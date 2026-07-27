@@ -1214,6 +1214,72 @@ describe("tecs.gfx.animation", function()
         end)
     end)
 
+    -- What an entity is playing has to survive things that are not about
+    -- playback. Moving archetype marks every component on the destination
+    -- dirty, which is how a spawn and a snapshot load reach playback without
+    -- knowing it exists; the cost of that is that adding an unrelated component
+    -- asks playback to write the row again, and what it writes has to be where
+    -- the cycle actually got to rather than where it was last started from.
+    describe("carrying on through a change", function()
+        it("keeps its place when the entity changes archetype", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+            -- Two frames in, so starting over and carrying on are different
+            -- answers rather than the same one.
+            drive(world, 3 + STEPS_PER_FRAME)
+            assert.equal(2, animation.frameOf(world, entity))
+
+            -- Nothing to do with playback, and it moves the row.
+            world:set(entity, components.Tint(1, 1, 1, 1))
+            world:update(STEP)
+            assert.equal(2, animation.frameOf(world, entity), "the move is not a rewind")
+
+            drive(world, STEPS_PER_FRAME)
+            assert.equal(3, animation.frameOf(world, entity), "and the cycle runs on from there")
+        end)
+
+        it("holds a paused entity where it was and resumes there", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+            drive(world, 3 + STEPS_PER_FRAME)
+            assert.equal(2, animation.frameOf(world, entity))
+
+            -- Pausing is an archetype move as well, and the world's clock does
+            -- not stop for one entity, so where it holds has to be said rather
+            -- than assumed.
+            world:set(entity, tecs.builtins.Paused)
+            drive(world, 60)
+            assert.equal(2, animation.frameOf(world, entity), "held on the frame it was on")
+
+            world:remove(entity, tecs.builtins.Paused)
+            drive(world, STEPS_PER_FRAME)
+            assert.equal(3, animation.frameOf(world, entity), "and carries on from it")
+        end)
+
+        it("keeps its place when only the speed changes", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+            drive(world, 3 + STEPS_PER_FRAME)
+            assert.equal(2, animation.frameOf(world, entity))
+
+            -- Twice as fast from here, which is a rewrite of the row and must
+            -- not be a jump: the frame it is on is the frame it stays on.
+            world:getMut(entity, Animation).speed = 2.0
+            world:update(STEP)
+            assert.equal(2, animation.frameOf(world, entity), "the rate changed, not the position")
+
+            -- Three steps to the frame now rather than six.
+            drive(world, 3)
+            assert.equal(3, animation.frameOf(world, entity))
+        end)
+    end)
+
     describe("the dirty gate", function()
         -- Dirty bits clear at the end of world:update, so the answer has to be
         -- read inside the frame that produced it.

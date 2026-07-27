@@ -50,12 +50,25 @@ local TICK_HZ <const> = frametable.TICK_HZ
 --- the timing the sheet's frames were authored with.
 local DEFAULT_SPEED <const> = 1.0
 
+--- What `Animation.frame` holds once playback on the GPU has encoded a row.
+---
+--- Deliberately not a frame index. No sheet numbers a frame this, so nothing
+--- can mistake it for one, and what it says is only the opposite of what zero
+--- says: this entity's `Sprite` carries a live playback and the phase is in
+--- there rather than in `time`.
+local ENCODED <const> = -1
+
 --- Playback state for one entity.
 ---
 --- `frame` is the frame the `Sprite` was last written from, as an index into
 --- the whole sheet rather than into the tag. Zero means nothing has been
 --- written yet, which is how a fresh or restored Animation gets its region on
 --- the first step it runs instead of drawing whatever the Sprite held.
+---
+--- With playback on the GPU it stops being an index and keeps only the zero:
+--- the encoder writes `ENCODED` to say the `Sprite` carries a live playback,
+--- and zero still means the entity is to start its cycle again. Which frame is
+--- showing is `animation.frameOf` on either path.
 ---
 --- `time` is seconds into the tag's cycle and stays inside it: a looping
 --- animation wraps and a one-shot parks at the end, so it never grows without
@@ -78,7 +91,8 @@ local record Animation is Component
     --- the tag visits. Changing `speed` leaves this where it is, so playback
     --- carries on from the frame it was showing rather than jumping.
     time: number
-    --- Frame the Sprite currently shows, or zero for none yet.
+    --- Frame the Sprite currently shows, or zero for none yet. With playback
+    --- on the GPU it is only that zero, and `animation.frameOf` is the frame.
     frame: number
     --- Whether the tag restarts after its last frame.
     loop: boolean
@@ -612,7 +626,10 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
         -- so. An archetype carrying no Pivot answers false and pays a lookup.
         if archetype:isComponentDirty(Animation)
             or archetype:isComponentDirty(Pivot) then
-            local animations <const> = archetype:get(Animation)
+            -- Mutable because the mark below is a write. The column is already
+            -- dirty, which is why this archetype is being visited at all, so
+            -- this declares the intent rather than changing what is gated.
+            local animations <const> = archetype:getMut(Animation)
             local sprites <const> = archetype:getMut(Sprite)
             -- Absent on every archetype that turns about its middle, which is
             -- most of them.
@@ -625,6 +642,7 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
             local cachedSlice = -1
             local cached: Sheet = nil
             local playback = 0
+            local count = 0
             local midX, midY, halfX, halfY = 0.5, 0.5, 0.0, 0.0
 
             for row = 1, length do
@@ -651,6 +669,7 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
                     if tagId ~= cachedTag or sliceId ~= cachedSlice then
                         cachedTag, cachedSlice = tagId, sliceId
                         playback = frametable.register(cached, tagId, sliceId)
+                        count = frametable.tickCount(playback)
                         midX, midY, halfX, halfY = frametable.pivotOf(playback)
                     end
 
@@ -669,11 +688,41 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
                         target.halfX, target.halfY = halfX, halfY
                     end
 
-                    -- Where in the cycle the entity is, in ticks. `time` is
-                    -- what the host path advances and what a snapshot carries,
-                    -- so reading the phase from it is what makes the two paths
-                    -- interchangeable and a restored entity resume where it was.
-                    local ticks = instance.time * TICK_HZ
+                    -- Where in the cycle the entity is, in ticks.
+                    --
+                    -- The encoding the row already carries is the live answer
+                    -- and `Animation.time` is not: nothing advances `time` on
+                    -- this path, so it is the phase the entity was last started
+                    -- from and it stays there. Reading it here would send an
+                    -- entity back to that phase every time anything re-encoded
+                    -- it, and an archetype move re-encodes everything it moved,
+                    -- because a move marks every component on the destination
+                    -- dirty. So a row still playing what it was carries on from
+                    -- where it is, and only a row that was reset, restored or
+                    -- never encoded reads the component.
+                    --
+                    -- Two things say which. `frame` is zero exactly when the
+                    -- component was written by something meaning to start the
+                    -- cycle again: `play`, `restart`, `of` and `deserialize`
+                    -- all write zero and nothing else does, which is the same
+                    -- job the field already had. And the region fields have to
+                    -- hold a playback rather than a region, since a game that
+                    -- put its own `Sprite` on the entity left no phase there to
+                    -- read.
+                    --
+                    -- Which is what makes a freeze, a thaw and a speed change
+                    -- hold their position too, rather than only an archetype
+                    -- move: all three are this same re-encode.
+                    local target <const> = sprites[row]
+                    local ticks: number
+                    if instance.frame ~= 0 and frametable.isPlayback(target) then
+                        local was <const> = target.u1
+                        ticks = was == 0.0 and target.v0
+                            or (clock - target.v0) * was
+                    else
+                        ticks = instance.time * TICK_HZ
+                    end
+
                     local speed <const> = instance.speed
                     local running <const> = not held and instance.playing
                         and speed > 0.0
@@ -685,16 +734,31 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
                         -- host path does and for the same reason: advancing
                         -- from the end would park it again on every step from
                         -- here and complete on each of them.
-                        if not instance.loop
-                            and ticks >= frametable.tickCount(playback) then
+                        --
+                        -- Which is why a one-shot nothing is listening to is
+                        -- the one thing a re-encode cannot hold: `playing` is
+                        -- what parks it, `Completed` is what clears `playing`,
+                        -- and with no subscriber it stays true. Past its end
+                        -- and playing reads as asked-again either way, so the
+                        -- entity starts over. Opting into `AnimationEvents`
+                        -- parks it and this then holds it at the last frame.
+                        if not instance.loop and ticks >= count then
                             ticks = 0.0
                         end
-                        frametable.encode(sprites[row], playback,
+                        frametable.encode(target, playback,
                             clock - ticks / rate, rate, instance.loop)
                     else
-                        frametable.encode(sprites[row], playback, ticks, 0.0,
+                        frametable.encode(target, playback, ticks, 0.0,
                             instance.loop)
                     end
+
+                    -- Not a frame index on this path: which frame is showing is
+                    -- the shader's answer and `frameOf`'s, and a number here
+                    -- would go stale between encodes while looking like one to
+                    -- trust. What it says is only what zero already said, the
+                    -- other way round: this Sprite carries a live playback, so
+                    -- the phase above comes out of it.
+                    instance.frame = ENCODED
                 end
             end
         end

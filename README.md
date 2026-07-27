@@ -1341,6 +1341,29 @@ playback's phase depend on how many fixed steps happened to fall inside the
 update it was first seen in, and two machines fed the same steps in differently
 sized updates would show different frames.
 
+What it reads for the phase is the encoding the row already carries, not
+`Animation.time`. Nothing advances `time` on this path, so it is the phase the
+entity was last started from and it stays there; reading it would send an entity
+back to that phase every time anything re-encoded it, and an archetype move
+re-encodes everything it moved because a move marks every component on the
+destination dirty. Adding an unrelated component to a walking character would
+rewind its walk. Reading the encoding instead makes a freeze, a thaw and a speed
+change hold their position too, since all three are that same re-encode: pausing
+holds the tick the entity was on, resuming rebases from it, and a new rate is
+applied from where the cycle is rather than from where it began.
+
+`Animation.frame` is what says a row was reset rather than merely re-encoded.
+`play`, `restart`, `of` and `deserialize` all write zero and nothing else does,
+which is the job the field already had; the encoder writes a value no sheet
+numbers a frame, so the field keeps its zero and stops pretending to be an index.
+Which frame is showing is `animation.frameOf` on either path.
+
+The one thing a re-encode cannot hold is a one-shot nothing is listening to.
+`playing` is what parks it, `Completed` is what clears `playing`, and with no
+subscriber it stays true, so past its end and playing reads as asked-again either
+way and the entity starts over. Carrying `AnimationEvents` parks it and a
+re-encode then holds it on the last frame.
+
 Pausing has to be said rather than assumed, because the world's clock does not
 stop for one entity. A rate of zero means held, and the second field then
 carries the tick to hold instead of the step playback began on. `Paused` moves
