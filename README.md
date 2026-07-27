@@ -770,6 +770,28 @@ the middle of that centre, one with neither answers the middle of its own
 rectangle, and no slice at all answers the middle of the frame, which is where
 a quad sits with no pivot.
 
+What reads that fraction is the `Pivot` component. It says where the quad hangs
+off itself, and the entity's position is where that point lands: a character
+pivoted at its feet stands at its position rather than hovering half a body
+above it. `Sheet:pivot` resolves a named slice and stays bound to it, so
+playback moves the pivot whenever the frame changes, which is what a slice with
+several keys asks for; a pivot written directly is left where it was put. The
+component lives with the sheet because a slice index is this run's answer and
+naming it again for a snapshot needs the sheet registry, which is here.
+
+The instance grows by nothing to carry it. A pivot is an affine shift of the
+very basis the vertex shader applies, so moving the quad's middle by
+`-basis * pivot` places every corner exactly where `corner - pivot` would;
+extraction folds it into the origin and the shader is untouched. Sending it
+instead would need a fifth `vec4`, which is sixteen more bytes streamed for
+every instance in the world to say something almost none of them have anything
+to say about. Two things follow the quad and one deliberately does not: the
+cull bound is centred on the quad rather than on the entity, so it stays exactly
+as big as it was instead of growing to cover a shift already known on the host;
+and the depth sort still runs on the entity's position, which is the whole
+reason a pivot at the feet is worth having, since two characters standing on
+the same line then sort together however tall either drawing is.
+
 A sheet is data, not a component: a hundred entities drawing one character
 share one sheet and point at it. What the `Animation` component carries is the
 sheet's registration index and the index of a tag within it, because a
@@ -803,6 +825,16 @@ with `getMut` the first time a row is actually written and not before, and
 do not. Zero means nothing has been written yet, which is how a fresh or
 restored animation gets its region on the first step rather than drawing
 whatever its `Sprite` held.
+
+That same field is what keeps a still sprite cheap. A row whose time did not
+move shows the frame it already showed, so the step asks the sheet nothing:
+only time advancing, a row that has never had a frame, and a sheet bound to
+another image since the row was written send it down the long path, and all
+three are comparisons where the long path is a scan of the tag's cycle and a
+handful of writes. Without it a world where a hundredth of the sprites animate
+costs nearly what one where all of them do costs. The gate above it is still per
+archetype per component, so one playing animation marks the column every still
+sprite beside it lives in: this cuts the walk, not the rewrite.
 
 A frame is a region of an image, not a region on its own, so a step that
 writes one writes the layer with it. Which layer is compared rather than
