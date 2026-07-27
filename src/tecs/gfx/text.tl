@@ -1036,13 +1036,12 @@ local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
         local scaleX = placements[place + 3] * blockX
         local scaleY = placements[place + 4] * blockY
 
-        -- V runs from the glyph's lower edge to its upper one, because a
-        -- quad's local Y and the screen's disagree in sign: the rows arrive
-        -- in the order the glyph is drawn in rather than the order the atlas
-        -- stores them.
+        -- The metrics are BMFont pixels measured from the atlas's top left,
+        -- and the rect goes out in that order: a glyph is a sub-rect of an
+        -- image like any other sprite.
         local glyph = metrics[codepoints[index]]
         local u0, u1 = glyph.x * u, (glyph.x + glyph.width) * u
-        local v0, v1 = (glyph.y + glyph.height) * v, glyph.y * v
+        local v0, v1 = glyph.y * v, (glyph.y + glyph.height) * v
 
         local base = (span + index - 2) * INSTANCE_FLOATS
         instances[base] = rotation
