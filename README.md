@@ -88,6 +88,103 @@ Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
 
+## Callbacks and systems
+
+Because the host reaches into an object rather than being handed a loop,
+something has to run after the device and the world exist, once per iteration,
+once per event, and once at teardown. That much follows from the entry point.
+What does not follow is that those four are named fields of a typed record.
+`load`, `update`, `event` and `quit` sit on `Application.Config` beside the
+window, the shader pack, the audio device, the frame cap and the rest of the
+startup settings, and that part is a choice. It is made for what the type
+checker can say about it.
+
+A name the host looks up at call time is a name nothing checks: a game that
+misspells one gets a function that is never called and no diagnostic anywhere.
+Written as a field of a record, every one of them is checked where it is
+written:
+
+```
+entry.tl:4:5: unknown field windwo
+entry.tl:5:5: unknown field updat
+entry.tl:6:17: in record field: maxFrames: got string "sixty", expected integer
+entry.tl:7:52: in record field: update: argument 2: got string, expected number
+entry.tl:9:20: in record field: quit: incompatible number of arguments: got 2, expected 1
+```
+
+The error lands on the key, not on the frame that fails to call it, and nesting
+does not weaken it: `window = { widht = 640 }` fails the same way. The one thing
+it does not object to is dropping trailing parameters, so
+`update = function(app)` type-checks against `function(Application, number)`.
+That is worth having rather than working around; the demo's `update` takes only
+the application, because reading a key is all it does.
+
+Each callback is placed rather than merely called, and the placement is most of
+what the shape is worth. `load` runs at the end of initialisation: the log file
+is open, the shader pack has already decided which format the device may claim
+and so which backend SDL selects, the window, device, world and renderer exist,
+audio and the sequencer are installed, touch is scaled to the window, the
+latched-input systems are in the fixed phases, and any gamepad that was plugged
+in before the process started has been enumerated, since the platform reports a
+device arriving and not one that was there all along. It runs before the clock
+resets, so startup cost never lands in the first frame's dt. `event` runs after
+the engine has folded the event into its own state, so quit, resize, suspend and
+resume are handled and the game still sees the event. `update` runs before the
+world steps, timed as a stage of its own, because its cost belongs to the
+simulation side of any split and leaving it outside every stage would flatter
+anything that moves work to the other side. `quit` runs before anything is
+destroyed, so the window, device, world and renderer are all still live in it,
+and it runs only if `load` returned, so a game never gets a teardown for a
+startup that did not finish.
+
+Where the line falls between a callback and a system is the question worth
+answering, since entities are the interface and most per-frame work belongs in a
+system. A system's signature is `(dt, world)` and it never sees the application,
+so anything that reaches for the window, the input, the device or
+`quitRequested` is either a callback or a system that captured the application
+when `load` registered it. Nothing forbids the second, and the demo does exactly
+that. The distinction that decides it is position rather than access. A system
+runs inside `world:update`, which is what gives it phase order, deferred
+mutation, the fixed step, pause and state gating, and the crash guard. A
+callback runs outside all of that.
+
+So gameplay goes in systems, and a callback is for work that has no entity to
+hang on. The latency bench is the clearest case: its `update` pushes a synthetic
+key event into SDL's queue and resets the timing tables at a chosen frame,
+neither of which is world state, while the reaction to that press is an ordinary
+system in `Update`, where it sits inside the step the measurement brackets.
+
+The crash guard is the sharpest edge on that line. The world's step and the frame
+it produces are wrapped, so an error in a system stops simulating and rendering
+and leaves the loop draining events and answering the debug server with the
+traceback, which is the moment the tooling is most useful and the worst one to
+lose. The callbacks are called outside that guard, so an error in `update`
+unwinds to the host, which logs it and ends the run. The same line of gameplay is
+inspectable after it fails in a system and is not inspectable after it fails in
+`update`, which is a second reason to prefer the system.
+
+The shape costs something, and the cost is singleton assumptions. An application
+owns one world; a second is possible and can be stepped from `update`, but only
+`app.world` is rendered, bound to the debug tools and given the engine's own
+systems. Replacing a callback while running works, since `event`, `update` and
+`quit` are read off the config at each call rather than captured, but the config
+is not part of the public surface, so hot reload has no seam of its own.
+Nesting one application inside another does not work at all, and not because of
+the config: the host holds a single registry reference to one returned table,
+`SDL_Init` and `SDL_Quit` bracket the process, and the debug server's bindings
+are module-level.
+
+What the shape buys below itself is that nothing needs it. `tecs.Application` is
+not loaded by `require("tecs")`; the engine modules resolve on first use through
+the surface's `__index`, which is what lets a tool build a world with no window,
+no device and no SDL reachable at all. The spec suite never constructs an
+application: it builds worlds directly, or assembles a window, a device and a
+renderer by hand, because the config is the only thing that puts those together
+and every piece it puts together is separately constructible. The debug server
+is bound to the world and the renderer rather than to the application, so a tool
+reads the same world whichever callbacks a game supplied, and none of it goes
+through the config at all.
+
 ## Workers and assets
 
 Workers are the only sanctioned way to run work off the main thread. Raw
