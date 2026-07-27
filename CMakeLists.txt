@@ -44,6 +44,8 @@ else()
     pkg_check_modules(LUAJIT REQUIRED IMPORTED_TARGET luajit)
     pkg_check_modules(SHADERC REQUIRED IMPORTED_TARGET shaderc)
     pkg_check_modules(SPIRV_CROSS REQUIRED spirv-cross-c)
+    pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
+    pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 
     # Box2D ships no pkg-config or CMake config, so it is located directly.
     find_path(BOX2D_INCLUDE_DIR box2d/box2d.h)
@@ -198,8 +200,25 @@ if(TECS_BUILD_LUA)
 
     # Include directories come from dependency discovery rather than from a
     # hardcoded package-manager prefix, which is what lets this cross-compile.
+    # Types a library's headers use and do not declare, recovered by the
+    # generator from the headers they include. Read here rather than passed,
+    # because only curl needs any and every other call site would carry an
+    # empty argument for it. Reset after the call that sets it.
+    set(TECS_CDEF_NEED "")
+
     function(tecs_cdef name header keep prefix)
         set(includes "")
+        # `keep` is a list, because a library's declarations do not always sit
+        # in one file: zlib's types are in zconf.h and its functions in zlib.h,
+        # and a binding with only one of those does not parse.
+        set(filters "")
+        foreach(path IN LISTS keep)
+            list(APPEND filters --keep ${path})
+        endforeach()
+        set(needs "")
+        foreach(type IN LISTS TECS_CDEF_NEED)
+            list(APPEND needs --need ${type})
+        endforeach()
         # The header is named the way a C file would name it, so it is resolved
         # against the same directories the generator searches. Found, it becomes
         # a dependency: editing a header this project owns has to regenerate its
@@ -217,8 +236,8 @@ if(TECS_BUILD_LUA)
             OUTPUT "${GEN}/${name}cdef.lua" "${GEN}/${name}const.lua"
             COMMAND
                 ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/gencdef.py" --header ${header} ${includes}
-                ${TECS_CDEF_DEFINES} --keep ${keep} --define-prefix ${prefix} --defines-out "${GEN}/${name}const.lua"
-                --out "${GEN}/${name}cdef.lua"
+                ${TECS_CDEF_DEFINES} ${filters} ${needs} --define-prefix ${prefix} --defines-out
+                "${GEN}/${name}const.lua" --out "${GEN}/${name}cdef.lua"
             DEPENDS "${CMAKE_SOURCE_DIR}/scripts/gencdef.py" ${headerPath}
             COMMENT "Generating ${name} FFI bindings"
             VERBATIM
@@ -234,6 +253,33 @@ if(TECS_BUILD_LUA)
     # pkg-config points into the spirv_cross directory rather than at its
     # parent, so the header is named relative to that.
     tecs_cdef(spvc spirv_cross_c.h /spirv_cross/ SPVC_ ${SPIRV_CROSS_INCLUDE_DIRS})
+
+    # zlib splits itself in two: zconf.h carries the typedefs its declarations
+    # are written in, so a binding built from zlib.h alone names types it never
+    # declares and does not parse. `off_t` is the platform's, and reaches the
+    # binding through the file offset in `gz_header`.
+    set(TECS_CDEF_NEED off_t)
+    tecs_cdef(zlib zlib.h "/zlib.h;/zconf.h" Z ${ZLIB_INCLUDE_DIRS})
+    set(TECS_CDEF_NEED "")
+
+    # curl's public headers, named one at a time rather than by their directory,
+    # so mprintf.h stays out. It declares curl's own printf family, which
+    # nothing here calls and which would pull the platform's `FILE` and every
+    # struct inside it into a binding the whole engine shares.
+    #
+    # What is left still refers to four types curl's headers use and do not
+    # declare, since they belong to the platform. The generator recovers those
+    # from the same preprocessor output rather than having them written here,
+    # because a hand-written layout is an ABI claim nothing checks.
+    set(TECS_CDEF_NEED socklen_t time_t fd_set "struct sockaddr")
+    tecs_cdef(
+        curl
+        curl/curl.h
+        "/curl/curl.h;/curl/easy.h;/curl/multi.h;/curl/system.h;/curl/urlapi.h;/curl/options.h;/curl/header.h;/curl/websockets.h"
+        CURL
+        ${CURL_INCLUDE_DIRS}
+    )
+    set(TECS_CDEF_NEED "")
 
     # The engine's own native API. Generated the same way as a third-party
     # header so the binding cannot drift from the C even though both live here.
@@ -259,7 +305,7 @@ if(TECS_BUILD_LUA)
             OUTPUT "${source}" "${GEN}/${name}apicdef.lua"
             COMMAND
                 ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/genregistry.py" --cdef "${GEN}/${name}cdef.lua"
-                --name ${name} --struct ${struct} --prefix ${prefix} ${headers} --source-out "${source}" --cdef-out
+                --name ${name} --struct ${struct} --prefix "${prefix}" ${headers} --source-out "${source}" --cdef-out
                 "${GEN}/${name}apicdef.lua"
             DEPENDS "${GEN}/${name}cdef.lua" "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
             COMMENT "Generating ${name} native API table"
@@ -275,6 +321,11 @@ if(TECS_BUILD_LUA)
     tecs_registry(sdl3net TecsSdl3NetApi NET_ SDL3_net/SDL_net.h)
     tecs_registry(sdl3mixer TecsSdl3MixerApi MIX_ SDL3_mixer/SDL_mixer.h)
     tecs_registry(box2d TecsBox2dApi b2 box2d/box2d.h)
+    tecs_registry(curl TecsCurlApi curl_ curl/curl.h)
+    # zlib names its functions after what they do rather than after itself, so
+    # there is no prefix to filter on. Nothing else is in its binding, since
+    # only its own two headers are kept, so exporting all of it is exact.
+    tecs_registry(zlib TecsZlibApi "" zlib.h)
     tecs_registry(worker TecsWorkerApi tecs worker.h)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
     tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
@@ -316,6 +367,8 @@ if(TECS_BUILD_LUA)
             PkgConfig::SDL3_IMAGE
             PkgConfig::SDL3_MIXER
             PkgConfig::LUAJIT
+            PkgConfig::CURL
+            PkgConfig::ZLIB
             ${BOX2D_LIBRARY}
             ${SDL3_NET_LIBRARY}
     )
@@ -328,7 +381,13 @@ if(TECS_BUILD_LUA)
     endif()
     target_include_directories(
         tecs_registry
-        PRIVATE ${BOX2D_INCLUDE_DIR} ${SDL3_NET_INCLUDE_DIR} ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS}
+        PRIVATE
+            ${BOX2D_INCLUDE_DIR}
+            ${SDL3_NET_INCLUDE_DIR}
+            ${SHADERC_INCLUDE_DIRS}
+            ${SPIRV_CROSS_INCLUDE_DIRS}
+            ${CURL_INCLUDE_DIRS}
+            ${ZLIB_INCLUDE_DIRS}
     )
 
     # Linked here rather than where the executables are declared, because the
@@ -353,6 +412,8 @@ if(TECS_BUILD_LUA)
             "${GEN}/box2dcdef.lua"
             "${GEN}/shaderccdef.lua"
             "${GEN}/spvccdef.lua"
+            "${GEN}/curlcdef.lua"
+            "${GEN}/zlibcdef.lua"
     )
 
     # Teal compilation. Kept as one custom target rather than per-file rules

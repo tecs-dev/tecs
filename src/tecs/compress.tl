@@ -8,22 +8,20 @@
 --- `deflate` here, and adding one before something needs it would be shipping a
 --- second implementation of a format to have no callers verify it.
 ---
---- **Why this is Lua and not a library.** zlib is already in the process, as a
---- transitive dependency of SDL3_image, and it is deliberately neither in the
---- generated bindings nor linked by name. Reaching it would mean generating
---- cdefs for it, carrying it through the ABI check, and, for a packaged preset,
---- pinning and building it from source rather than resolving it from the
---- system: a dependency added to every target so that one loader can skip a few
---- hundred lines. Vendoring a small permissive decoder instead trades the
---- pinning for a source copy and keeps the rest.
+--- **Why this is still Lua.** Not because zlib is out of reach. It is pinned,
+--- generated into `tecs.ffi.zlib`, carried through the ABI check and loaded the
+--- same way every other native library is, because libcurl needs it to answer a
+--- `Content-Encoding`. `zlib.C.inflate` is two lines away.
 ---
---- What makes neither worth it is where this runs. Decompressing an asset
---- happens once, when the asset loads, on a worker, off the frame. A decoder
---- that is several times slower than C costs milliseconds nothing is waiting
---- on, and buys a build that is the same on every preset, needs no cdefs, and
---- has nothing to pin. If a profile ever shows load time dominated by this, the
---- functions below keep their names and their signatures and something else
---- answers them.
+--- What is left is the cost of the change rather than the cost of the
+--- dependency. This decoder is checked against a corpus and against the failure
+--- modes below, and swapping it means proving the replacement rejects the same
+--- malformed streams in the same way, holds the same contract about how much
+--- output it will produce for a given input, and behaves the same on a worker
+--- thread. That is its own piece of work with its own evidence, and nothing is
+--- waiting on it: decompressing an asset happens once, when the asset loads, on
+--- a worker, off the frame. When it is worth doing, the functions below keep
+--- their names and their signatures and something else answers them.
 ---
 --- **What it costs.** Symbols are decoded a bit at a time against the canonical
 --- code, which is the small, checkable form rather than the fast one. A

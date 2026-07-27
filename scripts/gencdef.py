@@ -81,15 +81,21 @@ def preprocess(headers, includeDirs, defines):
     return out.stdout
 
 
-def selectByFile(preprocessed: str, keep: str) -> str:
-    """Keep only text that came from headers whose path contains `keep`."""
-    lineMarker = re.compile(r'^#\s+\d+\s+"([^"]*)"')
+LINE_MARKER_RE = re.compile(r'^#\s+\d+\s+"([^"]*)"')
+
+
+def selectByFile(preprocessed: str, keeps, wanted: bool = True) -> str:
+    """Keep text from headers whose path contains one of `keeps`.
+
+    With `wanted` false this returns the complement instead, which is where a
+    type the kept headers use but do not declare is recovered from.
+    """
     kept = []
     active = False
     for line in preprocessed.splitlines():
-        m = lineMarker.match(line)
+        m = LINE_MARKER_RE.match(line)
         if m:
-            active = keep in m.group(1)
+            active = any(k in m.group(1) for k in keeps) == wanted
             continue
         if active:
             kept.append(line)
@@ -135,6 +141,105 @@ def clean(text: str) -> str:
     # Collapse the runs of blank lines the preprocessor leaves behind.
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
+
+
+IDENTIFIER_RE = re.compile(r"\b[A-Za-z_]\w*\b")
+TAGGED_RE = re.compile(r"\b(struct|union|enum)\s+([A-Za-z_]\w*)")
+
+
+def statements(text: str):
+    """Yields top-level statements, so a record body's semicolons are ignored."""
+    depth = 0
+    current = []
+    for character in text:
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+        elif character == ";" and depth == 0:
+            yield "".join(current).strip() + ";"
+            current = []
+            continue
+        current.append(character)
+
+
+def declaredNames(statement: str) -> set:
+    """The type names a statement introduces.
+
+    A tagged record is named by its tag (`struct sockaddr`) and a typedef by
+    the identifier it ends with, which is the last one outside the record body
+    and outside any parameter list.
+    """
+    names = set()
+    body = statement
+    open_ = body.find("{")
+    if open_ != -1:
+        close = body.rfind("}")
+        head, tail = body[:open_], body[close + 1 :]
+        m = TAGGED_RE.search(head)
+        if m:
+            names.add(f"{m.group(1)} {m.group(2)}")
+        body = head + tail
+    elif not body.lstrip().startswith("typedef"):
+        m = TAGGED_RE.search(body)
+        if m:
+            names.add(f"{m.group(1)} {m.group(2)}")
+
+    if statement.lstrip().startswith("typedef"):
+        # `typedef void (*sig_t)(int);` names the identifier inside the
+        # parentheses; everything else names the last identifier before the
+        # semicolon, with any array bounds already behind it.
+        pointer = re.search(r"\(\s*\*\s*([A-Za-z_]\w*)\s*\)", body)
+        if pointer:
+            names.add(pointer.group(1))
+        else:
+            found = IDENTIFIER_RE.findall(body.split("(")[0])
+            if found:
+                names.add(found[-1])
+    return names
+
+
+def referencedNames(statement: str) -> set:
+    """Every type name a statement could depend on."""
+    names = set(IDENTIFIER_RE.findall(statement))
+    for kind, tag in TAGGED_RE.findall(statement):
+        names.add(f"{kind} {tag}")
+    return names
+
+
+def recoverTypes(rejected: str, alreadyDeclared: set, needed) -> str:
+    """Declarations for types the kept headers use and do not declare.
+
+    curl's headers are written against the platform's, so a binding built from
+    them alone refers to `time_t` and `struct sockaddr` without ever declaring
+    either, and LuaJIT rejects the result. Those declarations are recovered
+    from the same preprocessor output rather than written by hand here: a
+    hand-written one is an ABI claim nothing checks, and the layout it claims
+    differs between the targets this tree builds for.
+
+    Dependencies are followed, since a recovered record names types of its own,
+    and the result keeps its original order, which is the order C needs.
+    """
+    ordered = [s for s in statements(rejected) if s.strip(" ;")]
+    provides = {}
+    for index, statement in enumerate(ordered):
+        for name in declaredNames(statement):
+            if name not in provides and name not in alreadyDeclared:
+                provides[name] = index
+
+    chosen = set()
+    pending = list(needed)
+    while pending:
+        name = pending.pop()
+        index = provides.get(name)
+        if index is None or index in chosen:
+            continue
+        chosen.add(index)
+        pending.extend(referencedNames(ordered[index]) - alreadyDeclared)
+
+    if not chosen:
+        return ""
+    return "\n".join(ordered[index] for index in sorted(chosen)) + "\n"
 
 
 # Stem of the throwaway program the constants are recovered from. Distinctive
@@ -335,7 +440,13 @@ def main():
     ap.add_argument("--header", action="append", required=True, help="header to include, e.g. SDL3/SDL.h")
     ap.add_argument("--include", action="append", default=[], help="include directory")
     ap.add_argument("--define", action="append", default=[])
-    ap.add_argument("--keep", required=True, help="only keep declarations from paths containing this")
+    ap.add_argument("--keep", action="append", required=True, help="only keep declarations from paths containing this")
+    ap.add_argument(
+        "--need",
+        action="append",
+        default=[],
+        help="a type the kept headers use and do not declare, recovered from the ones they include",
+    )
     ap.add_argument("--define-prefix", action="append", default=[], help="emit integer #defines with this name prefix")
     ap.add_argument("--defines-out", help="write recovered #define constants here as a Lua table")
     ap.add_argument("--out", required=True)
@@ -354,6 +465,20 @@ def main():
 
     pp = preprocess(args.header, args.include, args.define)
     body = clean(selectByFile(pp, args.keep))
+
+    if args.need:
+        declared = set()
+        for statement in statements(body):
+            declared |= declaredNames(statement)
+        prelude = recoverTypes(clean(selectByFile(pp, args.keep, wanted=False)), declared, args.need)
+        # A name that came back with nothing behind it would leave the binding
+        # naming a type it never declares, which LuaJIT rejects at load with a
+        # message pointing at the use rather than at the absence.
+        available = declared | set(IDENTIFIER_RE.findall(prelude))
+        missing = [name for name in args.need if name.split()[-1] not in available]
+        if missing:
+            raise SystemExit(f"cannot recover declarations for: {', '.join(missing)}")
+        body = prelude + body
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

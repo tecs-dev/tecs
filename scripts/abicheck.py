@@ -25,10 +25,18 @@ LIBRARIES = [
     {"name": "sdl3mixer", "headers": ["SDL3_mixer/SDL_mixer.h"], "module": "sdl3-mixer", "requires": ["sdl3"]},
     {"name": "box2d", "headers": ["box2d/box2d.h"], "module": None},
     {"name": "shaderc", "headers": ["shaderc/shaderc.h"], "module": "shaderc"},
+    {"name": "zlib", "headers": ["zlib.h"], "module": "zlib"},
+    # curl's binding carries four platform types its headers use and do not
+    # declare, recovered from the headers they include. Those are exactly the
+    # declarations a hand-written prelude would have guessed at, so the records
+    # built on them are checked here alongside curl's own.
+    {"name": "curl", "headers": ["curl/curl.h"], "module": "libcurl"},
 ]
 
-# `typedef struct Name {` opening a record body.
-RECORD_START_RE = re.compile(r"typedef\s+(struct|union)\s+(\w+)?\s*\{")
+# A record body opening, whether it is typedef'd or named only by its tag.
+# curl declares most of its structs the second way, and one of them embeds a
+# platform type the binding recovered, which is the layout most worth checking.
+RECORD_START_RE = re.compile(r"\b(typedef\s+)?(struct|union)\s+(\w+)?\s*\{")
 # The typedef name that closes it: `} Name;`
 RECORD_END_RE = re.compile(r"\s*(\w+)\s*;")
 # A field line: strip arrays and pointers down to the name.
@@ -117,9 +125,19 @@ def parseRecords(cdef: str):
         body = cdef[open_ + 1 : i]
         end = RECORD_END_RE.match(cdef, i + 1)
         position = i + 1
-        if not end:
-            continue
-        position = end.end()
+
+        if start.group(1):
+            # `typedef struct { ... } Name;`, named by what closes it.
+            if not end:
+                continue
+            position = end.end()
+            name = end.group(1)
+        else:
+            # `struct Name { ... };`, named by its tag, which is how it has to
+            # be spelled at every use site as well.
+            if not start.group(3):
+                continue
+            name = f"{start.group(2)} {start.group(3)}"
 
         fields = []
         depth = 0
@@ -130,13 +148,19 @@ def parseRecords(cdef: str):
             # Only top-level members are addressable by a bare offsetof path;
             # members of nested anonymous records are reachable but their
             # names are ambiguous, so they are skipped.
+            # A bit field has no address, so `offsetof` on one does not
+            # compile. Its width is the only thing that looks like a member
+            # name on such a line, which is how it reaches this at all.
+            if ":" in stripped:
+                depth += opens - closes
+                continue
             if depth == 0 and opens == 0 and stripped.endswith(";"):
                 m = FIELD_RE.search(stripped)
                 if m:
                     fields.append(m.group(1))
             depth += opens - closes
 
-        records.append((end.group(1), start.group(1), fields))
+        records.append((name, start.group(2), fields))
 
 
 def cReport(headers, includeDirs, records):

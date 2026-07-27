@@ -15,11 +15,18 @@
 -- own: an input that is not a multiple of the block the reader takes at a
 -- time, bytes above 127 that a signed path would mangle, and an input long
 -- enough to reach the point where a deferred modulus has to be applied.
+--
+-- The Adler-32 vectors below were written against a Lua implementation and are
+-- unchanged now that zlib computes it. That is the point of them: they were
+-- the evidence that the swap changed nothing, and they stay as the evidence
+-- that nothing changes it back.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
+local ffi = require("ffi")
 local hash = require("tecs.hash")
+local zlib = require("tecs.ffi.zlib")
 
 describe("hash.fnv1a64", function()
     it("matches the published reference vectors", function()
@@ -76,10 +83,10 @@ describe("hash.adler32", function()
     end)
 
     it("agrees over an input that spans several deferred runs", function()
-        -- The sums are reduced once per 5552 bytes rather than once per byte,
-        -- so anything longer than one run crosses a boundary the per-byte
-        -- form does not have. Three of them here, which is where a loop that
-        -- drops or repeats a byte at a boundary stops agreeing with zlib.
+        -- Every Adler-32 implementation reduces its sums in blocks rather than
+        -- per byte, because that is the only way to keep them in range, and a
+        -- block boundary is where one that drops or repeats a byte shows it.
+        -- 21000 bytes crosses several of any plausible block size.
         local long = string.rep("The quick brown fox. ", 1000)
         assert.are.equal(21000, #long)
         assert.is_true(#long > 3 * 5552)
@@ -87,8 +94,31 @@ describe("hash.adler32", function()
     end)
 
     it("returns a value inside thirty-two bits", function()
+        -- zlib returns a uLong, which is 64 bits here and arrives as cdata.
+        -- A conversion that forgot that would hand back a boxed number that
+        -- compares equal to nothing and indexes nothing.
         local checksum = hash.adler32(string.rep("\255", 8192))
+        assert.are.equal("number", type(checksum))
         assert.is_true(checksum >= 0 and checksum < 4294967296)
         assert.are.equal(checksum, math.floor(checksum))
+    end)
+
+    it("matches the trailer zlib itself writes into a stream", function()
+        -- The strongest statement available about this function: RFC 1950 puts
+        -- the Adler-32 of the uncompressed bytes in the last four bytes of a
+        -- zlib stream, big-endian. Asking zlib to compress something and then
+        -- reading what it put there checks this against the format rather than
+        -- against another implementation of the same sum.
+        local text = string.rep("compressible, and then some. ", 400)
+        local bound = tonumber(zlib.C.compressBound(#text))
+        local buffer = ffi.new("uint8_t[?]", bound)
+        local size = ffi.new("unsigned long[1]", bound)
+        assert.are.equal(0, tonumber(zlib.C.compress2(buffer, size, text, #text, 6)))
+
+        local stream = ffi.string(buffer, tonumber(size[0]))
+        assert.is_true(#stream < #text)
+        local a, b, c, d = stream:byte(#stream - 3, #stream)
+        local trailer = ((a * 256 + b) * 256 + c) * 256 + d
+        assert.are.equal(trailer, hash.adler32(text))
     end)
 end)

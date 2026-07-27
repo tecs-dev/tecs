@@ -43,6 +43,36 @@ describe("ffi.loader", function()
         assert.are.equal(0x100, tonumber(sdl.C.SDL_EVENT_QUIT))
     end)
 
+    it("resolves the two libraries that carry no SDL prefix", function()
+        -- zlib and libcurl are named nothing like the rest and are found the
+        -- same way regardless: the registry when a host installed one, then
+        -- the soname, then each known prefix. A library reached by any other
+        -- route would work in development and fail where dlopen is forbidden.
+        local zlib = require("tecs.ffi.zlib")
+        local curl = require("tecs.ffi.curl")
+        assert.is_string(zlib.path)
+        assert.is_string(curl.path)
+        assert.is_not_nil(zlib.C.adler32_z)
+        assert.is_not_nil(curl.C.curl_multi_perform)
+        -- Both report the revision that actually answered, which a development
+        -- preset and a packaged one are not obliged to agree on.
+        assert.is_truthy(zlib.version():match("^%d+%.%d+"))
+        assert.is_truthy(curl.version():find("libcurl/", 1, true))
+    end)
+
+    it("recovers constants for libraries whose values are computed", function()
+        local curl = require("tecs.ffi.curl")
+        local zlib = require("tecs.ffi.zlib")
+        -- CURL_GLOBAL_SSL is `(1 << 0)` behind a #define, so it exists only in
+        -- the recovered table; CURLOPT_URL is an enumerator whose value is
+        -- written as an expression, so it exists only through the namespace.
+        assert.are.equal(1, curl.K.CURL_GLOBAL_SSL)
+        assert.are.equal(10002, tonumber(curl.C.CURLOPT_URL))
+        -- zlib's flush values are enumerator-free #defines throughout.
+        assert.are.equal(0, zlib.K.Z_NO_FLUSH)
+        assert.are.equal(4, zlib.K.Z_FINISH)
+    end)
+
     it("agrees with the C compiler on SDL_Event's size", function()
         local ffi = require("ffi")
         require("tecs.ffi.sdl3")
