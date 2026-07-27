@@ -149,6 +149,11 @@ local record Sheet
     --- Sprite carries, and the fractions of that layer the image occupies.
     _image: number
     _slot: number
+    --- Where the image sits within its texture-array cell, and how much of
+    --- the cell it covers. A packed cell holds several images, so a frame's
+    --- fraction of the image is scaled and then moved rather than only scaled.
+    _originU: number
+    _originV: number
     _scaleU: number
     _scaleV: number
 
@@ -634,21 +639,24 @@ local function rescale(self: Sheet)
     local rects, uvs = self._rects, self._uvs
     local width, height = self.imageWidth, self.imageHeight
     local scaleU, scaleV = self._scaleU, self._scaleV
+    local originU, originV = self._originU, self._originV
     for i = 1, self.count do
         local base = (i - 1) * 4
         local x, y = rects[base + 1], rects[base + 2]
-        uvs[base + 1] = x / width * scaleU
-        uvs[base + 2] = y / height * scaleV
-        uvs[base + 3] = (x + rects[base + 3]) / width * scaleU
-        uvs[base + 4] = (y + rects[base + 4]) / height * scaleV
+        uvs[base + 1] = originU + x / width * scaleU
+        uvs[base + 2] = originV + y / height * scaleV
+        uvs[base + 3] = originU + (x + rects[base + 3]) / width * scaleU
+        uvs[base + 4] = originV + (y + rects[base + 4]) / height * scaleV
     end
 end
 
 function Sheet:bind(sprite: Sprite): Sheet
     self._image = sprite.image
     self._slot = sprite.slot
-    self._scaleU = sprite.u1
-    self._scaleV = sprite.v1
+    self._originU = sprite.u0
+    self._originV = sprite.v0
+    self._scaleU = sprite.u1 - sprite.u0
+    self._scaleV = sprite.v1 - sprite.v0
     rescale(self)
     return self
 end
@@ -811,6 +819,8 @@ local function newSheet(name: string, imageWidth: number,
     -- what a sheet can say without a renderer.
     self._image = 0
     self._slot = -1
+    self._originU = 0.0
+    self._originV = 0.0
     self._scaleU = 1.0
     self._scaleV = 1.0
     return self

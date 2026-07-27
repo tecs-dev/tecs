@@ -633,6 +633,34 @@ smaller than a cell does not reach the cell's edge, so `registerImage` returns
 a ready `Sprite` rather than a bare index: a caller guessing the UV range
 would sample the undefined remainder.
 
+What a caller sees is a sub-rect of a layer rather than a layer, which is what
+makes packing possible. One image a layer costs a whole cell for a sixteen-
+pixel icon and caps the process at one distinct image per layer;
+`packImages = true` turns on a shelf allocator that fits many into each, and
+the ceiling becomes the array's area rather than its layer count. An image
+takes the shortest open shelf that is tall enough and has room, so a tall shelf
+is not spent on a short image; failing that a shelf opens below the last, and
+failing that a new layer starts. Shelves suit sprite work because frames of one
+sheet are the same size and arrive together, and the waste is the difference
+between an image's height and its shelf's.
+
+Every placement carries a one-texel gutter on all four sides, written as a copy
+of the image's own edge rather than left undefined, so two images are two texels
+apart and a filter that reaches past an edge finds the colour that was already
+there. The rect a caller samples is the image's own texels and never the gutter,
+so a neighbour packed beside it is unreachable however the sub-rect inside it is
+narrowed. Nothing is reclaimed, which is the same bargain the unpacked path
+makes.
+
+If the layer count ever becomes the binding constraint again, SDL allows up to
+sixteen texture samplers bound per stage, so binding several arrays and
+branching on the slot index in the fragment shader would multiply the ceiling
+without needing bindless. That composes with packing rather than competing with
+it, since packing raises images per layer and this would raise layers. It costs
+a divergent branch in the hot fragment path and more live bindings, and it is
+not built: packing alone takes the ceiling well past any realistic scene, and a
+second mechanism is worth it only if a measurement says so.
+
 A `Sprite` names its image; which layer that name occupies is the renderer's
 answer to it. Layers are handed out as images register, so a layer number
 means whatever loaded in that position, and one written into a snapshot is a

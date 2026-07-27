@@ -90,6 +90,8 @@ local record BackendOptions
     cell: integer
     --- Layers the image array holds.
     layers: integer
+    --- Fit many images into each layer rather than one.
+    packImages: boolean
 end
 
 local record Backend
@@ -110,6 +112,8 @@ local record Backend
     --- UV extent of the white pixel within its cell, published to whoever
     --- writes instances: an image smaller than a cell does not reach the
     --- cell's edge, so sampling 0..1 would read the undefined remainder.
+    whiteU0: number
+    whiteV0: number
     whiteU1: number
     whiteV1: number
     _mark: ComputePipeline
@@ -204,6 +208,7 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
         width = options.cell or DEFAULT_CELL,
         height = options.cell or DEFAULT_CELL,
         layers = layerCount,
+        pack = options.packImages,
     })
 
     -- Layer zero is a single white pixel. Entities without a Sprite sample it,
@@ -212,6 +217,8 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
     local pixel = loader.newArray("uint8_t[4]")
     pixel[0], pixel[1], pixel[2], pixel[3] = 255, 255, 255, 255
     local white = self.images:add(pixel as loader.CValue, 1, 1, 4)
+    self.whiteU0 = white.u0
+    self.whiteV0 = white.v0
     self.whiteU1 = white.u1
     self.whiteV1 = white.v1
 

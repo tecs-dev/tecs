@@ -95,6 +95,8 @@ local record ExtractorOptions
     --- UV extent of the white pixel within its cell, as the backend uploaded
     --- it. An image smaller than a cell does not reach the cell's edge, so
     --- sampling 0..1 would read the undefined remainder rather than the image.
+    whiteU0: number
+    whiteV0: number
     whiteU1: number
     whiteV1: number
 end
@@ -139,6 +141,8 @@ local record Extractor
     _bounds: loader.CArray
     _slot: integer
 
+    _whiteU0: number
+    _whiteV0: number
     _whiteU1: number
     _whiteV1: number
     --- Texture-array layer each registered image name occupies, keyed by the
@@ -169,6 +173,8 @@ function Extractor.create(options: ExtractorOptions): Extractor
     self._runs = {}
     self._seen = {}
     self._slot = 0
+    self._whiteU0 = options.whiteU0
+    self._whiteV0 = options.whiteV0
     self._whiteU1 = options.whiteU1
     self._whiteV1 = options.whiteV1
     self._slotByImage = {}
@@ -238,9 +244,13 @@ function Extractor:sprite(name: string, u0?: number, v0?: number,
     local image = components.imageId(name)
     local slot = slotOf(self, image)
     local region = self._regionByImage[image]
+    -- Fractions of the image mapped into the rectangle the image occupies,
+    -- which is a sub-rect of the cell and starts wherever the packer put it.
+    local spanU <const> = region.u1 - region.u0
+    local spanV <const> = region.v1 - region.v0
     return components.Sprite(image,
-        (u0 or 0.0) * region.u1, (v0 or 0.0) * region.v1,
-        (u1 or 1.0) * region.u1, (v1 or 1.0) * region.v1, slot)
+        region.u0 + (u0 or 0.0) * spanU, region.v0 + (v0 or 0.0) * spanV,
+        region.u0 + (u1 or 1.0) * spanU, region.v0 + (v1 or 1.0) * spanV, slot)
 end
 
 --- Adds a producer, laid out after the archetypes in the order added.
@@ -281,7 +291,7 @@ local function writeRun(self: Extractor, packet: FramePacket,
         local tint = tints[row]
 
         local layer = 0.0
-        local u0, v0 = 0.0, 0.0
+        local u0, v0 = self._whiteU0, self._whiteV0
         local u1, v1 = self._whiteU1, self._whiteV1
         if sprites ~= nil then
             local sprite = sprites[row]

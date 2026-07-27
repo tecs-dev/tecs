@@ -452,6 +452,198 @@ describe("ecs.Renderer", function()
     end)
 
 
+    -- One image a layer costs a whole cell for a sixteen-pixel icon and caps
+    -- the process at one image per layer. Packing fits many into each, and what
+    -- has to survive it is that every one of them still draws as itself: the
+    -- region a name resolves to is now a sub-rect that starts somewhere other
+    -- than the cell's origin, and every stage between here and the sampler has
+    -- to carry that origin rather than assume it away.
+    describe("a packed image array", function()
+        local function packedScene(layers)
+            local world = tecs.newWorld()
+            local renderer = Renderer.create(device.handle, FORMAT, {
+                ambient = { 1.0, 1.0, 1.0 },
+                capacity = 256,
+                cell = 64,
+                layers = layers or 4,
+                packImages = true,
+            })
+            renderer:install(world)
+            return world, renderer
+        end
+
+        -- An image of one colour, at whatever size the packer is being asked
+        -- to place. Registered under a name of its own so the renderer's own
+        -- registry is exercised the way a real load exercises it.
+        local function block(name, size, r, g, b)
+            local pixels = loader.newArray(("uint8_t[%d]"):format(size * size * 4))
+            for index = 0, size * size - 1 do
+                pixels[index * 4] = r
+                pixels[index * 4 + 1] = g
+                pixels[index * 4 + 2] = b
+                pixels[index * 4 + 3] = 255
+            end
+            return {
+                status = "ready",
+                path = name,
+                pixels = pixels,
+                width = size,
+                height = size,
+                pitch = size * 4,
+                release = function() end,
+            }
+        end
+
+        it("fits many images into one layer", function()
+            local _, renderer = packedScene()
+            -- The white pixel takes the first shelf; sixteen eight-pixel
+            -- blocks would need seventeen layers unpacked and fit inside one
+            -- 64-pixel cell here.
+            for index = 1, 16 do
+                renderer:registerImage(
+                    block("spec://pack" .. index, 8, index * 8, 0, 0))
+            end
+
+            assert.are.equal(1, renderer.images.used,
+                "sixteen eight-pixel images belong in one layer")
+            for index = 1, 16 do
+                assert.are.equal(0,
+                    renderer:sprite("spec://pack" .. index).slot)
+            end
+            renderer:destroy()
+        end)
+
+        it("gives every packed image a rect of its own", function()
+            local _, renderer = packedScene()
+            local seen = {}
+            for index = 1, 8 do
+                renderer:registerImage(
+                    block("spec://rect" .. index, 8, 0, 0, 0))
+                local sprite = renderer:sprite("spec://rect" .. index)
+                local key = ("%d:%.6f:%.6f"):format(sprite.slot,
+                    sprite.u0, sprite.v0)
+                assert.is_nil(seen[key],
+                    "two images landed on the same texels")
+                seen[key] = true
+                assert.is_true(sprite.u1 > sprite.u0)
+                assert.is_true(sprite.v1 > sprite.v0)
+            end
+            renderer:destroy()
+        end)
+
+        it("draws each packed image back as itself", function()
+            -- The assertion that matters. Eight distinct colours packed into
+            -- one layer, each drawn on its own frame covering the target: a
+            -- region whose origin was dropped anywhere between the packer and
+            -- the sampler shows up as a quad wearing a neighbour's colour.
+            local world, renderer = packedScene()
+            local colours = {
+                { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 },
+                { 255, 255, 0 }, { 255, 0, 255 }, { 0, 255, 255 },
+                { 128, 0, 0 }, { 0, 128, 0 },
+            }
+            for index = 1, #colours do
+                local colour = colours[index]
+                renderer:registerImage(block("spec://draw" .. index, 8,
+                    colour[1], colour[2], colour[3]))
+            end
+            assert.are.equal(1, renderer.images.used)
+
+            local entity = world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0),
+                renderer:sprite("spec://draw1"),
+                Renderable()
+            )
+
+            for index = 1, #colours do
+                local sprite = world:getMut(entity, Sprite)
+                local wanted = renderer:sprite("spec://draw" .. index)
+                sprite.image, sprite.slot = wanted.image, wanted.slot
+                sprite.u0, sprite.v0 = wanted.u0, wanted.v0
+                sprite.u1, sprite.v1 = wanted.u1, wanted.v1
+
+                local pixels = frameOnce(world, renderer)
+                local colour = colours[index]
+                -- Four corners as well as the middle, because a rect that is
+                -- one texel out reads correctly in the middle of the quad and
+                -- wrongly at its edges.
+                for _, at in ipairs({
+                    { SIZE / 2, SIZE / 2 }, { 3, 3 }, { SIZE - 3, 3 },
+                    { 3, SIZE - 3 }, { SIZE - 3, SIZE - 3 },
+                }) do
+                    local pixel = screen:getPixel(pixels, at[1], at[2])
+                    assert.are.equal(colour[1], pixel.r,
+                        ("image %d at %d,%d"):format(index, at[1], at[2]))
+                    assert.are.equal(colour[2], pixel.g)
+                    assert.are.equal(colour[3], pixel.b)
+                end
+            end
+            renderer:destroy()
+        end)
+
+        it("opens a new layer when the one it is filling runs out", function()
+            local _, renderer = packedScene(4)
+            -- A sixteen-pixel block is eighteen with its gutter, so three
+            -- shelves of three fit a 64-pixel cell and the tenth block starts
+            -- a second layer.
+            for index = 1, 30 do
+                renderer:registerImage(
+                    block("spec://spill" .. index, 16, 0, 0, 0))
+            end
+            assert.is_true(renderer.images.used > 1,
+                "thirty sixteen-pixel blocks do not fit in one 64-pixel cell")
+            assert.is_true(renderer.images.used < 30,
+                "and are nowhere near one layer each")
+            renderer:destroy()
+        end)
+
+        it("still fails when the whole array is full", function()
+            local _, renderer = packedScene(1)
+            -- One layer of 64 pixels, and blocks that fill a shelf each.
+            assert.has_error(function()
+                for index = 1, 64 do
+                    renderer:registerImage(
+                        block("spec://full" .. index, 32, 0, 0, 0))
+                end
+            end)
+            renderer:destroy()
+        end)
+
+        it("reports what it packed into the array", function()
+            local _, renderer = packedScene()
+            local before = renderer.images:usage()
+            renderer:registerImage(block("spec://usage", 16, 0, 0, 0))
+            local after, total = renderer.images:usage()
+
+            -- Eighteen squared: the image and the gutter around it.
+            assert.are.equal(18 * 18, after - before)
+            assert.are.equal(64 * 64 * 4, total)
+            renderer:destroy()
+        end)
+
+        it("leaves one image a layer when packing is off", function()
+            local world, renderer = newScene()
+            renderer:registerImage(solid("spec://unpacked1", 255, 0, 0))
+            renderer:registerImage(solid("spec://unpacked2", 0, 255, 0))
+
+            local first = renderer:sprite("spec://unpacked1")
+            local second = renderer:sprite("spec://unpacked2")
+            assert.are_not.equal(first.slot, second.slot)
+            assert.are.equal(0.0, first.u0, "and at the cell's own origin")
+            assert.are.equal(0.0, second.v0)
+
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0), second, Renderable())
+            assert.are.equal(255,
+                screen:getPixel(frameOnce(world, renderer),
+                    SIZE / 2, SIZE / 2).g)
+            renderer:destroy()
+        end)
+    end)
+
+
     -- A Sprite names its image and the renderer decides which layer that name
     -- occupies. These pin the two halves of that: a name is one layer however
     -- often it is asked for, and a name outlives the layer numbering of the run
