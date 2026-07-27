@@ -82,6 +82,9 @@ end
 
 local record assets
     Handle: Handle
+
+    --- Whether the loading worker is running.
+    installed: function(): boolean
 end
 
 local HandleMT <const>: metatable<Handle> = { __index = Handle }
@@ -96,6 +99,14 @@ function assets.install(luaPath?: string)
         source = DECODER,
         luaPath = luaPath or package.path,
     })
+end
+
+--- Whether the loading worker is running.
+---
+--- For a subsystem that loads an asset of its own and has no way of knowing
+--- whether the game has started the worker yet.
+function assets.installed(): boolean
+    return worker ~= nil
 end
 
 --- Queues an image for loading and returns its handle immediately.

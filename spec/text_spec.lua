@@ -1,0 +1,426 @@
+-- Text, asserted on rendered pixels.
+--
+-- "It drew something" is not the claim. A glyph is a quad whose UV rect
+-- addresses one cell of a font atlas and whose material reads a distance
+-- field out of it, and every one of those can be wrong in a way that still
+-- puts ink on the screen: the wrong glyph, the right glyph upside down, the
+-- right glyph in the wrong place. So these tests render offscreen and look at
+-- where the ink actually landed.
+
+-- Our build first, so it wins over the ECS repo's own engine tree.
+-- The build directory is the build system's to choose, so it is passed in.
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
+    .. package.path
+
+local tecs = require("tecs")
+local sdl = require("tecs.ffi.sdl3")
+local Window = require("tecs.platform.Window")
+local Device = require("tecs.gpu.Device")
+local Texture = require("tecs.gpu.Texture")
+local Renderer = require("tecs.Renderer")
+local assets = require("tecs.assets")
+local components = require("tecs.components")
+local text = require("tecs.gfx.text")
+
+local C = sdl.C
+local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local SIZE = 256
+
+local Transform = components.Transform
+local Tint = components.Tint
+
+describe("gfx.text", function()
+    local window, device, screen, font
+
+    setup(function()
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        window = Window.create({ title = "text", width = SIZE, height = SIZE })
+        device = Device.create(window, { debug = true })
+        screen = Texture.create(device.handle,
+            { width = SIZE, height = SIZE, format = FORMAT })
+        assets.install()
+        font = text.defaultFont()
+    end)
+
+    teardown(function()
+        assets.shutdown()
+        if screen then screen:destroy() end
+        if device then device:destroy() end
+        if window then window:destroy() end
+        C.SDL_Quit()
+    end)
+
+    -- A world with a renderer and the text plugin. Ambient is full white so a
+    -- glyph's colour reaches the screen without a light in the way.
+    local function newScene()
+        local world = tecs.newWorld()
+        local renderer = Renderer.create(device.handle, FORMAT, {
+            ambient = { 1.0, 1.0, 1.0 },
+            capacity = 4096,
+        })
+        renderer:install(world)
+        world:addPlugin(text.plugin({ renderer = renderer }))
+        return world, renderer
+    end
+
+    local function frame(world, renderer)
+        world:update(1 / 60)
+        local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+        renderer:render({
+            width = SIZE,
+            height = SIZE,
+            commandBuffer = commandBuffer,
+            swapchainTexture = screen.handle,
+        })
+        assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+        return screen:readback()
+    end
+
+    -- The atlas decodes on a worker and the first frame a text is laid out is
+    -- what queues it, so a font arrives no earlier than the frame after that.
+    -- Waiting for the decode in between is what makes this deterministic
+    -- rather than a race the test usually wins.
+    local function settle(world, renderer)
+        frame(world, renderer)
+        assets.waitAll()
+        frame(world, renderer)
+        return frame(world, renderer)
+    end
+
+    -- Ink in the rectangle, counted as pixels whose green channel is lit. Text
+    -- is drawn green throughout so a lit pixel cannot be the clear colour.
+    local function ink(pixels, x0, y0, x1, y1)
+        local count = 0
+        for y = math.floor(y0), math.floor(y1) - 1 do
+            for x = math.floor(x0), math.floor(x1) - 1 do
+                if screen:getPixel(pixels, x, y).g > 128 then
+                    count = count + 1
+                end
+            end
+        end
+        return count
+    end
+
+    local function spawnText(world, x, y, body, size, align)
+        return world:spawn(
+            Transform(x, y, 0, 1),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            text.Text.new({
+                text = body,
+                font = font,
+                size = size or 48,
+                align = align,
+            })
+        )
+    end
+
+    it("loads the bundled font's metrics", function()
+        assert.are.equal(64, font.size, "the atlas was generated at 64")
+        assert.are.equal(512, font.atlasWidth)
+        assert.are.equal(8, font.distanceRange)
+        assert.is_not_nil(font.glyphs[string.byte("H")])
+        assert.are.equal(0, font.glyphs[string.byte(" ")].width,
+            "a space has an advance and no quad")
+    end)
+
+    it("gives every glyph an entity owned by its text", function()
+        local world, renderer = newScene()
+        local entity = spawnText(world, 16, 16, "Hi there")
+        settle(world, renderer)
+
+        -- Eight characters, one of them a space, which has no quad.
+        assert.are.equal(7, renderer.count,
+            "one entity per glyph, and a space is not one")
+
+        local item = world:get(entity, text.Text)
+        assert.are.equal(7, #item._glyphs)
+        for index = 1, #item._glyphs do
+            local glyph = item._glyphs[index]
+            assert.is_true(world:has(glyph, text.Glyph))
+            assert.is_true(
+                world:has(glyph, tecs.builtins.ChildOf(entity)),
+                "a glyph belongs to its text")
+        end
+        renderer:destroy()
+    end)
+
+    it("draws a glyph where the layout puts it", function()
+        -- One glyph, placed by hand from the metrics, and nothing else on
+        -- screen. Its ink must land inside the rect the layout computed and
+        -- nowhere outside it.
+        local world, renderer = newScene()
+        local size = 96
+        local x, y = 40, 60
+        spawnText(world, x, y, "H", size)
+        local pixels = settle(world, renderer)
+
+        local metrics = font.glyphs[string.byte("H")]
+        local scale = size / font.size
+        local left = x + metrics.xOffset * scale
+        local top = y + metrics.yOffset * scale
+        local right = left + metrics.width * scale
+        local bottom = top + metrics.height * scale
+
+        assert.are.equal(1, renderer.count)
+        assert.is_true(ink(pixels, left, top, right, bottom) > 500,
+            "the glyph must fill the rect the metrics describe")
+        assert.are.equal(0, ink(pixels, 0, 0, SIZE, top - 2),
+            "and nothing above it")
+        assert.are.equal(0, ink(pixels, 0, bottom + 2, SIZE, SIZE),
+            "and nothing below it")
+        assert.are.equal(0, ink(pixels, 0, 0, left - 2, SIZE),
+            "and nothing to its left")
+        assert.are.equal(0, ink(pixels, right + 2, 0, SIZE, SIZE),
+            "and nothing to its right")
+        renderer:destroy()
+    end)
+
+    it("draws a glyph the right way up", function()
+        -- An L is ink across the bottom of its box and only a stem at the
+        -- top, so it tells an upside-down glyph from a correct one. A quad's
+        -- local Y and the screen's disagree in sign, and getting that wrong
+        -- renders a plausible glyph that happens to be mirrored.
+        local world, renderer = newScene()
+        local size = 96
+        local x, y = 40, 60
+        spawnText(world, x, y, "L", size)
+        local pixels = settle(world, renderer)
+
+        local metrics = font.glyphs[string.byte("L")]
+        local scale = size / font.size
+        local left = x + metrics.xOffset * scale
+        local top = y + metrics.yOffset * scale
+        local right = left + metrics.width * scale
+        local bottom = top + metrics.height * scale
+        local middle = (left + right) * 0.5
+        -- The atlas rect is padded by half the field's range so the outline
+        -- has room, so the ink stops that far short of the rect's edges.
+        local margin = font.distanceRange * 0.5 * scale
+
+        local foot = ink(pixels, middle, bottom - margin - 10,
+            right - margin, bottom - margin)
+        local shoulder = ink(pixels, middle, top,
+            right, top + metrics.height * scale * 0.4)
+
+        assert.is_true(foot > 100, "an L has its foot at the bottom right")
+        assert.are.equal(0, shoulder,
+            "and nothing at the top right; a flipped L would have it there")
+        renderer:destroy()
+    end)
+
+    it("advances a string of glyphs across the line", function()
+        -- Three of the same glyph, so anything that differs between them is
+        -- position. The font is monospaced, which makes the expected pitch a
+        -- single number rather than a sum.
+        local world, renderer = newScene()
+        local size = 64
+        local x, y = 20, 60
+        local entity = spawnText(world, x, y, "III", size)
+        local pixels = settle(world, renderer)
+
+        assert.are.equal(3, renderer.count)
+
+        local metrics = font.glyphs[string.byte("I")]
+        local scale = size / font.size
+        local pitch = metrics.xAdvance * scale
+        local top = y + metrics.yOffset * scale
+        local bottom = top + metrics.height * scale
+
+        for index = 0, 2 do
+            local left = x + index * pitch + metrics.xOffset * scale
+            local right = left + metrics.width * scale
+            assert.is_true(ink(pixels, left, top, right, bottom) > 200,
+                ("glyph %d belongs one advance along from the last"):format(index))
+        end
+
+        -- The gap after the run is empty, which is what pins the advance
+        -- rather than merely a wide smear of ink.
+        local after = x + 3 * pitch
+        assert.are.equal(0, ink(pixels, after + 2, 0, SIZE, SIZE),
+            "nothing is drawn past the last glyph")
+
+        local item = world:get(entity, text.Text)
+        assert.is_true(math.abs(item.width - 3 * pitch) < 0.01,
+            "the measured width is three advances")
+        renderer:destroy()
+    end)
+
+    it("breaks lines on a newline and aligns them", function()
+        local world, renderer = newScene()
+        local size = 48
+        local entity = spawnText(world, 20, 20, "II\nIIII", size, "right")
+        settle(world, renderer)
+
+        local item = world:get(entity, text.Text)
+        local scale = size / font.size
+        local pitch = font.glyphs[string.byte("I")].xAdvance * scale
+        assert.is_true(math.abs(item.width - 4 * pitch) < 0.01,
+            "the block is as wide as its widest line")
+        assert.is_true(
+            math.abs(item.height - 2 * font.lineHeight * scale) < 0.01,
+            "and two lines tall")
+
+        -- Right alignment moves the short line to the block's right edge, so
+        -- its first glyph starts two advances in.
+        local first = world:get(item._glyphs[1], tecs.builtins.RelativeTransform)
+        assert.is_true(math.abs(first.x - (2 * pitch + first.scaleX * 0.5
+            + font.glyphs[string.byte("I")].xOffset * scale)) < 0.01,
+            "the shorter line is pushed right")
+        renderer:destroy()
+    end)
+
+    it("changes what is drawn when the string changes", function()
+        local world, renderer = newScene()
+        local entity = spawnText(world, 30, 60, "I", 96)
+        local before = settle(world, renderer)
+
+        local metrics = font.glyphs[string.byte("I")]
+        local scale = 96 / font.size
+        local top = 60 + metrics.yOffset * scale
+        local bottom = top + metrics.height * scale
+        -- Where the second glyph of a two-character string would be, and is
+        -- not yet.
+        local secondLeft = 30 + metrics.xAdvance * scale
+        local secondRight = secondLeft + metrics.width * scale
+        assert.are.equal(0, ink(before, secondLeft, top, secondRight, bottom),
+            "one glyph is drawn to start with")
+
+        world:getMut(entity, text.Text).text = "II"
+        local after = frame(world, renderer)
+
+        assert.are.equal(2, renderer.count)
+        assert.is_true(ink(after, secondLeft, top, secondRight, bottom) > 200,
+            "the second glyph appears where the layout puts it")
+        renderer:destroy()
+    end)
+
+    it("despawns a text's glyphs with it", function()
+        local world, renderer = newScene()
+        local entity = spawnText(world, 30, 60, "Hello", 64)
+        local pixels = settle(world, renderer)
+        assert.are.equal(5, renderer.count)
+        assert.is_true(ink(pixels, 0, 0, SIZE, SIZE) > 500)
+
+        local item = world:get(entity, text.Text)
+        local glyphs = {}
+        for index = 1, #item._glyphs do glyphs[index] = item._glyphs[index] end
+
+        world:despawn(entity)
+        pixels = frame(world, renderer)
+
+        assert.are.equal(0, renderer.count, "the glyphs went with their text")
+        assert.are.equal(0, ink(pixels, 0, 0, SIZE, SIZE))
+        for index = 1, #glyphs do
+            assert.is_false(world:isAlive(glyphs[index]))
+        end
+        renderer:destroy()
+    end)
+
+    it("does not lay out a text that did not change", function()
+        local world, renderer = newScene()
+        spawnText(world, 30, 60, "Static", 48)
+        settle(world, renderer)
+
+        local built = text.layouts(world)
+        assert.is_true(built >= 1, "the text was laid out at least once")
+
+        for _ = 1, 8 do frame(world, renderer) end
+        assert.are.equal(built, text.layouts(world),
+            "an unchanged string must not be laid out again")
+
+        -- And the gate opens for a change, so it is a gate and not a
+        -- permanent stop.
+        local entity = spawnText(world, 30, 140, "Moved", 48)
+        frame(world, renderer)
+        assert.are.equal(built + 1, text.layouts(world))
+
+        world:getMut(entity, text.Text).text = "Moved on"
+        frame(world, renderer)
+        assert.are.equal(built + 2, text.layouts(world))
+        renderer:destroy()
+    end)
+
+    it("colours glyphs from the text's tint", function()
+        local world, renderer = newScene()
+        local entity = world:spawn(
+            Transform(20, 60, 0, 1),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            text.Text.new({ text = "H", font = font, size = 96 })
+        )
+        local pixels = settle(world, renderer)
+        local lit = ink(pixels, 0, 0, SIZE, SIZE)
+        assert.is_true(lit > 500, "green to start with")
+
+        local tint = world:getMut(entity, Tint)
+        tint.r, tint.g, tint.b = 1.0, 0.0, 0.0
+        pixels = frame(world, renderer)
+
+        assert.are.equal(0, ink(pixels, 0, 0, SIZE, SIZE),
+            "nothing green is left")
+        local red = 0
+        for y = 0, SIZE - 1 do
+            for x = 0, SIZE - 1 do
+                if screen:getPixel(pixels, x, y).r > 128 then red = red + 1 end
+            end
+        end
+        assert.is_true(math.abs(red - lit) <= lit * 0.1,
+            "the same glyph, in the tint the text now carries")
+        renderer:destroy()
+    end)
+
+    it("moves its glyphs when the text moves", function()
+        -- A glyph's position is a RelativeTransform under the text, so moving
+        -- the text is the hierarchy's job and not this module's.
+        local world, renderer = newScene()
+        local entity = spawnText(world, 20, 40, "H", 96)
+        local before = settle(world, renderer)
+        assert.is_true(ink(before, 0, 0, SIZE / 2, SIZE) > 500)
+        assert.are.equal(0, ink(before, SIZE / 2, 0, SIZE, SIZE))
+
+        local built = text.layouts(world)
+        local transform = world:getMut(entity, Transform)
+        transform.x = transform.x + SIZE / 2
+        local after = frame(world, renderer)
+
+        assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE),
+            "the glyph left the half it started in")
+        assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500,
+            "and arrived in the other one")
+        assert.are.equal(built, text.layouts(world),
+            "moving a text is the hierarchy's work, not a relayout")
+        renderer:destroy()
+    end)
+
+    it("lays its glyphs out again after a snapshot round trip", function()
+        -- Glyphs are derived from the Text, so a snapshot omits them. Saving
+        -- them and re-deriving them on load would draw every string twice.
+        local world, renderer = newScene()
+        spawnText(world, 30, 60, "Save", 48)
+        local before = settle(world, renderer)
+        assert.are.equal(4, renderer.count)
+
+        local saved = world:saveSnapshot({}).buffer
+        renderer:destroy()
+
+        local restored, second = newScene()
+        restored:loadSnapshot(saved)
+        local after = settle(restored, second)
+
+        assert.are.equal(4, second.count,
+            "the restored text laid out its own glyphs, and only its own")
+        assert.are.equal(ink(before, 0, 0, SIZE, SIZE),
+            ink(after, 0, 0, SIZE, SIZE),
+            "and drew the same string in the same place")
+        second:destroy()
+    end)
+
+    it("refuses an alignment it does not have", function()
+        local ok, reason = pcall(function()
+            return text.Text.new({ text = "x", font = font, align = "middle" })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("middle", 1, true),
+            "the error should name what was asked for")
+    end)
+end)

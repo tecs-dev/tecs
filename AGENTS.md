@@ -53,7 +53,7 @@ tecs/
 │   ├── utils/
 │   ├── ffi/               # Generated bindings: SDL3, Box2D, shaderc, SPIRV-Cross
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
-│   ├── gfx/               # Camera
+│   ├── gfx/               # Camera, layers, distance-field text
 │   ├── platform/          # Window, input, events, clock, paths, capabilities
 │   ├── physics/           # Box2D 3
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
@@ -105,9 +105,10 @@ Compaction is an ordered three-pass scan rather than an `atomicAdd`, because dra
 ### Ported, and not yet
 
 Working: windowing, input in three tiers behind a layer stack, events, the GPU pipeline, materials, camera,
-physics, workers and asset loading, logging, the debug server, and sequencing with tweening merged into it.
+physics, workers and asset loading, logging, the debug server, sequencing with tweening merged into it, and
+distance-field text laid out into one entity per glyph.
 
-Not ported: shadows, post-processing, audio, text, UI, tiled maps, sprite animation, layers and multi-camera.
+Not ported: shadows, post-processing, audio, UI, tiled maps, sprite animation, and multi-camera.
 
 ## Development Guidelines
 
