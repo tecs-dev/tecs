@@ -14,6 +14,29 @@
 
 local ffi <const> = require("ffi")
 
+-- Enough of dlfcn to pin a library in memory. Declared here rather than
+-- generated, because it is the C library's own interface and exists on every
+-- target that can load one at all.
+ffi.cdef[[
+void *dlopen(const char *path, int mode);
+]]
+
+--- Load now, and never unmap.
+---
+--- `ffi.load` returns a namespace whose collection dlcloses the library, and
+--- at `lua_close` everything is collected, including a module-level cache. A
+--- library holding running threads is then unmapped while they are executing
+--- its code, and they fault on the next instruction: the crash report shows
+--- the main thread inside `lua_close` and `dlclose` while a solver thread
+--- takes a translation fault at an address that no longer maps.
+---
+--- Keeping a second reference the loader never drops means the mapping
+--- outlives the state that asked for it, which is what a thread the engine
+--- started needs. The handle is deliberately not stored: nothing should be
+--- able to close it.
+local RTLD_NOW <const> = 0x2
+local RTLD_NODELETE <const> = 0x80
+
 local record loader
     --- A value that crossed the FFI boundary: a function, an enum constant,
     --- a pointer, or a struct. Readable, callable, and comparable, because
@@ -235,6 +258,14 @@ function loader.library(soname: string, formula: string, envVar: string,
         local ok, result = pcall(ffi.load, path)
         if ok then
             local namespace = result as loader.CNamespace
+            -- Pinned before anything can start a thread inside it. A failure
+            -- here is not fatal: the library is already loaded and usable, and
+            -- only an orderly shutdown that beats its own threads is at risk.
+            pcall(function()
+                local dlopen = (ffi.C as {string: any}).dlopen
+                    as function(string, integer): any
+                dlopen(path, RTLD_NOW + RTLD_NODELETE)
+            end)
             loaded[key] = namespace
             return namespace, path
         end
