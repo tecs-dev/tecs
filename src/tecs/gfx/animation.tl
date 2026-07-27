@@ -14,6 +14,11 @@
 --- The component carries a sheet id rather than a sheet. A component is plain
 --- C memory and a sheet is a table, and the indirection is the point besides:
 --- every entity playing one walk cycle shares one sheet.
+---
+--- An entity carrying a `Pivot` bound to one of the sheet's slices has it
+--- resolved again on every frame the sprite changes, because an Aseprite slice
+--- moves from frame to frame and a pivot that did not follow it would drift
+--- off the part of the drawing it names.
 
 local ecs <const> = require("tecs.ecs")
 local components <const> = require("tecs.components")
@@ -25,6 +30,7 @@ local type Query = ecs.Query
 local type Sheet = sheet.Sheet
 
 local Sprite <const> = components.Sprite
+local Pivot <const> = sheet.Pivot
 
 --- Playback rate an animation runs at when nothing says otherwise, which is
 --- the timing the sheet's frames were authored with.
@@ -314,6 +320,11 @@ local function advance(world: World, query: Query, dt: number)
         local marked = false
         local sprites <const> = archetype:get(Sprite)
         local wrote = false
+        -- Absent on every archetype that turns about its middle, which is
+        -- most of them. A pivot follows the slice it names and a slice moves
+        -- from frame to frame, so it is rewritten exactly when the frame is.
+        local pivots <const> = archetype:get(Pivot)
+        local moved = false
         -- Sheets are few and neighbouring rows tend to share one.
         local cachedId = 0
         local cached: Sheet = nil
@@ -329,17 +340,25 @@ local function advance(world: World, query: Query, dt: number)
 
             if source ~= nil then
                 local tagId <const> = instance.tag as integer
+                local time = instance.time
+                local completed, looped = false, false
+                -- Whether time moved this step. Everything below the advance
+                -- turns on it, because a row whose time stood still shows the
+                -- frame it already showed.
+                local advanced = false
+
                 -- The cycle is the sum of the durations of the frames the tag
                 -- visits, which the sheet worked out when it was built: a
                 -- pingpong tag counts the frames it passes twice twice, and a
-                -- hold frame lengthens it by exactly its own duration.
-                local cycle <const> = source._cycle[tagId] or 0.0
-
+                -- hold frame lengthens it by exactly its own duration. Read
+                -- inside the test rather than above it, so a row that is not
+                -- playing costs no table index to find that out.
                 local speed <const> = instance.speed
-                local time = instance.time
-                local completed, looped = false, false
+                local cycle <const> = (instance.playing and speed > 0)
+                    and (source._cycle[tagId] or 0.0) or 0.0
 
-                if instance.playing and speed > 0 and cycle > 0 then
+                if cycle > 0 then
+                    advanced = true
                     if not marked then
                         archetype:getMut(Animation)
                         marked = true
@@ -370,8 +389,6 @@ local function advance(world: World, query: Query, dt: number)
                     instance.time = time
                 end
 
-                local frame <const> = source:frameAt(tagId, time)
-                local target <const> = sprites[row]
                 -- A frame is a region of an image, not a region on its own, so
                 -- a sheet bound to another image moves the quad's layer as well
                 -- as its UVs. The layer is compared rather than assumed to
@@ -382,28 +399,57 @@ local function advance(world: World, query: Query, dt: number)
                 -- An unbound sheet names no image, so it writes the region
                 -- alone and leaves whatever the entity's Sprite already had.
                 local slot <const> = source._slot
-                local changed <const> = frame ~= instance.frame
-                if changed or (slot >= 0 and target.slot ~= slot) then
-                    if changed then
-                        if not marked then
-                            archetype:getMut(Animation)
-                            marked = true
+                -- Three things can put a different frame on a row: time
+                -- moving, the row never having had one, and the sheet having
+                -- been bound to another image since it was written. All three
+                -- are comparisons, where answering them the long way is a scan
+                -- of the tag's cycle and a handful of writes into the Sprite
+                -- column. Most sprites in a large world are standing still at
+                -- any moment, and this is what stops them costing what a
+                -- playing one does.
+                if advanced or instance.frame == 0
+                    or (slot >= 0 and sprites[row].slot ~= slot) then
+                    local frame <const> = source:frameAt(tagId, time)
+                    local target <const> = sprites[row]
+                    local changed <const> = frame ~= instance.frame
+                    if changed or (slot >= 0 and target.slot ~= slot) then
+                        if changed then
+                            if not marked then
+                                archetype:getMut(Animation)
+                                marked = true
+                            end
+                            instance.frame = frame
                         end
-                        instance.frame = frame
+                        if not wrote then
+                            archetype:getMut(Sprite)
+                            wrote = true
+                        end
+                        local base <const> = (frame - 1) * 4
+                        local uvs <const> = source._uvs
+                        target.u0 = uvs[base + 1]
+                        target.v0 = uvs[base + 2]
+                        target.u1 = uvs[base + 3]
+                        target.v1 = uvs[base + 4]
+                        if slot >= 0 then
+                            target.image = source._image
+                            target.slot = slot
+                        end
                     end
-                    if not wrote then
-                        archetype:getMut(Sprite)
-                        wrote = true
-                    end
-                    local base <const> = (frame - 1) * 4
-                    local uvs <const> = source._uvs
-                    target.u0 = uvs[base + 1]
-                    target.v0 = uvs[base + 2]
-                    target.u1 = uvs[base + 3]
-                    target.v1 = uvs[base + 4]
-                    if slot >= 0 then
-                        target.image = source._image
-                        target.slot = slot
+
+                    -- A slice bound to another sheet is left where it is: the
+                    -- frame index counts through this sheet's frames and means
+                    -- nothing in another's, so resolving there would move the
+                    -- pivot to whatever that index happened to name.
+                    if pivots ~= nil and changed then
+                        local pivot <const> = pivots[row]
+                        local slice <const> = pivot.slice as integer
+                        if slice > 0 and pivot.sheet as integer == sheetId then
+                            if not moved then
+                                archetype:getMut(Pivot)
+                                moved = true
+                            end
+                            pivot.x, pivot.y = source:pivotOf(slice, frame)
+                        end
                     end
                 end
 

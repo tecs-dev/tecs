@@ -84,6 +84,12 @@ end
 --- covers every angle: looser than the true extent and never smaller, so the
 --- cull can only keep something it might have dropped, never drop something it
 --- should have kept.
+---
+--- These are half extents about the quad's middle, so the centre written
+--- beside them has to be the quad's middle too. That is not always the
+--- entity's position: a pivoted quad hangs off some other point of itself, and
+--- the writer moves the centre with it rather than growing these to cover
+--- where the geometry went.
 function instancelayout.extentOf(rotation: number, scaleX: number,
                                  scaleY: number): number, number
     local ex: number

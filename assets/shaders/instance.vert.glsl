@@ -62,6 +62,14 @@ layout(location = 6) flat out int vClip;
 
 // Four distinct corners, visited through an index buffer. A non-indexed quad
 // runs the vertex shader six times for the four positions it actually has.
+//
+// The corners are symmetric and stay that way. A pivot moves where the quad
+// hangs off the point it is drawn at, and `Extractor.tl` folds it into
+// `origin.xy` before the instance is written, because origin - basis * pivot
+// places every corner exactly where corner - pivot would: the same geometry
+// for no extra bytes in the instance. Two things here decide the sign it uses:
+// these corners, and the `0.5 - corner.y` below that maps them onto V. Change
+// either and the pivot's Y follows.
 const vec2 CORNERS[4] = vec2[4](
     vec2(-0.5, -0.5), vec2( 0.5, -0.5),
     vec2(-0.5,  0.5), vec2( 0.5,  0.5)

@@ -13,6 +13,8 @@
 ---
 --- Instances pack as four vec4s: a 2x2 basis, an origin, a colour, and a UV
 --- rect. A precomputed basis costs less on the GPU than a per-vertex sincos.
+--- The origin is the quad's middle, which is the entity's position until a
+--- `Pivot` says the quad hangs off some other point of itself.
 ---
 --- Which layer an image occupies is the backend's answer, not the image's
 --- identity: layers are handed out as images register, so the number depends on
@@ -32,6 +34,7 @@ local Camera <const> = require("tecs.gfx.Camera")
 local FramePacket <const> = require("tecs.FramePacket")
 local components <const> = require("tecs.components")
 local layers <const> = require("tecs.gfx.layers")
+local sheet <const> = require("tecs.gfx.sheet")
 local timing <const> = require("tecs.timing")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 
@@ -49,8 +52,12 @@ local UNBOUNDED <const> = instancelayout.UNBOUNDED
 local extentOf <const> = instancelayout.extentOf
 local packSlot <const> = instancelayout.packSlot
 
+local Pivot <const> = sheet.Pivot
+
 local PI <const> = math.pi
 local TWO_PI <const> = math.pi * 2.0
+local cos <const> = math.cos
+local sin <const> = math.sin
 
 --- Something that draws instances without owning entities.
 ---
@@ -280,6 +287,9 @@ local function writeRun(self: Extractor, packet: FramePacket,
     -- the rows below then write the texture-array layer on its own and the
     -- fragments they produce never look at the region table.
     local clips = archetype:get(components.Clip)
+    -- Absent on every archetype that turns about its middle, which is most of
+    -- them: the rows below then draw the quad centred on the entity.
+    local pivots = archetype:get(Pivot)
     -- Loop invariant: an archetype either carries the previous transform or it
     -- does not, so an entity that is not interpolated costs one test per run
     -- rather than anything per row.
@@ -371,6 +381,43 @@ local function writeRun(self: Extractor, packet: FramePacket,
             angle = before.rotation + turn * alpha
         end
 
+        -- Where the quad's middle goes. Without a pivot that is the entity's
+        -- own position. With one the middle moves so that the point the pivot
+        -- names lands on the position instead, which is what makes the basis
+        -- turn and scale the quad about the pivot rather than about its
+        -- middle.
+        --
+        -- Folded in here rather than sent to the shader because it is an
+        -- affine shift of the very basis the vertex applies: moving the middle
+        -- by -basis * pivot is the same geometry as offsetting every corner by
+        -- -pivot, vertex for vertex. Sending it instead would need a fifth
+        -- vec4 in the instance, which is sixteen more bytes streamed for every
+        -- instance in the world to say something almost none of them have
+        -- anything to say about.
+        local centreX = originX
+        local centreY = originY
+        if pivots ~= nil then
+            local pivot = pivots[row]
+            -- Quad-local units, where the quad's corners run -0.5 to 0.5. Y is
+            -- measured the other way from the fraction because the vertex
+            -- shader reads the frame's V through `0.5 - corner.y`, so this
+            -- puts the pivot on the texel it names.
+            local px <const> = pivot.x - 0.5
+            local py <const> = 0.5 - pivot.y
+            if angle == 0.0 then
+                centreX = originX - px * scaleX
+                centreY = originY - py * scaleY
+            else
+                -- The same basis `instance.vert.glsl` builds, column major:
+                -- the columns are (c * scaleX, s * scaleX) and
+                -- (-s * scaleY, c * scaleY).
+                local c <const> = cos(angle)
+                local s <const> = sin(angle)
+                centreX = originX - (c * scaleX * px - s * scaleY * py)
+                centreY = originY - (s * scaleX * px + c * scaleY * py)
+            end
+        end
+
         local base = (offset + row - 1) * INSTANCE_FLOATS
         floats[base] = angle
         floats[base + 1] = scaleX
@@ -378,11 +425,16 @@ local function writeRun(self: Extractor, packet: FramePacket,
         -- The band this entity's layer owns, and where in it the sort mode
         -- puts it. Zero is nearest, so a higher layer resolves to a smaller
         -- value and covers everything below it whatever the two contain.
+        --
+        -- Sorted on the entity's position rather than on the quad's middle,
+        -- which is the whole reason a pivot at the feet is worth having: two
+        -- characters standing on the same line sort together however tall
+        -- either drawing is.
         floats[base + 3] = layers.depthOf(entityLayer, transform.z,
             originX, originY)
 
-        floats[base + 4] = originX
-        floats[base + 5] = originY
+        floats[base + 4] = centreX
+        floats[base + 5] = centreY
         floats[base + 6] = packedSlot
         floats[base + 7] = material
 
@@ -408,9 +460,15 @@ local function writeRun(self: Extractor, packet: FramePacket,
             ex, ey = extentOf(angle, scaleX, scaleY)
         end
 
+        -- Centred on the quad and not on the entity, because the extents
+        -- above are half extents about the quad's middle. A pivot moves the
+        -- geometry within its bound, so the bound moves with it and stays
+        -- exactly as big as it was: growing it instead would keep offscreen
+        -- instances alive for every pivoted entity in the world to cover a
+        -- shift that is already known here.
         local bound = (offset + row - 1) * BOUND_FLOATS
-        bounds[bound] = originX
-        bounds[bound + 1] = originY
+        bounds[bound] = centreX
+        bounds[bound + 1] = centreY
         bounds[bound + 2] = ex
         bounds[bound + 3] = ey
     end
@@ -508,6 +566,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
             or archetype:isComponentDirty(components.Clip)
+            or archetype:isComponentDirty(Pivot)
             or (interpolating
                 and archetype:get(components.PreviousTransform) ~= nil)
 

@@ -12,6 +12,12 @@
 --- character share one sheet and point at it, so what an entity carries is the
 --- sheet's id rather than a copy of its frame table.
 ---
+--- One component does live here. A `Pivot` is resolved from a slice, and a
+--- slice index is this sheet's answer alone, so writing the name a snapshot
+--- carries instead needs the registry at the bottom of this file. Putting the
+--- component in `tecs.components` would point that module at this one, which
+--- already points the other way.
+---
 --- Frames are addressed by index, counting from one, in the order the sheet
 --- lays them out: for a grid that is left to right and then top to bottom. A
 --- tag is an inclusive span of those indices, and that is what an animation
@@ -24,8 +30,11 @@
 --- layer the image itself covers. The second fraction is the renderer's
 --- answer, so a sheet holds pixels until `bind` hands it one.
 
+local ecs <const> = require("tecs.ecs")
 local components <const> = require("tecs.components")
 
+local type Component = ecs.Component
+local type World = ecs.World
 local type Sprite = components.Sprite
 
 local floor <const> = math.floor
@@ -99,6 +108,35 @@ local record Slice
     data: string
     --- Keys in frame order, at least one.
     keys: {SliceKey}
+end
+
+--- Where an entity's quad turns and scales about.
+---
+--- A quad with no Pivot turns about its centre, so a character rotates about
+--- its waist and a scale grows it in both directions at once. A quad with one
+--- turns about the point the pivot names, and the entity's Transform position
+--- is where that point lands: a character pivoted at its feet stands at its
+--- position instead of hovering half a body above it.
+---
+--- The point is a fraction of the frame rather than a distance in pixels,
+--- because that is what an artist places in Aseprite and what `pivotOf`
+--- answers. A frame that changes size therefore carries its pivot with it.
+---
+--- `sheet` and `slice` are what the fraction was resolved from. A slice moves
+--- from frame to frame, so playback resolves it again on every frame change,
+--- and it only does so while the slice belongs to the sheet the entity is
+--- playing: a frame index means nothing in another sheet's frames. Both zero
+--- is a pivot written directly, which nothing rewrites.
+local record Pivot is Component
+    --- Fraction across the frame, from its left edge. Half is the middle.
+    x: number
+    --- Fraction down the frame, from its top edge. Half is the middle.
+    y: number
+    --- Registration index of the sheet the slice belongs to, or zero.
+    sheet: number
+    --- Index of the slice within that sheet, from `Sheet:sliceId`, or zero
+    --- for a pivot written directly.
+    slice: number
 end
 
 --- An image divided into frames.
@@ -262,6 +300,21 @@ local record Sheet
     ---     left.
     pivotOf: function(self, id: integer, frame: integer): number, number
 
+    --- A Pivot resolved from a named slice, ready to spawn.
+    ---
+    --- Bound to the slice as well as resolved from it, so playback moves the
+    --- pivot as the frame changes rather than leaving it where the frame it
+    --- was built from put it.
+    ---
+    --- Fails on a name the sheet does not carry, for the reason `tag` does:
+    --- the alternative is a typo that silently pivots on the middle.
+    --- @param name A slice this sheet carries.
+    --- @param frame The frame to resolve it at, defaulting to the first. What
+    ---     an entity shows before its first step, and what a sheet with no
+    ---     Animation keeps.
+    --- @return A component value, not an entity.
+    pivot: function(self, name: string, frame?: integer): Pivot
+
     --- Resolves the sheet's frames against a registered image.
     ---
     --- `sprite` is what `Renderer:sprite(name)` returns for a whole image: its
@@ -418,6 +471,9 @@ local record sheet
     --- An image divided into frames.
     Sheet: Sheet
 
+    --- Where an entity's quad turns and scales about.
+    Pivot: Pivot
+
     --- Milliseconds a frame is held when nothing says otherwise.
     DEFAULT_DURATION: number
 
@@ -573,6 +629,45 @@ end
 -- Slices
 -------------------------------------------------------------------------------
 
+sheet.Pivot = Pivot
+
+ecs.newFFIComponent({
+    name = "Pivot",
+    container = Pivot,
+    fields = {
+        { "x", "float" }, { "y", "float" },
+        { "sheet", "int32_t" }, { "slice", "int32_t" },
+    },
+    -- The middle of the frame, which is where a quad with no Pivot at all
+    -- sits: adding the component without saying where moves nothing.
+    defaults = { 0.5, 0.5, 0, 0 },
+    -- A sheet id and a slice id are this process's answers, decided by the
+    -- order sheets and their slices were built in. What crosses a save is the
+    -- pair of names, resolved again on the way back in, and the fraction goes
+    -- with them so a pivot written directly survives as well.
+    serialize = function(instance: Pivot): {string: any}
+        local source = sheet.byId(instance.sheet as integer)
+        local name: string = nil
+        local slice: string = nil
+        if source ~= nil then
+            name = source.name
+            slice = source:sliceName(instance.slice as integer)
+        end
+        return {
+            x = instance.x, y = instance.y, sheet = name, slice = slice,
+        }
+    end,
+    deserialize = function(_world: World, data: {string: any}): Pivot
+        local source = sheet.byName(data.sheet as string)
+        local id, slice = 0, 0
+        if source ~= nil then
+            id = source.id
+            slice = source:sliceId(data.slice as string)
+        end
+        return Pivot(data.x as number, data.y as number, id, slice)
+    end,
+})
+
 function Sheet:slice(name: string): Slice
     if name == nil then return nil end
     local id = self._sliceIds[name]
@@ -628,6 +723,16 @@ function Sheet:pivotOf(id: integer, frame: integer): number, number
         end
     end
     return (key.x + x) / width, (key.y + y) / height
+end
+
+function Sheet:pivot(name: string, frame?: integer): Pivot
+    local id <const> = self:sliceId(name)
+    if id < 1 then
+        error(("tecs: sheet '%s' has no slice '%s'")
+            :format(self.name, tostring(name)), 2)
+    end
+    local x, y = self:pivotOf(id, frame or 1)
+    return Pivot(x, y, self.id, id)
 end
 
 -------------------------------------------------------------------------------

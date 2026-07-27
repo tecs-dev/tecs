@@ -17,6 +17,7 @@ local animation = require("tecs.gfx.animation")
 
 local Sprite = components.Sprite
 local Animation = animation.Animation
+local Pivot = sheet.Pivot
 
 local STEP = 1 / 60
 local EPSILON = 1e-6
@@ -502,6 +503,103 @@ describe("tecs.gfx.sheet", function()
         end)
     end)
 
+    describe("pivots", function()
+        -- Two 32x32 frames with a slice that moves between them, which is what
+        -- tells a pivot that follows its slice from one that was resolved once
+        -- and left there.
+        local function pivoted(name)
+            return sheet
+                .build(name or uniqueName("pivoted"), 64, 32)
+                :frame(0, 0, 32, 32)
+                :frame(32, 0, 32, 32)
+                :sliceKeys("feet", nil, {
+                    { frame = 1, x = 8, y = 24, w = 16, h = 8, pivotX = 8, pivotY = 8 },
+                    { frame = 2, x = 0, y = 0, w = 16, h = 8, pivotX = 8, pivotY = 0 },
+                })
+                :finish()
+        end
+
+        it("resolves a named slice and stays bound to it", function()
+            local s = pivoted()
+            local p = s:pivot("feet")
+
+            -- The slice sits at 8,24 in a 32x32 frame and its pivot is 8,8
+            -- into the slice, so the point is 16,32 of the frame.
+            near(p.x, 0.5, "pivot x")
+            near(p.y, 1.0, "pivot y")
+            assert.equal(s.id, p.sheet)
+            assert.equal(s:sliceId("feet"), p.slice, "bound, so playback can move it")
+        end)
+
+        it("resolves at the frame it is asked for", function()
+            local s = pivoted()
+            local p = s:pivot("feet", 2)
+            near(p.x, 0.25, "pivot x")
+            near(p.y, 0.0, "pivot y")
+        end)
+
+        it("fails on a slice the sheet does not carry", function()
+            local s = pivoted()
+            assert.has_error(function()
+                s:pivot("elbow")
+            end)
+        end)
+
+        it("sits in the middle of the frame until something says otherwise", function()
+            local p = Pivot()
+            near(p.x, 0.5, "pivot x")
+            near(p.y, 0.5, "pivot y")
+            assert.equal(0, p.sheet, "written directly")
+            assert.equal(0, p.slice)
+        end)
+
+        it("carries the sheet and slice by name through a snapshot", function()
+            local world = tecs.newWorld()
+            local name = uniqueName("saved")
+            local first = pivoted(name)
+            local entity = world:spawn(first:pivot("feet"))
+
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+
+            -- A second sheet under the same name takes it over, with an extra
+            -- slice ahead of the one that matters so both indices move. An
+            -- index in a file would land on whatever this run numbered the
+            -- same; a name lands on the sheet the run actually has.
+            local second = sheet
+                .build(name, 64, 32)
+                :frame(0, 0, 32, 32)
+                :frame(32, 0, 32, 32)
+                :slice("head", 8, 0, 16, 8)
+                :sliceKeys("feet", nil, {
+                    { frame = 1, x = 8, y = 24, w = 16, h = 8, pivotX = 8, pivotY = 8 },
+                })
+                :finish()
+            assert.is_true(second.id ~= first.id, "a rebuild takes a fresh id")
+            assert.is_true(second:sliceId("feet") ~= first:sliceId("feet"), "and numbers its slices differently")
+
+            world:loadSnapshot(saved)
+
+            local restored = world:get(entity, Pivot)
+            assert.equal(second.id, restored.sheet)
+            assert.equal(second:sliceId("feet"), restored.slice)
+            near(restored.x, 0.5, "pivot x")
+            near(restored.y, 1.0, "pivot y")
+        end)
+
+        it("restores a pivot written directly with no sheet to name", function()
+            local world = tecs.newWorld()
+            local entity = world:spawn(Pivot(0.25, 0.75))
+
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+            world:loadSnapshot(saved)
+
+            local restored = world:get(entity, Pivot)
+            near(restored.x, 0.25, "pivot x")
+            near(restored.y, 0.75, "pivot y")
+            assert.equal(0, restored.slice, "still bound to nothing")
+        end)
+    end)
+
     describe("the builder", function()
         it("writes frames, tags and slices in any order", function()
             local s = sheet
@@ -906,6 +1004,53 @@ describe("tecs.gfx.animation", function()
             assert.is_true(seen.sprite)
         end)
 
+        -- Counts what a step asks the sheet for. Shadowing the method on the
+        -- instance is what makes the cost observable: the sheet is a table
+        -- behind a metatable, so a field written on it wins over the one the
+        -- metatable would find.
+        local function countLookups(source)
+            local counted = { frames = 0 }
+            local frameAt = source.frameAt
+            source.frameAt = function(self, id, time)
+                counted.frames = counted.frames + 1
+                return frameAt(self, id, time)
+            end
+            return counted
+        end
+
+        it("looks up no frame for a row whose time stood still", function()
+            -- A world of sprites is mostly sprites standing still at any
+            -- moment, and a walk over all of them that looks each one up
+            -- again makes a scene where a hundredth of them animate cost what
+            -- one where all of them do costs.
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+            -- One step to settle it on a frame, then stop its clock.
+            world:update(STEP)
+            world:getMut(entity, Animation).playing = false
+
+            local counted = countLookups(s)
+            drive(world, 10)
+
+            assert.equal(0, counted.frames, "a paused sprite shows the frame it already has")
+        end)
+
+        it("looks a paused row up until it has a frame at all", function()
+            -- Zero is no frame written yet, so a sprite that has never been
+            -- resolved has to be, playing or not, or it draws whatever its
+            -- Sprite happened to carry.
+            local world = animatedWorld()
+            local s = stripSheet()
+            world:spawn(Sprite(3, 0, 0, 1, 1, 6), animation.of(s, "run", { playing = false }))
+
+            local counted = countLookups(s)
+            drive(world, 4)
+
+            assert.equal(1, counted.frames, "once to settle it, and never again")
+        end)
+
         it("leaves both columns clean when nothing is playing", function()
             local world = animatedWorld()
             local s = stripSheet()
@@ -980,6 +1125,112 @@ describe("tecs.gfx.animation", function()
 
             assert.equal(a.frame, b.frame)
             assert.equal(a.time, b.time)
+        end)
+    end)
+
+    describe("pivots", function()
+        -- Two 16x16 frames whose "feet" slice moves from the bottom middle of
+        -- the first to the top quarter of the second, so following the slice
+        -- and standing still are two different answers.
+        local function walker()
+            return sheet
+                .build(uniqueName("walker"), 32, 16)
+                :frame(0, 0, 16, 16)
+                :frame(16, 0, 16, 16)
+                :tag("run", 1, 2)
+                :sliceKeys("feet", nil, {
+                    { frame = 1, x = 4, y = 12, w = 8, h = 4, pivotX = 4, pivotY = 4 },
+                    { frame = 2, x = 8, y = 0, w = 8, h = 4, pivotX = 4, pivotY = 0 },
+                })
+                :finish()
+        end
+
+        it("moves a bound pivot with the slice as the frame changes", function()
+            local world = animatedWorld()
+            local s = walker()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+
+            world:update(STEP)
+            local p = world:get(entity, Pivot)
+            near(p.x, 0.5, "pivot x on frame one")
+            near(p.y, 1.0, "pivot y on frame one")
+
+            drive(world, STEPS_PER_FRAME)
+            p = world:get(entity, Pivot)
+            near(p.x, 0.75, "pivot x on frame two")
+            near(p.y, 0.0, "pivot y on frame two")
+        end)
+
+        it("leaves a pivot bound to nothing where it was written", function()
+            local world = animatedWorld()
+            local s = walker()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"), Pivot(0.25, 0.75))
+
+            drive(world, 2 * STEPS_PER_FRAME + 1)
+
+            local p = world:get(entity, Pivot)
+            near(p.x, 0.25, "pivot x")
+            near(p.y, 0.75, "pivot y")
+        end)
+
+        it("leaves a pivot bound to another sheet's slice alone", function()
+            local world = animatedWorld()
+            local s = walker()
+            -- A slice of the same name at a different place, so resolving it
+            -- against the sheet being played answers something else and the
+            -- two cases are told apart.
+            local other = sheet
+                .build(uniqueName("other"), 32, 16)
+                :frame(0, 0, 16, 16)
+                :frame(16, 0, 16, 16)
+                :slice("feet", 0, 0, 4, 4, 2, 2)
+                :finish()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"), other:pivot("feet"))
+
+            drive(world, STEPS_PER_FRAME + 1)
+
+            local p = world:get(entity, Pivot)
+            near(p.x, 0.125, "pivot x")
+            near(p.y, 0.125, "pivot y")
+        end)
+
+        it("leaves the Pivot column clean on a step that changed no frame", function()
+            local world = animatedWorld()
+            local s = walker()
+            world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+
+            local seen = false
+            local query = world:query({
+                name = "spec.PivotProbe",
+                include = { Animation, Pivot },
+            })
+            world:addSystem({
+                name = "spec.ReadPivotDirty",
+                phase = tecs.phases.Last,
+                run = function()
+                    seen = false
+                    for archetype in query:iter() do
+                        if archetype:isComponentDirty(Pivot) then
+                            seen = true
+                        end
+                    end
+                end,
+            })
+
+            -- The first step resolves the frame, which moves the pivot.
+            world:update(STEP)
+            assert.is_true(seen)
+
+            -- Four more stay on it. A frame's hundred milliseconds is six
+            -- steps and the sixth lands a hair past the end of it, so that is
+            -- the one that crosses.
+            for _ = 1, STEPS_PER_FRAME - 2 do
+                world:update(STEP)
+                assert.is_false(seen, "the frame stood still, so the pivot did")
+            end
+
+            world:update(STEP)
+            assert.is_true(seen, "crossing into the next frame moves it again")
         end)
     end)
 
