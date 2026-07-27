@@ -17,10 +17,10 @@
 ---   shaders/include/depth.glsl        included, never compiled alone
 
 local sdl <const> = require("tecs.ffi.sdl3")
+local filesystem <const> = require("tecs.platform.filesystem")
 local hash <const> = require("tecs.hash")
 local loader <const> = require("tecs.ffi.loader")
 local paths <const> = require("tecs.platform.paths")
-local assets <const> = require("tecs.assets")
 
 local C <const> = sdl.C
 
@@ -109,7 +109,7 @@ local function find(relative: string): string
     local generated = provided[relative]
     if generated ~= nil then return generated end
     for _, root in ipairs(searchRoots()) do
-        local text = assets.read(root .. relative)
+        local text = filesystem.read(root .. relative)
         if text ~= nil then return text end
     end
     return nil

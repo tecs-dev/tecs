@@ -32,25 +32,18 @@
 --- failure is SDL's failure and the name in this table is what to read the
 --- documentation for.
 ---
---- ## Reading is `assets.read`
+--- ## Reading and writing are both here
 ---
---- There is no `read` here, and that is not an omission. `SDL_LoadFile` already
---- has a home in `assets.read`, which does one thing this module cannot: it
---- records the path under the kind it was read as, and `assets.loaded()` is the
---- set `watch` polls. A second reader would mean a file opened through the
---- wrong one is never reloaded, and nothing would point at which reader was
---- used as the reason.
----
---- Routing a `read` here through `assets.read` would fix that and cost more
---- than it is worth: `tecs.assets` loads SDL3_mixer at require time, so listing
---- a directory would drag the audio decoders in behind it and would fail
---- outright on a machine that has no mixer installed. So `write` is here,
---- `read` is one module along, and they are a pair across two files on purpose:
+--- `read` and `write` are one pair in one module, and the record of what this
+--- process has opened lives with them. That record is what `watch` polls to
+--- decide whether a changed file is one anything asked for, so it belongs
+--- beside the call that opens a file rather than beside the code that decodes
+--- one. `assets` records its own decodes through `note` for the same reason.
 ---
 ---     local tecs <const> = require("tecs")
 ---     local save <const> = tecs.paths.writable("slot1.json")
 ---     tecs.filesystem.write(save, tecs.json.encode(state))
----     local bytes <const> = tecs.assets.read(save)
+---     local bytes <const> = tecs.filesystem.read(save)
 ---
 --- ## Path info is the same answer `watch` gets
 ---
@@ -203,9 +196,8 @@
 --- Two things it adds rather than changes: `ready`, `close` and
 --- `spaceRemaining`, which have no path equivalent; and a `read`, because
 --- `SDL_ReadStorageFile` fills a caller's buffer after
---- `SDL_GetStorageFileSize` and is not `SDL_LoadFile`, so `assets.read` cannot
---- reach a storage and the storage has to carry its own. That is the one
---- asymmetry the note above about reading does not already cover.
+--- `SDL_GetStorageFileSize` and is not `SDL_LoadFile`, so `read` here cannot
+--- reach a storage and the storage has to carry its own.
 ---
 --- ## Headless
 ---
@@ -306,6 +298,9 @@ local FOLDERS <const>: {UserFolder: loader.CValue} = {
 --- a nil that reached SDL would be a call against an empty or invalid path
 --- rather than an error anyone could trace back here. A path is the one thing
 --- every function below needs, and a missing one is a defect in the caller.
+--- Every path read or decoded this process, by the kind it was read as.
+local opened <const>: {string: string} = {}
+
 local function required(value: string, what: string)
     if value == nil then
         error(("tecs: filesystem.%s needs a path"):format(what), 3)
@@ -484,9 +479,62 @@ end
 --- in the middle of it is a byte like any other and an empty string makes an
 --- empty file. The parent directory must already exist.
 ---
---- The other half of this is `assets.read`, which is `SDL_LoadFile` plus the
---- record of what this process has opened that `watch` polls. See the note at
---- the top of this module for why the pair lives in two places.
+--- The other half of this is `read`, just below.
+--- Records a path under the kind it was first read as.
+---
+--- A named kind supersedes "document". `read` answers bytes and cannot know
+--- what asked for them, so whatever did is the only thing that can say what the
+--- file is, and it says so by naming a kind. The two can arrive in either
+--- order, since a game is free to read a font's metrics as a document before
+--- anything loads them as a font.
+---
+--- Decoding happens elsewhere, on a worker, so `assets` records what it opened
+--- through here rather than keeping a second list nothing else can see.
+function filesystem.note(path: string, kind: string)
+    local held <const> = opened[path]
+    if held == nil or (held == "document" and kind ~= "document") then
+        opened[path] = kind
+    end
+end
+
+--- Reads a whole file and returns its bytes, or nil when there is none there.
+---
+--- Through SDL rather than stdio, because on Android content lives inside the
+--- package and only SDL's IO reaches it. Binary: the result carries its own
+--- length, so a NUL in the middle of it is a byte like any other.
+---
+--- Synchronous, which is what makes it usable while a world is being built.
+--- This is for the documents a game or the engine reads once; a decode a frame
+--- should not wait on goes through `assets.loadImage` or `assets.loadSound`.
+--- @param path An absolute path, or one `paths.asset` has resolved.
+--- @param kind What the bytes were read as, for anything watching what this
+---     process has opened. Bytes are bytes, so nothing here can tell a font's
+---     metrics from a level; whatever asked can, and this is where it says so.
+---     Omitted, the path is recorded as a document.
+--- @return The bytes, or nil when the file could not be read.
+function filesystem.read(path: string, kind?: string): string
+    required(path, "a path")
+    local size <const> = loader.newArray("size_t[1]")
+    local data <const> = C.SDL_LoadFile(path, size)
+    if data == nil then return nil end
+    filesystem.note(path, kind or "document")
+    local bytes <const> = loader.toBytes(data, tonumber(size[0]) as integer)
+    C.SDL_free(data)
+    return bytes
+end
+
+--- Every path this process has read or decoded, by the kind it was read as:
+--- "image", "sound", "font", or "document" for bytes nothing named.
+---
+--- A path that failed to load is here too. Whatever asked for it named it, and
+--- a file that would not decode is exactly the one worth noticing a change to.
+--- @return The live table, so something consulting it periodically does not
+---     copy it. Shared, so a caller that means to keep it does not also mean to
+---     edit it.
+function filesystem.loaded(): {string: string}
+    return opened
+end
+
 function filesystem.write(path: string, bytes: string): boolean, string
     required(path, "write")
     if bytes == nil then

@@ -50,6 +50,7 @@
 --- and none is needed by anything drawing text today.
 
 local ecs <const> = require("tecs.ecs")
+local filesystem <const> = require("tecs.platform.filesystem")
 local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
@@ -375,7 +376,7 @@ function text.loadFont(options: FontOptions): Font
     -- Named as a font, because the bytes are a document like any other and the
     -- only thing that knows they are a font's metrics is the call that asked
     -- for them. A watcher routes a change by that name.
-    local document = assets.read(metricsPath, "font")
+    local document = filesystem.read(metricsPath, "font")
     if document == nil then
         error(("tecs: cannot read the font metrics '%s'"):format(metricsPath), 2)
     end
@@ -1042,7 +1043,7 @@ function text.reloadFont(path: string): Font
             .. "re-read"):format(path), 0)
     end
 
-    local document = assets.read(resolve(font.name), "font")
+    local document = filesystem.read(resolve(font.name), "font")
     if document == nil then
         error(("tecs: cannot read the font metrics '%s'"):format(path), 0)
     end

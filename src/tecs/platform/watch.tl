@@ -51,7 +51,7 @@
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local assets <const> = require("tecs.assets")
+local filesystem <const> = require("tecs.platform.filesystem")
 local paths <const> = require("tecs.platform.paths")
 local capabilities <const> = require("tecs.platform.capabilities")
 local log <const> = require("tecs.log")
@@ -263,7 +263,7 @@ end
 --- A path is accepted as it reads the first time it is seen, so a run that
 --- loads an image on frame ten does not reload it on frame eleven.
 local function adopt()
-    local loaded = assets.loaded()
+    local loaded = filesystem.loaded()
     for path, loadedAs in pairs(loaded) do
         if entries[path] == nil and path:sub(1, #root) == root then
             local size, stamp = look(path)

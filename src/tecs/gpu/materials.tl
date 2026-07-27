@@ -18,10 +18,10 @@
 --- which matters only for something that stored an id across a rebuild.
 
 local sdl <const> = require("tecs.ffi.sdl3")
+local filesystem <const> = require("tecs.platform.filesystem")
 local loader <const> = require("tecs.ffi.loader")
 local paths <const> = require("tecs.platform.paths")
 local shaders <const> = require("tecs.gpu.shaders")
-local assets <const> = require("tecs.assets")
 
 local C <const> = sdl.C
 
@@ -116,7 +116,7 @@ local function collect()
                 local name = (file:gsub("%.glsl$", ""))
                 -- A nearer root wins, and a definition beats both.
                 if byName[name] == nil then
-                    local source = assets.read(root .. file)
+                    local source = filesystem.read(root .. file)
                     if source ~= nil then
                         byName[name] = { name = name, id = 0, source = source }
                     end

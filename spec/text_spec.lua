@@ -13,6 +13,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
+local filesystem = require("tecs.platform.filesystem")
 local sdl = require("tecs.ffi.sdl3")
 local Window = require("tecs.platform.Window")
 local Device = require("tecs.gpu.Device")
@@ -608,7 +609,7 @@ describe("gfx.text", function()
         --- nothing about the image behind them.
         local function shipped(factor)
             local cjson = require("cjson")
-            local source = assets.read(tecs.paths.asset("fonts/jetbrainsmono-extrabold-msdf.json"))
+            local source = filesystem.read(tecs.paths.asset("fonts/jetbrainsmono-extrabold-msdf.json"))
             local root = cjson.decode(source)
             for _, entry in ipairs(root.chars) do
                 entry.xadvance = entry.xadvance * factor

@@ -42,6 +42,7 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
+local filesystem <const> = require("tecs.platform.filesystem")
 
 local C <const> = sdl.C
 local MIX <const> = sdl3mixer.C
@@ -249,57 +250,6 @@ local worker: workers.Worker = nil
 --- so this is the whole of what a run has touched. It is what a watcher polls,
 --- because polling what was loaded is a fraction of the work of walking a
 --- content tree and is the only set where a change has anything to act on.
-local seen <const>: {string: string} = {}
-
---- Records a path under the kind it was first read as.
----
---- A named kind supersedes "document". `read` answers bytes and cannot know
---- what asked for them, so whatever did is the only thing that can say what the
---- file is, and it says so by naming a kind. The two can arrive in either
---- order, since a game is free to read a font's metrics as a document before
---- anything loads them as a font.
-local function note(path: string, kind: string)
-    local held = seen[path]
-    if held == nil or (held == "document" and kind ~= "document") then
-        seen[path] = kind
-    end
-end
-
---- Reads a whole file and returns its bytes, or nil when there is none there.
----
---- Through SDL rather than stdio, because on Android content lives inside the
---- package and only SDL's IO reaches it. Binary: the result carries its own
---- length, so a NUL in the middle of it is a byte like any other.
----
---- Synchronous, which is what makes it usable while a world is being built.
---- This is for the documents a game or the engine reads once; a decode a frame
---- should not wait on goes through `loadImage` or `loadSound` instead.
---- @param path An absolute path, or one `paths.asset` has resolved.
---- @param kind What the bytes were read as, for anything watching what this
----     process has opened. Bytes are bytes, so nothing here can tell a font's
----     metrics from a level; whatever asked can, and this is where it says so.
----     Omitted, the path is recorded as a document.
-function assets.read(path: string, kind?: string): string
-    local size = loader.newArray("size_t[1]")
-    local data = C.SDL_LoadFile(path, size)
-    if data == nil then return nil end
-    note(path, kind or "document")
-    local bytes = loader.toBytes(data, tonumber(size[0]) as integer)
-    C.SDL_free(data)
-    return bytes
-end
-
---- Every path this process has read or decoded, by the kind it was read as:
---- "image", "sound", "font", or "document" for bytes nothing named.
----
---- A path that failed to load is here too. Whatever asked for it named it, and
---- a file that would not decode is exactly the one worth noticing a change to.
---- @return The live table, so something consulting it periodically does not
----     copy it. Shared, so a caller that means to keep it does not also mean to
----     edit it.
-function assets.loaded(): {string: string}
-    return seen
-end
 
 --- Starts the loading worker.
 function assets.install(luaPath?: string)
@@ -339,7 +289,7 @@ end
 --- first has resolved decodes again: nothing here is a cache, and a handle
 --- that has been released is not something to hand out a second time.
 function assets.loadImage(path: string): Handle
-    note(path, "image")
+    filesystem.note(path, "image")
     local shared = inFlight[path]
     if shared ~= nil then
         shared._shares = shared._shares + 1
@@ -367,7 +317,7 @@ end
 --- in order ahead of every decode without a lock.
 function assets.loadSound(path: string, mode: string,
                           streamMs: integer): Handle
-    note(path, "sound")
+    filesystem.note(path, "sound")
     if not sdl3mixer.init() then
         local failed = setmetatable({
             kind = "sound", status = "failed", path = path, _shares = 1,

@@ -13,6 +13,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local shaders = require("tecs.gpu.shaders")
+local filesystem = require("tecs.platform.filesystem")
 local materials = require("tecs.gpu.materials")
 local mcp = require("tecs.mcp")
 local tools = require("tecs.mcp.tools")
@@ -488,7 +489,7 @@ describe("mcp watch", function()
 
     it("starts, steps and stops the watcher", function()
         write(dir .. "watched.frag.glsl", "#version 450\n// FIRST\n")
-        assert.is_string(assets.read(dir .. "watched.frag.glsl"))
+        assert.is_string(filesystem.read(dir .. "watched.frag.glsl"))
 
         local reloaded = 0
         watch.on("shader", function()
