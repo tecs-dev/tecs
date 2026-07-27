@@ -46,9 +46,16 @@ local record Event is ecs.Event
     --- `SDL_GetTicksNS` epoch, which is not the clock `clock.now` reads, so it
     --- orders events against each other and against nothing else.
     timestamp: number
-    --- Monotonic seconds on the clock `clock.now` reads, taken where the host
-    --- received the event from SDL. Nil for an event that did not come through
-    --- the host's queue, such as a replayed one.
+    --- Monotonic seconds on the clock `clock.now` reads, converted by the host
+    --- from the stamp SDL put on the event when it produced it. Nil for an
+    --- event that did not come through the host's queue, such as a replayed
+    --- one.
+    ---
+    --- Not where the host was handed the event, which is a different and much
+    --- kinder number: SDL only hands events over while the main thread is
+    --- pumping, and most of what a player waits through is time the thread was
+    --- doing something else. Dating an event from delivery would leave the
+    --- measurement least trustworthy in exactly the frames worth catching.
     arrival: number
 
     --- Physical key position, which is what a movement binding wants: WASD
@@ -844,8 +851,9 @@ end
 --- with recorded events.
 ---
 --- `arrivals` is the host's parallel array of performance counter readings,
---- one per event, taken where SDL handed each one over. Given it, every
---- converted event carries `arrival` in the units `clock.now` reports.
+--- one per event, converted there from the stamp SDL put on each event as it
+--- was produced. Given it, every converted event carries `arrival` in the
+--- units `clock.now` reports.
 function events.drain(queue: loader.CValue, count: integer,
                       handler: function(Event), arrivals?: loader.CValue)
     local replay = events.source

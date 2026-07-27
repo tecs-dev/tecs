@@ -1,25 +1,31 @@
 --- Event to photon, with nobody at the keyboard.
 ---
 --- Frame time says nothing about how long a player waits for a key press to
---- appear on screen, and the two move independently: pipelining a frame buys
---- throughput and pays for it in latency. So this measures the other half, and
---- it measures it the way the engine will be judged after simulation moves to
---- its own thread, where a batch handed across a boundary costs about a frame.
+--- appear on screen, and the two move independently: anything that pipelines a
+--- frame buys throughput and pays for it here. So this measures the other half.
 ---
 --- Input is injected through `SDL_PushEvent` rather than through
 --- `events.source`. A replay source is deterministic but skips the host
---- entirely: the event would never pass through `SDL_AppEvent`, which is where
---- arrival is stamped, so the harness would be measuring its own call rather
---- than the path a key press takes. Pushed events go around the same loop as a
---- real one, are delivered by SDL to the host, and are stamped there, so the
---- only thing synthetic about them is which key was pressed and when.
+--- entirely: the event would never pass through `SDL_AppEvent`, so the harness
+--- would be measuring its own call rather than the path a key press takes.
+--- Pushed events go around the same loop as a real one, so the only thing
+--- synthetic about them is which key was pressed and when.
 ---
---- Which stamp the measurement starts from matters here more than anywhere.
---- SDL stamps a pushed event as it is pushed; the host stamps it as SDL hands
---- it over. Under vsync those are about fifteen milliseconds apart, because
---- the push lands just after one drain and the delivery just before the next.
---- Starting from SDL's stamp would charge a synthetic press for the harness's
---- own injection point, which no real press pays.
+--- Which stamp the measurement starts from matters here more than anywhere,
+--- and it is SDL's own: the nanosecond stamp SDL puts on an event as it is
+--- produced, which the host converts onto the clock the rest of the engine
+--- measures with. That interval includes the wait for the next pump, which is
+--- most of it. A main thread inside `SDL_WaitAndAcquireGPUSwapchainTexture` is
+--- not pumping and cannot be made to; dating an event from the pump that
+--- eventually found it would price that wait at zero and report a floor rather
+--- than a measurement.
+---
+--- So the number here is not the average press. Injection happens at a fixed
+--- point in the frame, just after the previous drain, which is the furthest an
+--- event can be from the pump that will take it: a real press arriving at a
+--- uniformly random moment waits about half as long for that pump. This is the
+--- worst case for the phase it is injected at, deliberately, because the point
+--- of the instrument is to catch the frames a player notices.
 ---
 --- One event every few frames, so each sample is a batch of its own and no
 --- sample overlaps the one before it. The reaction is a real one: a system in

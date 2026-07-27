@@ -823,8 +823,18 @@ every reason to trust it, so text, composition, candidates, drops, the
 clipboard, sensors, gamepad touchpads, displays, windows, pinches and user
 events all convert their payloads. Several of those carry pointers into memory
 SDL recycles as soon as the callback returns, so the C host copies those bytes
-into the queue it owns and frees them when the queue drains. Retaining the
-pointer is a use-after-free that reads as an occasional garbled string.
+into a batch it owns and frees them with that batch. Retaining the pointer is a
+use-after-free that reads as an occasional garbled string.
+
+There are two such batches and they swap at the top of an iteration: one is
+handed to Lua and is immutable while it is being drained, and the other receives
+whatever SDL delivers meanwhile. A single shared array with a drained count
+subtracted from it cannot do the job. `SDL_AppEvent` can run during an
+iteration, and from another thread, so growing the array for a new event would
+reallocate the one Lua is reading, and freeing the payloads of the events Lua
+consumed would free strings out of a list a later event is still recorded in.
+Ownership per batch makes both impossible, and an event that arrives mid-drain
+simply belongs to the next iteration.
 
 The vocabulary covers what a game can act on and stops there. Displays report
 being added, removed, moved, reoriented, rescaled and remoded, each naming the
@@ -883,13 +893,66 @@ The engine acts on lifecycle and input events and then hands every event to the
 game anyway. An engine that consumed events would leave a game unable to tell
 an event it never received from one it mishandled.
 
-Every event carries an `arrival`: the performance counter as the host received
-it from SDL, in the units `clock.now` reports. SDL's own `timestamp` is
-nanoseconds on the `SDL_GetTicksNS` epoch, which orders events against each
-other and against nothing else, so the host takes its own reading instead of
-converting that one across an offset SDL does not promise. It is stamped where
-SDL hands the event over rather than where a step picks it up, because the
-interval between those two is the thing worth measuring.
+Every event carries an `arrival`, in the units `clock.now` reports: SDL's own
+nanosecond stamp for the event, converted onto the performance counter. The two
+clocks are the same clock in SDL's implementation and not by its contract, so
+the host measures the offset between them once at startup rather than assuming
+one, and both are monotonic, so the one measurement holds.
+
+Taking a reading where SDL hands the event over instead would be simpler and
+would be a floor rather than a measurement. SDL only hands events over while
+the main thread is pumping, and most of what a player waits through is time the
+thread is doing something else: a frame blocked in
+`SDL_WaitAndAcquireGPUSwapchainTexture` cannot pump, and everything that
+arrived during that block would be dated to the end of it. The measurement
+would be least trustworthy in exactly the frames it exists to catch. Reading
+the stamp SDL already put on the event has no such gap, and SDL translates a
+driver's own timestamp onto that clock rather than passing it through, clamped
+so it can never be in the future.
+
+The six lifecycle events carry no stamp, because SDL hands them to its event
+watchers without queueing them and never fills one in. Those are dated where
+they were delivered, which nothing reads: `events.isInput` excludes them, since
+nobody is waiting on a backgrounding.
+
+### The lifecycle events, and the moment they arrive
+
+SDL treats six events specially and dispatches them from its event watcher
+rather than queueing them for the next iteration: `terminating`, `lowMemory`,
+and the four background and foreground transitions. Under
+`SDL_MAIN_USE_CALLBACKS` that watcher is `SDL_AppEvent`. The reason is on
+Android, where the app blocks as soon as backgrounding has been sent, and SDL's
+own comment says what that means for an application: it should do its lifecycle
+handling in the event filter, while the event is being sent.
+
+So that instant is the only one a game gets, and copying the event into a queue
+for the next iteration misses it. On Android the next iteration is after resume;
+on iOS SDL has stopped the display link by then. The host therefore answers
+these where they arrive, calling one hook per event on the application:
+`_lowMemory`, `_willEnterBackground`, `_didEnterBackground`,
+`_willEnterForeground`, `_didEnterForeground` and `_terminating`. One per event
+rather than one for the group, because giving memory back, saving state,
+releasing a graphics device, recovering one and resetting a clock are different
+jobs with different deadlines. A hook a game did not write is not an error.
+
+Two things stop a hook from running, and the host checks both. `SDL_AppEvent`
+is called from whichever thread produced the event, and a Lua state may only be
+entered from the thread that owns it. And an event dispatched into a frame that
+is already running would re-enter the state from inside `world:update`. Either
+way the hook is recorded and replayed at the top of the next iteration, which is
+correct rather than useful: it exists so nothing is dropped silently, not as a
+second way of meeting the deadline. Past `terminating` there is no next
+iteration at all, so a refusal there is reported instead.
+
+A backgrounding hook is dispatched once per backgrounding rather than once per
+event that mentions one, and the foreground rearms it. What it is for is
+flushing a checkpoint the game already prepared during a frame, not building
+one: at this engine's entity counts, serialising a world inside a platform
+callback cannot meet any deadline, and the host says so if the hook overruns.
+
+The event is queued as well as dispatched. The hook is where a game meets the
+platform's deadline; the stream is where it observes the change like any other,
+and those answer different questions.
 
 ## The clipboard
 
