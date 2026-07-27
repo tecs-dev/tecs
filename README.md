@@ -329,6 +329,27 @@ and every piece it puts together is separately constructible. The debug server
 is bound to the world and the renderer rather than to the application, so a tool
 reads the same world whatever a game registered.
 
+The world is all it is bound to. Which components exist is not something the
+application tells it, because the ECS already knows: every component enters
+`components.registeredComponents` when it is registered, whoever declared it,
+and `ecs.declaredComponents` is the read-only view of that. So the eight world
+tools name a game's own components on the same terms as the engine's, with no
+registration step a game has to find. The alternative the tools used to have was
+a second name-to-component map filled by scanning the engine's own module tables
+for anything that looked like a component, which meant the tools were wrong by
+default for every game: `query`, `set` and the rest answered "no component named
+X" for exactly the components a debugging session is about.
+
+That registry is process-wide and a world is not, which is a distinction the
+tools report rather than hide. A component's id is allocated once at
+registration and every world that carries one agrees on it, so registration is
+what makes a name resolvable and `spawn` and `set` are how it comes to be
+carried here. A component declared and carried by nothing in the bound world is
+an ordinary state, so `components_info` marks it absent rather than unnameable,
+and `context` reports `world.components` from `world:getStats` beside
+`world.declaredComponents` from the registry. An agent that cannot find a
+component can tell which of the two it is looking at.
+
 ## Workers and assets
 
 Workers are the only sanctioned way to run work off the main thread. Raw

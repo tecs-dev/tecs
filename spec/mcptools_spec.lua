@@ -121,3 +121,51 @@ describe("mcp send_event", function()
         assert.are.equal(12.0, event.x)
     end)
 end)
+
+describe("mcp context", function()
+    local tools = require("tecs.mcp.tools")
+    local tecs = require("tecs")
+
+    setup(function()
+        assert(C.SDL_Init(0))
+    end)
+    teardown(function()
+        tools.bind(nil, nil)
+        C.SDL_Quit()
+    end)
+
+    it("reports what this build is even before a world is bound", function()
+        tools.bind(nil, nil)
+        local context = call("context", {})
+        assert.is_truthy(context.target)
+        assert.are.equal(cjson.null, context.world, "no world is a report, not a failure")
+    end)
+
+    it("reports what the bound world holds", function()
+        -- Through world:getStats rather than a tally kept beside it, so the
+        -- first question an agent asks about a running game is answered by the
+        -- tool that says what the build is.
+        local world = tecs.newWorld()
+        world:addSystem({ name = "spec.context", phase = tecs.phases.Update, run = function() end })
+        for index = 1, 3 do
+            world:spawn(tecs.builtins.Transform(index, 0, 0, 1, 0, 1, 1))
+        end
+        world:commit()
+        tools.bind(nil, world)
+
+        local reported = call("context", {}).world
+        assert.are.equal(3, reported.entities)
+        assert.is_true(reported.archetypes >= 1)
+        assert.is_true(reported.systems >= 1)
+
+        -- The registry is process-wide and this world is not, so what is
+        -- declared has to read differently from what is here. Conflating them
+        -- is what makes a component an agent cannot find look like one that
+        -- was never registered.
+        assert.are.equal(1, reported.components)
+        assert.is_true(
+            reported.declaredComponents > reported.components,
+            "the process declares more than this world carries"
+        )
+    end)
+end)

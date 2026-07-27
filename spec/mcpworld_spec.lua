@@ -2,8 +2,9 @@
 --
 -- The protocol is tested elsewhere; what matters here is the semantics an
 -- agent relies on. set replaces and modify merges, a component named wrongly
--- is refused rather than guessed at, and a write reaches the GPU rather than
--- only the memory, which is the failure the dirty model exists to prevent.
+-- is refused rather than guessed at, a game's own components are as nameable
+-- as the engine's, and a write reaches the GPU rather than only the memory,
+-- which is the failure the dirty model exists to prevent.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -14,8 +15,19 @@ local sdl = require("tecs.ffi.sdl3")
 local mcp = require("tecs.mcp")
 local mcpWorld = require("tecs.mcp.world")
 local components = require("tecs.components")
+local builtins = require("tecs.ecs").builtins
 
 local C = sdl.C
+
+-- A component a game declares, registered once for the process the way a
+-- game's would be. Nothing tells the debug server about it.
+local Ammo = {}
+tecs.newComponent({
+    name = "SpecAmmo",
+    container = Ammo,
+    fields = { "rounds" },
+    defaults = { 6 },
+})
 
 local function call(name, args)
     local response = cjson.decode(mcp.dispatch(cjson.encode({
@@ -48,13 +60,7 @@ describe("mcp world tools", function()
 
     before_each(function()
         world = tecs.newWorld()
-        local known = {}
-        for name, value in pairs(components) do
-            if type(value) == "table" and value.componentName ~= nil then
-                known[name] = value
-            end
-        end
-        mcpWorld.bind(world, known)
+        mcpWorld.bind(world)
     end)
 
     it("describes components without their interface members", function()
@@ -104,6 +110,67 @@ describe("mcp world tools", function()
         local result = call("query", { include = { "Nonexistent" } })
         assert.is_true(result.isError)
         assert.is_truthy(result.content[1].text:find("Transform", 1, true), "the error should list what can be named")
+    end)
+
+    it("names a game's own components without having been told about them", function()
+        -- The whole point of reading the ECS registry rather than keeping a
+        -- second list. Nothing here registered SpecAmmo with the debug server,
+        -- and every tool still resolves it.
+        local entity = world:spawn(components.Renderable(), Ammo(3))
+        world:commit()
+
+        local listed = {}
+        for _, entry in ipairs(ok("components_info", {}).components) do
+            listed[entry.name] = entry
+        end
+        assert.is_truthy(listed.SpecAmmo, "components_info must list a game's own")
+        assert.are.same({ "rounds" }, listed.SpecAmmo.fields)
+
+        assert.are.equal(3, ok("info", { entity = entity }).components.SpecAmmo.rounds)
+        assert.are.equal(1, ok("query", { include = { "SpecAmmo" } }).matched)
+        local reloaded = ok("modify", { entity = entity, component = "SpecAmmo", values = { rounds = 9 } })
+        assert.are.equal(9, reloaded.components.SpecAmmo.rounds)
+        assert.is_true(world:isAlive(ok("spawn", { components = { SpecAmmo = { rounds = 1 } } }).entity))
+    end)
+
+    it("separates a component nothing here carries from one nobody declared", function()
+        -- The registry is process-wide and a world is not. Declared and unused
+        -- is an ordinary state, and reporting it as unnameable would send an
+        -- agent looking for a registration that already happened.
+        local listed = {}
+        for _, entry in ipairs(ok("components_info", {}).components) do
+            listed[entry.name] = entry
+        end
+        assert.is_false(listed.SpecAmmo.present, "no entity in this world carries one")
+
+        world:spawn(Ammo(1))
+        world:commit()
+        for _, entry in ipairs(ok("components_info", {}).components) do
+            listed[entry.name] = entry
+        end
+        assert.is_true(listed.SpecAmmo.present)
+
+        -- Nameable either way: spawn and set are how it comes to be carried.
+        assert.is_falsy(call("query", { include = { "SpecAmmo" } }).isError)
+    end)
+
+    it("reports an entity's Name beside its id", function()
+        -- A bare id says nothing about which entity it is, and Name is what
+        -- the ECS provides for saying so.
+        local named = world:spawn(components.Renderable(), builtins.Name("player"))
+        local anonymous = world:spawn(components.Renderable())
+        world:commit()
+
+        assert.are.equal("player", ok("info", { entity = named }).name)
+        assert.are.equal(cjson.null, ok("info", { entity = anonymous }).name)
+
+        -- Including where the values are not asked for, which is the listing
+        -- an agent reads before it picks an entity to look at.
+        local found = {}
+        for _, row in ipairs(ok("query", { include = { "Renderable" }, values = false }).entities) do
+            found[row.entity] = row.name
+        end
+        assert.are.equal("player", found[named])
     end)
 
     it("spawns with defaults for whatever the payload omits", function()

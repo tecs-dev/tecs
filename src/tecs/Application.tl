@@ -41,7 +41,6 @@ local Device <const> = require("tecs.gpu.Device")
 local Renderer <const> = require("tecs.Renderer")
 local Audio <const> = require("tecs.Audio")
 local assets <const> = require("tecs.assets")
-local components <const> = require("tecs.components")
 local sequence <const> = require("tecs.sequence")
 local paths <const> = require("tecs.platform.paths")
 local proc <const> = require("tecs.platform.proc")
@@ -318,23 +317,11 @@ function Application:_init(): boolean
     end
 
     if config.mcpPort ~= nil then
-        -- The engine's own components, plus the ECS builtins. A game adds its
-        -- own through mcpWorld.register, since nothing here can know them.
+        -- Only the world. Which components exist is the ECS's registry to
+        -- answer, and the tools read it there, so a game's own components are
+        -- nameable without the game being told to say so.
         local mcpWorld = require("tecs.mcp.world")
-        -- Both tables carry more than components, so a candidate has to look
-        -- like one rather than merely be present.
-        local known: {string: ecs.Component} = {}
-        local function collect(source: {string: any})
-            for name, value in pairs(source) do
-                if type(value) == "table"
-                    and (value as {string: any}).componentName ~= nil then
-                    known[name] = value as ecs.Component
-                end
-            end
-        end
-        collect(components as {string: any})
-        collect(ecs.builtins as {string: any})
-        mcpWorld.bind(self.world, known)
+        mcpWorld.bind(self.world)
         self.mcp = mcp.listen(config.mcpPort)
     end
 

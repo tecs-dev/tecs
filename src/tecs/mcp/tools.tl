@@ -111,15 +111,39 @@ mcp.register({
     end,
 })
 
+--- What the bound world holds, or nil before one is bound.
+---
+--- Through `world:getStats`, which is the ECS's own count of entities,
+--- archetypes, components and systems, rather than a second tally kept here.
+--- `declared` is beside it because the component registry is process-wide
+--- while `stats.components` counts only what an archetype in this world
+--- carries, and the difference between the two is what an agent looking for a
+--- component it cannot find needs to see.
+local function worldContext(): {string: any}
+    if boundWorld == nil then return nil end
+    local stats = boundWorld:getStats()
+    local declared = 0
+    for _ in pairs(ecs.declaredComponents()) do declared = declared + 1 end
+    return {
+        entities = stats.entities,
+        archetypes = stats.archetypes,
+        components = stats.components,
+        declaredComponents = declared,
+        systems = stats.systems,
+    }
+end
+
 mcp.register({
     name = "context",
-    description = "What this build is and what it can do.",
+    description = "What this build is, what it can do, and what the world it "
+        .. "is running holds.",
     readOnly = true,
     whenCrashed = true,
     inputSchema = { type = "object", properties = cjson.empty_array },
     handler = function(_: {string: any}): {string: any}
         local caps = capabilities.get()
         return {
+            world = worldContext() or cjson.null,
             target = caps.target,
             architecture = caps.architecture,
             jit = caps.jit,

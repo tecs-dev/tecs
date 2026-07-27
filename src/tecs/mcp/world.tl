@@ -9,29 +9,25 @@
 --- `serialize` and the constructor beside it, rather than through a second
 --- description of every component maintained here. A component the engine
 --- gains is a component these tools gain.
+---
+--- Which components exist is read the same way, from the ECS's own registry
+--- through `ecs.declaredComponents`. That registry is process-wide, so these
+--- tools can name anything anybody registered, including a game's own, and
+--- nothing has to be told about a component twice.
 
 local cjson <const> = require("cjson")
 local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 
 local record world
-    --- Makes `w` the world these tools act on, and `known` the components they
-    --- can name. A game adds its own.
-    bind: function(w: ecs.World, known: {string: ecs.Component})
-    --- Adds components to the set these tools can name.
-    register: function(known: {string: ecs.Component})
+    --- Makes `w` the world these tools act on.
+    bind: function(w: ecs.World)
 end
 
 local bound: ecs.World = nil
-local byName <const>: {string: ecs.Component} = {}
 
-function world.register(known: {string: ecs.Component})
-    for name, component in pairs(known) do byName[name] = component end
-end
-
-function world.bind(w: ecs.World, known: {string: ecs.Component})
+function world.bind(w: ecs.World)
     bound = w
-    if known ~= nil then world.register(known) end
 end
 
 --- The bound world, or an error naming why there is not one.
@@ -42,13 +38,23 @@ local function current(): ecs.World
     return bound
 end
 
+--- The declared components, sorted by name.
+local function sortedNames(declared: {string: ecs.Component}): {string}
+    local names: {string} = {}
+    for name in pairs(declared) do names[#names + 1] = name end
+    table.sort(names)
+    return names
+end
+
 --- Resolves a component by name, listing what exists when it cannot.
+---
+--- Registration rather than presence: a component nothing in this world
+--- carries is still nameable, because `spawn` and `set` are how it comes to
+--- be carried. Only a name nobody registered is refused.
 local function component(name: string): ecs.Component
-    local found = byName[name]
+    local found = name ~= nil and ecs.componentByName(name) or nil
     if found == nil then
-        local names: {string} = {}
-        for known in pairs(byName) do names[#names + 1] = known end
-        table.sort(names)
+        local names = sortedNames(ecs.declaredComponents())
         error(("no component named '%s'; known: %s")
             :format(tostring(name), table.concat(names, ", ")), 0)
     end
@@ -98,11 +104,27 @@ local function valueOf(kind: ecs.Component, instance: any): {string: any}
     return fields
 end
 
+--- An entity's `Name`, or nil for one that carries none.
+---
+--- Reported beside the id everywhere an entity is, because a bare number says
+--- nothing about which entity it is and `Name` is what the ECS provides for
+--- saying so.
+local function nameOf(w: ecs.World, entity: integer): string
+    local Name <const> = ecs.builtins.Name
+    if not w:has(entity, Name as ecs.Component) then return nil end
+    local ok, value = pcall(function(): any
+        return w:get(entity, Name as ecs.Component)
+    end)
+    return ok and value ~= nil and tostring(value) or nil
+end
+
 --- Reads one entity's components as plain tables.
-local function describe(w: ecs.World, entity: integer): {string: any}
+local function describe(
+    w: ecs.World, entity: integer, declared: {string: ecs.Component}
+): {string: any}
     local values: {string: any} = {}
     local count = 0
-    for name, kind in pairs(byName) do
+    for name, kind in pairs(declared) do
         if w:has(entity, kind) then
             -- Through the component's own serializer, so an FFI component
             -- crosses as numbers rather than as cdata JSON cannot carry. A tag
@@ -116,27 +138,54 @@ local function describe(w: ecs.World, entity: integer): {string: any}
             count = count + 1
         end
     end
-    return { entity = entity, components = values, count = count }
+    return {
+        entity = entity,
+        name = nameOf(w, entity) or cjson.null,
+        components = values,
+        count = count,
+    }
+end
+
+--- Everything about one entity, with the registry read once for it.
+local function describeOne(w: ecs.World, entity: integer): {string: any}
+    return describe(w, entity, ecs.declaredComponents())
 end
 
 -------------------------------------------------------------------------------
 -- Reading
 -------------------------------------------------------------------------------
 
+--- The components some live entity of `w` carries.
+---
+--- The registry is process-wide and a world is not: a component can be
+--- declared and carried by nothing here, which is an ordinary state and not
+--- the same answer as a name nobody registered. So `components_info` reports
+--- both rather than conflating them.
+local function presentIn(w: ecs.World): {ecs.Component: boolean}
+    local present: {ecs.Component: boolean} = {}
+    if w == nil then return present end
+    w:forEachArchetype(function(archetype: ecs.Archetype)
+        if archetype.entities[0] == 0 then return end
+        local list = archetype.componentList
+        for index = 1, #list do present[list[index]] = true end
+    end)
+    return present
+end
+
 mcp.register({
     name = "components_info",
     description = "Lists the components these tools can name, with the fields "
-        .. "each carries.",
+        .. "each carries and whether the bound world carries any.",
     readOnly = true,
     inputSchema = { type = "object", properties = cjson.empty_array },
     handler = function(_: {string: any}): {string: any}
-        local names: {string} = {}
-        for name in pairs(byName) do names[#names + 1] = name end
-        table.sort(names)
+        local declared = ecs.declaredComponents()
+        local names = sortedNames(declared)
+        local present = presentIn(bound)
 
         local described: {any} = {}
         for index, name in ipairs(names) do
-            local kind = byName[name]
+            local kind = declared[name]
             -- Fields are read from a default instance rather than declared
             -- again here, so this cannot describe a component incorrectly.
             local fields: {string} = {}
@@ -156,9 +205,12 @@ mcp.register({
                 -- from an empty list.
                 tag = #fields == 0,
                 fields = #fields > 0 and fields or cjson.empty_array,
+                -- Declared here and carried by nothing is a real state, so it
+                -- reads as absent rather than as a name that does not exist.
+                present = present[kind] == true,
             }
         end
-        return { components = described }
+        return { components = described, bound = bound ~= nil }
     end,
 })
 
@@ -192,6 +244,9 @@ mcp.register({
 
         local limit = math.floor(tonumber(args.limit) or 50) as integer
         local wantValues = args.values ~= false
+        -- Read once for the page rather than per row, since a describe walks
+        -- it whole and the registry cannot change while this runs.
+        local declared = ecs.declaredComponents()
 
         local query = w:query({ include = include })
         local rows: {any} = {}
@@ -206,8 +261,14 @@ mcp.register({
             for row = 1, length do
                 if #rows < limit then
                     local entity = archetype.entities[row] as integer
-                    rows[#rows + 1] = wantValues and describe(w, entity)
-                        or { entity = entity }
+                    if wantValues then
+                        rows[#rows + 1] = describe(w, entity, declared)
+                    else
+                        rows[#rows + 1] = {
+                            entity = entity,
+                            name = nameOf(w, entity) or cjson.null,
+                        }
+                    end
                 end
             end
         end
@@ -236,7 +297,7 @@ mcp.register({
         if not w:isAlive(entity) then
             return { entity = entity, alive = false }
         end
-        local described = describe(w, entity)
+        local described = describeOne(w, entity)
         described.alive = true
         return described
     end,
@@ -294,7 +355,7 @@ mcp.register({
             as function({any}): any...
         local entity = (w.spawn as function(ecs.World, ...: any): integer)(
             w, unpackAll(instances))
-        return describe(w, entity)
+        return describeOne(w, entity)
     end,
 })
 
@@ -324,7 +385,7 @@ mcp.register({
         local added = not w:has(entity, kind)
         w:set(entity, kind, construct(kind, args.values as {string: any}))
 
-        local described = describe(w, entity)
+        local described = describeOne(w, entity)
         described.added = added
         return described
     end,
@@ -366,7 +427,7 @@ mcp.register({
             instance[field] = value
         end
 
-        local described = describe(w, entity)
+        local described = describeOne(w, entity)
         described.skipped = false
         return described
     end,
@@ -392,7 +453,7 @@ mcp.register({
             return { entity = entity, skipped = true }
         end
         w:remove(entity, kind)
-        local described = describe(w, entity)
+        local described = describeOne(w, entity)
         described.skipped = false
         return described
     end,

@@ -38,6 +38,26 @@ local record ecs
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
     newEvent: function<E is Event>(event: E)
+
+    --- The component registered under `name`, or nil.
+    ---
+    --- The registry is process-wide, because a component's id is allocated
+    --- once at registration and every world that carries one agrees on it. So
+    --- this answers what can be named, and a world answers what is present.
+    ---
+    --- Finds a dense relationship instance by its stamped name as well, which
+    --- `declaredComponents` leaves out.
+    componentByName: function(name: string): Component
+
+    --- Every component declared in this process, name to component.
+    ---
+    --- A fresh table per call, so the registry itself stays unwritable from
+    --- outside registration.
+    ---
+    --- Dense relationship instances are left out. One is registered per target
+    --- under a stamped `Rel->42` name, so a world with many edges has many of
+    --- them, and none of them is a component anybody declared.
+    declaredComponents: function(): {string: Component}
 end
 
 ecs.phases = phases
@@ -50,5 +70,19 @@ ecs.newComponent = components.newComponent
     as function<C is types.components.Component>(options: types.components.ComponentOptions<C>): C
 ecs.newFFIComponent = components.newFFIComponent
     as function<C is types.components.Component>(options: types.components.FFIComponentOptions<C>): C
+
+function ecs.componentByName(name: string): types.components.Component
+    return components.registeredComponents[name]
+end
+
+function ecs.declaredComponents(): {string: types.components.Component}
+    local declared: {string: types.components.Component} = {}
+    for name, component in pairs(components.registeredComponents) do
+        if component.wildcardContainer == nil then
+            declared[name] = component
+        end
+    end
+    return declared
+end
 
 return ecs
