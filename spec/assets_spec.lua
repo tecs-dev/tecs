@@ -210,6 +210,46 @@ describe("assets", function()
         assert.are.equal(0, assets.update())
     end)
 
+    -- Installing twice used to spawn a second worker over the first, which
+    -- left a thread and both its channels with nothing reading them. The load
+    -- already queued is what makes that visible: its answer comes back on the
+    -- channel that was dropped, so it never resolves however long it is waited
+    -- for.
+    it("installs once however many times it is asked", function()
+        local handle = assets.loadImage(FIXTURE)
+        assets.install()
+
+        assets.waitAll(2000)
+        assert.are.equal("ready", handle.status, "the decode answered a worker nobody was reading")
+        handle:release()
+    end)
+
+    -- The wait spends a budget of time, not a count of pumps. A pump returns
+    -- as soon as one message has arrived, so subtracting its nominal 16 ms
+    -- whatever it actually cost turns the budget into a message count: these
+    -- sixty answers arrive in a few milliseconds together, and a "400 ms" wait
+    -- spent by subtraction gives up after twenty-five of them.
+    it("waits for a budget of time rather than a count of pumps", function()
+        local handles = {}
+        for index = 1, 60 do
+            handles[index] = assets.loadImage(("spec/fixtures/missing-%d.png"):format(index))
+        end
+        assert.are.equal(60, assets.pending())
+
+        local before = tonumber(C.SDL_GetTicks())
+        assets.waitAll(400)
+        local elapsed = tonumber(C.SDL_GetTicks()) - before
+
+        assert.are.equal(
+            0,
+            assets.pending(),
+            ("the wait gave up after %d ms with loads still in flight"):format(elapsed)
+        )
+        for index = 1, 60 do
+            assert.are.equal("failed", handles[index].status)
+        end
+    end)
+
     it("records what it read, and under what kind", function()
         assets.loadImage(FIXTURE):release()
         filesystem.read(FIXTURE)

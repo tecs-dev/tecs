@@ -51,6 +51,7 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
+local clock <const> = require("tecs.platform.clock")
 local filesystem <const> = require("tecs.platform.filesystem")
 
 local C <const> = sdl.C
@@ -261,7 +262,13 @@ local worker: workers.Worker = nil
 --- content tree and is the only set where a change has anything to act on.
 
 --- Starts the loading worker.
+---
+--- Installing twice is installing once. Spawning unconditionally would leave
+--- the first thread running with both its channels and nothing reading them,
+--- and every decode already queued would answer into a channel that has been
+--- dropped, so a load in flight across the second call would never resolve.
 function assets.install(luaPath?: string)
+    if worker ~= nil then return end
     worker = workers.spawn({
         source = DECODER,
         luaPath = luaPath or package.path,
@@ -460,15 +467,34 @@ local function pump(ms: number)
     if result ~= nil then complete(result as {string: any}) end
 end
 
+--- Milliseconds one blocking pump spends when nothing has arrived yet.
+local PUMP_MS <const> = 16
+
+--- Milliseconds a wait spends when the caller names nothing.
+local DEFAULT_WAIT_MS <const> = 5000
+
+--- Spends up to `ms` of wall clock pumping while `waiting` answers true.
+---
+--- Wall clock rather than a count of pumps. `pump` returns as soon as one
+--- message arrives, so subtracting its nominal size whatever it cost turns
+--- "wait 5000 ms" into "wait for at most 312 messages", and against a worker
+--- with a queue of answers ready that is a wait that gives up almost at once.
+local function spend(ms: number, waiting: function(): boolean)
+    local deadline = clock.now() * 1000.0 + ms
+    while waiting() do
+        local remaining = deadline - clock.now() * 1000.0
+        if remaining <= 0 then break end
+        pump(remaining < PUMP_MS and remaining or PUMP_MS)
+    end
+end
+
 --- Blocks until every queued load has finished.
 ---
 --- For startup and tests. A frame should poll `update` instead.
 function assets.waitAll(timeoutMs?: number)
-    local remaining = timeoutMs or 5000
-    while assets.pending() > 0 and remaining > 0 do
-        pump(16)
-        remaining = remaining - 16
-    end
+    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean
+        return assets.pending() > 0
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -537,11 +563,9 @@ function Batch:resolve(): integer
 end
 
 function Batch:wait(timeoutMs?: number): integer
-    local remaining = timeoutMs or 5000
-    while self:pending() > 0 and remaining > 0 do
-        pump(16)
-        remaining = remaining - 16
-    end
+    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean
+        return self:pending() > 0
+    end)
     return self:resolve()
 end
 
