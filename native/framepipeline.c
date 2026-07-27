@@ -118,8 +118,7 @@ static int publishedSlot(TecsFramePipeline *pipeline)
     int oldest = -1;
     for (int i = 0; i < TECS_FRAME_SLOTS; i++) {
         if (pipeline->slots[i].state != TECS_FRAME_SLOT_READY) continue;
-        if (oldest < 0
-            || pipeline->slots[i].sequence < pipeline->slots[oldest].sequence) {
+        if (oldest < 0 || pipeline->slots[i].sequence < pipeline->slots[oldest].sequence) {
             oldest = i;
         }
     }
@@ -144,8 +143,7 @@ static void leaveWait(TecsFramePipeline *pipeline)
  * pipeline that is still running, so the state keeps the first reason. */
 static void stop(TecsFramePipeline *pipeline, TecsFramePipelineState reason)
 {
-    if (reason == TECS_FRAME_PIPELINE_CRASHED
-        || pipeline->state == TECS_FRAME_PIPELINE_RUNNING) {
+    if (reason == TECS_FRAME_PIPELINE_CRASHED || pipeline->state == TECS_FRAME_PIPELINE_RUNNING) {
         pipeline->state = reason;
     }
     /* Broadcast even when the state did not move: a caller parked at the
@@ -227,8 +225,7 @@ bool tecsFramePipelinePublish(TecsFramePipeline *pipeline)
 
 /* -------------------------------------------------------------- consumption */
 
-void *tecsFramePipelineAcquireRead(TecsFramePipeline *pipeline,
-                                   uint64_t *sequence)
+void *tecsFramePipelineAcquireRead(TecsFramePipeline *pipeline, uint64_t *sequence)
 {
     if (!pipeline) return NULL;
 
@@ -312,8 +309,7 @@ TecsFramePipelineState tecsFramePipelineGetState(TecsFramePipeline *pipeline)
     return state;
 }
 
-TecsFrameSlotState tecsFramePipelineGetSlotState(TecsFramePipeline *pipeline,
-                                                 int slot)
+TecsFrameSlotState tecsFramePipelineGetSlotState(TecsFramePipeline *pipeline, int slot)
 {
     if (!pipeline || slot < 0 || slot >= TECS_FRAME_SLOTS) {
         return TECS_FRAME_SLOT_FREE;
@@ -361,25 +357,21 @@ TecsFramePipeline *tecsFramePipelineCreate(uint32_t payloadSize)
      * this is a caller mistake rather than a degenerate pipeline to support. */
     if (payloadSize == 0) return NULL;
 
-    TecsFramePipeline *pipeline =
-        (TecsFramePipeline *)SDL_calloc(1, sizeof(TecsFramePipeline));
+    TecsFramePipeline *pipeline = (TecsFramePipeline *)SDL_calloc(1, sizeof(TecsFramePipeline));
     if (!pipeline) return NULL;
 
     pipeline->payloadSize = payloadSize;
-    pipeline->stride =
-        (payloadSize + (PAYLOAD_ALIGN - 1)) & ~(uint32_t)(PAYLOAD_ALIGN - 1);
+    pipeline->stride = (payloadSize + (PAYLOAD_ALIGN - 1)) & ~(uint32_t)(PAYLOAD_ALIGN - 1);
     pipeline->writing = -1;
     pipeline->reading = -1;
     pipeline->state = TECS_FRAME_PIPELINE_RUNNING;
 
-    pipeline->payloads =
-        (unsigned char *)SDL_calloc(TECS_FRAME_SLOTS, pipeline->stride);
+    pipeline->payloads = (unsigned char *)SDL_calloc(TECS_FRAME_SLOTS, pipeline->stride);
     pipeline->lock = SDL_CreateMutex();
     pipeline->writable = SDL_CreateCondition();
     pipeline->readable = SDL_CreateCondition();
     pipeline->drained = SDL_CreateCondition();
-    if (!pipeline->payloads || !pipeline->lock || !pipeline->writable
-        || !pipeline->readable || !pipeline->drained) {
+    if (!pipeline->payloads || !pipeline->lock || !pipeline->writable || !pipeline->readable || !pipeline->drained) {
         release(pipeline);
         return NULL;
     }

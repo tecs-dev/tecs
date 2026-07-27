@@ -80,8 +80,7 @@ bool tecsFramePipelinePublish(TecsFramePipeline *pipeline);
  *
  * Blocks until a published slot exists. Returns NULL when the pipeline is no
  * longer running, and when the caller already holds a slot for reading. */
-void *tecsFramePipelineAcquireRead(TecsFramePipeline *pipeline,
-                                   uint64_t *sequence);
+void *tecsFramePipelineAcquireRead(TecsFramePipeline *pipeline, uint64_t *sequence);
 
 /* Returns the slot held for reading to the pool of free slots, which is what
  * lets the producer reuse it.
@@ -105,8 +104,7 @@ TecsFramePipelineState tecsFramePipelineGetState(TecsFramePipeline *pipeline);
 
 /* Where a slot is in its cycle, by zero-based index. Reports FREE for an index
  * the pipeline does not have. */
-TecsFrameSlotState tecsFramePipelineGetSlotState(TecsFramePipeline *pipeline,
-                                                 int slot);
+TecsFrameSlotState tecsFramePipelineGetSlotState(TecsFramePipeline *pipeline, int slot);
 
 /* Callers parked inside the pipeline waiting for a slot.
  *

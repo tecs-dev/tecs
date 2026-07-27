@@ -75,13 +75,11 @@ static bool reserveEvents(TecsHost *host, uint32_t needed)
     uint32_t capacity = host->capacity ? host->capacity : TECS_EVENTS_INITIAL;
     while (capacity < needed) capacity *= 2;
 
-    SDL_Event *grown = (SDL_Event *)SDL_realloc(host->events,
-                                                capacity * sizeof(SDL_Event));
+    SDL_Event *grown = (SDL_Event *)SDL_realloc(host->events, capacity * sizeof(SDL_Event));
     if (!grown) return false;
     host->events = grown;
 
-    Uint64 *stamps = (Uint64 *)SDL_realloc(host->arrivals,
-                                           capacity * sizeof(Uint64));
+    Uint64 *stamps = (Uint64 *)SDL_realloc(host->arrivals, capacity * sizeof(Uint64));
     if (!stamps) return false;
     host->arrivals = stamps;
 
@@ -98,8 +96,7 @@ static bool retain(TecsHost *host, void *block)
     if (!block) return false;
     if (host->ownedCount == host->ownedCapacity) {
         uint32_t capacity = host->ownedCapacity ? host->ownedCapacity * 2 : 32;
-        void **grown = (void **)SDL_realloc(host->owned,
-                                            capacity * sizeof(void *));
+        void **grown = (void **)SDL_realloc(host->owned, capacity * sizeof(void *));
         if (!grown) return false;
         host->owned = grown;
         host->ownedCapacity = capacity;
@@ -145,19 +142,13 @@ static char **ownStrings(TecsHost *host, const char *const *items, int count)
 static void ownPayload(TecsHost *host, SDL_Event *copy)
 {
     switch (copy->type) {
-    case SDL_EVENT_TEXT_INPUT:
-        copy->text.text = ownString(host, copy->text.text);
-        break;
+    case SDL_EVENT_TEXT_INPUT: copy->text.text = ownString(host, copy->text.text); break;
 
-    case SDL_EVENT_TEXT_EDITING:
-        copy->edit.text = ownString(host, copy->edit.text);
-        break;
+    case SDL_EVENT_TEXT_EDITING: copy->edit.text = ownString(host, copy->edit.text); break;
 
     case SDL_EVENT_TEXT_EDITING_CANDIDATES:
-        copy->edit_candidates.candidates =
-            (const char * const *)ownStrings(host,
-                copy->edit_candidates.candidates,
-                copy->edit_candidates.num_candidates);
+        copy->edit_candidates.candidates = (const char *const *)ownStrings(host, copy->edit_candidates.candidates,
+                                                                           copy->edit_candidates.num_candidates);
         if (!copy->edit_candidates.candidates) {
             copy->edit_candidates.num_candidates = 0;
             copy->edit_candidates.selected_candidate = -1;
@@ -174,15 +165,12 @@ static void ownPayload(TecsHost *host, SDL_Event *copy)
         break;
 
     case SDL_EVENT_CLIPBOARD_UPDATE:
-        copy->clipboard.mime_types =
-            (const char **)ownStrings(host,
-                (const char *const *)copy->clipboard.mime_types,
-                copy->clipboard.num_mime_types);
+        copy->clipboard.mime_types = (const char **)ownStrings(host, (const char *const *)copy->clipboard.mime_types,
+                                                               copy->clipboard.num_mime_types);
         if (!copy->clipboard.mime_types) copy->clipboard.num_mime_types = 0;
         break;
 
-    default:
-        break;
+    default: break;
     }
 }
 
@@ -205,8 +193,7 @@ static int traceback(lua_State *L)
 
 /* Calls application:<method>(...) with `extra` arguments already pushed by
  * `push`, and reports failure with a traceback. */
-static bool callMethod(TecsHost *host, const char *method,
-                       void (*push)(lua_State *, TecsHost *), int extra)
+static bool callMethod(TecsHost *host, const char *method, void (*push)(lua_State *, TecsHost *), int extra)
 {
     lua_State *L = host->L;
     int base = lua_gettop(L);

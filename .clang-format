@@ -1,0 +1,52 @@
+# C. STYLE.md sets the shape: 4-space indent, 120 columns, and comments left
+# exactly as written. Everything else here matches what native/ already does,
+# so adopting the formatter is not a rewrite of the tree.
+#
+# GLSL is deliberately not formatted by this. clang-format has no GLSL mode and
+# reads an interface block as a class definition, which strands the block's
+# instance name on a line of its own.
+Language: Cpp
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 120
+UseTab: Never
+
+# A definition opens its brace on the next line; every other brace is attached.
+BreakBeforeBraces: Linux
+PointerAlignment: Right
+DerivePointerAlignment: false
+BreakBeforeBinaryOperators: NonAssignment
+
+# Guard clauses are written on one line throughout native/, and folding them
+# back out would add a hundred lines of nothing.
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Never
+
+# Comments are load-bearing prose here, wrapped by hand. A formatter that
+# rewraps them is editing the text, not the layout.
+ReflowComments: Never
+AlignTrailingComments:
+  Kind: Leave
+  OverEmptyLines: 0
+
+# Include order is grouped by hand: language, then dependencies, then ours.
+# Sorting across those groups would say something the grouping already says.
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+AlignAfterOpenBracket: Align
+AlignEscapedNewlines: DontAlign
+AlignConsecutiveMacros: None
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignOperands: Align
+IndentCaseLabels: false
+SpaceAfterCStyleCast: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+InsertNewlineAtEOF: true

@@ -29,7 +29,8 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
         deps package check-package presets shaders bench bench-physics \
-        bench-latency bench-ecs bench-json bench-snapshot bench-bitset
+        bench-latency bench-ecs bench-json bench-snapshot bench-bitset \
+        format format-check
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -42,7 +43,8 @@ presets: ## List available CMake presets
 
 deps: ## Install development dependencies (macOS/Homebrew)
 	brew install cmake pkg-config sdl3 sdl3_image sdl3_mixer sdl3_net box2d \
-	  shaderc spirv-cross luajit
+	  shaderc spirv-cross luajit \
+	  clang-format stylua ruff gersemi prettier
 
 configure: ## Configure the selected preset
 	@cmake --preset $(PRESET)
@@ -55,6 +57,15 @@ build: ## Build the selected preset
 
 check: ## Type-check Teal sources
 	@tl check $(TL_FLAGS) $(SOURCE_TL) $(BENCH_TL) main.tl
+
+# Formatting needs no build, so these call the script rather than going through
+# CMake. It is the same script the CMake targets of these names run, so there is
+# one description of what is formatted and by what.
+format: ## Format sources in place
+	@python3 scripts/format.py
+
+format-check: ## Report unformatted sources, writing nothing
+	@python3 scripts/format.py --check
 
 # Two runs, because the headless specs fork. `io.popen` forks this process, and
 # by the time the rest of the suite has run there are live threads in it: the

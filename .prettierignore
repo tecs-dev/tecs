@@ -1,0 +1,8 @@
+# scripts/format.py passes an explicit file list, so this is for prettier run
+# by hand or by an editor. It mirrors EXCLUDED there: trees this repository
+# carries but did not write, and data a tool emits.
+vendor/
+out/
+build/
+assets/fonts/
+benches/cross-engine/assets/

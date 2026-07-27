@@ -25,6 +25,8 @@ CMake is canonical and Make wraps it, so there is one description of how the tre
 make build          # Build the selected preset
 make test           # Run the spec suite (both suites, one Busted run)
 make check          # Type-check Teal sources
+make format         # Format sources in place
+make format-check   # Report unformatted sources, writing nothing
 make run            # Run the demo
 make bench          # Shapes benchmark
 make bench-physics  # Physics benchmark
@@ -143,8 +145,8 @@ The rules that prevent the most common defect class:
 
 - Reads use `archetype:get` / `world:get`; writes go through `getMut`, which marks the component's column dirty on
   the archetype. Never `getMut` in a loop that might not write, it defeats every dirty-gated consumer.
-- Direct cdata writes through `world:get` on FFI components need an explicit `world:markComponentDirty(id,
-  Component)` or the GPU never re-syncs.
+- Direct cdata writes through `world:get` on FFI components need an explicit
+  `world:markComponentDirty(id, Component)` or the GPU never re-syncs.
 - Dirty bits clear at the end of each `world:update`.
 - `world:batchSpawn` skips FFI defaults; set every field in the callback.
 - Keep `query:iter()` for loops that run to exhaustion. If an archetype-level query loop may `break` or return
@@ -161,9 +163,9 @@ appropriate, early returns over deep nesting, comments sparse and informational.
 - **Identifiers** (functions, methods, record fields, option keys, non-import locals): `camelCase`. No
   `snake_case`.
 - **Filenames and their import bindings** follow a class/module split:
-  - The file *is* a class (one dominant type you construct and call methods on, including component records):
+  - The file _is_ a class (one dominant type you construct and call methods on, including component records):
     **PascalCase**, e.g. `Camera.tl` → `local Camera = require("tecs.gfx.Camera")`.
-  - The file is a *module* containing a class or a namespace of functions: **luacase** (all lowercase, no
+  - The file is a _module_ containing a class or a namespace of functions: **luacase** (all lowercase, no
     separators), e.g. `shaderpack.tl` → `local shaderpack = require("tecs.gpu.shaderpack")`. Multi-word module
     files drop their underscores.
 - Prefer single-word module names where a clear one exists.

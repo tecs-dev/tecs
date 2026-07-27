@@ -26,7 +26,7 @@ from pathlib import Path
 SIGNATURE_RE = re.compile(r"^(.*?)(\b\w+)\s*\((.*)\)$", re.S)
 
 # Statements that are not function declarations, whatever else they look like.
-NOT_A_FUNCTION = ("typedef", "struct", "union", "enum", "static", "extern \"C\"")
+NOT_A_FUNCTION = ("typedef", "struct", "union", "enum", "static", 'extern "C"')
 
 
 def statements(cdef: str):

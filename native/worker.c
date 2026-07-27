@@ -123,8 +123,7 @@ uint32_t tecsChannelPop(TecsChannel *channel, void **out, int32_t timeoutMs)
         }
         if (timeoutMs < 0) {
             SDL_WaitCondition(channel->arrived, channel->lock);
-        } else if (SDL_WaitConditionTimeout(channel->arrived, channel->lock,
-                                            timeoutMs) == false) {
+        } else if (SDL_WaitConditionTimeout(channel->arrived, channel->lock, timeoutMs) == false) {
             SDL_UnlockMutex(channel->lock);
             return 0;
         }
@@ -198,8 +197,7 @@ static int workerEntry(void *data)
     setPointer(L, "__tecsWorkerIn", worker->toWorker);
     setPointer(L, "__tecsWorkerOut", worker->fromWorker);
 
-    if (luaL_loadbuffer(L, worker->source, strlen(worker->source), "=worker")
-        || lua_pcall(L, 0, 0, 0)) {
+    if (luaL_loadbuffer(L, worker->source, strlen(worker->source), "=worker") || lua_pcall(L, 0, 0, 0)) {
         const char *message = lua_tostring(L, -1);
         SDL_Log("tecs worker: %s", message ? message : "unknown error");
         lua_close(L);
@@ -210,9 +208,7 @@ static int workerEntry(void *data)
     return 0;
 }
 
-TecsWorker *tecsWorkerSpawn(const char *source, const char *luaPath,
-                                TecsChannel *toWorker,
-                                TecsChannel *fromWorker)
+TecsWorker *tecsWorkerSpawn(const char *source, const char *luaPath, TecsChannel *toWorker, TecsChannel *fromWorker)
 {
     TecsWorker *worker = (TecsWorker *)SDL_calloc(1, sizeof(TecsWorker));
     if (!worker) return NULL;

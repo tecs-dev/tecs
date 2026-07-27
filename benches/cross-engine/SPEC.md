@@ -7,18 +7,18 @@ implementation.
 
 ## Scene
 
-| Parameter     | Value                                                          |
-|---------------|----------------------------------------------------------------|
-| Window        | 1280 x 720, windowed, not resizable                            |
-| VSync         | off (measuring throughput, not display refresh)                |
-| Clear         | opaque black every frame                                       |
-| Sprite asset  | `assets/running.png` (96x105, 8 frames of 32x35, 3x3 grid)     |
-| Frame rect    | frame `f` maps to `(x=(f%3)*32, y=floor(f/3)*35, w=32, h=35)`   |
-| Sprite size   | native 32x35 world units, centered pivot, no per-sprite tint   |
-| Count `N`     | passed per run (see Sweep)                                     |
-| Split         | first `N/2` sprites are visible, the other `N/2` sit at world X `+1e7` (off-screen) |
-| Visible grid  | square grid, `ceil(sqrt(N/2))` per side, spacing 40, centered on the origin |
-| Camera        | 2D ortho, centered on the origin, zoomed to fit the visible grid into 90% of the window height |
+| Parameter    | Value                                                                                          |
+| ------------ | ---------------------------------------------------------------------------------------------- |
+| Window       | 1280 x 720, windowed, not resizable                                                            |
+| VSync        | off (measuring throughput, not display refresh)                                                |
+| Clear        | opaque black every frame                                                                       |
+| Sprite asset | `assets/running.png` (96x105, 8 frames of 32x35, 3x3 grid)                                     |
+| Frame rect   | frame `f` maps to `(x=(f%3)*32, y=floor(f/3)*35, w=32, h=35)`                                  |
+| Sprite size  | native 32x35 world units, centered pivot, no per-sprite tint                                   |
+| Count `N`    | passed per run (see Sweep)                                                                     |
+| Split        | first `N/2` sprites are visible, the other `N/2` sit at world X `+1e7` (off-screen)            |
+| Visible grid | square grid, `ceil(sqrt(N/2))` per side, spacing 40, centered on the origin                    |
+| Camera       | 2D ortho, centered on the origin, zoomed to fit the visible grid into 90% of the window height |
 
 The 50/50 split exists because the two naive framings are both degenerate. A
 camera at 1:1 spawns N in a huge grid but only a few hundred land in the

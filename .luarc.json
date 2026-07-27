@@ -4,12 +4,8 @@
         "version": "LuaJIT"
     },
     "diagnostics": {
-        "globals": [
-            "jit"
-        ],
-        "disable": [
-            "deprecated"
-        ]
+        "globals": ["jit"],
+        "disable": ["deprecated"]
     },
     "workspace": {
         "library": [],
