@@ -11,7 +11,7 @@
 --- valid in either state, and passing it avoids copying a decoded image
 --- through a serialized message only to copy it again into staging. Ownership
 --- transfers with it: whoever receives the address destroys the surface. A
---- loaded sound crosses the same way, as the address of its PCM.
+--- loaded sound crosses the same way, as the address of its `MIX_Audio`.
 ---
 --- Nothing here creates a GPU resource. Decoding and residency are separate
 --- decisions: the renderer knows what layout its textures need, and an asset
@@ -20,20 +20,24 @@
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
+local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
 
 local C <const> = sdl.C
+local MIX <const> = sdl3mixer.C
 
 --- Runs on the worker. Decodes to a normalised layout and returns an address.
 local DECODER <const> = [==[
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
 local image = require("tecs.ffi.sdl3image")
+local mixer = require("tecs.ffi.sdl3mixer")
 local workers = require("tecs.workers")
 
 local C = sdl.C
 local IMG = image.C
+local MIX = mixer.C
 
 -- SDL_PIXELFORMAT_RGBA32 is a byte-order alias resolved by the preprocessor,
 -- so it never reaches the cdef. On a little-endian host it is ABGR8888.
@@ -63,35 +67,58 @@ local function decodeImage(task)
     }
 end
 
--- Loaded and converted in one step, for the same reason an image is: the
--- caller then holds exactly one layout, and every voice that plays this clip
--- resamples nothing.
+-- Length in milliseconds, or -1 when the container cannot say. A format that
+-- only stores a bit rate is estimated from it, and one that streams forever
+-- reports infinite; both are "unknown" as far as anything above cares.
+local function durationOf(audio)
+    local frames = MIX.MIX_GetAudioDuration(audio)
+    if frames < 0 then return -1 end
+    return tonumber(MIX.MIX_AudioFramesToMS(audio, frames))
+end
+
+-- Sound is read by the mixer's own decoders, which is what makes anything but
+-- WAV loadable. No mixer is passed: a clip is independent of the output, so
+-- loading works before one is open and on a machine that has none, and the
+-- mixer converts what it reads either way.
+--
+-- `mode` decides whether the clip ends up resident:
+--   "resident"  decoded once, up front, and held as PCM
+--   "stream"    nothing held; each voice opens the file for itself
+--   "auto"      resident under `streamMs`, streamed at or over it
+--
+-- The auto case reads the file twice when it turns out to be short: once
+-- without decoding, to ask how long it is, and once to decode it. That is a
+-- second read of a small file, off the main thread, against holding a decoded
+-- copy of a piece of music.
 local function decodeSound(task)
-    local spec = ffi.new("SDL_AudioSpec")
-    local data = ffi.new("uint8_t *[1]")
-    local length = ffi.new("Uint32[1]")
-    if not C.SDL_LoadWAV(task.path, spec, data, length) then
+    local predecode = task.mode == "resident"
+    local audio = MIX.MIX_LoadAudio(nil, task.path, predecode)
+    if audio == nil then
         return { id = task.id, error = "cannot load " .. task.path }
     end
 
-    local want = ffi.new("SDL_AudioSpec")
-    want.format = C.SDL_AUDIO_F32
-    want.channels = task.channels
-    want.freq = task.frequency
-
-    local samples = ffi.new("uint8_t *[1]")
-    local bytes = ffi.new("int[1]")
-    local ok = C.SDL_ConvertAudioSamples(spec, data[0], length[0],
-        want, samples, bytes)
-    C.SDL_free(data[0])
-    if not ok then
-        return { id = task.id, error = "cannot convert " .. task.path }
+    local ms = durationOf(audio)
+    if task.mode == "resident" then
+        return {
+            id = task.id, resident = true, durationMs = ms,
+            audio = tonumber(ffi.cast("uintptr_t", audio)),
+        }
     end
-    return {
-        id = task.id,
-        samples = tonumber(ffi.cast("uintptr_t", samples[0])),
-        bytes = bytes[0],
-    }
+
+    if task.mode == "auto" and ms >= 0 and ms < task.streamMs then
+        MIX.MIX_DestroyAudio(audio)
+        audio = MIX.MIX_LoadAudio(nil, task.path, true)
+        if audio == nil then
+            return { id = task.id, error = "cannot decode " .. task.path }
+        end
+        return {
+            id = task.id, resident = true, durationMs = ms,
+            audio = tonumber(ffi.cast("uintptr_t", audio)),
+        }
+    end
+
+    MIX.MIX_DestroyAudio(audio)
+    return { id = task.id, resident = false, durationMs = ms }
 end
 
 while true do
@@ -117,10 +144,13 @@ local record Handle
     height: integer
     --- Row stride in bytes, which a decoder may pad beyond width * 4.
     pitch: integer
-    --- Interleaved 32-bit float PCM, valid until `release`. Sounds only.
-    samples: loader.CValue
-    --- Bytes at `samples`.
-    bytes: integer
+    --- The loaded clip, valid until `release`. Sounds only, and nil for one
+    --- that streams, which holds nothing.
+    audio: loader.CValue
+    --- Whether the clip is held in memory. Sounds only.
+    resident: boolean
+    --- Length in milliseconds, or -1 when the file cannot say. Sounds only.
+    durationMs: integer
     --- Set if loading failed.
     error: string
     _surface: loader.CValue
@@ -175,19 +205,32 @@ function assets.loadImage(path: string): Handle
     return handle
 end
 
---- Queues a WAV for loading and returns its handle immediately.
+--- Queues a sound for loading and returns its handle immediately.
 ---
---- The PCM comes back converted to 32-bit float at `frequency` and
---- `channels`, so whatever the file happened to hold is not something the
---- caller has to handle.
-function assets.loadSound(path: string, frequency: integer,
-                          channels: integer): Handle
+--- Whatever the mixer's decoders can read loads, so the format is the file's
+--- business rather than the caller's.
+---
+--- `mode` is "resident", "stream", or "auto", and auto keeps anything shorter
+--- than `streamMs` resident.
+---
+--- The library is initialised here rather than on the worker: `MIX_Init` is
+--- documented as not thread safe, and doing it before the task is sent puts it
+--- in order ahead of every decode without a lock.
+function assets.loadSound(path: string, mode: string,
+                          streamMs: integer): Handle
+    if not sdl3mixer.init() then
+        local failed = setmetatable({
+            kind = "sound", status = "failed", path = path,
+            error = "cannot load " .. path,
+        } as Handle, HandleMT)
+        return failed
+    end
     local handle = setmetatable(
         { kind = "sound", status = "loading", path = path } as Handle, HandleMT)
     local id = queue(handle)
     worker:send({
         id = id, kind = "sound", path = path,
-        frequency = frequency, channels = channels,
+        mode = mode, streamMs = streamMs,
     })
     return handle
 end
@@ -206,11 +249,14 @@ local function complete(result: {string: any}): boolean
     end
 
     if handle.kind == "sound" then
-        -- Ownership arrived with the address, exactly as it does for a
-        -- surface. SDL allocated this buffer, so SDL_free releases it.
-        handle.samples = ffi.cast("uint8_t *",
-            ffi.cast("uintptr_t", result.samples)) as loader.CValue
-        handle.bytes = result.bytes as integer
+        handle.resident = result.resident as boolean
+        handle.durationMs = result.durationMs as integer
+        if handle.resident then
+            -- Ownership arrived with the address, exactly as it does for a
+            -- surface. The mixer allocated this, so the mixer frees it.
+            handle.audio = ffi.cast("MIX_Audio *",
+                ffi.cast("uintptr_t", result.audio)) as loader.CValue
+        end
         handle.status = "ready"
         return true
     end
@@ -231,13 +277,15 @@ end
 --- Frees what was decoded.
 ---
 --- Called once whatever needed it has taken a copy, which for an image means
---- after it has been uploaded. A sound is played straight out of this memory,
---- so it is released when nothing will play it again.
+--- after it has been uploaded. A voice reads a clip where it lies, so a clip is
+--- released when nothing will play it again. A track holds its own reference,
+--- so releasing one that is still sounding is safe: the mixer drops it when
+--- the last track using it does.
 function Handle:release()
-    if self.samples ~= nil then
-        C.SDL_free(self.samples)
-        self.samples = nil
-        self.bytes = 0
+    if self.audio ~= nil then
+        MIX.MIX_DestroyAudio(self.audio)
+        self.audio = nil
+        self.resident = false
     end
     if self._surface == nil then return end
     C.SDL_DestroySurface(self._surface)

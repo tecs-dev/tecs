@@ -79,9 +79,10 @@ Working today:
 - Layers: sixteen bands of the depth range, each choosing how its contents sort
   within it, and each able to sit in screen pixels, in virtual coordinates,
   outside the camera's zoom, at its own parallax, or unlit
-- Sound: WAV clips read on the asset worker, a voice per platform stream so the
-  platform does the mixing, and a `Sound` component that plays for as long as
-  its entity exists
+- Sound: clips read on the asset worker through SDL_mixer's decoders, a voice
+  per mixer track, groups by tag, keyed limits with cooldowns, fades, pitch,
+  loop points, streaming for long clips, and a `Sound` component that plays for
+  as long as its entity exists
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -117,53 +118,70 @@ pixels: surfaces live in process memory, so the pointer is valid in either
 state, and passing it avoids copying an image through a serialized message
 only to copy it again into staging. Ownership transfers with the address.
 
-Sound takes the same route. A WAV is read and converted to the output's format
-on the worker and handed back as the address of its PCM, so a clip that turns
-out to be mono at 22050 costs the frame nothing and every voice that plays it
-resamples nothing.
+Sound takes the same route. A clip is read and decoded on the worker by
+SDL_mixer and handed back as the address of a `MIX_Audio`, so a file that turns
+out to be a minute of Vorbis costs the frame nothing. A clip long enough to
+stream is measured on the worker and then thrown away rather than decoded, and
+the voices that play it read the file for themselves.
 
 ## Sound
 
-`app.audio` is the whole surface: load a clip, play it, set a gain, stop it,
-loop it. It is built on SDL's audio streams and on four decisions.
+`app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
+loop it, pitch it, put it in a group, cap how often it may start, stop it. It
+is built on SDL_mixer 3 and on five decisions.
 
-**WAV only.** Clips come through `SDL_LoadWAV`. There is no SDL_mixer here and
-no decoder, so Ogg Vorbis, Opus, MP3, FLAC and tracker modules do not load, and
-a compressed file fails rather than being resampled into something. Adding a
-decoder adds a dependency and a licence to the build, which is a decision worth
-making on its own rather than as a side effect of wanting background music.
+**The mixer decodes.** A clip is whatever the linked decoders can read. What
+this build has is a question with a runtime answer rather than a configure-time
+one, because a decoder whose dependency was missing is dropped without
+complaint, so `Audio.decoders()` reports the list the library itself gives.
+`cmake/Pinned.cmake` names every decoder option rather than accepting defaults:
+several of them are LGPL and on by default, and a statically linked game must
+not import those. dr_mp3 stands in for mpg123, dr_flac for libFLAC, stb_vorbis
+for vorbisfile, and `SDLMIXER_STRICT` turns a dependency that could not be
+found into a configure failure instead of a silently missing format.
 
-**A voice is a stream, and the platform mixes.** Playing a sound binds a stream
-to the output; playing the same clip three times over binds three streams
-reading one buffer. Nothing in this engine sums samples, which is why
-`SDL_MixAudio` goes unused: the only thing it could add is summing into a
-buffer the engine owns, and there is no such buffer. Thirty-two voices by
-default, and a thirty-third play declines rather than stealing one, because a
-sound that stops halfway through because something else started is harder to
-explain than one that never started.
+**A voice is a track, and the mixer mixes.** Playing a sound points a track at
+a clip and starts it; playing the same clip three times over is three tracks
+reading one clip. Thirty-two voices by default, and a thirty-third play
+declines rather than stealing one, because a sound that stops halfway through
+because something else started is harder to explain than one that never
+started.
 
-**No callback runs on an audio thread.** SDL can pull audio from a callback,
-and that callback fires on a thread the Lua VM did not create; a Lua function
-invoked from such a thread is the same unsafe case that keeps raw thread
-creation unexposed. The device is fed by queueing instead, from the iteration,
-on the thread everything else runs on. A callback mixer would need a native
-bridge and there is not one.
+**No callback runs on an audio thread.** SDL_mixer can call back when a track
+stops, and that callback fires on a thread the Lua VM did not create; a Lua
+function invoked from such a thread is the same unsafe case that keeps raw
+thread creation unexposed. So none is installed, and `update` asks each
+sounding voice whether the mixer is still taking samples from it. A voice is
+reaped on the frame after it ended rather than the instant it did, which is the
+whole cost, and it is the same frame the pass over `Sound` components already
+runs in.
 
-**Every voice is fed in pieces.** Each update tops a voice's stream up to a
-quarter of a second of lead and no further, so a long piece of music holds a
-bounded queue instead of being handed over whole, and looping is the cursor
-wrapping rather than a second mechanism. What that is not is streaming from
-disk: `SDL_LoadWAV` has no partial-read form, so the file is resident even
-though the queue is not, and reading a WAV incrementally would mean parsing the
-container here, which is the decoder that is deliberately absent.
+**A clip is resident or streamed, and its length decides.** Under ten seconds a
+clip is decoded once, up front, and every voice reads the same PCM: that is
+what a sound effect played forty times a second wants. At or over it the clip
+holds nothing and each voice opens the file and decodes as it plays. A file
+that will not say how long it is streams too, because a file that will not say
+may be very long. `load` takes `stream` to override the threshold either way,
+and `streamSeconds` moves it.
+
+**Exactly one thing writes each gain.** The master is the mixer's own number
+and goes straight to it, so setting it costs one call however many voices are
+sounding. A voice's gain and its group's are multiplied together in Lua and
+pushed to the track as one product, because SDL_mixer's per-tag gain is not a
+separate multiplier: it writes each tagged track's own gain, and using it for a
+group would overwrite what the voice asked for.
+
+Groups are the mixer's tags. A voice names one on `play`, and the group's gain,
+pause, resume and stop reach every voice carrying it. Keyed limits are not:
+`setLimit` caps how many voices a key may hold at once and how soon after one
+starts another may, which is what keeps forty enemies dying together from
+playing forty identical sounds, and SDL_mixer has no notion of it. The two
+compose without either knowing the other, because a group says where a gain
+comes from and a key says how many the mix will carry.
 
 The output is the platform's default rather than a device chosen by name, so
 SDL migrates the logical device when the system default changes and plugged-in
-headphones need no handling. That has one consequence worth writing down:
-`SDL_OpenAudioDeviceStream` opens a device and one stream together and then
-refuses every further binding on it, so the device is opened with
-`SDL_OpenAudioDevice` and voices are bound to it, which is also the form that
-starts unpaused.
+headphones need no handling.
 
 A `Sound` component is how a sound belongs to an entity. Presence is the
 instruction: an entity carrying one with a loaded clip starts sounding on the
@@ -172,16 +190,17 @@ per frame starts what has not started, marks what has finished, and releases
 any voice no component referred to, which is what makes despawning something
 mid-sound do the obvious thing without an observer on every archetype.
 
-There is no listener and no panning. SDL gives a stream one gain and a channel
-map, and a channel map reorders channels rather than attenuating them, so
-constant-power panning means either summing samples here or splitting every
-mono clip across two streams. Both are real designs, and neither is worth
-committing to before the questions under it are answered: what units distance
-is in, what the falloff curve is, whether the listener follows the camera or an
-entity, and what a sound on a screen-space layer does. Attenuating by distance
-alone is the cheap half of that, and shipping the cheap half fixes the answers
-to the rest by accident. `Sound.gain` is the seam it arrives through when it
-does.
+Position is passed to the mixer and nothing more. `Sound.spatial` switches it
+on and `x`, `y` and `z` are read as SDL_mixer reads them: a right-handed system
+whose listener sits at the origin and cannot be moved. The mixer attenuates
+with distance and spatialises across the speakers on its own, so what is left
+undecided is what a game has to do by hand. There is no listener component and
+no rule that the camera is one, so whatever a game decides is listening is what
+it subtracts before writing those fields; the scale between world units and the
+mixer's is the game's to pick; and a sound on a layer that does not move with
+the camera has no world position to convert, so it leaves `spatial` at zero.
+Each of those is a design decision about a game rather than about audio, and
+answering any of them here would fix the others by accident.
 
 ## Physics threads
 
@@ -748,7 +767,7 @@ and a port supplies these and touches nothing above them:
              _iterate, _shutdown
  events      Typed events, produced directly            adapter.events
  input       Devices, rumble, cursor modes, text input  adapter.input
- audio       An output, streams, PCM, gain              adapter.audio
+ audio       A mixer, tracks, gain, tags                adapter.audio
  static FFI  Function pointers taken at build time      native/registry.c
  storage     Content and writable roots                 adapter.basePath/prefPath
  shaders     A pack in the platform's own format        adapter.shaderFormat
@@ -761,9 +780,10 @@ both call the same four methods. Events are one typed stream discriminated by
 `kind`, so a platform with no `SDL_Event` produces those values directly.
 Input needs a second face because rumble, an LED, a cursor mode and a text
 input session are commands going the other way, and no event vocabulary can
-express one. Audio is that direction and only that direction: an output opens,
-PCM goes in, a gain is set, a voice stops, and nothing about sound comes back
-as an event. A target that forbids `dlopen` reaches its libraries through a
+express one. Audio is almost that direction alone: a mixer opens, a voice is
+pointed at a clip, a gain is set, a voice stops, and the one thing that comes
+back is whether a voice is still sounding, which is asked rather than
+delivered. A target that forbids `dlopen` reaches its libraries through a
 table of pointers
 taken at build time, and nothing calls `ffi.load` when one is present. The pack
 layout does not change for a platform with private bytecode; only the declared
@@ -858,6 +878,7 @@ worker that fails to start looks like a worker that had nothing to do.
  box2d        421
  spvc         169
  sdl3image    102
+ sdl3mixer     92
  shaderc       45
  worker        10
  taskpool       7
@@ -892,8 +913,10 @@ matching misses.
 A hand-maintained cdef does not fail to link when it drifts. It reinterprets
 memory and surfaces later as corruption far from the cause. `make abi-check`
 compares LuaJIT's view of every generated record against the C compiler's:
-size, alignment, and the offset of every field. It currently verifies 192
-records across the four libraries.
+size, alignment, and the offset of every field. It currently verifies 194
+records. A binding whose header is written against another library's types
+names that one as a prerequisite, which is how SDL_mixer's records are
+declared against SDL's.
 
 Header-only `static inline` helpers have no symbol to bind and are
 reimplemented in Lua. That is usually faster anyway, since the JIT can inline
@@ -955,8 +978,15 @@ a real window to completion.
 
 ## Requirements
 
-CMake 3.24+, LuaJIT, SDL3 (3.4+, for SDL_GPU), SDL3_image, Box2D 3.x, shaderc,
-SPIRV-Cross, and Teal (`tl`). `make deps` installs them on macOS.
+CMake 3.24+, LuaJIT, SDL3 (3.4+, for SDL_GPU), SDL3_image, SDL3_mixer,
+SDL3_net, Box2D 3.x, shaderc, SPIRV-Cross, and Teal (`tl`). `make deps`
+installs them on macOS.
+
+A development build takes SDL_mixer from the system, and a system build is
+whatever the packager configured: Homebrew's loads its optional decoders by
+name at `MIX_Init`, so a developer's machine may well have the LGPL ones
+available where a package built from `cmake/Pinned.cmake` does not.
+`Audio.decoders()` is how to tell which build is running.
 
 Dependencies are found through pkg-config rather than a package manager's
 paths, which is what lets the same build description cross-compile. Box2D ships

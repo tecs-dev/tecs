@@ -33,6 +33,7 @@ else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
     pkg_check_modules(SDL3_IMAGE REQUIRED IMPORTED_TARGET sdl3-image)
+    pkg_check_modules(SDL3_MIXER REQUIRED IMPORTED_TARGET sdl3-mixer)
     # Found by hand rather than through its .pc file: Homebrew's sdl3-net.pc
     # sets includedir to /include and libdir to /lib, which CMake rejects when
     # it builds an imported target. The real paths are on the same prefix as
@@ -226,6 +227,8 @@ if(TECS_BUILD_LUA)
         ${SDL3_IMAGE_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
     tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_
         ${SDL3_NET_INCLUDE_DIR} ${SDL3_INCLUDE_DIRS})
+    tecs_cdef(sdl3mixer SDL3_mixer/SDL_mixer.h /SDL3_mixer/ MIX_
+        ${SDL3_MIXER_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
     tecs_cdef(box2d box2d/box2d.h /box2d/ B2_ ${BOX2D_INCLUDE_DIR})
     tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_
         ${SHADERC_INCLUDE_DIRS})
@@ -280,6 +283,7 @@ if(TECS_BUILD_LUA)
     tecs_registry(sdl3 TecsSdl3Api SDL_ SDL3/SDL.h)
     tecs_registry(sdl3image TecsSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
     tecs_registry(sdl3net TecsSdl3NetApi NET_ SDL3_net/SDL_net.h)
+    tecs_registry(sdl3mixer TecsSdl3MixerApi MIX_ SDL3_mixer/SDL_mixer.h)
     tecs_registry(box2d TecsBox2dApi b2 box2d/box2d.h)
     tecs_registry(worker TecsWorkerApi tecs worker.h)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
@@ -319,8 +323,8 @@ if(TECS_BUILD_LUA)
     target_include_directories(tecs_registry PUBLIC
         "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
     target_link_libraries(tecs_registry PUBLIC
-        PkgConfig::SDL3 PkgConfig::SDL3_IMAGE PkgConfig::LUAJIT
-        ${BOX2D_LIBRARY} ${SDL3_NET_LIBRARY})
+        PkgConfig::SDL3 PkgConfig::SDL3_IMAGE PkgConfig::SDL3_MIXER
+        PkgConfig::LUAJIT ${BOX2D_LIBRARY} ${SDL3_NET_LIBRARY})
 
     # Taking the address of a shader compiler's functions means linking it.
     # That is the coupling TECS_RUNTIME_SHADERS exists to remove: a release
@@ -344,6 +348,7 @@ if(TECS_BUILD_LUA)
         "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
         "${GEN}/taskpoolcdef.lua" "${GEN}/framepipelinecdef.lua"
         "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua" "${GEN}/sdl3netcdef.lua"
+        "${GEN}/sdl3mixercdef.lua"
         "${GEN}/box2dcdef.lua" "${GEN}/shaderccdef.lua"
         "${GEN}/spvccdef.lua")
 

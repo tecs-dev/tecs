@@ -41,7 +41,8 @@ presets: ## List available CMake presets
 	@cmake --list-presets
 
 deps: ## Install development dependencies (macOS/Homebrew)
-	brew install cmake pkg-config sdl3 sdl3_image box2d shaderc spirv-cross luajit
+	brew install cmake pkg-config sdl3 sdl3_image sdl3_mixer sdl3_net box2d \
+	  shaderc spirv-cross luajit
 
 configure: ## Configure the selected preset
 	@cmake --preset $(PRESET)

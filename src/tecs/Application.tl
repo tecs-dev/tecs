@@ -328,11 +328,13 @@ function Application:_iterate(queue: loader.CValue, count: integer,
         if self._crashed == nil then self:_simulate(dt) end
     end
 
-    -- Outside the suspension guard and outside the crash guard. A queue that
-    -- is not topped up runs dry, and a sound that breaks up because the game
-    -- crashed or the window went to the background is a second failure on top
-    -- of the first.
-    if self.audio ~= nil then self.audio:update() end
+    -- Outside the suspension guard and outside the crash guard. Voices the
+    -- mixer has finished with have to keep being reaped, and a sound that
+    -- sticks because the game crashed or the window went to the background is
+    -- a second failure on top of the first. The step goes in because a keyed
+    -- cooldown is measured against it, which is also why it is this dt and not
+    -- the suspension-guarded one: time passes while a game is suspended.
+    if self.audio ~= nil then self.audio:update(dt) end
 
     timing.finish(FRAME, frameStart)
 

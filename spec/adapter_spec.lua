@@ -31,20 +31,32 @@ local C = sdl.C
 -- gets without a clip.
 local function fakeAudio()
     local backend = { name = "spec.console.audio", opens = 0 }
-    backend.openDevice = function(spec)
+    backend.open = function(spec)
         backend.opens = backend.opens + 1
         backend.spec = spec
-        return 41
+        return { id = 41 }
     end
-    backend.closeDevice = function() end
-    backend.createStream = function() return {} end
-    backend.destroyStream = function() end
-    backend.bindStream = function() return true end
-    backend.unbindStream = function() end
-    backend.putData = function() return true end
-    backend.pendingBytes = function() return 0 end
-    backend.clearStream = function() end
-    backend.setStreamGain = function() return true end
+    backend.close = function() end
+    backend.setMixerGain = function() end
+    backend.createTrack = function() return {} end
+    backend.destroyTrack = function() end
+    backend.setTrackClip = function() return true end
+    backend.setTrackFile = function() return true end
+    backend.clearTrack = function() end
+    backend.play = function() return true end
+    backend.stop = function() end
+    backend.pause = function() end
+    backend.resume = function() end
+    backend.playing = function() return false end
+    backend.setGain = function() end
+    backend.setPitch = function() end
+    backend.setPosition = function() end
+    backend.clearPosition = function() end
+    backend.tag = function() end
+    backend.untag = function() end
+    backend.pauseTag = function() end
+    backend.resumeTag = function() end
+    backend.stopTag = function() end
     return backend
 end
 

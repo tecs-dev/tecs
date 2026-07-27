@@ -1,25 +1,35 @@
--- Sound output: clips, voices, gain, and the component that attaches one to
--- an entity.
+-- Sound output: clips, voices, groups, limits, and the component that
+-- attaches one to an entity.
 --
 -- Playback is driven through a substituted backend rather than through a
 -- sound card. No continuous-integration machine has one, and a machine that
 -- does cannot assert what came out of it: there is no readback for audio the
 -- way there is for a framebuffer. So what these tests assert is what was
--- asked of the platform. That a play queued exactly the bytes the clip holds,
--- that a gain reached the stream, that stopping unbound it, that a one-shot
--- whose queue drained gave its voice back, and that a looping one keeps being
--- topped up past the end of its clip.
+-- asked of the mixer. That a play pointed a track at the right input and
+-- started it with the right options, that a gain reached the track and the
+-- master reached the mixer, that stopping ended it, that a voice the mixer
+-- reports as finished gives its slot back, and that a group's operations go
+-- out as tag operations.
 --
--- Loading is the one half driven for real: the fixture is read and converted
--- by the asset worker, on a thread, which is what the "loading" status
--- immediately after the call proves.
+-- The mixer pulls rather than being fed, so the one thing a test drives is
+-- whether a track is still playing. Setting `track.playing = false` is what a
+-- mixer finishing a voice looks like from here, and every reaping test turns
+-- on it.
+--
+-- Loading is the one half driven for real: both fixtures are read and decoded
+-- by SDL_mixer on the asset worker, on a thread, which is what the "loading"
+-- status immediately after the call proves. `blip.ogg` is there so the Vorbis
+-- decoder is exercised rather than assumed; it was produced from `blip.wav`
+-- with `oggenc -q 4 -o spec/fixtures/blip.ogg spec/fixtures/blip.wav`.
 --
 -- What that leaves untested, rather than asserted: whether anything is
--- audible, whether SDL's mixer sums two bound streams the way its
--- documentation says, whether the logical device really follows the system
--- default when headphones are plugged in, and what the hardware does with a
--- gain above one. Those need a device and a pair of ears, and the tests here
--- prove the layer above them instead.
+-- audible, whether SDL_mixer sums two tracks the way its documentation says,
+-- whether a fade is actually a ramp rather than a cut, what a frequency ratio
+-- does to a decoder's output, whether 3D positioning puts a sound where it
+-- claims, whether the mixer really follows the system default when headphones
+-- are plugged in, and what the hardware does with a gain above one. Those
+-- need a device and a pair of ears, and the tests here prove the layer above
+-- them instead.
 
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
@@ -31,13 +41,12 @@ local tecs = require("tecs")
 local Audio = require("tecs.Audio")
 local assets = require("tecs.assets")
 
--- A tenth of a second of 16-bit mono at 48000 Hz, which converts to exactly
--- 38400 bytes of 32-bit float stereo. Whole numbers, so a byte count that is
--- off by a resample is off by a lot rather than by rounding.
+-- A tenth of a second of 16-bit mono at 48000 Hz, and the same tenth of a
+-- second encoded as Ogg Vorbis. Whole numbers, so a duration that is off by a
+-- resample is off by a lot rather than by rounding.
 local FIXTURE = "spec/fixtures/blip.wav"
-local CLIP_BYTES = 38400
--- The default lead, 0.25 seconds at 48000 Hz stereo float.
-local LEAD_BYTES = 96000
+local VORBIS = "spec/fixtures/blip.ogg"
+local CLIP_SECONDS = 0.1
 
 -- A backend that records what it was asked to do and reports back whatever a
 -- test tells it to. Nothing here reaches SDL, so it runs anywhere.
@@ -45,74 +54,141 @@ local function recorder(options)
     options = options or {}
     local backend = {
         name = "spec.audio",
-        streams = {},
+        tracks = {},
         opens = 0,
         closes = 0,
+        mixerGain = 1.0,
+        tagOps = {},
     }
 
-    function backend.openDevice(spec)
+    --- Every track carrying `tag`, which is how the mixer reaches a group.
+    local function tagged(tag)
+        local found = {}
+        for _, track in ipairs(backend.tracks) do
+            if track.tags[tag] then found[#found + 1] = track end
+        end
+        return found
+    end
+
+    function backend.open(spec)
         backend.opens = backend.opens + 1
         backend.spec = spec
-        if options.silent then return 0 end
-        return 7
+        if options.silent then return nil end
+        backend.mixer = { id = 7 }
+        return backend.mixer
     end
 
-    function backend.closeDevice(device)
+    function backend.close(mixer)
         backend.closes = backend.closes + 1
-        backend.device = device
+        backend.closed = mixer
     end
 
-    function backend.createStream()
-        local stream = {
-            index = #backend.streams + 1,
-            bound = false,
-            binds = 0,
-            unbinds = 0,
-            clears = 0,
-            gains = {},
-            queued = 0,
-            pending = 0,
-            puts = {},
+    function backend.setMixerGain(_mixer, gain)
+        backend.mixerGain = gain
+    end
+
+    function backend.createTrack(mixer)
+        local track = {
+            index = #backend.tracks + 1,
+            mixer = mixer,
+            playing = false,
+            paused = false,
+            plays = 0,
+            stops = 0,
             destroyed = false,
+            gain = 1.0,
+            gains = {},
+            pitch = 1.0,
+            tags = {},
+            input = nil,
+            position = nil,
+            params = nil,
+            fadeOutMs = nil,
         }
-        backend.streams[stream.index] = stream
-        return stream
+        backend.tracks[track.index] = track
+        return track
     end
 
-    function backend.destroyStream(stream) stream.destroyed = true end
+    function backend.destroyTrack(track) track.destroyed = true end
 
-    function backend.bindStream(device, stream)
-        backend.boundTo = device
-        stream.bound = true
-        stream.binds = stream.binds + 1
+    function backend.setTrackClip(track, clip)
+        if options.refuseInput then return false end
+        track.input = { kind = "clip", clip = clip }
         return true
     end
 
-    function backend.unbindStream(stream)
-        stream.bound = false
-        stream.unbinds = stream.unbinds + 1
-    end
-
-    function backend.putData(stream, _data, bytes)
-        stream.puts[#stream.puts + 1] = bytes
-        stream.queued = stream.queued + bytes
-        -- Nothing consumes it until a test says so, which is what makes the
-        -- device's progress something a test drives rather than waits for.
-        stream.pending = stream.pending + bytes
+    function backend.setTrackFile(track, path)
+        if options.refuseInput then return false end
+        track.input = { kind = "file", path = path }
         return true
     end
 
-    function backend.pendingBytes(stream) return stream.pending end
+    function backend.clearTrack(track) track.input = nil end
 
-    function backend.clearStream(stream)
-        stream.clears = stream.clears + 1
-        stream.pending = 0
+    function backend.play(track, params)
+        track.plays = track.plays + 1
+        -- Copied, because one options record is reused for every play.
+        track.params = {
+            loops = params.loops,
+            loopStartMs = params.loopStartMs,
+            fadeInMs = params.fadeInMs,
+            startMs = params.startMs,
+        }
+        track.playing = true
+        track.paused = false
+        return true
     end
 
-    function backend.setStreamGain(stream, gain)
-        stream.gain = gain
-        stream.gains[#stream.gains + 1] = gain
-        return true
+    function backend.stop(track, fadeMs)
+        track.stops = track.stops + 1
+        track.fadeOutMs = fadeMs
+        -- A fade keeps the mixer taking samples until it finishes, so only an
+        -- immediate stop ends the track here.
+        if fadeMs <= 0 then track.playing = false end
+    end
+
+    function backend.pause(track)
+        track.paused = true
+        track.playing = false
+    end
+
+    function backend.resume(track)
+        track.paused = false
+        track.playing = true
+    end
+
+    function backend.playing(track) return track.playing end
+
+    function backend.setGain(track, gain)
+        track.gain = gain
+        track.gains[#track.gains + 1] = gain
+    end
+
+    function backend.setPitch(track, ratio) track.pitch = ratio end
+
+    function backend.setPosition(track, x, y, z)
+        track.position = { x = x, y = y, z = z }
+    end
+
+    function backend.clearPosition(track) track.position = nil end
+
+    function backend.tag(track, tag) track.tags[tag] = true end
+    function backend.untag(track, tag) track.tags[tag] = nil end
+
+    function backend.pauseTag(_mixer, tag)
+        backend.tagOps[#backend.tagOps + 1] = { op = "pause", tag = tag }
+        for _, track in ipairs(tagged(tag)) do backend.pause(track) end
+    end
+
+    function backend.resumeTag(_mixer, tag)
+        backend.tagOps[#backend.tagOps + 1] = { op = "resume", tag = tag }
+        for _, track in ipairs(tagged(tag)) do backend.resume(track) end
+    end
+
+    function backend.stopTag(_mixer, tag, fadeMs)
+        backend.tagOps[#backend.tagOps + 1] =
+            { op = "stop", tag = tag, fadeMs = fadeMs }
+        for _, track in ipairs(tagged(tag)) do backend.stop(track, fadeMs) end
     end
 
     return backend
@@ -131,11 +207,11 @@ local function holds(value, wanted)
 end
 
 --- An audio object on a recording backend, with its fixture already loaded.
-local function loaded(config)
+local function loaded(config, path)
     config = config or {}
     config.backend = config.backend or recorder()
     local audio = Audio.create(config)
-    local clip = audio:load(FIXTURE)
+    local clip = audio:load(path or FIXTURE)
     audio:waitForLoads()
     return audio, clip, config.backend
 end
@@ -143,6 +219,19 @@ end
 describe("audio", function()
     teardown(function()
         assets.shutdown()
+    end)
+
+    describe("the build", function()
+        it("carries a decoder for every fixture it is asked to read",
+            function()
+            local names = {}
+            for _, decoder in ipairs(Audio.decoders()) do
+                names[decoder] = true
+            end
+            assert.is_true(names.WAV, "the built-in WAV reader is not optional")
+            assert.is_true(names.VORBIS or names.STBVORBIS,
+                "an Ogg Vorbis decoder, under either backend's name")
+        end)
     end)
 
     describe("clips", function()
@@ -160,14 +249,18 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("converts to the output format while it is off the thread",
-            function()
-            -- The fixture is mono at 48000; the output is stereo. A duration
-            -- of a tenth of a second means the conversion landed, since the
-            -- byte count doubled and the frame count did not.
+        it("reads a compressed file, not only PCM", function()
+            local audio, clip = loaded(nil, VORBIS)
+            assert.are.equal("ready", clip.status,
+                "the mixer's decoders are what make this more than WAV")
+            assert.is_true(math.abs(clip.duration - CLIP_SECONDS) < 1e-3,
+                "a tenth of a second, whatever container it arrived in")
+            audio:destroy()
+        end)
+
+        it("reports the length the file states", function()
             local audio, clip = loaded()
-            assert.is_true(math.abs(clip.duration - 0.1) < 1e-6,
-                "a tenth of a second, whatever the file's channel count")
+            assert.is_true(math.abs(clip.duration - CLIP_SECONDS) < 1e-6)
             audio:destroy()
         end)
 
@@ -193,32 +286,82 @@ describe("audio", function()
         end)
     end)
 
+    describe("resident and streamed", function()
+        it("holds a clip shorter than the threshold in memory", function()
+            local audio, clip = loaded({ streamSeconds = 10 })
+            assert.is_true(clip.resident,
+                "a sound effect is decoded once and read by every voice")
+            audio:destroy()
+        end)
+
+        it("streams one at or over the threshold", function()
+            local audio, clip = loaded({ streamSeconds = 0.05 }, VORBIS)
+            assert.is_false(clip.resident,
+                "a long clip is not worth a decoded copy")
+            assert.is_nil(clip._handle.audio,
+                "and nothing was loaded to hold one")
+            audio:destroy()
+        end)
+
+        it("takes an explicit answer over the threshold", function()
+            local audio = Audio.create({
+                backend = recorder(), streamSeconds = 10,
+            })
+            local streamed = audio:load(VORBIS, { stream = true })
+            audio:waitForLoads()
+            assert.is_false(streamed.resident)
+
+            local other = Audio.create({
+                backend = recorder(), streamSeconds = 0.05,
+            })
+            local kept = other:load(FIXTURE, { stream = false })
+            other:waitForLoads()
+            assert.is_true(kept.resident)
+
+            audio:destroy()
+            other:destroy()
+        end)
+
+        it("points a streamed voice at the file and a resident one at the clip",
+            function()
+            local streaming, music, backend =
+                loaded({ streamSeconds = 0.05 }, VORBIS)
+            streaming:play(music)
+            assert.are.equal("file", backend.tracks[1].input.kind)
+            assert.are.equal(VORBIS, backend.tracks[1].input.path)
+            streaming:destroy()
+
+            local audio, clip, other = loaded()
+            audio:play(clip)
+            assert.are.equal("clip", other.tracks[1].input.kind)
+            audio:destroy()
+        end)
+    end)
+
     describe("playing", function()
-        it("queues the clip's bytes on a bound stream", function()
+        it("starts one track per voice", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip)
 
             assert.is_true(voice > 0)
-            assert.are.equal(1, #backend.streams)
-            local stream = backend.streams[1]
-            assert.is_true(stream.bound)
-            assert.are.equal(7, backend.boundTo, "bound to the opened device")
-            assert.are.equal(CLIP_BYTES, stream.queued,
-                "a one-shot shorter than the lead goes in whole")
+            assert.are.equal(1, #backend.tracks)
+            local track = backend.tracks[1]
+            assert.is_true(track.playing)
+            assert.are.equal(1, track.plays)
+            assert.are.equal(backend.mixer, track.mixer,
+                "made on the mixer that was opened")
             assert.are.equal(1, audio:sounding())
             audio:destroy()
         end)
 
-        it("plays the same clip twice over, on a stream each", function()
+        it("plays the same clip twice over, on a track each", function()
             local audio, clip, backend = loaded()
             local first = audio:play(clip)
             local second = audio:play(clip)
 
             assert.are_not.equal(first, second)
-            assert.are.equal(2, #backend.streams,
-                "mixing is the platform's job, so two sounds are two streams")
-            assert.are.equal(CLIP_BYTES, backend.streams[1].queued)
-            assert.are.equal(CLIP_BYTES, backend.streams[2].queued)
+            assert.are.equal(2, #backend.tracks,
+                "mixing is the mixer's job, so two sounds are two tracks")
             assert.are.equal(2, audio:sounding())
             audio:destroy()
         end)
@@ -229,66 +372,72 @@ describe("audio", function()
             assert.is_true(audio:play(clip) > 0)
 
             assert.are.equal(0, audio:play(clip))
-            assert.are.equal(2, #backend.streams)
+            assert.are.equal(2, #backend.tracks)
             assert.are.equal(2, audio:sounding())
             audio:destroy()
         end)
 
-        it("puts gain on the stream, before and during playback", function()
+        it("puts gain on the track and the master on the mixer", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip, { gain = 0.25 })
-            local stream = backend.streams[1]
+            local track = backend.tracks[1]
 
-            assert.are.equal(0.25, stream.gain)
+            assert.are.equal(0.25, track.gain)
             audio:setGain(voice, 0.5)
-            assert.are.equal(0.5, stream.gain)
+            assert.are.equal(0.5, track.gain)
 
             audio:setMasterGain(0.5)
-            assert.are.equal(0.25, stream.gain,
-                "the master scales what is already sounding")
+            assert.are.equal(0.5, backend.mixerGain,
+                "the master is the mixer's own number, not every voice's")
+            assert.are.equal(0.5, track.gain,
+                "so a voice's gain is left exactly as it was asked for")
+            assert.are.equal(0.5, audio:masterGain())
             audio:destroy()
         end)
 
-        it("unbinds and empties the stream when a voice is stopped", function()
+        it("ends and detaches a track when a voice is stopped", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip)
-            local stream = backend.streams[1]
+            local track = backend.tracks[1]
 
             audio:stop(voice)
-            assert.is_false(stream.bound)
-            assert.are.equal(1, stream.unbinds)
-            assert.are.equal(1, stream.clears,
-                "an unbound stream keeps what it holds, so it is cleared too")
+            assert.is_false(track.playing)
+            assert.are.equal(1, track.stops)
+            assert.is_nil(track.input,
+                "the input is dropped, so a streamed voice closes its file")
             assert.is_false(audio:playing(voice))
             assert.are.equal(0, audio:sounding())
             audio:destroy()
         end)
 
-        it("gives a voice back once its queue has drained", function()
+        it("gives a voice back once the mixer says it has finished", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip)
-            local stream = backend.streams[1]
+            local track = backend.tracks[1]
             assert.is_true(audio:playing(voice))
 
-            -- What a device consuming everything looks like from here.
-            stream.pending = 0
-            audio:update()
+            audio:update(1 / 60)
+            assert.is_true(audio:playing(voice),
+                "a voice the mixer is still taking samples from stays")
+
+            -- What a mixer running a voice to its end looks like from here.
+            track.playing = false
+            audio:update(1 / 60)
 
             assert.is_false(audio:playing(voice))
             assert.are.equal(0, audio:sounding())
-            assert.is_false(stream.bound)
             audio:destroy()
         end)
 
-        it("reuses a released stream for the next sound", function()
+        it("reuses a released track for the next sound", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip)
-            backend.streams[1].pending = 0
-            audio:update()
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
 
             local again = audio:play(clip)
-            assert.are.equal(1, #backend.streams, "the stream is pooled")
-            assert.are.equal(2, backend.streams[1].binds)
+            assert.are.equal(1, #backend.tracks, "the track is pooled")
+            assert.are.equal(2, backend.tracks[1].plays)
             assert.are_not.equal(voice, again,
                 "a reused slot answers to a new handle")
             audio:destroy()
@@ -297,57 +446,376 @@ describe("audio", function()
         it("leaves a handle to a finished voice inert", function()
             local audio, clip, backend = loaded()
             local stale = audio:play(clip)
-            backend.streams[1].pending = 0
-            audio:update()
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
 
             local live = audio:play(clip, { gain = 0.75 })
             audio:setGain(stale, 0.1)
-            assert.are.equal(0.75, backend.streams[1].gain,
+            assert.are.equal(0.75, backend.tracks[1].gain,
                 "the stale handle must not reach the sound that replaced it")
             audio:stop(stale)
             assert.is_true(audio:playing(live))
             audio:destroy()
         end)
+
+        it("holds one voice without reaping it", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+
+            audio:pause(voice)
+            assert.is_true(backend.tracks[1].paused)
+            assert.is_true(audio:paused(voice))
+
+            audio:update(1 / 60)
+            assert.is_true(audio:playing(voice),
+                "a paused track reports that it is not playing, and reaping "
+                    .. "on that alone would collect it")
+
+            audio:resume(voice)
+            assert.is_false(audio:paused(voice))
+            assert.is_true(backend.tracks[1].playing)
+            audio:destroy()
+        end)
+
+        it("declines when the mixer will not take the input", function()
+            local audio, clip, backend =
+                loaded({ backend = recorder({ refuseInput = true }) })
+            assert.are.equal(0, audio:play(clip))
+            assert.are.equal(0, audio:sounding())
+            assert.are.equal(0, backend.tracks[1].plays,
+                "a track with no input is never started")
+            assert.is_nil(backend.tracks[1].input,
+                "and a resident clip that was refused does not fall back to "
+                    .. "reading the file")
+            audio:destroy()
+        end)
     end)
 
-    describe("feeding", function()
-        it("queues no more than the lead", function()
-            -- The clip is shorter than the lead, so a one-shot fits; a loop
-            -- is what shows the ceiling.
+    describe("looping and start points", function()
+        it("asks for an endless loop rather than a count", function()
             local audio, clip, backend = loaded()
             audio:play(clip, { loop = true })
-            assert.are.equal(LEAD_BYTES, backend.streams[1].queued)
+            assert.are.equal(-1, backend.tracks[1].params.loops)
             audio:destroy()
         end)
 
-        it("keeps topping a looping voice up past the end of its clip",
+        it("plays once by default", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip)
+            assert.are.equal(0, backend.tracks[1].params.loops)
+            audio:destroy()
+        end)
+
+        it("carries a loop point and a start offset in milliseconds",
             function()
             local audio, clip, backend = loaded()
-            local voice = audio:play(clip, { loop = true })
-            local stream = backend.streams[1]
+            audio:play(clip, { loop = true, loopStart = 0.02, start = 0.05 })
+            local params = backend.tracks[1].params
+            assert.are.equal(20, params.loopStartMs,
+                "so an intro plays once and the rest of it repeats")
+            assert.are.equal(50, params.startMs)
+            audio:destroy()
+        end)
+    end)
 
-            stream.pending = 0
-            audio:update()
+    describe("fades", function()
+        it("hands a fade-in to the mixer rather than ramping gain here",
+            function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { gain = 0.8, fadeIn = 0.25 })
+            local track = backend.tracks[1]
 
-            assert.are.equal(LEAD_BYTES * 2, stream.queued)
-            assert.is_true(audio:playing(voice),
-                "a loop does not end when the clip does")
+            assert.are.equal(250, track.params.fadeInMs)
+            assert.are.equal(0.8, track.gain,
+                "the gain is where it will end up; the ramp is the mixer's")
+            assert.is_true(audio:playing(voice))
             audio:destroy()
         end)
 
-        it("tops a one-shot up only as far as it goes", function()
-            -- A lead shorter than the clip, so the clip arrives in pieces.
-            local audio, clip, backend = loaded({ lead = 0.05 })
+        it("keeps a faded-out voice until the mixer has finished it",
+            function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            local track = backend.tracks[1]
+
+            audio:stop(voice, 0.5)
+            assert.are.equal(500, track.fadeOutMs)
+            assert.is_true(track.playing)
+            assert.is_true(audio:playing(voice),
+                "a fading voice has not finished, so it keeps its slot")
+
+            audio:update(1 / 60)
+            assert.are.equal(1, audio:sounding())
+
+            track.playing = false
+            audio:update(1 / 60)
+            assert.is_false(audio:playing(voice))
+            assert.are.equal(0, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("ignores a second stop while one is fading", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:stop(voice, 0.5)
+            audio:stop(voice)
+            assert.are.equal(1, backend.tracks[1].stops)
+            assert.is_true(audio:playing(voice))
+            audio:destroy()
+        end)
+    end)
+
+    describe("pitch", function()
+        it("sets a rate only when one was asked for", function()
+            local audio, clip, backend = loaded()
             audio:play(clip)
+            assert.are.equal(1.0, backend.tracks[1].pitch)
 
-            local stream = backend.streams[1]
-            assert.are.equal(19200, stream.queued)
+            local voice = audio:play(clip, { pitch = 1.5 })
+            assert.are.equal(1.5, backend.tracks[2].pitch)
+            audio:setPitch(voice, 0.5)
+            assert.are.equal(0.5, backend.tracks[2].pitch)
+            audio:destroy()
+        end)
 
-            stream.pending = 0
-            audio:update()
-            assert.are.equal(CLIP_BYTES, stream.queued,
-                "the rest of the clip, and not a byte more")
-            assert.are.equal(2, #stream.puts)
+        it("returns a reused track to the rate the next voice asked for",
+            function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { pitch = 1.5 })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            audio:play(clip)
+            assert.are.equal(1.0, backend.tracks[1].pitch,
+                "the next sound on this slot must not inherit a rate")
+            audio:destroy()
+        end)
+
+        it("spreads variance around the rate that was asked for", function()
+            local audio, clip, backend = loaded({ maxVoices = 16 })
+            local spread = {}
+            for _ = 1, 16 do
+                audio:play(clip, { pitch = 2.0, pitchVariance = 0.1 })
+            end
+            for index = 1, 16 do
+                local pitch = backend.tracks[index].pitch
+                assert.is_true(pitch >= 1.8 and pitch <= 2.2,
+                    "a tenth either side of the rate, and no further")
+                spread[pitch] = true
+            end
+            local distinct = 0
+            for _ in pairs(spread) do distinct = distinct + 1 end
+            assert.is_true(distinct > 1,
+                "forty of one sound must not all come out at one pitch")
+            audio:destroy()
+        end)
+    end)
+
+    describe("groups", function()
+        it("tags a voice with its group", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { group = "music" })
+            assert.is_true(backend.tracks[1].tags.music)
+            audio:destroy()
+        end)
+
+        it("scales the voices in a group, and later joiners too", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { gain = 0.5, group = "sfx" })
+            audio:play(clip, { gain = 1.0, group = "music" })
+
+            audio:setGroupGain("sfx", 0.5)
+            assert.are.equal(0.25, backend.tracks[1].gain,
+                "the group multiplies what the voice asked for")
+            assert.are.equal(1.0, backend.tracks[2].gain,
+                "and reaches nothing outside it")
+            assert.are.equal(0.5, audio:groupGain("sfx"))
+
+            audio:play(clip, { gain = 0.4, group = "sfx" })
+            assert.are.equal(0.2, backend.tracks[3].gain)
+            audio:destroy()
+        end)
+
+        it("pauses and resumes a group through the mixer's tags", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { group = "sfx" })
+            local other = audio:play(clip)
+
+            audio:pauseGroup("sfx")
+            assert.are.same({ op = "pause", tag = "sfx" }, backend.tagOps[1])
+            assert.is_true(backend.tracks[1].paused)
+            assert.is_false(backend.tracks[2].paused, "and only that group")
+            assert.is_true(audio:paused(voice))
+            assert.is_false(audio:paused(other))
+
+            audio:update(1 / 60)
+            assert.is_true(audio:playing(voice),
+                "a paused voice is held, not finished")
+            assert.are.equal(2, audio:sounding())
+
+            audio:resumeGroup("sfx")
+            assert.are.equal("resume", backend.tagOps[2].op)
+            assert.is_false(backend.tracks[1].paused)
+            assert.is_false(audio:paused(voice))
+            audio:destroy()
+        end)
+
+        it("stops a group at once", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { group = "sfx" })
+            local other = audio:play(clip, { group = "music" })
+
+            audio:stopGroup("sfx")
+            assert.are.equal("stop", backend.tagOps[1].op)
+            assert.are.equal(0, backend.tagOps[1].fadeMs)
+            assert.is_false(audio:playing(voice))
+            assert.is_true(audio:playing(other))
+            assert.are.equal(1, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("stops a group over a fade", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { group = "music" })
+
+            audio:stopGroup("music", 1.5)
+            assert.are.equal(1500, backend.tagOps[1].fadeMs)
+            assert.is_true(audio:playing(voice),
+                "a group fading out is still sounding")
+
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            assert.is_false(audio:playing(voice))
+            audio:destroy()
+        end)
+
+        it("untags a track when its voice ends, so the next one is clean",
+            function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { group = "sfx" })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            assert.is_nil(backend.tracks[1].tags.sfx)
+
+            audio:play(clip, { group = "music" })
+            assert.is_nil(backend.tracks[1].tags.sfx)
+            assert.is_true(backend.tracks[1].tags.music)
+            audio:destroy()
+        end)
+    end)
+
+    describe("keyed limits", function()
+        it("caps how many voices one key holds", function()
+            local audio, clip = loaded()
+            audio:setLimit("hit", { voices = 3 })
+
+            for _ = 1, 3 do
+                assert.is_true(audio:play(clip, { key = "hit" }) > 0)
+            end
+            assert.are.equal(0, audio:play(clip, { key = "hit" }),
+                "forty enemies dying together do not play forty sounds")
+            assert.are.equal(3, audio:keyCount("hit"))
+            assert.is_true(audio:play(clip) > 0, "and other sounds still start")
+            audio:destroy()
+        end)
+
+        it("frees a key's room when a voice ends", function()
+            local audio, clip, backend = loaded()
+            audio:setLimit("hit", { voices = 1 })
+            local voice = audio:play(clip, { key = "hit" })
+            assert.are.equal(0, audio:play(clip, { key = "hit" }))
+
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            assert.are.equal(0, audio:keyCount("hit"))
+            assert.is_false(audio:playing(voice))
+            assert.is_true(audio:play(clip, { key = "hit" }) > 0)
+            audio:destroy()
+        end)
+
+        it("refuses a second start inside the cooldown", function()
+            local audio, clip = loaded()
+            audio:setLimit("hit", { cooldown = 0.05 })
+
+            assert.is_true(audio:play(clip, { key = "hit" }) > 0)
+            assert.are.equal(0, audio:play(clip, { key = "hit" }))
+
+            audio:update(0.02)
+            assert.are.equal(0, audio:play(clip, { key = "hit" }),
+                "the cooldown is measured against the frames that have run")
+
+            audio:update(0.04)
+            assert.is_true(audio:play(clip, { key = "hit" }) > 0)
+            audio:destroy()
+        end)
+
+        it("composes a limit with a group without either knowing the other",
+            function()
+            local audio, clip, backend = loaded()
+            audio:setLimit("hit", { voices = 2 })
+            audio:setGroupGain("sfx", 0.5)
+
+            local first = audio:play(clip,
+                { gain = 1.0, key = "hit", group = "sfx" })
+            audio:play(clip, { gain = 1.0, key = "hit", group = "sfx" })
+            assert.are.equal(0,
+                audio:play(clip, { key = "hit", group = "sfx" }),
+                "the key caps the count")
+            assert.are.equal(0.5, backend.tracks[1].gain,
+                "and the group sets the gain")
+            assert.is_true(backend.tracks[1].tags.sfx)
+
+            -- Stopping through the group also releases the key's count, since
+            -- both are torn down when the slot goes back.
+            audio:stopGroup("sfx")
+            assert.are.equal(0, audio:keyCount("hit"))
+            assert.is_false(audio:playing(first))
+            audio:destroy()
+        end)
+
+        it("counts nothing for a key with no limit", function()
+            local audio, clip = loaded()
+            for _ = 1, 5 do audio:play(clip, { key = "step" }) end
+            assert.are.equal(5, audio:keyCount("step"))
+            assert.is_nil(audio:limit("step"))
+            audio:destroy()
+        end)
+    end)
+
+    describe("spatial position", function()
+        it("passes a position through and nothing else", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip,
+                { spatial = true, x = 3, y = -1, z = 2 })
+            assert.are.same({ x = 3, y = -1, z = 2 },
+                backend.tracks[1].position)
+
+            audio:setPosition(voice, 4, 0, 0)
+            assert.are.same({ x = 4, y = 0, z = 0 },
+                backend.tracks[1].position)
+
+            audio:clearPosition(voice)
+            assert.is_nil(backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("leaves an unpositioned voice unpositioned", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip)
+            assert.is_nil(backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("clears a reused track's position", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { spatial = true, x = 9, y = 9, z = 9 })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            assert.is_nil(backend.tracks[1].position)
+
+            audio:play(clip)
+            assert.is_nil(backend.tracks[1].position,
+                "the next sound on this slot must not inherit a position")
             audio:destroy()
         end)
     end)
@@ -367,16 +835,43 @@ describe("audio", function()
             world:update(1 / 60)
 
             assert.are.equal(1, audio:sounding())
-            assert.are.equal(CLIP_BYTES, backend.streams[1].queued)
+            assert.is_true(backend.tracks[1].playing)
             assert.is_true(world:get(entity, Audio.Sound).voice > 0)
             audio:destroy()
         end)
 
-        it("carries the component's gain to the stream", function()
+        it("carries the component's gain to the track", function()
             local audio, clip, backend, world = scene()
             world:spawn(Audio.Sound(clip.id, 0.5))
             world:update(1 / 60)
-            assert.are.equal(0.5, backend.streams[1].gain)
+            assert.are.equal(0.5, backend.tracks[1].gain)
+            audio:destroy()
+        end)
+
+        it("carries pitch and position", function()
+            local audio, clip, backend, world = scene()
+            world:spawn(Audio.Sound(clip.id, 1.0, 0, 1.25, 1, 2, 3, 4))
+            world:update(1 / 60)
+
+            assert.are.equal(1.25, backend.tracks[1].pitch)
+            assert.are.same({ x = 2, y = 3, z = 4 },
+                backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("follows a moving sound", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(
+                Audio.Sound(clip.id, 1.0, 1, 1.0, 1, 0, 0, 0))
+            world:update(1 / 60)
+
+            world:getMut(entity, Audio.Sound).x = 5
+            world:update(1 / 60)
+            assert.are.equal(5, backend.tracks[1].position.x)
+
+            world:getMut(entity, Audio.Sound).spatial = 0
+            world:update(1 / 60)
+            assert.is_nil(backend.tracks[1].position)
             audio:destroy()
         end)
 
@@ -391,7 +886,7 @@ describe("audio", function()
 
             assert.are.equal(0, audio:sounding(),
                 "a looping sound outlives its entity unless something ends it")
-            assert.is_false(backend.streams[1].bound)
+            assert.is_false(backend.tracks[1].playing)
             audio:destroy()
         end)
 
@@ -404,7 +899,7 @@ describe("audio", function()
             world:update(1 / 60)
 
             assert.are.equal(0, audio:sounding())
-            assert.is_false(backend.streams[1].bound)
+            assert.is_false(backend.tracks[1].playing)
             audio:destroy()
         end)
 
@@ -414,8 +909,8 @@ describe("audio", function()
             local entity = world:spawn(Audio.Sound(clip.id))
             world:update(1 / 60)
 
-            backend.streams[1].pending = 0
-            audio:update()
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
             world:update(1 / 60)
 
             assert.are.equal(-1, world:get(entity, Audio.Sound).voice)
@@ -452,7 +947,8 @@ describe("audio", function()
 
         it("survives a round trip through a snapshot", function()
             local audio, clip, _, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 0.5, 1))
+            local entity = world:spawn(
+                Audio.Sound(clip.id, 0.5, 1, 1.5, 1, 7, 8, 9))
             world:update(1 / 60)
             assert.is_true(world:get(entity, Audio.Sound).voice > 0)
 
@@ -465,6 +961,10 @@ describe("audio", function()
             assert.are.equal(clip.id, restored.clip)
             assert.are.equal(0.5, restored.gain)
             assert.are.equal(1, restored.loop)
+            assert.are.equal(1.5, restored.pitch)
+            assert.are.equal(1, restored.spatial)
+            assert.are.equal(7, restored.x)
+            assert.are.equal(9, restored.z)
             assert.are.equal(0, restored.voice,
                 "a restored sound starts again rather than resuming")
             audio:destroy()
@@ -472,7 +972,7 @@ describe("audio", function()
     end)
 
     describe("no output", function()
-        it("keeps working when no device opens", function()
+        it("keeps working when no mixer opens", function()
             local backend = recorder({ silent = true })
             local audio = Audio.create({ backend = backend })
             local clip = audio:load(FIXTURE)
@@ -483,25 +983,30 @@ describe("audio", function()
                 "loading does not need an output")
             assert.are.equal(0, audio:play(clip))
             assert.are.equal(0, audio:sounding())
-            assert.are.equal(0, #backend.streams)
-            audio:update()
+            assert.are.equal(0, #backend.tracks)
+            audio:update(1 / 60)
+            audio:setMasterGain(0.5)
+            audio:setGroupGain("sfx", 0.5)
+            audio:pauseGroup("sfx")
+            audio:resumeGroup("sfx")
+            audio:stopGroup("sfx")
             audio:stopAll()
             audio:destroy()
         end)
     end)
 
     describe("shutdown", function()
-        it("closes the device and destroys every stream", function()
+        it("closes the mixer and destroys every track", function()
             local audio, clip, backend = loaded()
             audio:play(clip)
             audio:play(clip)
             audio:destroy()
 
             assert.are.equal(1, backend.closes)
-            assert.are.equal(7, backend.device)
-            for _, stream in ipairs(backend.streams) do
-                assert.is_true(stream.destroyed)
-                assert.is_false(stream.bound)
+            assert.are.equal(backend.mixer, backend.closed)
+            for _, track in ipairs(backend.tracks) do
+                assert.is_true(track.destroyed)
+                assert.is_false(track.playing)
             end
             assert.are.equal(0, audio:sounding())
         end)

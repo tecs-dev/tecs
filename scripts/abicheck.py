@@ -20,6 +20,10 @@ REPO = Path(__file__).resolve().parent.parent
 
 LIBRARIES = [
     {"name": "sdl3", "headers": ["SDL3/SDL.h"], "module": "sdl3"},
+    # `requires` names bindings that must be declared first. SDL_mixer's
+    # header is written against SDL's types, so its cdef does not parse alone.
+    {"name": "sdl3mixer", "headers": ["SDL3_mixer/SDL_mixer.h"],
+     "module": "sdl3-mixer", "requires": ["sdl3"]},
     {"name": "box2d", "headers": ["box2d/box2d.h"], "module": None},
     {"name": "shaderc", "headers": ["shaderc/shaderc.h"], "module": "shaderc"},
 ]
@@ -182,13 +186,17 @@ def cReport(headers, includeDirs, records):
     return report
 
 
-def luaReport(name: str, records):
+def luaReport(name: str, records, requires=()):
     """Ask LuaJIT for its view of the same records."""
     wanted = [{"name": n, "fields": f} for n, _k, f in records]
+    declare = "\n".join(
+        f'ffi.cdef(require("tecs.ffi.{dep}cdef"))' for dep in requires
+    )
     script = """
 local ffi = require("ffi")
 local json = ...
 package.path = "%s/?.lua;%s/?/init.lua;" .. package.path
+%s
 local cdefSource = require("tecs.ffi.%scdef")
 ffi.cdef(cdefSource)
 local out = {}
@@ -207,7 +215,7 @@ for line in io.lines(json) do
     end
 end
 print(table.concat(out, "\\n"))
-""" % (GEN.parent.parent, GEN.parent.parent, name)
+""" % (GEN.parent.parent, GEN.parent.parent, declare, name)
 
     with tempfile.TemporaryDirectory() as d:
         listing = Path(d) / "records.txt"
@@ -252,7 +260,7 @@ def main():
             continue
 
         fromC = cReport(lib["headers"], includes, records)
-        fromLua = luaReport(name, records)
+        fromLua = luaReport(name, records, lib.get("requires", ()))
 
         checked = 0
         for recordName, _kind, fields in records:
