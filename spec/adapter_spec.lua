@@ -146,9 +146,9 @@ describe("platform contract", function()
         end)
 
         assert.are.same({ "keyDown", "mouseMotion" }, seen)
-        assert.is_true(input:isKeyDown(44),
+        assert.is_true(input:keyDown(44),
             "a platform key press must reach the live tier")
-        assert.is_true(input:isKeyPressed(44), "and the frame tier")
+        assert.is_true(input:keyPressed(44), "and the frame tier")
         assert.are.equal(120, input.mouseX)
         assert.are.equal(48, input.mouseY)
     end)

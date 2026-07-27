@@ -37,6 +37,7 @@ local type sheet = require("tecs.gfx.sheet")
 local type animation = require("tecs.gfx.animation")
 local type Window = require("tecs.platform.Window")
 local type Input = require("tecs.platform.Input")
+local type Gamepad = require("tecs.platform.Gamepad")
 local type clock = require("tecs.platform.clock")
 local type events = require("tecs.platform.events")
 local type capabilities = require("tecs.platform.capabilities")
@@ -97,6 +98,7 @@ local record tecs
     animation: animation
     Window: Window
     Input: Input
+    Gamepad: Gamepad
     clock: clock
     events: events
     capabilities: capabilities
@@ -270,6 +272,7 @@ local ENGINE <const>: {string: string} = {
     animation = "tecs.gfx.animation",
     Window = "tecs.platform.Window",
     Input = "tecs.platform.Input",
+    Gamepad = "tecs.platform.Gamepad",
     clock = "tecs.platform.clock",
     events = "tecs.platform.events",
     capabilities = "tecs.platform.capabilities",

@@ -54,12 +54,13 @@ Working today:
 - Physics in the world: a RigidBody component holding a value-typed Box2D
   handle, stepped in the fixed phases, solved across a native thread pool, and
   written back from the movement Box2D reports rather than by asking per body
-- Input in three tiers behind a layer stack, latched for fixed steps
+- Input in three tiers behind a layer stack, latched for fixed steps, with
+  per-device gamepads, text input bound to a layer, touch and pen
 - Worker threads with serialized channels, and asset loading that decodes on
   one and uploads on the main thread
 - Frame pacing from the swapchain, with no sleep heuristic
 - Shaders packaged as artifacts, so a release links no compiler
-- A platform contract with five seams, and an SDL implementation of all five
+- A platform contract with six seams, and an SDL implementation of all six
 - A debug server over HTTP that survives a crash in game code, with tools that
   read and write the world
 - Per-stage frame timing with percentiles, which is how any of the numbers in
@@ -169,8 +170,22 @@ of being dropped, so upgrading SDL surfaces new input rather than silently
 losing it.
 
 A touch finger's identity is 64 bits and does not fit a double, so it is
-carried as an opaque string. Reporting it as a number would round, and two
-distinct fingers could collapse into one.
+carried as an opaque string, and so is the touch device it belongs to.
+Reporting either as a number would round, and two distinct fingers could
+collapse into one.
+
+A recognised kind means usable fields. An event whose kind is named and whose
+payload was left unread is worse than an unknown one, because the caller has
+every reason to trust it, so text, composition, candidates, drops, the
+clipboard, sensors and gamepad touchpads all convert their payloads. Several of
+those carry pointers into memory SDL recycles as soon as the callback returns,
+so the C host copies those bytes into the queue it owns and frees them when the
+queue drains. Retaining the pointer is a use-after-free that reads as an
+occasional garbled string.
+
+A mouse event the platform synthesised from a touch or a pen is marked as such.
+Those arrive beside the finger events they were made from, and a game handling
+both would otherwise act on one gesture twice.
 
 The engine acts on lifecycle and input events and then hands every event to the
 game anyway. An engine that consumed events would leave a game unable to tell
@@ -223,8 +238,45 @@ everything beneath it, so a menu suppresses gameplay without gameplay code
 knowing a menu exists. Code that names no layer reads the base layer, which is
 the safe default: it goes quiet when anything is pushed over it.
 
-The state is fed one `SDL_Event` at a time and holds no globals, so a recorded
-session replays by feeding the same events back through `events.source`.
+A gamepad is not part of that state. It has identity, a lifetime shorter than
+the process, metadata, capabilities that differ between devices, and outputs, so
+it is an object reached through `input:gamepads()` and it answers for itself.
+Two pads sharing one button set is not a simplification but a defect: pad A
+releasing a button releases pad B's. Devices already attached are opened before
+a game's `load` runs, because the platform reports additions and not devices
+that were there all along.
+
+A reference to a pad that went away is safe by construction rather than by
+documented caution. The platform handle lives in one field, one function reads
+it, and disconnection clears it before the handle is closed, so every method
+takes its quiet branch: buttons read as released, outputs report failure, and
+nothing reaches a freed pointer. A reconnect produces a new object, so an old
+reference never comes back to life.
+
+Buttons are named positionally: `south`, `east`, `leftShoulder`, `dpadUp`, and
+axes `leftX`, `leftTrigger`. `south` is the button nearest the player on every
+pad, where `a` is that button on some and the one to its right on others. What
+is printed on the hardware is a separate question and `pad:label(button)`
+answers it, because a prompt has to show the player their own controller.
+
+Text input is off until asked for and is bound to a layer, so popping the menu
+that started it stops the input method and takes the on-screen keyboard with
+it. That is the case nobody remembers to handle. Composition is reported
+separately from committed text, so a field draws what is being typed before it
+commits, and an area is passed so the platform places its candidate window
+clear of what the player is looking at.
+
+Held state clears on focus loss and on device removal. The platform delivers no
+release for a key held as the window loses focus, and a button left held on a
+device that is gone is worse than one that never worked.
+
+Queries are never answered by polling the device. `SDL_GetKeyboardState` and
+its relatives are read when a device is opened or resynchronised and never
+after, because a poll bypasses replay, layers, edge detection and latching, all
+of which are the point. The state is fed typed events and holds no globals, so
+a recorded session replays by feeding the same events back through
+`events.source`, and every outbound command goes through a backend for the same
+reason.
 
 ## The Tecs binding
 
@@ -535,7 +587,7 @@ installed tree runs from an unrelated directory with nothing in the environment.
 SDL covers every platform this engine can be built for openly. It does not
 cover the ones whose SDKs are licensed, and those cannot live in this repository
 even for someone who holds a licence, because their headers may not be
-redistributed. So the engine names its platform seams instead. There are five,
+redistributed. So the engine names its platform seams instead. There are six,
 and a port supplies these and touches nothing above them:
 
 ```
@@ -543,7 +595,8 @@ and a port supplies these and touches nothing above them:
  ──────────  ─────────────────────────────────────────  ───────────────────────
  lifecycle   A host that calls _init, _receive,         its own entry point
              _iterate, _shutdown
- events      Typed events, produced directly           adapter.events
+ events      Typed events, produced directly            adapter.events
+ input       Devices, rumble, cursor modes, text input  adapter.input
  static FFI  Function pointers taken at build time      native/registry.c
  storage     Content and writable roots                 adapter.basePath/prefPath
  shaders     A pack in the platform's own format        adapter.shaderFormat
@@ -553,8 +606,11 @@ Each is a seam rather than a fork because everything above it is already
 indifferent to the answer. The application is an object a host drives rather
 than a function that runs until done, which is why iOS and a console SDK can
 both call the same four methods. Events are one typed stream discriminated by
-`kind`, so a platform with no `SDL_Event` produces those values directly. A
-target that forbids `dlopen` reaches its libraries through a table of pointers
+`kind`, so a platform with no `SDL_Event` produces those values directly.
+Input needs a second face because rumble, an LED, a cursor mode and a text
+input session are commands going the other way, and no event vocabulary can
+express one. A target that forbids `dlopen` reaches its libraries through a
+table of pointers
 taken at build time, and nothing calls `ffi.load` when one is present. The pack
 layout does not change for a platform with private bytecode; only the declared
 format does.

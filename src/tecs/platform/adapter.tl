@@ -6,7 +6,7 @@
 --- the engine names its platform seams instead, and a licensed port supplies a
 --- platform through this module without touching anything above it.
 ---
---- There are five seams, and the reason each is a seam rather than a fork is
+--- There are six seams, and the reason each is a seam rather than a fork is
 --- that everything else in the engine is already indifferent to the answer:
 ---
 ---   lifecycle   SDL owns the loop and calls the application's `_init`,
@@ -21,6 +21,11 @@
 ---               translating an `SDL_Event`, which is what `events.source`
 ---               already exists for.
 ---
+---   input       The other direction. Rumble, an LED, a cursor mode and a text
+---               input session are commands a game issues, and no event
+---               vocabulary can express one. Device enumeration belongs here
+---               too, since a pad has to be opened before it reports anything.
+---
 ---   static FFI  A target that forbids `dlopen` cannot reach a library by
 ---               name, so function pointers are taken at build time and
 ---               installed as a table. Nothing calls `ffi.load` when one is
@@ -34,13 +39,14 @@
 ---               keyed by name. A platform with its own bytecode format
 ---               declares that format; the pack layout does not change.
 ---
---- Only storage and the shader format need to be *asked for*, which is what
---- this module does. The rest are already substitutable where they live, and
---- installing a platform wires them up.
+--- Only storage, the shader format and the input backend need to be *asked
+--- for*, which is what this module does. The rest are already substitutable
+--- where they live, and installing a platform wires them up.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local events <const> = require("tecs.platform.events")
+local inputbackend <const> = require("tecs.platform.inputbackend")
 
 local C <const> = sdl.C
 
@@ -67,6 +73,9 @@ local record adapter
         --- Delivers one iteration's input as typed events, in arrival order.
         --- Leave nil to keep SDL's queue, which the host already drains.
         events: function(handler: function(events.Event))
+
+        --- Devices and outbound input commands. Leave nil to keep SDL's.
+        input: inputbackend.Backend
 
         --- Whether a library can be loaded by name at run time.
         dynamicLibraries: boolean
@@ -105,6 +114,8 @@ local sdlPlatform <const>: adapter.Platform = {
     -- Nil: the C host drains SDL's queue and hands it over, so there is
     -- nothing for a platform hook to do.
     events = nil,
+
+    input = inputbackend.sdl,
 
     dynamicLibraries = not loader.isStatic("sdl3"),
 }

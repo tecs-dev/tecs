@@ -53,10 +53,16 @@ struct TecsHost {
     /* Copied out of SDL_AppEvent, whose pointer is only valid for that call. */
     SDL_Event *events;
     /* Performance counter reading taken as each event was handed over, one per
-     * entry of `events`. */
+     * entry of `events`. Parallel to `events` and grown with it, so an event
+     * and its stamp share an index for the whole life of the queue. */
     Uint64 *arrivals;
     uint32_t count;
     uint32_t capacity;
+    /* Everything the queue allocated to own a payload, freed together when the
+     * queue drains. */
+    void **owned;
+    uint32_t ownedCount;
+    uint32_t ownedCapacity;
     bool shutdownCalled;
 };
 
@@ -81,6 +87,111 @@ static bool reserveEvents(TecsHost *host, uint32_t needed)
 
     host->capacity = capacity;
     return true;
+}
+
+/* --------------------------------------------------------------- payloads */
+
+/* Records an allocation the queue owns, so it is freed with the queue rather
+ * than tracked by whichever event happens to point at it. */
+static bool retain(TecsHost *host, void *block)
+{
+    if (!block) return false;
+    if (host->ownedCount == host->ownedCapacity) {
+        uint32_t capacity = host->ownedCapacity ? host->ownedCapacity * 2 : 32;
+        void **grown = (void **)SDL_realloc(host->owned,
+                                            capacity * sizeof(void *));
+        if (!grown) return false;
+        host->owned = grown;
+        host->ownedCapacity = capacity;
+    }
+    host->owned[host->ownedCount++] = block;
+    return true;
+}
+
+static char *ownString(TecsHost *host, const char *text)
+{
+    if (!text) return NULL;
+    char *copy = SDL_strdup(text);
+    if (!copy) return NULL;
+    if (!retain(host, copy)) {
+        SDL_free(copy);
+        return NULL;
+    }
+    return copy;
+}
+
+static char **ownStrings(TecsHost *host, const char *const *items, int count)
+{
+    if (!items || count <= 0) return NULL;
+    char **copies = (char **)SDL_calloc((size_t)count, sizeof(char *));
+    if (!copies) return NULL;
+    if (!retain(host, copies)) {
+        SDL_free(copies);
+        return NULL;
+    }
+    for (int i = 0; i < count; i++) copies[i] = ownString(host, items[i]);
+    return copies;
+}
+
+/* Deep-copies whatever an event points at and repoints the copy at the result.
+ *
+ * SDL keeps the strings on text, composition, drop and clipboard events in a
+ * pool it recycles as soon as the callback returns, and the queue outlives that
+ * call by a whole frame. Retaining the pointers would hand Lua a string that
+ * had already been reused; copying here is what makes a recognised kind mean a
+ * usable payload. Anything that fails to copy becomes an empty payload rather
+ * than a dangling one, because a lost drop is recoverable and a freed pointer
+ * read from Lua is not. */
+static void ownPayload(TecsHost *host, SDL_Event *copy)
+{
+    switch (copy->type) {
+    case SDL_EVENT_TEXT_INPUT:
+        copy->text.text = ownString(host, copy->text.text);
+        break;
+
+    case SDL_EVENT_TEXT_EDITING:
+        copy->edit.text = ownString(host, copy->edit.text);
+        break;
+
+    case SDL_EVENT_TEXT_EDITING_CANDIDATES:
+        copy->edit_candidates.candidates =
+            (const char * const *)ownStrings(host,
+                copy->edit_candidates.candidates,
+                copy->edit_candidates.num_candidates);
+        if (!copy->edit_candidates.candidates) {
+            copy->edit_candidates.num_candidates = 0;
+            copy->edit_candidates.selected_candidate = -1;
+        }
+        break;
+
+    case SDL_EVENT_DROP_BEGIN:
+    case SDL_EVENT_DROP_FILE:
+    case SDL_EVENT_DROP_TEXT:
+    case SDL_EVENT_DROP_POSITION:
+    case SDL_EVENT_DROP_COMPLETE:
+        copy->drop.source = ownString(host, copy->drop.source);
+        copy->drop.data = ownString(host, copy->drop.data);
+        break;
+
+    case SDL_EVENT_CLIPBOARD_UPDATE:
+        copy->clipboard.mime_types =
+            (const char **)ownStrings(host,
+                (const char *const *)copy->clipboard.mime_types,
+                copy->clipboard.num_mime_types);
+        if (!copy->clipboard.mime_types) copy->clipboard.num_mime_types = 0;
+        break;
+
+    default:
+        break;
+    }
+}
+
+/* Frees every payload the drained queue owned. The event and stamp arrays
+ * themselves are kept and reused; only what they pointed at goes. */
+static void releasePayloads(TecsHost *host)
+{
+    for (uint32_t i = 0; i < host->ownedCount; i++) SDL_free(host->owned[i]);
+    host->ownedCount = 0;
 }
 
 /* ------------------------------------------------------------------- Lua */
@@ -221,7 +332,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 
     /* Copied rather than dispatched here. The pointer is only valid for this
      * call, and dispatching mid-frame would show the application a world that
-     * is halfway through an update. */
+     * is halfway through an update. What the event points at is copied too,
+     * for the same reason applied one level down. */
     if (!reserveEvents(host, host->count + 1)) return SDL_APP_FAILURE;
 
     /* Arrival is stamped here, where SDL hands the event over, because that is
@@ -234,7 +346,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
      * counter, so the two are the same magnitude only by an offset SDL does
      * not promise. Reading the counter here needs no such assumption. */
     host->arrivals[host->count] = SDL_GetPerformanceCounter();
-    host->events[host->count++] = *event;
+    host->events[host->count] = *event;
+    ownPayload(host, &host->events[host->count]);
+    host->count++;
     return SDL_APP_CONTINUE;
 }
 
@@ -246,6 +360,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     /* Drained whether or not the iteration succeeded, so a failing frame does
      * not replay its events into the next one. */
     host->count = 0;
+    releasePayloads(host);
 
     if (!keepGoing) {
         /* Distinguishing a requested stop from a failed one is the
@@ -268,6 +383,8 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
     }
 
     if (host->L) lua_close(host->L);
+    releasePayloads(host);
+    SDL_free(host->owned);
     SDL_free(host->events);
     SDL_free(host->arrivals);
     SDL_free(host);

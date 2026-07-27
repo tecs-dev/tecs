@@ -207,7 +207,7 @@ return tecs.application({
     update = function(app: tecs.Application)
         -- Reads the base layer, so this stops responding on its own if a
         -- menu layer is ever pushed over it.
-        if app.input:isKeyPressed("escape") then
+        if app.input:keyPressed("escape") then
             app.quitRequested = true
         end
     end,
