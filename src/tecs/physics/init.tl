@@ -139,6 +139,13 @@ function physics.attach(world: ecs.World, entity: integer,
         handle.world0 as number,
         handle.generation as number))
 
+    -- Seeded from where the body starts, so the first frame interpolates
+    -- between a real position and a real position rather than from the
+    -- origin. A body advances in fixed steps while frames arrive whenever the
+    -- display asks, so without this it steps visibly instead of moving.
+    world:set(entity, components.PreviousTransform(
+        transform.x, transform.y, transform.rotation))
+
     return body
 end
 

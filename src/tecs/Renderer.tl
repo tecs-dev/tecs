@@ -78,6 +78,8 @@ local QUAD_INDICES <const> = 6
 local CULL_GROUP <const> = 256
 
 local abs <const> = math.abs
+local PI <const> = math.pi
+local TWO_PI <const> = math.pi * 2.0
 
 --- Layers the image array holds, including the white default in layer zero.
 local MAX_LAYERS <const> = 64
@@ -103,6 +105,14 @@ end
 local record Renderer
     --- Seconds the last extraction took. Zero unless timing is on.
     _extractSeconds: number
+    --- How far through the current fixed step this frame falls, 0 to 1. Read
+    --- once per sync rather than per row, since it is the same for every
+    --- entity in the frame.
+    _alpha: number
+    --- Alpha the previous sync drew at, so a frame that lands at the same
+    --- point in the step as the last one rewrites nothing.
+    _lastAlpha: number
+    _world: ecs.World
     --- Staging slot this frame writes into, rotated after each submission.
     ---
     --- Rotating is what lets the mapping skip cycling. Cycling exists so a
@@ -207,6 +217,11 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
     local materialColumn = archetype:get(components.Material)
+    -- Loop invariant: an archetype either carries the previous transform or it
+    -- does not, so an entity that is not interpolated costs one test per run
+    -- rather than anything per row.
+    local previous = archetype:get(components.PreviousTransform)
+    local alpha <const> = self._alpha
 
     for row = 1, length do
         local transform = transforms[row]
@@ -250,6 +265,25 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         local angle = transform.rotation
         local scaleX = transform.scaleX
         local scaleY = transform.scaleY
+        local originX = transform.x
+        local originY = transform.y
+
+        if previous ~= nil then
+            local before = previous[row]
+            originX = before.x + (originX - before.x) * alpha
+            originY = before.y + (originY - before.y) * alpha
+
+            -- The shortest arc, because an angle that crossed pi would
+            -- otherwise be interpolated the long way round and the entity
+            -- would spin backwards through nearly a full turn on that frame.
+            local turn = angle - before.rotation
+            if turn > PI then
+                turn = turn - TWO_PI
+            elseif turn < -PI then
+                turn = turn + TWO_PI
+            end
+            angle = before.rotation + turn * alpha
+        end
 
         local base = (offset + row - 1) * INSTANCE_FLOATS
         floats[base] = angle
@@ -257,8 +291,8 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         floats[base + 2] = scaleY
         floats[base + 3] = 0.0
 
-        floats[base + 4] = transform.x
-        floats[base + 5] = transform.y
+        floats[base + 4] = originX
+        floats[base + 5] = originY
         floats[base + 6] = layer
         floats[base + 7] = material
 
@@ -287,8 +321,8 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         end
 
         local bound = (offset + row - 1) * BOUND_FLOATS
-        bounds[bound] = transform.x
-        bounds[bound + 1] = transform.y
+        bounds[bound] = originX
+        bounds[bound + 1] = originY
         bounds[bound + 2] = ex
         bounds[bound + 3] = ey
     end
@@ -335,6 +369,14 @@ local function syncInstances(self: Renderer): integer, integer, integer
         total = self.capacity
     end
 
+    -- An interpolated entity's drawn position moves with alpha even when the
+    -- simulation did not touch its transform, so the dirty bits alone would
+    -- hold it still between fixed steps. Alpha standing still is the case
+    -- where they are enough: a frame rate matching the step rate rewrites
+    -- nothing, which is what makes this cost nothing when it buys nothing.
+    local interpolating <const> = self._alpha ~= self._lastAlpha
+    self._lastAlpha = self._alpha
+
     local rewritten = 0
     local offset = 0
     -- A cursor rather than iter, because this stops once the buffer is full and
@@ -353,6 +395,8 @@ local function syncInstances(self: Renderer): integer, integer, integer
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
+            or (interpolating
+                and archetype:get(components.PreviousTransform) ~= nil)
 
         if dirty then
             writeRun(self, archetype, length, offset)
@@ -577,6 +621,36 @@ end
 --- afterwards against a frame, so the two stay separable: the sync needs no
 --- command buffer and the render needs no world.
 function Renderer:install(world: ecs.World)
+    self._world = world
+    self._alpha = 1.0
+    self._lastAlpha = 1.0
+
+    -- Snapshotting before anything in the step moves is what makes the pair a
+    -- pair: taken later, the two would be the same value and every frame would
+    -- draw the entity where the step left it.
+    local interpolated = world:query({
+        include = { components.Transform, components.PreviousTransform },
+    })
+    world:addSystem({
+        name = "tecs.SnapshotTransforms",
+        phase = ecs.phases.FixedFirst,
+        run = function()
+            for archetype, length in interpolated:iter() do
+                local transforms = archetype:get(components.Transform)
+                -- Mutable, because this writes every row it visits: the whole
+                -- column is what the next frame interpolates from.
+                local before = archetype:getMut(components.PreviousTransform)
+                for row = 1, length do
+                    local transform = transforms[row]
+                    local target = before[row]
+                    target.x = transform.x
+                    target.y = transform.y
+                    target.rotation = transform.rotation
+                end
+            end
+        end,
+    })
+
     self._renderables = world:query({
         include = {
             components.Transform, components.Tint, components.Renderable,
@@ -591,6 +665,12 @@ function Renderer:install(world: ecs.World)
         phase = ecs.phases.RenderFirst,
         run = function()
             local started = timing.begin()
+            -- Whatever the fixed steps left unconsumed, as a fraction of one
+            -- step. Read here rather than per row: it is the same for the
+            -- whole frame.
+            local timestep, accumulator = self._world:getFixedTiming()
+            self._alpha = timestep > 0.0 and accumulator / timestep or 1.0
+            if self._alpha > 1.0 then self._alpha = 1.0 end
             self.count, self.dropped, self.rewritten = syncInstances(self)
             self.deferred:setLights(syncLights(self))
             self._extractSeconds = timing.finish(EXTRACT, started)

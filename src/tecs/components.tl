@@ -18,6 +18,33 @@ local type Component = ecs.Component
 --- draw an entity that a parent transform or a tween had moved somewhere else.
 local Transform <const> = ecs.builtins.Transform
 
+--- The transform as it stood before the current fixed step.
+---
+--- Presence is the opt-in: an entity carrying it is drawn somewhere between
+--- this and its current transform, according to how far through the step the
+--- frame falls. Simulation advances in fixed jumps and frames arrive whenever
+--- the display asks for one, so without this an entity moved by physics steps
+--- visibly rather than moving.
+---
+--- Only the fields that move continuously are here. Scale and layer change by
+--- assignment rather than by integration, and a half-applied assignment is not
+--- a value anything asked for.
+local record PreviousTransform is Component
+    x: number
+    y: number
+    --- Radians.
+    rotation: number
+end
+
+ecs.newFFIComponent({
+    name = "PreviousTransform",
+    container = PreviousTransform,
+    fields = {
+        { "x", "float" }, { "y", "float" }, { "rotation", "float" },
+    },
+    defaults = { 0, 0, 0 },
+})
+
 --- Base colour written into the G-buffer's albedo target.
 local record Tint is Component
     r: number
@@ -189,6 +216,7 @@ ecs.newComponent({
 
 local record components
     Transform: Transform
+    PreviousTransform: PreviousTransform
     Tint: Tint
     Sprite: Sprite
     Material: Material
@@ -203,6 +231,7 @@ local record components
 end
 
 components.Transform = Transform
+components.PreviousTransform = PreviousTransform
 components.Tint = Tint
 components.Sprite = Sprite
 components.Material = Material

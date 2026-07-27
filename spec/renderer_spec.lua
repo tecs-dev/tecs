@@ -94,6 +94,19 @@ describe("ecs.Renderer", function()
         return handle
     end
 
+    local function frameAt(world, renderer, dt)
+        world:update(dt)
+        local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+        renderer:render({
+            width = SIZE,
+            height = SIZE,
+            commandBuffer = commandBuffer,
+            swapchainTexture = screen.handle,
+        })
+        assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+        return screen:readback()
+    end
+
     local function frameOnce(world, renderer)
         world:update(1 / 60)
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
@@ -1059,6 +1072,88 @@ describe("ecs.Renderer", function()
         local worldX, worldY = camera:toWorld(screenX, screenY, SIZE, SIZE)
         assert.is_true(math.abs(worldX - 200) < 0.01)
         assert.is_true(math.abs(worldY - 140) < 0.01)
+    end)
+
+
+    -- Simulation advances in fixed jumps while frames arrive whenever the display
+    -- asks for one. An entity moved by a fixed step therefore belongs, on a frame
+    -- that lands part way through the next step, part way between where the step
+    -- found it and where it left it.
+    --
+    -- Driven entirely through `world:update`: the alpha is whatever the fixed
+    -- accumulator has left over, so feeding a dt of one and a quarter steps runs
+    -- one step and leaves a quarter. There is no test-only entry point into the
+    -- renderer, because a path only tests exercise is not the path that ships.
+    describe("ecs.Renderer interpolation", function()
+        local STEP = 1 / 60
+
+        --- A world whose body teleports one span to the right per fixed step.
+        local function movingScene(span)
+            local world = tecs.newWorld()
+            local renderer = Renderer.create(device.handle, FORMAT,
+                { ambient = { 1, 1, 1 }, capacity = 64 })
+            renderer:install(world)
+
+            local entity = world:spawn(
+                Transform(0, SIZE / 2, 0, 1, 0, 4, SIZE),
+                Tint(1, 1, 1, 1), Renderable(),
+                components.PreviousTransform(0, SIZE / 2, 0))
+
+            world:addSystem({
+                name = "spec.Teleport",
+                phase = tecs.phases.FixedUpdate,
+                run = function()
+                    local transform = world:getMut(entity, Transform)
+                    transform.x = transform.x + span
+                end,
+            })
+            return world, renderer, entity
+        end
+
+        it("draws a stepped body part way between its two positions", function()
+            local world, renderer = movingScene(SIZE)
+
+            -- One step plus a quarter: the body moves to SIZE, and the frame
+            -- lands a quarter of the way into the step that has not run yet, so
+            -- it is drawn a quarter of the way along.
+            local pixels = frameAt(world, renderer, STEP * 1.25)
+            assert.is_true(screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r > 200,
+                "a quarter of the way along")
+            assert.is_true(screen:getPixel(pixels, SIZE * 0.75, SIZE / 2).r < 50,
+                "and not three quarters")
+            renderer:destroy()
+        end)
+
+        -- The failure this catches is subtle: the dirty bits say an archetype is
+        -- unchanged between fixed steps, which is true of its transform and false
+        -- of where it should be drawn. Gated on the bits alone, the body would
+        -- hold still for every frame that did not run a step.
+        it("keeps moving on frames that run no step", function()
+            local world, renderer = movingScene(SIZE)
+
+            frameAt(world, renderer, STEP)
+            local early = frameAt(world, renderer, STEP * 0.25)
+            local late = frameAt(world, renderer, STEP * 0.5)
+
+            local earlyLit = screen:getPixel(early, SIZE * 0.25, SIZE / 2).r
+            local lateLit = screen:getPixel(late, SIZE * 0.75, SIZE / 2).r
+            assert.is_true(earlyLit > 200, "a quarter in after one step")
+            assert.is_true(lateLit > 200, "three quarters in after another frame")
+        end)
+
+        it("leaves an entity without the component alone", function()
+            local world = tecs.newWorld()
+            local renderer = Renderer.create(device.handle, FORMAT,
+                { ambient = { 1, 1, 1 }, capacity = 64 })
+            renderer:install(world)
+            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
+                Tint(1, 1, 1, 1), Renderable())
+
+            local pixels = frameAt(world, renderer, STEP * 1.5)
+            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 200,
+                "drawn where it is, with no previous transform to blend from")
+            renderer:destroy()
+        end)
     end)
 
 end)
