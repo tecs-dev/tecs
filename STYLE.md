@@ -84,7 +84,17 @@ damages them rather than tidying them:
   `src/` hit one or the other. Revisit when both are fixed upstream.
 - **GLSL.** clang-format has no GLSL mode and reads an interface block as a
   class definition, so `layout(...) uniform View { ... } view;` comes back with
-  `view;` stranded on a line of its own.
+  `view;` stranded on a line of its own. glslx 0.3.1 was measured as the
+  alternative and rejected. It is a WebGL-dialect tool, so `flat`, `switch` and
+  the `u` suffix on an integer literal are all outside its grammar, and its
+  `format` entry point is purely lexical: on meeting one it returns its input
+  unchanged, with no diagnostic and no failing status. That silently covers
+  every file in the cull and draw pipeline, the four `instance.*` shaders and
+  `include/cull.glsl`. It loses nothing, so it is not dangerous; of the three
+  files it does rewrite, all it does is collapse the wrapped-argument and
+  trailing-comment alignment asked for above. Its compiler is no use either: it
+  reads `layout` as an ordinary identifier, so all 22 files fail to parse and
+  neither its validation nor its dead-code analysis reaches anything.
 
 Until those change, both are formatted by hand to the rules above.
 

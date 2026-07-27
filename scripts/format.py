@@ -18,7 +18,10 @@ Two languages in this tree deliberately have no formatter:
 
   GLSL   clang-format has no GLSL mode and reads an interface block as a class
          definition, so `layout(...) uniform View { ... } view;` comes back
-         with `view;` stranded on a line of its own.
+         with `view;` stranded on a line of its own. glslx 0.3.1 reads the
+         WebGL dialect, where `flat`, `switch` and a `u`-suffixed integer
+         literal do not exist, and its formatter returns such a file unchanged
+         without saying so. See STYLE.md.
 """
 
 import argparse
