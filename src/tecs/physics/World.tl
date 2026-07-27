@@ -161,6 +161,11 @@ end
 ---
 --- The rotation is not converted to an angle here: a caller that only needs
 --- the pair should not pay for an inverse tangent it throws away.
+---
+--- Slot zero is the null handle and always reads as "did not move", with no
+--- test of its own: Box2D numbers bodies from one, so nothing ever writes
+--- that slot, and a `RigidBody` restored from a snapshot lands here rather
+--- than on a body it does not own.
 function World:moveOf(index1: integer): number, number, number, number
     if index1 >= self._moveOfCapacity then return nil end
     local slot = (self._moveOf as {integer: integer})[index1]
@@ -242,6 +247,15 @@ function World.addCircle(body: loader.CValue, radius: number,
     centre.y = 0.0
     shape.radius = radius
     return C.b2CreateCircleShape(body, shapeDef(options), circle) as loader.CValue
+end
+
+--- How many bodies the world currently holds.
+---
+--- Box2D counts them by walking its solver sets, so this is a diagnostic
+--- rather than something to call per frame.
+function World:bodyCount(): integer
+    local counters = C.b2World_GetCounters(self.handle) as loader.CStruct
+    return counters.bodyCount as integer
 end
 
 --- Returns a body's world position.

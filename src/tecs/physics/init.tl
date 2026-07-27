@@ -49,6 +49,23 @@ ecs.newFFIComponent({
         { "generation", "uint16_t" },
     },
     defaults = { 0, 0, 0 },
+    serialize = function(_instance: RigidBody): {string: any}
+        -- The handle stays out of the file. It is this run's numbering:
+        -- Box2D keeps `index1` dense and reuses it, so a saved one names
+        -- whichever body the loading run happens to have put in that slot,
+        -- and the sync would write a stranger's pose into this entity's
+        -- Transform with nothing to signal it.
+        return {}
+    end,
+    deserialize = function(_world: ecs.World, _data: {string: any}): RigidBody
+        -- Restored as the null handle, which is inert everywhere: the sync
+        -- reads no movement for it, the impulse and velocity calls refuse
+        -- it, and `physics.hasBody` answers false. Rebuilding the body
+        -- instead would need its shape, and a snapshot does not carry one,
+        -- so an entity that simulated before a load does not simulate after
+        -- it until something attaches a body again.
+        return RigidBody(0, 0, 0)
+    end,
 })
 
 local record BodyOptions
@@ -166,6 +183,22 @@ local function handleOf(row: RigidBody): loader.CValue
     return scratchHandle
 end
 
+--- Whether `entity` has a body Box2D is still solving.
+---
+--- False for an entity whose RigidBody came out of a snapshot. A load
+--- restores the row as the null handle rather than a body id this run never
+--- issued, so this is how a game tells "was simulating and is not any more"
+--- from "never had a body", and the two are worth telling apart: nothing
+--- rebuilds a body on load.
+function physics.hasBody(world: ecs.World, entity: integer): boolean
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then return false end
+    -- Box2D's own check, which covers the generation and the world as well
+    -- as the slot, so a handle left over from a destroyed world answers
+    -- false rather than addressing whatever took its place.
+    return B.b2Body_IsValid(handleOf(row)) as boolean
+end
+
 --- Pushes a body, in pixels per second squared applied at its centre.
 ---
 --- An impulse rather than a force, so the effect does not depend on how long
@@ -183,6 +216,10 @@ end
 --- For a system walking a column, where going back through the entity would
 --- cost a lookup per body per frame.
 function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
+    -- The null handle is what a snapshot load leaves behind, and Box2D
+    -- indexes its body array from the slot without checking it, so passing
+    -- one through would read off the front of that array.
+    if row.index1 == 0 then return end
     local body = handleOf(row)
     local impulse = loader.newStruct("b2Vec2")
     local fields = impulse as loader.CStruct
@@ -194,7 +231,7 @@ end
 --- Reads a body's velocity, in pixels per second.
 function physics.velocity(world: ecs.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
-    if row == nil then return 0.0, 0.0 end
+    if row == nil or row.index1 == 0 then return 0.0, 0.0 end
     return World.getVelocity(handleOf(row))
 end
 
@@ -213,7 +250,36 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             workerCount = options.workerCount,
         })
 
-        local bodies = world:query({ include = { Transform, RigidBody } })
+        -- A logic query, so a paused entity keeps its Transform where it was
+        -- instead of being followed around by its body. This gates the
+        -- write-back and not the solve: Box2D steps a world rather than a
+        -- body, so a paused body is still in the pile, still colliding, and
+        -- still moving, and unpausing snaps its Transform to wherever it got
+        -- to. Taking it out of the solve properly means putting its type and
+        -- its velocity somewhere they survive the pause, which is a decision
+        -- about what a RigidBody holds rather than a change to this query.
+        local bodies = world:query({
+            name = "tecs.SimulatedBodies",
+            type = "logic",
+            include = { Transform, RigidBody },
+        })
+
+        -- A body outlives its entity otherwise. Box2D owns it until something
+        -- says so, and nothing else knows the entity is gone, so it keeps
+        -- being solved for the rest of the session.
+        world:observe(0, ecs.builtins.OnDespawn,
+            function(event: ecs.builtins.OnDespawn)
+                local row = world:get(event.entity, RigidBody)
+                if row == nil or row.index1 == 0 then return end
+                local body = handleOf(row)
+                -- The handle names its own world, so this reaches the right
+                -- one whatever `physics.world` currently points at. The
+                -- validity check is what makes a row restored from a
+                -- snapshot, or one whose world has been destroyed, safe to
+                -- meet here.
+                if not (B.b2Body_IsValid(body) as boolean) then return end
+                B.b2DestroyBody(body)
+            end)
 
         -- The fixed phases, always. A simulation that advanced by the frame
         -- would take a different number of steps on every machine and produce

@@ -53,7 +53,9 @@ Working today:
   mapped GPU staging, and a depth-tested G-buffer
 - Physics in the world: a RigidBody component holding a value-typed Box2D
   handle, stepped in the fixed phases, solved across a native thread pool, and
-  written back from the movement Box2D reports rather than by asking per body
+  written back from the movement Box2D reports rather than by asking per body.
+  A despawn destroys the body; a snapshot restores the handle as null, because
+  nothing yet carries the shape a rebuild would need
 - Input in three tiers behind a layer stack, latched for fixed steps, with
   per-device gamepads, text input bound to a layer, touch and pen
 - Worker threads with serialized channels, and asset loading that decodes on
@@ -653,6 +655,56 @@ the slowest core sets the pace of the step. Adding workers does not change the
 answer: the solver colours its constraint graph so no colour holds two
 constraints sharing a body, and a 1,600-body pile lands bit-exactly where one
 worker left it whether it was solved by 2 or by 64.
+
+## A body's lifetime
+
+A `RigidBody` is three integers naming a body Box2D owns, so the component and
+the thing it names have separate lifetimes and every place they can come apart
+is a place where nothing announces the difference. There are three, and each is
+answered here rather than left to a game.
+
+**A despawn destroys the body.** Nothing else knows the entity is gone, so
+without this the body keeps being solved for the rest of the session: the
+entity's collider stays in the pile, pushing bodies that are still on screen,
+and the memory it holds is never returned. The physics plugin observes the
+built-in `OnDespawn`, which fires while the row is still readable, and destroys
+whatever handle it finds. It reaches the world named in the handle rather than
+whichever world the plugin was last given, and it asks Box2D whether the handle
+is live first, so a row that never had a body and a row whose world has already
+been destroyed both pass through it safely.
+
+**A snapshot does not carry the handle.** Box2D keeps `index1` dense and hands
+a slot to the next body the moment the one holding it is destroyed, so a saved
+handle names whichever body the loading run happens to have put there. Restoring
+one verbatim writes that body's pose into this entity's `Transform`, every step,
+with no error and nothing out of place to notice. So `RigidBody` serializes to
+nothing and deserializes to the null handle, the same reasoning that keeps a
+`Sound`'s voice out of a save.
+
+The consequence is plain and is not yet fixed: **an entity that simulated before
+a load does not simulate after it.** Rebuilding the body needs its shape,
+density, friction, restitution and type, and none of those are in the world for
+a snapshot to carry. Where they should live is a question about what a
+`RigidBody` holds, not about the snapshot format, and it is being answered
+separately. Until it is, `physics.hasBody` is how a game tells an entity whose
+body is gone from one that never had a body, and a game that wants physics back
+after a load attaches it again itself. The restored row is inert rather than
+merely wrong: the write-back reads no movement for the null handle, and
+`applyImpulse` and `velocity` refuse it instead of indexing off the front of
+Box2D's body array.
+
+**`Paused` stops the write-back and not the solve.** The query the sync walks is
+a logic query, so a paused entity's `Transform` stays where it was, which is what
+`Paused` means everywhere else in the engine. Box2D steps a world rather than a
+body, though, so underneath that the body is still in the pile: still falling,
+still colliding, still pushing its neighbours. Unpausing snaps the `Transform` to
+wherever the body reached. That is a real limit rather than a description of
+pausing, and the two primitives available for closing it are both wrong in their
+own way. Disabling a body takes it out of the broad phase entirely, so the world
+around it falls through where it used to be, and it comes back with its velocity
+lost. Making it static instead keeps it solid but needs its type and its velocity
+stored somewhere they survive the pause, which is another field on `RigidBody`
+and so another part of the same question above.
 
 ## Events
 

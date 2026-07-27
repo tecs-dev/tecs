@@ -1,0 +1,285 @@
+-- What happens to a Box2D body when its entity's life changes.
+--
+-- A body is native and a `RigidBody` is three integers naming it, so every
+-- edge here is a place where the two can disagree: a snapshot that carries
+-- the integers into a run that never issued them, a despawn that takes the
+-- entity and leaves the body, and a pause that stops one without stopping
+-- the other. None of the three announces itself, so each is pinned here.
+
+-- The build directory is the build system's to choose, so it is passed in.
+-- Our tree comes first, so it wins over the ECS repo's own engine tree.
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
+
+local tecs = require("tecs")
+local components = require("tecs.components")
+local physics = require("tecs.physics")
+
+local Transform = components.Transform
+local Paused = tecs.builtins.Paused
+
+local function newWorld()
+    local world = tecs.newWorld()
+    world:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
+    return world
+end
+
+describe("ecs.physics snapshots", function()
+    -- A handle is this run's numbering. Box2D hands out `index1` densely and
+    -- reuses a slot the moment its body is gone, so a file that carried one
+    -- would name whichever body the loading run happened to put there, and
+    -- the sync would follow it: one body's pose written into a different
+    -- entity's Transform, silently.
+    it("does not follow a stranger's body after a load", function()
+        local first = newWorld()
+        local saved = first:spawn(Transform(100, 100, 0, 1, 0, 16, 16))
+        physics.attach(first, saved, { type = "static", halfWidth = 8, halfHeight = 8 })
+        assert.equal(1, first:get(saved, physics.RigidBody).index1)
+        local snapshot = first:saveSnapshot({ format = "table" }).snapshot
+
+        -- A second world in the same process, whose first body takes the
+        -- same slot the saved one had.
+        local second = newWorld()
+        local stranger = second:spawn(Transform(900, 50, 0, 1, 0, 16, 16))
+        physics.attach(second, stranger, { type = "dynamic", radius = 8, density = 1 })
+        assert.equal(1, second:get(stranger, physics.RigidBody).index1)
+
+        second:loadSnapshot(snapshot)
+        for _ = 1, 30 do
+            second:update(1 / 60)
+        end
+
+        local restored
+        for _, length, entities in second:query({ include = { Transform, physics.RigidBody } }):iter() do
+            for row = 1, length do
+                restored = entities[row]
+            end
+        end
+        assert.is_not_nil(restored)
+
+        -- The stranger was falling from y=50. Reading its pose here is the
+        -- failure this spec exists for.
+        local transform = second:get(restored, Transform)
+        assert.is_true(
+            math.abs(transform.x - 100) < 1e-3 and math.abs(transform.y - 100) < 1e-3,
+            ("restored entity must stay where it was saved, got (%.1f, %.1f)"):format(transform.x, transform.y)
+        )
+    end)
+
+    it("restores the handle as null in both snapshot formats", function()
+        for _, options in ipairs({ { format = "table" }, {} }) do
+            local first = newWorld()
+            local entity = first:spawn(Transform(40, 60, 0, 1, 0, 16, 16))
+            physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+            assert.is_true(physics.hasBody(first, entity))
+
+            local written = first:saveSnapshot(options)
+            local second = newWorld()
+            second:loadSnapshot(written.snapshot or written.buffer)
+
+            local rows = 0
+            for archetype, length in second:query({ include = { physics.RigidBody } }):iter() do
+                local column = archetype:get(physics.RigidBody)
+                for row = 1, length do
+                    rows = rows + 1
+                    assert.equal(0, column[row].index1)
+                end
+            end
+            assert.equal(1, rows)
+        end
+    end)
+
+    -- The component survives the load and the body does not, so a game needs
+    -- a way to tell "simulated once" from "simulating now" without reading
+    -- the handle fields itself.
+    it("reports no body for an entity restored from a snapshot", function()
+        local first = newWorld()
+        local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+        assert.is_true(physics.hasBody(first, entity))
+        local snapshot = first:saveSnapshot({ format = "table" }).snapshot
+
+        local second = newWorld()
+        second:loadSnapshot(snapshot)
+
+        local restored
+        for _, length, entities in second:query({ include = { physics.RigidBody } }):iter() do
+            for row = 1, length do
+                restored = entities[row]
+            end
+        end
+        assert.is_false(physics.hasBody(second, restored))
+        assert.is_false(physics.hasBody(second, second:spawn(Transform(0, 0, 0, 1, 0, 16, 16))))
+    end)
+
+    -- A null handle reaches Box2D's body array as index -1 if anything passes
+    -- it through, so the calls that take one refuse it instead.
+    it("leaves a restored body inert under impulse and velocity", function()
+        local first = newWorld()
+        local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+        local snapshot = first:saveSnapshot({ format = "table" }).snapshot
+
+        local second = newWorld()
+        second:loadSnapshot(snapshot)
+        local restored
+        for _, length, entities in second:query({ include = { physics.RigidBody } }):iter() do
+            for row = 1, length do
+                restored = entities[row]
+            end
+        end
+
+        physics.applyImpulse(second, restored, 500, -500)
+        local vx, vy = physics.velocity(second, restored)
+        assert.equal(0, vx)
+        assert.equal(0, vy)
+
+        for _ = 1, 30 do
+            second:update(1 / 60)
+        end
+        local transform = second:get(restored, Transform)
+        assert.equal(0, transform.x)
+        assert.equal(0, transform.y)
+    end)
+end)
+
+describe("ecs.physics despawn", function()
+    it("destroys the body when the entity goes", function()
+        local world = newWorld()
+        local baseline = physics.world:bodyCount()
+
+        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        assert.equal(baseline + 1, physics.world:bodyCount())
+
+        world:despawn(entity)
+        world:update(1 / 60)
+        assert.equal(baseline, physics.world:bodyCount())
+    end)
+
+    it("destroys every body a batch despawn takes", function()
+        local world = newWorld()
+        local baseline = physics.world:bodyCount()
+
+        for index = 1, 8 do
+            local entity = world:spawn(Transform(index * 40, 0, 0, 1, 0, 16, 16))
+            physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        end
+        assert.equal(baseline + 8, physics.world:bodyCount())
+
+        world:batchDespawn(world:query({ include = { physics.RigidBody } }))
+        world:update(1 / 60)
+        assert.equal(baseline, physics.world:bodyCount())
+    end)
+
+    -- A despawn inside a system runs against a deferred world, where the row
+    -- is staged for removal before it is gone. The observer has to reach the
+    -- component there too, or the body outlives an entity killed the ordinary
+    -- way and only that way.
+    it("destroys the body when a system despawns the entity", function()
+        local world = newWorld()
+        local baseline = physics.world:bodyCount()
+
+        local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+
+        local killed = false
+        world:addSystem({
+            name = "spec.KillTheBody",
+            phase = tecs.phases.Update,
+            run = function()
+                if killed then
+                    return
+                end
+                killed = true
+                world:despawn(entity)
+            end,
+        })
+
+        world:update(1 / 60)
+        world:update(1 / 60)
+        assert.equal(baseline, physics.world:bodyCount())
+    end)
+
+    it("keeps other bodies when one entity goes", function()
+        local world = newWorld()
+        local baseline = physics.world:bodyCount()
+
+        local kept = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local gone = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, kept, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(world, gone, { type = "dynamic", radius = 8, density = 1 })
+
+        world:despawn(gone)
+        world:update(1 / 60)
+        assert.equal(baseline + 1, physics.world:bodyCount())
+        assert.is_true(physics.hasBody(world, kept))
+
+        for _ = 1, 30 do
+            world:update(1 / 60)
+        end
+        assert.is_true(world:get(kept, Transform).y > 10, "the surviving body must still be simulated")
+    end)
+end)
+
+describe("ecs.physics pausing", function()
+    it("stops writing a paused entity's transform", function()
+        local world = newWorld()
+        local free = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local held = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
+        world:set(held, Paused)
+
+        for _ = 1, 30 do
+            world:update(1 / 60)
+        end
+
+        assert.is_true(world:get(free, Transform).y > 10, "an unpaused body must be followed")
+        assert.equal(0, world:get(held, Transform).y)
+    end)
+
+    -- The limit, stated as a test rather than only as a sentence: Box2D steps
+    -- a world, not a body, so pausing an entity stops the write-back and
+    -- nothing else. The body keeps falling and the Transform snaps to it when
+    -- the pause lifts.
+    it("keeps solving a paused body and snaps to it on resume", function()
+        local world = newWorld()
+        local free = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        local held = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
+        world:set(held, Paused)
+
+        for _ = 1, 30 do
+            world:update(1 / 60)
+        end
+        assert.equal(0, world:get(held, Transform).y)
+
+        world:remove(held, Paused)
+        world:update(1 / 60)
+
+        -- One update after the pause lifts, the paused body is where the one
+        -- that was never paused is: it fell the whole time, unwatched.
+        local resumed = world:get(held, Transform).y
+        local never = world:get(free, Transform).y
+        assert.is_true(
+            math.abs(resumed - never) < 1.0,
+            ("a paused body keeps falling: expected about %.1f, got %.1f"):format(never, resumed)
+        )
+    end)
+
+    it("still destroys a paused entity's body on despawn", function()
+        local world = newWorld()
+        local baseline = physics.world:bodyCount()
+
+        local held = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
+        world:set(held, Paused)
+        world:update(1 / 60)
+
+        world:despawn(held)
+        world:update(1 / 60)
+        assert.equal(baseline, physics.world:bodyCount())
+    end)
+end)
