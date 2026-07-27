@@ -47,6 +47,11 @@ local record RendererOptions
     cell: integer
     --- Layers the image array holds.
     layers: integer
+    --- Fit many images into each layer of the image array rather than one.
+    --- Defaults to false. On, the ceiling on distinct images is the array's
+    --- area rather than its layer count, and a small image costs its own size
+    --- rather than a whole cell.
+    packImages: boolean
 end
 
 local record Renderer
@@ -107,6 +112,7 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
         capacity = self.capacity,
         cell = options.cell,
         layers = options.layers,
+        packImages = options.packImages,
     })
     self._backend = backend
     self.images = backend.images
@@ -118,6 +124,8 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     -- crosses once, at construction, rather than being asked for per frame.
     local extractor = Extractor.create({
         capacity = self.capacity,
+        whiteU0 = backend.whiteU0,
+        whiteV0 = backend.whiteV0,
         whiteU1 = backend.whiteU1,
         whiteV1 = backend.whiteV1,
     })
@@ -165,8 +173,8 @@ function Renderer:registerImage(handle: assets.Handle): components.Sprite, Textu
     end
     handle:release()
 
-    return components.Sprite(image, 0.0, 0.0, region.u1, region.v1,
-        region.layer), region
+    return components.Sprite(image, region.u0, region.v0, region.u1,
+        region.v1, region.layer), region
 end
 
 --- A resolved Sprite for a registered image, ready to spawn.

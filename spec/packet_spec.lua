@@ -46,6 +46,8 @@ describe("render extraction", function()
         local world = tecs.newWorld()
         local extractor = Extractor.create({
             capacity = CAPACITY,
+            whiteU0 = 0.0,
+            whiteV0 = 0.0,
             whiteU1 = 1 / 512,
             whiteV1 = 1 / 512,
         })
@@ -171,7 +173,8 @@ describe("render extraction", function()
     it("tells whoever owns the packet that it is filled", function()
         local world = tecs.newWorld()
         local extractor = Extractor.create({
-            capacity = CAPACITY, whiteU1 = 1.0, whiteV1 = 1.0,
+            capacity = CAPACITY, whiteU0 = 0.0, whiteV0 = 0.0,
+            whiteU1 = 1.0, whiteV1 = 1.0,
         })
         local packet = FramePacket.create()
         extractor:setStaging(0,

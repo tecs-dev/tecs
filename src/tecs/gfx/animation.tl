@@ -1,7 +1,7 @@
 --- Sprite-sheet playback.
 ---
---- An `Animation` says which range of a sheet is playing, how fast, whether it
---- repeats, whether it is running, and where in the range it has got to. The
+--- An `Animation` says which tag of a sheet is playing, how fast, whether it
+--- repeats, whether it is running, and where in the tag it has got to. The
 --- system installed by `animation.plugin` advances it and writes the frame's
 --- region into the entity's `Sprite`, which is what the renderer reads.
 ---
@@ -26,54 +26,61 @@ local type Sheet = sheet.Sheet
 
 local Sprite <const> = components.Sprite
 
-local floor <const> = math.floor
+--- Playback rate an animation runs at when nothing says otherwise, which is
+--- the timing the sheet's frames were authored with.
+local DEFAULT_SPEED <const> = 1.0
 
 --- Playback state for one entity.
 ---
 --- `frame` is the frame the `Sprite` was last written from, as an index into
---- the whole sheet rather than into the range. Zero means nothing has been
+--- the whole sheet rather than into the tag. Zero means nothing has been
 --- written yet, which is how a fresh or restored Animation gets its region on
 --- the first step it runs instead of drawing whatever the Sprite held.
 ---
---- `time` is seconds into the range's cycle and stays inside it: a looping
+--- `time` is seconds into the tag's cycle and stays inside it: a looping
 --- animation wraps and a one-shot parks at the end, so it never grows without
 --- bound and never loses precision to its own age.
 local record Animation is Component
     --- Registration index of the sheet, from `Sheet.id`. Zero plays nothing.
     sheet: number
-    --- Index of the range within that sheet, from `Sheet:rangeId`. Zero plays
-    --- the whole sheet in order.
-    range: number
-    --- Frames per second. Zero or less holds the first frame and stops time
-    --- advancing, which is a pause that leaves `playing` alone.
-    fps: number
-    --- Seconds into the cycle, which is the range's frame count divided by
-    --- `fps`. Changing `fps` therefore rescales where in the range this lands
-    --- rather than keeping the frame and changing the speed.
+    --- Index of the tag within that sheet, from `Sheet:tagId`. Zero plays the
+    --- whole sheet in order.
+    tag: number
+    --- Multiplier on the timing the sheet carries. One is the timing as
+    --- authored, two is twice as fast. Zero or less holds the current frame and
+    --- stops time advancing, which is a pause that leaves `playing` alone.
+    ---
+    --- How long each frame is held is the sheet's answer and not an entity's,
+    --- because that is where an artist sets it: a hold frame is a frame with a
+    --- long duration, which no single rate can express.
+    speed: number
+    --- Seconds into the cycle, which is the sum of the durations of the frames
+    --- the tag visits. Changing `speed` leaves this where it is, so playback
+    --- carries on from the frame it was showing rather than jumping.
     time: number
     --- Frame the Sprite currently shows, or zero for none yet.
     frame: number
-    --- Whether the range restarts after its last frame.
+    --- Whether the tag restarts after its last frame.
     loop: boolean
     --- Whether time advances.
     playing: boolean
 end
 
---- Emitted at address zero on the step a range that does not loop runs past its
+--- Emitted at address zero on the step a tag that does not loop runs past its
 --- last frame. The animation stops and holds that frame, so this fires once per
 --- playthrough and never again until something restarts it.
 local record Completed is ecs.Event
     entity: integer
     sheet: Sheet
-    --- Name of the range that finished, or the empty string for a whole sheet.
-    range: string
+    --- Name of the tag that finished, or the empty string for a whole sheet.
+    tag: string
 
     metamethod __call: function(
-        self, entity: integer, sheet: Sheet, range: string
+        self, entity: integer, sheet: Sheet, tag: string
     ): Completed
 end
 
---- Emitted at address zero on the step a looping range passes its last frame
+--- Emitted at address zero on the step a looping tag passes its last frame
 --- and restarts.
 ---
 --- Once per step at most, not once per cycle: a step long enough to cover
@@ -82,19 +89,19 @@ end
 local record Looped is ecs.Event
     entity: integer
     sheet: Sheet
-    --- Name of the range that wrapped, or the empty string for a whole sheet.
-    range: string
+    --- Name of the tag that wrapped, or the empty string for a whole sheet.
+    tag: string
 
     metamethod __call: function(
-        self, entity: integer, sheet: Sheet, range: string
+        self, entity: integer, sheet: Sheet, tag: string
     ): Looped
 end
 
 --- How an animation should play.
 local record PlayOptions
-    --- Frames per second. Defaults to `sheet.DEFAULT_FPS`.
-    fps: number
-    --- Whether the range restarts after its last frame. Defaults to true.
+    --- Multiplier on the sheet's own timing. Defaults to one.
+    speed: number
+    --- Whether the tag restarts after its last frame. Defaults to true.
     loop: boolean
     --- Whether it starts running. Defaults to true.
     playing: boolean
@@ -106,40 +113,54 @@ local record animation
     --- Playback state for one entity.
     Animation: Animation
 
-    --- Emitted when a range that does not loop runs past its last frame.
+    --- Emitted when a tag that does not loop runs past its last frame.
     Completed: Completed
 
-    --- Emitted when a looping range passes its last frame and restarts.
+    --- Emitted when a looping tag passes its last frame and restarts.
     Looped: Looped
 
-    --- An Animation playing a named range of a sheet, ready to spawn.
+    --- An Animation playing a named tag of a sheet, ready to spawn.
     ---
-    --- Omit the range to play the whole sheet in order. Fails on a range the
-    --- sheet does not carry, since the alternative is a typo that plays every
+    --- Omit the tag to play the whole sheet in order. Fails on a tag the sheet
+    --- does not carry, since the alternative is a typo that plays every
     --- frame.
     ---
     --- The entity also needs a `Sprite`, which is what the query matches on and
     --- what playback writes the frame's region into. An Animation on its own
     --- advances nothing.
     --- @param source The sheet to play. Nil raises.
-    --- @param range A range the sheet names, or nil for the whole sheet.
-    --- @param options Defaults are `sheet.DEFAULT_FPS`, looping, and playing.
+    --- @param tag A tag the sheet names, or nil for the whole sheet.
+    --- @param options Defaults are the sheet's own timing, looping, and
+    ---     playing.
     --- @return A component value, not an entity: pass it to `world:spawn` or
     ---     `world:set` yourself.
-    of: function(source: Sheet, range?: string, options?: PlayOptions): Animation
+    of: function(source: Sheet, tag?: string, options?: PlayOptions): Animation
 
-    --- Points a live entity at a range and restarts it there.
+    --- Points a live entity at a tag and restarts it there.
     ---
     --- Restarting is the point: time and frame both reset, so the next step
-    --- writes the range's first frame whatever the entity was showing. An
-    --- entity carrying no Animation gets one.
+    --- writes the tag's first frame whatever the entity was showing. An entity
+    --- carrying no Animation gets one.
     --- @param world The world the entity lives in.
     --- @param entity A live entity, which needs a `Sprite` for playback to
     ---     reach it.
     --- @param source The sheet to play. Nil raises.
-    --- @param range A range the sheet names, or nil for the whole sheet.
-    --- @param options Defaults are `sheet.DEFAULT_FPS`, looping, and playing.
-    play: function(world: World, entity: integer, source: Sheet, range?: string, options?: PlayOptions)
+    --- @param tag A tag the sheet names, or nil for the whole sheet.
+    --- @param options Defaults are the sheet's own timing, looping, and
+    ---     playing.
+    play: function(world: World, entity: integer, source: Sheet, tag?: string, options?: PlayOptions)
+
+    --- Plays an entity's animation again from the start of its tag.
+    ---
+    --- The sheet, tag, speed and loop flag are left as they are; what resets
+    --- is where in the cycle playback has got to and whether it is running. For
+    --- replaying a one-shot that has finished, and for rewinding one that has
+    --- not.
+    --- @param world The world the entity lives in.
+    --- @param entity A live entity.
+    --- @return Whether there was an Animation to restart. False leaves the
+    ---     entity untouched, since there is nothing to say what it would play.
+    restart: function(world: World, entity: integer): boolean
 
     --- Adds the system that advances playback.
     ---
@@ -159,15 +180,15 @@ ecs.newFFIComponent({
     container = Animation,
     fields = {
         { "sheet", "int32_t" },
-        { "range", "int32_t" },
-        { "fps", "float" },
+        { "tag", "int32_t" },
+        { "speed", "float" },
         { "time", "float" },
         { "frame", "int32_t" },
         { "loop", "bool" },
         { "playing", "bool" },
     },
-    defaults = { 0, 0, sheet.DEFAULT_FPS, 0, 0, true, true },
-    -- A sheet id and a range id are this process's answers, decided by the
+    defaults = { 0, 0, DEFAULT_SPEED, 0, 0, true, true },
+    -- A sheet id and a tag id are this process's answers, decided by the
     -- order sheets were built in. What crosses a save is the pair of names,
     -- resolved again on the way back in. The frame is deliberately dropped:
     -- zero makes the first step rewrite the Sprite's region, so a restored
@@ -175,15 +196,15 @@ ecs.newFFIComponent({
     serialize = function(instance: Animation): {string: any}
         local source = sheet.byId(instance.sheet as integer)
         local name: string = nil
-        local range: string = nil
+        local tag: string = nil
         if source ~= nil then
             name = source.name
-            range = source:rangeName(instance.range as integer)
+            tag = source:tagName(instance.tag as integer)
         end
         return {
             sheet = name,
-            range = range,
-            fps = instance.fps,
+            tag = tag,
+            speed = instance.speed,
             time = instance.time,
             loop = instance.loop,
             playing = instance.playing,
@@ -191,12 +212,12 @@ ecs.newFFIComponent({
     end,
     deserialize = function(_world: World, data: {string: any}): Animation
         local source = sheet.byName(data.sheet as string)
-        local id, range = 0, 0
+        local id, tag = 0, 0
         if source ~= nil then
             id = source.id
-            range = source:rangeId(data.range as string)
+            tag = source:tagId(data.tag as string)
         end
-        return Animation(id, range, data.fps as number, data.time as number,
+        return Animation(id, tag, data.speed as number, data.time as number,
             0, data.loop as boolean, data.playing as boolean)
     end,
 })
@@ -206,14 +227,14 @@ animation.Completed = Completed
 animation.Looped = Looped
 
 animation.Completed.init = function(event: Completed, entity: integer,
-                                    source: Sheet, range: string)
-    event.entity, event.sheet, event.range = entity, source, range
+                                    source: Sheet, tag: string)
+    event.entity, event.sheet, event.tag = entity, source, tag
 end
 ecs.newEvent(animation.Completed)
 
 animation.Looped.init = function(event: Looped, entity: integer,
-                                 source: Sheet, range: string)
-    event.entity, event.sheet, event.range = entity, source, range
+                                 source: Sheet, tag: string)
+    event.entity, event.sheet, event.tag = entity, source, tag
 end
 ecs.newEvent(animation.Looped)
 
@@ -221,39 +242,50 @@ ecs.newEvent(animation.Looped)
 -- Authoring
 -------------------------------------------------------------------------------
 
-function animation.of(source: Sheet, range?: string, options?: PlayOptions): Animation
+function animation.of(source: Sheet, tag?: string, options?: PlayOptions): Animation
     if source == nil then
         error("tecs: an animation needs a sheet", 2)
     end
-    local rangeId = 0
-    if range ~= nil then
+    local tagId = 0
+    if tag ~= nil then
         -- Fails on a name the sheet does not carry.
-        source:range(range)
-        rangeId = source:rangeId(range)
+        source:tag(tag)
+        tagId = source:tagId(tag)
     end
     options = options or {}
     local loop = options.loop
     if loop == nil then loop = true end
     local playing = options.playing
     if playing == nil then playing = true end
-    return Animation(source.id, rangeId, options.fps or sheet.DEFAULT_FPS,
+    return Animation(source.id, tagId, options.speed or DEFAULT_SPEED,
         0.0, 0, loop, playing)
 end
 
-function animation.play(world: World, entity: integer, source: Sheet, range?: string, options?: PlayOptions)
-    local built <const> = animation.of(source, range, options)
+function animation.play(world: World, entity: integer, source: Sheet, tag?: string, options?: PlayOptions)
+    local built <const> = animation.of(source, tag, options)
     if not world:has(entity, Animation) then
         world:set(entity, built)
         return
     end
     local current <const> = world:getMut(entity, Animation)
     current.sheet = built.sheet
-    current.range = built.range
-    current.fps = built.fps
+    current.tag = built.tag
+    current.speed = built.speed
     current.time = 0.0
     current.frame = 0
     current.loop = built.loop
     current.playing = built.playing
+end
+
+function animation.restart(world: World, entity: integer): boolean
+    if not world:has(entity, Animation) then return false end
+    local current <const> = world:getMut(entity, Animation)
+    current.time = 0.0
+    -- Zero is no frame written yet, so the next step writes the tag's first
+    -- one whatever the entity was showing.
+    current.frame = 0
+    current.playing = true
+    return true
 end
 
 -------------------------------------------------------------------------------
@@ -276,9 +308,12 @@ local function advance(world: World, query: Query, dt: number)
         -- `get` and `getMut` hand back the same column and only `getMut` sets
         -- the dirty bit, so each is taken the first time a row is actually
         -- written. An archetype whose frames all stood still this step leaves
-        -- its Sprite column clean, which is what the renderer skips on.
+        -- its Sprite column clean, which is what the renderer skips on. The
+        -- Sprite column is read from the first row, because deciding whether a
+        -- row needs writing means comparing against what it already holds.
         local marked = false
-        local sprites: {components.Sprite} = nil
+        local sprites <const> = archetype:get(Sprite)
+        local wrote = false
         -- Sheets are few and neighbouring rows tend to share one.
         local cachedId = 0
         local cached: Sheet = nil
@@ -293,32 +328,39 @@ local function advance(world: World, query: Query, dt: number)
             local source = cached
 
             if source ~= nil then
-                local rangeId = instance.range as integer
-                local from, to = 1, source.count
-                local start = source._from[rangeId]
-                if start ~= nil then
-                    from, to = start, source._to[rangeId]
-                end
-                local span <const> = to - from + 1
+                local tagId <const> = instance.tag as integer
+                -- The cycle is the sum of the durations of the frames the tag
+                -- visits, which the sheet worked out when it was built: a
+                -- pingpong tag counts the frames it passes twice twice, and a
+                -- hold frame lengthens it by exactly its own duration.
+                local cycle <const> = source._cycle[tagId] or 0.0
 
-                local fps <const> = instance.fps
+                local speed <const> = instance.speed
                 local time = instance.time
                 local completed, looped = false, false
 
-                if instance.playing and fps > 0 then
+                if instance.playing and speed > 0 and cycle > 0 then
                     if not marked then
                         archetype:getMut(Animation)
                         marked = true
                     end
-                    time = time + dt
-                    local cycle <const> = span / fps
+                    -- A one-shot parks at the end of its cycle and stops, so
+                    -- finding one there and playing is something that set
+                    -- `playing` back to true. That reads as asking for the
+                    -- animation again, and it starts over: advancing from the
+                    -- end instead would park it again on this step and on every
+                    -- step after it, emitting Completed each time, forever.
+                    if not instance.loop and time >= cycle then
+                        time = 0.0
+                    end
+                    time = time + dt * speed
                     if time >= cycle then
                         if instance.loop then
                             time = time % cycle
                             looped = true
                         else
-                            -- Parked one whole cycle in, which the clamp below
-                            -- reads as the last frame. Holding the time rather
+                            -- Parked one whole cycle in, which the lookup below
+                            -- reads as the last step. Holding the time rather
                             -- than the index keeps one field the answer.
                             time = cycle
                             instance.playing = false
@@ -328,38 +370,49 @@ local function advance(world: World, query: Query, dt: number)
                     instance.time = time
                 end
 
-                local index = floor(time * fps)
-                if index >= span then
-                    index = span - 1
-                elseif index < 0 then
-                    index = 0
-                end
-
-                local frame <const> = from + index
-                if frame ~= instance.frame then
-                    if not marked then
-                        archetype:getMut(Animation)
-                        marked = true
+                local frame <const> = source:frameAt(tagId, time)
+                local target <const> = sprites[row]
+                -- A frame is a region of an image, not a region on its own, so
+                -- a sheet bound to another image moves the quad's layer as well
+                -- as its UVs. The layer is compared rather than assumed to
+                -- follow the frame index, because a sheet swapped under an
+                -- entity can land on the index the last one left behind and the
+                -- quad would go on sampling the old image with the new rect.
+                --
+                -- An unbound sheet names no image, so it writes the region
+                -- alone and leaves whatever the entity's Sprite already had.
+                local slot <const> = source._slot
+                local changed <const> = frame ~= instance.frame
+                if changed or (slot >= 0 and target.slot ~= slot) then
+                    if changed then
+                        if not marked then
+                            archetype:getMut(Animation)
+                            marked = true
+                        end
+                        instance.frame = frame
                     end
-                    instance.frame = frame
-                    if sprites == nil then
-                        sprites = archetype:getMut(Sprite)
+                    if not wrote then
+                        archetype:getMut(Sprite)
+                        wrote = true
                     end
-                    local target = sprites[row]
                     local base <const> = (frame - 1) * 4
                     local uvs <const> = source._uvs
                     target.u0 = uvs[base + 1]
                     target.v0 = uvs[base + 2]
                     target.u1 = uvs[base + 3]
                     target.v1 = uvs[base + 4]
+                    if slot >= 0 then
+                        target.image = source._image
+                        target.slot = slot
+                    end
                 end
 
                 if completed and wantsCompleted then
                     world:emit(0, animation.Completed, entities[row], source,
-                        source:rangeName(rangeId))
+                        source:tagName(tagId))
                 elseif looped and wantsLooped then
                     world:emit(0, animation.Looped, entities[row], source,
-                        source:rangeName(rangeId))
+                        source:tagName(tagId))
                 end
             end
         end
