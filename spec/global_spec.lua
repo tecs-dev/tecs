@@ -48,8 +48,8 @@ local logger = tecs.log.get("game")
 logger:info("entities: %d", world:getStats().entities)
 
 return tecs.application({
-    plugins = { function(game: tecs.World)
-        print(tecs.Application.of(game).window ~= nil)
+    plugin = function(game: tecs.World, app: tecs.Application)
+        print(app.window ~= nil)
         game:addSystem({
             name = "game.Tick",
             phase = tecs.phases.Update,
@@ -58,7 +58,7 @@ return tecs.application({
         game:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
             print(event.scancode)
         end)
-    end },
+    end,
 })
 ]]
 

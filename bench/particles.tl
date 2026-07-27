@@ -134,8 +134,8 @@ return tecs.application({
     maxEntities = 4096,
     maxFrames = WARMUP + FRAMES,
 
-    plugins = { function(world: tecs.World)
-        local renderer = tecs.Renderer.of(world)
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
         world:addPlugin(particles.plugin({
             renderer = renderer,
             capacity = POOL,
@@ -169,5 +169,5 @@ return tecs.application({
         print(("particles: regime %s, %d live over %d emitters in a pool of "
             .. "%d, viewport %dx%d"):format(REGIME, LIVE, LIVE > 0 and EMITTERS
             or 0, POOL, WIDTH, HEIGHT))
-    end },
+    end,
 })

@@ -8,12 +8,12 @@
 --- The underscored methods are the host's contract, not the game's.
 ---
 --- A game's own code runs in systems and observers, and there is one way in:
---- `config.plugins`. A plugin is handed the world and registers what it wants
---- to happen, which the world then runs. Nothing here calls back into a game
---- per frame or per event, because the world already does both and does them
---- better: a system's order is declared by its phase, both are visible to the
---- debug server, and both run inside a guard that keeps the process alive and
---- inspectable after the game throws.
+--- `config.plugin`. It is handed the world and this application, and registers
+--- what it wants to happen, which the world then runs. Nothing here calls back
+--- into a game per frame or per event, because the world already does both and
+--- does them better: a system's order is declared by its phase, both are
+--- visible to the debug server, and both run inside a guard that keeps the
+--- process alive and inspectable after the game throws.
 ---
 --- So the four lifecycle points a game used to be handed map onto what the ECS
 --- already had:
@@ -25,10 +25,10 @@
 ---   teardown   `PreShutdown`, `Shutdown`, `PostShutdown`, run once by
 ---              `world:shutdown` before anything is destroyed
 ---
---- A plugin needs to reach the objects that are not world state, and each of
---- those answers to the world it was installed into: `Renderer.of(world)`,
---- `Audio.of(world)`, and `Application.of(world)` for the window, the device,
---- the input and `quitRequested`.
+--- A plugin needs to reach the objects that are not world state, and it is
+--- handed them rather than asked to look them up: the window, the device, the
+--- input, the renderer, the audio and `quitRequested` all hang off the
+--- application it is passed beside the world.
 
 local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -115,19 +115,23 @@ local record Application
         --- real window to completion without a human closing it.
         maxFrames: integer
 
-        --- The game, as functions handed the world.
+        --- The game, as one function handed the world and this application.
         ---
-        --- Called in order at the end of initialisation, after every engine
-        --- subsystem is installed and before the startup phases run, so a
-        --- plugin can register a `Startup` system and have it run this
-        --- initialisation rather than the next one.
+        --- Called at the end of initialisation, after every engine subsystem is
+        --- installed and before the startup phases run, so it can register a
+        --- `Startup` system and have it run this initialisation rather than the
+        --- next one.
         ---
-        --- A list rather than one function, because that is the difference
-        --- worth having: a game composes its own modules and the engine's the
-        --- same way, and adding one is adding an element rather than editing a
-        --- body. `world:addPlugin` takes the same thing, so a plugin that
-        --- wants sub-plugins needs nothing from here.
-        plugins: {ecs.Plugin}
+        --- One entry point rather than a list, because composing plugins is
+        --- something the world already does: `world:addPlugin` takes an
+        --- `ecs.Plugin` and is how the engine installs its own, so a game with
+        --- several calls it from in here and needs no second mechanism.
+        ---
+        --- The world comes first because every plugin the world takes is
+        --- `function(world)`, so this reads as that shape with one more thing
+        --- and code moves between here and a delegated plugin without a silent
+        --- argument swap.
+        plugin: function(world: ecs.World, app: Application)
     end
 
     window: Window
@@ -159,22 +163,6 @@ local record Application
 end
 
 local ApplicationMT <const>: metatable<Application> = { __index = Application }
-
---- The application each world belongs to. Weak, so a world that has gone takes
---- its entry with it.
-local owners <const>: {ecs.World: Application} =
-    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Application}>)
-
---- The application a world belongs to, or nil for a world nothing drives.
----
---- A plugin is handed the world and nothing else, and most of what it needs
---- answers to the world already: `Renderer.of` and `Audio.of` reach the two
---- subsystems a game reaches for most. This is for the rest, which is the
---- window, the device, the input tiers and `quitRequested`: none of them is
---- world state and none of them belongs to a subsystem installed into a world.
-function Application.of(world: ecs.World): Application
-    return owners[world]
-end
 
 -------------------------------------------------------------------------------
 -- The crash guard
@@ -271,9 +259,6 @@ function Application:_init(): boolean
     -- created knowing it rather than being told later.
     self.input = Input.create({ window = self.window.handle })
     self.world = ecs.newWorld({ maxEntities = config.maxEntities })
-    -- Named before anything is installed into the world, so a plugin reaching
-    -- back for the window or the input has an answer however early it runs.
-    owners[self.world] = self
     self.renderer = Renderer.create(self.device.handle,
         self.device:getSwapchainFormat(), {
             ambient = config.ambient,
@@ -353,7 +338,7 @@ function Application:_init(): boolean
         self.mcp = mcp.listen(config.mcpPort)
     end
 
-    -- Before the game's plugins, so a pad that was already plugged in when the
+    -- Before the game's plugin, so a pad that was already plugged in when the
     -- process started is there when the game asks for it. Waiting for an
     -- event would leave every such device invisible: the platform reports an
     -- addition, not a device that was there all along.
@@ -364,24 +349,23 @@ function Application:_init(): boolean
     -- leaves a traceback and a live debug server rather than a dead process,
     -- which is the same bargain a system in any other phase already gets.
     --
+    -- Called rather than passed to `world:addPlugin`, which takes a plain
+    -- `function(world)`. Anything this delegates to has that shape and goes
+    -- through the world, which is what makes one entry point enough.
+    --
     -- Startup runs here rather than in the first iteration so that everything
     -- it spawned is resident before the first frame is extracted, and so its
     -- cost lands before the clock resets rather than in the first frame's dt.
     local world = self.world
-    local plugins = config.plugins
-    if plugins ~= nil then
-        for index = 1, #plugins do
-            local plugin = plugins[index]
-            if not guard(self, "a plugin", function() world:addPlugin(plugin) end) then
-                break
-            end
-        end
+    local plugin = config.plugin
+    if plugin ~= nil then
+        guard(self, "the plugin", function() plugin(world, self) end)
     end
     if self._crashed == nil then
         guard(self, "startup", function() world:startup() end)
     end
 
-    -- After the game's plugins, so the first look takes up everything the run has
+    -- After the game's plugin, so the first look takes up everything the run has
     -- opened. Which reloader owns which kind is registered here rather than
     -- inside the watcher: nothing in `tecs.platform` knows what an image or a
     -- clip is, and the rules a reload may not break are stated once, in the

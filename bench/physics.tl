@@ -157,8 +157,8 @@ return tecs.application({
     maxFrames = WARMUP + FRAMES,
     logFile = "",
 
-    plugins = { function(world: tecs.World)
-        local renderer = tecs.Renderer.of(world)
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
 
         -- Iterations completed, which is what the drop schedule and the warmup
         -- cut are both counted in. Incremented in `Last` so every phase in one
@@ -304,5 +304,5 @@ return tecs.application({
         print(("physics: %d bodies in %d waves, %d frames apart, "
             .. "measuring %d after %d warmup")
             :format(BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP))
-    end },
+    end,
 })

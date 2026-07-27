@@ -198,8 +198,8 @@ Because the host reaches into an object rather than being handed a loop,
 something has to run after the device and the world exist, once per iteration,
 once per event, and once at teardown. That much follows from the entry point.
 What does not follow is that a game should be handed four callbacks for it, and
-it no longer is. `Application.Config` carries `plugins`, a list of
-`function(world)`, and nothing else a game supplies is called by the loop.
+it no longer is. `Application.Config` carries `plugin`, one
+`function(world, app)`, and nothing else a game supplies is called by the loop.
 
 The reason is that the ECS already answers all four questions, and answers them
 better than a callback can. A system's order is declared by the phase it is
@@ -235,21 +235,36 @@ it is deliberately not a list of the six phases that were dead. It takes
 drives a real application through the whole lifecycle and names the ones that
 never fired, so a phase added later is covered the day it is added.
 
-### What a plugin can reach
+### One plugin, and what it is handed
 
-A callback received the application; a plugin receives the world. Most of what
-a game wants before its first frame is not world state, so each of those
-answers to the world it was installed into: `Renderer.of(world)` for
-registering an image or adding an instance producer, `Audio.of(world)` for the
-mixer, and `Application.of(world)` for the rest, which is the window, the
-device, the input tiers and `quitRequested`. All three are weak-keyed, so a
-world that has gone takes its entry with it.
+There is one entry point rather than a list of them, because the world already
+composes plugins. `world:addPlugin` takes an `ecs.Plugin`, which is a plain
+`function(world)`; it is how the engine installs its own sequencer and how
+`main.tl` installs the text plugin. A game with several modules calls it from
+inside its entry plugin, so a list here would be a second mechanism for
+something that already has one.
 
-That is an accessor rather than a fifth lifecycle mechanism, and the difference
-is worth stating: what made a callback worse than a system was _when_ it ran,
-not what it could see. A system that captured the application when a plugin
-registered it gets phase order, the fixed step, pause and state gating, and the
-guard, and reaches everything a callback did.
+The entry plugin is handed the world and the application, in that order. The
+world comes first because every plugin the world takes is `function(world)`:
+the entry reads as that shape with one more thing, and a body moved between it
+and a delegated plugin cannot silently swap its arguments. Reversed, this would
+be the only plugin in the tree whose parameters run the other way.
+
+The application is passed rather than looked up, and that closes a hole by
+construction instead of by type. An accessor keyed on the world has to answer
+nil for a world nothing drives, so its result is a value every caller
+dereferences at once and none of them checks. A plugin runs only for a world
+that has an application, so passing it in leaves no nil case to express and
+there is no `Application.of` to write. The renderer is `app.renderer` for the
+same reason, and there is no `Renderer.of` either, nor the weak table behind
+it. `Audio.of` is the one that stays, because the debug tools reach the mixer
+holding only a world and have no application to have been handed.
+
+Being handed the application is not a fifth lifecycle mechanism, and the
+difference is worth stating: what made a callback worse than a system was
+_when_ it ran, not what it could see. A system that captured the application
+when the plugin registered it gets phase order, the fixed step, pause and state
+gating, and the guard, and reaches everything a callback did.
 
 ### Events are a type per kind
 

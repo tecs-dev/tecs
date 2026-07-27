@@ -103,20 +103,6 @@ end
 
 local RendererMT <const>: metatable<Renderer> = { __index = Renderer }
 
---- The renderer each world had installed into it. Weak, so a world that has
---- gone takes its entry with it.
-local installed <const>: {ecs.World: Renderer} =
-    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Renderer}>)
-
---- The renderer installed into a world, or nil when none has been.
----
---- What lets something holding only the world reach the renderer, which is
---- what a plugin has: registering an image and adding an instance producer are
---- the two things a game reaches for and neither is world state.
-function Renderer.of(world: ecs.World): Renderer
-    return installed[world]
-end
-
 --- Builds a renderer for `device`.
 function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
                          options: RendererOptions): Renderer
@@ -163,7 +149,6 @@ end
 
 --- Registers the sync system and queries on `world`.
 function Renderer:install(world: ecs.World)
-    installed[world] = self
     self._extractor:install(world, self._packet, function()
         local packet = self._packet
         self.count = packet.count
@@ -361,12 +346,6 @@ end
 
 --- Releases everything the renderer owns. Safe to call more than once.
 function Renderer:destroy()
-    -- Every world this was installed into stops naming it, so nothing reaches
-    -- a destroyed renderer through `Renderer.of` and gets a live-looking
-    -- object over dead buffers.
-    for world, renderer in pairs(installed) do
-        if renderer == self then installed[world] = nil end
-    end
     self._backend:destroy()
 end
 

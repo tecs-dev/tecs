@@ -286,11 +286,9 @@ describe("proc", function()
         it("resolves a run without the game pumping it", function()
             local run
             local app = build({
-                plugins = {
-                    function()
-                        run = proc.run({ args = { "/bin/echo", "framed" } })
-                    end,
-                },
+                plugin = function()
+                    run = proc.run({ args = { "/bin/echo", "framed" } })
+                end,
             })
             assert.is_true(app:_init())
             assert.are.equal("running", run.status)
@@ -312,11 +310,9 @@ describe("proc", function()
         it("ends a child and stops the runner at shutdown", function()
             local run
             local app = build({
-                plugins = {
-                    function()
-                        run = proc.run({ args = { "/bin/sh", "-c", "sleep 60" } })
-                    end,
-                },
+                plugin = function()
+                    run = proc.run({ args = { "/bin/sh", "-c", "sleep 60" } })
+                end,
             })
             assert.is_true(app:_init())
             while run.pid == 0 do

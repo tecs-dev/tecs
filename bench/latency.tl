@@ -114,8 +114,8 @@ return tecs.application({
     capacity = COUNT + 64,
     maxFrames = TOTAL,
 
-    plugins = { function(world: tecs.World)
-        local input = tecs.Application.of(world).input
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local input = app.input
         spawnField(world)
 
         -- The entity the press moves. One entity, so the reaction costs
@@ -201,5 +201,5 @@ return tecs.application({
         print(("latency: %d shapes, one %s press every %d frames, %s present")
             :format(COUNT, KEY, INTERVAL,
                     os.getenv("BENCH_PRESENT") or "immediate"))
-    end },
+    end,
 })

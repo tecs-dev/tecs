@@ -95,8 +95,8 @@ return tecs.application({
     maxFrames = WARMUP + FRAMES,
     logFile = "",
 
-    plugins = { function(world: tecs.World)
-        local renderer = tecs.Renderer.of(world)
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
         -- Real time, recorded where both values are visible. The world's dt is
         -- whatever the loop measured, and this is that same measurement kept
         -- for the report.
@@ -208,5 +208,5 @@ return tecs.application({
                 if report ~= "" then print(report) end
             end,
         })
-    end },
+    end,
 })

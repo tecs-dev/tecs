@@ -10,7 +10,6 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local Application = require("tecs.Application")
-local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local events = require("tecs.platform.events")
 local phases = require("tecs.internal.phases")
@@ -28,12 +27,10 @@ describe("Application", function()
     it("resolves asset handles without the game pumping them", function()
         local handle
         local app = build({
-            plugins = {
-                function()
-                    assets.install()
-                    handle = assets.loadImage(FIXTURE)
-                end,
-            },
+            plugin = function()
+                assets.install()
+                handle = assets.loadImage(FIXTURE)
+            end,
         })
         assert.is_true(app:_init())
         assert.are.equal("loading", handle.status)
@@ -57,11 +54,9 @@ describe("Application", function()
 
     it("stops the loading worker at shutdown", function()
         local app = build({
-            plugins = {
-                function()
-                    assets.install()
-                end,
-            },
+            plugin = function()
+                assets.install()
+            end,
         })
         assert.is_true(app:_init())
         assert.is_true(assets.installed())
@@ -93,24 +88,47 @@ describe("Application", function()
         reserved:_shutdown()
     end)
 
-    it("answers a plugin holding only the world", function()
-        -- A plugin is handed the world and nothing else, so everything it
-        -- needs has to be reachable from one. Without these two a plugin
-        -- cannot register an image or read the window, which is most of what
-        -- a game does before its first frame.
+    it("hands the plugin the world and then the application", function()
+        -- The order is the assertion. Every plugin the world takes is
+        -- `function(world)`, so this one is that shape with the application
+        -- after it, and code that moves between the two must not swap its
+        -- arguments silently. The arity is pinned for the same reason.
         local seen = {}
         local app = build({
-            plugins = {
-                function(world)
-                    seen.app = Application.of(world)
-                    seen.renderer = Renderer.of(world)
-                end,
-            },
+            plugin = function(...)
+                seen.count = select("#", ...)
+                seen.world, seen.app = ...
+            end,
         })
         assert.is_true(app:_init())
 
+        assert.are.equal(2, seen.count)
+        assert.is_true(rawequal(app.world, seen.world))
         assert.is_true(rawequal(app, seen.app))
-        assert.is_true(rawequal(app.renderer, seen.renderer))
+        -- What a game reaches for before its first frame, and the reason the
+        -- application is passed at all: none of it is world state.
+        assert.is_true(rawequal(app.renderer, seen.app.renderer))
+        assert.is_not_nil(seen.app.window)
+        assert.is_not_nil(seen.app.input)
+        app:_shutdown()
+    end)
+
+    it("lets the one plugin install the rest", function()
+        -- One entry point rather than a list, because the world already
+        -- composes plugins. A game with several calls `addPlugin` from inside
+        -- this one, which is how the engine installs its own.
+        local order = {}
+        local app = build({
+            plugin = function(world)
+                order[#order + 1] = "entry"
+                world:addPlugin(function()
+                    order[#order + 1] = "delegated"
+                end)
+            end,
+        })
+        assert.is_true(app:_init())
+
+        assert.are.same({ "entry", "delegated" }, order)
         app:_shutdown()
     end)
 
@@ -118,16 +136,14 @@ describe("Application", function()
         it("delivers one to an observer of that kind and to no other", function()
             local keys, drops = 0, 0
             local app = build({
-                plugins = {
-                    function(world)
-                        world:observe(0, events.on.keyDown, function()
-                            keys = keys + 1
-                        end)
-                        world:observe(0, events.on.dropFile, function()
-                            drops = drops + 1
-                        end)
-                    end,
-                },
+                plugin = function(world)
+                    world:observe(0, events.on.keyDown, function()
+                        keys = keys + 1
+                    end)
+                    world:observe(0, events.on.dropFile, function()
+                        drops = drops + 1
+                    end)
+                end,
             })
             assert.is_true(app:_init())
 
@@ -144,13 +160,11 @@ describe("Application", function()
             -- from it is the one this vocabulary already had.
             local received
             local app = build({
-                plugins = {
-                    function(world)
-                        world:observe(0, events.on.mouseMotion, function(event)
-                            received = event
-                        end)
-                    end,
-                },
+                plugin = function(world)
+                    world:observe(0, events.on.mouseMotion, function(event)
+                        received = event
+                    end)
+                end,
             })
             assert.is_true(app:_init())
 
@@ -170,13 +184,11 @@ describe("Application", function()
         it("folds the event into input before the observer sees it", function()
             local downInHandler
             local app = build({
-                plugins = {
-                    function(world)
-                        world:observe(0, events.on.keyDown, function()
-                            downInHandler = Application.of(world).input:keyDown("space")
-                        end)
-                    end,
-                },
+                plugin = function(world, app)
+                    world:observe(0, events.on.keyDown, function()
+                        downInHandler = app.input:keyDown("space")
+                    end)
+                end,
             })
             assert.is_true(app:_init())
 
@@ -194,11 +206,9 @@ describe("Application", function()
     describe("the crash guard", function()
         it("survives a plugin that throws", function()
             local app = build({
-                plugins = {
-                    function()
-                        error("plugin boom")
-                    end,
-                },
+                plugin = function()
+                    error("plugin boom")
+                end,
             })
 
             -- True, not false: the process stays up so the traceback is
@@ -212,17 +222,15 @@ describe("Application", function()
 
         it("survives a startup system that throws", function()
             local app = build({
-                plugins = {
-                    function(world)
-                        world:addSystem({
-                            name = "spec.BadStartup",
-                            phase = phases.Startup,
-                            run = function()
-                                error("startup boom")
-                            end,
-                        })
-                    end,
-                },
+                plugin = function(world)
+                    world:addSystem({
+                        name = "spec.BadStartup",
+                        phase = phases.Startup,
+                        run = function()
+                            error("startup boom")
+                        end,
+                    })
+                end,
             })
             assert.is_true(app:_init())
             assert.is_truthy(app:crashed():match("startup boom"))
@@ -231,13 +239,11 @@ describe("Application", function()
 
         it("survives an observer that throws", function()
             local app = build({
-                plugins = {
-                    function(world)
-                        world:observe(0, events.on.keyDown, function()
-                            error("observer boom")
-                        end)
-                    end,
-                },
+                plugin = function(world)
+                    world:observe(0, events.on.keyDown, function()
+                        error("observer boom")
+                    end)
+                end,
             })
             assert.is_true(app:_init())
 
@@ -254,24 +260,22 @@ describe("Application", function()
             -- nothing else will.
             local releases = 0
             local app = build({
-                plugins = {
-                    function(world)
-                        world:addSystem({
-                            name = "spec.BadStartup",
-                            phase = phases.Startup,
-                            run = function()
-                                error("startup boom")
-                            end,
-                        })
-                        world:addSystem({
-                            name = "spec.Release",
-                            phase = phases.Shutdown,
-                            run = function()
-                                releases = releases + 1
-                            end,
-                        })
-                    end,
-                },
+                plugin = function(world)
+                    world:addSystem({
+                        name = "spec.BadStartup",
+                        phase = phases.Startup,
+                        run = function()
+                            error("startup boom")
+                        end,
+                    })
+                    world:addSystem({
+                        name = "spec.Release",
+                        phase = phases.Shutdown,
+                        run = function()
+                            releases = releases + 1
+                        end,
+                    })
+                end,
             })
             assert.is_true(app:_init())
             assert.is_true(app:_shutdown())

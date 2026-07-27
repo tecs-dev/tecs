@@ -231,8 +231,8 @@ return tecs.application({
     maxFrames = WARMUP + FRAMES,
     logFile = "",
 
-    plugins = { function(world: tecs.World)
-        local renderer = tecs.Renderer.of(world)
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
         if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse"
             and MODE ~= "churn" then
             error(("tecs: no sprite bench regime '%s'"):format(MODE))
@@ -339,5 +339,5 @@ return tecs.application({
             .. "measuring %d frames after %d warmup")
             :format(MODE, GPU and "GPU" or "host", WIDTH, HEIGHT, FRAMES,
                 WARMUP))
-    end },
+    end,
 })

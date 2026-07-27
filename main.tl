@@ -7,8 +7,8 @@
 --- Transform, the lights are entities too, and systems move them. Nothing
 --- here touches a buffer, a pass, or a command buffer.
 ---
---- The game is a plugin, which is the only way in. It is handed the world,
---- reaches the objects that are not world state through `Application.of`, and
+--- The game is a plugin, which is the only way in. It is handed the world and
+--- the application everything that is not world state hangs off, and it
 --- registers what should happen: systems for per-frame work, an observer for
 --- the one platform event it cares about, and a `Shutdown` system for the
 --- closing summary. Nothing in this file is called by the loop directly.
@@ -126,8 +126,7 @@ return tecs.application({
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 
-    plugins = { function(world: tecs.World)
-        local app = tecs.Application.of(world)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local width, height = app.window:getPixelSize()
         print(("tecs %s"):format(tecs.version))
         print(("  driver: %s"):format(app.device.driver))
@@ -243,5 +242,5 @@ return tecs.application({
 
         print(("  %d renderable entities, %d light entities"):format(COUNT, LIGHTS))
         print("  escape or close the window to quit")
-    end },
+    end,
 })

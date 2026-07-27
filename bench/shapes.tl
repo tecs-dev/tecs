@@ -122,8 +122,8 @@ return tecs.application({
     maxEntities = COUNT + 1024,
     maxFrames = WARMUP + FRAMES,
 
-    plugins = { function(world: tecs.World)
-        local renderer = tecs.Renderer.of(world)
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local renderer = app.renderer
         spawnField(world)
 
         -- Translation only, matching the reference scene. Rotation would make
@@ -184,5 +184,5 @@ return tecs.application({
 
         print(("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s")
             :format(PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE))
-    end },
+    end,
 })

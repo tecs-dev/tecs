@@ -52,7 +52,7 @@ describe("phases", function()
         local app = Application.create({
             window = { title = "phases", width = 64, height = 64 },
             logFile = "",
-            plugins = { plugin },
+            plugin = plugin,
         })
 
         -- A fixed step is released when the accumulator crosses it, so a run
