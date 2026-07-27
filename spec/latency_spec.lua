@@ -178,8 +178,10 @@ describe("input latency", function()
     it("counts player input as input and the platform as not", function()
         assert.is_true(events.isInput("keyDown"))
         assert.is_true(events.isInput("mouseMotion"))
-        assert.is_true(events.isInput("controllerAxis"))
+        assert.is_true(events.isInput("gamepadAxis"))
         assert.is_true(events.isInput("fingerDown"))
+        assert.is_true(events.isInput("penMotion"))
+        assert.is_true(events.isInput("textInput"))
 
         -- Nobody is waiting on these, so a frame that only saw one has no
         -- latency to report.

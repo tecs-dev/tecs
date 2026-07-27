@@ -45,11 +45,17 @@ describe("platform.events", function()
         assert.is_true(kinds.quit)
         assert.is_true(kinds.keyDown)
         assert.is_true(kinds.mouseMotion)
-        assert.is_true(kinds.controllerAxis)
+        assert.is_true(kinds.gamepadAxis)
         assert.is_true(kinds.appWillEnterBackground)
         assert.is_true(kinds.appDidEnterForeground)
         assert.is_true(kinds.lowMemory)
         assert.is_true(kinds.fingerDown)
+        assert.is_true(kinds.textInput)
+        assert.is_true(kinds.penMotion)
+        assert.is_true(kinds.gamepadTouchpadDown)
+
+        -- Named after the device rather than after the interface SDL retired.
+        assert.is_nil(kinds.controllerAxis)
     end)
 
     it("converts a key press, including the repeat flag", function()
@@ -85,7 +91,7 @@ describe("platform.events", function()
         assert.are.equal(2.0, event.dy)
     end)
 
-    it("scales a controller axis into minus one to one", function()
+    it("scales a gamepad axis into minus one to one", function()
         local queue, count = queueOf(function(q)
             q[0].type = C.SDL_EVENT_GAMEPAD_AXIS_MOTION
             q[0].gaxis.axis = 1
@@ -94,10 +100,185 @@ describe("platform.events", function()
         end)
 
         local event = drainOne(queue, count)[1]
-        assert.are.equal("controllerAxis", event.kind)
+        assert.are.equal("gamepadAxis", event.kind)
         assert.are.equal(1, event.axis)
         assert.is_true(math.abs(event.value + 1.0) < 0.001)
         assert.are.equal(3, event.which)
+    end)
+
+    it("says which pad a button came from", function()
+        -- Without this a two-player game has one set of buttons, and pad A
+        -- releasing one releases pad B's.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_GAMEPAD_BUTTON_DOWN
+            q[0].gbutton.button = 3
+            q[0].gbutton.which = 17
+            q[0].gbutton.down = true
+        end)
+
+        local event = drainOne(queue, count)[1]
+        assert.are.equal("gamepadButtonDown", event.kind)
+        assert.are.equal(3, event.button)
+        assert.are.equal(17, event.which)
+        assert.is_true(event.down)
+    end)
+
+    it("converts a gamepad sensor reading and a touchpad finger", function()
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_GAMEPAD_SENSOR_UPDATE
+            q[0].gsensor.which = 5
+            q[0].gsensor.sensor = 3
+            q[0].gsensor.data[0] = 1.5
+            q[0].gsensor.data[1] = -2.5
+            q[0].gsensor.data[2] = 0.25
+            q[1].type = C.SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION
+            q[1].gtouchpad.which = 5
+            q[1].gtouchpad.touchpad = 1
+            q[1].gtouchpad.finger = 2
+            q[1].gtouchpad.x = 0.75
+            q[1].gtouchpad.y = 0.5
+            q[1].gtouchpad.pressure = 1.0
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("gamepadSensor", seen[1].kind)
+        assert.are.equal(3, seen[1].sensor)
+        assert.are.equal(1.5, seen[1].sensorX)
+        assert.are.equal(-2.5, seen[1].sensorY)
+        assert.are.equal(0.25, seen[1].sensorZ)
+
+        assert.are.equal("gamepadTouchpadMotion", seen[2].kind)
+        assert.are.equal(1, seen[2].touchpad)
+        assert.are.equal(2, seen[2].fingerIndex)
+        assert.are.equal(0.75, seen[2].normalX)
+    end)
+
+    it("carries a key's layout and its physical position, plus modifiers",
+        function()
+            -- A movement binding wants the position and a text binding wants
+            -- the layout, so neither can stand in for the other.
+            local queue, count = queueOf(function(q)
+                q[0].type = C.SDL_EVENT_KEY_DOWN
+                q[0].key.scancode = 4
+                q[0].key.key = 97
+                q[0].key.mod = sdl.K.SDL_KMOD_LSHIFT
+                q[0].key.which = 6
+                q[0].key.down = true
+            end)
+
+            local event = drainOne(queue, count)[1]
+            assert.are.equal(4, event.scancode)
+            assert.are.equal(97, event.keycode)
+            assert.are.equal(sdl.K.SDL_KMOD_LSHIFT, event.modifiers)
+            assert.are.equal(6, event.which, "and which keyboard produced it")
+        end)
+
+    it("marks a mouse event the platform made from a touch or a pen", function()
+        -- These arrive alongside the finger events they were made from, so a
+        -- game that handles both would act on one gesture twice.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_MOUSE_BUTTON_DOWN
+            q[0].button.button = 1
+            q[0].button.which = sdl.K.SDL_TOUCH_MOUSEID
+            q[1].type = C.SDL_EVENT_MOUSE_BUTTON_DOWN
+            q[1].button.button = 1
+            q[1].button.which = sdl.K.SDL_PEN_MOUSEID
+            q[2].type = C.SDL_EVENT_MOUSE_BUTTON_DOWN
+            q[2].button.button = 1
+            q[2].button.which = 0
+        end, 3)
+
+        local seen = drainOne(queue, count)
+        assert.is_true(seen[1].synthetic, "a touch-generated click")
+        assert.is_true(seen[2].synthetic, "a pen-generated click")
+        assert.is_false(seen[3].synthetic, "and a real mouse is not one")
+    end)
+
+    it("converts text and composition into Lua strings", function()
+        -- A recognised kind has to mean a usable payload. The pointer is only
+        -- valid where it was read, so what arrives above is a copy.
+        local typed = "hi"
+        local composing = "ni"
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_TEXT_INPUT
+            q[0].text.text = typed
+            q[1].type = C.SDL_EVENT_TEXT_EDITING
+            q[1].edit.text = composing
+            q[1].edit.start = 1
+            q[1].edit.length = 2
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("textInput", seen[1].kind)
+        assert.are.equal("hi", seen[1].text)
+        assert.are.equal("textEditing", seen[2].kind)
+        assert.are.equal("ni", seen[2].text)
+        assert.are.equal(1, seen[2].start)
+        assert.are.equal(2, seen[2].length)
+    end)
+
+    it("clears a string payload rather than carrying it to the next event",
+        function()
+            -- The record is reused, and a handler that checks `text ~= nil`
+            -- would otherwise act on the previous event's text.
+            local typed = "hi"
+            local queue, count = queueOf(function(q)
+                q[0].type = C.SDL_EVENT_TEXT_INPUT
+                q[0].text.text = typed
+                q[1].type = C.SDL_EVENT_KEY_DOWN
+                q[1].key.scancode = 44
+            end, 2)
+
+            local seen = drainOne(queue, count)
+            assert.are.equal("hi", seen[1].text)
+            assert.is_nil(seen[2].text)
+        end)
+
+    it("converts a pen through its whole vocabulary", function()
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_PEN_DOWN
+            q[0].ptouch.which = 9
+            q[0].ptouch.x = 40.0
+            q[0].ptouch.y = 60.0
+            q[0].ptouch.eraser = true
+            q[0].ptouch.down = true
+            q[1].type = C.SDL_EVENT_PEN_AXIS
+            q[1].paxis.which = 9
+            q[1].paxis.x = 41.0
+            q[1].paxis.y = 61.0
+            q[1].paxis.axis = 0
+            q[1].paxis.value = 0.5
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("penDown", seen[1].kind)
+        assert.are.equal(9, seen[1].which)
+        assert.are.equal(40.0, seen[1].x)
+        assert.is_true(seen[1].eraser)
+
+        assert.are.equal("penAxis", seen[2].kind)
+        assert.are.equal(0, seen[2].axis)
+        assert.are.equal(0.5, seen[2].value)
+        assert.is_false(seen[2].eraser,
+            "the eraser flag must not carry over from the press before it")
+    end)
+
+    it("reports a drop with its path and its origin", function()
+        local dropped = "/tmp/hero.png"
+        local from = "explorer"
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_DROP_FILE
+            q[0].drop.data = dropped
+            q[0].drop.source = from
+            q[0].drop.x = 12.0
+            q[0].drop.y = 34.0
+        end)
+
+        local event = drainOne(queue, count)[1]
+        assert.are.equal("dropFile", event.kind)
+        assert.are.equal("/tmp/hero.png", event.text)
+        assert.are.equal("explorer", event.source)
+        assert.are.equal(12.0, event.x)
     end)
 
     it("reports lifecycle events with their own kinds", function()
@@ -114,6 +295,7 @@ describe("platform.events", function()
         local queue, count = queueOf(function(q)
             q[0].type = C.SDL_EVENT_FINGER_DOWN
             q[0].tfinger.fingerID = 9007199254740995ULL
+            q[0].tfinger.touchID = 42ULL
             q[0].tfinger.x = 0.5
             q[0].tfinger.y = 0.25
             q[0].tfinger.pressure = 0.75
@@ -124,10 +306,33 @@ describe("platform.events", function()
         assert.is_string(event.finger)
         assert.is_truthy(event.finger:find("9007199254740995"),
             "the identity must survive exactly, not as a rounded double")
-        -- Touch arrives normalised and is reported in window units.
+        assert.is_truthy(event.touchDevice:find("42"),
+            "and so must the device it belongs to")
+        -- Touch arrives normalised and is reported in window units as well,
+        -- since a window coordinate does not survive a resize and the
+        -- normalised one does.
+        assert.are.equal(0.5, event.normalX)
+        assert.are.equal(0.25, event.normalY)
         assert.are.equal(400.0, event.x)
         assert.are.equal(150.0, event.y)
         assert.is_true(math.abs(event.pressure - 0.75) < 0.001)
+    end)
+
+    it("scales touch by the window size it was told, not by pixels", function()
+        -- Mouse positions are in window coordinates. Scaling touch by the
+        -- drawable size instead would put the two pointers a device-density
+        -- factor apart on every high-density display.
+        events.setTouchScale(800, 600)
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_FINGER_DOWN
+            q[0].tfinger.x = 0.5
+            q[0].tfinger.y = 0.5
+        end)
+        assert.are.equal(400.0, drainOne(queue, count)[1].x)
+
+        events.setTouchScale(1600, 1200)
+        assert.are.equal(800.0, drainOne(queue, count)[1].x)
+        events.setTouchScale(800, 600)
     end)
 
     it("surfaces an unrecognised SDL event rather than dropping it", function()

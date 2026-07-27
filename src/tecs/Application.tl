@@ -168,7 +168,9 @@ function Application:_init(): boolean
         self.device:setPresentMode(config.presentMode)
     end
 
-    self.input = Input.create()
+    -- The window is what text input and the cursor modes act on, so input is
+    -- created knowing it rather than being told later.
+    self.input = Input.create({ window = self.window.handle })
     self.world = ecs.newWorld({ maxEntities = config.maxEntities })
     self.renderer = Renderer.create(self.device.handle,
         self.device:getSwapchainFormat(), {
@@ -184,8 +186,11 @@ function Application:_init(): boolean
     sequence.plugin(self.world)
 
     -- Touch arrives normalised, so the converter needs the window size to
-    -- report it in the same units as a mouse position.
-    local width, height = self.window:getPixelSize()
+    -- report it in the same units as a mouse position. That is the logical
+    -- size: a mouse position is in window coordinates, and scaling touch by
+    -- the pixel size would put the two pointers a device-density factor apart
+    -- on every high-density display.
+    local width, height = self.window:getSize()
     events.setTouchScale(width, height)
 
     -- Latched input is what lets a fixed step see a press that began and ended
@@ -227,6 +232,12 @@ function Application:_init(): boolean
         self.mcp = mcp.listen(config.mcpPort)
     end
 
+    -- Before the game's load, so a pad that was already plugged in when the
+    -- process started is there when the game asks for it. Waiting for an
+    -- event would leave every such device invisible: the platform reports an
+    -- addition, not a device that was there all along.
+    self.input:refreshDevices()
+
     if config.load ~= nil then config.load(self) end
 
     -- Startup cost must not land in the first iteration's dt.
@@ -253,6 +264,11 @@ function Application:_receive(event: events.Event)
     local kind = event.kind
     if kind == "quit" or kind == "windowCloseRequested" then
         self.quitRequested = true
+    elseif kind == "windowResized" then
+        -- Touch is normalised to the window, so the conversion to window
+        -- coordinates has to follow the window rather than the size it had at
+        -- startup.
+        events.setTouchScale(event.data1, event.data2)
     elseif kind == "appWillEnterBackground" then
         self.suspended = true
     elseif kind == "appDidEnterForeground" then
@@ -382,6 +398,9 @@ function Application:_shutdown(): boolean
     end
 
     if self.mcp ~= nil then self.mcp:destroy() end
+    -- Before SDL_Quit, since closing a device after the subsystem it belongs
+    -- to has gone is undefined.
+    if self.input ~= nil then self.input:destroy() end
     log.closeFile()
 
     if self.device ~= nil then

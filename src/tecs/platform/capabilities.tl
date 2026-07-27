@@ -42,7 +42,7 @@ local record capabilities
 
     --- Input and threading the target provides.
     touch: boolean
-    controller: boolean
+    gamepad: boolean
     sensors: boolean
     workers: boolean
     --- Logical cores, for sizing a worker pool.
@@ -122,7 +122,7 @@ function capabilities.get(): capabilities
         packagedShaders = pack ~= nil,
         shaderFormats = formats,
         touch = hasTouch(),
-        controller = true,
+        gamepad = true,
         sensors = platform == "iOS" or platform == "Android",
         workers = pcall(require, "tecs.workers"),
         cores = tonumber(C.SDL_GetNumLogicalCPUCores()) as integer,

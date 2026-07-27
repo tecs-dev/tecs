@@ -133,12 +133,12 @@ return tecs.application({
                 -- Inside the step, because the step is what the measurement
                 -- brackets. A reaction deferred to the next frame would be a
                 -- frame of latency this harness could not see.
-                if not input:isKeyPressed(KEY) and not input:isKeyReleased(KEY) then
+                if not input:keyPressed(KEY) and not input:keyReleased(KEY) then
                     return
                 end
                 if app.frame >= WARMUP then reactions = reactions + 1 end
                 local transform = app.world:getMut(marker, Transform)
-                transform.y = HEIGHT * (input:isKeyDown(KEY) and 0.6 or 0.4)
+                transform.y = HEIGHT * (input:keyDown(KEY) and 0.6 or 0.4)
             end,
         })
 
