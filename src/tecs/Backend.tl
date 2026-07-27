@@ -91,6 +91,40 @@ local record ClipRegion
     height: number
 end
 
+--- Something that writes instances with compute before the cull runs.
+---
+--- The pool a particle emitter draws from is the caller this exists for. Its
+--- contents outlive the frame, so it is not written through staging the way an
+--- archetype run is, and what it writes has to land before the mark pass reads
+--- the bounds beside it. A stage is recorded on the frame's command buffer
+--- between the staging flush and the cull, and SDL orders all three because
+--- each declares what it writes.
+local record ComputeStage
+    --- Whether this stage has anything to record this frame.
+    ---
+    --- Asked every frame rather than derived from a dirty bit, because the
+    --- thing this exists for dirties nothing: an emitter's whole field moves
+    --- every frame while the world holding it reports no change at all. There
+    --- is no bit to read, so the stage has to publish the answer.
+    active: function(self: ComputeStage): boolean
+
+    --- Records its dispatches onto `frame`'s command buffer.
+    ---
+    --- The instance and bounds buffers are handed over rather than reached
+    --- for, because writing them is the whole point of being here and a stage
+    --- that had to find them would be a stage that could find something else.
+    record: function(self: ComputeStage, frame: Frame, instances: Buffer,
+                     bounds: Buffer)
+
+    --- Releases what the stage owns, called when the backend is destroyed.
+    ---
+    --- A stage's buffers and pipelines are built on the backend's device, so
+    --- they cannot outlive it and nothing else is holding them: a world that
+    --- installed a stage and then dropped its renderer would leak every one of
+    --- them otherwise. Must be safe to call more than once.
+    destroy: function(self: ComputeStage)
+end
+
 local record BackendOptions
     --- Ambient colour applied everywhere.
     ambient: {number}
@@ -106,6 +140,7 @@ end
 
 local record Backend
     type ClipRegion = ClipRegion
+    type ComputeStage = ComputeStage
     type Options = BackendOptions
 
     deferred: Deferred
@@ -158,6 +193,10 @@ local record Backend
     --- The clip rectangles, in the shape the fragment shader reads them.
     --- Written in place as regions are set, so there is nothing to repack.
     _clipUniform: loader.CArray
+    --- Stages recorded between the staging flush and the cull, in the order
+    --- they were added. Empty on a world that installed nothing that writes
+    --- instances with compute, which is what makes that world pay nothing.
+    _stages: {ComputeStage}
     _device: loader.CPtr
     _destroyed: boolean
 end
@@ -265,12 +304,17 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
     self.whiteU1 = white.u1
     self.whiteV1 = white.v1
 
+    -- Written by compute as well as by the staging flush, because a producer
+    -- whose contents outlive the frame writes its own region from a compute
+    -- pass rather than through staging. Nothing dispatches over them until
+    -- something adds a stage, so a world that never does pays only for the
+    -- usage bit.
     self.instances = Buffer.create(device, {
-        usage = { "storage", "computeRead" },
+        usage = { "storage", "computeRead", "computeWrite" },
         size = self.capacity * INSTANCE_BYTES,
     })
     self._bounds = Buffer.create(device, {
-        usage = { "computeRead" },
+        usage = { "computeRead", "computeWrite" },
         size = self.capacity * BOUND_BYTES,
     })
     self._slots = Buffer.create(device, {
@@ -337,6 +381,8 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
         self._clipUniform[base + 3] = CLIP_UNBOUNDED
     end
 
+    self._stages = {}
+
     self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
     self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
     self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
@@ -381,6 +427,23 @@ end
 function Backend:mapSlot(slot: integer): loader.CArray, loader.CArray
     return self.instances:mapSlotAs(slot, "float *", false),
         self._bounds:mapSlotAs(slot, "float *", false)
+end
+
+--- Adds a stage recorded between the staging flush and the cull.
+---
+--- Order is the order they were added, and each is asked whether it has
+--- anything to do before it is asked to do it. A backend nothing was added to
+--- records nothing and dispatches nothing.
+function Backend:addComputeStage(stage: ComputeStage)
+    self._stages[#self._stages + 1] = stage
+end
+
+--- The device this backend was built for.
+---
+--- For a stage building its own pipelines and buffers, which it has to do
+--- before there is a frame to record onto.
+function Backend:device(): loader.CPtr
+    return self._device
 end
 
 --- Uploads a decoded image into the array and returns the region it occupies.
@@ -541,6 +604,18 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._playbacks:flush(frame.commandBuffer)
     end
 
+    -- After the flush and before the cull. A stage owns a region of the same
+    -- two buffers the flush just wrote, so what it writes has to land on top
+    -- of whatever staging left there, and it has to land before the mark pass
+    -- reads the bounds beside it. Both fall out of the recording order.
+    local stages <const> = self._stages
+    for index = 1, #stages do
+        local stage = stages[index]
+        if stage:active() then
+            stage:record(frame, self.instances, self._bounds)
+        end
+    end
+
     self._stepClock = packet.stepClock
     self.count = packet.count
     local view <const> = self._view
@@ -607,6 +682,10 @@ end
 function Backend:destroy()
     if self._destroyed then return end
     self._destroyed = true
+    -- First, because a stage's buffers were built on this device and releasing
+    -- the device out from under them is the one order that cannot work.
+    local stages <const> = self._stages
+    for index = 1, #stages do stages[index]:destroy() end
     self.pipeline:destroy()
     self.deferred:destroy()
     self.instances:destroy()

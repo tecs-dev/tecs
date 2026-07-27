@@ -103,6 +103,10 @@ Working today:
   area, taskbar attention and progress, pointer and keyboard confinement, and
   the displays underneath it all, every one of them also settable in the
   application's config
+- Particles simulated on the GPU: an entity is an emitter and its particles are
+  not entities, their state living in a buffer the CPU never reads, drawn
+  through the instance stream and the cull that were already there. Opaque
+  only, until there is a blended pass
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -1683,6 +1687,114 @@ string changed. Layout runs every frame and almost no text changes, so it is
 gated twice: an archetype whose `Text`, `Tint` and `Transform` columns are all
 clean is skipped whole, and within a dirty archetype a row whose authored fields
 and transform match what its glyphs were built from is skipped too.
+
+## Particles are emitters, not entities
+
+An entity carrying `ParticleEmitter` is an emitter. Its particles are not
+entities, are not components, and never cross back to the host at all: their
+position, velocity, age and lifetime live in a storage buffer that the CPU
+never reads and the vertex shader never sees, and a slot in it is handed out
+once, at spawn, and held until the particle expires. Four thousand particles
+cost three dispatches and no per-frame host writes; what that buys is paid for
+by not being able to inspect, move, kill or count one of them.
+
+Three things divide the work. A `ParticleEffect` is immutable data describing
+how particles spawn and evolve, registered once and shared by every emitter
+naming it. The emitter component names an effect and carries playback state, a
+seed and a few per-instance scales, and deliberately nothing else: if an
+instance could override every effect field then effects would stop being
+reusable GPU data. A pool owns one run of the instance buffer, sub-allocates a
+contiguous slot range of the effect's capacity to each emitter, and records the
+passes that fill it.
+
+Drawing is not new work. A particle written into the instance buffer is an
+instance: the same sixteen floats, the same four bound floats, the same mark,
+scan and compact, and the same one indirect draw. The pool is an
+`InstanceProducer` whose `takeDirty` is always empty, which is what gives it a
+region of the instance and bounds buffers the host flush never covers, and a
+`Backend.ComputeStage`, which is what lets it write that region between the
+staging flush and the cull. Nothing downstream was taught about particles.
+
+Three compute passes, in order. **Emit** is one thread per emitter: it advances
+the schedule, carries the fractional accumulator, fires the bursts whose time
+has passed and reserves a block of the emitter's own range. **Spawn** is one
+thread per pool slot: a slot works out arithmetically whether it falls in its
+emitter's reserved block, and if it does it draws its lifetime, speed,
+direction, size and rotation and writes them. **Simulate** is one thread per
+pool slot too: it integrates whole fixed steps and writes the instance and the
+bound beside it. Emit and spawn are separate because the schedule is per
+emitter and the work it decides on is per particle, so a burst of four thousand
+is four thousand threads rather than one thread going round four thousand
+times.
+
+Slot allocation is an `atomicAdd`, and the ordered scan the compaction uses is
+not the right mechanism here. The rule that scan exists for is that a
+_permutation the image can see_ must not depend on thread scheduling; a
+particle's slot is assigned once and held for its whole life, so two particles'
+relative draw order is fixed from the moment both exist and the scene cannot
+shimmer. Emitters also do not share an arena: each has its own range and its
+own cursor, so the only contention possible is within one emitter.
+
+The emitter presents no bound to the cull, because the emitter is not in the
+instance stream. Its particles are, one bound each, written by the simulate
+pass from each particle's own position and size by the same formula
+`instancelayout.extentOf` uses. Culling is therefore exact and per particle,
+which a conservative bound around an emitter could never be, and it costs
+nothing extra because the pass is already writing the instance beside it. A
+slot with no live particle writes `instancelayout.HIDDEN`, which is what a
+reserved run has always written, so a dead particle costs a bounds read and a
+scan lane and never reaches the draw.
+
+Randomness is a counter-based hash of the seed, the emitter's generation, the
+particle's serial and a lane per property, rather than a generator carrying
+state. Two consequences follow. Adding a randomised property does not shift
+every other random choice, so an effect edited to randomise its rotation keeps
+the sizes it had. And a particle's constants are recomputed each frame rather
+than stored, which is what keeps its state at eight floats: seven hash draws
+are cheaper than seven floats of memory traffic per particle per frame.
+
+Integration is whole fixed steps against the emitter's own clock, so two
+machines fed the same steps hold the same field however many frames either
+drew, and an emitter that is paused, stopped or held by the `Paused` tag stands
+still while the world goes on drawing. Smoothness is bought presentationally:
+the instance position carries one extrapolation term along the particle's own
+velocity, applied to the output and never to the state, so it cannot feed back.
+
+Animated particles are the frame table's second caller and build nothing new.
+Writing `rate = tickCount / (lifetime * stepsPerSecond)` with looping off makes
+a particle traverse its cycle exactly once over its own life and clamp at the
+end, so a randomised lifetime randomises the playback speed. Per-frame
+durations, reverse and pingpong all arrive already spent at build time, and
+there is no second registry, no second table and no second answer to which
+frame a thing is showing.
+
+An emitter dirties nothing, ever, while its whole field moves every frame, and
+unlike an animated sprite there is no archetype bit that could be read instead.
+Any gate of the shape "nothing is dirty" concludes wrongly here, so the pool
+publishes the answer itself through `ComputeStage:active`, counting its own
+live emitters and holding the gate open one frame past the last of them so the
+pass that hides their slots is the one that runs. For the same reason the host
+walks every emitter every frame rather than gating on a dirty bit that will
+never be set; emitters are counted in tens, so the walk is cheaper than any
+arrangement that tried to avoid it would be to get right.
+
+A snapshot carries the emitter and not the field, which is the shape audio is
+already in: the configuration, the seed and the playback state cross, and not
+one particle does. `finished` answers exactly from the schedule and the longest
+lifetime, which is what almost every "has the explosion ended" question is
+actually asking; `estimatedCount` integrates the schedule and subtracts
+expirations, and its name carries the caveat. Neither reads anything back,
+because a readback here is a pipeline stall.
+
+**Particles are opaque.** There is no blend state anywhere in this engine yet:
+the geometry pass writes with replace, so a colour's alpha reaches the
+swapchain and nothing blends against it. A gradient ending at transparent black
+writes opaque black over what was behind it, which is worse than not fading.
+Alpha is carried and it is inert, `render.blend` is accepted and logged and
+ignored so an effect authored today draws as written once there is a blended
+pass, and the only fade that works is the size curve going to zero. What that
+leaves working is debris, chunks, gibs, snow, rain, confetti and hard-edged
+sparks. Fire, smoke, glow and soft dust want the blended pass and are not here.
 
 ## GPU-driven by default
 

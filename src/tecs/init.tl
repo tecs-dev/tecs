@@ -50,6 +50,7 @@ local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
 local type components = require("tecs.components")
 local type text = require("tecs.gfx.text")
+local type particles = require("tecs.gfx.particles")
 local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
@@ -118,6 +119,7 @@ local record tecs
     sequence: sequence
     components: components
     text: text
+    particles: particles
     materials: materials
     assets: assets
     workers: workers
@@ -300,6 +302,7 @@ local ENGINE <const>: {string: string} = {
     sequence = "tecs.sequence",
     components = "tecs.components",
     text = "tecs.gfx.text",
+    particles = "tecs.gfx.particles",
     materials = "tecs.gpu.materials",
     assets = "tecs.assets",
     workers = "tecs.workers",

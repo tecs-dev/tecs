@@ -33,6 +33,7 @@ local components <const> = require("tecs.components")
 
 local type InstanceProducer = Extractor.InstanceProducer
 local type ClipRegion = Backend.ClipRegion
+local type ComputeStage = Backend.ComputeStage
 
 --- Instances the buffers are sized for. This is a ceiling, not a hint: rows
 --- beyond it are dropped rather than growing the buffer mid-frame.
@@ -65,6 +66,7 @@ end
 local record Renderer
     type InstanceProducer = InstanceProducer
     type ClipRegion = ClipRegion
+    type ComputeStage = ComputeStage
 
     --- What the view is looking at. Centred on the viewport the first time a
     --- frame is drawn, so a scene that never mentions a camera sees world
@@ -285,6 +287,23 @@ end
 --- Adds a producer, laid out after the archetypes in the order added.
 function Renderer:addProducer(producer: InstanceProducer)
     self._extractor:addProducer(producer)
+end
+
+--- Adds a stage recorded between the staging flush and the cull.
+---
+--- What a producer whose instances are written on the GPU needs beyond the
+--- run a producer already gets: the run reserves the slots, and this is where
+--- something is put in them.
+function Renderer:addComputeStage(stage: ComputeStage)
+    self._backend:addComputeStage(stage)
+end
+
+--- The GPU device this renderer draws through.
+---
+--- For a stage that has to build its own pipelines and buffers before there is
+--- a frame to record onto.
+function Renderer:device(): loader.CPtr
+    return self._backend:device()
 end
 
 --- Seconds the last extraction took, or zero when nothing is being measured.

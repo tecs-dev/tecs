@@ -29,7 +29,8 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
         deps package check-package presets shaders bench bench-physics \
-        bench-sprites bench-text bench-latency bench-ecs bench-json \
+        bench-sprites bench-text bench-particles bench-latency bench-ecs \
+        bench-json \
         bench-snapshot bench-bitset format format-check
 
 help: ## List targets
@@ -102,6 +103,9 @@ bench-sprites: build $(OUT)/bench/sprites.lua ## Run the sprite benchmark
 
 bench-text: build $(OUT)/bench/text.lua ## Run the text benchmark
 	@$(BIN) --entry $(OUT)/bench/text.lua
+
+bench-particles: build $(OUT)/bench/particles.lua ## Run the particle benchmark
+	@$(BIN) --entry $(OUT)/bench/particles.lua
 
 bench-latency: build $(OUT)/bench/latency.lua ## Measure event-to-photon latency
 	@$(BIN) --entry $(OUT)/bench/latency.lua
