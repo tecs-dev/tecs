@@ -161,6 +161,9 @@ end
 --- and what a snapshot stores. Registering a path a second time answers with
 --- the layer it already holds instead of consuming another, so a name means
 --- one image for the life of the renderer however many times it is asked for.
+--- The path is what identifies it rather than the spelling of the path: two
+--- ways of writing one path are one image, since the array's layers are few
+--- and none of them is ever given back.
 ---
 --- A Sprite is returned rather than a bare region because an image smaller
 --- than a cell does not reach the cell's edge, so the UV range is not 0..1 and

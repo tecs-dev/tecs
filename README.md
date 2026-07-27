@@ -965,7 +965,15 @@ means whatever loaded in that position, and one written into a snapshot is a
 different image the moment the assets load in a different order. So a snapshot
 stores the name, `registerImage` keeps a registry from name to layer, and
 registering a name twice answers with the layer it already holds instead of
-consuming another. The layer is cached in the `Sprite` when it is built, or on
+consuming another. The name is the path rather than the spelling of it: a name
+is normalised before it becomes an identity, so `a/b.png` and `a/./b.png` are
+one image and not two layers holding the same pixels. Only what a spelling
+cannot disagree about is dropped, which is repeated separators, `.` segments
+and a trailing separator. Nothing there reads the filesystem, so a name
+normalises the same before its file exists as after, and `..`, letter case and
+the asset root are all left alone: resolving any of them lexically would merge
+two names that are two different files, or make an identity depend on where the
+process was looking when it was asked. The layer is cached in the `Sprite` when it is built, or on
 the first frame that writes a restored one, because extraction reads it for
 every row and a lookup per row is a lookup too many. A name nothing is
 registered under fails rather than drawing whichever image holds that layer.
@@ -1169,7 +1177,16 @@ One depth attachment is shared by whichever passes ask for it, sized and resized
 with the frame like every other target. Its format is discovered rather than
 assumed: Metal has no `D24_UNORM` and a Vulkan driver may have that one and not
 `D32_FLOAT`, so the device is asked which of the three it supports as a depth
-target and the best answer is taken. Depth state is declared per pass, because a
+target and the best answer is taken. What is taken is then checked against what
+the sort needs, because the fallback is otherwise the quietest defect in the
+engine: `D16_UNORM` steps by 1.5e-5 and the layer bands resolve to 9.3e-7, so a
+device that offers only the floor keeps the bands and loses the sort inside
+them, and everything within about sixteen world units of anything else draws in
+the order it was written. That is reported rather than raised. A layer sorted by
+z alone resolves in `D16_UNORM` with room to spare, and so does a game whose
+world is smaller than the default extents; refusing the depth target would take
+a device those scenes are correct on and leave it with no picture at all. Depth
+state is declared per pass, because a
 pass that must not have an attachment is as ordinary as a pass that must, and a
 pipeline bakes its target info, so the graph answers both cases through
 `depthOf` rather than leaving the call site to assume one.

@@ -149,6 +149,24 @@ local record layers
     --- @return A depth clamped into 0.001 to 0.999, which is what keeps the
     ---     shader's recovery of the layer index in range.
     depthOf: function(layer: integer, z: number, x: number, y: number): number
+
+    --- The smallest depth difference `depthOf` produces between two entities
+    --- one unit apart, taken over every sort mode.
+    ---
+    --- What a depth buffer has to hold. A format whose own step is larger than
+    --- this keeps the bands, so layer order is never at risk, and loses the
+    --- sort inside them: the two entities land on one depth value and draw in
+    --- the order they were written rather than the order they were sorted
+    --- into.
+    ---
+    --- Every mode is counted rather than the one a scene is using, because
+    --- `configure` may put any layer on any sort at any point after the depth
+    --- target exists. Derived from `MAX`, `maxZ` and `maxY`, so raising an
+    --- extent moves this with it.
+    --- @return A depth difference, in the input that moves depth least. That
+    ---     is the topdown sort's y at the defaults, which spends the smallest
+    ---     share of a band on the widest range.
+    depthResolution: function(): number
 end
 
 layers.MAX = 16
@@ -160,6 +178,18 @@ layers.virtualHeight = 1080.0
 local SORT_TOPDOWN <const> = 0
 local SORT_Z <const> = 1
 local SORT_ISOMETRIC <const> = 2
+
+--- How much of its band a sort spreads across, leaving a sliver so the far
+--- end of one band never reaches the near end of the next.
+local BAND_FILL <const> = 0.99
+--- How the topdown sort divides that span between its two inputs. Height
+--- carries most of it and position breaks the ties, which is what makes a
+--- character standing on a crate read as on top of it.
+local TOPDOWN_Z_SHARE <const> = 0.7
+local TOPDOWN_Y_SHARE <const> = 0.3
+--- The range the isometric sum covers: a normalised x, a normalised y and a
+--- normalised z, each zero to one.
+local ISOMETRIC_RANGE <const> = 3.0
 
 local SORT_IDS <const>: {string: integer} = {
     topdown = SORT_TOPDOWN,
@@ -266,22 +296,47 @@ function layers.depthOf(layer: integer, z: number, x: number, y: number): number
 
     local within: number
     if sort == SORT_Z then
-        within = (1.0 - z / layers.maxZ) * band * 0.99
+        within = (1.0 - z / layers.maxZ) * band * BAND_FILL
     elseif sort == SORT_ISOMETRIC then
         local nx = (x + layers.maxY) / (2.0 * layers.maxY)
         local ny = (y + layers.maxY) / (2.0 * layers.maxY)
         local iso = nx + ny + z / layers.maxZ
-        if iso < 0.0 then iso = 0.0 elseif iso > 3.0 then iso = 3.0 end
-        within = (1.0 - iso / 3.0) * band * 0.99
+        if iso < 0.0 then
+            iso = 0.0
+        elseif iso > ISOMETRIC_RANGE then
+            iso = ISOMETRIC_RANGE
+        end
+        within = (1.0 - iso / ISOMETRIC_RANGE) * band * BAND_FILL
     else
         local ny = (y + layers.maxY) / (2.0 * layers.maxY)
-        within = (1.0 - (z / layers.maxZ * 0.7 + ny * 0.3)) * band * 0.99
+        within = (1.0 - (z / layers.maxZ * TOPDOWN_Z_SHARE
+            + ny * TOPDOWN_Y_SHARE)) * band * BAND_FILL
     end
 
     local depth = base + within
     if depth < 0.001 then return 0.001 end
     if depth > 0.999 then return 0.999 end
     return depth
+end
+
+function layers.depthResolution(): number
+    local span <const> = (1.0 / layers.MAX) * BAND_FILL
+    -- One term per input each sort reads, in the order `depthOf` applies them,
+    -- and each the depth a unit of that input is worth. A sort's own weight
+    -- divided by the range it normalises over.
+    local steps <const>: {number} = {
+        span * TOPDOWN_Z_SHARE / layers.maxZ,
+        span * TOPDOWN_Y_SHARE / (2.0 * layers.maxY),
+        span / layers.maxZ,
+        span / ISOMETRIC_RANGE / layers.maxZ,
+        span / ISOMETRIC_RANGE / (2.0 * layers.maxY),
+    }
+
+    local finest = steps[1]
+    for index = 2, #steps do
+        if steps[index] < finest then finest = steps[index] end
+    end
+    return finest
 end
 
 return layers

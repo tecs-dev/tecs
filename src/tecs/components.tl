@@ -104,7 +104,61 @@ local imageIds: {string: integer} = {}
 local imageNames: {integer: string} = {}
 local imageCount = 0
 
+--- The scheme a name may lead with, whose `//` is not a path separator: what
+--- follows it is an authority rather than a directory.
+local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
+
+--- One spelling of a path, so two of them cannot become two images.
+---
+--- The image array holds a fixed number of layers and reclaims none of them,
+--- so `"a/b.png"` and `"a/./b.png"` arriving as two names costs a layer and
+--- uploads the same pixels twice, with nothing to show for it and nothing
+--- said. What this drops is the part of a spelling that carries no
+--- information: repeated separators, `.` segments, and a trailing separator.
+---
+--- Lexical, and only lexical. Nothing here reads the filesystem, so a name
+--- normalises the same before its file exists as after, and the same on a
+--- platform whose asset root is not a directory at all. Three things are
+--- deliberately left alone for that reason:
+---
+---   - `..`, because resolving it without the filesystem renames a path
+---     across a symlink, which would merge two names that are two files.
+---   - Letter case, because folding it merges two files that a case-sensitive
+---     filesystem keeps apart.
+---   - The asset root, because stripping `paths.assets()` would make an
+---     identity depend on process state that `TECS_ASSETS` and
+---     `paths.setAssets` move, and one name would then intern as two indices
+---     at two moments, which is the defect this exists to prevent.
+---
+--- A leading run of separators is kept as it was written: one leads an
+--- absolute path and two lead a UNC share.
+local function normalisePath(name: string): string
+    -- Nothing to drop is the common case, and it is answered without building
+    -- a string. An interior `//` or `/./`, a leading `./` and a trailing
+    -- separator are the whole of what the walk below removes.
+    if name:find("/%.?/") == nil and name:sub(1, 2) ~= "./"
+        and name:sub(-1) ~= "/" and name:sub(-2) ~= "/." then
+        return name
+    end
+
+    local prefix, rest = name:match(SCHEME_PREFIX)
+    if prefix == nil then
+        prefix, rest = name:match("^(/*)(.*)$")
+    end
+
+    local segments <const>: {string} = {}
+    for segment in rest:gmatch("[^/]+") do
+        if segment ~= "." then segments[#segments + 1] = segment end
+    end
+    return prefix .. table.concat(segments, "/")
+end
+
 --- Index of the given image name, assigning one the first time it is seen.
+---
+--- The name is normalised first, so what an image is identified by is the path
+--- it names rather than the spelling it was named with. Every way in goes
+--- through here: registering an image, resolving a sprite by name, reloading
+--- one, and reading a name back out of a snapshot.
 ---
 --- Indices start at one, so zero is the index of no image at all and that is
 --- what a Sprite carries until something names one.
@@ -112,6 +166,7 @@ local function imageId(name: string): integer
     if name == nil or name == "" then
         error("tecs: an image name cannot be empty", 2)
     end
+    name = normalisePath(name)
     local id = imageIds[name]
     if id ~= nil then return id end
     imageCount = imageCount + 1

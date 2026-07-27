@@ -877,6 +877,41 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("hands two spellings of one path one layer", function()
+        -- The array's layers are few and are never given back, so a path
+        -- written two ways costs one of them and uploads the same pixels
+        -- twice. The second registration here carries green, and red is what
+        -- must reach the screen: the layer answered with is the one the first
+        -- spelling already uploaded into.
+        local world, renderer = newScene()
+        local first = renderer:registerImage(solid("spec://tiles/wall.png", 255, 0, 0))
+        local used = renderer.images.used
+        local second = renderer:registerImage(solid("spec://tiles/./wall.png", 0, 255, 0))
+
+        assert.are.equal(first.image, second.image, "one path, one image")
+        assert.are.equal(first.slot, second.slot)
+        assert.are.equal(used, renderer.images.used, "a second spelling must not consume another layer")
+
+        -- Including the way in that does not go through registration, since a
+        -- sprite asked for by name resolves through the same identity.
+        assert.are.equal(first.slot, renderer:sprite("spec://tiles//wall.png").slot)
+
+        -- And what a snapshot writes is the path rather than the spelling it
+        -- was registered with, so a reload looks the same image up.
+        assert.are.equal("spec://tiles/wall.png", components.imageName(second.image))
+
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            second,
+            Renderable()
+        )
+        local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, centre.r, "the pixels are the ones the first spelling uploaded")
+        assert.are.equal(0, centre.g)
+        renderer:destroy()
+    end)
+
     it("resolves a restored sprite by its image's name", function()
         -- The two renderers register the same two images in opposite orders,
         -- so red and green swap layers between them. A snapshot that carried a
@@ -2107,6 +2142,79 @@ describe("ecs.Renderer", function()
 
             half:destroy()
             renderer:destroy()
+        end)
+
+        -- What a band is worth is decided by the formula, and what survives of
+        -- it is decided by the depth buffer. These two have to be compared, or
+        -- a device that offers only a shallow format draws a scene in an order
+        -- nobody asked for and nothing says a word.
+        it("reports the finest step each sort asks a depth buffer for", function()
+            -- Measured off depthOf rather than restated, so the number the
+            -- format is checked against cannot drift from the formula. On a
+            -- middle band, because the far end of the range is clamped and a
+            -- step measured there would read as none at all.
+            local BAND = 8
+            local function stepOf(sort, z, x, y)
+                layers.configure(BAND, { sort = sort })
+                return math.abs(layers.depthOf(BAND, z, x, y) - layers.depthOf(BAND, 0, 0, 0))
+            end
+
+            local topdownZ = stepOf("topdown", 1, 0, 0)
+            local topdownY = stepOf("topdown", 0, 0, 1)
+            local zOnly = stepOf("z", 1, 0, 0)
+            local isometricZ = stepOf("isometric", 1, 0, 0)
+            local isometricY = stepOf("isometric", 0, 0, 1)
+            layers.configure(BAND, { sort = "topdown" })
+
+            local finest = layers.depthResolution()
+            assert.is_true(
+                math.abs(finest - topdownY) < finest * 1e-4,
+                ("the finest step is a topdown y, %.3g, and not %.3g"):format(topdownY, finest)
+            )
+            assert.is_true(topdownY < isometricY, "topdown spends less of its band on position than isometric")
+            assert.is_true(isometricY < isometricZ)
+            assert.is_true(isometricZ < topdownZ)
+            assert.is_true(topdownZ < zOnly, "a sort that reads z alone spends the whole band on it")
+        end)
+
+        it("says so when the depth format cannot hold the sort", function()
+            local log = require("tecs.log")
+            local path = "/tmp/tecs-depth-spec.jsonl"
+            local d32 = tonumber(C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT)
+            local d24 = tonumber(C.SDL_GPU_TEXTUREFORMAT_D24_UNORM)
+            local d16 = tonumber(C.SDL_GPU_TEXTUREFORMAT_D16_UNORM)
+
+            assert.are.equal(0, Texture.checkDepthSorting(d32), "a float depth target holds the sort")
+            assert.are.equal(0, Texture.checkDepthSorting(d24), "and so does the middle one")
+
+            -- At ERROR, which is where a custom category starts: a warning
+            -- would be filtered by default and so would say nothing at all.
+            log.get("tecs.gpu"):setLevel(log.ERROR)
+            assert.is_true(log.openFile(path))
+            local collapsed = Texture.checkDepthSorting(d16)
+            log.closeFile()
+
+            local said = false
+            local file = io.open(path, "r")
+            if file ~= nil then
+                for line in file:lines() do
+                    if line:find("D16_UNORM", 1, true) then
+                        said = true
+                    end
+                end
+                file:close()
+            end
+            os.remove(path)
+
+            assert.is_true(
+                collapsed > 16 and collapsed < 17,
+                ("D16 collapses about sixteen world units, not %.4g"):format(collapsed)
+            )
+            assert.is_true(said, "a depth format that loses the sort has to be reported")
+
+            -- And what this device actually chose does hold it, so the check
+            -- is not reporting on every run.
+            assert.are.equal(0, Texture.checkDepthSorting(Texture.depthFormat(device.handle)))
         end)
     end)
 
