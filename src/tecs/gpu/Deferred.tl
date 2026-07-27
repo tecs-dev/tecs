@@ -22,17 +22,16 @@ local Shader <const> = require("tecs.gpu.Shader")
 local Buffer <const> = require("tecs.gpu.Buffer")
 local GraphicsPipeline <const> = require("tecs.gpu.GraphicsPipeline")
 local Frame <const> = require("tecs.gpu.Frame")
+local lightlayout <const> = require("tecs.gpu.lightlayout")
 
 local C <const> = sdl.C
 
 --- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local RGBA8 <const> = 4
 
---- Most lights the lighting pass will consider in one frame.
-local MAX_LIGHTS <const> = 256
-
---- Bytes per light: vec4 position and radius, vec4 colour and intensity.
-local LIGHT_STRIDE <const> = 32
+local MAX_LIGHTS <const> = lightlayout.MAX
+local LIGHT_FLOATS <const> = lightlayout.FLOATS
+local LIGHT_STRIDE <const> = lightlayout.BYTES
 
 --- One point light, positioned against the pixels it lands on.
 ---
@@ -100,6 +99,9 @@ local record Deferred
     --- The lights themselves, as `MAX_LIGHTS` slots of `LIGHT_STRIDE` bytes.
     --- Written through slot zero and flushed by `render`.
     _lightBuffer: Buffer
+    --- Where `setLights` packs records before handing them on, so the packed
+    --- form has one writer.
+    _lightScratch: loader.CArray
     _lightingPipeline: GraphicsPipeline
     _compositePipeline: GraphicsPipeline
     --- Eight floats pushed to the lighting fragment stage: ambient and a pad,
@@ -149,6 +151,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
         usage = { "storage" },
         size = MAX_LIGHTS * LIGHT_STRIDE,
     })
+    self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
     self._sceneUniform = loader.newArray("float[8]")
 
     local graph = PassGraph.create(device, swapchainFormat)
@@ -234,35 +237,50 @@ end
 
 --- Replaces the light set for subsequent frames.
 ---
---- Writes straight into the buffer's mapped staging: there is no intermediate
---- array to fill and then copy. The upload itself is deferred to `render`, so
---- it rides the frame's command buffer instead of submitting its own.
+--- One block copy into the buffer's mapped staging, because the caller's array
+--- is already the shape the shader reads and the whole set is at most eight
+--- kilobytes. The upload itself is deferred to `render`, so it rides the
+--- frame's command buffer instead of submitting its own.
 ---
---- Past `MAX_LIGHTS` the remainder is dropped rather than reported, because
---- the alternative is a frame that raises over a light nobody would have
---- picked out of the image.
---- @param lights Lights to light with, replacing the previous set entirely.
----     An empty list leaves the buffer as it was and lights nothing, since the
----     count is what the shader loops over.
-function Deferred:setLights(lights: {Light})
-    local count = math.min(#lights, MAX_LIGHTS)
+--- Past `lightlayout.MAX` the remainder is dropped rather than reported,
+--- because the alternative is a frame that raises over a light nobody would
+--- have picked out of the image.
+--- @param data Lights already in `lightlayout` order, `FLOATS` per light.
+--- @param count Lights in `data`. Zero leaves the buffer as it was and lights
+---     nothing, since the count is what the shader loops over.
+function Deferred:setLightData(data: loader.CArray, count: integer)
+    if count > MAX_LIGHTS then count = MAX_LIGHTS end
     self.lightCount = count
     if count == 0 then return end
 
-    local staging = self._lightBuffer:mapAs("float *")
+    local bytes <const> = count * LIGHT_STRIDE
+    loader.copyTo(self._lightBuffer:map(), data as loader.CValue, bytes)
+    self._lightBuffer:markDirty(0, bytes)
+end
+
+--- Replaces the light set from records rather than from packed floats.
+---
+--- The record form is what a caller assembling a handful of lights by hand
+--- wants. Anything producing a light per entity per frame packs directly and
+--- calls `setLightData`, since a record per light per frame is an allocation
+--- per light per frame.
+--- @param lights Lights to light with, replacing the previous set entirely.
+function Deferred:setLights(lights: {Light})
+    local count = math.min(#lights, MAX_LIGHTS)
+    local scratch = self._lightScratch
     for index = 1, count do
         local light = lights[index]
-        local base = (index - 1) * 8
-        staging[base] = light.x or 0.0
-        staging[base + 1] = light.y or 0.0
-        staging[base + 2] = light.z or 32.0
-        staging[base + 3] = light.radius or 128.0
-        staging[base + 4] = light.r or 1.0
-        staging[base + 5] = light.g or 1.0
-        staging[base + 6] = light.b or 1.0
-        staging[base + 7] = light.intensity or 1.0
+        local base = (index - 1) * LIGHT_FLOATS
+        scratch[base] = light.x or 0.0
+        scratch[base + 1] = light.y or 0.0
+        scratch[base + 2] = light.z or 32.0
+        scratch[base + 3] = light.radius or 128.0
+        scratch[base + 4] = light.r or 1.0
+        scratch[base + 5] = light.g or 1.0
+        scratch[base + 6] = light.b or 1.0
+        scratch[base + 7] = light.intensity or 1.0
     end
-    self._lightBuffer:markDirty(0, count * LIGHT_STRIDE)
+    self:setLightData(scratch, count)
 end
 
 --- Runs the pipeline for one frame.
