@@ -315,4 +315,23 @@ setmetatable(tecs as {string: any}, {
 
 tecs.version = "0.1.0"
 
+--- The surface is also a global, so a game writes `tecs.newWorld()` in any file
+--- without a require line, and `tecs/global.d.tl` types it.
+---
+--- Set here, where the module is defined, rather than by the host. A host that
+--- set it would leave the global present for a game and absent under a plain
+--- interpreter, so headless tools, the spec suite and the benchmarks would each
+--- see a different surface and the same line would work in one and fail in
+--- another with nothing to warn on. Setting it here makes requiring tecs
+--- anywhere, including transitively, enough: require stays the mechanism and
+--- the global is a consequence of it.
+---
+--- It is the same table `require` returns, metatable included, so reading
+--- `tecs.Application` off the global loads the engine module on demand exactly
+--- as reading it off the required value does. `require` caches, so this runs
+--- once; a game that assigns `tecs` itself afterwards owns the name and the
+--- declaration no longer describes it.
+local globals <const> = _G as {string: any}
+globals.tecs = tecs
+
 return tecs

@@ -355,6 +355,10 @@ if(TECS_BUILD_LUA)
     # CONFIGURE_DEPENDS so adding a source is a build, not a reconfigure.
     # Without it a new module is silently absent until someone remembers.
     file(GLOB_RECURSE TECS_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.tl")
+    # Declaration files describe types and emit no code, so compiling one only
+    # writes an empty .lua beside the module it describes. They are installed as
+    # sources instead, which is where a type checker wants them.
+    list(FILTER TECS_TL EXCLUDE REGEX "\\.d\\.tl$")
     add_custom_target(
         tecs_lua
         ALL
@@ -442,3 +446,11 @@ install(TARGETS cjson LIBRARY DESTINATION lib)
 if(TECS_BUILD_LUA)
     install(DIRECTORY "${TECS_LUA_OUT}/" DESTINATION share/tecs/lua)
 endif()
+
+# The Teal sources are the package's type information. `tl` reads types out of
+# `.tl`, and a compiled `.lua` carries none, so a game that type-checks against
+# an installed tecs needs these on its include path even though it never runs
+# them. `tecs/global.d.tl` is among them, and is what declares the `tecs`
+# global; it derives its type from `tecs/init.tl` rather than restating it, so
+# it only works with the rest of the tree beside it.
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/src/" DESTINATION share/tecs/teal FILES_MATCHING PATTERN "*.tl")

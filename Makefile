@@ -138,7 +138,8 @@ package: build shaders $(LUA)/main.lua ## Install a tree into out/package
 	@cmake --install $(OUT) --prefix $(CURDIR)/out/package
 
 check-package: package ## Verify a package carries its own dependencies
-	@python3 scripts/checkpackage.py $(CURDIR)/out/package --allow-compiler
+	@python3 scripts/checkpackage.py $(CURDIR)/out/package --allow-compiler \
+	  --teal-types $(CURDIR)/vendor/share/lua/5.1
 
 clean: ## Remove build output
 	@rm -rf out build bin

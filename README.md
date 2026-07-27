@@ -97,6 +97,85 @@ Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
 
+## The surface is a global
+
+`tecs` is a global, so a game writes it in any file with no require line:
+
+```lua
+local world = tecs.newWorld()
+local Velocity = tecs.newComponent({
+    name = "Velocity",
+    container = {},
+    fields = { "x", "y" },
+    defaults = { 0, 0 },
+})
+world:spawn(tecs.builtins.Transform(0, 0), Velocity(1, 0))
+```
+
+`require("tecs")` is equally supported and returns exactly the same table, so a
+file that prefers to name its dependency can:
+
+```lua
+local tecs = require("tecs")
+```
+
+The global is set by `src/tecs/init.tl` itself, as it returns, and that
+placement is the whole design. A host that set it would leave the global
+present for a game and absent under a plain interpreter, so a headless tool,
+the spec suite and the benchmarks would each see a different surface and the
+same line would work in one and fail in another with nothing to warn on.
+Setting it where the module is defined means requiring tecs anywhere,
+including transitively, is enough. Require stays the mechanism; the global is a
+consequence of it.
+
+It is the same table, metatable included, so nothing about the lazy engine half
+changes: `tecs.Application` read off the global resolves on first use exactly as
+it does read off the required value, and `require("tecs")` still loads no engine
+module. `require` caches, so the assignment runs once. A game that assigns
+`tecs` itself afterwards owns the name from then on, and the declaration below
+no longer describes what is there.
+
+Teal types it through `src/tecs/global.d.tl`, which reads the type off the
+module rather than restating it, so the two cannot drift:
+
+```teal
+local type TecsModule = require("tecs")
+
+global tecs: TecsModule
+```
+
+A game names that declaration to the type checker in its own `tlconfig.lua`,
+alongside the installed Teal sources that carry the engine's types:
+
+```lua
+return {
+    global_env_def = "tecs.global",
+    include_dir = {
+        "<luajit-tl-type>",          -- ffi, bit, jit, string.buffer
+        "<prefix>/share/tecs/teal",  -- tecs
+    },
+}
+```
+
+`tl check` then reports `tecs.newWorldd()` as `invalid key 'newWorldd' in record
+'tecs' of type TecsModule`, at the line that wrote it. `TecsModule` is the
+declaration file's own name for what the module returns, kept distinct from
+`tecs` so the file that has to hold both apart reads unambiguously. It is
+never something to write: the surface is spelled `tecs` everywhere else.
+
+`share/tecs/teal` is the Teal sources, installed beside the compiled Lua that
+actually runs. A `.lua` carries no types, so the sources are how a game reaches
+them, and there is no second description of the surface to keep in step. The
+declarations for LuaJIT itself are not tecs's to ship: they are the
+`luajit-tl-type` rock, which any Teal project on LuaJIT installs.
+
+Code inside this repository keeps its explicit requires. `src`, `main.tl` and
+`bench` all say what they depend on, which is worth more than the line it saves,
+and the engine's modules require `tecs.ecs` rather than the whole surface for a
+reason the global would quietly undo. So `make check` runs with no declaration
+loaded, and a module that reached for `tecs` without requiring it is an error
+here rather than a cycle later.
+
 ## Callbacks and systems
 
 Because the host reaches into an object rather than being handed a loop,
@@ -1573,6 +1652,7 @@ Lua where it cannot inline across an FFI call. `World.getAngle` converting a
 host/main.c                 process entry: a Lua state and argv, nothing else
 scripts/gencdef.py          header -> cdef + constants generator
 scripts/abicheck.py         cdef vs C compiler layout verification
+src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
 src/tecs/ffi/             library loading and generated binding wrappers
 src/tecs/platform/        window, clock, events, clipboard, input and audio
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
@@ -1619,6 +1699,13 @@ it reports what it found and passes, because those references are expected
 there; on a packaged one it fails. A package that resolved a library from the
 build machine works there and nowhere else, and the failure only appears once
 someone else unpacks it.
+
+It holds the installed types to the same standard, for the same reason: it
+type-checks a file that uses the `tecs` global against `share/tecs/teal` and
+nothing else of the engine's, so a package whose type information is missing or
+incomplete fails here rather than for whoever unpacks it. That one fails on
+both kinds of install, since types are not something a development build is
+allowed to borrow from its machine.
 
 `TECS_FRAMES=N make run` exits after N frames, so an automated run can drive
 a real window to completion.

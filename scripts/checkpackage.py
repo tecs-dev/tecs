@@ -7,12 +7,26 @@ inspects the installed binaries for absolute references and search paths that
 point outside the package, and for a shader compiler that a release is not
 supposed to ship.
 
-Usage: checkpackage.py <install-prefix> [--allow-compiler]
+Type information is checked the same way and for the same reason. A game runs
+its own `tl check`, and it reaches the engine's types through the installed
+Teal sources; if those are absent or incomplete, the failure lands on whoever
+unpacked the package, not on whoever built it. So a file using the `tecs`
+global is type-checked here against the package.
+
+The one thing the package is not asked to carry is the declarations for LuaJIT
+itself and for cjson. Those belong to the `luajit-tl-type` rock and to the
+JSON library, not to tecs, and any Teal project on LuaJIT installs them
+already. `--teal-types` says where to find them; without it the type check is
+reported as not run rather than failed.
+
+Usage: checkpackage.py <install-prefix> [--allow-compiler] [--teal-types <dir>]
 """
 
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Libraries the platform itself provides. Referencing these absolutely is
@@ -31,6 +45,62 @@ SYSTEM_PREFIXES = (
 # artifacts instead, and shipping the compiler means the fallback can happen
 # silently on a target that was supposed to have none.
 COMPILER_NAMES = ("shaderc", "spirvcross", "spirv-cross", "dxcompiler")
+
+
+# Enough of the surface to prove the type information is whole: the ECS half,
+# the engine half reached as a value, and the engine half reached as a type.
+GLOBAL_USAGE = """
+local world = tecs.newWorld()
+world:update(1 / 60)
+tecs.log.get("game"):info("entities: %d", world:getStats().entities)
+
+return tecs.application({
+    load = function(app: tecs.Application) print(app.world ~= nil) end,
+})
+"""
+
+
+def checkTealTypes(prefix: Path, tealTypes: str, problems: list):
+    """Type-checks a file that uses the `tecs` global against the package."""
+    teal = prefix / "share" / "tecs" / "teal"
+    if not (teal / "tecs" / "global.d.tl").exists():
+        problems.append("no tecs/global.d.tl under share/tecs/teal: a game's `tl check` has no `tecs` global")
+        return
+    if not shutil.which("tl"):
+        print("tl is not installed, so the packaged types were not checked")
+        return
+    if not tealTypes:
+        print("no --teal-types given, so the packaged types were not checked")
+        return
+
+    with tempfile.TemporaryDirectory() as scratch:
+        usage = Path(scratch) / "usage.tl"
+        usage.write_text(GLOBAL_USAGE)
+        # Only the package and the LuaJIT declarations, so everything else the
+        # types reach for has to be in the package. Running from a scratch
+        # directory keeps a tlconfig.lua from lending it a source tree.
+        result = subprocess.run(
+            [
+                "tl",
+                "--global-env-def",
+                "tecs.global",
+                "-I",
+                tealTypes,
+                "-I",
+                str(teal),
+                "check",
+                str(usage),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=scratch,
+        )
+    if "0 errors detected" not in result.stdout:
+        detail = (result.stdout + result.stderr).strip().splitlines()
+        problems.append("the packaged Teal types do not check a file using the `tecs` global:")
+        problems.extend(f"  {line}" for line in detail)
+        return
+    print(f"{teal.relative_to(prefix)}: types a file using the `tecs` global")
 
 
 def machoReferences(binary: Path):
@@ -56,6 +126,9 @@ def main():
         sys.exit(__doc__)
     prefix = Path(sys.argv[1]).resolve()
     allowCompiler = "--allow-compiler" in sys.argv
+    tealTypes = ""
+    if "--teal-types" in sys.argv:
+        tealTypes = sys.argv[sys.argv.index("--teal-types") + 1]
 
     if not prefix.is_dir():
         sys.exit(f"no such install prefix: {prefix}")
@@ -103,7 +176,20 @@ def main():
             summary = manifest.read_text().splitlines()[1]
             print(f"{pack.relative_to(prefix)}: {summary}")
 
+    # Kept apart from the list above, which is about what a development install
+    # is allowed to borrow from its machine. Type information is not borrowed
+    # from anywhere: either the package carries it or no game can check against
+    # it, so this fails on both kinds of install.
+    typeProblems = []
+    checkTealTypes(prefix, tealTypes, typeProblems)
+
     print(f"checked {len(binaries)} binaries under {prefix}")
+
+    if typeProblems:
+        print(f"\n{len(typeProblems)} problems with the packaged types:")
+        for problem in typeProblems:
+            print(f"  {problem}")
+        sys.exit(1)
 
     if development:
         print("development install: system dependencies are expected here")
