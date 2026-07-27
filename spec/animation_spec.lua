@@ -1004,6 +1004,53 @@ describe("tecs.gfx.animation", function()
             assert.is_true(seen.sprite)
         end)
 
+        -- Counts what a step asks the sheet for. Shadowing the method on the
+        -- instance is what makes the cost observable: the sheet is a table
+        -- behind a metatable, so a field written on it wins over the one the
+        -- metatable would find.
+        local function countLookups(source)
+            local counted = { frames = 0 }
+            local frameAt = source.frameAt
+            source.frameAt = function(self, id, time)
+                counted.frames = counted.frames + 1
+                return frameAt(self, id, time)
+            end
+            return counted
+        end
+
+        it("looks up no frame for a row whose time stood still", function()
+            -- A world of sprites is mostly sprites standing still at any
+            -- moment, and a walk over all of them that looks each one up
+            -- again makes a scene where a hundredth of them animate cost what
+            -- one where all of them do costs.
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+            -- One step to settle it on a frame, then stop its clock.
+            world:update(STEP)
+            world:getMut(entity, Animation).playing = false
+
+            local counted = countLookups(s)
+            drive(world, 10)
+
+            assert.equal(0, counted.frames, "a paused sprite shows the frame it already has")
+        end)
+
+        it("looks a paused row up until it has a frame at all", function()
+            -- Zero is no frame written yet, so a sprite that has never been
+            -- resolved has to be, playing or not, or it draws whatever its
+            -- Sprite happened to carry.
+            local world = animatedWorld()
+            local s = stripSheet()
+            world:spawn(Sprite(3, 0, 0, 1, 1, 6), animation.of(s, "run", { playing = false }))
+
+            local counted = countLookups(s)
+            drive(world, 4)
+
+            assert.equal(1, counted.frames, "once to settle it, and never again")
+        end)
+
         it("leaves both columns clean when nothing is playing", function()
             local world = animatedWorld()
             local s = stripSheet()

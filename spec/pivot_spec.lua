@@ -172,12 +172,7 @@ describe("a pivoted quad", function()
         -- world units across a sixteenth of the depth range, so a shift small
         -- enough to be a sprite moves the depth by less than a float shows.
         -- Four thousand of it does.
-        world:spawn(
-            Transform(100, 200, 0, 1, 0, 40, 8000),
-            Tint(1, 1, 1, 1),
-            Renderable(),
-            Pivot(0.5, 1.0)
-        )
+        world:spawn(Transform(100, 200, 0, 1, 0, 40, 8000), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
         world:spawn(Transform(100, 200, 0, 1, 0, 40, 8000), Tint(1, 1, 1, 1), Renderable())
 
         world:update(1 / 60)
