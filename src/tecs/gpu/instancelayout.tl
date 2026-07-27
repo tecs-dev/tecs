@@ -32,6 +32,11 @@ local record instancelayout
     --- the cull drops it before the draw sees it.
     HIDDEN: number
 
+    --- Depth for a slot nothing owns, at the back of the band it lands in.
+    --- The bound is what removes it, and this is what keeps it harmless if a
+    --- view ever reaches out to where the bound is: it occludes nothing.
+    HIDDEN_DEPTH: number
+
     --- Texture-array layers `origin.z` addresses, and the stride the clip
     --- index sits above them at.
     ---
@@ -57,6 +62,7 @@ instancelayout.BOUND_FLOATS = 4
 instancelayout.BOUND_BYTES = instancelayout.BOUND_FLOATS * 4
 instancelayout.UNBOUNDED = 1e30
 instancelayout.HIDDEN = 1e30
+instancelayout.HIDDEN_DEPTH = 0.999
 --- Hoisted, because `packSlot` runs once per instance written and a field
 --- lookup per row is a lookup too many.
 local LAYER_SLOTS <const> = 64

@@ -669,6 +669,50 @@ little. A still scene resyncs nothing at any size:
 
 Four million is the ECS's ceiling: an entity id packs its slot into 22 bits.
 
+### Runs pack, or reserve
+
+Packed runs are laid end to end, so the extent is the rows and nothing else,
+and so a run cannot grow without shifting every run after it. One spawn
+anywhere therefore lays the whole scene out again and rewrites every instance
+in it. `reserveRuns` on the renderer is the other layout: each archetype's
+run is given room to grow into, a run that outgrows its room is moved to the
+end rather than shifting its neighbours, and the slots nothing occupies are
+written once as hidden. Hidden is what `gfx.text` already does with a glyph
+slot it holds and is not drawing: the instance zeroed, the depth parked at the
+back of its band, and a cull bound out where no finite view overlaps it, which
+the mark pass rejects before the compaction that feeds the draw. A spawn then
+rewrites the archetype it spawned into, and leaves every other archetype
+resident.
+
+A world of 200,000 still sprites with a spawner touching 64 of them a frame,
+which is the shape of most games:
+
+```
+ layout    extract p50  extract p95  instances rewritten per frame
+ ────────  ───────────  ───────────  ─────────────────────────────
+ packed        1.420 ms     1.829 ms  200,032 mean, 200,064 peak
+ reserved      0.092 ms     0.270 ms       32 mean,      64 peak
+```
+
+What it costs is the slack. The cull is dispatched over the extent rather than
+over the rows, so that scene dispatches 217,000 threads where the packed one
+dispatches 200,000, and a hidden slot costs a bounds read and a lane in the
+mark pass and never reaches the draw. A run is given sixteen slots when it is
+first laid out and a quarter of itself once it has outgrown a reservation, so a
+still scene occupies what it occupies and a growing one is reallocated on a
+geometric schedule. The extent is compacted when it has drifted half a layout
+above what a fresh one would need; the trigger is measured against that fresh
+layout rather than against the rows, so a compaction cannot ask for another
+one. Slack is only ever what is left over after the rows: a compaction lays out
+with the widest reservation the capacity affords and packs exactly when it
+affords none, so `dropped` trips at the same population it trips at packed.
+
+What still bounds it is the ECS, not the layout. Moving a row into an
+archetype marks every one of that archetype's columns dirty, so a spawn
+rewrites the destination archetype's whole run whatever the runs are laid out
+like. Where a scene keeps everything in one archetype, that is the whole scene
+again and reserving buys nothing.
+
 What is drawn is decided on the GPU. A compute pass tests each instance against
 the view, compacts the survivors into an index list, and writes the draw
 arguments, so the draw touches only what is visible and the CPU never learns

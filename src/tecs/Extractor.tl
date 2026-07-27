@@ -46,11 +46,42 @@ local INSTANCE_BYTES <const> = instancelayout.BYTES
 local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
 local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
 local UNBOUNDED <const> = instancelayout.UNBOUNDED
+local HIDDEN <const> = instancelayout.HIDDEN
+local HIDDEN_DEPTH <const> = instancelayout.HIDDEN_DEPTH
 local extentOf <const> = instancelayout.extentOf
 local packSlot <const> = instancelayout.packSlot
 
 local PI <const> = math.pi
 local TWO_PI <const> = math.pi * 2.0
+local floor <const> = math.floor
+
+--- Room a run that has grown once is given to grow again, as a fraction of the
+--- rows it holds, and the room any run is given whatever that works out to.
+---
+--- A quarter puts a growing run's reallocations on a geometric schedule, so a
+--- scene that spawns steadily pays a bounded number of stores per spawn rather
+--- than a run rewrite each. The fraction is withheld until a run has actually
+--- outgrown its slot, because an archetype that never grows would otherwise
+--- hold a quarter of itself in slack for ever: a still scene is the common one
+--- and it should occupy what it occupies.
+local SLACK_RATIO <const> = 0.25
+local MIN_SLACK <const> = 16
+
+--- What a compaction has to reclaim to be worth the full rewrite it costs, as
+--- a fraction of the extent a fresh layout would occupy, and the floor below
+--- which reclaiming anything is not worth a rewrite.
+---
+--- Half means the extent the cull is dispatched over settles between one and
+--- one and a half times what the rows alone need, and that a compaction is
+--- paid for by the spawns and despawns that made it necessary.
+local RECLAIM_RATIO <const> = 0.5
+local MIN_RECLAIM <const> = 512
+
+--- Reservations, widest first, as a compaction tries them against what the
+--- buffer has room for.
+local RESERVE_FULL <const> = 2
+local RESERVE_FLOOR <const> = 1
+local RESERVE_NONE <const> = 0
 
 --- Something that draws instances without owning entities.
 ---
@@ -85,13 +116,35 @@ end
 --- One archetype's contiguous run in the instance buffer.
 local record Run
     offset: integer
+    --- Rows the run held after the last sync wrote it.
     length: integer
+    --- Slots the run owns from `offset`. Equal to `length` when runs are
+    --- packed, and at least it when they are reserved: the difference is the
+    --- room the archetype grows into, written as hidden.
+    capacity: integer
+    --- Rows this sync writes, after the buffer's ceiling truncated them.
+    pending: integer
+    --- Set when this sync gave the run a different offset or reservation, so
+    --- its bytes are stale whatever the component bits say.
+    moved: boolean
+    --- Set once the archetype has outgrown a reservation, which is what earns
+    --- it the room to grow again.
+    grown: boolean
 end
 
 local record ExtractorOptions
     --- Instances the buffers are sized for. Rows beyond it are dropped rather
     --- than growing anything mid-frame.
     capacity: integer
+    --- Give each archetype a run with room to grow rather than packing the
+    --- runs end to end. Defaults to false, which packs.
+    ---
+    --- Packed, a run cannot grow without shifting every run after it, so one
+    --- spawn anywhere rewrites every instance in the scene. Reserved, it grows
+    --- into its own slack and the archetypes around it are left alone; what it
+    --- costs is that the cull is dispatched over the slack as well as over the
+    --- rows.
+    reserveRuns: boolean
     --- UV extent of the white pixel within its cell, as the backend uploaded
     --- it. An image smaller than a cell does not reach the cell's edge, so
     --- sampling 0..1 would read the undefined remainder rather than the image.
@@ -132,6 +185,11 @@ local record Extractor
     _producerBase: {integer}
     _runs: {ecs.Archetype: Run}
     _seen: {ecs.Archetype: integer}
+    --- Reserve room in each run rather than packing them end to end.
+    _reserve: boolean
+    --- Slots the reserved runs cover, live and slack together. This is what
+    --- the cull is dispatched over, and it is where the next run is allocated.
+    _high: integer
 
     --- The staging this frame writes into, as the backend mapped it, and the
     --- slot it belongs to. Held rather than asked for per run: the addresses
@@ -172,6 +230,8 @@ function Extractor.create(options: ExtractorOptions): Extractor
     self._producerBase = {}
     self._runs = {}
     self._seen = {}
+    self._reserve = options.reserveRuns == true
+    self._high = 0
     self._slot = 0
     self._whiteU0 = options.whiteU0
     self._whiteV0 = options.whiteV0
@@ -427,25 +487,173 @@ local function markRun(packet: FramePacket, offset: integer, count: integer)
     packet.boundsRanges:mark(offset * BOUND_BYTES, count * BOUND_BYTES)
 end
 
---- Rewrites only what changed.
+--- Puts `count` slots from `offset` where no view can see them.
 ---
---- The layout is rebuilt when the set of archetypes or their lengths move,
---- because a run cannot grow in place without shifting its neighbours. Short
---- of that, an archetype whose Transform, Tint, and Sprite columns are all
---- clean is skipped entirely: its bytes are already resident and correct.
-local function syncInstances(self: Extractor, packet: FramePacket)
-    local runs = self._runs
-    local seen = self._seen
-    for archetype in pairs(seen) do seen[archetype] = nil end
+--- The same treatment a producer gives a slot it holds and is not drawing:
+--- the instance zeroed, the depth parked at the back of its band so nothing
+--- that reached the draw could occlude, and a cull bound out where no finite
+--- view overlaps it. The mark pass rejects it on that bound, so a hidden slot
+--- costs a bounds read and a scan lane and never reaches the draw.
+local function hideRun(self: Extractor, packet: FramePacket, offset: integer,
+                       count: integer)
+    if count <= 0 then return end
+    local floats = self._instances
+    local bounds = self._bounds
+    for slot = offset, offset + count - 1 do
+        local base = slot * INSTANCE_FLOATS
+        for index = 0, INSTANCE_FLOATS - 1 do
+            floats[base + index] = 0.0
+        end
+        floats[base + 3] = HIDDEN_DEPTH
+
+        local bound = slot * BOUND_FLOATS
+        bounds[bound] = HIDDEN
+        bounds[bound + 1] = HIDDEN
+        bounds[bound + 2] = 0.0
+        bounds[bound + 3] = 0.0
+    end
+    markRun(packet, offset, count)
+end
+
+--- A fresh run for an archetype nothing has laid out yet.
+local function newRun(): Run
+    return {
+        offset = 0, length = 0, capacity = 0, pending = 0,
+        moved = false, grown = false,
+    }
+end
+
+--- Slots a run of this length is given under a reservation, its room to grow
+--- included. `RESERVE_NONE` is what a packed layout would give it.
+local function reservedIn(reserve: integer, length: integer,
+                          grown: boolean): integer
+    if reserve == RESERVE_NONE then return length end
+    if reserve == RESERVE_FLOOR or not grown then return length + MIN_SLACK end
+    local slack = floor(length * SLACK_RATIO)
+    if slack < MIN_SLACK then slack = MIN_SLACK end
+    return length + slack
+end
+
+--- Slots a run of this length is given, its room to grow included.
+local function reservedFor(length: integer, grown: boolean): integer
+    return reservedIn(RESERVE_FULL, length, grown)
+end
+
+--- Puts a run at the end of the extent, with room to grow into.
+---
+--- The slack is opportunistic: what does not fit is not reserved and a run
+--- that does not fit at all is truncated, so reserving never drops a row a
+--- packed layout would have kept.
+local function allocateRun(self: Extractor, run: Run, length: integer)
+    local high <const> = self._high
+    local want = reservedFor(length, run.grown)
+    local room <const> = self.capacity - high
+    if want > room then want = room end
+    if want < 0 then want = 0 end
+    run.offset = high
+    run.capacity = want
+    run.moved = true
+    self._high = high + want
+end
+
+--- Finds a run that outgrew its reservation somewhere it fits.
+---
+--- Extended where it stands when it is already the last run, which is what a
+--- scene with one growing archetype does, and moved to the end otherwise. The
+--- slots a move leaves behind stay inside the extent the cull walks until a
+--- compaction reclaims them, so they are hidden on the way out.
+local function growRun(self: Extractor, packet: FramePacket, run: Run,
+                       length: integer)
+    if run.offset + run.capacity == self._high then
+        local want = reservedFor(length, true)
+        local room <const> = self.capacity - run.offset
+        if want > room then want = room end
+        run.capacity = want
+        run.moved = true
+        self._high = run.offset + want
+        return
+    end
+    hideRun(self, packet, run.offset, run.capacity)
+    allocateRun(self, run, length)
+end
+
+--- Lays every run out again from zero, reclaiming what growth left behind.
+---
+--- Every run moves, so this is the full-scene rewrite the reservation exists
+--- to avoid. What keeps it from happening every frame is the trigger, not the
+--- policy: see `layoutReserved`.
+---
+--- The reservation it lays out with is the widest one the buffer affords, and
+--- the last of the three is what a packed layout does. That is the whole of
+--- the interaction between reserving and `capacity`: room to grow is what is
+--- left over after the rows, never taken from them, so a world sized to fit
+--- exactly still fits exactly and drops exactly what it dropped.
+local function compactRuns(self: Extractor)
+    local runs <const> = self._runs
+    local seen <const> = self._seen
+    local capacity <const> = self.capacity
+
+    local reserve = RESERVE_FULL
+    while reserve > RESERVE_NONE do
+        local total = 0
+        for archetype, length in pairs(seen) do
+            local run = runs[archetype]
+            total = total + reservedIn(reserve, length,
+                run ~= nil and run.grown)
+        end
+        if total <= capacity then break end
+        reserve = reserve - 1
+    end
+
+    local offset = 0
+    for archetype, length in pairs(seen) do
+        local run = runs[archetype]
+        if run == nil then
+            run = newRun()
+            runs[archetype] = run
+        end
+        local want = reservedIn(reserve, length, run.grown)
+        local room <const> = capacity - offset
+        if want > room then want = room end
+        if want < 0 then want = 0 end
+        run.offset = offset
+        run.capacity = want
+        run.moved = true
+        offset = offset + want
+    end
+    self._high = offset
+end
+
+--- Lays the archetypes out end to end, in query order.
+---
+--- Returns the slots the runs cover, the rows past the ceiling, and whether
+--- the layout moved. A run cannot grow without shifting its neighbours, so any
+--- length or offset that changed rewrites every run this sync.
+local function layoutPacked(self: Extractor): integer, integer, boolean
+    local runs <const> = self._runs
+    local seen <const> = self._seen
+    local capacity <const> = self.capacity
 
     local total = 0
     local relayout = false
     for archetype, length in self._renderables:iter() do
         seen[archetype] = length
         local run = runs[archetype]
-        if run == nil or run.length ~= length or run.offset ~= total then
+        if run == nil then
+            run = newRun()
+            runs[archetype] = run
+            relayout = true
+        elseif run.length ~= length or run.offset ~= total then
             relayout = true
         end
+
+        local placed = length
+        local room <const> = capacity - total
+        if placed > room then placed = room end
+        if placed < 0 then placed = 0 end
+        run.offset = total
+        run.capacity = placed
+        run.pending = placed
         total = total + length
     end
 
@@ -457,9 +665,114 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         end
     end
 
+    if total > capacity then return capacity, total - capacity, relayout end
+    return total, 0, relayout
+end
+
+--- Lays each archetype out in a run of its own, with room to grow.
+---
+--- A run that outgrows its reservation moves to the end of the extent rather
+--- than shifting everything after it, so a spawn rewrites the archetype it
+--- spawned into and leaves every other archetype resident. Nothing here
+--- depends on the order the query hands archetypes over either, so an
+--- archetype emptying and dropping out of that order costs nothing.
+---
+--- Compaction is what stops the extent drifting upwards for ever, and two
+--- things ask for it: an allocation that no longer fits, and an extent far
+--- enough above what a fresh layout would occupy to be worth the full rewrite.
+--- The second is measured against what a compaction would produce rather than
+--- against the live rows, which is what keeps a compaction from asking for
+--- another one: the moment it runs the gap it triggers on is zero, and it
+--- cannot open again until growth and shrinkage have put `RECLAIM_RATIO` of a
+--- packed layout back into it.
+local function layoutReserved(self: Extractor,
+                              packet: FramePacket): integer, integer, boolean
+    local runs <const> = self._runs
+    local seen <const> = self._seen
+    local capacity <const> = self.capacity
+
+    -- What a compaction would produce, and what the runs that have outgrown
+    -- their reservation want at the end of the extent.
+    local packed = 0
+    local needed = 0
+    for archetype, length in self._renderables:iter() do
+        seen[archetype] = length
+        local run = runs[archetype]
+        if run ~= nil and length > run.capacity then
+            -- Outgrowing a reservation is what earns the next one, and it is
+            -- settled here so a compaction lays the run out with the room it
+            -- has just been shown to need.
+            run.grown = true
+        end
+        local reserved <const> = reservedFor(length, run ~= nil and run.grown)
+        packed = packed + reserved
+        if run == nil or length > run.capacity then
+            needed = needed + reserved
+        end
+    end
+
+    local high <const> = self._high
+    local waste <const> = high - packed
+    local compacting <const> = high + needed > capacity
+        or (waste > packed * RECLAIM_RATIO and waste > MIN_RECLAIM)
+
+    for archetype, run in pairs(runs) do
+        if seen[archetype] == nil then
+            -- The slots stay inside the extent the cull walks until something
+            -- reclaims them, so an archetype that went away has to stop
+            -- drawing on its own.
+            if not compacting then
+                hideRun(self, packet, run.offset, run.capacity)
+            end
+            runs[archetype] = nil
+        end
+    end
+
+    if compacting then compactRuns(self) end
+
+    local dropped = 0
+    for archetype, length in pairs(seen) do
+        local run = runs[archetype]
+        if run == nil then
+            run = newRun()
+            runs[archetype] = run
+            allocateRun(self, run, length)
+        elseif length > run.capacity then
+            growRun(self, packet, run, length)
+        end
+
+        local pending = length
+        if pending > run.capacity then pending = run.capacity end
+        run.pending = pending
+        dropped = dropped + (length - pending)
+    end
+
+    return self._high, dropped, false
+end
+
+--- Rewrites only what changed.
+---
+--- Which runs can be left alone is the layout's answer: packed, a length that
+--- moved rewrites everything, and reserved, it rewrites the run it moved.
+--- Short of that, an archetype whose Transform, Tint, and Sprite columns are
+--- all clean is skipped entirely: its bytes are already resident and correct.
+local function syncInstances(self: Extractor, packet: FramePacket)
+    local runs = self._runs
+    local seen = self._seen
+    for archetype in pairs(seen) do seen[archetype] = nil end
+
+    local reserve <const> = self._reserve
+    local total, dropped, relayout: integer, integer, boolean
+    if reserve then
+        total, dropped, relayout = layoutReserved(self, packet)
+    else
+        total, dropped, relayout = layoutPacked(self)
+    end
+
     -- Producers are laid out after the archetypes, in the order they were
     -- added. A producer whose count moved shifts everything after it, which is
     -- the same condition an archetype's length changing creates.
+    local producerMoved = false
     local producers <const> = self._producers
     local producerRuns <const> = self._producerRuns
     local producerBase: {integer} = self._producerBase
@@ -468,16 +781,18 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         producerBase[index] = total
         if producerRuns[index * 2 - 1] ~= total
             or producerRuns[index * 2] ~= count then
-            relayout = true
+            -- Reserved, the archetypes are laid out where a producer cannot
+            -- reach them, so a producer that moved rewrites the producers and
+            -- nothing else.
+            if reserve then producerMoved = true else relayout = true end
         end
         producerRuns[index * 2 - 1] = total
         producerRuns[index * 2] = count
         total = total + count
     end
 
-    local dropped = 0
     if total > self.capacity then
-        dropped = total - self.capacity
+        dropped = dropped + (total - self.capacity)
         total = self.capacity
     end
 
@@ -490,19 +805,20 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     self._lastAlpha = self._alpha
 
     local rewritten = 0
-    local offset = 0
-    -- A cursor rather than iter, because this stops once the buffer is full and
-    -- leaving an archetype loop early through iter leaves the world deferred,
-    -- which silently queues every spawn made after it.
+    -- A cursor rather than iter, because the layout above can leave a run it
+    -- could not place and leaving an archetype loop early through iter leaves
+    -- the world deferred, which silently queues every spawn made after it.
     local cursor = self._renderables:cursor()
     for archetype, length in cursor:iter() do
-        if offset >= self.capacity then break end
-        if offset + length > self.capacity then
-            length = self.capacity - offset
-        end
-
-        local run = runs[archetype]
-        local dirty = relayout
+        -- An archetype the layout above did not see has nowhere to be written,
+        -- and one that lost rows since then would be written past its column.
+        -- Both are the same structural change landing between the two walks,
+        -- and both wait for the next sync, which lays the archetype out from
+        -- what the world holds by then.
+        local run = runs[archetype] or newRun()
+        local pending = run.pending
+        if pending > length then pending = length end
+        local dirty = relayout or run.moved or run.length ~= pending
             or archetype:isComponentDirty(components.Transform)
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
@@ -512,17 +828,23 @@ local function syncInstances(self: Extractor, packet: FramePacket)
                 and archetype:get(components.PreviousTransform) ~= nil)
 
         if dirty then
-            writeRun(self, packet, archetype, length, offset)
-            rewritten = rewritten + length
+            writeRun(self, packet, archetype, pending, run.offset)
+            rewritten = rewritten + pending
         end
 
-        if run == nil then
-            runs[archetype] = { offset = offset, length = length }
-        else
-            run.offset = offset
-            run.length = length
+        if reserve then
+            -- Slots the run holds and is not drawing from. A run that moved
+            -- landed on whatever the last tenant left there, so all of them
+            -- are stale; one that stood still and shrank has only the rows it
+            -- gave up to put out of sight.
+            local stale <const> = run.moved and run.capacity or run.length
+            if stale > pending then
+                hideRun(self, packet, run.offset + pending, stale - pending)
+            end
         end
-        offset = offset + length
+
+        run.length = pending
+        run.moved = false
     end
     cursor:close()
 
@@ -551,7 +873,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             end
 
             local ranges = producer:takeDirty()
-            if relayout and count > 0 then
+            if (relayout or producerMoved) and count > 0 then
                 producer:write(floats, bounds, base, 1, count)
                 markRun(packet, base, count)
                 rewritten = rewritten + count
