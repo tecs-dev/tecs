@@ -191,16 +191,32 @@ end
 --- a save file would name a different group the next time a build interned its
 --- names in a different order.
 ---
---- `clip`, `loop`, `pitch` and `group` are read when a voice starts and not
---- afterwards; `gain` and the position are followed for as long as it sounds.
---- So moving a sound into another group is done by setting `group` and
---- clearing `voice`, which is the same thing changing its clip takes.
+--- `playing`, `gain`, `loop`, `pitch` and the position are followed for as
+--- long as the voice sounds, so writing any of them is enough and nothing has
+--- to be restarted to make one take. Each of those is a read and a compare per
+--- sounding row per frame, which is the price of the component being live and
+--- is why `clip` and `group` are not on the list: both take an untag, a
+--- retag and a fresh input to change, neither is something a game writes
+--- often, and following them would put that cost on every row that never
+--- does. Moving a sound into another group is setting `group` and clearing
+--- `voice`, which is the same thing changing its clip takes.
+---
+--- Disabling an entity silences its sound and re-enabling starts it again.
+--- `Disabled` is excluded from every query that does not name it, so a
+--- disabled row is not followed and its voice is taken back; the audio pass
+--- clears the handle at the same moment, which is what lets the sound return
+--- with the entity rather than reading as a one-shot that had finished.
 local record Sound is Component
     --- Clip index, from `Audio.clipId`. Zero plays nothing.
     clip: number
+    --- Nonzero sounds, zero does not. The instruction rather than a report:
+    --- clearing it stops the voice and setting it again starts one, including
+    --- on a one-shot that has already run out.
+    playing: number
     --- 0 to 1, before the master gain.
     gain: number
-    --- Nonzero repeats until the component goes away.
+    --- Nonzero repeats. Clearing it part way through lets the voice play out
+    --- to its end rather than cutting it.
     loop: number
     --- Playback rate. 1 is unchanged, 2 is an octave up and half as long.
     pitch: number
@@ -222,6 +238,7 @@ ecs.newFFIComponent({
     container = Sound,
     fields = {
         { "clip", "int32_t" },
+        { "playing", "uint8_t" },
         { "gain", "float" },
         { "loop", "uint8_t" },
         { "pitch", "float" },
@@ -232,13 +249,14 @@ ecs.newFFIComponent({
         { "group", "int32_t" },
         { "voice", "int32_t" },
     },
-    defaults = { 0, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0 },
+    defaults = { 0, 1, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0 },
     serialize = function(instance: Sound): {string: any}
         -- Both the clip and the group cross as the names they were interned
         -- from. An index is this run's numbering, and a file that carried one
         -- would name whatever the next run happened to intern in its place.
         return {
             clip = clipPaths[instance.clip as integer],
+            playing = instance.playing ~= 0,
             gain = instance.gain,
             loop = instance.loop ~= 0,
             pitch = instance.pitch,
@@ -256,9 +274,13 @@ ecs.newFFIComponent({
         local name = data.group as string
         local group = 0
         if name ~= nil and name ~= "" then group = groupId(name) end
+        -- A file written before `playing` existed carries no answer, and the
+        -- one that matches what it recorded is that the sound was on.
+        local playing = 1
+        if data.playing == false then playing = 0 end
         -- The voice is not restored. A snapshot records that an entity has a
         -- sound, not how far through it the mixer had got, so it starts.
-        return Sound(clip, data.gain as number,
+        return Sound(clip, playing, data.gain as number,
             (data.loop as boolean) and 1 or 0,
             (data.pitch as number) or 1.0,
             (data.spatial as boolean) and 1 or 0,
@@ -1465,18 +1487,55 @@ end
 --- allocates nothing.
 local rowOptions <const>: Audio.PlayOptions = {}
 
---- Starts, stops and reaps the voices `Sound` components ask for.
+--- Puts the rows of entities something has disabled back to rest.
 ---
---- One walk answers all three. A row with no voice starts one; a row whose
---- voice has ended is marked so it does not start again; and a voice nothing
---- referred to during the walk belonged to an entity that has gone, so it is
---- stopped. That last case is what makes despawning something mid-sound work
---- without an observer on every archetype that might hold one.
-local function reconcile(self: Audio, sounds: ecs.Query)
+--- `Disabled` is excluded from every query that does not name it, so a
+--- disabled row is not walked below and the voice it holds is taken by the
+--- sweep for looking abandoned. The row is left naming a voice that has gone,
+--- which reads on re-enabling as a one-shot that finished, and the sound never
+--- comes back. Clearing the handle here is what makes it.
+---
+--- Archetype-shaped rather than per-row: a disabled entity is in an archetype
+--- of its own, so a world with nothing disabled matches nothing and this walks
+--- nothing. Only the frame something is disabled on writes.
+local function hush(hushed: ecs.Query)
+    for archetype, length in hushed:iter() do
+        local rows = archetype:get(Sound) as {Sound}
+        local mutable: {Sound} = nil
+        for row = 1, length do
+            if (rows[row].voice as integer) > 0 then
+                if mutable == nil then
+                    mutable = archetype:getMut(Sound) as {Sound}
+                end
+                -- Zero rather than finished: a voice the sweep is about to
+                -- take back is not one that ran to its end.
+                mutable[row].voice = 0
+            end
+        end
+    end
+end
+
+--- Starts, stops, follows and reaps the voices `Sound` components ask for.
+---
+--- One walk answers all of it. A row asking to sound with no voice starts one;
+--- a sounding row has its gain, rate, loop and position followed; a row that
+--- has stopped asking, or whose voice has ended, is put back to rest; and a
+--- voice nothing referred to during the walk belonged to an entity that has
+--- gone or been disabled, so it is stopped. That last case is what makes
+--- despawning something mid-sound work without an observer on every archetype
+--- that might hold one.
+---
+--- Following is a read and a compare per field per sounding row. Every field
+--- on the list is one a game changes without wanting the sound to restart,
+--- and every field left off it takes a stop and a fresh start to change
+--- anyway, so nothing here is paid for on behalf of a case that cannot use it.
+local function reconcile(self: Audio, sounds: ecs.Query, hushed: ecs.Query)
     local voices = self._voices
     for slot = 1, #voices do
         voices[slot].referenced = false
     end
+
+    hush(hushed)
 
     for archetype, length in sounds:iter() do
         local rows = archetype:get(Sound) as {Sound}
@@ -1489,7 +1548,23 @@ local function reconcile(self: Audio, sounds: ecs.Query)
             local entry = rows[row]
             local handle = entry.voice as integer
 
-            if handle == 0 then
+            if (entry.playing as integer) == 0 then
+                -- Asked for silence. Whatever is sounding ends now, and the
+                -- row goes back to zero rather than to finished, so that
+                -- setting the flag again starts it: a one-shot that has run
+                -- out plays a second time instead of staying spent.
+                if handle ~= 0 then
+                    local voice = voiceOf(self, handle)
+                    if voice ~= nil then
+                        self._backend.stop(voice.track, 0)
+                        release(self, handle % SLOT_SPAN)
+                    end
+                    if mutable == nil then
+                        mutable = archetype:getMut(Sound) as {Sound}
+                    end
+                    mutable[row].voice = 0
+                end
+            elseif handle == 0 then
                 rowOptions.gain = entry.gain as number
                 rowOptions.loop = (entry.loop as integer) ~= 0
                 rowOptions.pitch = entry.pitch as number
@@ -1520,9 +1595,21 @@ local function reconcile(self: Audio, sounds: ecs.Query)
                     mutable[row].voice = FINISHED
                 else
                     voice.referenced = true
+                    -- Each of these is a load and a compare, and the call
+                    -- past it runs only on the frame the value moved. The
+                    -- guard is written out rather than left to the helper so
+                    -- that an unchanged row makes no call at all.
                     if voice.gain ~= entry.gain then
                         voice.gain = entry.gain as number
                         applyGain(self, voice)
+                    end
+                    local pitch = entry.pitch as number
+                    if voice.pitch ~= pitch then
+                        applyPitch(self, voice, pitch)
+                    end
+                    local loop = (entry.loop as integer) ~= 0
+                    if voice.loop ~= loop then
+                        applyLoop(self, voice, loop)
                     end
                     if (entry.spatial as integer) ~= 0 then
                         applyPosition(self, voice, entry.x as number,
@@ -1645,12 +1732,20 @@ function Audio:install(world: ecs.World)
         include = { Sound },
     })
 
+    -- Naming `Disabled` opts out of the exclusion every other query gets, so
+    -- this is the disabled rows and only those. They are in archetypes of
+    -- their own, so it matches nothing until something is disabled.
+    local hushed = world:query({
+        name = "tecs.DisabledSounds",
+        include = { Sound, ecs.builtins.Disabled },
+    })
+
     world:addSystem({
         name = "tecs.PlaySounds",
         -- After gameplay has decided what exists and before anything renders,
         -- so a sound spawned this frame starts this frame.
         phase = ecs.phases.PostUpdate,
-        run = function() reconcile(self, sounds) end,
+        run = function() reconcile(self, sounds, hushed) end,
     })
 
     world:addSnapshotHandler({
