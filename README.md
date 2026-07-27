@@ -192,102 +192,125 @@ reason the global would quietly undo. So `make check` runs with no declaration
 loaded, and a module that reached for `tecs` without requiring it is an error
 here rather than a cycle later.
 
-## Callbacks and systems
+## One way in
 
 Because the host reaches into an object rather than being handed a loop,
 something has to run after the device and the world exist, once per iteration,
 once per event, and once at teardown. That much follows from the entry point.
-What does not follow is that those four are named fields of a typed record.
-`load`, `update`, `event` and `quit` sit on `Application.Config` beside the
-window, the shader pack, the audio device, the frame cap and the rest of the
-startup settings, and that part is a choice. It is made for what the type
-checker can say about it.
+What does not follow is that a game should be handed four callbacks for it, and
+it no longer is. `Application.Config` carries `plugins`, a list of
+`function(world)`, and nothing else a game supplies is called by the loop.
 
-A name the host looks up at call time is a name nothing checks: a game that
-misspells one gets a function that is never called and no diagnostic anywhere.
-Written as a field of a record, every one of them is checked where it is
-written:
+The reason is that the ECS already answers all four questions, and answers them
+better than a callback can. A system's order is declared by the phase it is
+registered in rather than being implicit in where the loop happens to call it.
+A system and an observer are both registered on the world, so the debug server
+lists them; a field of a config table is reachable from nowhere. And both run
+inside the crash guard, so the line that fails leaves a traceback and a live
+process rather than unwinding to the host. That last one used to cut the other
+way: the same line of gameplay was inspectable after it failed in a system and
+fatal after it failed in `update`, which was reason enough on its own.
+
+So the four map onto machinery that was already there:
 
 ```
-entry.tl:4:5: unknown field windwo
-entry.tl:5:5: unknown field updat
-entry.tl:6:17: in record field: maxFrames: got string "sixty", expected integer
-entry.tl:7:52: in record field: update: argument 2: got string, expected number
-entry.tl:9:20: in record field: quit: incompatible number of arguments: got 2, expected 1
+ Was          Is now                        Run by
+ ───────────  ────────────────────────────  ────────────────
+ load         PreStartup, Startup,          world:startup
+              PostStartup
+ update       First … Last, fixed or not    world:update
+ event        world:observe(0, on.<kind>)   the drain
+ quit         PreShutdown, Shutdown,        world:shutdown
+              PostShutdown
 ```
 
-The error lands on the key, not on the frame that fails to call it, and nesting
-does not weaken it: `window = { widht = 640 }` fails the same way. The one thing
-it does not object to is dropping trailing parameters, so
-`update = function(app)` type-checks against `function(Application, number)`.
-That is worth having rather than working around; the demo's `update` takes only
-the application, because reading a key is all it does.
+Three of those four phases groups were built and never invoked. `world:startup`
+and `world:shutdown` existed, the twenty-eight phases existed, and
+`Application` called neither, so a game registering a `Startup` system got one
+that was accepted, listed, and silently never run. That is presumably why the
+callbacks existed at all: they filled a gap that was only ever a missing pair
+of calls. `spec/phases_spec.lua` is the guard against it happening again, and
+it is deliberately not a list of the six phases that were dead. It takes
+`phases.index` from the phases module, registers a marker in every phase in it,
+drives a real application through the whole lifecycle and names the ones that
+never fired, so a phase added later is covered the day it is added.
 
-Each callback is placed rather than merely called, and the placement is most of
-what the shape is worth. `load` runs at the end of initialisation: the log file
-is open, the shader pack has already decided which format the device may claim
-and so which backend SDL selects, the window, device, world and renderer exist,
-audio and the sequencer are installed, touch is scaled to the window, the
-latched-input systems are in the fixed phases, and any gamepad that was plugged
-in before the process started has been enumerated, since the platform reports a
-device arriving and not one that was there all along. It runs before the clock
-resets, so startup cost never lands in the first frame's dt. `event` runs after
-the engine has folded the event into its own state, so quit, resize, suspend and
-resume are handled and the game still sees the event. `update` runs before the
-world steps, timed as a stage of its own, because its cost belongs to the
-simulation side of any split and leaving it outside every stage would flatter
-anything that moves work to the other side. `quit` runs before anything is
-destroyed, so the window, device, world and renderer are all still live in it,
-and it runs only if `load` returned, so a game never gets a teardown for a
-startup that did not finish.
+### What a plugin can reach
 
-Where the line falls between a callback and a system is the question worth
-answering, since entities are the interface and most per-frame work belongs in a
-system. A system's signature is `(dt, world)` and it never sees the application,
-so anything that reaches for the window, the input, the device or
-`quitRequested` is either a callback or a system that captured the application
-when `load` registered it. Nothing forbids the second, and the demo does exactly
-that. The distinction that decides it is position rather than access. A system
-runs inside `world:update`, which is what gives it phase order, deferred
-mutation, the fixed step, pause and state gating, and the crash guard. A
-callback runs outside all of that.
+A callback received the application; a plugin receives the world. Most of what
+a game wants before its first frame is not world state, so each of those
+answers to the world it was installed into: `Renderer.of(world)` for
+registering an image or adding an instance producer, `Audio.of(world)` for the
+mixer, and `Application.of(world)` for the rest, which is the window, the
+device, the input tiers and `quitRequested`. All three are weak-keyed, so a
+world that has gone takes its entry with it.
 
-So gameplay goes in systems, and a callback is for work that has no entity to
-hang on. The latency bench is the clearest case: its `update` pushes a synthetic
-key event into SDL's queue and resets the timing tables at a chosen frame,
-neither of which is world state, while the reaction to that press is an ordinary
-system in `Update`, where it sits inside the step the measurement brackets.
+That is an accessor rather than a fifth lifecycle mechanism, and the difference
+is worth stating: what made a callback worse than a system was _when_ it ran,
+not what it could see. A system that captured the application when a plugin
+registered it gets phase order, the fixed step, pause and state gating, and the
+guard, and reaches everything a callback did.
 
-The crash guard is the sharpest edge on that line. The world's step and the frame
-it produces are wrapped, so an error in a system stops simulating and rendering
-and leaves the loop draining events and answering the debug server with the
-traceback, which is the moment the tooling is most useful and the worst one to
-lose. The callbacks are called outside that guard, so an error in `update`
-unwinds to the host, which logs it and ends the run. The same line of gameplay is
-inspectable after it fails in a system and is not inspectable after it fails in
-`update`, which is a second reason to prefer the system.
+### Events are a type per kind
 
-The shape costs something, and the cost is singleton assumptions. An application
-owns one world; a second is possible and can be stepped from `update`, but only
-`app.world` is rendered, bound to the debug tools and given the engine's own
-systems. Replacing a callback while running works, since `event`, `update` and
-`quit` are read off the config at each call rather than captured, but the config
-is not part of the public surface, so hot reload has no seam of its own.
-Nesting one application inside another does not work at all, and not because of
-the config: the host holds a single registry reference to one returned table,
+Platform events reach a game through the world's message bus, at address zero,
+with one ECS event type per kind: `world:observe(0, events.on.dropFile, h)` is
+called for dropped files and for nothing else. The alternative shape, one type
+carrying a `kind` field, is the callback with a subscription table in front of
+it, since every subscriber would be handed every kind and would filter it back
+out. Precise subscription is the entire difference, so it is the one worth
+having.
+
+The vocabulary is checked where it is written. `events.on` is a record with a
+field per kind, so `events.on.dropFil` is an error on the key rather than an
+observer that is never called. `events.typeOf` is the same table for code
+holding a kind as a string, which is the conversion itself and the debug tools.
+
+Delivery copies nothing. `events.tl` already converts into one reused record,
+so what a "copy" would have cost is field stores into a warm table rather than
+an allocation, and the emit avoids even those: the bus routes on `eventId` and
+reads nothing else, so stamping that one field on the record already in hand is
+the whole cost of delivery. Nothing is emitted for a kind nobody observes, so a
+stream of motion at device rate costs a table lookup and a gate. The borrow
+rule that follows is the one this vocabulary always had, now stated for
+observers too: read the record or copy it with `events.copy`, but do not keep
+it, because the next event overwrites it.
+
+A raw cdata view onto SDL's own storage would save the conversion's stores as
+well, and it is the wrong trade. Wheel axes are negated when the platform
+reports natural scrolling and pen axes are folded the same way, so a plain cast
+to the SDL struct hands back values that are wrong in exactly the way a recent
+fix made right. Normalisation has to happen somewhere, and a metatype computing
+it per access moves the cost rather than removing it.
+
+Where an observer sits in the frame is worth being plain about, because an
+observer is not a system. The drain runs before `world:update`, so an observer
+fires ahead of every system in the frame the event belongs to, outside every
+phase: no fixed step, no pause or state gating, and its mutations apply at once
+rather than at a phase boundary. `Input` is folded first and is unaffected by
+any of this: it consumes the whole stream into state that systems read in
+phase, and remains the way to react to input. A game wanting a reaction in
+phase does what `Input` does, which is fold the event into something a system
+looks at.
+
+### What the shape costs
+
+An application owns one world. A second is possible and can be stepped from a
+system, but only `app.world` is rendered, bound to the debug tools and given
+the engine's own systems. Nesting one application inside another does not work
+at all: the host holds a single registry reference to one returned table,
 `SDL_Init` and `SDL_Quit` bracket the process, and the debug server's bindings
 are module-level.
 
 What the shape buys below itself is that nothing needs it. `tecs.Application` is
 not loaded by `require("tecs")`; the engine modules resolve on first use through
 the surface's `__index`, which is what lets a tool build a world with no window,
-no device and no SDL reachable at all. The spec suite never constructs an
-application: it builds worlds directly, or assembles a window, a device and a
+no device and no SDL reachable at all. Most of the spec suite never constructs
+an application: it builds worlds directly, or assembles a window, a device and a
 renderer by hand, because the config is the only thing that puts those together
 and every piece it puts together is separately constructible. The debug server
 is bound to the world and the renderer rather than to the application, so a tool
-reads the same world whichever callbacks a game supplied, and none of it goes
-through the config at all.
+reads the same world whatever a game registered.
 
 ## Workers and assets
 
@@ -629,6 +652,10 @@ per-kind records. Teal can express the union but not a union that pools, and an
 event stream that allocates per event is not one this engine can use. Records
 handed to a handler are reused, so `events.copy` exists for anything that
 retains one.
+
+A game reads the stream by observing the kinds it wants, one ECS event type per
+kind, which is described under [One way in](#one-way-in) along with why
+delivery copies nothing.
 
 Unrecognised SDL events arrive as `unknown` carrying their numeric type instead
 of being dropped, so upgrading SDL surfaces new input rather than silently

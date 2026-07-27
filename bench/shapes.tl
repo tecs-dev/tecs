@@ -122,17 +122,18 @@ return tecs.application({
     maxEntities = COUNT + 1024,
     maxFrames = WARMUP + FRAMES,
 
-    load = function(app: tecs.Application)
-        spawnField(app.world)
+    plugins = { function(world: tecs.World)
+        local renderer = tecs.Renderer.of(world)
+        spawnField(world)
 
         -- Translation only, matching the reference scene. Rotation would make
         -- the sync recompute a basis per entity per frame, which is a different
         -- amount of work and would not be comparable.
-        local moving = app.world:query({ include = { Transform, Renderable } })
+        local moving = world:query({ include = { Transform, Renderable } })
         local phase = MODE == "fixed" and tecs.phases.FixedUpdate
             or tecs.phases.Update
 
-        app.world:addSystem({
+        world:addSystem({
             name = "bench.Drift",
             phase = phase,
             run = function(dt: number)
@@ -151,22 +152,37 @@ return tecs.application({
             end,
         })
 
+        -- The bench's own bookkeeping, in `First` so it runs ahead of every
+        -- system whose cost it is about to record. Counting frames here rather
+        -- than reading the loop's counter keeps the harness inside the world
+        -- like everything else it measures.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Sample",
+            phase = tecs.phases.First,
+            run = function(dt: number)
+                -- Warmup frames are the ones that built and first uploaded the
+                -- scene. Dropping them from every stage at once is what makes
+                -- the report a distribution of the steady state rather than of
+                -- the run.
+                if frame == WARMUP then timing.reset() end
+                if frame >= WARMUP then timing.mark(DELTA, dt) end
+                frame = frame + 1
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                print(("frames after %d warmup, %d of %d instances synced")
+                    :format(WARMUP, renderer.count, COUNT))
+                local report = timing.format()
+                if report ~= "" then print(report) end
+            end,
+        })
+
         print(("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s")
             :format(PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE))
-    end,
-
-    update = function(app: tecs.Application, dt: number)
-        -- Warmup frames are the ones that built and first uploaded the scene.
-        -- Dropping them from every stage at once is what makes the report a
-        -- distribution of the steady state rather than of the run.
-        if app.frame == WARMUP then timing.reset() end
-        if app.frame >= WARMUP then timing.mark(DELTA, dt) end
-    end,
-
-    quit = function(app: tecs.Application)
-        print(("frames after %d warmup, %d of %d instances synced")
-            :format(WARMUP, app.renderer.count, COUNT))
-        local report = timing.format()
-        if report ~= "" then print(report) end
-    end,
+    end },
 })

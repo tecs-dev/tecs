@@ -157,7 +157,19 @@ return tecs.application({
     maxFrames = WARMUP + FRAMES,
     logFile = "",
 
-    load = function(app: tecs.Application)
+    plugins = { function(world: tecs.World)
+        local renderer = tecs.Renderer.of(world)
+
+        -- Iterations completed, which is what the drop schedule and the warmup
+        -- cut are both counted in. Incremented in `Last` so every phase in one
+        -- iteration reads the same number.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Frame",
+            phase = tecs.phases.Last,
+            run = function() frame = frame + 1 end,
+        })
+
         -- Physics runs in the fixed phases, as it always does. The comparison
         -- problem that creates is solved where it belongs: dt is pinned, so
         -- the accumulator releases exactly one fixed step per frame.
@@ -168,9 +180,9 @@ return tecs.application({
         -- and the cost oscillates between runs by more than any change being
         -- measured. `clock.provider` exists for exactly this: frames are the
         -- coordinate system and dt is data.
-        -- The real dt is recorded here rather than in `update`, which now
-        -- receives the pinned value: a stage fed the fiction would report the
-        -- fiction. This is the one place that sees both.
+        -- The real dt is recorded here rather than in a system, which sees the
+        -- pinned value: a stage fed the fiction would report the fiction. This
+        -- is the one place that sees both.
         clock.provider = function(realDt: number): number
             timing.mark(DELTA, realDt)
             return clock.nominal
@@ -178,12 +190,12 @@ return tecs.application({
 
         -- The A/B knob for the solver's thread pool. One worker starts no
         -- threads and runs every task inline, which is the no-executor path.
-        app.world:addPlugin(physics.plugin({
+        world:addPlugin(physics.plugin({
             gravity = { 0.0, 900.0 },
             workerCount = math.floor(
                 tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
         }))
-        buildContainer(app.world)
+        buildContainer(world)
 
         -- Seeded, so every run drops the same bodies in the same order and two
         -- measurements are of the same scene.
@@ -193,14 +205,14 @@ return tecs.application({
         local perWave <const> = math.floor(BODIES / WAVES)
         local dropped = 0
 
-        app.world:addSystem({
+        world:addSystem({
             name = "bench.Drop",
             phase = tecs.phases.Update,
             run = function()
                 if dropped >= WAVES then return end
-                if app.frame < dropped * WAVE_FRAMES then return end
+                if frame < dropped * WAVE_FRAMES then return end
                 dropped = dropped + 1
-                dropWave(app.world, perWave, rand)
+                dropWave(world, perWave, rand)
             end,
         })
 
@@ -221,11 +233,11 @@ return tecs.application({
         }
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
-        local blown = app.world:query({
+        local blown = world:query({
             include = { Transform, physics.RigidBody },
         })
 
-        app.world:addSystem({
+        world:addSystem({
             name = "bench.Blowers",
             -- Beside the step rather than beside the frame, so a body takes
             -- the same impulse per step of simulated time however the frames
@@ -264,23 +276,33 @@ return tecs.application({
             end,
         })
 
+        world:addSystem({
+            name = "bench.Sample",
+            phase = tecs.phases.First,
+            run = function()
+                -- Everything before this built the scene: waves still landing,
+                -- the pile still settling, archetypes still moving. Dropping
+                -- those frames from every stage at once is what makes the
+                -- report a distribution of the steady state rather than of the
+                -- run.
+                if frame == WARMUP then timing.reset() end
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                print(("frames after %d warmup, %d bodies spawned, "
+                    .. "%d instances synced")
+                    :format(WARMUP, spawned, renderer.count))
+                local report = timing.format()
+                if report ~= "" then print(report) end
+            end,
+        })
+
         print(("physics: %d bodies in %d waves, %d frames apart, "
             .. "measuring %d after %d warmup")
             :format(BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP))
-    end,
-
-    update = function(app: tecs.Application, _: number)
-        -- Everything before this built the scene: waves still landing, the
-        -- pile still settling, archetypes still moving. Dropping those frames
-        -- from every stage at once is what makes the report a distribution of
-        -- the steady state rather than of the run.
-        if app.frame == WARMUP then timing.reset() end
-    end,
-
-    quit = function(app: tecs.Application)
-        print(("frames after %d warmup, %d bodies spawned, %d instances synced")
-            :format(WARMUP, spawned, app.renderer.count))
-        local report = timing.format()
-        if report ~= "" then print(report) end
-    end,
+    end },
 })

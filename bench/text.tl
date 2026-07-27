@@ -95,7 +95,8 @@ return tecs.application({
     maxFrames = WARMUP + FRAMES,
     logFile = "",
 
-    load = function(app: tecs.Application)
+    plugins = { function(world: tecs.World)
+        local renderer = tecs.Renderer.of(world)
         -- Real time, recorded where both values are visible. The world's dt is
         -- whatever the loop measured, and this is that same measurement kept
         -- for the report.
@@ -104,7 +105,7 @@ return tecs.application({
             return realDt
         end
 
-        app.world:addPlugin(text.plugin({ renderer = app.renderer }))
+        world:addPlugin(text.plugin({ renderer = renderer }))
         local font = text.defaultFont()
         transientFont = font
 
@@ -114,7 +115,7 @@ return tecs.application({
         for index = 1, TEXTS do
             local column = (index - 1) % columns
             local row = math.floor((index - 1) / columns)
-            entities[index] = app.world:spawn(
+            entities[index] = world:spawn(
                 Transform(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4,
                     0.0, 1, 0.0, 1.0, 1.0),
                 Tint(0.9, 0.95, 1.0, 1.0),
@@ -133,67 +134,79 @@ return tecs.application({
             .. "measuring %d frames after %d warmup")
             :format(TEXTS, LENGTH, CHURN * 100.0,
                 RESIZE and " with length changes" or "", FRAMES, WARMUP))
-    end,
 
-    update = function(app: tecs.Application, _: number)
-        if app.frame == WARMUP then timing.reset() end
+        -- In `First`, which is where the loop used to call this from: a text
+        -- spawned here is laid out and extracted by the frame that spawned it.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Churn",
+            phase = tecs.phases.First,
+            run = function()
+                if frame == WARMUP then timing.reset() end
 
-        -- Damage numbers: a burst appears every frame and each is gone a
-        -- moment later, so the population is steady while the identities turn
-        -- over completely.
-        for index = 1, SPAWN_RATE do
-            local at = (app.frame * SPAWN_RATE + index) % 997
-            transient[#transient + 1] = app.world:spawn(
-                Transform(8.0 + (at % 60) * 20.0,
-                    8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
-                Tint(1.0, 0.8, 0.2, 1.0),
-                text.Text.new({
-                    text = tostring(100 + at),
-                    font = transientFont,
-                    size = SIZE,
-                })
-            )
-        end
-        if SPAWN_RATE > 0 then
-            local expire <const> = #transient - SPAWN_RATE * LIFETIME
-            for index = 1, expire do
-                app.world:despawn(transient[index])
-                transient[index] = nil
-            end
-            if expire > 0 then
-                local moved: {integer} = {}
-                for index = expire + 1, #transient + expire do
-                    moved[#moved + 1] = transient[index]
+                -- Damage numbers: a burst appears every frame and each is gone a
+                -- moment later, so the population is steady while the identities turn
+                -- over completely.
+                for index = 1, SPAWN_RATE do
+                    local at = (frame * SPAWN_RATE + index) % 997
+                    transient[#transient + 1] = world:spawn(
+                        Transform(8.0 + (at % 60) * 20.0,
+                            8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
+                        Tint(1.0, 0.8, 0.2, 1.0),
+                        text.Text.new({
+                            text = tostring(100 + at),
+                            font = transientFont,
+                            size = SIZE,
+                        })
+                    )
                 end
-                transient = moved
-            end
-        end
+                if SPAWN_RATE > 0 then
+                    local expire <const> = #transient - SPAWN_RATE * LIFETIME
+                    for index = 1, expire do
+                        world:despawn(transient[index])
+                        transient[index] = nil
+                    end
+                    if expire > 0 then
+                        local moved: {integer} = {}
+                        for index = expire + 1, #transient + expire do
+                            moved[#moved + 1] = transient[index]
+                        end
+                        transient = moved
+                    end
+                end
 
-        local changing = math.floor(TEXTS * CHURN)
-        for index = 1, changing do
-            -- Spread across the set rather than always the first N, so the
-            -- churn is not confined to one archetype.
-            local at = ((app.frame * 31 + index * 17) % TEXTS) + 1
-            local length = LENGTH
-            if RESIZE then
-                length = LENGTH - (app.frame + index) % 3
-            end
-            local item = app.world:getMut(entities[at], text.Text)
-            item.text = phrase(app.frame + index, length)
-        end
+                local changing = math.floor(TEXTS * CHURN)
+                for index = 1, changing do
+                    -- Spread across the set rather than always the first N, so the
+                    -- churn is not confined to one archetype.
+                    local at = ((frame * 31 + index * 17) % TEXTS) + 1
+                    local length = LENGTH
+                    if RESIZE then
+                        length = LENGTH - (frame + index) % 3
+                    end
+                    local item = world:getMut(entities[at], text.Text)
+                    item.text = phrase(frame + index, length)
+                end
 
-        if app.frame >= WARMUP then
-            rewritten = rewritten + app.renderer.rewritten
-            glyphs = app.renderer.count
-        end
-    end,
+                if frame >= WARMUP then
+                    rewritten = rewritten + renderer.rewritten
+                    glyphs = renderer.count
+                end
+                frame = frame + 1
+            end,
+        })
 
-    quit = function(app: tecs.Application)
-        local frames <const> = math.max(1, app.frame - WARMUP)
-        print(("%d instances drawn, %d layouts, %.0f instances rewritten "
-            .. "per frame")
-            :format(glyphs, text.layouts(app.world), rewritten / frames))
-        local report = timing.format()
-        if report ~= "" then print(report) end
-    end,
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                local frames <const> = math.max(1, frame - WARMUP)
+                print(("%d instances drawn, %d layouts, %.0f instances "
+                    .. "rewritten per frame")
+                    :format(glyphs, text.layouts(world), rewritten / frames))
+                local report = timing.format()
+                if report ~= "" then print(report) end
+            end,
+        })
+    end },
 })

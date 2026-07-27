@@ -12,6 +12,11 @@
 --- Records handed to a handler are reused, so anything retaining one must
 --- take a copy.
 ---
+--- Events reach a game through the world's message bus, one ECS event type per
+--- kind at address zero, so `world:observe(0, events.on.dropFile, handler)` is
+--- how a drop is handled. See `KindTypes` for why the vocabulary is a type per
+--- kind rather than one type carrying the kind.
+---
 --- Unrecognised SDL events arrive as `unknown` with their numeric type rather
 --- than being dropped, so upgrading SDL surfaces new input instead of silently
 --- losing it.
@@ -24,12 +29,17 @@
 --- and the conversion reads them from there.
 
 local ffi <const> = require("ffi")
+local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 
 local C <const> = sdl.C
 
-local record Event
+--- An event is also an ECS event, so the record a handler receives is the
+--- record the message bus routes. `eventId` is the only field the bus reads,
+--- and it is stamped just before an emit, which is what makes delivery to an
+--- observer copy nothing.
+local record Event is ecs.Event
     --- What happened. Determines which other fields mean anything.
     kind: string
     --- Nanoseconds since SDL started, as SDL reported it. That is the
@@ -177,6 +187,116 @@ local record Event
     sdlType: integer
 end
 
+--- One ECS event type per kind, to observe at address zero.
+---
+--- A game asks for the kinds it wants rather than for the stream:
+--- `world:observe(0, events.on.dropFile, handler)` is called for dropped files
+--- and for nothing else. That is what a type per kind buys over one type
+--- carrying the kind, where every subscriber is handed every kind and filters
+--- it back out again.
+---
+--- Written as a record rather than looked up by name, so a misspelled kind is
+--- a compile error on the key instead of an observer that is never called.
+--- `events.typeOf` is the same table for code holding a kind as a string.
+---
+--- The record an observer receives is the reused one, so the borrow rule is
+--- the one this module states everywhere: read it, or copy it with
+--- `events.copy`, but do not keep it.
+local record KindTypes
+    quit: Event
+    terminating: Event
+    lowMemory: Event
+    appWillEnterBackground: Event
+    appDidEnterBackground: Event
+    appWillEnterForeground: Event
+    appDidEnterForeground: Event
+    localeChanged: Event
+    themeChanged: Event
+    displayOrientation: Event
+    displayAdded: Event
+    displayRemoved: Event
+    displayMoved: Event
+    displayScaleChanged: Event
+    displayDesktopModeChanged: Event
+    displayCurrentModeChanged: Event
+    displayUsableBoundsChanged: Event
+    windowShown: Event
+    windowHidden: Event
+    windowExposed: Event
+    windowMoved: Event
+    windowResized: Event
+    windowPixelSizeChanged: Event
+    windowMinimized: Event
+    windowMaximized: Event
+    windowRestored: Event
+    windowMouseEnter: Event
+    windowMouseLeave: Event
+    windowFocusGained: Event
+    windowFocusLost: Event
+    windowCloseRequested: Event
+    windowDisplayChanged: Event
+    windowDisplayScaleChanged: Event
+    windowSafeAreaChanged: Event
+    windowOccluded: Event
+    windowEnterFullscreen: Event
+    windowLeaveFullscreen: Event
+    keyDown: Event
+    keyUp: Event
+    textEditing: Event
+    textCandidates: Event
+    textInput: Event
+    keymapChanged: Event
+    keyboardAdded: Event
+    keyboardRemoved: Event
+    screenKeyboardShown: Event
+    screenKeyboardHidden: Event
+    mouseMotion: Event
+    mouseDown: Event
+    mouseUp: Event
+    mouseWheel: Event
+    mouseAdded: Event
+    mouseRemoved: Event
+    fingerDown: Event
+    fingerUp: Event
+    fingerMotion: Event
+    fingerCanceled: Event
+    pinchBegin: Event
+    pinchUpdate: Event
+    pinchEnd: Event
+    penProximityIn: Event
+    penProximityOut: Event
+    penDown: Event
+    penUp: Event
+    penMotion: Event
+    penButtonDown: Event
+    penButtonUp: Event
+    penAxis: Event
+    gamepadAdded: Event
+    gamepadRemoved: Event
+    gamepadRemapped: Event
+    gamepadButtonDown: Event
+    gamepadButtonUp: Event
+    gamepadAxis: Event
+    gamepadSensor: Event
+    gamepadTouchpadDown: Event
+    gamepadTouchpadUp: Event
+    gamepadTouchpadMotion: Event
+    dropFile: Event
+    dropText: Event
+    dropBegin: Event
+    dropComplete: Event
+    dropPosition: Event
+    clipboardUpdate: Event
+    audioDeviceAdded: Event
+    audioDeviceRemoved: Event
+    audioDeviceFormatChanged: Event
+    sensorUpdate: Event
+    user: Event
+    --- An SDL event this build has no name for. Carries `sdlType` and nothing
+    --- else worth reading.
+    unknown: Event
+end
+
 local record events
     --- One event, discriminated by `kind`. The record handed to a handler is
     --- reused, so anything retaining one takes a copy through `events.copy`.
@@ -184,6 +304,15 @@ local record events
     --- Installed by a replay driver. Called instead of draining the host
     --- queue, and expected to invoke the handler for each recorded event.
     source: function(handler: function(Event))
+
+    --- One ECS event type per kind, to observe at address zero. See
+    --- `KindTypes`.
+    on: KindTypes
+    --- The event type for a kind, or nil for a name this build does not know.
+    ---
+    --- What `on` is for code holding a kind it cannot spell in source, which
+    --- is the conversion itself and the debug tools.
+    typeOf: function(kind: string): Event
 end
 
 local Cast <const> = "SDL_Event *"
@@ -198,10 +327,28 @@ local StampCast <const> = "uint64_t *"
 --- wrong kind.
 local KINDS <const>: {integer: string} = {}
 
+--- Kind name to the ECS event type it is observed through. The same tables
+--- `events.on` names, reachable by a name that is only known at run time.
+local TYPES <const>: {string: Event} = {}
+
+--- Registers the event type for a kind.
+---
+--- One per kind rather than one for the stream, because a subscription is
+--- worth no more than what it excludes. The type is a table with an id on it
+--- and nothing else: the payload stays the one wide record above, so a hundred
+--- types cost a hundred integers and no per-event work.
+local function declare(kind: string): Event
+    local eventType = {} as Event
+    ecs.newEvent(eventType)
+    TYPES[kind] = eventType
+    return eventType
+end
+
 local function map(name: string, kind: string)
     local value = C[name]
     if value == nil then return end
     KINDS[tonumber(value) as integer] = kind
+    declare(kind)
 end
 
 map("SDL_EVENT_QUIT", "quit")
@@ -303,6 +450,17 @@ map("SDL_EVENT_AUDIO_DEVICE_REMOVED", "audioDeviceRemoved")
 map("SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED", "audioDeviceFormatChanged")
 map("SDL_EVENT_SENSOR_UPDATE", "sensorUpdate")
 map("SDL_EVENT_USER", "user")
+
+-- Not in the table above, since nothing maps to it: it is what a kind becomes
+-- when this build has no name for the SDL type.
+declare("unknown")
+
+events.on = TYPES as KindTypes
+
+--- The event type for a kind, or nil for a name this build does not know.
+function events.typeOf(kind: string): Event
+    return TYPES[kind]
+end
 
 --- Axis values arrive as signed 16-bit and are reported as -1..1.
 local AXIS_SCALE <const> = 1.0 / 32767.0

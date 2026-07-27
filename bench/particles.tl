@@ -134,28 +134,40 @@ return tecs.application({
     maxEntities = 4096,
     maxFrames = WARMUP + FRAMES,
 
-    load = function(app: tecs.Application)
-        app.world:addPlugin(particles.plugin({
-            renderer = app.renderer,
+    plugins = { function(world: tecs.World)
+        local renderer = tecs.Renderer.of(world)
+        world:addPlugin(particles.plugin({
+            renderer = renderer,
             capacity = POOL,
             maxEmitters = EMITTERS + 8,
         }))
-        spawnEmitters(app.world)
+        spawnEmitters(world)
+
+        -- In `First`, so the sample is taken ahead of the systems it covers.
+        local frame = 0
+        world:addSystem({
+            name = "bench.Sample",
+            phase = tecs.phases.First,
+            run = function(dt: number)
+                if frame == WARMUP then timing.reset() end
+                if frame >= WARMUP then timing.mark(DELTA, dt) end
+                frame = frame + 1
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.Report",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                print(("frames after %d warmup, %d instances resident")
+                    :format(WARMUP, renderer.count))
+                local report = timing.format()
+                if report ~= "" then print(report) end
+            end,
+        })
 
         print(("particles: regime %s, %d live over %d emitters in a pool of "
             .. "%d, viewport %dx%d"):format(REGIME, LIVE, LIVE > 0 and EMITTERS
             or 0, POOL, WIDTH, HEIGHT))
-    end,
-
-    update = function(app: tecs.Application, dt: number)
-        if app.frame == WARMUP then timing.reset() end
-        if app.frame >= WARMUP then timing.mark(DELTA, dt) end
-    end,
-
-    quit = function(app: tecs.Application)
-        print(("frames after %d warmup, %d instances resident")
-            :format(WARMUP, app.renderer.count))
-        local report = timing.format()
-        if report ~= "" then print(report) end
-    end,
+    end },
 })

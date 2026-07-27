@@ -27,6 +27,7 @@ local record ecs
     type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
     type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
     type Event = types.events.Event
+    type Plugin = types.Plugin
     type Query = types.Query
     type Archetype = types.Archetype
 

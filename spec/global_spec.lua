@@ -39,7 +39,7 @@ local function checkTeal(source, declared)
 end
 
 -- Both halves of the surface, and both positions the name is used in: a value
--- (`tecs.newWorld`, `tecs.log`) and a type (`tecs.Application`).
+-- (`tecs.newWorld`, `tecs.log`) and a type (`tecs.World`, `tecs.phases`).
 local USAGE = [[
 local world = tecs.newWorld()
 world:update(1 / 60)
@@ -48,8 +48,17 @@ local logger = tecs.log.get("game")
 logger:info("entities: %d", world:getStats().entities)
 
 return tecs.application({
-    load = function(app: tecs.Application) print(app.world ~= nil) end,
-    update = function(_app: tecs.Application, dt: number) print(dt) end,
+    plugins = { function(game: tecs.World)
+        print(tecs.Application.of(game).window ~= nil)
+        game:addSystem({
+            name = "game.Tick",
+            phase = tecs.phases.Update,
+            run = function(dt: number) print(dt) end,
+        })
+        game:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
+            print(event.scancode)
+        end)
+    end },
 })
 ]]
 

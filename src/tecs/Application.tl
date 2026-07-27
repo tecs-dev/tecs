@@ -6,6 +6,29 @@
 --- on iOS there is no loop for it to block in.
 ---
 --- The underscored methods are the host's contract, not the game's.
+---
+--- A game's own code runs in systems and observers, and there is one way in:
+--- `config.plugins`. A plugin is handed the world and registers what it wants
+--- to happen, which the world then runs. Nothing here calls back into a game
+--- per frame or per event, because the world already does both and does them
+--- better: a system's order is declared by its phase, both are visible to the
+--- debug server, and both run inside a guard that keeps the process alive and
+--- inspectable after the game throws.
+---
+--- So the four lifecycle points a game used to be handed map onto what the ECS
+--- already had:
+---
+---   startup    `PreStartup`, `Startup`, `PostStartup`, run once by
+---              `world:startup` at the end of initialisation
+---   per frame  the ordinary phases, run by `world:update`
+---   per event  `world:observe(0, events.on.<kind>, handler)`
+---   teardown   `PreShutdown`, `Shutdown`, `PostShutdown`, run once by
+---              `world:shutdown` before anything is destroyed
+---
+--- A plugin needs to reach the objects that are not world state, and each of
+--- those answers to the world it was installed into: `Renderer.of(world)`,
+--- `Audio.of(world)`, and `Application.of(world)` for the window, the device,
+--- the input and `quitRequested`.
 
 local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -41,10 +64,6 @@ local SIMULATE <const> = timing.stage("simulate")
 local ACQUIRE <const> = timing.stage("acquire")
 local RECORD <const> = timing.stage("record")
 local SUBMIT <const> = timing.stage("submit")
---- The game's own per-frame callback. Its cost belongs to the simulation side
---- of any split, so leaving it outside every stage understates that side and
---- flatters anything that only moves the other one.
-local GAME <const> = timing.stage("game")
 
 local record Application
     record Config
@@ -96,10 +115,19 @@ local record Application
         --- real window to completion without a human closing it.
         maxFrames: integer
 
-        load: function(app: Application)
-        update: function(app: Application, dt: number)
-        event: function(app: Application, event: events.Event)
-        quit: function(app: Application)
+        --- The game, as functions handed the world.
+        ---
+        --- Called in order at the end of initialisation, after every engine
+        --- subsystem is installed and before the startup phases run, so a
+        --- plugin can register a `Startup` system and have it run this
+        --- initialisation rather than the next one.
+        ---
+        --- A list rather than one function, because that is the difference
+        --- worth having: a game composes its own modules and the engine's the
+        --- same way, and adding one is adding an element rather than editing a
+        --- body. `world:addPlugin` takes the same thing, so a plugin that
+        --- wants sub-plugins needs nothing from here.
+        plugins: {ecs.Plugin}
     end
 
     window: Window
@@ -127,17 +155,70 @@ local record Application
     --- Traceback of a gameplay crash. Once set, the loop stops simulating and
     --- rendering but keeps draining events and answering the debug server.
     _crashed: string
-    _started: boolean
     _shutdownDone: boolean
 end
 
 local ApplicationMT <const>: metatable<Application> = { __index = Application }
 
+--- The application each world belongs to. Weak, so a world that has gone takes
+--- its entry with it.
+local owners <const>: {ecs.World: Application} =
+    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Application}>)
+
+--- The application a world belongs to, or nil for a world nothing drives.
+---
+--- A plugin is handed the world and nothing else, and most of what it needs
+--- answers to the world already: `Renderer.of` and `Audio.of` reach the two
+--- subsystems a game reaches for most. This is for the rest, which is the
+--- window, the device, the input tiers and `quitRequested`: none of them is
+--- world state and none of them belongs to a subsystem installed into a world.
+function Application.of(world: ecs.World): Application
+    return owners[world]
+end
+
+-------------------------------------------------------------------------------
+-- The crash guard
+-------------------------------------------------------------------------------
+
+--- What a guarded emit is about to deliver. Held here rather than captured, so
+--- the per-event path allocates no closure.
+local emitting: Application = nil
+local emittingEvent: events.Event = nil
+
+local function traceback(err: any): string
+    return debug.traceback(tostring(err), 2)
+end
+
+--- Runs `body`, and records rather than propagates whatever it throws.
+---
+--- Every entry into a game's own code goes through this, so the line that
+--- fails is post-mortem debuggable wherever it was written. The loop keeps
+--- draining events so the window still closes, and keeps answering the debug
+--- server so an agent that was watching gets the traceback rather than a
+--- refused connection. That was already true of a system, and it is the
+--- moment the tooling is most useful and the worst one to lose.
+---
+--- Engine code is deliberately not guarded. An engine that throws is a bug
+--- here rather than in the game, and swallowing it would hide it.
+local function guard(self: Application, what: string, body: function): boolean
+    local ok, failure = xpcall(body, traceback) as (boolean, string)
+    if ok then return true end
+
+    self._crashed = failure
+    LOGGER:error("%s crashed, still serving:\n%s", what, failure)
+    mcp.setCrashed(failure)
+    return false
+end
+
+--- The body of a guarded emit, as one function rather than one per event.
+local function deliver()
+    emitting.world:emit(0, emittingEvent)
+end
+
 --- Builds an application. Return the result from the entry chunk.
 function Application.create(config: Application.Config): Application
     local self = setmetatable({} as Application, ApplicationMT)
     self._config = config or {} as Application.Config
-    self._started = false
     self._shutdownDone = false
     self.quitRequested = false
     self.suspended = false
@@ -190,6 +271,9 @@ function Application:_init(): boolean
     -- created knowing it rather than being told later.
     self.input = Input.create({ window = self.window.handle })
     self.world = ecs.newWorld({ maxEntities = config.maxEntities })
+    -- Named before anything is installed into the world, so a plugin reaching
+    -- back for the window or the input has an answer however early it runs.
+    owners[self.world] = self
     self.renderer = Renderer.create(self.device.handle,
         self.device:getSwapchainFormat(), {
             ambient = config.ambient,
@@ -269,15 +353,35 @@ function Application:_init(): boolean
         self.mcp = mcp.listen(config.mcpPort)
     end
 
-    -- Before the game's load, so a pad that was already plugged in when the
+    -- Before the game's plugins, so a pad that was already plugged in when the
     -- process started is there when the game asks for it. Waiting for an
     -- event would leave every such device invisible: the platform reports an
     -- addition, not a device that was there all along.
     self.input:refreshDevices()
 
-    if config.load ~= nil then config.load(self) end
+    -- The game. Registration first, then the startup phases the registration
+    -- put systems in, and both guarded: a game that throws while starting up
+    -- leaves a traceback and a live debug server rather than a dead process,
+    -- which is the same bargain a system in any other phase already gets.
+    --
+    -- Startup runs here rather than in the first iteration so that everything
+    -- it spawned is resident before the first frame is extracted, and so its
+    -- cost lands before the clock resets rather than in the first frame's dt.
+    local world = self.world
+    local plugins = config.plugins
+    if plugins ~= nil then
+        for index = 1, #plugins do
+            local plugin = plugins[index]
+            if not guard(self, "a plugin", function() world:addPlugin(plugin) end) then
+                break
+            end
+        end
+    end
+    if self._crashed == nil then
+        guard(self, "startup", function() world:startup() end)
+    end
 
-    -- After the game's load, so the first look takes up everything the run has
+    -- After the game's plugins, so the first look takes up everything the run has
     -- opened. Which reloader owns which kind is registered here rather than
     -- inside the watcher: nothing in `tecs.platform` knows what an image or a
     -- clip is, and the rules a reload may not break are stated once, in the
@@ -307,15 +411,31 @@ function Application:_init(): boolean
 
     -- Startup cost must not land in the first iteration's dt.
     clock.reset()
-    self._started = true
     return true
 end
 
---- Folds one event into engine state, then hands it to the game.
+--- Folds one event into engine state, then emits it on the world's bus.
 ---
---- The game sees every event, including ones the engine acted on. An engine
+--- Observers see every event, including ones the engine acted on. An engine
 --- that consumed events would leave a game unable to tell the difference
 --- between an event it never received and one it mishandled.
+---
+--- Input is folded first, so an observer reading `app.input` inside its handler
+--- sees the press it is being told about rather than the state before it.
+---
+--- Where this sits in the frame is worth being plain about, because an observer
+--- is not a system. The drain runs before `world:update`, so an observer fires
+--- ahead of every system in the frame the event belongs to, outside every
+--- phase: no fixed step, no pause or state gating, and mutations are applied at
+--- once rather than deferred to a phase boundary. A game wanting a reaction in
+--- phase does what `Input` does, which is fold the event into something a
+--- system reads.
+---
+--- Nothing is emitted for a kind nobody asked for, which is what makes a
+--- device-rate stream of motion cost a table lookup rather than a dispatch. The
+--- record is emitted as it stands rather than copied into an event instance,
+--- so an observer is handed the same reused record every other consumer sees
+--- and the same borrow rule applies to it.
 function Application:_receive(event: events.Event)
     -- Before anything acts on the event, so what is measured is the wait from
     -- the host's stamp rather than from some point inside the reaction.
@@ -343,8 +463,19 @@ function Application:_receive(event: events.Event)
         clock.reset()
     end
 
-    local handler = self._config.event
-    if handler ~= nil then handler(self, event) end
+    local eventType = events.typeOf(kind)
+    if eventType == nil then return end
+
+    local world = self.world
+    if not world:hasObservers(0, eventType) then return end
+
+    -- The bus routes on this and reads nothing else off the record, so stamping
+    -- it is the whole of what delivery costs beyond the dispatch itself.
+    event.eventId = eventType.eventId
+    emitting = self
+    emittingEvent = event
+    guard(self, "an observer", deliver)
+    emittingEvent = nil
 end
 
 --- Called once per iteration by the host. Returning false stops the loop.
@@ -388,11 +519,6 @@ function Application:_iterate(queue: loader.CValue, count: integer,
 
     if not self.suspended then
         self.elapsed = self.elapsed + dt
-        if self._config.update ~= nil then
-            local started = timing.begin()
-            self._config.update(self, dt)
-            timing.finish(GAME, started)
-        end
 
         -- Answered on this thread, inside the frame, so a tool reads a world
         -- that is not mid-update. Polled before the guard below, so it keeps
@@ -431,7 +557,7 @@ function Application:_simulate(dt: number)
     -- This step observes whatever the drain above delivered, so this is the
     -- moment the input stops waiting and starts being acted on.
     timing.inputConsumed(t0)
-    local ok, failure = xpcall(function(): boolean
+    guard(self, "gameplay", function()
         self.world:update(dt)
 
         local t1 = timing.begin()
@@ -459,16 +585,7 @@ function Application:_simulate(dt: number)
                 timing.inputPresented(t1, t4)
             end
         end
-        return true
-    end, function(err: any): string
-        return debug.traceback(tostring(err), 2)
-    end) as (boolean, string)
-
-    if ok then return end
-
-    self._crashed = failure as string
-    LOGGER:error("gameplay crashed, still serving:\n%s", self._crashed)
-    mcp.setCrashed(self._crashed)
+    end)
 end
 
 --- The gameplay traceback, or nil while the game is healthy.
@@ -486,8 +603,19 @@ function Application:_shutdown(): boolean
         if report ~= "" then io.stderr:write(report .. "\n") end
     end
 
-    if self._started and self._config.quit ~= nil then
-        self._config.quit(self)
+    -- The game's teardown, and the first thing here for the same reason the
+    -- rest of this function is ordered at all: a `Shutdown` system releasing
+    -- something has to run while what it holds still exists. The window, the
+    -- device, the renderer, the world and the audio are all live at this point
+    -- and none of them is after it.
+    --
+    -- Run whenever there is a world to run them on, rather than only after a
+    -- clean startup. A game that acquired something in a `PreStartup` system
+    -- and threw in the next one still has to be given the chance to give it
+    -- back, and that is exactly the run where nothing else will.
+    if self.world ~= nil then
+        local world = self.world
+        guard(self, "shutdown", function() world:shutdown() end)
     end
 
     watch.uninstall()

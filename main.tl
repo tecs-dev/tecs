@@ -6,6 +6,12 @@
 --- Entities are the interface. Everything on screen is a spawned entity with a
 --- Transform, the lights are entities too, and systems move them. Nothing
 --- here touches a buffer, a pass, or a command buffer.
+---
+--- The game is a plugin, which is the only way in. It is handed the world,
+--- reaches the objects that are not world state through `Application.of`, and
+--- registers what should happen: systems for per-frame work, an observer for
+--- the one platform event it cares about, and a `Shutdown` system for the
+--- closing summary. Nothing in this file is called by the loop directly.
 
 -- Where this tree was compiled to: the build says so during development, the
 -- host says so for an installed run, and neither is the working directory. Our
@@ -120,7 +126,8 @@ return tecs.application({
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 
-    load = function(app: tecs.Application)
+    plugins = { function(world: tecs.World)
+        local app = tecs.Application.of(world)
         local width, height = app.window:getPixelSize()
         print(("tecs %s"):format(tecs.version))
         print(("  driver: %s"):format(app.device.driver))
@@ -140,16 +147,16 @@ return tecs.application({
         end
 
         local t0 = tecs.clock.now()
-        spawnField(app.world, width, height)
+        spawnField(world, width, height)
         local t1 = tecs.clock.now()
-        spawnLights(app.world, width, height)
+        spawnLights(world, width, height)
         print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
 
         -- Text is entities too. The plugin lays the string out into one child
         -- entity per glyph, and each of those is an ordinary renderable that
         -- the same cull and the same draw pick up.
-        app.world:addPlugin(tecs.text.plugin({ renderer = app.renderer }))
-        app.world:spawn(
+        world:addPlugin(tecs.text.plugin({ renderer = app.renderer }))
+        world:spawn(
             Transform(24, 24, 0, 1),
             Tint(0.92, 0.96, 1.0, 1.0),
             tecs.text.Text.new({
@@ -165,9 +172,9 @@ return tecs.application({
         -- get: taking getMut to read would mark the component dirty on every
         -- archetype every frame and defeat every dirty-gated consumer.
         local static = os.getenv("TECS_STATIC") ~= nil
-        local spinning = app.world:query({ include = { Transform, Renderable } })
+        local spinning = world:query({ include = { Transform, Renderable } })
         if not static then
-        app.world:addSystem({
+        world:addSystem({
             name = "demo.Spin",
             phase = tecs.phases.Update,
             run = function(dt: number)
@@ -182,8 +189,8 @@ return tecs.application({
         })
         end
 
-        local orbiting = app.world:query({ include = { Transform, PointLight } })
-        app.world:addSystem({
+        local orbiting = world:query({ include = { Transform, PointLight } })
+        world:addSystem({
             name = "demo.OrbitLights",
             phase = tecs.phases.Update,
             run = function()
@@ -200,31 +207,41 @@ return tecs.application({
             end,
         })
 
+        local input = app.input
+        world:addSystem({
+            name = "demo.Quit",
+            phase = tecs.phases.Update,
+            run = function()
+                -- Reads the base layer, so this stops responding on its own if
+                -- a menu layer is ever pushed over it.
+                if input:keyPressed("escape") then
+                    app.quitRequested = true
+                end
+            end,
+        })
+
+        -- One kind, one handler. A game that also cared about drops would ask
+        -- for `events.on.dropFile` beside this and be called for drops only,
+        -- rather than for every event with a branch at the top.
+        world:observe(0, tecs.events.on.appWillEnterBackground, function()
+            print("  backgrounded, simulation suspended")
+        end)
+
+        -- Teardown is a phase like any other, so the summary is a system in it
+        -- rather than a callback the loop has to remember to call.
+        world:addSystem({
+            name = "demo.Report",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                print(("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, "
+                    .. "%d resynced)")
+                    :format(app.frame, app.elapsed,
+                        app.elapsed / math.max(app.frame, 1) * 1000,
+                        app.renderer.count, app.renderer.rewritten))
+            end,
+        })
+
         print(("  %d renderable entities, %d light entities"):format(COUNT, LIGHTS))
         print("  escape or close the window to quit")
-    end,
-
-    update = function(app: tecs.Application)
-        -- Reads the base layer, so this stops responding on its own if a
-        -- menu layer is ever pushed over it.
-        if app.input:keyPressed("escape") then
-            app.quitRequested = true
-        end
-    end,
-
-    event = function(_app: tecs.Application, event: tecs.events.Event)
-        -- Every event reaches here, including ones the engine acted on, so a
-        -- game can observe lifecycle without the engine handing it a
-        -- second, parallel notification.
-        if event.kind == "appWillEnterBackground" then
-            print("  backgrounded, simulation suspended")
-        end
-    end,
-
-    quit = function(app: tecs.Application)
-        print(("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, %d resynced)")
-            :format(app.frame, app.elapsed,
-                app.elapsed / math.max(app.frame, 1) * 1000,
-                app.renderer.count, app.renderer.rewritten))
-    end,
+    end },
 })
