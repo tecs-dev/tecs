@@ -91,6 +91,10 @@ Working today:
 - The clipboard read and written, and the primary selection beside it, so the
   `clipboardUpdate` event is something a game can act on rather than only
   notice
+- Child processes run to completion off the main thread, with their output,
+  error output and exit status answered through a handle a frame polls, an
+  environment and a working directory the caller chooses, and a teardown that
+  ends a child rather than leaving it behind
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -717,6 +721,92 @@ nothing is trimmed from either end. Text stops at the first NUL, because that
 is what terminates the C string SDL returns and what every producer of
 clipboard text intends; `data` uses the length SDL reports instead, so a blob
 keeps its NULs.
+
+## Shelling out
+
+A command line tool, a resource pipeline or an asset build wants to run another
+program, and a game wants to do it between two frames rather than instead of
+them. `tecs.proc` is that, and it is one of the few subsystems that is more
+useful without a window than with one, so it initialises no SDL subsystem and
+works under a plain interpreter.
+
+```lua
+local run = tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
+-- ... frames pass, the loop pumps ...
+if not run:isRunning() and run:succeeded() then
+    print(run.output)
+end
+```
+
+**One shape, and it is run-to-completion.** The result arrives whole, once,
+with the exit status beside it. The long-running child whose output you want as
+it appears is a different API rather than a flag on this one: it has to answer
+what a chunk is, what happens when a chatty child outruns its reader, and how
+two streams interleave once they are delivered separately over time, and every
+one of those is a guess here and a requirement there. The worker already reads
+incrementally, so a streaming variant grows from that seam; until it exists,
+output is accumulated whole and `timeoutMs` is what bounds a child that prints
+forever.
+
+**The child never leaves the worker.** `SDL_ReadProcess` reads to end of file
+and a blocking `SDL_WaitProcess` waits for the child to exit, so on the main
+thread either one is a stalled frame for as long as the program runs. A run
+therefore goes out to a worker exactly as a decode does, and what comes back is
+bytes, an exit code and a pid.
+
+An `SDL_Process` could cross the way a decoded surface does, as an address with
+ownership attached, and it must not. SDL documents `SDL_WaitProcess`,
+`SDL_KillProcess`, `SDL_ReadProcess` and `SDL_DestroyProcess` as not thread
+safe, and unlike a surface a process is not a block of memory whose ownership
+can simply move: it is a pid that may be reaped exactly once, plus a set of
+pipe descriptors. Two states holding it is two states able to reap it, and the
+second reap lands on whatever pid the kernel has handed out since. The only
+reason to move it would be to call something from the main thread, and every
+call worth making there is one of those four. So the address stays on the
+worker and the caller gets a copy of the output, which is the right trade at
+this size: a decoded 4K texture is sixty-four megabytes and copying it twice is
+the frame, while `git rev-parse` answers forty-one bytes.
+
+**The worker polls, and that is what makes it interruptible.** Instead of
+calling `SDL_ReadProcess` and disappearing for the child's lifetime, it asks
+`SDL_WaitProcess` with `block` false and reads the child's pipes through the
+non-blocking streams SDL hands out. Three things follow. A kill is a message
+the worker picks up on its next pass, so the main thread can end a child it is
+not allowed to touch. One worker holds any number of children at once, so a
+second run does not queue behind the first. And a child that writes past the
+pipe buffer keeps going, because something is draining it, rather than stopping
+until someone reads.
+
+**Teardown kills.** Reaping alone has no bound and a child that never exits
+parks it; detaching leaves a worker running inside a library the process is
+about to unmap, which is the failure
+[`ffi/loader.tl`](src/tecs/ffi/loader.tl)'s `RTLD_NODELETE` already exists for.
+So `proc.shutdown`, which the application runs at teardown, asks every live
+child to stop, gives it a quarter second, and then forces it. A forced kill is
+not refusable, so the join that follows is bounded by the kernel reaping the
+child, and a handle whose child was still running ends at `"killed"` rather
+than at a status that implies it finished.
+
+**A failed spawn is a status.** A program that cannot be started resolves at
+`"failed"` with `error` set, the way a failed decode resolves rather than
+raising. A caller that shells out is already branching on the exit code, and a
+spawn that did not happen is one more branch on the same value.
+
+**Error output is separate by default.** `SDL_CreateProcess` inherits the
+child's standard error, and interleaving diagnostics into standard output
+corrupts anything parsing that output, so a run pipes both and answers them as
+`output` and `errorOutput`. `mergeStderr` folds them for the caller who wants a
+transcript. Creation always goes through `SDL_CreateProcessWithProperties`,
+which is a strict superset: piping error output, a working directory and an
+environment are reachable only there, and two creation paths would be two
+places where what the child inherits is written down.
+
+**Environment and working directory are exposed rather than hidden.** Both
+default to inheriting, which is what a tool almost always wants; `cwd` sets the
+directory, `env` sets variables over the inherited environment, and `clearEnv`
+starts from an empty one so `env` is the whole of what the child sees. `input`
+writes bytes to the child's standard input and closes it, which is what a child
+reading to end of input is waiting for.
 
 ## Measuring latency
 
@@ -1903,7 +1993,7 @@ scripts/gencdef.py          header -> cdef + constants generator
 scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
 src/tecs/ffi/             library loading and generated binding wrappers
-src/tecs/platform/        window, clock, events, clipboard, input and audio
+src/tecs/platform/        window, clock, events, clipboard, proc, input, audio
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sprite sheets and their playback

@@ -21,6 +21,7 @@ local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 local sequence <const> = require("tecs.sequence")
 local paths <const> = require("tecs.platform.paths")
+local proc <const> = require("tecs.platform.proc")
 local watch <const> = require("tecs.platform.watch")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
@@ -384,6 +385,12 @@ function Application:_iterate(queue: loader.CValue, count: integer,
     -- guard, because a decode that finished while backgrounded is finished.
     assets.update()
 
+    -- The same argument, for the same reason: a child that has exited has
+    -- exited, and a game that shelled out and did nothing else would otherwise
+    -- hold a handle that never leaves "running". Costs a nil check on a
+    -- process that has never started a child.
+    proc.update()
+
     -- Outside the suspension and crash guards, for the reason above and one
     -- more: a shader edited to fix the crash is exactly what a stopped process
     -- is waiting for. Costs a clock read on a frame the interval has not
@@ -505,6 +512,10 @@ function Application:_shutdown(): boolean
     -- torn down is the one way asset loading can outlive the process it
     -- belongs to.
     assets.shutdown()
+    -- A child outlives the process that started it unless something ends it,
+    -- and the worker waiting on one would be a thread inside a library about
+    -- to be unmapped. So teardown kills: gently, then forcibly, then joins.
+    proc.shutdown()
     log.closeFile()
 
     if self.device ~= nil then
