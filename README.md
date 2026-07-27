@@ -500,6 +500,41 @@ given a bound no view can be outside of, so it draws whatever the camera is
 looking at. That gives up culling on those layers and keeps it exactly on every
 layer that does not ask, which is where the entities are.
 
+## Shapes are materials
+
+A shape is not geometry. Every entity is the same quad, and a `Material` names
+the fragment function that decides which part of it exists: `circle`, `ellipse`,
+`ring`, `rounded`, `frame`, `capsule`, `line`, `pie`, `triangle` and `star`,
+alongside `textured`, which is the whole quad, and `glyph`. They are compiled
+into one fragment shader with a generated dispatch, so a scene of shapes is
+still one batch, one cull and one draw, and a shape is one entity rather than
+the several a fan of triangles would need.
+
+Each answers with a signed distance rather than a yes or a no. Positive inside
+and negative outside, in the quad's own coordinates, which run -0.5 to 0.5
+across it however large the entity is drawn: nothing is measured in pixels and
+nothing is sampled, so an edge is as exact at five hundred pixels as at five. It
+is also what an antialiased edge is computed from, since the rate a distance
+changes across a pixel is what a boolean throws away.
+
+A material gets one parameter, a ratio from zero to one, because the instance
+packs the material's id and its parameter into a single float: the integer part
+selects and the fraction carries. So each shape spends it on the one thing the
+transform cannot say. Scale already gives a shape its width and height and
+rotation aims it, which is why `triangle` takes no parameter at all; `ring`
+spends it on the hole's radius, `frame` on the border's thickness, `capsule` and
+`line` on thickness, `pie` on the swept fraction of a turn, `star` on how deep
+the valleys between its points cut, and `ellipse` on its height as a fraction of
+the quad's, so an entity scaled evenly can still be an ellipse. A shape that
+genuinely needed two would need the instance to grow, which is a decision about
+every entity in the scene rather than about that shape.
+
+`line` is the one whose parameterisation is worth stating: it runs along the
+quad's diagonal, so placing it at the midpoint of two points and scaling it by
+their signed difference draws the segment joining them. A negative scale mirrors
+the quad and takes the diagonal with it, so either direction works without the
+material knowing which.
+
 ## Text is a producer's run
 
 A `Text` names a font and a string, and a system in `PostUpdate` lays it out
