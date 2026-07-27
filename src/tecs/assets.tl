@@ -252,8 +252,17 @@ local worker: workers.Worker = nil
 local seen <const>: {string: string} = {}
 
 --- Records a path under the kind it was first read as.
+---
+--- A named kind supersedes "document". `read` answers bytes and cannot know
+--- what asked for them, so whatever did is the only thing that can say what the
+--- file is, and it says so by naming a kind. The two can arrive in either
+--- order, since a game is free to read a font's metrics as a document before
+--- anything loads them as a font.
 local function note(path: string, kind: string)
-    if seen[path] == nil then seen[path] = kind end
+    local held = seen[path]
+    if held == nil or (held == "document" and kind ~= "document") then
+        seen[path] = kind
+    end
 end
 
 --- Reads a whole file and returns its bytes, or nil when there is none there.
@@ -266,18 +275,22 @@ end
 --- This is for the documents a game or the engine reads once; a decode a frame
 --- should not wait on goes through `loadImage` or `loadSound` instead.
 --- @param path An absolute path, or one `paths.asset` has resolved.
-function assets.read(path: string): string
+--- @param kind What the bytes were read as, for anything watching what this
+---     process has opened. Bytes are bytes, so nothing here can tell a font's
+---     metrics from a level; whatever asked can, and this is where it says so.
+---     Omitted, the path is recorded as a document.
+function assets.read(path: string, kind?: string): string
     local size = loader.newArray("size_t[1]")
     local data = C.SDL_LoadFile(path, size)
     if data == nil then return nil end
-    note(path, "document")
+    note(path, kind or "document")
     local bytes = loader.toBytes(data, tonumber(size[0]) as integer)
     C.SDL_free(data)
     return bytes
 end
 
 --- Every path this process has read or decoded, by the kind it was read as:
---- "image", "sound" or "document".
+--- "image", "sound", "font", or "document" for bytes nothing named.
 ---
 --- A path that failed to load is here too. Whatever asked for it named it, and
 --- a file that would not decode is exactly the one worth noticing a change to.

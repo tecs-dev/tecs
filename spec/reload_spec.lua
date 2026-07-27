@@ -296,8 +296,151 @@ describe("mcp reload_image", function()
     end)
 end)
 
+-- The font half. A font is metrics and an atlas, and only the metrics are
+-- reloaded here: the atlas is an image, was loaded as one, and reloads through
+-- `reload_image` under the rect it already occupies. What the metrics decide is
+-- what a glyph is, which is why re-reading them is its own operation with its
+-- own refusal. Laying the glyphs out again needs a device and is asserted in
+-- `text_spec`; what is here is the rules.
+describe("mcp reload_font", function()
+    local text = require("tecs.gfx.text")
+
+    --- A distance-field metrics document, in the shape the parser reads.
+    local function metrics(scaleW, advance)
+        return cjson.encode({
+            pages = { "specfont.png" },
+            info = { size = 32 },
+            common = { lineHeight = 40, base = 32, scaleW = scaleW, scaleH = 128 },
+            distanceField = { distanceRange = 4 },
+            chars = {
+                {
+                    id = 72,
+                    x = 0,
+                    y = 0,
+                    width = 20,
+                    height = 24,
+                    xoffset = 0,
+                    yoffset = 2,
+                    xadvance = advance,
+                },
+                { id = 32, x = 0, y = 0, width = 0, height = 0, xoffset = 0, yoffset = 0, xadvance = 16 },
+            },
+        })
+    end
+
+    local function callTool(arguments)
+        local response = cjson.decode(mcp.dispatch(cjson.encode({
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            params = { name = "reload_font", arguments = arguments },
+        })))
+        local result = response.result
+        local message = result.content and result.content[1] and result.content[1].text or ""
+        return result.isError ~= true, result.structuredContent, message
+    end
+
+    local dir, path, font
+
+    -- A fresh directory per case, so each one loads a font of its own: a
+    -- metrics path is a font's identity for the life of the process, and two
+    -- cases sharing one would be re-reading each other's.
+    before_each(function()
+        dir = tempDir()
+        path = dir .. "specfont.json"
+        write(path, metrics(256, 30))
+        font = text.loadFont({ metrics = path, atlas = dir .. "specfont.png" })
+    end)
+
+    after_each(function()
+        os.execute("rm -rf '" .. dir .. "'")
+    end)
+
+    it("reads the metrics back into the font every text already holds", function()
+        assert.are.equal(30, font.glyphs[72].xAdvance)
+
+        write(path, metrics(256, 44))
+        local ok, result, message = callTool({ path = path })
+
+        assert.is_true(ok, message)
+        assert.are.equal(font, text.fontByName(path), "a re-read must keep the table every Text points at")
+        assert.are.equal(44, font.glyphs[72].xAdvance, "and the table must hold what was just read")
+        assert.are.equal(2, result.glyphs)
+        assert.are.equal(path, result.font)
+    end)
+
+    it("refuses metrics that name an atlas of another size", function()
+        -- The same rule `reload_image` enforces, and for the same reason from
+        -- the other side: a glyph carries UV extents computed against the atlas
+        -- size, and every glyph already drawn is holding them.
+        write(path, metrics(512, 44))
+        local ok, _, message = callTool({ path = path })
+
+        assert.is_false(ok)
+        assert.is_truthy(message:find("512", 1, true), "the refusal must name the size that arrived: " .. message)
+        assert.are.equal(256, font.atlasWidth, "a refusal leaves the font as it was")
+        assert.are.equal(30, font.glyphs[72].xAdvance)
+    end)
+
+    it("leaves the font alone when the document does not parse", function()
+        -- Valid JSON that is not valid metrics, and not valid only at the end
+        -- of the parse: the em size and the line height are read before the
+        -- glyph list is found to be missing. A parse straight into the live
+        -- table gets that far and raises holding half a font, which is why it
+        -- goes into a new one first.
+        write(
+            path,
+            cjson.encode({
+                pages = { "specfont.png" },
+                info = { size = 99 },
+                common = { lineHeight = 111, base = 99, scaleW = 256, scaleH = 128 },
+                distanceField = { distanceRange = 7 },
+            })
+        )
+        local ok, _, message = callTool({ path = path })
+
+        assert.is_false(ok)
+        assert.is_truthy(message:find("no glyphs", 1, true), "unexpected refusal: " .. message)
+        assert.are.equal(32, font.size, "a document that raised part way through was written over the live font")
+        assert.are.equal(40, font.lineHeight)
+        assert.are.equal(4, font.distanceRange)
+        assert.are.equal(30, font.glyphs[72].xAdvance)
+    end)
+
+    it("refuses a path no font was loaded from", function()
+        local ok, _, message = callTool({ path = dir .. "never.json" })
+        assert.is_false(ok)
+        assert.is_truthy(message:find("no font is loaded", 1, true), "unexpected refusal: " .. message)
+    end)
+
+    it("refuses a call that names no path", function()
+        local ok, _, message = callTool({})
+        assert.is_false(ok)
+        assert.is_truthy(message:find("path is required", 1, true), "unexpected refusal: " .. message)
+    end)
+
+    it("finds the font by the file the watcher looked at", function()
+        -- A game names a font the way it asked for it and a watcher names the
+        -- file it stat'd, which is that resolved against the content root. Both
+        -- spellings have to reach the one font or an edit picked up by the
+        -- watcher is refused as a font nothing loaded.
+        local paths = require("tecs.platform.paths")
+        local contentRoot = paths.assets()
+        paths.setAssets(dir)
+        write(dir .. "relative.json", metrics(256, 30))
+        local relative = text.loadFont({ metrics = "relative.json", atlas = dir .. "specfont.png" })
+
+        write(dir .. "relative.json", metrics(256, 51))
+        local ok, _, message = callTool({ path = dir .. "relative.json" })
+        paths.setAssets(contentRoot)
+
+        assert.is_true(ok, message)
+        assert.are.equal(51, relative.glyphs[72].xAdvance)
+    end)
+end)
+
 -- The watcher's switch, which is the tool an agent reaches for rather than a
--- fourth reload: what it turns on is the three above happening without being
+-- fifth reload: what it turns on is the four above happening without being
 -- asked. The watcher's own behaviour is asserted in `watch_spec`; what is here
 -- is that the tool reports it, steps it, and stops it.
 describe("mcp watch", function()
@@ -435,6 +578,7 @@ describe("reload_shaders against a running application", function()
         assert.is_true(kinds.shader, "no reloader owns a changed shader")
         assert.is_true(kinds.image, "no reloader owns a changed image")
         assert.is_true(kinds.sound, "no reloader owns a changed sound")
+        assert.is_true(kinds.font, "no reloader owns a changed font")
 
         -- The engine's own shaders are read through `assets`, so a run that has
         -- drawn a frame is already watching them.

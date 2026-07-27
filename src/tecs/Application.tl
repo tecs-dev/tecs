@@ -301,6 +301,17 @@ function Application:_init(): boolean
         watch.on("sound", function(change: watch.Change)
             tools.reloadSound(change.path)
         end)
+        -- The metrics, not the atlas beside them. The atlas was loaded as an
+        -- image and reloads as one, under the rect it already occupies; the
+        -- metrics are what decides where a glyph is and how wide it is, so they
+        -- are what has to be read again and laid out from.
+        -- The metrics, not the atlas beside them. The atlas was loaded as an
+        -- image and reloads as one, under the rect it already occupies; the
+        -- metrics are what decides where a glyph is and how wide it is, so they
+        -- are what has to be read again and laid out from.
+        watch.on("font", function(change: watch.Change)
+            tools.reloadFont(change.path)
+        end)
         watch.install(config.watch)
     end
 

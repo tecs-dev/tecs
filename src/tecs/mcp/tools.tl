@@ -21,6 +21,7 @@ local materials <const> = require("tecs.gpu.materials")
 local Renderer <const> = require("tecs.Renderer")
 local Audio <const> = require("tecs.Audio")
 local assets <const> = require("tecs.assets")
+local text <const> = require("tecs.gfx.text")
 
 local C <const> = sdl.C
 
@@ -31,7 +32,7 @@ local record tools
     --- Supplies what rebuilds the pipelines after a shader reload.
     bindReload: function(rebuild: function())
 
-    --- The three reloads, as the functions the tools below are wrappers over.
+    --- The four reloads, as the functions the tools below are wrappers over.
     ---
     --- Each raises with the reason when it refuses, which is what the tool
     --- reports and what the file watcher logs. They are named here because the
@@ -42,6 +43,7 @@ local record tools
     reloadShaders: function(): {string}
     reloadImage: function(path: string): integer, integer, integer
     reloadSound: function(path: string): boolean
+    reloadFont: function(path: string): string, integer
 end
 
 local bound: Renderer = nil
@@ -565,6 +567,24 @@ function tools.reloadSound(path: string): boolean
     return clip ~= nil and clip.resident
 end
 
+--- Re-reads a font's metrics over the font already loaded from them.
+---
+--- `text.reloadFont` is the half that owns the rules, the way `Audio:reload`
+--- owns the mixer's: identity, the refusal on an atlas whose size moved, and
+--- laying out again exactly the texts that draw this font. What is here is
+--- turning a path into a refusal an agent can read and reporting what came
+--- back.
+--- @return The name the font is loaded under, and how many glyphs it carries.
+function tools.reloadFont(path: string): string, integer
+    if path == nil or path == "" then
+        error("path is required", 0)
+    end
+    local font = text.reloadFont(path)
+    local glyphs = 0
+    for _ in pairs(font.glyphs) do glyphs = glyphs + 1 end
+    return font.name, glyphs
+end
+
 mcp.register({
     name = "reload_shaders",
     description = "Re-reads shaders and materials from their files and "
@@ -629,16 +649,48 @@ mcp.register({
     end,
 })
 
+--- Re-reads a font's metrics over the font already loaded from them.
+---
+--- The one reload with something in the world to put right afterwards. An
+--- image, a clip and a pipeline are each read through every frame, so replacing
+--- one is picked up by the next frame and nothing has to be told. A glyph is
+--- not: it is an instance laid out once from the metrics and left alone until
+--- something about its text changes, and re-reading the metrics changes nothing
+--- about its text. So this is also what lays those glyphs out again.
+mcp.register({
+    name = "reload_font",
+    description = "Re-reads a font's metrics over the font already loaded "
+        .. "from that path, and lays out every text drawing it again. Refuses "
+        .. "metrics that name an atlas of a different size.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            path = {
+                type = "string",
+                description = "The path the font's metrics were loaded from.",
+            },
+        },
+        required = { "path" },
+    },
+    handler = function(args: {string: any}): {string: any}
+        local path = args.path as string
+        local name, glyphs = tools.reloadFont(path)
+        return { path = path, font = name, glyphs = glyphs }
+    end,
+})
+
 --- Turns the file watcher on and off, and drives it a poll at a time.
 ---
---- The watcher is what makes the three reloads above happen without being
---- asked, so this is the switch over them rather than a fourth reload. Polling
+--- The watcher is what makes the four reloads above happen without being
+--- asked, so this is the switch over them rather than a fifth reload. Polling
 --- from here as well as from the loop is what lets an agent that has just
 --- written a file wait for the effect rather than for the interval.
 mcp.register({
     name = "watch",
     description = "Reports, starts, stops or steps the content file watcher, "
-        .. "which reloads shaders, images and sounds when their files change.",
+        .. "which reloads shaders, images, sounds and fonts when their files "
+        .. "change.",
     destructive = true,
     inputSchema = {
         type = "object",

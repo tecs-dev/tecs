@@ -1552,9 +1552,41 @@ their names in sorted order, an `Animation` holds a tag index and a `Pivot`
 holds a slice index, so a re-export that adds, removes or renames either is
 refused by name, exactly as a material file appearing is.
 
+A font re-reads through `reload_font`, and it is the one reload with something
+in the world to put right afterwards. An image, a clip and a pipeline are each
+read through every frame, so replacing one is picked up by the next frame and
+nothing has to be told. A glyph is not: it is an instance laid out once from the
+metrics and left alone until something about its text changes, and re-reading
+the metrics changes nothing about its text.
+
+So identity is kept the same way and then has to be worked around. The metrics
+are read back into the `Font` table itself rather than into a new one, because a
+`Text` names its font by holding it and a replacement would strand every live
+text on the font that was. Which means nothing can infer from identity that
+anything happened, since a text is laid out again when what its glyphs were
+built from differs from what it holds and after a read in place none of it
+differs. The texts naming that font are therefore told, by forgetting the font
+in each one's build record: that makes the comparison fail, and it goes on
+failing until a build succeeds, which is what carries them across the frames the
+atlas is decoding in. Exactly those texts, and no others: one naming a different
+font is not laid out again however much of an archetype it shares with one that
+is.
+
+The refusal is the atlas's size, on the terms `reload_image` refuses an image
+whose size moved. Every glyph carries UV extents computed against the size the
+atlas had, and a page of another size makes each of them address something else.
+A font is two files, and only the metrics reload as a font: the atlas is an
+image, was loaded as one, and reloads as one under the rect it already occupies,
+so no glyph has to be told about it. What the metrics reload does give up is
+what the renderer resolved for the font, since the field's range arrives as a
+fraction of a cell computed from the metrics, and a page that would not decode
+is remembered so a broken path is reported once rather than every frame. Both
+are answers to a question the re-read just changed, and the second is the more
+useful one: a font regenerated over a page that was missing can come back.
+
 ### The file watcher
 
-Those four are driven by an agent that knows it edited something, and also by a
+Those five are driven by an agent that knows it edited something, and also by a
 watcher that notices. SDL has no change notification: not in 3.4 and not behind
 a hint, and `SDL_AddEventWatch` watches the event queue rather than the
 filesystem. What `SDL_filesystem.h` offers is `SDL_GetPathInfo`, which answers a
@@ -1596,9 +1628,12 @@ Dispatch is by kind, and the kind comes from how the file was loaded rather than
 from its name: something asked for a path as an image, which is what makes it
 one. A suffix decides in one place only, because `read` answers bytes and cannot
 know what wanted them, so a `.glsl` document is a shader and every other
-document is a document. Which reloader owns a kind is registered by the
-application, not by the watcher, so nothing in `tecs.platform` has to know what
-an image or a clip is.
+unnamed document is a document. A font's metrics are the case that pins the
+rule: they are JSON, a level is JSON, and the suffix cannot tell them apart, so
+`read` takes the kind from whoever asked for the bytes and the call that loads a
+font is the one that names it a font. Which reloader owns a kind is registered
+by the application, not by the watcher, so nothing in `tecs.platform` has to
+know what an image or a clip is.
 
 It is development only. `Application.Config.watch` starts it, the `watch` tool
 turns it on, off and a poll at a time, and `install` refuses on a build that

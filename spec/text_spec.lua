@@ -585,6 +585,129 @@ describe("gfx.text", function()
         renderer:destroy()
     end)
 
+    -- Re-reading a font's metrics. The atlas is an image and reloads as one,
+    -- under the rect it already occupies; the metrics are the half that decides
+    -- what a glyph is and where the pen goes next, so they are the half a text
+    -- has to be laid out again from.
+    --
+    -- Two fonts in one world, because the interesting claim is not that a
+    -- re-read is picked up. It is that it is picked up by exactly the texts
+    -- drawing that font: they share an archetype, the gate that opens is the
+    -- archetype's, and what tells the two apart has to be finer than that.
+    describe("re-reading a font", function()
+        local second, secondPath, dir
+
+        local function write(path, body)
+            local file = assert(io.open(path, "wb"))
+            file:write(body)
+            file:close()
+        end
+
+        --- The shipped metrics, with every advance scaled. A second font over
+        --- the same atlas, so what differs between the two is the metrics and
+        --- nothing about the image behind them.
+        local function shipped(factor)
+            local cjson = require("cjson")
+            local source = assets.read(tecs.paths.asset("fonts/jetbrainsmono-extrabold-msdf.json"))
+            local root = cjson.decode(source)
+            for _, entry in ipairs(root.chars) do
+                entry.xadvance = entry.xadvance * factor
+            end
+            return cjson.encode(root)
+        end
+
+        before_each(function()
+            local scratch = os.tmpname()
+            os.remove(scratch)
+            os.execute("mkdir -p '" .. scratch .. "'")
+            dir = scratch .. "/"
+            secondPath = dir .. "specsecond.json"
+            write(secondPath, shipped(1))
+            second = text.loadFont({
+                metrics = secondPath,
+                atlas = tecs.paths.asset("fonts/jetbrainsmono-extrabold-msdf.png"),
+            })
+        end)
+
+        after_each(function()
+            os.execute("rm -rf '" .. dir .. "'")
+        end)
+
+        it("lays out only the texts that draw the font that was re-read", function()
+            local world, renderer = newScene()
+            local size = 32
+            local kept = spawnText(world, 20, 30, "II", size)
+            local reread = world:spawn(
+                Transform(20, 90, 0, 1),
+                Tint(0.0, 1.0, 0.0, 1.0),
+                text.Text.new({ text = "II", font = second, size = size })
+            )
+            settle(world, renderer)
+            assert.are.equal(4, renderer.count)
+
+            local before = text.layouts(world)
+            local keptSpan = world:get(kept, text.Text)._span
+            local keptX, keptY = text.glyphAt(world, kept, 2)
+
+            write(secondPath, shipped(2))
+            assert.are.equal(second, text.reloadFont(secondPath), "a re-read keeps the table the Text holds")
+
+            -- The atlas was given up with the metrics, so it decodes again and
+            -- the text it belongs to is laid out on the frame that queues the
+            -- decode and again on the frame it arrives.
+            frame(world, renderer)
+            assets.waitAll()
+            frame(world, renderer)
+
+            assert.are.equal(before + 2, text.layouts(world), "a text naming another font was laid out again")
+            assert.are.equal(keptSpan, world:get(kept, text.Text)._span, "and it kept its span")
+            local afterX, afterY = text.glyphAt(world, kept, 2)
+            assert.are.equal(keptX, afterX, "and its glyphs are where they were")
+            assert.are.equal(keptY, afterY)
+
+            -- And the one that was re-read draws from the metrics that arrived.
+            local metrics = font.glyphs[string.byte("I")]
+            local scale = size / second.size
+            local firstX = text.glyphAt(world, reread, 1)
+            local secondX = text.glyphAt(world, reread, 2)
+            assert.is_true(
+                math.abs((secondX - firstX) - 2 * metrics.xAdvance * scale) < 0.01,
+                "the second glyph belongs one doubled advance along from the first"
+            )
+            assert.are.equal(4, renderer.count, "and the run is the length it was")
+            renderer:destroy()
+        end)
+
+        it("refuses metrics that name an atlas of another size", function()
+            -- A glyph carries UV extents computed against the atlas size, and
+            -- every glyph already drawn holds them, so this is refused on the
+            -- terms `reload_image` refuses an image whose size moved.
+            local world, renderer = newScene()
+            world:spawn(
+                Transform(20, 30, 0, 1),
+                Tint(0.0, 1.0, 0.0, 1.0),
+                text.Text.new({ text = "II", font = second, size = 32 })
+            )
+            settle(world, renderer)
+
+            local cjson = require("cjson")
+            local root = cjson.decode(shipped(2))
+            root.common.scaleW = root.common.scaleW * 2
+            write(secondPath, cjson.encode(root))
+
+            local ok, reason = pcall(text.reloadFont, secondPath)
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("1024", 1, true), "unexpected refusal: " .. tostring(reason))
+            assert.are.equal(512, second.atlasWidth, "a refusal leaves the font as it was")
+
+            local before = text.layouts(world)
+            frame(world, renderer)
+            assert.are.equal(before, text.layouts(world), "a refused re-read must not lay anything out")
+            assert.are.equal(2, renderer.count)
+            renderer:destroy()
+        end)
+    end)
+
     it("refuses an alignment it does not have", function()
         local ok, reason = pcall(function()
             return text.Text.new({ text = "x", font = font, align = "middle" })

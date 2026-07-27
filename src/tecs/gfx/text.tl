@@ -247,6 +247,7 @@ local record text
     loadFont: function(options: FontOptions): Font
     defaultFont: function(): Font
     fontByName: function(name: string): Font
+    reloadFont: function(path: string): Font
     measure: function(item: Text): number, number
     plugin: function(options: TextOptions): function(World)
     layouts: function(world: World): integer
@@ -371,7 +372,10 @@ function text.loadFont(options: FontOptions): Font
     if existing ~= nil then return existing end
 
     local metricsPath = resolve(options.metrics)
-    local document = assets.read(metricsPath)
+    -- Named as a font, because the bytes are a document like any other and the
+    -- only thing that knows they are a font's metrics is the call that asked
+    -- for them. A watcher routes a change by that name.
+    local document = assets.read(metricsPath, "font")
     if document == nil then
         error(("tecs: cannot read the font metrics '%s'"):format(metricsPath), 2)
     end
@@ -400,6 +404,21 @@ end
 --- A loaded font by the metrics path it was loaded from, or nil.
 function text.fontByName(name: string): Font
     return fontsByName[name]
+end
+
+--- The font loaded from `path`, by the name it was loaded under or by the file
+--- that name resolves to.
+---
+--- Two spellings reach the same font. A game names it the way it asked for it,
+--- which is commonly relative to the content root; a watcher names the file it
+--- looked at, which is that name resolved. Both have to find the one font.
+local function fontAt(path: string): Font
+    local named = fontsByName[path]
+    if named ~= nil then return named end
+    for _, font in pairs(fontsByName) do
+        if resolve(font.name) == path then return font end
+    end
+    return nil
 end
 
 --- The font's atlas on this renderer, or nil while it is still decoding.
@@ -926,10 +945,125 @@ end
 local layoutCounts <const>: {World: integer} = setmetatable(
     {} as {World: integer}, { __mode = "k" } as metatable<{World: integer}>)
 
---- The producer each world's texts draw through, for the same reason and on
---- the same terms.
-local producers <const>: {World: Glyphs} = setmetatable(
-    {} as {World: Glyphs}, { __mode = "k" } as metatable<{World: Glyphs}>)
+--- What the plugin holds on one world, for the same reason and on the same
+--- terms: a reload is asked for from outside any frame and has to reach the run
+--- the glyphs live in, the atlases this world's renderer resolved for them, and
+--- the gate the layout system reads.
+local record Install
+    glyphs: Glyphs
+    --- Which texture-array layer each font's atlas landed on, which is this
+    --- renderer's answer and not the font's.
+    known: {Font: Atlas}
+    --- Set when the next layout has to look at every archetype rather than only
+    --- the dirty ones: a font that has not arrived yet, or one just re-read.
+    waiting: boolean
+    --- Fonts re-read since the last layout, or nil when there are none. A
+    --- re-read keeps the font's table, so nothing a text holds differs
+    --- afterwards and nothing it is compared against does either; this is what
+    --- the layout pass consults instead of inferring from identity.
+    reloaded: {Font: boolean}
+end
+
+local installs <const>: {World: Install} = setmetatable(
+    {} as {World: Install}, { __mode = "k" } as metatable<{World: Install}>)
+
+-------------------------------------------------------------------------------
+-- Re-reading a font
+-------------------------------------------------------------------------------
+
+--- Gives up what a renderer resolved for `font`, so the next layout resolves it
+--- again.
+---
+--- Everything in an `Atlas` is an answer to the metrics. The field's range
+--- arrives as a fraction of a cell, computed from `distanceRange` and the atlas
+--- size, and a page that would not decode is remembered so a broken path is
+--- reported once rather than every frame. A re-read is exactly the event that
+--- makes both of those questions worth asking again, and the second is the more
+--- interesting one: a font regenerated over a page that was missing has to be
+--- able to come back.
+local function evict(install: Install, font: Font)
+    local atlas = install.known[font]
+    if atlas == nil then return end
+    -- A decode still in flight is reachable through this record and through
+    -- nothing else, so what the worker answers with has to be given back before
+    -- the record goes.
+    if atlas.handle ~= nil then atlas.handle:release() end
+    install.known[font] = nil
+end
+
+--- Re-reads a font's metrics over the font already loaded from them.
+---
+--- Identity is the point, as it is for an image. A `Text` names its font by
+--- holding the table, so the metrics are read back into that table rather than
+--- into a new one and every text goes on pointing at the font it was given. A
+--- replacement would strand each of them on the font that was.
+---
+--- Which is also why nothing can infer from identity that anything happened. A
+--- text is laid out again when what its glyphs were built from differs from what
+--- it holds now, and after a read in place none of it differs, so the texts
+--- naming this font are told rather than left to notice. Exactly those: a text
+--- naming another font is not laid out again, whatever archetype it shares.
+---
+--- Metrics naming an atlas of another size are refused, on the terms
+--- `reloadImage` refuses an image whose size moved. Every glyph already drawn
+--- carries UV extents measured against the size the atlas had, and a page of
+--- another size makes each of them address something else. The atlas keeps the
+--- name it was loaded under either way, since that name may have been given
+--- rather than read and a re-read of the metrics is not a change of which image
+--- the glyphs come from.
+--- @param path The metrics path the font was loaded under, or the file it was
+---     read from.
+--- @return The font, which is the table it always was.
+function text.reloadFont(path: string): Font
+    if path == nil or path == "" then
+        error("tecs: a font re-read needs a metrics path", 2)
+    end
+
+    local font = fontAt(path)
+    if font == nil then
+        error(("tecs: no font is loaded from '%s', so there is nothing to "
+            .. "re-read"):format(path), 0)
+    end
+
+    local document = assets.read(resolve(font.name), "font")
+    if document == nil then
+        error(("tecs: cannot read the font metrics '%s'"):format(path), 0)
+    end
+
+    -- Into a fresh table first. A malformed document raises part way through
+    -- parsing, and the font every text is holding has to end up as the one it
+    -- was or as the whole new one, never as half of each.
+    local fresh = parseMetrics(document, font.name, font.atlas)
+    if fresh.atlasWidth ~= font.atlasWidth
+        or fresh.atlasHeight ~= font.atlasHeight then
+        error(("tecs: '%s' was loaded against a %dx%d atlas and now names one "
+            .. "of %dx%d; a re-read keeps the size, because the glyphs already "
+            .. "drawn hold rects measured against the old one"):format(
+            font.name, font.atlasWidth, font.atlasHeight,
+            fresh.atlasWidth, fresh.atlasHeight), 0)
+    end
+
+    font.size = fresh.size
+    font.lineHeight = fresh.lineHeight
+    font.base = fresh.base
+    font.distanceRange = fresh.distanceRange
+    font.glyphs = fresh.glyphs
+    font.kernings = fresh.kernings
+    font._fallbackAdvance = fresh._fallbackAdvance
+
+    for _, install in pairs(installs) do
+        evict(install, font)
+        local reloaded = install.reloaded
+        if reloaded == nil then
+            reloaded = {}
+            install.reloaded = reloaded
+        end
+        reloaded[font] = true
+        install.waiting = true
+    end
+
+    return font
+end
 
 --- How many texts have been laid out in `world` since it was created.
 ---
@@ -947,8 +1081,9 @@ end
 --- text has no such glyph.
 function text.glyphAt(world: World, entity: integer,
                       index: integer): number, number, number, number
-    local glyphs = producers[world]
-    if glyphs == nil then return nil end
+    local install = installs[world]
+    if install == nil then return nil end
+    local glyphs = install.glyphs
     local item = world:get(entity, text.Text)
     if item == nil or index < 1 or index > item._spanCount then return nil end
 
@@ -1157,13 +1292,16 @@ function text.plugin(options: TextOptions): function(World)
             name = "tecs.Text",
             include = { text.Text, Transform },
         })
-        --- Which texture-array layer each font's atlas landed on, which is
-        --- this renderer's answer and not the font's.
-        local known <const>: {Font: Atlas} = {}
-        local glyphs <const> = newGlyphs()
-        local waiting = false
+        local install <const>: Install = {
+            glyphs = newGlyphs(),
+            known = {},
+            waiting = false,
+            reloaded = nil,
+        }
+        local known <const> = install.known
+        local glyphs <const> = install.glyphs
 
-        producers[world] = glyphs
+        installs[world] = install
         renderer:addProducer(glyphs as Renderer.InstanceProducer)
 
         world:addSystem({
@@ -1173,10 +1311,18 @@ function text.plugin(options: TextOptions): function(World)
             run = function()
                 -- A font that has not arrived leaves its texts unbuilt and
                 -- their archetypes clean, so the gate is held open until it
-                -- does, and the decode is pumped meanwhile.
-                local all = waiting
+                -- does, and the decode is pumped meanwhile. A font just re-read
+                -- holds it open for the same reason: its atlas was given up and
+                -- has to be resolved again.
+                local all = install.waiting
                 if all then assets.update() end
-                waiting = false
+                install.waiting = false
+                -- Read once and dropped, because clearing what it marks is the
+                -- text's own build record and that survives until a build
+                -- actually succeeds. An atlas that takes a few frames to come
+                -- back is retried on the record, not on this.
+                local reloaded <const> = install.reloaded
+                install.reloaded = nil
 
                 local built = 0
                 local live = 0
@@ -1200,11 +1346,21 @@ function text.plugin(options: TextOptions): function(World)
                             if clips ~= nil then
                                 clip = clips[row].index as integer
                             end
+                            -- The font this text holds was read again under it,
+                            -- so what its glyphs were built from is the table
+                            -- it still names and comparing the two says
+                            -- nothing. Forgetting the font is what makes the
+                            -- comparison fail, and it goes on failing until a
+                            -- build writes it back, which is what carries the
+                            -- text across the frames its atlas is decoding in.
+                            if reloaded ~= nil and reloaded[item.font] then
+                                item._builtFont = nil
+                            end
                             if stale(item, transform, tint, clip) then
                                 built = built + 1
                                 if not build(renderer, known, glyphs, item,
                                              transform, tint, clip) then
-                                    waiting = true
+                                    install.waiting = true
                                 end
                                 own(glyphs, entities[row] as integer, item)
                             end

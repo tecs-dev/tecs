@@ -67,8 +67,10 @@ local DEFAULT_INTERVAL <const> = 0.5
 local DEFAULT_SETTLE <const> = 1
 
 --- What a document's extension makes it. The load path decides every other
---- kind, because something asked for an image as an image; `read` answers bytes
---- and cannot know what wanted them, so this is the one place a suffix decides.
+--- kind, because something asked for an image as an image, or for a document as
+--- a font's metrics; `read` answers bytes and cannot know what wanted them, so
+--- this is the one place a suffix decides, and it decides only what nothing
+--- named.
 local DOCUMENT_KINDS <const>: {string: string} = {
     glsl = "shader",
 }
@@ -108,7 +110,13 @@ local record watch
     --- What a handler is told about.
     record Change
         path: string
-        --- "image", "sound", "shader" or "document".
+        --- "image", "sound", "font", "shader" or "document".
+        ---
+        --- A font is its metrics and not the atlas beside them. The atlas is an
+        --- image, was loaded as one, and reloads as one: its texels are
+        --- replaced under the rect they already occupy and no glyph has to be
+        --- told. The metrics are the half that decides what a glyph is, so they
+        --- are the half with a font's rules over them.
         kind: string
     end
 
