@@ -124,23 +124,24 @@ describe("gfx.text", function()
             "a space has an advance and no quad")
     end)
 
-    it("gives every glyph an entity owned by its text", function()
+    it("gives every glyph an instance owned by its text", function()
         local world, renderer = newScene()
         local entity = spawnText(world, 16, 16, "Hi there")
         settle(world, renderer)
 
         -- Eight characters, one of them a space, which has no quad.
         assert.are.equal(7, renderer.count,
-            "one entity per glyph, and a space is not one")
+            "one instance per glyph, and a space is not one")
 
         local item = world:get(entity, text.Text)
-        assert.are.equal(7, #item._glyphs)
-        for index = 1, #item._glyphs do
-            local glyph = item._glyphs[index]
-            assert.is_true(world:has(glyph, text.Glyph))
-            assert.is_true(
-                world:has(glyph, tecs.builtins.ChildOf(entity)),
-                "a glyph belongs to its text")
+        assert.are.equal(7, item._spanCount, "the text owns a span of seven")
+        assert.are.equal(1, item._span,
+            "and it is the only text, so the span starts the run")
+        for index = 1, item._spanCount do
+            local x, y = text.glyphAt(world, entity, index)
+            assert.is_not_nil(x, "every glyph of the span was written")
+            assert.is_true(x > 16 and y > 16,
+                "a glyph belongs to its text, so it sits at its position")
         end
         renderer:destroy()
     end)
@@ -263,8 +264,8 @@ describe("gfx.text", function()
 
         -- Right alignment moves the short line to the block's right edge, so
         -- its first glyph starts two advances in.
-        local first = world:get(item._glyphs[1], tecs.builtins.RelativeTransform)
-        assert.is_true(math.abs(first.x - (2 * pitch + first.scaleX * 0.5
+        local firstX, _, firstWidth = text.glyphAt(world, entity, 1)
+        assert.is_true(math.abs(firstX - (20 + 2 * pitch + firstWidth * 0.5
             + font.glyphs[string.byte("I")].xOffset * scale)) < 0.01,
             "the shorter line is pushed right")
         renderer:destroy()
@@ -303,17 +304,14 @@ describe("gfx.text", function()
         assert.is_true(ink(pixels, 0, 0, SIZE, SIZE) > 500)
 
         local item = world:get(entity, text.Text)
-        local glyphs = {}
-        for index = 1, #item._glyphs do glyphs[index] = item._glyphs[index] end
+        assert.are.equal(5, item._spanCount)
 
         world:despawn(entity)
         pixels = frame(world, renderer)
 
         assert.are.equal(0, renderer.count, "the glyphs went with their text")
         assert.are.equal(0, ink(pixels, 0, 0, SIZE, SIZE))
-        for index = 1, #glyphs do
-            assert.is_false(world:isAlive(glyphs[index]))
-        end
+        assert.are.equal(0, item._spanCount, "and the span went with them")
         renderer:destroy()
     end)
 
@@ -370,8 +368,8 @@ describe("gfx.text", function()
     end)
 
     it("moves its glyphs when the text moves", function()
-        -- A glyph's position is a RelativeTransform under the text, so moving
-        -- the text is the hierarchy's job and not this module's.
+        -- A glyph carries an absolute position, so a moved text is a stale
+        -- text and the move is applied by laying it out again.
         local world, renderer = newScene()
         local entity = spawnText(world, 20, 40, "H", 96)
         local before = settle(world, renderer)
@@ -379,6 +377,7 @@ describe("gfx.text", function()
         assert.are.equal(0, ink(before, SIZE / 2, 0, SIZE, SIZE))
 
         local built = text.layouts(world)
+        local span = world:get(entity, text.Text)._span
         local transform = world:getMut(entity, Transform)
         transform.x = transform.x + SIZE / 2
         local after = frame(world, renderer)
@@ -387,8 +386,38 @@ describe("gfx.text", function()
             "the glyph left the half it started in")
         assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500,
             "and arrived in the other one")
-        assert.are.equal(built, text.layouts(world),
-            "moving a text is the hierarchy's work, not a relayout")
+        assert.are.equal(built + 1, text.layouts(world),
+            "a move is a relayout, since the glyphs carry where they are")
+        assert.are.equal(span, world:get(entity, text.Text)._span,
+            "and it rewrites the span rather than taking another")
+        renderer:destroy()
+    end)
+
+    it("follows a parent that moves it", function()
+        -- The hierarchy composes the text's own Transform, and its glyphs
+        -- carry absolute positions, so the layout has to run against the
+        -- composed value in the frame that produced it.
+        local world, renderer = newScene()
+        local parent = world:spawn(Transform(20, 40, 0, 1))
+        world:spawn(
+            Transform(0, 0, 0, 1),
+            tecs.builtins.RelativeTransform(0, 0, 0, 0, 1, 1),
+            tecs.builtins.ChildOf(parent),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            text.Text.new({ text = "H", font = font, size = 96 })
+        )
+        local before = settle(world, renderer)
+        assert.is_true(ink(before, 0, 0, SIZE / 2, SIZE) > 500,
+            "the glyph is drawn where the parent puts it")
+        assert.are.equal(0, ink(before, SIZE / 2, 0, SIZE, SIZE))
+
+        local transform = world:getMut(parent, Transform)
+        transform.x = transform.x + SIZE / 2
+        local after = frame(world, renderer)
+
+        assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE),
+            "and goes with the parent in the frame the parent moved")
+        assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500)
         renderer:destroy()
     end)
 
@@ -413,6 +442,119 @@ describe("gfx.text", function()
             ink(after, 0, 0, SIZE, SIZE),
             "and drew the same string in the same place")
         second:destroy()
+    end)
+
+    it("keeps a text's span when its glyph count is unchanged", function()
+        -- The whole point of a span: a string swapped for another of the same
+        -- length rewrites its own slots and moves nothing else.
+        local world, renderer = newScene()
+        local first = spawnText(world, 20, 30, "AAAA", 24)
+        local second = spawnText(world, 20, 60, "BBBB", 24)
+        settle(world, renderer)
+
+        local item = world:get(first, text.Text)
+        local other = world:get(second, text.Text)
+        assert.are.equal(4, item._spanCount)
+        assert.are.equal(8, renderer.count)
+        local span, neighbour = item._span, other._span
+
+        world:getMut(first, text.Text).text = "CCCC"
+        frame(world, renderer)
+
+        assert.are.equal(span, item._span, "the same span, rewritten")
+        assert.are.equal(4, item._spanCount)
+        assert.are.equal(neighbour, other._span, "and nothing else moved")
+        assert.are.equal(8, renderer.count)
+        renderer:destroy()
+    end)
+
+    it("frees the difference when a string gets shorter", function()
+        local world, renderer = newScene()
+        local long = spawnText(world, 20, 30, "AAAAAAAA", 24)
+        spawnText(world, 20, 60, "BBBB", 24)
+        settle(world, renderer)
+        assert.are.equal(12, renderer.count)
+
+        local item = world:get(long, text.Text)
+        local span = item._span
+        world:getMut(long, text.Text).text = "AAAAA"
+        frame(world, renderer)
+
+        assert.are.equal(span, item._span, "the front of the span stays")
+        assert.are.equal(5, item._spanCount)
+        assert.are.equal(12, renderer.count,
+            "and the run does not shrink, so nothing after it moves")
+
+        -- The three slots it gave up are the three a new text takes.
+        local short = spawnText(world, 20, 90, "CCC", 24)
+        frame(world, renderer)
+        assert.are.equal(span + 5, world:get(short, text.Text)._span,
+            "the freed tail is what the next three-glyph text gets")
+        assert.are.equal(12, renderer.count, "so the run is still the same")
+        renderer:destroy()
+    end)
+
+    it("reuses a despawned text's span for one the same length", function()
+        local world, renderer = newScene()
+        local first = spawnText(world, 20, 30, "AAA", 24)
+        spawnText(world, 20, 60, "BBB", 24)
+        settle(world, renderer)
+        assert.are.equal(6, renderer.count)
+
+        local span = world:get(first, text.Text)._span
+        world:despawn(first)
+        frame(world, renderer)
+        assert.are.equal(6, renderer.count,
+            "a freed span keeps its place in the run")
+
+        local third = spawnText(world, 20, 90, "CCC", 24)
+        frame(world, renderer)
+        assert.are.equal(span, world:get(third, text.Text)._span,
+            "and the next text of that length takes it")
+        assert.are.equal(6, renderer.count,
+            "so the run never grew for the second three glyphs")
+        renderer:destroy()
+    end)
+
+    it("rewrites only the sub-range of the text that changed", function()
+        local world, renderer = newScene()
+        for index = 1, 4 do
+            spawnText(world, 20, 20 + index * 30, "AAAAAAAA", 24)
+        end
+        local edited = spawnText(world, 20, 170, "BBBBBBBB", 24)
+        settle(world, renderer)
+        assert.are.equal(40, renderer.count)
+
+        frame(world, renderer)
+        assert.are.equal(0, renderer.rewritten,
+            "a still frame rewrites nothing at all")
+
+        world:getMut(edited, text.Text).text = "CCCCCCCC"
+        frame(world, renderer)
+        assert.are.equal(8, renderer.rewritten,
+            "one string's eight glyphs, not the other thirty-two")
+        renderer:destroy()
+    end)
+
+    it("gives up its spans when a snapshot replaces the world", function()
+        -- A load wipes entities in place, so nothing is despawned and the
+        -- spans the wiped texts held have to go with them anyway.
+        local world, renderer = newScene()
+        spawnText(world, 30, 60, "Before", 48)
+        settle(world, renderer)
+        assert.are.equal(6, renderer.count)
+
+        local other = tecs.newWorld()
+        spawnText(other, 30, 60, "Hi", 48)
+        local saved = other:saveSnapshot({}).buffer
+
+        world:loadSnapshot(saved)
+        local pixels = settle(world, renderer)
+
+        assert.are.equal(2, renderer.count,
+            "only the restored text is drawn, and the old glyphs are gone")
+        assert.is_true(ink(pixels, 0, 0, SIZE, SIZE) > 100)
+        renderer:destroy()
     end)
 
     it("refuses an alignment it does not have", function()

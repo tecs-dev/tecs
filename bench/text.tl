@@ -1,22 +1,24 @@
---- Text, which is entities.
+--- Text, which is a producer's run rather than entities.
 ---
---- Every glyph is an entity carrying the components that draw, so a screen of
---- text is a screen of instances and text costs what its glyph count costs.
---- That is the design's bet, and this is what settles it.
+--- Every glyph is an instance in a span the text owns, so a screen of text is
+--- a screen of instances and text costs what its glyph count costs. That is
+--- the design's bet, and this is what settles it.
 ---
---- Three regimes, because they stress different things:
+--- Four regimes, because they stress different things:
 ---
 ---   static   nothing changes, so layout runs once and the dirty gate should
 ---            skip every text every frame. The floor.
 ---   churn    a fraction of the texts change their string each frame, which is
 ---            what a score, a timer or a debug overlay does.
----   resize   the changed strings change *length*, so glyph entities are
----            spawned or despawned rather than rewritten in place.
+---   spawn    short texts appear and disappear constantly, which is what
+---            damage numbers do. Spans are freed and taken again at the same
+---            length, so the run's length settles and stops relaying out.
+---   resize   the changed strings change *length*, so a span is given up and
+---            another taken rather than rewritten in place.
 ---
---- The last one is the cliff worth watching. `syncInstances` sets `relayout`
---- when any archetype's length moves, and a relayout rewrites every instance in
---- the scene rather than the ones that changed. So a single score counter
---- gaining a digit can cost the whole frame's extraction, and the report prints
+--- The last two are where the cliff is. `syncInstances` sets `relayout`
+--- whenever a run's length moves, and a relayout rewrites every instance in
+--- the scene rather than the ones that changed. So the report prints
 --- `rewritten` beside the stage table for exactly that reason: if it tracks the
 --- instance count rather than the glyph count, the cliff is real.
 

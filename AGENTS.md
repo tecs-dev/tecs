@@ -105,15 +105,10 @@ Compaction is an ordered three-pass scan rather than an `atomicAdd`, because dra
 ### Ported, and not yet
 
 Working: windowing, input in three tiers behind a layer stack, events, the GPU pipeline, materials, camera,
-layers, physics, workers and asset loading, logging, the debug server, sprite sheets with animation, and
-sequencing with tweening merged into it.
-
-physics, workers and asset loading, logging, the debug server, sequencing with tweening merged into it, and
-distance-field text laid out into one entity per glyph.
+layers, physics, workers and asset loading, logging, the debug server, sprite sheets with animation,
+sequencing with tweening merged into it, and distance-field text drawn through an instance producer.
 
 Not ported: shadows, post-processing, audio, UI, tiled maps and multi-camera.
-
-Not ported: shadows, post-processing, audio, UI, tiled maps, sprite animation, and multi-camera.
 
 ## Development Guidelines
 
