@@ -57,8 +57,7 @@ static void *reserveWithin(size_t size, uintptr_t low, uintptr_t high)
 {
     uintptr_t hint = low;
     for (int attempt = 0; attempt < TECS_MCODE_ATTEMPTS; attempt++) {
-        void *p = mmap((void *)hint, size, PROT_NONE,
-                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void *p = mmap((void *)hint, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (p == MAP_FAILED) return NULL;
 
         uintptr_t got = (uintptr_t)p;
@@ -82,8 +81,7 @@ bool tecsMcodeArenaReserve(void)
     uintptr_t low = target - TECS_MCODE_RANGE;
     uintptr_t high = target + TECS_MCODE_RANGE;
 
-    for (size_t size = TECS_MCODE_ARENA_BYTES; size >= TECS_MCODE_ARENA_MIN;
-         size /= 2) {
+    for (size_t size = TECS_MCODE_ARENA_BYTES; size >= TECS_MCODE_ARENA_MIN; size /= 2) {
         void *p = reserveWithin(size, low, high);
         if (p) {
             arena = p;
