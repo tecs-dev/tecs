@@ -500,15 +500,24 @@ given a bound no view can be outside of, so it draws whatever the camera is
 looking at. That gives up culling on those layers and keeps it exactly on every
 layer that does not ask, which is where the entities are.
 
-## Text is entities
+## Text is a producer's run
 
 A `Text` names a font and a string, and a system in `PostUpdate` lays it out
-and keeps one child entity per glyph. Each glyph carries a `Transform`, a
-`Sprite` whose UV rect addresses its cell of the font atlas, and a `Material`
-selecting the distance-field shader. Nothing about text is special from there:
-extraction, culling, the indirect draw, layers and depth all work on glyphs
-because glyphs are ordinary renderables, and a text on a screen-space layer or
-moved by a parent works without any of the text code knowing about either.
+into instances. The glyphs are not entities: the text plugin registers an
+`InstanceProducer` with the renderer, which lays a producer out as its own run
+after the archetypes and asks it which sub-ranges changed. A glyph is still a
+quad with a UV rect addressing its cell of the font atlas and a material
+selecting the distance-field shader, so extraction, culling, the indirect draw,
+layers and depth all apply to it exactly as they apply to an entity, and a text
+on a screen-space layer or moved by a parent works without any of the text code
+knowing about either.
+
+An entity per glyph is what a producer is here to avoid, and the reason is the
+dirty model rather than the entity. Dirty is per archetype per component, so
+every glyph in the world would share one archetype and editing one string would
+rewrite all of them; and spawning or despawning a glyph moves an archetype's
+length, which relays the whole scene out. Measured at four thousand short texts,
+editing a single string rewrote sixty-four thousand instances that frame.
 
 The glyph is a multi-channel signed distance field. The median of the three
 channels is the signed distance to the outline, and scaling it by how many
@@ -519,19 +528,25 @@ reads nearest and the median has to be taken after interpolation; taking it
 first collapses three channels into one and loses the corners they encode,
 which is exactly where a glyph has its sharp features.
 
-A glyph belongs to its text through `ChildOf`, which cascades on despawn, so a
-text takes its glyphs with it, and its position is a `RelativeTransform`, so
-moving a text is the hierarchy's work rather than a relayout. Layout runs every
-frame and almost no text changes, so it is gated twice: an archetype whose
-`Text` and `Tint` columns are both clean is skipped whole, and within a dirty
-archetype a row whose authored fields match what its glyphs were built from is
-skipped too.
+Each text owns a span of the producer's run, and spans come from a size-bucketed
+free list: allocating takes an exact-size span off the free list when one is
+there and extends the high-water mark otherwise, and freeing hands the span back
+to its size's list. That is chosen for damage numbers, where short strings of
+the same length appear and disappear constantly and reuse each other's spans
+exactly, so the run's length settles and nothing relays out. Fragmentation is
+the tradeoff, since a span freed at one length is only reclaimed at that length;
+compaction is the answer if a measurement ever shows it mattering, and there is
+none until one does.
 
-The cost is an entity per glyph: an archetype row, an instance and a cull bound
-per character on screen. That is the right first version and the wrong final
-one. The optimisation, if a measurement ever asks for it, is to batch a text's
-glyphs into a buffer of their own and draw them together, which trades all of
-the above for a second path through the renderer.
+The producer keeps its own copy of the instances, so a layout writes into
+ordinary memory and the renderer's sync is a bulk copy of the ranges that moved.
+A glyph carries an absolute position, so a text composes its own transform onto
+the glyph offsets and a text whose `Transform` moved is as stale as one whose
+string changed. Layout runs every frame and almost no text changes, so it is
+gated twice: an archetype whose `Text`, `Tint` and `Transform` columns are all
+clean is skipped whole, and within a dirty archetype a row whose authored fields
+and transform match what its glyphs were built from is skipped too.
+
 ## GPU-driven by default
 
 `make run` animates 512 instances and issues exactly one dispatch and one

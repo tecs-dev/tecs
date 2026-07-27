@@ -1,29 +1,42 @@
---- Text, laid out into entities and drawn from a signed distance field.
+--- Text, laid out into instances and drawn from a signed distance field.
 ---
---- A `Text` names a font and a string; a system lays it out and keeps one
---- child entity per glyph, each carrying a Transform, a Sprite addressing the
---- glyph in the font atlas, and a Material selecting the distance-field
---- shader. Nothing about drawing text is special from there: extraction,
---- culling, the indirect draw, layers and depth all work on glyphs because
---- glyphs are ordinary renderables.
+--- A `Text` names a font and a string. It is one entity, and its glyphs are
+--- not entities at all: the plugin registers an instance producer with the
+--- renderer and every text owns a span of that producer's run. A glyph is
+--- still a textured quad with a UV rect addressing the font atlas and a
+--- material selecting the distance-field shader, so culling, depth, layers and
+--- the indirect draw all apply to it exactly as they apply to an entity.
 ---
---- The cost is an entity per glyph. That is the right first version and the
---- wrong final one: a scene with a great deal of text pays an archetype row,
---- an instance and a cull bound for every character on screen. The
---- optimisation, if a measurement ever asks for it, is to batch a text's
---- glyphs into a buffer of their own and draw them together, which trades all
---- of the above for a second path through the renderer. Do not reach for it
---- before the measurement.
+--- What a span buys is what dirty tracking cannot give an entity here. Dirty
+--- is per archetype per component, so glyph entities would share one archetype
+--- and editing one string would rewrite every glyph in the world; and spawning
+--- or despawning a glyph moves an archetype's length, which relays the whole
+--- scene out. A producer reports the sub-ranges it changed, so editing one
+--- string rewrites that string.
 ---
---- A glyph belongs to its text through `ChildOf`, which cascades on despawn,
---- so a text takes its glyphs with it. Position is a `RelativeTransform`, so a
---- text on a screen-space layer, or moved by a parent, works without any of
---- this knowing about either.
+--- Spans come from a size-bucketed free list. Allocating takes an exact-size
+--- span off the free list when one is there and extends the high-water mark
+--- otherwise, so short strings appearing and disappearing reuse each other's
+--- spans exactly and the producer's length stops moving after warmup. The
+--- tradeoff is fragmentation: a text that grows past its span leaves a hole
+--- that only a text of that exact length reclaims. Compaction is the answer if
+--- a measurement ever shows it mattering, and there is none here until one
+--- does.
+---
+--- The producer keeps its own copy of the glyph instances, so writing a text
+--- is a write into ordinary memory and the renderer's sync is a bulk copy of
+--- the ranges that moved. That decouples when layout happens from when the
+--- GPU buffer is filled, and the copy is contiguous.
+---
+--- Glyph positions are absolute, so a text composes its own transform: its
+--- position, rotation and scale are applied to the glyph offsets here. The
+--- text entity is ordinary, so a parent has already composed its `Transform`
+--- into world space by the time this reads it.
 ---
 --- Layout runs every frame and almost no text changes, so it is gated twice:
---- an archetype whose `Text` and `Tint` columns are both clean is skipped
---- whole, and within a dirty archetype a row whose authored fields match what
---- its glyphs were built from is skipped too.
+--- an archetype whose `Text`, `Tint` and `Transform` columns are all clean is
+--- skipped whole, and within a dirty archetype a row whose authored fields and
+--- transform match what its glyphs were built from is skipped too.
 ---
 --- A `Font` is metrics and an atlas path, and nothing about a device. Which
 --- texture-array layer the atlas occupies is a renderer's answer, so the
@@ -42,6 +55,7 @@ local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 local materials <const> = require("tecs.gpu.materials")
+local layersModule <const> = require("tecs.gfx.layers")
 local paths <const> = require("tecs.platform.paths")
 local json <const> = require("tecs.utils.json")
 local log <const> = require("tecs.log")
@@ -54,14 +68,15 @@ local type World = ecs.World
 local C <const> = sdl.C
 
 local Transform <const> = ecs.builtins.Transform
-local RelativeTransform <const> = ecs.builtins.RelativeTransform
-local ChildOf <const> = ecs.builtins.ChildOf
-local Sprite <const> = components.Sprite
 local Tint <const> = components.Tint
-local Material <const> = components.Material
-local Renderable <const> = components.Renderable
+
+local type TransformInstance = ecs.builtins.Transform
+local type TintInstance = components.Tint
 
 local byte <const> = string.byte
+local abs <const> = math.abs
+local cos <const> = math.cos
+local sin <const> = math.sin
 
 --- Material the glyph quads select, resolved by name because the numbering
 --- depends on which material files exist.
@@ -69,6 +84,26 @@ local MATERIAL <const> = "glyph"
 
 --- The font the engine ships, relative to the asset root.
 local DEFAULT_METRICS <const> = "fonts/jetbrainsmono-extrabold-msdf.json"
+
+--- The shape of one instance, which is the producer contract: four vec4s of
+--- instance data and one vec4 of cull bound.
+local INSTANCE_FLOATS <const> = 16
+local INSTANCE_BYTES <const> = INSTANCE_FLOATS * 4
+local BOUND_FLOATS <const> = 4
+local BOUND_BYTES <const> = BOUND_FLOATS * 4
+
+--- Half extent for a glyph on a layer the view rectangle does not describe.
+--- Big enough that no finite view can be outside it, and finite so the
+--- comparison stays arithmetic rather than a special case.
+local UNBOUNDED <const> = 1e30
+
+--- Centre a slot nothing owns is given. No view can overlap a bound out here,
+--- so the cull drops it before the draw ever sees it.
+local HIDDEN <const> = 1e30
+
+--- Glyph slots the producer's arrays start at, and the floor every growth
+--- doubles from.
+local MINIMUM_SLOTS <const> = 64
 
 local logger <const> = log.get("tecs.text")
 
@@ -139,12 +174,12 @@ local record Atlas
     failed: boolean
 end
 
---- A string laid out into glyph entities.
+--- A string laid out into glyph instances.
 ---
---- The entity's Transform places the top-left corner of the text block, and
---- its Tint, if it has one, colours every glyph. Both are ordinary components
---- on an ordinary entity, so a text is moved, parented, tweened and layered
---- like anything else.
+--- The entity's Transform places the top-left corner of the text block and
+--- orients and scales the whole block, and its Tint, if it has one, colours
+--- every glyph. Both are ordinary components on an ordinary entity, so a text
+--- is moved, parented, tweened and layered like anything else.
 ---
 --- Write through `world:getMut(entity, Text)`. A write through `world:get`
 --- leaves the column clean and the glyphs stale.
@@ -167,8 +202,13 @@ local record Text is Component
     width: number
     height: number
 
-    --- What the glyphs were last built from. A row whose authored fields all
-    --- match these is already laid out.
+    --- First slot of the producer span this text owns, one-based, and how many
+    --- slots it holds. Zero when it holds none.
+    _span: integer
+    _spanCount: integer
+
+    --- What the glyphs were last built from. A row whose authored fields and
+    --- transform all match these is already laid out.
     _builtText: string
     _builtFont: Font
     _builtSize: number
@@ -179,15 +219,14 @@ local record Text is Component
     _builtG: number
     _builtB: number
     _builtA: number
-    --- The glyph entities, in layout order.
-    _glyphs: {integer}
+    _builtX: number
+    _builtY: number
+    _builtZ: number
+    _builtLayer: integer
+    _builtRotation: number
+    _builtScaleX: number
+    _builtScaleY: number
 end
-
---- Marks an entity as one glyph of a text.
----
---- Derived state: the layout system owns these entities entirely, and a
---- snapshot omits them because loading a Text lays out its own again.
-local record Glyph is Component end
 
 local record FontOptions
     --- Path to the metrics JSON, resolved against the asset root when it is
@@ -199,7 +238,8 @@ local record FontOptions
 end
 
 local record TextOptions
-    --- The renderer the font atlases upload into.
+    --- The renderer the font atlases upload into and the glyph instances are
+    --- produced for.
     renderer: Renderer
 end
 
@@ -210,7 +250,6 @@ local record text
     type TextOptions = TextOptions
 
     Text: Text
-    Glyph: Glyph
 
     loadFont: function(options: FontOptions): Font
     defaultFont: function(): Font
@@ -218,13 +257,9 @@ local record text
     measure: function(item: Text): number, number
     plugin: function(options: TextOptions): function(World)
     layouts: function(world: World): integer
+    glyphAt: function(world: World, entity: integer,
+                      index: integer): number, number, number, number
 end
-
-text.Glyph = ecs.newComponent({
-    name = "Glyph",
-    container = Glyph,
-    transient = true,
-})
 
 -------------------------------------------------------------------------------
 -- Fonts
@@ -414,6 +449,261 @@ local function residency(known: {Font: Atlas}, font: Font,
 end
 
 -------------------------------------------------------------------------------
+-- The producer
+-------------------------------------------------------------------------------
+
+--- Every text's glyph instances in one world, as one run of the renderer's
+--- instance buffer.
+---
+--- Holds its own copy of what it produces. A text writes glyphs here whenever
+--- it changes and the renderer copies the ranges that moved, so a layout costs
+--- what the text costs rather than what the frame's timing decides.
+local record Glyphs
+    --- Instance floats, sixteen per slot, and cull bounds, four per slot.
+    instances: loader.CArray
+    bounds: loader.CArray
+    --- Byte views of both, so a copy can be offset into them exactly.
+    _instanceBytes: loader.BytePointer
+    _boundBytes: loader.BytePointer
+    --- Slots the arrays hold.
+    capacity: integer
+    --- Slots handed out. The run is this long, and a slot above it is not
+    --- drawn because it is not in the run.
+    high: integer
+    --- Freed spans, keyed by their length. A text takes an exact-size span
+    --- back off this before the mark is extended, which is what lets short
+    --- strings appearing and disappearing keep the run's length still.
+    ---
+    --- Fragmentation is the tradeoff: a span freed at one length is only ever
+    --- reclaimed at that length, so a scene whose string lengths keep changing
+    --- leaves holes. Compaction is the answer if a measurement shows it
+    --- mattering; there is none here until one does.
+    _free: {integer: {integer}}
+    --- Sub-ranges written since the last sync, as flat one-based inclusive
+    --- pairs, and how many entries are in use.
+    _dirty: {integer}
+    _dirtyCount: integer
+    --- Whether the last sync took those ranges. They are dropped at the first
+    --- write after that rather than on the way out, so the table handed over
+    --- stays valid while the renderer is reading it.
+    _taken: boolean
+end
+
+local GlyphsMT <const>: metatable<Glyphs> = { __index = Glyphs }
+
+--- Grows the arrays to hold at least `slots`, preserving what is in them.
+local function reserveCapacity(self: Glyphs, slots: integer)
+    if slots <= self.capacity then return end
+
+    local capacity = self.capacity
+    if capacity < MINIMUM_SLOTS then capacity = MINIMUM_SLOTS end
+    while capacity < slots do capacity = capacity * 2 end
+
+    local instances = loader.newArray("float[?]", capacity * INSTANCE_FLOATS)
+    local bounds = loader.newArray("float[?]", capacity * BOUND_FLOATS)
+    if self.high > 0 then
+        loader.copyBytes(instances, self.instances as loader.CValue,
+            self.high * INSTANCE_BYTES)
+        loader.copyBytes(bounds, self.bounds as loader.CValue,
+            self.high * BOUND_BYTES)
+    end
+
+    self.instances = instances
+    self.bounds = bounds
+    self._instanceBytes = loader.bytePointer(instances as loader.CValue)
+    self._boundBytes = loader.bytePointer(bounds as loader.CValue)
+    self.capacity = capacity
+end
+
+local function clearDirty(self: Glyphs)
+    local ranges = self._dirty
+    for index = self._dirtyCount, 1, -1 do ranges[index] = nil end
+    self._dirtyCount = 0
+    self._taken = false
+end
+
+--- Drops the ranges the last sync consumed.
+local function settle(self: Glyphs)
+    if not self._taken then return end
+    clearDirty(self)
+end
+
+--- Hands every span back at once.
+---
+--- For a world replaced wholesale, where the texts that owned the spans are
+--- gone without anything having been despawned.
+local function reset(self: Glyphs)
+    self.high = 0
+    local free = self._free
+    for size in pairs(free) do free[size] = nil end
+    clearDirty(self)
+end
+
+--- Records that slots `first` through `last` were written.
+---
+--- Coalesces with the range recorded before it when the two touch, which is
+--- what keeps a burst of consecutive spans one entry rather than one each.
+local function mark(self: Glyphs, first: integer, last: integer)
+    settle(self)
+    local ranges = self._dirty
+    local count = self._dirtyCount
+    if count > 0 then
+        local previousFirst = ranges[count - 1]
+        local previousLast = ranges[count]
+        if first >= previousFirst and first <= previousLast + 1 then
+            if last > previousLast then ranges[count] = last end
+            return
+        end
+    end
+    ranges[count + 1] = first
+    ranges[count + 2] = last
+    self._dirtyCount = count + 2
+end
+
+--- Puts `count` slots from `first` where no view can see them.
+local function hide(self: Glyphs, first: integer, count: integer)
+    local instances = self.instances
+    local bounds = self.bounds
+    for slot = first, first + count - 1 do
+        local base = (slot - 1) * INSTANCE_FLOATS
+        for offset = 0, INSTANCE_FLOATS - 1 do
+            instances[base + offset] = 0.0
+        end
+        -- Farthest depth the band allows, so nothing that reaches the draw can
+        -- occlude what is in front of it.
+        instances[base + 3] = 0.999
+
+        local bound = (slot - 1) * BOUND_FLOATS
+        bounds[bound] = HIDDEN
+        bounds[bound + 1] = HIDDEN
+        bounds[bound + 2] = 0.0
+        bounds[bound + 3] = 0.0
+    end
+    mark(self, first, first + count - 1)
+end
+
+--- Hands `count` slots back.
+---
+--- A span at the top of the mark shrinks the mark instead of joining the free
+--- list, so the last text on screen going away leaves the run empty rather
+--- than leaving a hole the length of it.
+local function release(self: Glyphs, first: integer, count: integer)
+    if count <= 0 then return end
+    if first + count - 1 == self.high then
+        self.high = first - 1
+        return
+    end
+
+    local bucket = self._free[count]
+    if bucket == nil then
+        bucket = {}
+        self._free[count] = bucket
+    end
+    bucket[#bucket + 1] = first
+    hide(self, first, count)
+end
+
+--- Takes `count` slots, from the free list when it has an exact fit.
+local function allocate(self: Glyphs, count: integer): integer
+    local bucket = self._free[count]
+    if bucket ~= nil then
+        local top = #bucket
+        if top > 0 then
+            local first = bucket[top]
+            bucket[top] = nil
+            return first
+        end
+    end
+
+    local first = self.high + 1
+    reserveCapacity(self, self.high + count)
+    self.high = self.high + count
+    return first
+end
+
+--- Gives `item` a span of exactly `count` slots.
+---
+--- A text whose glyph count did not change keeps the span it has, which is the
+--- case that costs nothing. A shorter string keeps its span's front and hands
+--- the difference back, and a longer one extends the mark when it is already
+--- at the top of it and takes a fresh span otherwise.
+local function reserve(self: Glyphs, item: Text, count: integer)
+    local first = item._span
+    local held = item._spanCount
+    if count == held then return end
+
+    if held == 0 then
+        item._span = allocate(self, count)
+        item._spanCount = count
+        return
+    end
+
+    if count == 0 then
+        release(self, first, held)
+        item._span = 0
+        item._spanCount = 0
+        return
+    end
+
+    if count < held then
+        release(self, first + count, held - count)
+        item._spanCount = count
+        return
+    end
+
+    if first + held - 1 == self.high then
+        reserveCapacity(self, first + count - 1)
+        self.high = first + count - 1
+        item._spanCount = count
+        return
+    end
+
+    release(self, first, held)
+    item._span = allocate(self, count)
+    item._spanCount = count
+end
+
+--- Slots the run reserves, which is the high-water mark rather than the number
+--- of slots in use: a freed span keeps its place so the run's length stops
+--- moving once the scene settles.
+function Glyphs:count(): integer
+    return self.high
+end
+
+function Glyphs:takeDirty(): {integer}
+    settle(self)
+    self._taken = true
+    return self._dirty
+end
+
+function Glyphs:write(floats: loader.CArray, bounds: loader.CArray,
+                      base: integer, first: integer, last: integer)
+    local count = last - first + 1
+    if count <= 0 then return end
+
+    loader.copyTo(loader.bytePointer(floats as loader.CValue)
+        + (base + first - 1) * INSTANCE_BYTES,
+        (self._instanceBytes + (first - 1) * INSTANCE_BYTES) as loader.CValue,
+        count * INSTANCE_BYTES)
+    loader.copyTo(loader.bytePointer(bounds as loader.CValue)
+        + (base + first - 1) * BOUND_BYTES,
+        (self._boundBytes + (first - 1) * BOUND_BYTES) as loader.CValue,
+        count * BOUND_BYTES)
+end
+
+local function newGlyphs(): Glyphs
+    local self = setmetatable({} as Glyphs, GlyphsMT)
+    self.capacity = 0
+    self.high = 0
+    self._free = {}
+    self._dirty = {}
+    self._dirtyCount = 0
+    self._taken = false
+    reserveCapacity(self, MINIMUM_SLOTS)
+    return self
+end
+
+-------------------------------------------------------------------------------
 -- Layout
 -------------------------------------------------------------------------------
 
@@ -516,7 +806,7 @@ local function layout(item: Text): integer, number, number
                 end
 
                 -- A space has an advance and no quad, so it moves the pen and
-                -- costs no entity.
+                -- costs no slot.
                 if glyph.width > 0 and glyph.height > 0 then
                     local width = glyph.width * scale
                     local height = glyph.height * scale
@@ -570,7 +860,7 @@ function text.measure(item: Text): number, number
 end
 
 -------------------------------------------------------------------------------
--- The glyph entities
+-- The glyph instances
 -------------------------------------------------------------------------------
 
 --- Layouts run, by world, for a test or a tool that wants to see the gate
@@ -578,12 +868,36 @@ end
 local layoutCounts <const>: {World: integer} = setmetatable(
     {} as {World: integer}, { __mode = "k" } as metatable<{World: integer}>)
 
+--- The producer each world's texts draw through, for the same reason and on
+--- the same terms.
+local producers <const>: {World: Glyphs} = setmetatable(
+    {} as {World: Glyphs}, { __mode = "k" } as metatable<{World: Glyphs}>)
+
 --- How many texts have been laid out in `world` since it was created.
 ---
 --- Laying out a string that did not change is the cost the dirty gates exist
 --- to avoid, and this is how that is asserted rather than assumed.
 function text.layouts(world: World): integer
     return layoutCounts[world] or 0
+end
+
+--- Where the `index`th glyph of `entity` landed, as world x, y, width and
+--- height.
+---
+--- Read back out of the instance the producer wrote, so this is where the
+--- glyph is drawn rather than where a layout intended it. Nothing when the
+--- text has no such glyph.
+function text.glyphAt(world: World, entity: integer,
+                      index: integer): number, number, number, number
+    local glyphs = producers[world]
+    if glyphs == nil then return nil end
+    local item = world:get(entity, text.Text)
+    if item == nil or index < 1 or index > item._spanCount then return nil end
+
+    local base = (item._span + index - 2) * INSTANCE_FLOATS
+    local instances = glyphs.instances
+    return instances[base + 4] as number, instances[base + 5] as number,
+        instances[base + 1] as number, instances[base + 2] as number
 end
 
 --- The material id, resolved on first use: reading the material files needs
@@ -595,30 +909,14 @@ local function glyphMaterial(): integer
     return materialId
 end
 
---- Despawns the glyphs from `first` onwards.
-local function trimGlyphs(world: World, owned: {integer}, first: integer)
-    for index = #owned, first, -1 do
-        world:despawn(owned[index])
-        owned[index] = nil
-    end
-end
-
---- Rebuilds one text's glyphs. False when its font has not arrived.
-local function build(world: World, renderer: Renderer, known: {Font: Atlas},
-                     entity: integer): boolean
-    local item = world:get(entity, Text)
-    if item == nil then return true end
-
-    local owned = item._glyphs
-    if owned == nil then
-        owned = {}
-        item._glyphs = owned
-    end
-
+--- Rewrites one text's glyph instances. False when its font has not arrived.
+local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
+                     item: Text, transform: TransformInstance,
+                     tint: TintInstance): boolean
     local font = item.font
     local atlas = font ~= nil and residency(known, font, renderer) or nil
     if atlas == nil then
-        trimGlyphs(world, owned, 1)
+        reserve(glyphs, item, 0)
         item.width = 0.0
         item.height = 0.0
         -- A font that is absent or broken is settled; one still decoding is
@@ -626,76 +924,112 @@ local function build(world: World, renderer: Renderer, known: {Font: Atlas},
         return font == nil or known[font].failed
     end
 
-    local tint = world:get(entity, Tint)
     local r, g, b, a = 1.0, 1.0, 1.0, 1.0
     if tint ~= nil then r, g, b, a = tint.r, tint.g, tint.b, tint.a end
 
     local count, width, height = layout(item)
     item.width = width
     item.height = height
+    reserve(glyphs, item, count)
 
-    local material <const> = glyphMaterial()
-    local param <const> = atlas.param
-    local image <const> = atlas.image
+    local instances <const> = glyphs.instances
+    local bounds <const> = glyphs.bounds
+    local span <const> = item._span
+
+    -- The text's own transform, composed into every glyph here because a
+    -- producer has no entities for a hierarchy to compose.
+    local rotation <const> = transform.rotation
+    local turnX <const> = cos(rotation)
+    local turnY <const> = sin(rotation)
+    local blockX <const> = transform.scaleX
+    local blockY <const> = transform.scaleY
+    local originX <const> = transform.x
+    local originY <const> = transform.y
+    local z <const> = transform.z
+    local layer <const> = transform.layer as integer
+    local viewCulled <const> = layersModule.viewCulled(layer)
+
+    -- Material and parameter share one float: the integer part selects and the
+    -- fraction carries the parameter, which is a ratio in 0..1.
+    local param = atlas.param
+    if param < 0.0 then
+        param = 0.0
+    elseif param > 0.999 then
+        param = 0.999
+    end
+    local material <const> = glyphMaterial() + param
     local slot <const> = atlas.slot
-    -- Glyph rects are atlas pixels and a Sprite carries cell fractions, and an
-    -- atlas smaller than its cell does not reach the cell's edge.
+
+    -- Glyph rects are atlas pixels and the instance carries cell fractions,
+    -- and an atlas smaller than its cell does not reach the cell's edge.
     local u <const> = atlas.u / font.atlasWidth
     local v <const> = atlas.v / font.atlasHeight
-    local glyphs <const> = font.glyphs
+    local metrics <const> = font.glyphs
 
     for index = 1, count do
-        local base = (index - 1) * 4
-        local x, y = placements[base + 1], placements[base + 2]
-        local sx, sy = placements[base + 3], placements[base + 4]
+        local place = (index - 1) * 4
+        local offsetX = placements[place + 1] * blockX
+        local offsetY = placements[place + 2] * blockY
+        local x = originX + offsetX * turnX - offsetY * turnY
+        local y = originY + offsetX * turnY + offsetY * turnX
+        local scaleX = placements[place + 3] * blockX
+        local scaleY = placements[place + 4] * blockY
 
         -- V runs from the glyph's lower edge to its upper one, because a
         -- quad's local Y and the screen's disagree in sign: the rows arrive
         -- in the order the glyph is drawn in rather than the order the atlas
         -- stores them.
-        local glyph = glyphs[codepoints[index]]
+        local glyph = metrics[codepoints[index]]
         local u0, u1 = glyph.x * u, (glyph.x + glyph.width) * u
         local v0, v1 = (glyph.y + glyph.height) * v, glyph.y * v
 
-        local entry = owned[index]
-        local relative = entry ~= nil
-            and world:getMut(entry, RelativeTransform) or nil
-        if relative == nil then
-            -- A row with no live entity behind it is either new or one whose
-            -- entity something else despawned; either way it is spawned now.
-            owned[index] = world:spawn(
-                Transform(),
-                RelativeTransform(x, y, 0, 0, sx, sy),
-                ChildOf(entity) as Component,
-                Sprite(image, u0, v0, u1, v1, slot),
-                Tint(r, g, b, a),
-                Material(material, param),
-                Renderable(),
-                text.Glyph()
-            )
+        local base = (span + index - 2) * INSTANCE_FLOATS
+        instances[base] = rotation
+        instances[base + 1] = scaleX
+        instances[base + 2] = scaleY
+        instances[base + 3] = layersModule.depthOf(layer, z, x, y)
+
+        instances[base + 4] = x
+        instances[base + 5] = y
+        instances[base + 6] = slot
+        instances[base + 7] = material
+
+        instances[base + 8] = r
+        instances[base + 9] = g
+        instances[base + 10] = b
+        instances[base + 11] = a
+
+        instances[base + 12] = u0
+        instances[base + 13] = v0
+        instances[base + 14] = u1
+        instances[base + 15] = v1
+
+        -- Extents without a trigonometric call. Unrotated, each axis is its
+        -- own scale. Rotated, half the sum of both scales covers every angle,
+        -- which is looser than the true extent but never smaller, so the cull
+        -- can only ever keep something it might have dropped.
+        local ex: number
+        local ey: number
+        if not viewCulled then
+            ex = UNBOUNDED
+            ey = UNBOUNDED
+        elseif rotation == 0.0 then
+            ex = 0.5 * abs(scaleX)
+            ey = 0.5 * abs(scaleY)
         else
-            relative.x = x
-            relative.y = y
-            relative.scaleX = sx
-            relative.scaleY = sy
-
-            local sprite = world:getMut(entry, Sprite)
-            sprite.image = image
-            sprite.slot = slot
-            sprite.u0, sprite.v0 = u0, v0
-            sprite.u1, sprite.v1 = u1, v1
-
-            local colour = world:getMut(entry, Tint)
-            colour.r, colour.g, colour.b, colour.a = r, g, b, a
+            ex = 0.5 * (abs(scaleX) + abs(scaleY))
+            ey = ex
         end
+
+        local bound = (span + index - 2) * BOUND_FLOATS
+        bounds[bound] = x
+        bounds[bound + 1] = y
+        bounds[bound + 2] = ex
+        bounds[bound + 3] = ey
     end
 
-    trimGlyphs(world, owned, count + 1)
+    if count > 0 then mark(glyphs, span, span + count - 1) end
 
-    -- Written straight onto the instance rather than through getMut: these
-    -- fields are this system's own bookkeeping, nothing dirty-gated reads
-    -- them, and marking the column would reopen the gate that let this row
-    -- through in the first place.
     item._builtText = item.text
     item._builtFont = font
     item._builtSize = item.size
@@ -704,11 +1038,16 @@ local function build(world: World, renderer: Renderer, known: {Font: Atlas},
     item._builtTracking = item.tracking
     item._builtR, item._builtG = r, g
     item._builtB, item._builtA = b, a
+    item._builtX, item._builtY, item._builtZ = originX, originY, z
+    item._builtLayer = layer
+    item._builtRotation = rotation
+    item._builtScaleX, item._builtScaleY = blockX, blockY
     return true
 end
 
 --- Whether `item` differs from what its glyphs were built from.
-local function stale(world: World, entity: integer, item: Text): boolean
+local function stale(item: Text, transform: TransformInstance,
+                     tint: TintInstance): boolean
     if item._builtText ~= item.text
         or item._builtFont ~= item.font
         or item._builtSize ~= item.size
@@ -718,7 +1057,18 @@ local function stale(world: World, entity: integer, item: Text): boolean
         return true
     end
 
-    local tint = world:get(entity, Tint)
+    -- A glyph carries an absolute position, so the transform the text was laid
+    -- out at is part of what its glyphs were built from.
+    if item._builtX ~= transform.x
+        or item._builtY ~= transform.y
+        or item._builtZ ~= transform.z
+        or item._builtLayer ~= transform.layer
+        or item._builtRotation ~= transform.rotation
+        or item._builtScaleX ~= transform.scaleX
+        or item._builtScaleY ~= transform.scaleY then
+        return true
+    end
+
     if tint == nil then
         return item._builtR ~= 1.0 or item._builtG ~= 1.0
             or item._builtB ~= 1.0 or item._builtA ~= 1.0
@@ -727,11 +1077,12 @@ local function stale(world: World, entity: integer, item: Text): boolean
         or item._builtB ~= tint.b or item._builtA ~= tint.a
 end
 
---- Registers the layout system and the snapshot exclusion on a world.
+--- Registers the layout system and the producer on a world.
 ---
---- The system runs ahead of `RelativeTransform`, which composes the glyph
---- offsets into world transforms in the same phase: a glyph spawned after it
---- would sit at the world origin for a frame.
+--- The system runs after `RelativeTransform`, which composes a parented text's
+--- own world transform in the same phase. Glyph positions are absolute, so a
+--- text laid out before that composition would use the transform the previous
+--- frame left and never notice the write that changed it.
 function text.plugin(options: TextOptions): function(World)
     if options == nil or options.renderer == nil then
         error("tecs: the text plugin needs a `renderer`", 2)
@@ -746,13 +1097,16 @@ function text.plugin(options: TextOptions): function(World)
         --- Which texture-array layer each font's atlas landed on, which is
         --- this renderer's answer and not the font's.
         local known <const>: {Font: Atlas} = {}
-        local pending <const>: {integer} = {}
+        local glyphs <const> = newGlyphs()
         local waiting = false
+
+        producers[world] = glyphs
+        renderer:addProducer(glyphs as Renderer.InstanceProducer)
 
         world:addSystem({
             name = "tecs.TextLayout",
             phase = ecs.phases.PostUpdate,
-            before = { "RelativeTransform" },
+            after = { "RelativeTransform" },
             run = function()
                 -- A font that has not arrived leaves its texts unbuilt and
                 -- their archetypes clean, so the gate is held open until it
@@ -761,41 +1115,50 @@ function text.plugin(options: TextOptions): function(World)
                 if all then assets.update() end
                 waiting = false
 
-                local count = 0
-                for archetype, length, entities in texts:iter() do
+                local built = 0
+                for archetype, length in texts:iter() do
                     if all or archetype:isComponentDirty(text.Text)
-                        or archetype:isComponentDirty(Tint) then
+                        or archetype:isComponentDirty(Tint)
+                        or archetype:isComponentDirty(Transform) then
                         local column = archetype:get(text.Text)
+                        local transforms = archetype:get(Transform)
+                        local tints = archetype:get(Tint)
                         for row = 1, length do
-                            local entity = entities[row]
-                            if stale(world, entity, column[row]) then
-                                count = count + 1
-                                pending[count] = entity
+                            local item = column[row]
+                            local transform = transforms[row]
+                            local tint = tints ~= nil and tints[row] or nil
+                            if stale(item, transform, tint) then
+                                built = built + 1
+                                if not build(renderer, known, glyphs, item,
+                                             transform, tint) then
+                                    waiting = true
+                                end
                             end
                         end
                     end
                 end
 
-                if count == 0 then return end
-                layoutCounts[world] = (layoutCounts[world] or 0) + count
-                -- Spawning happens here rather than inside the walk above,
-                -- because a spawn made while a query is iterating is deferred
-                -- and the composition that follows this system would not see
-                -- it until the next frame.
-                for index = 1, count do
-                    if not build(world, renderer, known, pending[index]) then
-                        waiting = true
-                    end
-                    pending[index] = nil
+                if built > 0 then
+                    layoutCounts[world] = (layoutCounts[world] or 0) + built
                 end
             end,
         })
 
-        -- Glyphs are derived, so a snapshot leaves them out and loading a
-        -- Text lays them out again. Saving them would double every string.
-        world:observe(0, ecs.builtins.OnSnapshotSave,
-            function(event: ecs.builtins.OnSnapshotSave)
-                event:exclude(text.Glyph)
+        -- A span outlives its text otherwise: nothing else knows the slots are
+        -- free, and the glyphs in them keep being drawn.
+        world:observe(0, ecs.builtins.OnDespawn,
+            function(event: ecs.builtins.OnDespawn)
+                local item = world:get(event.entity, text.Text)
+                if item == nil or item._spanCount == 0 then return end
+                reserve(glyphs, item, 0)
+            end)
+
+        -- A load replaces the world in place rather than despawning what was
+        -- in it, so the observer above never hears about the texts it removed
+        -- and the run has to be given up whole.
+        world:observe(0, ecs.builtins.FinishSnapshotLoad,
+            function(_event: ecs.builtins.FinishSnapshotLoad)
+                reset(glyphs)
             end)
     end
 end
@@ -826,11 +1189,12 @@ text.Text = ecs.newComponent({
         end
         item.width = 0.0
         item.height = 0.0
+        item._span = 0
+        item._spanCount = 0
     end,
     serialize = function(item: Text): {string: any}
-        -- The font by name and the authored fields only. The glyph entities
-        -- are derived and the font is a shared table; neither belongs in a
-        -- save.
+        -- The authored fields and the font by name. The span is one process's
+        -- answer and the font is a shared table; neither belongs in a save.
         return {
             text = item.text,
             font = item.font ~= nil and item.font.name or nil,
