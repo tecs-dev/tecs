@@ -27,31 +27,48 @@ local RGBA8 <const> = 4
 
 
 local record TextureArrayOptions
-    --- Cell size. Every image must fit within it.
+    --- Cell size in pixels. Every image must fit within it, and every layer
+    --- costs this much whatever the image put in it is.
     width: integer
     height: integer
-    --- Layers to allocate.
+    --- Layers to allocate, all of them up front. The device decides how many
+    --- an array may have, so a count past what it allows fails at creation
+    --- rather than at the layer that crosses the line.
     layers: integer
 end
 
 local record TextureArray
+    --- Where one image landed, and how to sample it back out.
     record Region
-        --- Layer this image occupies.
+        --- Layer this image occupies, zero-based: the index a shader passes to
+        --- the third component of an array sampler's coordinate.
         layer: integer
-        --- Fraction of the cell the image covers.
+        --- Fraction of the cell the image covers, from its origin. UVs run
+        --- from zero to these, and they are below one for any image smaller
+        --- than the cell.
         u1: number
         v1: number
+        --- Size in pixels as uploaded, for a caller that needs the image's own
+        --- dimensions rather than its share of the cell.
         width: integer
         height: integer
     end
 
+    --- The `SDL_GPUTexture`, of type 2D array. Nil once `destroy` has run.
     handle: loader.CPtr
+    --- Cell size in pixels, shared by every layer.
     width: integer
     height: integer
+    --- Layers allocated.
     layers: integer
-    --- Layers handed out so far.
+    --- Layers handed out so far, and the index the next `add` takes. Layers
+    --- are never reclaimed: an image uploaded is resident until the whole
+    --- array is destroyed.
     used: integer
     _device: loader.CPtr
+    --- Upload staging, kept between calls and grown when an image needs more
+    --- than the last one did. Never shrunk, since the largest image is the one
+    --- that decides the cost either way.
     _transfer: loader.CPtr
     _transferSize: integer
     _destroyed: boolean
@@ -60,6 +77,9 @@ end
 local TextureArrayMT <const>: metatable<TextureArray> = { __index = TextureArray }
 
 --- Creates an array with `layers` cells of the given size.
+---
+--- RGBA8 and sampler usage, neither of which is an option: the point is one
+--- binding for every image, and a second format would be a second binding.
 function TextureArray.create(device: loader.CPtr,
                              options: TextureArrayOptions): TextureArray
     local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
@@ -106,9 +126,17 @@ end
 
 --- Uploads RGBA pixels into the next free layer.
 ---
---- Returns the region describing where it landed. `pitch` is the source's row
---- stride in bytes, which is not always `width * 4`: a decoder is free to pad
---- rows, and copying as though it never does shears the image.
+--- Submits its own command buffer, so this is a load-time path: an asset
+--- arrives once, not once per frame.
+---
+--- Raises when the array is full or the image is larger than a cell. Both are
+--- authoring mistakes with no useful runtime answer, and a silently dropped
+--- image would surface as a sprite sampling whatever occupies layer zero.
+--- @param pitch The source's row stride in bytes, which is not always
+---     `width * 4`: a decoder is free to pad rows, and copying as though it
+---     never does shears the image.
+--- @return Where the image landed, which the caller keeps: nothing here maps
+---     an image back to its region.
 function TextureArray:add(pixels: loader.CValue, width: integer,
                           height: integer, pitch: integer): TextureArray.Region
     if self.used >= self.layers then

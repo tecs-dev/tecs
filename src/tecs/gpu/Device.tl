@@ -22,13 +22,19 @@ local record DeviceOptions
 end
 
 local record Device
+    --- The `SDL_GPUDevice`, and what every other wrapper here is created
+    --- against. Nil once `destroy` has run.
     handle: loader.CPtr
     --- Backend SDL selected, e.g. "metal".
     driver: string
+    --- The window claimed for presentation. One device presents to one window
+    --- here, and the device releases its claim before destroying itself.
     window: Window
     --- Frames the CPU may run ahead of the GPU. Resource retirement depth
     --- must match this or the GPU reads freed memory.
     framesInFlight: integer
+    --- Out-parameters `beginFrame` fills, held rather than allocated so
+    --- acquiring a frame costs nothing.
     _swapchainOut: loader.CArray
     _widthOut: loader.CArray
     _heightOut: loader.CArray
@@ -54,6 +60,10 @@ local function supportedShaderFormats(): integer
 end
 
 --- Creates a GPU device and claims `window` for presentation.
+---
+--- The claim is what makes a swapchain exist for that window, and `destroy`
+--- releases it before destroying the device, so the two can be torn down in
+--- either order from the caller's point of view.
 function Device.create(window: Window, options: DeviceOptions): Device
     options = options or {}
 
@@ -83,6 +93,12 @@ end
 --- "vsync" blocks the swapchain acquire on the display, which is what paces
 --- the loop in normal use. "immediate" and "mailbox" do not, so a benchmark
 --- can observe what a frame actually costs instead of what the display allows.
+---
+--- Only "vsync" is available everywhere; the other two are the backend's to
+--- offer. An unknown name raises, since that is a typo rather than a
+--- capability.
+--- @return Whether the mode was applied. False leaves the previous pacing in
+---     place, which a benchmark should notice rather than assume away.
 function Device:setPresentMode(mode: string): boolean
     local modes: {string: any} = {
         vsync = C.SDL_GPU_PRESENTMODE_VSYNC,
@@ -130,6 +146,12 @@ end
 --- Returns nil when the window cannot be presented to, which happens while it
 --- is minimised or occluded. Callers skip rendering that frame; the command
 --- buffer is cancelled rather than leaked.
+---
+--- Waits for a frame to be available first, so this is where the loop is paced
+--- under vsync and where a CPU running ahead of `framesInFlight` is held back.
+--- The frame's size is the swapchain's, which is not the window's on a
+--- high-density display and is what a pass should size targets to.
+--- @return A frame to record into, or nil to skip this one.
 function Device:beginFrame(): Frame
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self.handle)
     if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
@@ -153,6 +175,9 @@ end
 
 --- Returns the swapchain's texture format, which pipelines writing to it must
 --- be created against.
+---
+--- The backend's choice, not a fixed value: asking is the only way to build a
+--- pipeline that matches on every machine.
 function Device:getSwapchainFormat(): integer
     return tonumber(
         C.SDL_GetGPUSwapchainTextureFormat(self.handle, self.window.handle)

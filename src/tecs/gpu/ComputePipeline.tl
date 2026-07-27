@@ -15,16 +15,26 @@ local shaders <const> = require("tecs.gpu.shaders")
 local C <const> = sdl.C
 
 local record ComputePipelineOptions
+    --- Name a compile error is reported against. Read by `fromGLSL`, which has
+    --- no other name for the source it was handed.
     name: string
+    --- Preprocessor macros, and part of the key a packaged shader is found
+    --- under.
     defines: {string: string}
 end
 
 local record ComputePipeline
+    --- The `SDL_GPUComputePipeline`. Nil once `destroy` has run.
     handle: loader.CPtr
+    --- What the shader binds, reflected out of the SPIR-V. Read-write storage
+    --- has to be declared when the pass begins, so this is what tells a caller
+    --- how many buffers `ComputePass.begin` is owed.
     counts: shadercompiler.ResourceCounts
-    --- Declared workgroup size, as {x, y, z}.
+    --- Declared workgroup size, as {x, y, z}. Threads per group, so a dispatch
+    --- covering n items asks for n divided by this, rounded up.
     threadCount: {integer}
     _device: loader.CPtr
+    -- Retains the buffer SDL read the code from.
     _code: loader.CArray
     _destroyed: boolean
 end

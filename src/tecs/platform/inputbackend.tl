@@ -29,6 +29,8 @@ local K <const> = sdl.K
 local record GamepadInfo
     --- SDL instance id. Unique while the device is attached.
     id: number
+    --- What the platform calls the device. For showing the player which pad is
+    --- which, not for matching: `guid` is what survives a driver change.
     name: string
     --- Device family, as the platform recognises it: "xboxOne", "ps5",
     --- "switchPro", "standard", "unknown" and so on.
@@ -60,6 +62,9 @@ local record Backend
     closeGamepad: function(handle: loader.CPtr)
     --- Everything the device says about itself.
     gamepadInfo: function(handle: loader.CPtr, id: number): GamepadInfo
+    --- Whether the device carries a control at all, which is what lets a
+    --- prompt be omitted rather than shown for something the player does not
+    --- have. Asked of the device, so a pad with no right stick says so.
     gamepadHasButton: function(handle: loader.CPtr, button: integer): boolean
     gamepadHasAxis: function(handle: loader.CPtr, axis: integer): boolean
     gamepadHasSensor: function(handle: loader.CPtr, sensor: integer): boolean
@@ -76,18 +81,32 @@ local record Backend
 
     ---------------------------------------------------------------- outputs
 
-    --- Rumble at `low` and `high` in 0..1 for `milliseconds`.
+    --- Rumble at `low` and `high` in 0..1 for `milliseconds`. Milliseconds
+    --- rather than seconds because that is the resolution every platform takes
+    --- it in, so the rounding happens once above rather than in each port.
+    ---
+    --- False rather than an error where the device has no motor. Every output
+    --- here answers that way: they are garnish, and a game should not have to
+    --- guard them.
     rumble: function(handle: loader.CPtr, low: number, high: number,
                      milliseconds: integer): boolean
+    --- The motors in the triggers, on the devices that have them, which is
+    --- separate hardware from the body motors.
     rumbleTriggers: function(handle: loader.CPtr, left: number, right: number,
                              milliseconds: integer): boolean
-    --- Sets the device's light, in 0..1 per channel.
+    --- Sets the device's light, in 0..1 per channel. The bar or ring, not the
+    --- numbered player indicator.
     setLED: function(handle: loader.CPtr, red: number, green: number,
                      blue: number): boolean
+    --- Assigns the player slot, zero-based, or -1 for none. What lights the
+    --- numbered indicator on a device that has one.
     setPlayerIndex: function(handle: loader.CPtr, index: integer): boolean
 
     ------------------------------------------------------------- text input
 
+    --- Starts and stops composing. Off until asked for: a platform that is
+    --- composing is one whose key events a game must not also read as
+    --- bindings. False without a window, which is what a headless test gets.
     startTextInput: function(window: loader.CPtr): boolean
     stopTextInput: function(window: loader.CPtr): boolean
     --- Where the text being edited sits, so the platform can place its
@@ -102,28 +121,52 @@ local record Backend
 
     ----------------------------------------------------------------- cursor
 
+    --- Hides the cursor and delivers motion as deltas only. Per window, as are
+    --- the two below it; capture and visibility are per application, which is
+    --- why those take no window.
     setRelativeMouseMode: function(window: loader.CPtr, enabled: boolean): boolean
     relativeMouseMode: function(window: loader.CPtr): boolean
+    --- Moves the cursor, in window coordinates. Produces a motion event like
+    --- any other, so a caller recentring the cursor sees its own warp.
     warpMouse: function(window: loader.CPtr, x: number, y: number)
+    --- Keeps delivering mouse events while a button is held outside the
+    --- window, which is what a drag that leaves the window needs.
     captureMouse: function(enabled: boolean): boolean
     showCursor: function(visible: boolean): boolean
     cursorVisible: function(): boolean
 
     ------------------------------------------------------------------ names
+    --
+    -- Everything below returns nil for a name it does not know, so a caller
+    -- can say which name was wrong. The keyboard is the exception: the
+    -- platform owns that table and reports its own miss.
 
-    --- Physical key position from a name, or 0 when there is no such key.
+    --- Physical key position from a name, or 0 when there is no such key. Zero
+    --- rather than nil because the platform's own unknown scancode is zero,
+    --- and translating it would lose nothing and cost a branch.
     scancodeFromName: function(name: string): integer
-    --- Name of a physical key, for showing a binding.
+    --- Name of a physical key, for showing a binding. The position's name, not
+    --- the character the player's layout produces there.
     scancodeName: function(scancode: integer): string
+    --- "left", "middle", "right", "x1", "x2".
     mouseButtonFromName: function(name: string): integer
+    --- A single modifier's mask, or a mask covering both sides for the unsided
+    --- names: "shift" matches either, "leftShift" only one.
     modifierFromName: function(name: string): integer
+    --- Positional button names, per `GAMEPAD_BUTTONS`.
     gamepadButtonFromName: function(name: string): integer
+    --- "leftX", "rightY", "leftTrigger" and so on.
     gamepadAxisFromName: function(name: string): integer
+    --- "gyro", "accelerometer", and the per-side names a split device has.
     sensorFromName: function(name: string): integer
 end
 
 local record inputbackend
+    --- What a device says about itself, as `Backend.gamepadInfo` returns it.
     GamepadInfo: GamepadInfo
+    --- The seam a port implements. Every field is required: `Input` and
+    --- `Gamepad` call them without checking, since a partial backend would
+    --- fail at whichever command a game happened to reach first.
     Backend: Backend
     --- The SDL backend, and the default everywhere.
     sdl: Backend

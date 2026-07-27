@@ -13,6 +13,10 @@ local loader <const> = require("tecs.ffi.loader")
 local C <const> = sdl.C
 local K <const> = sdl.K
 
+--- One pixel out of a readback, as eight-bit channels in 0..255.
+---
+--- Read as stored rather than converted, so a format whose channels are not
+--- RGBA in that order reads as whatever the bytes were.
 local record Pixel
     r: integer
     g: integer
@@ -21,21 +25,36 @@ local record Pixel
 end
 
 local record TextureOptions
+    --- Size in pixels, fixed for the texture's life. Resizing means creating
+    --- another one and destroying this, which is what `PassGraph` does when
+    --- the window changes.
     width: integer
     height: integer
+    --- An `SDL_GPU_TEXTUREFORMAT_*` value. What the swapchain takes comes from
+    --- `Device:getSwapchainFormat` and a depth format from `Texture.depthFormat`;
+    --- neither is safe to assume, since backends differ about both.
     format: integer
-    --- Any of "colorTarget", "sampled", "depthTarget", "computeWrite",
-    --- "computeRead". Defaults to a samplable colour target.
+    --- Any of "colorTarget", "sampled", "depthTarget", "computeRead",
+    --- "computeWrite", "graphicsRead". Defaults to a samplable colour target.
     usage: {string}
+    --- Label for the caller's own diagnostics. Not handed to SDL, so it does
+    --- not reach a graphics debugger.
     name: string
 end
 
 local record Texture
+    --- The `SDL_GPUTexture`. Nil once `destroy` has run, and the field every
+    --- binding call reads, so a released texture cannot be bound by accident.
     handle: loader.CPtr
+    --- Size in pixels, as created.
     width: integer
     height: integer
+    --- Format as created. A pipeline drawing into this texture has to be
+    --- created against the same value.
     format: integer
     _device: loader.CPtr
+    --- Download staging, created by the first `readback` and kept for the ones
+    --- after it. A texture nobody reads back never allocates one.
     _transfer: loader.CPtr
     _transferSize: integer
     _destroyed: boolean
@@ -74,6 +93,11 @@ local DEPTH_FORMATS <const>: {integer} = {
 --- exist at all: Metal has no D24_UNORM, and a Vulkan driver may have that one
 --- and not D32_FLOAT. A hardcoded choice creates a texture on the machine it
 --- was written on and returns nil on the next one.
+---
+--- Raises rather than returning nil when nothing in the list works, since a
+--- device that supports no depth format at all cannot run the geometry pass
+--- and there is nothing a caller could do with the answer.
+--- @return An `SDL_GPU_TEXTUREFORMAT_*` value to create a depth target with.
 function Texture.depthFormat(device: loader.CPtr): integer
     local usage = USAGE_FLAGS.depthTarget
     for _, format in ipairs(DEPTH_FORMATS) do
@@ -85,7 +109,11 @@ function Texture.depthFormat(device: loader.CPtr): integer
     error("tecs: this device supports no depth format as a depth target", 2)
 end
 
---- Creates a texture.
+--- Creates a texture with one mip level and one layer.
+---
+--- The caller owns it and calls `destroy`; nothing is tied to the collector.
+--- Size, format and usage are all fixed here, so a texture that has to change
+--- any of them is a new texture.
 function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     local flags = 0
     for _, name in ipairs(options.usage or DEFAULT_USAGE) do
@@ -126,6 +154,12 @@ end
 ---
 --- Submits its own command buffer, so this is a load-time path. It exists
 --- because an asset arrives once, not once per frame.
+---
+--- Tightly packed means rows of exactly `width * 4` bytes with no padding: the
+--- copy is described to SDL as `width` pixels per row, so a source that pads
+--- its rows shears. `TextureArray:add` takes a pitch and repacks for that.
+--- @param pixels Rows of RGBA bytes covering the whole texture.
+--- @param byteCount Bytes to read, which is `width * height * 4`.
 function Texture:upload(pixels: loader.CValue, byteCount: integer)
     local info = loader.newArray("SDL_GPUTransferBufferCreateInfo[1]")
     local settings = info[0] as loader.CStruct
@@ -172,6 +206,11 @@ end
 ---
 --- Blocks until the GPU has finished, so this is a diagnostic and test path,
 --- not something a frame should call.
+---
+--- Four bytes a pixel is assumed, which is what makes this a colour-target
+--- path: a depth texture reads back a byte count that does not describe it.
+--- @return A fresh `width * height * 4` byte array the caller owns, with rows
+---     running down from the top-left. Index it through `getPixel`.
 function Texture:readback(): loader.CArray
     local byteCount = self.width * self.height * 4
 
@@ -229,6 +268,11 @@ function Texture:readback(): loader.CArray
 end
 
 --- Reads one pixel out of a buffer returned by `readback`.
+---
+--- Coordinates are zero-based from the top-left, the same origin
+--- `gl_FragCoord` has, so a shader that writes a gradient reads back in the
+--- direction it wrote it. Unchecked: a coordinate outside the texture reads
+--- whatever is at that offset.
 function Texture:getPixel(pixels: loader.CArray, x: integer, y: integer): Pixel
     local offset = (y * self.width + x) * 4
     return {

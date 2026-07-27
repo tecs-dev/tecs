@@ -11,6 +11,9 @@ local loader <const> = require("tecs.ffi.loader")
 local C <const> = sdl.C
 
 local record ComputePass
+    --- The `SDL_GPUComputePass`. Nil once `finish` has run, and valid only
+    --- between the begin and the end: a pass does not outlive its command
+    --- buffer's recording.
     handle: loader.CPtr
     _finished: boolean
 end
@@ -18,6 +21,9 @@ end
 local ComputePassMT <const>: metatable<ComputePass> = { __index = ComputePass }
 
 --- Wraps a begun compute pass handle.
+---
+--- For a caller that began the pass itself. `begin` is the usual way in, and
+--- calls this.
 function ComputePass.wrap(handle: loader.CPtr): ComputePass
     local self = setmetatable({} as ComputePass, ComputePassMT)
     self.handle = handle
@@ -31,6 +37,12 @@ end
 --- here rather than bound inside the pass: SDL_GPU derives its barriers from
 --- this list, so a buffer written by compute and then read by a draw is only
 --- correctly ordered if it appears in it.
+---
+--- Order is the binding order the shader's read-write set expects, and the
+--- count has to match what the pipeline reflected: SDL validates both, and a
+--- mismatch is a pass that never runs rather than one that runs wrongly.
+--- @param readWriteBuffers Device buffer handles, not `Buffer` objects. An
+---     empty list or nil is a pass that only reads.
 function ComputePass.begin(commandBuffer: loader.CValue,
                            readWriteBuffers: {loader.CValue}): ComputePass
     readWriteBuffers = readWriteBuffers or {}
@@ -60,6 +72,8 @@ end
 ---
 --- Read-write buffers are not bound here; they were declared when the pass
 --- began.
+--- @param firstSlot Zero-based binding in the shader's read-only set, which
+---     the list continues from in order.
 function ComputePass:bindStorageBuffers(firstSlot: integer,
                                         buffers: {loader.CValue})
     local handles = loader.newArray("SDL_GPUBuffer*[?]", #buffers)
@@ -72,7 +86,11 @@ end
 --- Dispatches `x` by `y` by `z` workgroups.
 ---
 --- These are workgroup counts, not thread counts: the threads per group come
---- from the shader's declared local size.
+--- from the shader's declared local size, which `ComputePipeline.threadCount`
+--- reports. Covering n items means dispatching n divided by that, rounded up,
+--- and the shader dropping the invocations past the end.
+--- @param y Defaults to one, as does `z`, which is what a linear dispatch over
+---     a buffer wants.
 function ComputePass:dispatch(x: integer, y?: integer, z?: integer)
     C.SDL_DispatchGPUCompute(self.handle, x, y or 1, z or 1)
 end

@@ -11,13 +11,18 @@ local loader <const> = require("tecs.ffi.loader")
 local C <const> = sdl.C
 
 local record SamplerOptions
-    --- "nearest" or "linear". Defaults to nearest.
+    --- "nearest" or "linear". Defaults to nearest, and applies to both
+    --- minification and magnification: a sampler that filtered one and not the
+    --- other has no use here.
     filter: string
-    --- "clamp", "repeat", or "mirror". Defaults to clamp.
+    --- "clamp", "repeat", or "mirror". Defaults to clamp, and applies to all
+    --- three axes. Clamp is what a texture array wants, where an image
+    --- occupying part of a cell would otherwise sample its neighbour's padding.
     address: string
 end
 
 local record Sampler
+    --- The `SDL_GPUSampler`. Nil once `destroy` has run.
     handle: loader.CPtr
     _device: loader.CPtr
     _destroyed: boolean
@@ -37,6 +42,10 @@ local ADDRESS_MODES <const>: {string: integer} = {
 }
 
 --- Creates a sampler.
+---
+--- One mip level, no anisotropy and no comparison: nothing here generates
+--- mips, so a sampler that could filter between them would be describing a
+--- texture that does not exist.
 function Sampler.create(device: loader.CPtr, options: SamplerOptions): Sampler
     options = options or {}
 

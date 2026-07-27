@@ -73,6 +73,9 @@ function shaderbuild.build(): shaderpack.Pack
 end
 
 --- A readable listing of what a pack contains.
+---
+--- Sorted by key, so two builds of the same tree produce the same text and a
+--- diff between them is the change rather than the ordering.
 function shaderbuild.manifest(pack: shaderpack.Pack): string
     local keys: {string} = {}
     for key in pairs(pack.shaders) do keys[#keys + 1] = key end
@@ -110,6 +113,11 @@ function shaderbuild.manifest(pack: shaderpack.Pack): string
 end
 
 --- Builds a pack, writes it to `path`, and writes its manifest beside it.
+---
+--- The manifest takes the same path with `.txt` appended, so the two travel
+--- together and a pack in a tree is never there without its listing.
+--- @return The pack that was written, so a caller can inspect what it built
+---     without reading the file back.
 function shaderbuild.writeTo(path: string): shaderpack.Pack
     local pack = shaderbuild.build()
     shaderpack.write(path, pack)

@@ -47,39 +47,63 @@ local SLOT_COUNT <const> = 2
 --- independently is the entire point, and a shared range list would make each
 --- flush copy the other slot's bytes out of memory that never received them.
 local record Slot
+    --- The `SDL_GPUTransferBuffer`, created the first time the slot is mapped.
     transfer: loader.CPtr
+    --- The driver's address while the slot is mapped, nil while it is not.
+    --- Held rather than remapped, because remapping cycles and cycling would
+    --- move the address out from under a writer still holding it.
     mapped: loader.CValue
+    --- Recorded writes as offset and size pairs, flat: entry n occupies
+    --- indices 2n and 2n+1. A C array rather than a Lua table because it is
+    --- written on every marked range, which is every row a producer touches.
     ranges: loader.CArray
+    --- Pairs recorded, not entries in the array. Zero is a slot with nothing
+    --- to flush, which is what `flushSlot` returns false on.
     rangeCount: integer
+    --- True once the ranges collapsed into the single span at index 0. Every
+    --- later mark widens that span instead of adding an entry.
     collapsed: boolean
+    --- Bytes marked since the last flush, summed as marked. Overlapping writes
+    --- count twice, so this sizes the work a producer did rather than the
+    --- bytes the flush will copy.
     dirtyBytes: integer
 end
 
 local record BufferOptions
-    --- Any of "storage", "indirect", "computeRead", "computeWrite". A buffer
-    --- written by compute and then drawn from needs both "indirect" and
-    --- "computeWrite".
+    --- Any of "index", "indirect", "storage", "computeRead", "computeWrite". A
+    --- buffer written by compute and then drawn from needs both "indirect" and
+    --- "computeWrite". Defaults to "storage".
     usage: {string}
-    --- Size in bytes.
+    --- Size in bytes, fixed for the buffer's life. Growing means creating
+    --- another buffer, and the old one stays live until every frame that could
+    --- still reference it has retired.
     size: integer
     --- Bytes of staging to allocate per slot. Defaults to the full buffer
     --- size, which lets any range be written. A smaller value bounds the extra
     --- residency at the cost of capping how much may change in one frame.
     stagingSize: integer
+    --- Label for the caller's own diagnostics. Not handed to SDL, so it does
+    --- not reach a graphics debugger.
     name: string
 end
 
 local record Buffer
     --- Staging slots every buffer carries, so a caller can loop by index.
     slotCount: integer
+    --- The `SDL_GPUBuffer`, shared by every slot. Nil once `destroy` has run.
     handle: loader.CPtr
+    --- Device buffer size in bytes, which is the largest offset plus size a
+    --- write may name.
     size: integer
     --- Bytes marked dirty on slot zero since its last flush. Slot-aware
     --- callers read `slotDirtyBytes` instead.
     dirtyBytes: integer
     _device: loader.CPtr
     _usage: integer
+    --- Staging bytes per slot, and the capacity `mapSlot` reports.
     _transferSize: integer
+    --- Indexed one-based, while every method takes a slot zero-based: the
+    --- outside numbering matches the frame index a caller alternates with.
     _slots: {Slot}
     _destroyed: boolean
 end
@@ -207,6 +231,10 @@ end
 --- writer that is still holding it.
 ---
 --- The address is valid until the slot is flushed or cycled.
+--- @param index Slot to map, zero-based, below `slotCount`.
+--- @param cycle Pass false to keep the driver's existing allocation, which is
+---     what a writer adding to what a previous frame left in the slot wants.
+--- @return The address to write into, and the bytes the slot holds.
 function Buffer:mapSlot(index: integer, cycle?: boolean): loader.BytePointer, integer
     local slot = slotAt(self, index)
     return loader.bytePointer(mapSlotRecord(self, slot, cycle)),
@@ -228,6 +256,12 @@ end
 --- Adjacent and overlapping writes merge, which is the common case when a
 --- producer walks rows in order. Beyond `MAX_RANGES` distinct spans the whole
 --- dirty region collapses to one, trading bandwidth for bounded bookkeeping.
+---
+--- Only the last recorded range is tested for a merge, so writes that arrive
+--- out of order fill the list faster and collapse sooner. That costs
+--- bandwidth and nothing else: the collapsed span still covers every write.
+--- @param offset Bytes from the start of the buffer, matching the address
+---     `mapSlot` returned. A size of zero or less records nothing.
 function Buffer:markSlotDirty(index: integer, offset: integer, size: integer)
     if size <= 0 then return end
     local slot = slotAt(self, index)
@@ -293,6 +327,10 @@ function Buffer:writeSlot(index: integer, offset: integer,
 end
 
 --- Bytes marked dirty on a slot since its last flush.
+---
+--- Summed as marked rather than deduplicated, so this answers how much a
+--- producer wrote and not how much the flush copies. Zero means the flush
+--- would encode nothing, which is the useful test.
 function Buffer:slotDirtyBytes(index: integer): integer
     return slotAt(self, index).dirtyBytes
 end
@@ -316,6 +354,11 @@ end
 --- it would erase every range this flush did not rewrite. That is what makes
 --- one persistent device buffer behind several slots correct, and it is why
 --- ranges are tracked at all.
+---
+--- The slot is left unmapped and its ranges cleared, so flushing twice copies
+--- nothing the second time.
+--- @return Whether any range was encoded. False on a slot nothing marked,
+---     which is how a caller skips the pass that would have consumed it.
 function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
     local slot = slotAt(self, index)
     unmapSlotRecord(self, slot)
@@ -376,6 +419,9 @@ end
 -- slot means.
 
 --- Maps slot zero's staging memory and returns the driver's address.
+---
+--- Drops the capacity `mapSlot` also returns, which a caller that already
+--- knows the buffer's size does not need. Ask `mapSlot` for both.
 function Buffer:map(cycle?: boolean): loader.BytePointer
     local pointer = self:mapSlot(0, cycle)
     return pointer
@@ -405,6 +451,10 @@ end
 ---
 --- For setup and tests. Per-frame writes belong on the frame's command buffer
 --- through a mapped slot and `flushSlot`.
+---
+--- Submitted and not waited on, so the copy is ordered only against work
+--- submitted after it. That is enough for content uploaded before the first
+--- frame and is not enough for anything a frame already in flight reads.
 function Buffer:upload(source: loader.CArray, byteCount: integer, offset?: integer)
     self:write(offset or 0, source as loader.CValue, byteCount)
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)

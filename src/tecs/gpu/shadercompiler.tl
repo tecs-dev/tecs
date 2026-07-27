@@ -77,8 +77,11 @@ local record SetLayout
     --- For compute this is the read-only set.
     resources: integer
     --- Set holding read-write storage resources. Compute only; -1 elsewhere,
-    --- since graphics storage bindings are always read-only.
+    --- since graphics storage bindings are always read-only. No set is -1, so
+    --- the value doubles as "there is no such set here".
     readWrite: integer
+    --- Set holding uniform buffers, which every stage has and which is always
+    --- a set of its own.
     uniforms: integer
 end
 
@@ -98,21 +101,35 @@ local MSL_ENTRYPOINT <const> = "main0"
 local type ResourceCounts = shaderpack.ResourceCounts
 
 local record CompiledShader
-    --- Backend bytecode or source, as a byte buffer.
+    --- Backend bytecode or source, as a byte buffer. Must outlive the create
+    --- call that reads it, which is why the buffer is carried rather than a
+    --- string.
     code: loader.CArray
+    --- Bytes SDL reads, which includes the terminator where the format is
+    --- text: MSL is source, and SDL is told a length rather than trusting one.
     codeSize: integer
     --- Retains the buffer that `code` points into.
     _codeOwner: loader.CArray
+    --- SDL shader format the code is in, and what the device must have been
+    --- created claiming.
     format: integer
+    --- Entry point name, which is not always `main`: MSL reserves that, so the
+    --- translation renames it.
     entrypoint: string
+    --- What the shader binds, for the counts SDL is told separately.
     counts: ResourceCounts
-    --- Local workgroup size, for compute shaders.
+    --- Local workgroup size, for compute shaders. Nil for the other stages,
+    --- which have none.
     threadCount: {integer}
 end
 
 local record shadercompiler
+    --- A built pack, re-exported so a caller loading one need not also require
+    --- `shaderpack`.
     Pack: shaderpack.Pack
     ResourceCounts: ResourceCounts
+    --- What both `compile` and a pack lookup produce, so a pipeline is built
+    --- the same way whichever a shader came from.
     CompiledShader: CompiledShader
 end
 
@@ -409,7 +426,11 @@ end
 
 --- Compiles GLSL to whatever the running backend consumes.
 ---
---- @param source GLSL source text.
+--- SPIR-V everywhere but macOS, where it is translated to MSL and the bindings
+--- are flattened into the order SDL's Metal backend expects. Which of the two
+--- happens is decided by the host this runs on, so a pack built here is a pack
+--- for this backend.
+--- @param source GLSL source text, with includes already expanded.
 --- @param stage "vertex", "fragment", or "compute".
 function shadercompiler.compile(source: string, stage: string,
                                 options: CompileOptions): CompiledShader
@@ -476,6 +497,10 @@ end
 local loadedPack: shaderpack.Pack = nil
 
 --- Uses `pack` for every subsequent lookup by name.
+---
+--- Also decides `format`, and so what a device is created claiming. Install a
+--- pack before creating the device, or the device claims one format and the
+--- pack supplies another.
 function shadercompiler.usePack(pack: shaderpack.Pack)
     loadedPack = pack
 end
@@ -520,6 +545,9 @@ end
 --- build that can compile that is a recompile; on one that cannot it is an
 --- error, because drawing with a shader that no longer matches its source is
 --- worse than not starting.
+--- @param hasCompiler Whether compiling is available. Passed in rather than
+---     asked for, so a test can put this on the branch a packaged build takes.
+--- @return "pack" or "compile". Raises where neither is possible.
 function shadercompiler.plan(name: string, defines: {string: string},
                              hasCompiler: boolean): string
     local entry = shaders.get(name)

@@ -88,7 +88,9 @@ local record Event
     --- Gamepad or pen axis, and its value in -1..1.
     axis: integer
     value: number
-    --- Touch or pen pressure in 0..1.
+    --- How hard a finger is pressing, in 0..1, on a touch surface or a gamepad
+    --- touchpad. A pen reports its pressure as an axis instead, so a pen event
+    --- leaves this holding whatever the last touch put there.
     pressure: number
     --- Whether the pen's eraser end is in use.
     eraser: boolean
@@ -139,6 +141,8 @@ local record Event
 end
 
 local record events
+    --- One event, discriminated by `kind`. The record handed to a handler is
+    --- reused, so anything retaining one takes a copy through `events.copy`.
     Event: Event
     --- Installed by a replay driver. Called instead of draining the host
     --- queue, and expected to invoke the handler for each recorded event.
@@ -541,6 +545,11 @@ end
 
 --- Returns an independent copy, for code that must retain an event past the
 --- handler that received it.
+---
+--- Shallow, which is enough because every field is a number, a string or a
+--- boolean except the three lists, and those are freshly built per event
+--- rather than reused. Allocates, so this is for the events a recorder or a
+--- tool keeps and not for the stream.
 function events.copy(event: Event): Event
     local out: Event = {}
     for key, value in pairs(event as {string: any}) do
@@ -597,6 +606,15 @@ end
 --- Takes the engine's vocabulary rather than an SDL union, so a test or a tool
 --- can inject input without knowing SDL's layout. Only the fields a kind uses
 --- are read.
+---
+--- Payloads are filled for the key, mouse and gamepad kinds. Any other
+--- recognised kind is pushed carrying its type and nothing else, which is what
+--- a kind whose payload nobody injects needs and is not what a caller expecting
+--- a full event would assume.
+---
+--- SDL stamps the timestamp, so a pushed event arrives ordered against real
+--- ones rather than ahead of them.
+--- @param kind One of `events.kinds()`. An unrecognised name raises.
 function events.push(kind: string, fields: Event)
     local sdlType: integer = nil
     for value, name in pairs(KINDS) do

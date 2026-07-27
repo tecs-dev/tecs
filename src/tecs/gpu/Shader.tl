@@ -16,15 +16,22 @@ local shaders <const> = require("tecs.gpu.shaders")
 local C <const> = sdl.C
 
 local record ShaderOptions
-    --- Name used in diagnostics and GPU debugging tools.
+    --- Name a compile error is reported against. Read by `fromGLSL`, which has
+    --- no other name for the source it was handed; `load` already has one.
     name: string
-    --- Preprocessor macros, for material variants.
+    --- Preprocessor macros, for material variants. Part of the key a packaged
+    --- shader is found under, so a define set that was not declared in the
+    --- source is not in the pack either.
     defines: {string: string}
 end
 
 local record Shader
+    --- The `SDL_GPUShader`. Nil once `destroy` has run.
     handle: loader.CPtr
+    --- "vertex" or "fragment".
     stage: string
+    --- What the shader binds, reflected out of the SPIR-V. Carried so a caller
+    --- can check a pipeline's bindings against what the shader expects.
     counts: shadercompiler.ResourceCounts
     _device: loader.CPtr
     -- Retains the buffer SDL read the code from.
@@ -79,6 +86,11 @@ end
 --- keyed by. On a build that links a compiler this compiles; on one that does
 --- not, it reads the packaged artifact, and a shader missing from the pack
 --- raises rather than leaving a pass silently unbuilt.
+---
+--- The stage comes from the name's suffix rather than from the caller, so a
+--- `.frag` asked for as a vertex shader is not a thing that can be said.
+--- @param name A registered shader, without the `.glsl` extension, such as
+---     "deferred.lighting.frag".
 function Shader.load(device: loader.CPtr, name: string,
                      options: ShaderOptions): Shader
     options = options or {}
@@ -92,6 +104,10 @@ end
 --- Needs a shader compiler, so a packaged build cannot use this. Engine code
 --- goes through `load`; this is for a caller holding source that was never
 --- registered, which in practice means a test.
+---
+--- Includes are not expanded: that happens in `shaders` on the way from a file,
+--- and source handed in directly has already been assembled by whoever holds
+--- it.
 --- @param stage "vertex" or "fragment". Compute uses `ComputePipeline`.
 function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string,
                          options: ShaderOptions): Shader

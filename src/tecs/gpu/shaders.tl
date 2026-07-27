@@ -50,10 +50,16 @@ local record shaders
 
     --- A source and one define set, with the key the pair is stored under.
     record Variant
+        --- What a pack stores this under, from `shaders.key`.
         key: string
+        --- The source's name, shared by every variant of it.
         name: string
         stage: string
+        --- The same expanded source for every variant: what differs between
+        --- them is the defines the compiler is given, not the text.
         source: string
+        --- Macros for this variant, empty for the one the engine asks for
+        --- unless it is assembling a material.
         defines: {string: string}
     end
 end
@@ -76,6 +82,10 @@ local function searchRoots(): {string}
 end
 
 --- Adds a directory to search before the ones already known.
+---
+--- Everything cached is dropped, because a resolved source may have taken an
+--- include from a root this one now precedes.
+--- @param path A directory, with or without its trailing separator.
 function shaders.addRoot(path: string)
     local list = searchRoots()
     table.insert(list, 1, path:sub(-1) == "/" and path or path .. "/")
@@ -206,6 +216,12 @@ local function stageOf(name: string): string
 end
 
 --- Returns the entry named `name`, reading and resolving it once.
+---
+--- Cached, and the cache is dropped whole whenever a root or a generated
+--- include changes, since either can change what an already resolved source
+--- would expand to.
+--- @param name Without the `.glsl` extension, and carrying the stage suffix
+---     that names it: a name with no `.vert`, `.frag` or `.comp` raises.
 function shaders.get(name: string): shaders.Entry
     local cached = cache[name]
     if cached ~= nil then return cached end

@@ -7,11 +7,18 @@
 --- layer pushed once is answered the same way by all of them.
 
 local record Layer
+    --- What the layer is for, in diagnostics. Not an identity: two layers may
+    --- share a name, and a query is answered from the object rather than from
+    --- what it is called.
     name: string
     --- Whether this layer hides input from the layers beneath it.
     blocking: boolean
     --- Position in the stack. Compared against the topmost blocking layer to
     --- decide whether this layer may read.
+    ---
+    --- Fixed when the layer is pushed. Nothing renumbers, because the base
+    --- layer is never removed and only the top one ever is, so an index cannot
+    --- go stale while its layer is still on the stack.
     index: integer
 end
 
@@ -22,11 +29,23 @@ end
 --- is not the same question: a button pressed and released between two steps
 --- is invisible to the frame sets, and losing it produces input loss that
 --- varies with frame timing and so cannot be reproduced on demand.
+--- Every set is keyed by the platform's own code for the button, and holds
+--- true or nothing: a code absent from a set is a button that set has nothing
+--- to say about, which is why membership rather than value is what is read.
 local record Buttons
+    --- Held right now. Survives the frame boundary, and is emptied only by a
+    --- release or by `releaseAll`.
     down: {integer: boolean}
+    --- Went down since the last `beginFrame`, and cleared by the next one.
     pressed: {integer: boolean}
+    --- Came up since the last `beginFrame`, and cleared by the next one.
     released: {integer: boolean}
+    --- Went down since the last fixed step, accumulated across every frame
+    --- between two steps and cleared by `exitFixed`. A button pressed and
+    --- released inside one step interval appears in this and in
+    --- `latchedReleased` together.
     latchedPressed: {integer: boolean}
+    --- Came up since the last fixed step, on the same terms.
     latchedReleased: {integer: boolean}
 end
 
@@ -40,8 +59,14 @@ local record Gate
 end
 
 local record inputstate
+    --- A position in the layer stack, handed back by `Gate:push` and passed to
+    --- every query that wants to be answered relative to it.
     Layer: Layer
+    --- One set of buttons in three tiers. `Input` holds one for the keyboard
+    --- and one for the mouse; every `Gamepad` holds its own.
     Buttons: Buttons
+    --- The layer stack. One instance is shared by every device, so a layer
+    --- pushed once is answered the same way by all of them.
     Gate: Gate
 end
 
@@ -56,6 +81,7 @@ end
 -- Buttons
 -------------------------------------------------------------------------------
 
+--- Creates an empty set, with nothing held and no edges recorded.
 function Buttons.create(): Buttons
     return setmetatable({
         down = {}, pressed = {}, released = {},
@@ -63,12 +89,22 @@ function Buttons.create(): Buttons
     } as Buttons, ButtonsMT)
 end
 
+--- Records a press in all three tiers.
+---
+--- A platform repeat is not a press and must be filtered before this: holding
+--- a key would otherwise read as pressing it once per repeat interval.
+--- @param code The platform's own code for the button.
 function Buttons:press(code: integer)
     self.down[code] = true
     self.pressed[code] = true
     self.latchedPressed[code] = true
 end
 
+--- Records a release in all three tiers.
+---
+--- Recorded whether or not the button was held, since the platform is the
+--- authority on that and a release for something this never saw pressed means
+--- the press was missed rather than that the release is spurious.
 function Buttons:release(code: integer)
     self.down[code] = nil
     self.released[code] = true
@@ -100,6 +136,12 @@ function Buttons:releaseAll()
 end
 
 --- The edge set a query should read, given the phase and which edge it wants.
+---
+--- The live set is returned rather than a copy, so a caller tests membership
+--- in it and does not retain it past the frame.
+--- @param fixed Whether a fixed step is running, which selects the latched
+---     sets over the frame sets.
+--- @param released Whether the caller wants releases rather than presses.
 function Buttons:edges(fixed: boolean, released: boolean): {integer: boolean}
     if fixed then
         return released and self.latchedReleased or self.latchedPressed
@@ -111,6 +153,10 @@ end
 -- Gate
 -------------------------------------------------------------------------------
 
+--- Creates a stack holding only the base layer.
+---
+--- The base layer blocks, which is what makes it the thing everything beneath
+--- would be hidden from if there were anything beneath it.
 function Gate.create(): Gate
     return setmetatable({
         layers = { { name = "base", blocking = true, index = 1 } },
@@ -132,7 +178,11 @@ function Gate:push(name: string, blocking?: boolean): Layer
     return layer
 end
 
---- Removes the topmost layer and returns it. The base layer is never removed.
+--- Removes the topmost layer and returns it.
+---
+--- The base layer is never removed, so popping an empty stack returns nil
+--- rather than raising: an unbalanced pop leaves the stack in the state
+--- everything already reads correctly.
 function Gate:pop(): Layer
     local count = #self.layers
     if count <= 1 then return nil end
