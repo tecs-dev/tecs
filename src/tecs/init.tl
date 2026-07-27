@@ -44,6 +44,8 @@ local type clipboard = require("tecs.platform.clipboard")
 local type capabilities = require("tecs.platform.capabilities")
 local type paths = require("tecs.platform.paths")
 local type watch = require("tecs.platform.watch")
+local type layers = require("tecs.gfx.layers")
+local type sequence = require("tecs.sequence")
 local type components = require("tecs.components")
 local type text = require("tecs.gfx.text")
 local type materials = require("tecs.gpu.materials")
@@ -109,6 +111,8 @@ local record tecs
     capabilities: capabilities
     paths: paths
     watch: watch
+    layers: layers
+    sequence: sequence
     components: components
     text: text
     materials: materials
@@ -286,6 +290,8 @@ local ENGINE <const>: {string: string} = {
     capabilities = "tecs.platform.capabilities",
     paths = "tecs.platform.paths",
     watch = "tecs.platform.watch",
+    layers = "tecs.gfx.layers",
+    sequence = "tecs.sequence",
     components = "tecs.components",
     text = "tecs.gfx.text",
     materials = "tecs.gpu.materials",
