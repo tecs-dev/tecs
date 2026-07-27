@@ -68,8 +68,8 @@ local record BufferOptions
     --- size, which lets any range be written. A smaller value bounds the extra
     --- residency at the cost of capping how much may change in one frame.
     stagingSize: integer
-    --- Label for the caller's own diagnostics. Not handed to SDL, so it does
-    --- not reach a graphics debugger.
+    --- Label handed to SDL, which a graphics debugger shows against the
+    --- resource. Optional; a buffer created without one is unnamed there.
     name: string
 end
 
@@ -81,6 +81,8 @@ local record Buffer
     --- Device buffer size in bytes, which is the largest offset plus size a
     --- write may name.
     size: integer
+    --- The name SDL was given, or nil when none was asked for.
+    name: string
     --- Bytes marked dirty on slot zero since its last flush. Slot-aware
     --- callers read `slotDirtyBytes` instead.
     dirtyBytes: integer
@@ -149,6 +151,12 @@ function Buffer.create(device: loader.CPtr, options: BufferOptions): Buffer
 
     local self = setmetatable({} as Buffer, BufferMT)
     self.handle = createDeviceBuffer(device, flags, options.size)
+    -- A device created without debug mode keeps no names, so this is free in a
+    -- release and the difference is only visible in a graphics debugger.
+    if options.name ~= nil then
+        C.SDL_SetGPUBufferName(device, self.handle, options.name)
+    end
+    self.name = options.name
     self.size = options.size
     self.dirtyBytes = 0
     self._device = device
