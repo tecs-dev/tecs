@@ -14,6 +14,11 @@
 --- The component carries a sheet id rather than a sheet. A component is plain
 --- C memory and a sheet is a table, and the indirection is the point besides:
 --- every entity playing one walk cycle shares one sheet.
+---
+--- An entity carrying a `Pivot` bound to one of the sheet's slices has it
+--- resolved again on every frame the sprite changes, because an Aseprite slice
+--- moves from frame to frame and a pivot that did not follow it would drift
+--- off the part of the drawing it names.
 
 local ecs <const> = require("tecs.ecs")
 local components <const> = require("tecs.components")
@@ -25,6 +30,7 @@ local type Query = ecs.Query
 local type Sheet = sheet.Sheet
 
 local Sprite <const> = components.Sprite
+local Pivot <const> = sheet.Pivot
 
 --- Playback rate an animation runs at when nothing says otherwise, which is
 --- the timing the sheet's frames were authored with.
@@ -314,6 +320,11 @@ local function advance(world: World, query: Query, dt: number)
         local marked = false
         local sprites <const> = archetype:get(Sprite)
         local wrote = false
+        -- Absent on every archetype that turns about its middle, which is
+        -- most of them. A pivot follows the slice it names and a slice moves
+        -- from frame to frame, so it is rewritten exactly when the frame is.
+        local pivots <const> = archetype:get(Pivot)
+        local moved = false
         -- Sheets are few and neighbouring rows tend to share one.
         local cachedId = 0
         local cached: Sheet = nil
@@ -404,6 +415,22 @@ local function advance(world: World, query: Query, dt: number)
                     if slot >= 0 then
                         target.image = source._image
                         target.slot = slot
+                    end
+                end
+
+                -- A slice bound to another sheet is left where it is: the
+                -- frame index below counts through this sheet's frames and
+                -- means nothing in another's, so resolving against it would
+                -- move the pivot to whatever that index happened to name.
+                if pivots ~= nil and changed then
+                    local pivot <const> = pivots[row]
+                    local slice <const> = pivot.slice as integer
+                    if slice > 0 and pivot.sheet as integer == sheetId then
+                        if not moved then
+                            archetype:getMut(Pivot)
+                            moved = true
+                        end
+                        pivot.x, pivot.y = source:pivotOf(slice, frame)
                     end
                 end
 
