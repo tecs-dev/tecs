@@ -580,6 +580,53 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    -- Stopping at capacity means leaving an archetype loop early, and leaving
+    -- one early through `iter` leaves the world deferred: every later spawn is
+    -- queued instead of applied, and nothing says so. The count above is the
+    -- same either way, so it takes a spawn after the sync to tell.
+    it("leaves the world undeferred after dropping rows", function()
+        local world = tecs.newWorld()
+        local renderer = Renderer.create(device.handle, FORMAT,
+            { ambient = { 1, 1, 1 }, capacity = 4 })
+        renderer:install(world)
+
+        -- Two archetypes, because the break has to actually execute. With one,
+        -- the first pass fills the buffer and the loop then ends by exhausting
+        -- the query, which pops the scope and hides the defect entirely.
+        local Second = tecs.newTagComponent({ name = "CapacitySecondArchetype" })
+        for _ = 1, 6 do
+            world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable())
+        end
+        for _ = 1, 6 do
+            world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1),
+                Renderable(), Second)
+        end
+        frameOnce(world, renderer)
+
+        -- Observed from inside the same update, in a phase after the sync,
+        -- because the world drains what it deferred when the update ends. A
+        -- scope the sync failed to pop is invisible from outside and defers
+        -- every system that runs after it.
+        local Marker = tecs.newTagComponent({ name = "AfterCapacityDrop" })
+        local seen = -1
+        world:addSystem({
+            name = "spec.SpawnAfterSync",
+            phase = tecs.phases.Last,
+            run = function()
+                world:spawn(Marker)
+                seen = 0
+                for _, length in world:query({ include = { Marker } }):iter() do
+                    seen = seen + length
+                end
+            end,
+        })
+
+        world:update(1 / 60)
+        assert.are.equal(1, seen,
+            "a spawn in a later phase was deferred, so the sync left a scope open")
+        renderer:destroy()
+    end)
+
     -- Shapes are a fragment-side material on the same quad, same instance
     -- format, same batch. What must be true is that the silhouette is the
     -- shape and not the quad, which only a corner sample can tell you.

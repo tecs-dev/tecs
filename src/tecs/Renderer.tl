@@ -324,7 +324,11 @@ local function syncInstances(self: Renderer): integer, integer, integer
 
     local rewritten = 0
     local offset = 0
-    for archetype, length in self._renderables:iter() do
+    -- A cursor rather than iter, because this stops once the buffer is full and
+    -- leaving an archetype loop early through iter leaves the world deferred,
+    -- which silently queues every spawn made after it.
+    local cursor = self._renderables:cursor()
+    for archetype, length in cursor:iter() do
         if offset >= self.capacity then break end
         if offset + length > self.capacity then
             length = self.capacity - offset
@@ -350,6 +354,7 @@ local function syncInstances(self: Renderer): integer, integer, integer
         end
         offset = offset + length
     end
+    cursor:close()
 
     return total, dropped, rewritten
 end
