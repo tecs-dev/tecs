@@ -439,6 +439,14 @@ end
 
 local AudioMT <const>: metatable<Audio> = { __index = Audio }
 
+--- The audio each world had installed into it. Weak, so a world that has gone
+--- takes its entry with it.
+---
+--- Declared here rather than beside `Audio.of`, because `destroy` clears the
+--- entries naming it and reads this well before that point in the file.
+local installed <const>: {ecs.World: Audio} =
+    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
+
 --- Takes finished loads. Declared here and defined below, because shutting
 --- down has to drain what is in flight and shutting down is described first.
 local resolveLoads: function(self: Audio): integer
@@ -579,6 +587,16 @@ function Audio:destroy()
         self._mixer = nil
     end
     self.available = false
+
+    -- Every world this was installed into stops naming it. Nothing here can
+    -- open an output again, so a world still answering with this mixer would
+    -- hand the debug tools, and anything else reaching through `Audio.of`, a
+    -- mixer that can only report that it is unavailable. Swept rather than
+    -- indexed, because `install` takes a world and this holds no reference to
+    -- any of them.
+    for world, audio in pairs(installed) do
+        if audio == self then installed[world] = nil end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1438,11 +1456,6 @@ end
 -------------------------------------------------------------------------------
 -- The plugin
 -------------------------------------------------------------------------------
-
---- The audio each world had installed into it. Weak, so a world that has gone
---- takes its entry with it.
-local installed <const>: {ecs.World: Audio} =
-    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
 
 --- The audio installed into a world, or nil when none has been.
 ---

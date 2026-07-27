@@ -1346,6 +1346,31 @@ describe("audio", function()
             assert.is_true(result.isError)
             assert.is_truthy(result.content[1].text:find("no audio", 1, true))
         end)
+
+        it("stops answering for a world once the mixer is destroyed",
+            function()
+            -- Nothing can open an output again, so a world still naming a
+            -- destroyed mixer would answer every reader with one that can
+            -- only report itself unavailable. Two worlds because `install`
+            -- takes a world and the mixer holds no reference to any of them.
+            local audio, _, _, world = scene()
+            local second = tecs.newWorld()
+            audio:install(second)
+            assert.are.equal(audio, Audio.of(world))
+            assert.are.equal(audio, Audio.of(second))
+
+            audio:destroy()
+
+            assert.is_nil(Audio.of(world))
+            assert.is_nil(Audio.of(second),
+                "every world it was installed into, not just the last")
+
+            mcpTools.bind(nil, world)
+            local result = callTool("audio")
+            assert.is_true(result.isError,
+                "so the debug tool says none is installed rather than "
+                    .. "reporting on a mixer that has gone")
+        end)
     end)
 
     describe("no output", function()
