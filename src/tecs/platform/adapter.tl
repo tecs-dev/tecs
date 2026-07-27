@@ -26,9 +26,10 @@
 ---               vocabulary can express one. Device enumeration belongs here
 ---               too, since a pad has to be opened before it reports anything.
 ---
----   audio       Outbound in the same sense: opening an output, queueing PCM,
----               setting a gain, stopping a voice. Nothing about sound comes
----               back as an event, so it has no other face.
+---   audio       Outbound in the same sense: opening a mixer, pointing a voice
+---               at a clip, setting a gain, stopping a voice. The one thing
+---               that comes back is whether a voice is still sounding, and
+---               nothing about sound arrives as an event.
 ---
 ---   static FFI  A target that forbids `dlopen` cannot reach a library by
 ---               name, so function pointers are taken at build time and

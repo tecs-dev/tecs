@@ -51,7 +51,7 @@ tecs/
 │   ├── types.tl
 │   ├── internal/          # ECS implementation
 │   ├── utils/
-│   ├── ffi/               # Generated bindings: SDL3, Box2D, shaderc, SPIRV-Cross
+│   ├── ffi/               # Generated bindings: SDL3, SDL3_mixer, Box2D, shaderc, SPIRV-Cross
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
 │   ├── gfx/               # Camera, layers, distance-field text
 │   ├── platform/          # Window, input, audio, events, clock, paths, capabilities
@@ -63,11 +63,12 @@ tecs/
 │   ├── Extractor.tl       # World-facing: a world to a frame packet
 │   ├── Backend.tl         # Device-facing: a frame packet to a frame
 │   ├── FramePacket.tl     # What crosses between them
-│   ├── Audio.tl           # Clips, voices, the Sound component
+│   ├── Audio.tl           # Clips, voices, groups, limits, the Sound component
 │   ├── components.tl      # Engine components
 │   ├── assets.tl
 │   ├── workers.tl
-│   └── log.tl
+│   ├── log.tl             # SDL's logging, per platform
+│   └── json.tl            # lua-cjson, with the build's own copy found
 ├── native/                # Host, worker runner, log sink, solver pool, registry
 ├── assets/                # shaders/ and materials/, globbed at build time
 ├── cmake/                 # Pinned dependency revisions
@@ -111,7 +112,7 @@ Compaction is an ordered three-pass scan rather than an `atomicAdd`, because dra
 Working: windowing, input in three tiers behind a layer stack, events, the GPU pipeline, materials, camera,
 layers, physics, workers and asset loading, logging, the debug server, sprite sheets with animation,
 sequencing with tweening merged into it, distance-field text drawn through an instance producer, and audio
-as WAV clips played through one platform stream per voice.
+on SDL3_mixer: a voice per track, groups by tag, keyed limits, fades, pitch, loop points, and streaming.
 
 Not ported: shadows, post-processing, UI, tiled maps and multi-camera.
 

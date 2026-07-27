@@ -1,46 +1,49 @@
 --- Sound output, rooted at `app.audio`.
 ---
---- **WAV only.** Clips are read with `SDL_LoadWAV`, and there is no
---- SDL_mixer and no decoder in this engine. So Ogg Vorbis, Opus, MP3, FLAC
---- and tracker modules do not load, and neither does anything else that is
---- compressed: a file is PCM, or it fails with "cannot load". Adding a
---- decoder means adding a dependency and a licence to the build, which is a
---- decision this module does not get to make on its own.
+--- **The mixer decodes.** A clip is whatever SDL_mixer's decoders can read:
+--- WAV, AIFF, VOC, AU, Ogg Vorbis, Opus, FLAC, MP3 and WavPack, depending on
+--- what the build linked. `Audio.decoders` reports what this one has, which is
+--- the only honest answer: a decoder whose dependency was missing at configure
+--- time is dropped without complaint.
 ---
---- **Nothing is mixed here.** A voice is one platform stream, and every
---- stream bound to the output is summed by the platform. Playing the same
---- clip three times over is three streams reading the same bytes, not three
---- copies added together by this code. `SDL_MixAudio` is therefore unused:
---- the only thing it could do that binding cannot is sum into a buffer this
---- engine owns, and nothing needs one.
+--- **A voice is a track.** The mixer sums every track on it into the buffer
+--- the hardware reads, so playing the same clip three times over is three
+--- tracks reading one clip, not three copies added together by this code.
 ---
---- **Nothing runs on an audio thread.** SDL can pull audio from a callback,
---- and that callback fires on a thread the Lua VM did not create. A Lua
---- function invoked from such a thread is the unsafe case that keeps raw
---- thread creation unexposed (see `native/worker.c`), so the device is fed by
---- queueing instead, from `update`, on the thread everything else runs on. A
---- callback mixer would need a native bridge, and there is none.
+--- **Resident or streamed.** A clip under `streamSeconds` is decoded once, up
+--- front, and every voice reads the same PCM: that is what a sound effect
+--- played forty times a second wants. A clip at or over it holds nothing, and
+--- each voice opens the file and decodes as it plays: that is what a piece of
+--- music wants, and it is also what a clip whose length the file cannot state
+--- gets, because a file that will not say how long it is may be very long.
+--- `load` takes `stream` to override the threshold either way.
 ---
---- **Every voice is fed in pieces.** A sound is not queued whole and then
---- forgotten; each update tops its stream up to a fixed lead in seconds and
---- no further. That is what a long piece of music needs, and running short
---- sounds through the same path means there is one playback shape rather than
---- two. Looping falls out of it: the cursor wraps and the next top-up crosses
---- the join with no gap. What it does not do is stream from disk. `SDL_LoadWAV`
---- has no partial-read form, so the file is resident even though the stream's
---- queue is bounded, and reading a WAV incrementally means parsing the
---- container here, which is the decoder this module does not have.
+--- **Loading is off the main thread.** A clip is read on the asset worker and
+--- handed back as an address, the same route a decoded image takes. A load
+--- never blocks a frame; the clip reports that it is still loading and `play`
+--- declines until it is not.
 ---
---- **Loading is off the main thread.** A clip is read and converted on the
---- asset worker and handed back as an address, the same route a decoded image
---- takes. A load never blocks a frame; the clip reports that it is still
---- loading and `play` declines until it is not.
+--- **Nothing runs on an audio thread.** SDL_mixer can call back when a track
+--- stops, and that callback fires on a thread the Lua VM did not create. A Lua
+--- function invoked from such a thread is the unsafe case that keeps raw thread
+--- creation unexposed (see `native/worker.c`), so no callback is installed and
+--- `update` asks each sounding voice whether it is still playing instead. The
+--- cost is that a voice is reaped on the frame after it ended rather than the
+--- instant it did, which nothing here needs to be sooner.
 ---
---- Positional panning is deliberately absent. See `Sound` for why.
+--- **Limits are ours; groups are the mixer's.** A group is a tag, and the
+--- mixer pauses, resumes and stops every voice carrying one. A key is a limit
+--- bucket counted here, because the mixer has no notion of "at most three of
+--- these at once, and not twice inside fifty milliseconds", which is what keeps
+--- forty enemies dying together from playing forty identical sounds.
+---
+--- **Position is passed through and nothing else.** See `Sound` for what a
+--- caller still has to do by hand.
 
 local ecs <const> = require("tecs.ecs")
 local assets <const> = require("tecs.assets")
 local loader <const> = require("tecs.ffi.loader")
+local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local adapter <const> = require("tecs.platform.adapter")
 local audiobackend <const> = require("tecs.platform.audiobackend")
 local log <const> = require("tecs.log")
@@ -59,14 +62,11 @@ local DEFAULT_CHANNELS <const> = 2
 --- stealing: a sound that stops halfway through because something else
 --- started is harder to explain than one that never started.
 local DEFAULT_MAX_VOICES <const> = 32
---- Seconds of audio kept queued ahead of the device on each voice.
+--- Seconds past which a clip streams rather than being held in memory.
 ---
---- Long enough that a frame that runs late does not run the queue dry, short
---- enough that stopping a voice is not audibly deferred by what is already
---- committed.
-local DEFAULT_LEAD <const> = 0.25
---- Bytes per sample. Clips arrive as 32-bit float, always.
-local SAMPLE_BYTES <const> = 4
+--- Ten is long enough that no sound effect reaches it and short enough that no
+--- piece of music misses it.
+local DEFAULT_STREAM_SECONDS <const> = 10.0
 
 --- Slots a voice handle reserves for its index. The rest of the handle is a
 --- generation, so a handle to a voice that has finished and been reused
@@ -81,6 +81,9 @@ local MAX_GENERATION <const> = 32767
 --- Distinct from zero, which means "not started yet". Without the
 --- distinction a one-shot would restart on the frame after it ended, forever.
 local FINISHED <const> = -1
+
+--- What `MIX_PlayTrack` is told to repeat forever.
+local LOOP_FOREVER <const> = -1
 
 -------------------------------------------------------------------------------
 -- Interned clip names
@@ -121,17 +124,27 @@ end
 --- handle a game has to remember to release, and it is why despawning
 --- something mid-sound does the obvious thing.
 ---
---- There is no listener and no panning. SDL gives a stream one gain and a
---- channel map, and a channel map reorders channels rather than attenuating
---- them, so constant-power panning would mean either summing samples here or
---- splitting every mono clip across two streams. Both are real designs with
---- real costs, and neither is worth committing to before the questions under
---- it are answered: which units distance is in, what the falloff curve is,
---- whether the listener follows the camera or an entity, and what happens to
---- a sound on a screen-space layer. Attenuating by distance without panning
---- would be the cheap half of that, and shipping the cheap half is what fixes
---- the answers to the other questions by accident. `gain` is the seam it will
---- arrive through when it does.
+--- Position is passed to the mixer and nothing more. `spatial` switches it on,
+--- and `x`, `y` and `z` are read as the mixer reads them: a right-handed
+--- system whose listener sits at the origin and cannot be moved, with x
+--- positive to the right, y positive up and z positive behind. So a caller with
+--- a camera and a world has three jobs this component does not do for it, and
+--- doing any of them here would fix answers that belong to a game:
+---
+--- 1. Subtract the listener. There is no listener component and no rule that
+---    the camera is one, so whatever a game decides is listening is what it
+---    subtracts before writing these fields.
+--- 2. Choose a scale. The mixer attenuates with distance on its own, and how
+---    loud a sound a hundred world units away should be is a question about a
+---    game's units, not about audio.
+--- 3. Decide what a screen-space sound means. A sound on a layer that does not
+---    move with the camera has no world position to convert, and the answer is
+---    to leave `spatial` at zero.
+---
+--- No group is named here. A group is a string, an FFI component holds
+--- numbers, and interning group names into a second integer space would make
+--- the mixer's tags something a snapshot had to reproduce. A game that wants an
+--- entity's sound in a group starts it with `play` and holds the handle.
 local record Sound is Component
     --- Clip index, from `Audio.clipId`. Zero plays nothing.
     clip: number
@@ -139,6 +152,13 @@ local record Sound is Component
     gain: number
     --- Nonzero repeats until the component goes away.
     loop: number
+    --- Playback rate. 1 is unchanged, 2 is an octave up and half as long.
+    pitch: number
+    --- Nonzero reads `x`, `y` and `z`; zero mixes without a position.
+    spatial: number
+    x: number
+    y: number
+    z: number
     --- Voice the audio pass assigned: zero before it starts, negative once a
     --- one-shot has finished. Written by the engine; setting it back to zero
     --- is how a game asks for the sound again.
@@ -152,14 +172,24 @@ ecs.newFFIComponent({
         { "clip", "int32_t" },
         { "gain", "float" },
         { "loop", "uint8_t" },
+        { "pitch", "float" },
+        { "spatial", "uint8_t" },
+        { "x", "float" },
+        { "y", "float" },
+        { "z", "float" },
         { "voice", "int32_t" },
     },
-    defaults = { 0, 1.0, 0, 0 },
+    defaults = { 0, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0 },
     serialize = function(instance: Sound): {string: any}
         return {
             clip = clipPaths[instance.clip as integer],
             gain = instance.gain,
             loop = instance.loop ~= 0,
+            pitch = instance.pitch,
+            spatial = instance.spatial ~= 0,
+            x = instance.x,
+            y = instance.y,
+            z = instance.z,
         }
     end,
     deserialize = function(_world: ecs.World, data: {string: any}): Sound
@@ -167,9 +197,13 @@ ecs.newFFIComponent({
         local clip = 0
         if path ~= nil and path ~= "" then clip = clipId(path) end
         -- The voice is not restored. A snapshot records that an entity has a
-        -- sound, not how far through it the device had got, so it starts.
+        -- sound, not how far through it the mixer had got, so it starts.
         return Sound(clip, data.gain as number,
-            (data.loop as boolean) and 1 or 0)
+            (data.loop as boolean) and 1 or 0,
+            (data.pitch as number) or 1.0,
+            (data.spatial as boolean) and 1 or 0,
+            (data.x as number) or 0.0, (data.y as number) or 0.0,
+            (data.z as number) or 0.0)
     end,
 })
 
@@ -179,24 +213,45 @@ ecs.newFFIComponent({
 
 --- One playback in progress. Internal: a game holds the integer handle.
 local record Voice
-    stream: loader.CPtr
+    track: loader.CPtr
     clip: Audio.Clip
-    --- Bytes of the clip handed to the stream so far.
-    cursor: integer
-    loop: boolean
-    --- What the game asked for, before the master gain.
+    --- What the game asked for, before the group and the master.
     gain: number
-    --- The value last pushed to the stream, so an unchanged gain costs
-    --- nothing per frame.
+    --- The value last pushed to the track, so an unchanged gain costs nothing
+    --- per frame.
     applied: number
+    --- The rate last pushed to the track, for the same reason and because a
+    --- reused track keeps whatever the last voice set.
+    pitch: number
+    --- Group tag, or nil.
+    group: string
+    --- Limit bucket, or nil.
+    key: string
     --- Rises each time the slot is taken, so a stale handle is inert.
     generation: integer
     sounding: boolean
+    --- Set while a stop is fading out. Such a voice keeps its slot until the
+    --- mixer says it has finished, and takes no further instruction.
+    stopping: boolean
+    --- Tracked here because a paused track reports that it is not playing, and
+    --- reaping on that alone would collect everything a group paused.
+    paused: boolean
     --- True when a `Sound` component started this, and so when the audio pass
     --- is the thing that decides it should stop.
     owned: boolean
     --- Set by the pass that walks `Sound` rows, cleared before each walk.
     referenced: boolean
+    --- Last position pushed, so an unmoved sound costs nothing per frame.
+    spatial: boolean
+    x: number
+    y: number
+    z: number
+end
+
+--- How many of one key are sounding, and when one last started.
+local record Bucket
+    count: integer
+    last: number
 end
 
 local record Audio
@@ -207,8 +262,9 @@ local record Audio
         channels: integer
         --- Voices that may sound at once. Defaults to 32.
         maxVoices: integer
-        --- Seconds kept queued ahead of the device. Defaults to 0.25.
-        lead: number
+        --- Seconds at which a clip streams instead of being held resident.
+        --- Defaults to 10.
+        streamSeconds: number
         --- Output backend. Defaults to the installed platform's.
         backend: Backend
     end
@@ -223,18 +279,54 @@ local record Audio
         status: string
         --- Set when loading failed.
         error: string
-        --- Seconds of audio, once ready.
+        --- Seconds of audio, or zero when the file cannot say.
         duration: number
+        --- Whether the decoded audio is held in memory. False for a clip each
+        --- voice reads from the file for itself.
+        resident: boolean
         _handle: assets.Handle
-        _samples: loader.BytePointer
-        _length: integer
+    end
+
+    record LoadOptions
+        --- Forces streaming when true and residency when false. Left unset,
+        --- the clip's duration decides against `streamSeconds`.
+        stream: boolean
     end
 
     record PlayOptions
-        --- 0 to 1, before the master gain. Defaults to 1.
+        --- 0 to 1, before the group and the master gains. Defaults to 1.
         gain: number
         --- Repeats until stopped. Defaults to false.
         loop: boolean
+        --- Seconds from the start of the clip a repeat returns to, so an
+        --- intro can play once and the rest of it loop. Defaults to 0.
+        loopStart: number
+        --- Seconds into the clip the first pass begins. Defaults to 0.
+        start: number
+        --- Seconds of silence-to-full at the start. Defaults to 0.
+        fadeIn: number
+        --- Playback rate. 1 is unchanged. Defaults to 1.
+        pitch: number
+        --- Fraction of `pitch` to vary by, chosen anew for each voice. 0.1
+        --- spreads voices over plus or minus a tenth. Defaults to 0.
+        pitchVariance: number
+        --- Group this voice joins. Defaults to none.
+        group: string
+        --- Limit bucket this voice counts against. Defaults to none.
+        key: string
+        --- Position, when `spatial`. See `Sound` for what the numbers mean.
+        spatial: boolean
+        x: number
+        y: number
+        z: number
+    end
+
+    --- What a key allows.
+    record Limit
+        --- Voices this key may hold at once. Zero or absent is no ceiling.
+        voices: integer
+        --- Seconds after one starts before another may. Zero is none.
+        cooldown: number
     end
 
     Sound: Sound
@@ -244,18 +336,29 @@ local record Audio
     available: boolean
 
     _backend: Backend
-    _device: integer
+    _mixer: loader.CPtr
     _spec: audiobackend.Spec
+    _params: audiobackend.PlayParams
     _voices: {Voice}
     _free: {integer}
     _sounding: integer
-    _leadBytes: integer
+    _streamMs: integer
     _masterGain: number
+    _groupGains: {string: number}
+    _limits: {string: Audio.Limit}
+    _buckets: {string: Bucket}
     _clips: {integer: Clip}
     _loading: {Clip}
+    --- Seconds `update` has been told about, which is what a cooldown is
+    --- measured against.
+    _now: number
 end
 
 local AudioMT <const>: metatable<Audio> = { __index = Audio }
+
+--- Takes finished loads. Declared here and defined below, because shutting
+--- down has to drain what is in flight and shutting down is described first.
+local resolveLoads: function(self: Audio): integer
 
 Audio.Sound = Sound
 
@@ -267,6 +370,15 @@ end
 --- Path a clip index stands for, or nil when it names nothing.
 function Audio.clipPath(id: integer): string
     return clipPaths[id]
+end
+
+--- The decoders this build linked, in the mixer's own order.
+---
+--- What a build asked for and what it got are different questions: a decoder
+--- whose dependency was not found is dropped silently. This answers the second.
+function Audio.decoders(): {string}
+    if not sdl3mixer.init() then return {} end
+    return sdl3mixer.decoders()
 end
 
 -------------------------------------------------------------------------------
@@ -288,10 +400,8 @@ function Audio.create(config?: Audio.Config): Audio
         frequency = given.frequency or DEFAULT_FREQUENCY,
         channels = given.channels or DEFAULT_CHANNELS,
     }
-
-    local lead = given.lead or DEFAULT_LEAD
-    self._leadBytes = math.floor(
-        lead * self._spec.frequency * self._spec.channels * SAMPLE_BYTES)
+    self._streamMs = math.floor(
+        (given.streamSeconds or DEFAULT_STREAM_SECONDS) * 1000)
 
     local maxVoices = given.maxVoices or DEFAULT_MAX_VOICES
     if maxVoices < 1 or maxVoices >= SLOT_SPAN then
@@ -302,8 +412,9 @@ function Audio.create(config?: Audio.Config): Audio
     self._free = {}
     for slot = 1, maxVoices do
         self._voices[slot] = {
-            cursor = 0, gain = 1.0, applied = -1.0, generation = 0,
-            sounding = false, owned = false, referenced = false, loop = false,
+            gain = 1.0, applied = -1.0, pitch = 1.0, generation = 0,
+            sounding = false, stopping = false, paused = false, owned = false,
+            referenced = false, spatial = false, x = 0.0, y = 0.0, z = 0.0,
         }
         -- Taken from the end, so the first sound of a run uses slot one and a
         -- log or a snapshot reads in the order things happened.
@@ -312,11 +423,18 @@ function Audio.create(config?: Audio.Config): Audio
 
     self._sounding = 0
     self._masterGain = 1.0
+    self._groupGains = {}
+    self._limits = {}
+    self._buckets = {}
     self._clips = {}
     self._loading = {}
+    self._now = 0.0
+    -- One options record, overwritten per play. Every field is set each time,
+    -- so nothing carries over from the previous voice.
+    self._params = { loops = 0, loopStartMs = 0, fadeInMs = 0, startMs = 0 }
 
-    self._device = self._backend.openDevice(self._spec)
-    self.available = self._device ~= 0
+    self._mixer = self._backend.open(self._spec)
+    self.available = self._mixer ~= nil
     if not self.available then
         LOGGER:info("no audio output; sound is silent for this run")
     end
@@ -325,32 +443,41 @@ end
 
 --- Stops everything and closes the output.
 function Audio:destroy()
+    -- Drained first. A clip that arrived after the mixer had gone would hold a
+    -- pointer into a library that has released everything it made.
+    if #self._loading > 0 then
+        assets.waitAll()
+        resolveLoads(self)
+    end
+
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
-        if voice.stream ~= nil then
-            if voice.sounding then self._backend.unbindStream(voice.stream) end
-            self._backend.destroyStream(voice.stream)
-            voice.stream = nil
+        if voice.track ~= nil then
+            if voice.sounding then self._backend.stop(voice.track, 0) end
+            self._backend.destroyTrack(voice.track)
+            voice.track = nil
         end
         voice.sounding = false
+        voice.stopping = false
+        voice.paused = false
     end
     self._sounding = 0
+    self._buckets = {}
 
     for _, clip in pairs(self._clips) do
         if clip._handle ~= nil then
             clip._handle:release()
             clip._handle = nil
         end
-        clip._samples = nil
-        clip._length = 0
+        clip.resident = false
         clip.status = "released"
     end
     self._clips = {}
     self._loading = {}
 
-    if self._device ~= 0 then
-        self._backend.closeDevice(self._device)
-        self._device = 0
+    if self._mixer ~= nil then
+        self._backend.close(self._mixer)
+        self._mixer = nil
     end
     self.available = false
 end
@@ -359,11 +486,13 @@ end
 -- Clips
 -------------------------------------------------------------------------------
 
---- Queues a WAV for loading and returns its clip immediately.
+--- Queues a sound for loading and returns its clip immediately.
 ---
 --- Loading the same path twice returns the same clip; a clip is the file, and
---- playing it twice over is two voices reading one buffer.
-function Audio:load(path: string): Audio.Clip
+--- playing it twice over is two voices reading one clip. `options.stream`
+--- overrides the duration threshold that otherwise decides whether the clip is
+--- held in memory.
+function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     local id = clipId(path)
     local existing = self._clips[id]
     if existing ~= nil then return existing end
@@ -372,14 +501,21 @@ function Audio:load(path: string): Audio.Clip
     -- sound has no other reason to have started it.
     if not assets.installed() then assets.install() end
 
+    local given = options or {} as Audio.LoadOptions
+    local mode = "auto"
+    if given.stream == true then
+        mode = "stream"
+    elseif given.stream == false then
+        mode = "resident"
+    end
+
     local clip: Audio.Clip = {
         path = path,
         id = id,
         status = "loading",
         duration = 0.0,
-        _length = 0,
-        _handle = assets.loadSound(path, self._spec.frequency,
-            self._spec.channels),
+        resident = false,
+        _handle = assets.loadSound(path, mode, self._streamMs),
     }
     self._clips[id] = clip
     self._loading[#self._loading + 1] = clip
@@ -392,7 +528,7 @@ function Audio:clip(id: integer): Audio.Clip
 end
 
 --- Takes finished loads. Called by `update`.
-local function resolveLoads(self: Audio): integer
+resolveLoads = function(self: Audio): integer
     local waiting = #self._loading
     if waiting == 0 then return 0 end
     assets.update()
@@ -405,10 +541,9 @@ local function resolveLoads(self: Audio): integer
         if handle.status == "loading" then
             kept[#kept + 1] = clip
         elseif handle.status == "ready" then
-            clip._samples = loader.bytePointer(handle.samples)
-            clip._length = handle.bytes
-            clip.duration = handle.bytes
-                / (self._spec.frequency * self._spec.channels * SAMPLE_BYTES)
+            clip.resident = handle.resident
+            clip.duration = handle.durationMs >= 0
+                and handle.durationMs / 1000 or 0.0
             clip.status = "ready"
             resolved = resolved + 1
         else
@@ -451,51 +586,80 @@ local function voiceOf(self: Audio, handle: integer): Voice
     return voice
 end
 
---- Hands the stream as much as the lead calls for, wrapping when looping.
-local function feed(self: Audio, voice: Voice)
-    local clip = voice.clip
-    local length = clip._length
-    if length <= 0 then return end
-
-    local want = self._leadBytes - self._backend.pendingBytes(voice.stream)
-    while want > 0 do
-        local remaining = length - voice.cursor
-        if remaining <= 0 then
-            if not voice.loop then return end
-            voice.cursor = 0
-            remaining = length
-        end
-        local chunk = remaining < want and remaining or want
-        self._backend.putData(voice.stream, clip._samples + voice.cursor, chunk)
-        voice.cursor = voice.cursor + chunk
-        want = want - chunk
-    end
+--- The gain a voice should carry, group included. The master is the mixer's
+--- own number and is not multiplied in here.
+local function composedGain(self: Audio, voice: Voice): number
+    if voice.group == nil then return voice.gain end
+    local scale = self._groupGains[voice.group]
+    if scale == nil then return voice.gain end
+    return voice.gain * scale
 end
 
---- Unbinds a voice, empties it, and returns the slot.
+--- Pushes a voice's gain, skipping the call when nothing changed.
+local function applyGain(self: Audio, voice: Voice)
+    local applied = composedGain(self, voice)
+    if applied == voice.applied then return end
+    voice.applied = applied
+    self._backend.setGain(voice.track, applied)
+end
+
+--- Gives a slot back, untagging and un-counting whatever it held.
 local function release(self: Audio, slot: integer)
     local voice = self._voices[slot]
     if not voice.sounding then return end
-    self._backend.unbindStream(voice.stream)
-    -- Unbinding stops it feeding the output but leaves whatever it still
-    -- holds inside it, so the next sound on this slot would start with the
-    -- tail of the last one.
-    self._backend.clearStream(voice.stream)
+
+    if voice.group ~= nil then
+        self._backend.untag(voice.track, voice.group)
+        voice.group = nil
+    end
+    if voice.key ~= nil then
+        local bucket = self._buckets[voice.key]
+        if bucket ~= nil then bucket.count = bucket.count - 1 end
+        voice.key = nil
+    end
+    -- Dropped rather than left attached, so a streamed voice closes its file
+    -- and a resident clip stops being referenced by a track nothing plays.
+    self._backend.clearTrack(voice.track)
+
     voice.sounding = false
+    voice.stopping = false
+    voice.paused = false
     voice.owned = false
     voice.clip = nil
-    voice.cursor = 0
+    voice.applied = -1.0
+    if voice.spatial then
+        self._backend.clearPosition(voice.track)
+        voice.spatial = false
+    end
     self._sounding = self._sounding - 1
     self._free[#self._free + 1] = slot
 end
 
---- Starts `clip` on a free voice and returns its handle, or zero.
-local function start(self: Audio, clip: Audio.Clip, gain: number,
-                     loop: boolean, owned: boolean): integer
-    if not self.available then return 0 end
-    if clip == nil or clip.status ~= "ready" or clip._length <= 0 then
-        return 0
+--- Whether `key` has room for another voice right now.
+local function admits(self: Audio, key: string): boolean
+    local limit = self._limits[key]
+    if limit == nil then return true end
+    local bucket = self._buckets[key]
+    if bucket == nil then return true end
+    if limit.cooldown ~= nil and limit.cooldown > 0
+        and self._now - bucket.last < limit.cooldown then
+        return false
     end
+    if limit.voices ~= nil and limit.voices > 0
+        and bucket.count >= limit.voices then
+        return false
+    end
+    return true
+end
+
+--- Starts `clip` on a free voice and returns its handle, or zero.
+local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
+                     owned: boolean): integer
+    if not self.available then return 0 end
+    if clip == nil or clip.status ~= "ready" then return 0 end
+
+    local key = options.key
+    if key ~= nil and not admits(self, key) then return 0 end
 
     local count = #self._free
     if count == 0 then return 0 end
@@ -503,95 +667,207 @@ local function start(self: Audio, clip: Audio.Clip, gain: number,
     self._free[count] = nil
 
     local voice = self._voices[slot]
-    if voice.stream == nil then
+    if voice.track == nil then
         -- Made on first use rather than at startup, so a game that never
-        -- plays anything holds no streams.
-        voice.stream = self._backend.createStream(self._spec)
-        if voice.stream == nil then
+        -- plays anything holds no tracks.
+        voice.track = self._backend.createTrack(self._mixer)
+        if voice.track == nil then
             self._free[#self._free + 1] = slot
             return 0
         end
     end
 
-    voice.generation = voice.generation + 1
-    if voice.generation > MAX_GENERATION then voice.generation = 1 end
-    voice.clip = clip
-    voice.cursor = 0
-    voice.loop = loop
-    voice.gain = gain
-    voice.applied = gain * self._masterGain
-    voice.sounding = true
-    voice.owned = owned
-    voice.referenced = false
-
-    self._backend.setStreamGain(voice.stream, voice.applied)
-    if not self._backend.bindStream(self._device, voice.stream) then
-        voice.sounding = false
+    local pointed: boolean
+    if clip.resident then
+        pointed = self._backend.setTrackClip(voice.track, clip._handle.audio)
+    else
+        pointed = self._backend.setTrackFile(voice.track, clip.path)
+    end
+    if not pointed then
         self._free[#self._free + 1] = slot
         return 0
     end
 
+    voice.generation = voice.generation + 1
+    if voice.generation > MAX_GENERATION then voice.generation = 1 end
+    voice.clip = clip
+    voice.gain = options.gain or 1.0
+    voice.applied = -1.0
+    voice.group = options.group
+    voice.key = key
+    voice.sounding = true
+    voice.stopping = false
+    voice.paused = false
+    voice.owned = owned
+    voice.referenced = false
+
+    if voice.group ~= nil then self._backend.tag(voice.track, voice.group) end
+    applyGain(self, voice)
+
+    local pitch = options.pitch or 1.0
+    local variance = options.pitchVariance or 0.0
+    if variance ~= 0.0 then
+        pitch = pitch * (1.0 + (math.random() * 2.0 - 1.0) * variance)
+    end
+    -- Compared against what this track already carries, not against one,
+    -- because a reused slot would otherwise keep the last voice's rate.
+    if pitch ~= voice.pitch then
+        self._backend.setPitch(voice.track, pitch)
+        voice.pitch = pitch
+    end
+
+    voice.spatial = options.spatial == true
+    if voice.spatial then
+        voice.x = options.x or 0.0
+        voice.y = options.y or 0.0
+        voice.z = options.z or 0.0
+        self._backend.setPosition(voice.track, voice.x, voice.y, voice.z)
+    end
+
+    local params = self._params
+    params.loops = options.loop == true and LOOP_FOREVER or 0
+    params.loopStartMs = math.floor((options.loopStart or 0.0) * 1000)
+    params.startMs = math.floor((options.start or 0.0) * 1000)
+    params.fadeInMs = math.floor((options.fadeIn or 0.0) * 1000)
+
+    if not self._backend.play(voice.track, params) then
+        if voice.group ~= nil then
+            self._backend.untag(voice.track, voice.group)
+            voice.group = nil
+        end
+        -- Dropped here as well as in `release`, because a slot that never
+        -- started is not released and a streamed input would stay open.
+        self._backend.clearTrack(voice.track)
+        voice.sounding = false
+        voice.key = nil
+        self._free[#self._free + 1] = slot
+        return 0
+    end
+
+    if key ~= nil then
+        local bucket = self._buckets[key]
+        if bucket == nil then
+            bucket = { count = 0, last = 0.0 }
+            self._buckets[key] = bucket
+        end
+        bucket.count = bucket.count + 1
+        bucket.last = self._now
+    end
+
     self._sounding = self._sounding + 1
-    -- The first piece goes in before this returns, so a sound is audible
-    -- without waiting for the next update to notice it.
-    feed(self, voice)
     return voice.generation * SLOT_SPAN + slot
 end
 
 --- Plays `clip`, returning a handle, or zero when it did not start.
 ---
---- Zero means the clip is not loaded, loading failed, every voice is busy, or
---- the machine has no output. None of those is worth raising over: a sound
---- that does not play is not a reason for a frame to stop.
+--- Zero means the clip is not loaded, loading failed, a key's limit or
+--- cooldown declined it, every voice is busy, or the machine has no output.
+--- None of those is worth raising over: a sound that does not play is not a
+--- reason for a frame to stop.
 function Audio:play(clip: Audio.Clip, options?: Audio.PlayOptions): integer
-    local given = options or {} as Audio.PlayOptions
-    return start(self, clip, given.gain or 1.0, given.loop == true, false)
+    return start(self, clip, options or {} as Audio.PlayOptions, false)
 end
 
 --- Stops a voice. A handle to one that already ended does nothing.
-function Audio:stop(handle: integer)
+---
+--- `fadeOut` seconds keeps the voice sounding while it fades, so `playing`
+--- stays true until `update` sees the mixer finish it.
+function Audio:stop(handle: integer, fadeOut?: number)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
-    release(self, handle % SLOT_SPAN)
+    if voice == nil or voice.stopping then return end
+    local seconds = fadeOut or 0.0
+    if seconds <= 0.0 then
+        self._backend.stop(voice.track, 0)
+        release(self, handle % SLOT_SPAN)
+        return
+    end
+    self._backend.stop(voice.track, math.floor(seconds * 1000))
+    voice.stopping = true
 end
 
---- Stops everything.
+--- Stops everything, at once.
 function Audio:stopAll()
     for slot = 1, #self._voices do
-        release(self, slot)
+        local voice = self._voices[slot]
+        if voice.sounding then
+            self._backend.stop(voice.track, 0)
+            release(self, slot)
+        end
     end
 end
 
---- Whether a handle still names a sounding voice.
+--- Whether a handle still names a sounding voice. A paused or fading voice
+--- still counts: it has not finished.
 function Audio:playing(handle: integer): boolean
     return voiceOf(self, handle) ~= nil
 end
 
---- Sets a voice's gain, before the master gain.
+--- Whether a handle names a voice a pause is holding.
+function Audio:paused(handle: integer): boolean
+    local voice = voiceOf(self, handle)
+    return voice ~= nil and voice.paused
+end
+
+--- Holds a voice where it is. It keeps its slot until something resumes or
+--- stops it, because a paused voice has not finished.
+function Audio:pause(handle: integer)
+    local voice = voiceOf(self, handle)
+    if voice == nil or voice.paused or voice.stopping then return end
+    voice.paused = true
+    self._backend.pause(voice.track)
+end
+
+--- Lets a paused voice carry on.
+function Audio:resume(handle: integer)
+    local voice = voiceOf(self, handle)
+    if voice == nil or not voice.paused then return end
+    voice.paused = false
+    self._backend.resume(voice.track)
+end
+
+--- Sets a voice's gain, before its group and the master.
 function Audio:setGain(handle: integer, gain: number)
     local voice = voiceOf(self, handle)
     if voice == nil then return end
     voice.gain = gain
-    local applied = gain * self._masterGain
-    if applied == voice.applied then return end
-    voice.applied = applied
-    self._backend.setStreamGain(voice.stream, applied)
+    applyGain(self, voice)
 end
 
---- Scales everything. Applied to what is already sounding, not only to what
---- starts next.
+--- Sets a voice's playback rate. 1 is unchanged.
+function Audio:setPitch(handle: integer, ratio: number)
+    local voice = voiceOf(self, handle)
+    if voice == nil or voice.pitch == ratio then return end
+    voice.pitch = ratio
+    self._backend.setPitch(voice.track, ratio)
+end
+
+--- Places a voice in space. See `Sound` for what the numbers mean.
+function Audio:setPosition(handle: integer, x: number, y: number, z: number)
+    local voice = voiceOf(self, handle)
+    if voice == nil then return end
+    if voice.spatial and voice.x == x and voice.y == y and voice.z == z then
+        return
+    end
+    voice.spatial = true
+    voice.x = x
+    voice.y = y
+    voice.z = z
+    self._backend.setPosition(voice.track, x, y, z)
+end
+
+--- Returns a voice to unpositioned mixing.
+function Audio:clearPosition(handle: integer)
+    local voice = voiceOf(self, handle)
+    if voice == nil or not voice.spatial then return end
+    voice.spatial = false
+    self._backend.clearPosition(voice.track)
+end
+
+--- Scales everything. One number on the mixer, so this costs the same whether
+--- one voice is sounding or every voice is.
 function Audio:setMasterGain(gain: number)
     self._masterGain = gain
-    for slot = 1, #self._voices do
-        local voice = self._voices[slot]
-        if voice.sounding then
-            local applied = voice.gain * gain
-            if applied ~= voice.applied then
-                voice.applied = applied
-                self._backend.setStreamGain(voice.stream, applied)
-            end
-        end
-    end
+    if self._mixer ~= nil then self._backend.setMixerGain(self._mixer, gain) end
 end
 
 --- The master gain.
@@ -599,32 +875,124 @@ function Audio:masterGain(): number
     return self._masterGain
 end
 
---- Voices sounding right now.
+--- Voices sounding right now, including paused and fading ones.
 function Audio:sounding(): integer
     return self._sounding
 end
 
---- Takes finished loads, tops up every voice, and releases the ones that
---- have finished. Call once per frame.
+-------------------------------------------------------------------------------
+-- Groups
+-------------------------------------------------------------------------------
+
+--- Scales every voice in a group, and every voice that joins it later.
 ---
---- "Finished" is the platform having taken every byte, which is a little
---- earlier than the last sample reaching the speaker: whatever the device has
---- already pulled into its own buffer plays out regardless. A queue-fed API
---- reports what it has been asked for, not what has been heard, and the
---- difference is one device buffer.
-function Audio:update(): integer
+--- Composed here rather than through the mixer's per-tag gain, which writes
+--- each tagged track's own gain and would overwrite what the voice asked for.
+function Audio:setGroupGain(name: string, gain: number)
+    self._groupGains[name] = gain
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding and voice.group == name then
+            applyGain(self, voice)
+        end
+    end
+end
+
+--- A group's gain. 1 for one nothing has set.
+function Audio:groupGain(name: string): number
+    return self._groupGains[name] or 1.0
+end
+
+--- Holds every voice in a group where it is.
+function Audio:pauseGroup(name: string)
+    if self._mixer == nil then return end
+    self._backend.pauseTag(self._mixer, name)
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding and voice.group == name then voice.paused = true end
+    end
+end
+
+--- Lets a paused group carry on.
+function Audio:resumeGroup(name: string)
+    if self._mixer == nil then return end
+    self._backend.resumeTag(self._mixer, name)
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding and voice.group == name then voice.paused = false end
+    end
+end
+
+--- Ends every voice in a group, over `fadeOut` seconds if that is given.
+---
+--- A faded stop leaves the voices sounding until they finish, so they are
+--- reaped by `update` rather than here.
+function Audio:stopGroup(name: string, fadeOut?: number)
+    if self._mixer == nil then return end
+    local seconds = fadeOut or 0.0
+    self._backend.stopTag(self._mixer, name, math.floor(seconds * 1000))
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding and voice.group == name then
+            if seconds > 0.0 then
+                voice.stopping = true
+                -- A paused voice does not advance, so a fade on one would
+                -- never finish and the slot would never come back.
+                voice.paused = false
+            else
+                release(self, slot)
+            end
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Keyed limits
+-------------------------------------------------------------------------------
+
+--- Caps how many voices a key may hold and how often it may start one.
+---
+--- A key is not a group. A group says where a sound's gain comes from and what
+--- a pause reaches; a key says how many of one sound the mix will carry. The
+--- two are set independently on `play`, so "at most three footsteps at once,
+--- all of them in the effects group" is the ordinary case and neither name has
+--- to know about the other.
+---
+--- Passing nil removes the limit. Voices already sounding are left alone.
+function Audio:setLimit(key: string, limit: Audio.Limit)
+    self._limits[key] = limit
+end
+
+--- The limit a key carries, or nil.
+function Audio:limit(key: string): Audio.Limit
+    return self._limits[key]
+end
+
+--- Voices a key is holding right now.
+function Audio:keyCount(key: string): integer
+    local bucket = self._buckets[key]
+    return bucket ~= nil and bucket.count or 0
+end
+
+-------------------------------------------------------------------------------
+-- The frame
+-------------------------------------------------------------------------------
+
+--- Takes finished loads and reaps the voices the mixer has finished with.
+--- Call once per frame, with the frame's step.
+---
+--- The step is what a cooldown is measured against. Nothing else here needs
+--- time: a fade is the mixer's to run, and a voice is over when the mixer says
+--- so rather than when a clock here says it should be.
+function Audio:update(dt?: number): integer
+    self._now = self._now + (dt or 0.0)
     resolveLoads(self)
 
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
-        if voice.sounding then
-            local drained = self._backend.pendingBytes(voice.stream) <= 0
-            if drained and not voice.loop
-                and voice.cursor >= voice.clip._length then
-                release(self, slot)
-            else
-                feed(self, voice)
-            end
+        if voice.sounding and not voice.paused
+            and not self._backend.playing(voice.track) then
+            release(self, slot)
         end
     end
     return self._sounding
@@ -633,6 +1001,10 @@ end
 -------------------------------------------------------------------------------
 -- The entity interface
 -------------------------------------------------------------------------------
+
+--- Options `reconcile` fills per row, so a walk over a million sounds
+--- allocates nothing.
+local rowOptions <const>: Audio.PlayOptions = {}
 
 --- Starts, stops and reaps the voices `Sound` components ask for.
 ---
@@ -659,8 +1031,15 @@ local function reconcile(self: Audio, sounds: ecs.Query)
             local handle = entry.voice as integer
 
             if handle == 0 then
-                local started = start(self, self._clips[entry.clip as integer],
-                    entry.gain as number, (entry.loop as integer) ~= 0, true)
+                rowOptions.gain = entry.gain as number
+                rowOptions.loop = (entry.loop as integer) ~= 0
+                rowOptions.pitch = entry.pitch as number
+                rowOptions.spatial = (entry.spatial as integer) ~= 0
+                rowOptions.x = entry.x as number
+                rowOptions.y = entry.y as number
+                rowOptions.z = entry.z as number
+                local started = start(self,
+                    self._clips[entry.clip as integer], rowOptions, true)
                 if started ~= 0 then
                     if mutable == nil then
                         mutable = archetype:getMut(Sound) as {Sound}
@@ -680,6 +1059,12 @@ local function reconcile(self: Audio, sounds: ecs.Query)
                     if voice.gain ~= entry.gain then
                         self:setGain(handle, entry.gain as number)
                     end
+                    if (entry.spatial as integer) ~= 0 then
+                        self:setPosition(handle, entry.x as number,
+                            entry.y as number, entry.z as number)
+                    elseif voice.spatial then
+                        self:clearPosition(handle)
+                    end
                 end
             end
         end
@@ -688,6 +1073,7 @@ local function reconcile(self: Audio, sounds: ecs.Query)
     for slot = 1, #voices do
         local voice = voices[slot]
         if voice.sounding and voice.owned and not voice.referenced then
+            self._backend.stop(voice.track, 0)
             release(self, slot)
         end
     end
@@ -695,9 +1081,9 @@ end
 
 --- Adds the system that plays `Sound` components.
 ---
---- `update` is not added here. Feeding the device is not world work: it has
---- to keep happening while the world is paused, and an application drives it
---- from the iteration instead.
+--- `update` is not added here. Reaping voices is not world work: it has to
+--- keep happening while the world is paused, and an application drives it from
+--- the iteration instead.
 function Audio:install(world: ecs.World)
     local sounds = world:query({
         name = "tecs.Sounds",
