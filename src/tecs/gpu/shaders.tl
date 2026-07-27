@@ -20,6 +20,7 @@ local bit <const> = require("bit")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local paths <const> = require("tecs.platform.paths")
+local assets <const> = require("tecs.assets")
 
 local C <const> = sdl.C
 
@@ -81,6 +82,17 @@ local function searchRoots(): {string}
     return roots
 end
 
+--- Forgets every resolved source, so the next lookup reads the files again.
+---
+--- What a shader reload starts with, and what a root or a generated include
+--- changing does on its own. Overrides and generated includes are kept: those
+--- are substitutions something asked for rather than copies of a file, and
+--- dropping them would put a spec or a material dispatch back on disk content
+--- it deliberately replaced.
+function shaders.invalidate()
+    for key in pairs(cache) do cache[key] = nil end
+end
+
 --- Adds a directory to search before the ones already known.
 ---
 --- Everything cached is dropped, because a resolved source may have taken an
@@ -89,17 +101,7 @@ end
 function shaders.addRoot(path: string)
     local list = searchRoots()
     table.insert(list, 1, path:sub(-1) == "/" and path or path .. "/")
-    for key in pairs(cache) do cache[key] = nil end
-end
-
---- Reads a file through SDL, so this works wherever content lives.
-local function readFile(path: string): string
-    local size = loader.newArray("size_t[1]")
-    local data = C.SDL_LoadFile(path, size)
-    if data == nil then return nil end
-    local text = loader.toBytes(data, tonumber(size[0]) as integer)
-    C.SDL_free(data)
-    return text
+    shaders.invalidate()
 end
 
 --- Locates `relative` in the first root that has it.
@@ -107,7 +109,7 @@ local function find(relative: string): string
     local generated = provided[relative]
     if generated ~= nil then return generated end
     for _, root in ipairs(searchRoots()) do
-        local text = readFile(root .. relative)
+        local text = assets.read(root .. relative)
         if text ~= nil then return text end
     end
     return nil

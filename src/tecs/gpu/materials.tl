@@ -21,6 +21,7 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local paths <const> = require("tecs.platform.paths")
 local shaders <const> = require("tecs.gpu.shaders")
+local assets <const> = require("tecs.assets")
 
 local C <const> = sdl.C
 
@@ -53,6 +54,8 @@ local record materials
     define: function(name: string, source: string)
     --- Reads the materials and publishes the dispatch. Idempotent.
     install: function()
+    --- Re-reads every material and republishes the dispatch, or refuses.
+    reload: function(): boolean, string
     --- The id a material is dispatched by, resolved from its name.
     id: function(name: string): integer
     --- Every material name, in id order.
@@ -64,6 +67,10 @@ end
 materials.defaultName = DEFAULT
 
 local byName <const>: {string: materials.Material} = {}
+--- Names supplied from memory rather than read from a root. Held apart so a
+--- re-read can drop what came from a file without dropping these, which beat
+--- a file of the same name.
+local defined <const>: {string: boolean} = {}
 local order: {string} = {}
 local roots: {string} = nil
 local built = false
@@ -81,15 +88,6 @@ function materials.addRoot(path: string)
     built = false
 end
 
-local function readFile(path: string): string
-    local size = loader.newArray("size_t[1]")
-    local data = C.SDL_LoadFile(path, size)
-    if data == nil then return nil end
-    local text = loader.toBytes(data, tonumber(size[0]) as integer)
-    C.SDL_free(data)
-    return text
-end
-
 --- Turns a material name into something that can be a GLSL identifier.
 local function mangle(name: string): string
     return "material_" .. (name:gsub("[^%w]", "_"))
@@ -102,6 +100,7 @@ end
 --- as adding a file would.
 function materials.define(name: string, source: string)
     byName[name] = { name = name, id = 0, source = source }
+    defined[name] = true
     built = false
 end
 
@@ -117,7 +116,7 @@ local function collect()
                 local name = (file:gsub("%.glsl$", ""))
                 -- A nearer root wins, and a definition beats both.
                 if byName[name] == nil then
-                    local source = readFile(root .. file)
+                    local source = assets.read(root .. file)
                     if source ~= nil then
                         byName[name] = { name = name, id = 0, source = source }
                     end
@@ -215,9 +214,58 @@ function materials.names(): {string}
     return list
 end
 
+--- Re-reads every material and republishes the dispatch.
+---
+--- Refused when the set of materials has changed, and this is the whole reason
+--- there is a rule rather than a re-read. Ids come from sorted name order, so a
+--- file appearing or disappearing renumbers every material after it
+--- alphabetically, and a `Material` component in a live world holds a number
+--- that was resolved before the change. Editing a body reloads; adding or
+--- removing one is a restart.
+---
+--- Materials supplied through `define` are kept as they are: those came from
+--- memory rather than a root, and nothing on disk has an opinion about them.
+--- @return Whether the dispatch was rebuilt, then why not.
+function materials.reload(): boolean, string
+    materials.install()
+
+    local previousOrder = order
+    local previousByName: {string: materials.Material} = {}
+    for name, material in pairs(byName) do previousByName[name] = material end
+
+    for name in pairs(byName) do
+        if not defined[name] then byName[name] = nil end
+    end
+    collect()
+
+    local changed = #order ~= #previousOrder
+    if not changed then
+        for index, name in ipairs(order) do
+            if name ~= previousOrder[index] then changed = true end
+        end
+    end
+    if not changed then
+        shaders.provide(DISPATCH, assemble())
+        return true
+    end
+
+    -- Put back exactly what was dispatched before, ids included: the re-read
+    -- renumbered whatever it kept, and a refusal has to leave nothing changed.
+    local found = table.concat(order, ", ")
+    for name in pairs(byName) do byName[name] = nil end
+    for name, material in pairs(previousByName) do byName[name] = material end
+    order = previousOrder
+    for index, name in ipairs(order) do byName[name].id = index - 1 end
+    return false, ("the material set changed from [%s] to [%s]; ids are "
+        .. "assigned by name order, so reloading would change what every "
+        .. "Material component in the world means")
+        :format(table.concat(previousOrder, ", "), found)
+end
+
 --- Forgets everything read, so a spec can start from the files again.
 function materials.reset()
     for name in pairs(byName) do byName[name] = nil end
+    for name in pairs(defined) do defined[name] = nil end
     order = {}
     roots = nil
     built = false

@@ -50,7 +50,6 @@
 --- and none is needed by anything drawing text today.
 
 local ecs <const> = require("tecs.ecs")
-local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
@@ -65,8 +64,6 @@ local type Renderer = require("tecs.Renderer")
 
 local type Component = ecs.Component
 local type World = ecs.World
-
-local C <const> = sdl.C
 
 local Transform <const> = ecs.builtins.Transform
 local Tint <const> = components.Tint
@@ -265,15 +262,6 @@ end
 --- snapshot writes a name, so this is what one is resolved back through.
 local fontsByName <const>: {string: Font} = {}
 
-local function readFile(path: string): string
-    local size = loader.newArray("size_t[1]")
-    local data = C.SDL_LoadFile(path, size)
-    if data == nil then return nil end
-    local body = loader.toBytes(data, tonumber(size[0]) as integer)
-    C.SDL_free(data)
-    return body
-end
-
 --- Resolves a path against the asset root unless it already names one.
 local function resolve(path: string): string
     if path:sub(1, 1) == "/" then return path end
@@ -383,7 +371,7 @@ function text.loadFont(options: FontOptions): Font
     if existing ~= nil then return existing end
 
     local metricsPath = resolve(options.metrics)
-    local document = readFile(metricsPath)
+    local document = assets.read(metricsPath)
     if document == nil then
         error(("tecs: cannot read the font metrics '%s'"):format(metricsPath), 2)
     end

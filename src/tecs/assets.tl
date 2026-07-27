@@ -17,6 +17,25 @@
 --- decisions: the renderer knows what layout its textures need, and an asset
 --- that has been decoded is useful before anything has decided where it will
 --- live.
+---
+--- A file whose contents something else knows how to interpret goes through
+--- `read`. That is synchronous and is the only sanctioned way to get bytes out
+--- of the content root, because content lives inside the package on Android
+--- and `io.open` does not reach it. It answers bytes and never text: a Lua
+--- string carries a length, so an image, an archive or a binary sidecar comes
+--- back whole, and a format that is text is a decoder's opinion rather than
+--- this function's.
+---
+--- Reading a document is therefore those two halves and nothing between them:
+---
+---     local tecs <const> = require("tecs")
+---     local bytes <const> = tecs.assets.read(tecs.paths.asset("levels/1.json"))
+---     local level <const> = tecs.json.decode(bytes)
+---
+--- `paths.asset` resolves against the content root and `read` answers nil for
+--- a path with no file, so a game distinguishes an absent document from a
+--- malformed one, which the decoder raises on. A parser for a binary format
+--- sits in exactly that second position, over the same bytes.
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -135,7 +154,10 @@ end
 local record Handle
     --- What was asked for: "image" or "sound".
     kind: string
-    --- "loading", "ready", or "failed".
+    --- "loading", "ready", "failed", or "released". The last is terminal and
+    --- reached only through `release`, so something handed a handle whose
+    --- decode it no longer owns is told that rather than finding nil where the
+    --- pixels were.
     status: string
     path: string
     --- Decoded RGBA pixels, valid until `release`. Images only.
@@ -154,6 +176,11 @@ local record Handle
     --- Set if loading failed.
     error: string
     _surface: loader.CValue
+    --- Id the worker answers with, so a release can find this in the queue.
+    _id: integer
+    --- Callers sharing this decode. One decode serves every load of a path
+    --- that was already in flight, and the last release of it frees.
+    _shares: integer
 end
 
 local record assets
@@ -166,8 +193,31 @@ end
 local HandleMT <const>: metatable<Handle> = { __index = Handle }
 
 local pending: {integer: Handle} = {}
+--- Image decodes that have been queued and not yet answered, by path. A second
+--- load of a path in this table joins the first rather than queueing a decode
+--- of the same file beside it.
+local inFlight: {string: Handle} = {}
 local nextId = 1
 local worker: workers.Worker = nil
+
+--- Reads a whole file and returns its bytes, or nil when there is none there.
+---
+--- Through SDL rather than stdio, because on Android content lives inside the
+--- package and only SDL's IO reaches it. Binary: the result carries its own
+--- length, so a NUL in the middle of it is a byte like any other.
+---
+--- Synchronous, which is what makes it usable while a world is being built.
+--- This is for the documents a game or the engine reads once; a decode a frame
+--- should not wait on goes through `loadImage` or `loadSound` instead.
+--- @param path An absolute path, or one `paths.asset` has resolved.
+function assets.read(path: string): string
+    local size = loader.newArray("size_t[1]")
+    local data = C.SDL_LoadFile(path, size)
+    if data == nil then return nil end
+    local bytes = loader.toBytes(data, tonumber(size[0]) as integer)
+    C.SDL_free(data)
+    return bytes
+end
 
 --- Starts the loading worker.
 function assets.install(luaPath?: string)
@@ -192,15 +242,31 @@ local function queue(handle: Handle): integer
     end
     local id = nextId
     nextId = nextId + 1
+    handle._id = id
+    handle._shares = 1
     pending[id] = handle
     return id
 end
 
 --- Queues an image for loading and returns its handle immediately.
+---
+--- Two loads of one path that overlap share a decode and get the same handle,
+--- because decoding the same PNG twice at once is work with no result the
+--- first decode does not already have. They share the surface with it, so the
+--- last of them to release is the one that frees. A load that starts after the
+--- first has resolved decodes again: nothing here is a cache, and a handle
+--- that has been released is not something to hand out a second time.
 function assets.loadImage(path: string): Handle
+    local shared = inFlight[path]
+    if shared ~= nil then
+        shared._shares = shared._shares + 1
+        return shared
+    end
+
     local handle = setmetatable(
         { kind = "image", status = "loading", path = path } as Handle, HandleMT)
     local id = queue(handle)
+    inFlight[path] = handle
     worker:send({ id = id, kind = "image", path = path })
     return handle
 end
@@ -220,7 +286,7 @@ function assets.loadSound(path: string, mode: string,
                           streamMs: integer): Handle
     if not sdl3mixer.init() then
         local failed = setmetatable({
-            kind = "sound", status = "failed", path = path,
+            kind = "sound", status = "failed", path = path, _shares = 1,
             error = "cannot load " .. path,
         } as Handle, HandleMT)
         return failed
@@ -241,6 +307,22 @@ local function complete(result: {string: any}): boolean
     local handle = pending[id]
     pending[id] = nil
     if handle == nil then return false end
+    if inFlight[handle.path] == handle then inFlight[handle.path] = nil end
+
+    -- Released while the worker was still decoding. Ownership still arrives
+    -- with the address, so what arrived is destroyed here rather than left for
+    -- a handle nobody is holding any more.
+    if handle.status == "released" then
+        if result.surface ~= nil then
+            C.SDL_DestroySurface(ffi.cast("SDL_Surface *",
+                ffi.cast("uintptr_t", result.surface)) as loader.CValue)
+        end
+        if result.audio ~= nil then
+            MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *",
+                ffi.cast("uintptr_t", result.audio)) as loader.CValue)
+        end
+        return true
+    end
 
     if result.error ~= nil then
         handle.status = "failed"
@@ -281,7 +363,22 @@ end
 --- released when nothing will play it again. A track holds its own reference,
 --- so releasing one that is still sounding is safe: the mixer drops it when
 --- the last track using it does.
+---
+--- The handle ends at "released" whatever it held, so a caller handed one
+--- after its decode has gone reads a status that says so rather than finding
+--- the pixels nil and no reason for it. Releasing a load still in flight is
+--- allowed: what the worker returns is destroyed on arrival.
+---
+--- Where several loads shared one decode, this releases one of them, and the
+--- last one frees.
 function Handle:release()
+    if self.status == "released" then return end
+    self._shares = self._shares - 1
+    if self._shares > 0 then return end
+
+    if inFlight[self.path] == self then inFlight[self.path] = nil end
+    self.status = "released"
+
     if self.audio ~= nil then
         MIX.MIX_DestroyAudio(self.audio)
         self.audio = nil
@@ -330,6 +427,7 @@ function assets.shutdown()
     worker:stop()
     worker = nil
     pending = {}
+    inFlight = {}
 end
 
 return assets

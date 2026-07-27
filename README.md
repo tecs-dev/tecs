@@ -223,6 +223,37 @@ out to be a minute of Vorbis costs the frame nothing. A clip long enough to
 stream is measured on the worker and then thrown away rather than decoded, and
 the voices that play it read the file for themselves.
 
+The application owns the pump. `assets.update` runs once per iteration and
+`assets.shutdown` runs at teardown, so a game that loads an image and does
+nothing else still sees its handle resolve and the decoding thread still stops.
+Subsystems that load assets of their own drain the same queue when they look at
+their own waiting lists, and that is an optimisation rather than the mechanism.
+
+A handle is a one-shot future, not a cache. Two loads of one path that overlap
+share the decode and the surface, because decoding the same file twice at once
+produces nothing the first decode does not already have; the last of them to
+release is the one that frees. A load that starts after the first has resolved
+decodes again, since handing back a handle whose pixels may already have been
+uploaded and released would be a cache with none of a cache's guarantees.
+Release is terminal and says so: a released handle reports `"released"` rather
+than reporting `"ready"` over pixels that are gone, which is the difference
+between a clear error at the upload and a null dereference inside it.
+
+Files a game interprets itself go through `assets.read`, which is the only
+sanctioned way to get bytes out of the content root: on Android content lives
+inside the package and `io.open` does not reach it. It answers bytes rather
+than text, so an image, an archive or a binary sidecar comes back whole and
+being text is a decoder's opinion. Reading a document is that call and a
+decoder over it, with nothing in between:
+
+```lua
+local bytes = tecs.assets.read(tecs.paths.asset("levels/1.json"))
+local level = tecs.json.decode(bytes)
+```
+
+`read` answers nil for a path with no file, so an absent document is
+distinguishable from a malformed one, which the decoder raises on.
+
 ## Sound
 
 `app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
@@ -956,6 +987,21 @@ since changed, is a recompile where one is possible and an error where it is
 not. The device claims the pack's format for the same reason: claiming a format
 the build cannot supply selects a backend that fails at shader creation rather
 than at startup.
+
+Shaders and materials are re-readable while the process runs, through the
+debug server's `reload_shaders` tool rather than a watcher on the filesystem.
+Whatever edited a `.glsl` knows that it did, and a watcher is the part of a
+reload with no decision in it. The decisions are the refusals. A build that
+links no compiler cannot reload at all: a pack decides the shader format the
+device claimed when it was created, so there is nothing to put in a pipeline's
+place. And a material file appearing or disappearing renumbers every material
+after it alphabetically, while `Material` components in the live world already
+hold numbers, so editing a body reloads and adding one is a restart. Both are
+refused by name rather than attempted.
+
+What makes the swap cheap is that the pipeline objects a frame binds are read
+through the backend every frame, so replacing them is picked up by the next
+frame with no pass graph rebuilt and nothing in the world touched.
 
 Content is never resolved against the working directory. That happens to work
 when a build is launched from a project root and is meaningless the moment

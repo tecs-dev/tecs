@@ -17,6 +17,7 @@ local Window <const> = require("tecs.platform.Window")
 local Device <const> = require("tecs.gpu.Device")
 local Renderer <const> = require("tecs.Renderer")
 local Audio <const> = require("tecs.Audio")
+local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 local sequence <const> = require("tecs.sequence")
 local paths <const> = require("tecs.platform.paths")
@@ -312,6 +313,14 @@ function Application:_iterate(queue: loader.CValue, count: integer,
 
     if self.quitRequested then return false end
 
+    -- The loading worker answers whenever it finishes, and nothing else in a
+    -- frame is obliged to ask. A subsystem that loads assets of its own drains
+    -- the same queue when it looks at its own waiting list, but a game that
+    -- loaded an image and nothing else has no such subsystem, and its handle
+    -- would stay "loading" for the life of the process. Outside the suspension
+    -- guard, because a decode that finished while backgrounded is finished.
+    assets.update()
+
     if not self.suspended then
         self.elapsed = self.elapsed + dt
         if self._config.update ~= nil then
@@ -421,6 +430,11 @@ function Application:_shutdown(): boolean
     -- to has gone is undefined.
     if self.input ~= nil then self.input:destroy() end
     if self.audio ~= nil then self.audio:destroy() end
+    -- After the audio, which drains its own outstanding loads through the
+    -- worker this stops. A thread still decoding into a state that is being
+    -- torn down is the one way asset loading can outlive the process it
+    -- belongs to.
+    assets.shutdown()
     log.closeFile()
 
     if self.device ~= nil then

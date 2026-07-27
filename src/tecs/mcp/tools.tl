@@ -14,6 +14,9 @@ local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 local events <const> = require("tecs.platform.events")
 local sandbox <const> = require("tecs.mcp.sandbox")
+local shaders <const> = require("tecs.gpu.shaders")
+local shadercompiler <const> = require("tecs.gpu.shadercompiler")
+local materials <const> = require("tecs.gpu.materials")
 local Renderer <const> = require("tecs.Renderer")
 local Audio <const> = require("tecs.Audio")
 
@@ -23,14 +26,29 @@ local record tools
     --- Set by the application so the frame-facing tools have something to
     --- look at. Absent means those tools report why rather than failing.
     bind: function(renderer: Renderer, world: ecs.World)
+    --- Supplies what rebuilds the pipelines after a shader reload.
+    bindReload: function(rebuild: function())
 end
 
 local bound: Renderer = nil
 local boundWorld: ecs.World = nil
+local boundReload: function() = nil
 
 function tools.bind(renderer: Renderer, world: ecs.World)
     bound = renderer
     boundWorld = world
+end
+
+--- Supplies what rebuilds the pipelines after a shader reload.
+---
+--- Separate from `bind` because it is the device's half of the operation and
+--- the source half is all this module can do on its own. Swapping a pipeline
+--- object means destroying live GPU handles and creating new ones against the
+--- formats the device claimed, which is knowledge the renderer's backend has
+--- and nothing here does. `rebuild` runs with the device idle and outside any
+--- pass, and raising from it is reported as the tool failing.
+function tools.bindReload(rebuild: function())
+    boundReload = rebuild
 end
 
 --- The bound world, or an error naming why there is not one.
@@ -452,6 +470,45 @@ mcp.register({
             keys = #keys > 0 and keys or cjson.empty_array,
             voices = #voices > 0 and voices or cjson.empty_array,
         }
+    end,
+})
+
+--- Re-reads the shader and material sources and rebuilds what draws from them.
+---
+--- Driven from here rather than from a watcher on the filesystem. Whatever
+--- edited a `.glsl` knows that it did, and a watcher is the part of a reload
+--- with no decision in it: the interesting question is what a reload may not
+--- do, and both answers to that are checked below.
+---
+--- The pipeline objects a frame binds are read through the backend every
+--- frame, so replacing them is picked up by the next frame with no graph
+--- rebuild and nothing in the world touched.
+mcp.register({
+    name = "reload_shaders",
+    description = "Re-reads shaders and materials from their files and "
+        .. "rebuilds the pipelines. Refuses where a reload would change what "
+        .. "already-drawn entities mean.",
+    destructive = true,
+    inputSchema = { type = "object", properties = cjson.empty_array },
+    handler = function(_: {string: any}): {string: any}
+        -- A pack decides the shader format the device claimed at creation, so
+        -- a build without a compiler has nothing to put in its place and no
+        -- way to change what it draws with while it is running.
+        if not shadercompiler.available() then
+            error("this build links no shader compiler, so its shaders are "
+                .. "fixed at the pack it was built against", 0)
+        end
+        if boundReload == nil then
+            error("no shader rebuild is registered, so the sources would be "
+                .. "re-read and nothing would draw differently", 0)
+        end
+
+        local reloaded, refused = materials.reload()
+        if not reloaded then error(refused, 0) end
+        shaders.invalidate()
+        boundReload()
+
+        return { materials = materials.names() }
     end,
 })
 

@@ -6,13 +6,11 @@
 --- too, because that is not recoverable from the translated output.
 ---
 --- This module knows nothing about compiling. That is deliberate: it is loaded
---- by builds that link no compiler at all, so it depends only on SDL and the
---- loader.
+--- by builds that link no compiler at all.
 
 local sdl <const> = require("tecs.ffi.sdl3")
-local loader <const> = require("tecs.ffi.loader")
+local assets <const> = require("tecs.assets")
 
-local C <const> = sdl.C
 local K <const> = sdl.K
 local buffer <const> = require("string.buffer")
 
@@ -165,15 +163,9 @@ function shaderpack.write(path: string, pack: shaderpack.Pack)
 end
 
 --- Reads a pack from `path`, or nil if there is no file there.
----
---- Read through SDL rather than stdio, because on Android content lives inside
---- the package and only SDL's IO reaches it.
 function shaderpack.read(path: string): shaderpack.Pack
-    local size = loader.newArray("size_t[1]")
-    local data = C.SDL_LoadFile(path, size)
-    if data == nil then return nil end
-    local bytes = loader.toBytes(data, tonumber(size[0]) as integer)
-    C.SDL_free(data)
+    local bytes = assets.read(path)
+    if bytes == nil then return nil end
     return shaderpack.decode(bytes, path)
 end
 
