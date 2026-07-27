@@ -31,6 +31,7 @@ local WorldImpl <const> = require("tecs.internal.world")
 -- that declares them loads, so a plain `require("tecs")` would demand a
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
+local type Future = require("tecs.Future")
 local type Renderer = require("tecs.Renderer")
 local type Audio = require("tecs.Audio")
 local type Camera = require("tecs.gfx.Camera")
@@ -103,6 +104,7 @@ local record tecs
 
     --- The engine surface.
     Application: Application
+    Future: Future
     Renderer: Renderer
     Audio: Audio
     Camera: Camera
@@ -290,6 +292,7 @@ end
 --- written instead of a nil where it is called.
 local ENGINE <const>: {string: string} = {
     Application = "tecs.Application",
+    Future = "tecs.Future",
     Renderer = "tecs.Renderer",
     Audio = "tecs.Audio",
     Camera = "tecs.gfx.Camera",
