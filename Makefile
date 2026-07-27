@@ -77,6 +77,9 @@ bench: build $(OUT)/bench/shapes.lua ## Run the shapes benchmark
 bench-physics: build $(OUT)/bench/physics.lua ## Run the physics benchmark
 	@$(BIN) --entry $(OUT)/bench/physics.lua
 
+bench-text: build $(OUT)/bench/text.lua ## Run the text benchmark
+	@$(BIN) --entry $(OUT)/bench/text.lua
+
 bench-latency: build $(OUT)/bench/latency.lua ## Measure event-to-photon latency
 	@$(BIN) --entry $(OUT)/bench/latency.lua
 
