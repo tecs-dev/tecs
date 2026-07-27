@@ -11,16 +11,27 @@ local C <const> = sdl.C
 local K <const> = sdl.K
 
 local record Window
+    --- The `SDL_Window`. Nil once `destroy` has run, and what a device claims
+    --- for presentation.
     handle: loader.CPtr
+    --- The title last set, kept so reading it back does not cross the FFI.
     title: string
     _destroyed: boolean
 end
 
 local record WindowOptions
+    --- Defaults to "tecs".
     title: string
+    --- Size in screen coordinates, not pixels: on a high-density display the
+    --- drawable is larger. Defaults to 1280 by 720.
     width: integer
     height: integer
+    --- Defaults to true, so omitting it gives a resizable window. Only an
+    --- explicit false turns it off.
     resizable: boolean
+    --- Whether the drawable follows the display's density instead of being
+    --- stretched to it. Defaults to true, on the same terms, which is what
+    --- makes `getPixelSize` differ from `getSize`.
     highPixelDensity: boolean
 end
 
@@ -54,6 +65,10 @@ local widthOut <const> = loader.newArray("int[1]")
 local heightOut <const> = loader.newArray("int[1]")
 
 --- Returns the window's size in screen coordinates.
+---
+--- The units mouse, touch and pen positions arrive in, so this is what a
+--- layout positioned against the pointer uses. `getPixelSize` is what a render
+--- target is sized to.
 function Window:getSize(): integer, integer
     C.SDL_GetWindowSize(self.handle, widthOut, heightOut)
     return widthOut[0] as integer, heightOut[0] as integer
@@ -66,6 +81,7 @@ function Window:getPixelSize(): integer, integer
     return widthOut[0] as integer, heightOut[0] as integer
 end
 
+--- Sets the window's title, and the copy `title` reports.
 function Window:setTitle(title: string)
     self.title = title
     C.SDL_SetWindowTitle(self.handle, title)

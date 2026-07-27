@@ -15,7 +15,9 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 local C <const> = sdl.C
 
 local record capabilities
-    --- Platform name as SDL reports it.
+    --- Platform name as SDL reports it, such as "macOS" or "Android". A
+    --- licensed port answers with its own name instead, since everything here
+    --- describes the platform actually installed.
     target: string
     --- CPU architecture LuaJIT was built for.
     architecture: string
@@ -37,18 +39,29 @@ local record capabilities
     --- `runtimeShaders`: a development build may have both, and a release has
     --- only this.
     packagedShaders: boolean
-    --- Shader formats this target consumes.
+    --- Shader formats this target consumes. One entry, since a build supplies
+    --- one format.
     shaderFormats: {string}
 
-    --- Input and threading the target provides.
+    --- Whether a touch device is attached right now. A property of the machine
+    --- rather than of the target: a desktop with a touchscreen has one.
     touch: boolean
+    --- Always true. Every target reaches gamepads through the same subsystem,
+    --- so what varies is whether one is plugged in, which `Input:gamepads`
+    --- answers.
     gamepad: boolean
+    --- Whether the device itself carries a gyroscope or an accelerometer. Says
+    --- nothing about a gamepad's sensors, which `Gamepad:hasSensor` answers
+    --- per device.
     sensors: boolean
+    --- Whether work can be run off the main thread.
     workers: boolean
     --- Logical cores, for sizing a worker pool.
     cores: integer
 
-    --- Where content is read from and state is written to.
+    --- Always true. Every target has somewhere to write, and `paths.pref` is
+    --- where: the field exists so a caller can ask rather than assume, not
+    --- because a target answers no.
     writableStorage: boolean
 end
 
@@ -87,7 +100,11 @@ end
 
 --- Reads the capabilities of the running build.
 ---
---- Cached, since none of these change while a platform is installed.
+--- Cached, since none of these change while a platform is installed. The cache
+--- is keyed on the platform generation, so installing one drops it without
+--- anybody calling `reset`.
+--- @return The same table on every call until the platform changes. Shared,
+---     so a caller that means to keep it does not also mean to edit it.
 function capabilities.get(): capabilities
     local generation = adapter.generation()
     if generation ~= cachedGeneration then

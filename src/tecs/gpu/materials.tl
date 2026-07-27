@@ -33,20 +33,31 @@ local DEFAULT <const> = "textured"
 
 local record materials
     record Material
+        --- The file's name without its extension, and how a game asks for it.
         name: string
+        --- What an instance carries to select this material. Assigned by
+        --- `install` from sorted order, so it holds only for the set of files
+        --- that were present when the dispatch was built.
         id: integer
+        --- The material's GLSL, as read. Renamed on the way into the dispatch
+        --- rather than here, so this is still the text the file holds.
         source: string
     end
 
     --- Name of the material an entity with no Material component draws as.
     defaultName: string
 
+    --- Adds a directory to search before the ones already known.
     addRoot: function(path: string)
+    --- Supplies a material from memory rather than a file.
     define: function(name: string, source: string)
+    --- Reads the materials and publishes the dispatch. Idempotent.
     install: function()
+    --- The id a material is dispatched by, resolved from its name.
     id: function(name: string): integer
-    --- Every material name, sorted, which is also id order.
+    --- Every material name, in id order.
     names: function(): {string}
+    --- Forgets everything read, so a spec can start from the files again.
     reset: function()
 end
 
@@ -84,8 +95,11 @@ local function mangle(name: string): string
     return "material_" .. (name:gsub("[^%w]", "_"))
 end
 
---- Supplies a material from memory rather than a file. For a spec, and for a
---- game that generates one at build time.
+--- Supplies a material from memory rather than a file.
+---
+--- For a spec, and for a game that generates one at build time. Beats a file
+--- of the same name in any root, and renumbers the set on the next `install`
+--- as adding a file would.
 function materials.define(name: string, source: string)
     byName[name] = { name = name, id = 0, source = source }
     built = false
@@ -162,6 +176,10 @@ local function assemble(): string
 end
 
 --- Reads the materials and publishes the dispatch. Idempotent.
+---
+--- Called by shader loading rather than by a game, so a fragment shader cannot
+--- be built before the materials it dispatches to are known. Adding a root or
+--- defining a material puts this back on, and the next load rebuilds.
 function materials.install()
     if built then return end
     built = true
@@ -184,6 +202,12 @@ function materials.id(name: string): integer
     return material.id
 end
 
+--- Every material name, in id order.
+---
+--- The default first at id zero, then the rest alphabetically. Not sorted as a
+--- whole: the default's place is fixed by what a zero on an instance has to
+--- mean, wherever its own name would otherwise fall.
+--- @return A fresh list the caller owns.
 function materials.names(): {string}
     materials.install()
     local list: {string} = {}
