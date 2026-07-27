@@ -84,9 +84,10 @@ Working today:
   outside the camera's zoom, at its own parallax, or unlit
 - Sound: clips read on the asset worker through SDL_mixer's decoders, a voice
   per mixer track, groups by tag with a gain, a mute and a sticky pause each,
-  keyed limits with cooldowns, fades, pitch, loop points, streaming for long
-  clips, and a `Sound` component that names a group and plays for as long as
-  its entity exists
+  keyed limits with cooldowns, fades, pitch, loop points that change mid-play,
+  seek and tell, 3D position or a plain left-and-right pan, streaming for long
+  clips, and a `Sound` component that names a group and follows what is
+  written to it for as long as its entity is around and enabled
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -259,8 +260,8 @@ distinguishable from a malformed one, which the decoder raises on.
 ## Sound
 
 `app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
-loop it, pitch it, put it in a group, cap how often it may start, stop it. It
-is built on SDL_mixer 3 and on five decisions.
+loop it, pitch it, seek it, pan it, put it in a group, cap how often it may
+start, stop it. It is built on SDL_mixer 3 and on five decisions.
 
 **The mixer decodes.** A clip is whatever the linked decoders can read. What
 this build has is a question with a runtime answer rather than a configure-time
@@ -336,19 +337,35 @@ headphones need no handling.
 A `Sound` component is how a sound belongs to an entity. Presence is the
 instruction: an entity carrying one with a loaded clip starts sounding on the
 next audio pass and stops when the component or the entity goes away. One walk
-per frame starts what has not started, marks what has finished, and releases
-any voice no component referred to, which is what makes despawning something
-mid-sound do the obvious thing without an observer on every archetype.
+per frame starts what has not started, follows what is sounding, marks what has
+finished, and releases any voice no component referred to, which is what makes
+despawning something mid-sound do the obvious thing without an observer on
+every archetype.
+
+`Sound.playing` is the instruction rather than a report. Clearing it ends the
+voice and puts the row back to zero, so setting it again starts the sound,
+including on a one-shot that had already run out. Disabling an entity has the
+same effect for the same reason and comes back the same way: `Disabled` is
+excluded from every query that does not name it, so a disabled row is not
+followed and its voice is taken, and the pass clears the handle in the same
+frame so re-enabling starts rather than reading a voice that has gone as one
+that finished. A second query naming `Disabled` is what sees those rows, and
+because a disabled entity sits in an archetype of its own, a world with
+nothing disabled matches nothing and walks nothing.
 
 A `Sound` names its group the way it names its clip. The component is FFI and
 holds numbers, so `Sound.group` carries an interned index from `Audio.groupId`
 rather than the tag itself, and zero is no group. The index is one run's
 numbering and nothing else, which is why the component serializes the name: an
 integer in a save file would name whatever the next run happened to intern in
-its place. `clip`, `loop`, `pitch` and `group` are read when a voice starts and
-not afterwards, while `gain` and the position are followed for as long as it
-sounds, so moving a sound to another group means setting `group` and clearing
-`voice`.
+its place. `playing`, `gain`, `loop`, `pitch` and the position are followed for
+as long as the voice sounds, each of them a read and a compare per sounding row
+per frame and a call only on the frame the value moved. `clip` and `group` are
+read when a voice starts and not afterwards, because changing either takes an
+untag, a retag and a fresh input whatever else happens, and following a field
+that cannot be applied without a restart would put that cost on every row that
+never changes it. So moving a sound to another group means setting `group` and
+clearing `voice`.
 
 Position is passed to the mixer and nothing more. `Sound.spatial` switches it
 on and `x`, `y` and `z` are read as SDL_mixer reads them: a right-handed system
@@ -361,6 +378,27 @@ mixer's is the game's to pick; and a sound on a layer that does not move with
 the camera has no world position to convert, so it leaves `spatial` at zero.
 Each of those is a design decision about a game rather than about audio, and
 answering any of them here would fix the others by accident.
+
+`Audio:setStereo` is the other way to place a voice: a plain left and right
+gain, with no listener to subtract and no distance model to argue with, which
+is usually what a game laid out on a plane wants. It and `setPosition` are
+exclusive rather than layered. SDL_mixer keeps one spatialization mode per
+track, so `MIX_SetTrack3DPosition` folds the input to mono and derives the
+speaker gains from the coordinates while `MIX_SetTrackStereo` writes those same
+gains directly and resets the recorded position, and whichever was called last
+is what is heard. A null to either leaves both, which is why one
+`clearSpatial` answers for them.
+
+Fades are the mixer's to run, on a play and on a stop. `play` takes a
+`fadeIn`, and `stop`, `stopGroup` and `stopAll` all take a fade-out and leave
+the voice sounding until the mixer finishes it, so a faded stop costs nothing
+per frame and cannot drift. `pause` and `resume` take no duration, and that is
+the same decision rather than a gap in it: the mixer ramps nowhere else, so a
+faded pause means a gain ramp run from Lua on frame boundaries, its length
+following the frame rate rather than the clock, with the pause itself deferred
+until the ramp lands. What the mixer does offer instead is `tell` to read a
+voice's position and `seek` to put one back, so fading out and taking a sound
+back where it left off is something a game can build without either cost.
 
 ## Physics threads
 

@@ -111,8 +111,14 @@ local function recorder(options)
             tags = {},
             input = nil,
             position = nil,
+            stereo = nil,
             params = nil,
             fadeOutMs = nil,
+            -- The loop count last pushed part way through, and where the
+            -- mixer says the track is reading. A decoder that cannot seek is
+            -- what the `unseekable` option stands in for.
+            loops = nil,
+            positionMs = 0,
         }
         backend.tracks[track.index] = track
         return track
@@ -189,12 +195,37 @@ local function recorder(options)
         track.pitch = ratio
     end
 
-    function backend.setPosition(track, x, y, z)
-        track.position = { x = x, y = y, z = z }
+    function backend.setLoops(track, loops)
+        track.loops = loops
     end
 
-    function backend.clearPosition(track)
+    function backend.seek(track, ms)
+        if options.unseekable then
+            return false
+        end
+        track.positionMs = ms
+        return true
+    end
+
+    function backend.tell(track)
+        return track.positionMs
+    end
+
+    function backend.setPosition(track, x, y, z)
+        track.position = { x = x, y = y, z = z }
+        -- The mixer holds one placement per track, so recording both would
+        -- let a test pass that the real thing fails.
+        track.stereo = nil
+    end
+
+    function backend.setStereo(track, left, right)
+        track.stereo = { left = left, right = right }
         track.position = nil
+    end
+
+    function backend.clearSpatial(track)
+        track.position = nil
+        track.stereo = nil
     end
 
     function backend.tag(track, tag)
@@ -577,6 +608,104 @@ describe("audio", function()
             assert.are.equal(50, params.startMs)
             audio:destroy()
         end)
+
+        it("changes whether a voice repeats part way through", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { loop = true })
+            assert.is_true(audio:looping(voice))
+            assert.is_nil(backend.tracks[1].loops, "the play already carried the count, so nothing is pushed twice")
+
+            audio:setLoop(voice, false)
+            assert.are.equal(
+                0,
+                backend.tracks[1].loops,
+                "a piece of music told to stop looping plays out to its end rather than being cut"
+            )
+            assert.is_false(audio:looping(voice))
+
+            audio:setLoop(voice, true)
+            assert.are.equal(-1, backend.tracks[1].loops)
+            audio:destroy()
+        end)
+
+        it("pushes a loop change once", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:setLoop(voice, false)
+            assert.is_nil(backend.tracks[1].loops, "a one-shot already plays once")
+
+            audio:setLoop(voice, true)
+            audio:setLoop(voice, true)
+            assert.are.equal(-1, backend.tracks[1].loops)
+
+            backend.tracks[1].loops = nil
+            audio:setLoop(voice, true)
+            assert.is_nil(backend.tracks[1].loops, "an unchanged loop costs no call")
+            audio:destroy()
+        end)
+
+        it("leaves a loop change to a finished voice inert", function()
+            local audio, clip, backend = loaded()
+            local stale = audio:play(clip, { loop = true })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            audio:setLoop(stale, false)
+            assert.is_nil(backend.tracks[1].loops)
+            assert.is_false(audio:looping(stale))
+            audio:destroy()
+        end)
+
+        it("returns a reused track's loop to what the next voice asked for", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { loop = true })
+            audio:setLoop(voice, false)
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            local again = audio:play(clip, { loop = true })
+            assert.is_true(audio:looping(again), "the next sound on this slot must not inherit a loop")
+            audio:destroy()
+        end)
+    end)
+
+    describe("seek and tell", function()
+        it("moves a voice's read position and reads it back", function()
+            local audio, clip = loaded()
+            local voice = audio:play(clip)
+
+            assert.are.equal(0, audio:tell(voice))
+            assert.is_true(audio:seek(voice, 0.04))
+            assert.is_true(math.abs(audio:tell(voice) - 0.04) < 1e-9, "seconds in and seconds out")
+            audio:destroy()
+        end)
+
+        it("reports an input that cannot seek rather than raising", function()
+            local audio, clip = loaded({ backend = recorder({ unseekable = true }) })
+            local voice = audio:play(clip)
+            assert.is_false(audio:seek(voice, 0.04), "a decoder is allowed not to be able to seek")
+            audio:destroy()
+        end)
+
+        it("answers nothing for a handle that names no voice", function()
+            local audio, clip, backend = loaded()
+            local stale = audio:play(clip)
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            assert.is_false(audio:seek(stale, 0.01))
+            assert.is_nil(audio:tell(stale))
+            audio:destroy()
+        end)
+
+        it("says nothing rather than a negative when the mixer cannot answer", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            -- What a decoder that will not report a position looks like here.
+            backend.tracks[1].positionMs = -1
+            assert.is_nil(audio:tell(voice))
+            audio:destroy()
+        end)
     end)
 
     describe("fades", function()
@@ -606,6 +735,49 @@ describe("audio", function()
 
             track.playing = false
             audio:update(1 / 60)
+            assert.is_false(audio:playing(voice))
+            assert.are.equal(0, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("takes everything down over one fade", function()
+            local audio, clip, backend = loaded()
+            local first = audio:play(clip)
+            local second = audio:play(clip)
+
+            audio:stopAll(0.75)
+            assert.are.equal(750, backend.tracks[1].fadeOutMs)
+            assert.are.equal(750, backend.tracks[2].fadeOutMs)
+            assert.is_true(audio:playing(first), "a fading voice has not finished, so it keeps its slot")
+            assert.is_true(audio:playing(second))
+            assert.are.equal(2, audio:sounding())
+
+            backend.tracks[1].playing = false
+            backend.tracks[2].playing = false
+            audio:update(1 / 60)
+            assert.are.equal(0, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("lets a paused voice run its fade out", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:pause(voice)
+
+            audio:stopAll(0.5)
+            assert.is_false(audio:paused(voice), "a paused voice does not advance, so a fade on one would never finish")
+            assert.are.equal(500, backend.tracks[1].fadeOutMs)
+            audio:destroy()
+        end)
+
+        it("ends everything at once when no fade is given", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:play(clip)
+
+            audio:stopAll()
+            assert.are.equal(0, backend.tracks[1].fadeOutMs)
+            assert.is_false(backend.tracks[1].playing)
             assert.is_false(audio:playing(voice))
             assert.are.equal(0, audio:sounding())
             audio:destroy()
@@ -798,7 +970,7 @@ describe("audio", function()
         it("holds an entity's sound that starts after the pause", function()
             local audio, clip, backend, world = scene()
             audio:pauseGroup("sfx")
-            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             assert.is_true(
@@ -982,7 +1154,7 @@ describe("audio", function()
             audio:setPosition(voice, 4, 0, 0)
             assert.are.same({ x = 4, y = 0, z = 0 }, backend.tracks[1].position)
 
-            audio:clearPosition(voice)
+            audio:clearSpatial(voice)
             assert.is_nil(backend.tracks[1].position)
             audio:destroy()
         end)
@@ -1007,6 +1179,94 @@ describe("audio", function()
         end)
     end)
 
+    describe("stereo panning", function()
+        it("puts a plain left and right gain on the track", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { stereo = true, left = 0.8, right = 0.2 })
+            assert.are.same(
+                { left = 0.8, right = 0.2 },
+                backend.tracks[1].stereo,
+                "a game on a plane wants a pan, not a listener to subtract from"
+            )
+
+            audio:setStereo(voice, 0.1, 0.9)
+            assert.are.same({ left = 0.1, right = 0.9 }, backend.tracks[1].stereo)
+            audio:destroy()
+        end)
+
+        it("defaults both gains to one", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { stereo = true })
+            assert.are.same({ left = 1.0, right = 1.0 }, backend.tracks[1].stereo)
+            audio:destroy()
+        end)
+
+        it("replaces a position rather than layering over it", function()
+            -- The mixer keeps one spatialization mode per track: setting a
+            -- pan resets the 3D position and setting a position recomputes
+            -- the same speaker gains a pan wrote.
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { spatial = true, x = 3, y = 0, z = 0 })
+            assert.are.same({ x = 3, y = 0, z = 0 }, backend.tracks[1].position)
+
+            audio:setStereo(voice, 0.25, 0.75)
+            assert.is_nil(backend.tracks[1].position, "the later call is the one that is heard")
+            assert.are.same({ left = 0.25, right = 0.75 }, backend.tracks[1].stereo)
+
+            audio:setPosition(voice, 0, 0, -1)
+            assert.is_nil(backend.tracks[1].stereo, "and it goes the other way too")
+            assert.are.same({ x = 0, y = 0, z = -1 }, backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("takes the position when a play asks for both", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { spatial = true, x = 1, y = 2, z = 3, stereo = true, left = 0.5, right = 0.5 })
+            assert.are.same(
+                { x = 1, y = 2, z = 3 },
+                backend.tracks[1].position,
+                "one of the two has to win, and it must not be whichever the code happens to write last"
+            )
+            assert.is_nil(backend.tracks[1].stereo)
+            audio:destroy()
+        end)
+
+        it("leaves both behind on one call", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { stereo = true, left = 0.3, right = 0.7 })
+
+            audio:clearSpatial(voice)
+            assert.is_nil(backend.tracks[1].stereo, "a null to either mode leaves both, so one call answers for them")
+            assert.is_nil(backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("clears a reused track's pan", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { stereo = true, left = 0.0, right = 1.0 })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            assert.is_nil(backend.tracks[1].stereo)
+
+            audio:play(clip)
+            assert.is_nil(backend.tracks[1].stereo, "the next sound on this slot must not inherit a pan")
+            audio:destroy()
+        end)
+
+        it("reports the placement a voice is in", function()
+            local audio, clip = loaded()
+            local voice = audio:play(clip, { stereo = true, left = 0.4, right = 0.6 })
+
+            local sounding = audio:voices()
+            assert.are.equal(voice, sounding[1].handle)
+            assert.is_true(sounding[1].stereo)
+            assert.is_false(sounding[1].spatial, "the two are exclusive, so what looks in must not show both")
+            assert.are.equal(0.4, sounding[1].left)
+            assert.are.equal(0.6, sounding[1].right)
+            audio:destroy()
+        end)
+    end)
+
     describe("the Sound component", function()
         it("starts a sound the frame its entity appears", function()
             local audio, clip, backend, world = scene()
@@ -1022,7 +1282,7 @@ describe("audio", function()
 
         it("carries the component's gain to the track", function()
             local audio, clip, backend, world = scene()
-            world:spawn(Audio.Sound(clip.id, 0.5))
+            world:spawn(Audio.Sound(clip.id, 1, 0.5))
             world:update(1 / 60)
             assert.are.equal(0.5, backend.tracks[1].gain)
             audio:destroy()
@@ -1030,7 +1290,7 @@ describe("audio", function()
 
         it("carries pitch and position", function()
             local audio, clip, backend, world = scene()
-            world:spawn(Audio.Sound(clip.id, 1.0, 0, 1.25, 1, 2, 3, 4))
+            world:spawn(Audio.Sound(clip.id, 1, 1.0, 0, 1.25, 1, 2, 3, 4))
             world:update(1 / 60)
 
             assert.are.equal(1.25, backend.tracks[1].pitch)
@@ -1040,7 +1300,7 @@ describe("audio", function()
 
         it("follows a moving sound", function()
             local audio, clip, backend, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 1, 0, 0, 0))
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 1, 1.0, 1, 0, 0, 0))
             world:update(1 / 60)
 
             world:getMut(entity, Audio.Sound).x = 5
@@ -1055,7 +1315,7 @@ describe("audio", function()
 
         it("stops the sound when its entity goes away", function()
             local audio, clip, backend, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 1))
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 1))
             world:update(1 / 60)
             assert.are.equal(1, audio:sounding())
 
@@ -1069,7 +1329,7 @@ describe("audio", function()
 
         it("stops the sound when the component is removed", function()
             local audio, clip, backend, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 1))
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 1))
             world:update(1 / 60)
 
             world:remove(entity, Audio.Sound)
@@ -1108,6 +1368,140 @@ describe("audio", function()
             audio:destroy()
         end)
 
+        it("follows a gain, a rate and a loop without a restart", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 1, 1.0))
+            world:update(1 / 60)
+            local track = backend.tracks[1]
+            local voice = world:get(entity, Audio.Sound).voice
+
+            local sound = world:getMut(entity, Audio.Sound)
+            sound.gain = 0.25
+            sound.pitch = 1.5
+            sound.loop = 0
+            world:update(1 / 60)
+
+            assert.are.equal(0.25, track.gain)
+            assert.are.equal(1.5, track.pitch)
+            assert.are.equal(0, track.loops, "a loop cleared part way through lets the voice play out")
+            assert.are.equal(1, track.plays, "and none of it starts the sound over")
+            assert.are.equal(voice, world:get(entity, Audio.Sound).voice)
+            audio:destroy()
+        end)
+
+        it("costs no call while nothing on the row moves", function()
+            local audio, clip, backend, world = scene()
+            world:spawn(Audio.Sound(clip.id, 1, 0.5, 1, 1.25))
+            world:update(1 / 60)
+
+            local track = backend.tracks[1]
+            local calls = #track.gains
+            track.pitch = nil
+            track.loops = nil
+            for _ = 1, 5 do
+                world:update(1 / 60)
+            end
+
+            assert.are.equal(calls, #track.gains, "a followed field is a compare, not a call")
+            assert.is_nil(track.pitch)
+            assert.is_nil(track.loops)
+            audio:destroy()
+        end)
+
+        it("stops and starts a sound from the playing flag", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 1))
+            world:update(1 / 60)
+            assert.are.equal(1, audio:sounding())
+
+            world:getMut(entity, Audio.Sound).playing = 0
+            world:update(1 / 60)
+            assert.are.equal(0, audio:sounding(), "the flag is the instruction, not a report")
+            assert.is_false(backend.tracks[1].playing)
+            assert.are.equal(0, world:get(entity, Audio.Sound).voice, "and the row is left ready to start again")
+
+            world:getMut(entity, Audio.Sound).playing = 1
+            world:update(1 / 60)
+            assert.are.equal(1, audio:sounding())
+            assert.are.equal(2, backend.tracks[1].plays)
+            audio:destroy()
+        end)
+
+        it("starts nothing while the flag is clear", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id, 0))
+            world:update(1 / 60)
+
+            assert.are.equal(0, audio:sounding(), "a sound spawned switched off is not heard once first")
+            assert.are.equal(0, #backend.tracks)
+            assert.are.equal(0, world:get(entity, Audio.Sound).voice)
+            audio:destroy()
+        end)
+
+        it("plays a spent one-shot again when the flag is cycled", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id))
+            world:update(1 / 60)
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            world:update(1 / 60)
+            assert.are.equal(-1, world:get(entity, Audio.Sound).voice)
+
+            world:getMut(entity, Audio.Sound).playing = 0
+            world:update(1 / 60)
+            assert.are.equal(
+                0,
+                world:get(entity, Audio.Sound).voice,
+                "switching off rearms, so the flag says whether the sound is on rather than whether it has run"
+            )
+
+            world:getMut(entity, Audio.Sound).playing = 1
+            world:update(1 / 60)
+            assert.are.equal(1, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("brings a re-enabled loop back", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 1))
+            world:update(1 / 60)
+            assert.are.equal(1, audio:sounding())
+
+            world:set(entity, tecs.builtins.Disabled)
+            world:update(1 / 60)
+            assert.are.equal(0, audio:sounding(), "a disabled entity is not heard")
+            assert.is_false(backend.tracks[1].playing)
+            assert.are.equal(
+                0,
+                world:get(entity, Audio.Sound).voice,
+                "and the handle goes with it, or re-enabling reads a voice that has gone as one that finished"
+            )
+
+            world:remove(entity, tecs.builtins.Disabled)
+            world:update(1 / 60)
+            assert.are.equal(1, audio:sounding())
+            assert.are.equal(2, backend.tracks[1].plays)
+            audio:destroy()
+        end)
+
+        it("leaves a disabled one-shot that had already finished spent", function()
+            local audio, clip, backend, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id))
+            world:update(1 / 60)
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            world:update(1 / 60)
+            assert.are.equal(-1, world:get(entity, Audio.Sound).voice)
+
+            world:set(entity, tecs.builtins.Disabled)
+            world:update(1 / 60)
+            world:remove(entity, tecs.builtins.Disabled)
+            world:update(1 / 60)
+
+            assert.are.equal(0, audio:sounding(), "a sound that ran out does not come back for being switched off")
+            audio:destroy()
+        end)
+
         it("leaves a voice a game started alone", function()
             -- The pass reaps voices no component refers to. One started by
             -- hand is not one of those, or `play` would be unusable next to
@@ -1123,7 +1517,7 @@ describe("audio", function()
         it("joins the group its component names", function()
             local audio, clip, backend, world = scene()
             audio:setGroupGain("sfx", 0.5)
-            world:spawn(Audio.Sound(clip.id, 0.5, 0, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1, 0.5, 0, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             assert.is_true(
@@ -1140,7 +1534,7 @@ describe("audio", function()
 
         it("reaches an entity's sound through its group", function()
             local audio, clip, backend, world = scene()
-            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             audio:pauseGroup("sfx")
@@ -1162,7 +1556,7 @@ describe("audio", function()
 
         it("carries a group's name through a snapshot, not this run's index", function()
             local audio, clip, _, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 0, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 1.0, 0, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             local saved = world:saveSnapshot({ format = "table" }).snapshot
@@ -1178,7 +1572,7 @@ describe("audio", function()
 
         it("resolves a saved group this run has never interned", function()
             local audio, clip, _, world = scene()
-            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             -- The name is the only thing the file carries, so rewriting it
@@ -1198,7 +1592,8 @@ describe("audio", function()
 
         it("survives a round trip through a snapshot", function()
             local audio, clip, _, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 0.5, 1, 1.5, 1, 7, 8, 9))
+            local entity = world:spawn(Audio.Sound(clip.id, 1, 0.5, 1, 1.5, 1, 7, 8, 9))
+            local hushed = world:spawn(Audio.Sound(clip.id, 0))
             world:update(1 / 60)
             assert.is_true(world:get(entity, Audio.Sound).voice > 0)
 
@@ -1208,6 +1603,12 @@ describe("audio", function()
             world:loadSnapshot(saved)
             local restored = world:get(entity, Audio.Sound)
             assert.are.equal(clip.id, restored.clip)
+            assert.are.equal(1, restored.playing)
+            assert.are.equal(
+                0,
+                world:get(hushed, Audio.Sound).playing,
+                "a sound switched off comes back switched off rather than starting on the next pass"
+            )
             assert.are.equal(0.5, restored.gain)
             assert.are.equal(1, restored.loop)
             assert.are.equal(1.5, restored.pitch)

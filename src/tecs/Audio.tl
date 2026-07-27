@@ -49,7 +49,11 @@
 --- snapshot handler that carries them.
 ---
 --- **Position is passed through and nothing else.** See `Sound` for what a
---- caller still has to do by hand.
+--- caller still has to do by hand. `setStereo` is the other way to place a
+--- voice, a plain left and right gain with no listener and no distance model
+--- in it, which is usually what a game laid out on a plane wants. The two are
+--- exclusive: the mixer holds one placement per track, so the later call
+--- replaces the earlier one rather than layering over it.
 
 local ecs <const> = require("tecs.ecs")
 local assets <const> = require("tecs.assets")
@@ -187,16 +191,32 @@ end
 --- a save file would name a different group the next time a build interned its
 --- names in a different order.
 ---
---- `clip`, `loop`, `pitch` and `group` are read when a voice starts and not
---- afterwards; `gain` and the position are followed for as long as it sounds.
---- So moving a sound into another group is done by setting `group` and
---- clearing `voice`, which is the same thing changing its clip takes.
+--- `playing`, `gain`, `loop`, `pitch` and the position are followed for as
+--- long as the voice sounds, so writing any of them is enough and nothing has
+--- to be restarted to make one take. Each of those is a read and a compare per
+--- sounding row per frame, which is the price of the component being live and
+--- is why `clip` and `group` are not on the list: both take an untag, a
+--- retag and a fresh input to change, neither is something a game writes
+--- often, and following them would put that cost on every row that never
+--- does. Moving a sound into another group is setting `group` and clearing
+--- `voice`, which is the same thing changing its clip takes.
+---
+--- Disabling an entity silences its sound and re-enabling starts it again.
+--- `Disabled` is excluded from every query that does not name it, so a
+--- disabled row is not followed and its voice is taken back; the audio pass
+--- clears the handle at the same moment, which is what lets the sound return
+--- with the entity rather than reading as a one-shot that had finished.
 local record Sound is Component
     --- Clip index, from `Audio.clipId`. Zero plays nothing.
     clip: number
+    --- Nonzero sounds, zero does not. The instruction rather than a report:
+    --- clearing it stops the voice and setting it again starts one, including
+    --- on a one-shot that has already run out.
+    playing: number
     --- 0 to 1, before the master gain.
     gain: number
-    --- Nonzero repeats until the component goes away.
+    --- Nonzero repeats. Clearing it part way through lets the voice play out
+    --- to its end rather than cutting it.
     loop: number
     --- Playback rate. 1 is unchanged, 2 is an octave up and half as long.
     pitch: number
@@ -218,6 +238,7 @@ ecs.newFFIComponent({
     container = Sound,
     fields = {
         { "clip", "int32_t" },
+        { "playing", "uint8_t" },
         { "gain", "float" },
         { "loop", "uint8_t" },
         { "pitch", "float" },
@@ -228,13 +249,14 @@ ecs.newFFIComponent({
         { "group", "int32_t" },
         { "voice", "int32_t" },
     },
-    defaults = { 0, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0 },
+    defaults = { 0, 1, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0 },
     serialize = function(instance: Sound): {string: any}
         -- Both the clip and the group cross as the names they were interned
         -- from. An index is this run's numbering, and a file that carried one
         -- would name whatever the next run happened to intern in its place.
         return {
             clip = clipPaths[instance.clip as integer],
+            playing = instance.playing ~= 0,
             gain = instance.gain,
             loop = instance.loop ~= 0,
             pitch = instance.pitch,
@@ -252,9 +274,13 @@ ecs.newFFIComponent({
         local name = data.group as string
         local group = 0
         if name ~= nil and name ~= "" then group = groupId(name) end
+        -- A file written before `playing` existed carries no answer, and the
+        -- one that matches what it recorded is that the sound was on.
+        local playing = 1
+        if data.playing == false then playing = 0 end
         -- The voice is not restored. A snapshot records that an entity has a
         -- sound, not how far through it the mixer had got, so it starts.
-        return Sound(clip, data.gain as number,
+        return Sound(clip, playing, data.gain as number,
             (data.loop as boolean) and 1 or 0,
             (data.pitch as number) or 1.0,
             (data.spatial as boolean) and 1 or 0,
@@ -302,6 +328,14 @@ local record Voice
     x: number
     y: number
     z: number
+    --- Whether the voice is pinned to the front pair rather than placed, and
+    --- the gains last pushed for it. The mixer holds one placement per track,
+    --- so at most one of this and `spatial` is ever set.
+    stereo: boolean
+    left: number
+    right: number
+    --- Whether the voice repeats, as the mixer was last told.
+    loop: boolean
 end
 
 --- How many of one key are sounding, and when one last started.
@@ -375,6 +409,13 @@ local record Audio
         x: number
         y: number
         z: number
+        --- Pins the voice to the front pair of speakers at `left` and
+        --- `right`, which is a pan rather than a position. Ignored when
+        --- `spatial` is set, because the mixer holds one placement per track.
+        --- Both gains default to 1.
+        stereo: boolean
+        left: number
+        right: number
     end
 
     --- What a key allows.
@@ -403,10 +444,16 @@ local record Audio
         stopping: boolean
         --- Whether a `Sound` component started this rather than `play`.
         owned: boolean
+        --- Whether it repeats when it reaches the end.
+        loop: boolean
         spatial: boolean
         x: number
         y: number
         z: number
+        --- Whether it is pinned to the front pair, and at what gains.
+        stereo: boolean
+        left: number
+        right: number
     end
 
     Sound: Sound
@@ -518,7 +565,9 @@ function Audio.create(config?: Audio.Config): Audio
         self._voices[slot] = {
             gain = 1.0, applied = -1.0, pitch = 1.0, generation = 0,
             sounding = false, stopping = false, paused = false, owned = false,
-            referenced = false, spatial = false, x = 0.0, y = 0.0, z = 0.0,
+            referenced = false, loop = false,
+            spatial = false, x = 0.0, y = 0.0, z = 0.0,
+            stereo = false, left = 1.0, right = 1.0,
         }
         -- Taken from the end, so the first sound of a run uses slot one and a
         -- log or a snapshot reads in the order things happened.
@@ -722,6 +771,56 @@ local function applyGain(self: Audio, voice: Voice)
     self._backend.setGain(voice.track, applied)
 end
 
+--- Pushes a voice's rate, skipping the call when nothing changed.
+local function applyPitch(self: Audio, voice: Voice, ratio: number)
+    if voice.pitch == ratio then return end
+    voice.pitch = ratio
+    self._backend.setPitch(voice.track, ratio)
+end
+
+--- Pushes whether a voice repeats, skipping the call when nothing changed.
+local function applyLoop(self: Audio, voice: Voice, loop: boolean)
+    if voice.loop == loop then return end
+    voice.loop = loop
+    self._backend.setLoops(voice.track, loop and LOOP_FOREVER or 0)
+end
+
+--- Places a voice, skipping the call when it has not moved.
+local function applyPosition(self: Audio, voice: Voice,
+                             x: number, y: number, z: number)
+    if voice.spatial and voice.x == x and voice.y == y and voice.z == z then
+        return
+    end
+    -- The mixer keeps one placement per track, so this leaves the other.
+    voice.spatial = true
+    voice.stereo = false
+    voice.x = x
+    voice.y = y
+    voice.z = z
+    self._backend.setPosition(voice.track, x, y, z)
+end
+
+--- Pans a voice, skipping the call when nothing changed.
+local function applyStereo(self: Audio, voice: Voice,
+                           left: number, right: number)
+    if voice.stereo and voice.left == left and voice.right == right then
+        return
+    end
+    voice.stereo = true
+    voice.spatial = false
+    voice.left = left
+    voice.right = right
+    self._backend.setStereo(voice.track, left, right)
+end
+
+--- Returns a voice to unpositioned mixing, out of either placement.
+local function applyUnplaced(self: Audio, voice: Voice)
+    if not voice.spatial and not voice.stereo then return end
+    voice.spatial = false
+    voice.stereo = false
+    self._backend.clearSpatial(voice.track)
+end
+
 --- Gives a slot back, untagging and un-counting whatever it held.
 local function release(self: Audio, slot: integer)
     local voice = self._voices[slot]
@@ -746,10 +845,7 @@ local function release(self: Audio, slot: integer)
     voice.owned = false
     voice.clip = nil
     voice.applied = -1.0
-    if voice.spatial then
-        self._backend.clearPosition(voice.track)
-        voice.spatial = false
-    end
+    applyUnplaced(self, voice)
     self._sounding = self._sounding - 1
     self._free[#self._free + 1] = slot
 end
@@ -830,21 +926,23 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     end
     -- Compared against what this track already carries, not against one,
     -- because a reused slot would otherwise keep the last voice's rate.
-    if pitch ~= voice.pitch then
-        self._backend.setPitch(voice.track, pitch)
-        voice.pitch = pitch
+    applyPitch(self, voice, pitch)
+
+    -- The two placements are exclusive, and a position wins when a caller
+    -- asks for both rather than one silently undoing the other.
+    if options.spatial == true then
+        applyPosition(self, voice, options.x or 0.0, options.y or 0.0,
+            options.z or 0.0)
+    elseif options.stereo == true then
+        applyStereo(self, voice, options.left or 1.0, options.right or 1.0)
     end
 
-    voice.spatial = options.spatial == true
-    if voice.spatial then
-        voice.x = options.x or 0.0
-        voice.y = options.y or 0.0
-        voice.z = options.z or 0.0
-        self._backend.setPosition(voice.track, voice.x, voice.y, voice.z)
-    end
+    -- The play carries the loop count, so nothing is pushed here; what is
+    -- recorded is what a later `setLoop` compares against.
+    voice.loop = options.loop == true
 
     local params = self._params
-    params.loops = options.loop == true and LOOP_FOREVER or 0
+    params.loops = voice.loop and LOOP_FOREVER or 0
     params.loopStartMs = math.floor((options.loopStart or 0.0) * 1000)
     params.startMs = math.floor((options.start or 0.0) * 1000)
     params.fadeInMs = math.floor((options.fadeIn or 0.0) * 1000)
@@ -855,8 +953,10 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
             voice.group = nil
         end
         -- Dropped here as well as in `release`, because a slot that never
-        -- started is not released and a streamed input would stay open.
+        -- started is not released and a streamed input would stay open. The
+        -- placement goes with it, for the same reason.
         self._backend.clearTrack(voice.track)
+        applyUnplaced(self, voice)
         voice.sounding = false
         voice.key = nil
         self._free[#self._free + 1] = slot
@@ -914,13 +1014,26 @@ function Audio:stop(handle: integer, fadeOut?: number)
     voice.stopping = true
 end
 
---- Stops everything, at once.
-function Audio:stopAll()
+--- Stops everything, over `fadeOut` seconds if that is given.
+---
+--- A faded stop leaves each voice sounding until the mixer finishes it, so
+--- they are reaped by `update` rather than here. The ramp is the mixer's, on
+--- the same terms as `stop` and `stopGroup`.
+function Audio:stopAll(fadeOut?: number)
+    local seconds = fadeOut or 0.0
+    local fadeMs = math.floor(seconds * 1000)
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
         if voice.sounding then
-            self._backend.stop(voice.track, 0)
-            release(self, slot)
+            self._backend.stop(voice.track, fadeMs)
+            if seconds > 0.0 then
+                voice.stopping = true
+                -- A paused voice does not advance, so a fade on one would
+                -- never finish and the slot would never come back.
+                voice.paused = false
+            else
+                release(self, slot)
+            end
         end
     end
 end
@@ -939,6 +1052,24 @@ end
 
 --- Holds a voice where it is. It keeps its slot until something resumes or
 --- stops it, because a paused voice has not finished.
+---
+--- Neither this nor `resume` takes a fade, and that is a decision rather than
+--- an omission. The mixer ramps on a play and on a stop and nowhere else, so a
+--- faded pause has to be a ramp run from here: a list of voices in flight, a
+--- `setGain` per voice per frame, and the pause itself issued only once the
+--- ramp reaches zero, which makes this a command that takes effect later and
+--- needs its own answer for what a stop, a group gain or a second pause
+--- during the ramp means. Each step also lands on a frame boundary, so a
+--- quarter-second fade at 60 frames a second is fifteen steps on a stream
+--- running at 48000, and its length follows the frame rate rather than the
+--- clock. Drift and cost of exactly that kind are what handing fades to the
+--- mixer avoids, and one voice held for a menu is not worth giving it up.
+---
+--- The mixer does offer the pieces to fade out and take a sound back where it
+--- left off: `tell` reads the position, `stop` fades out, and `play` returns
+--- with `start` and `fadeIn`. That re-reads the input rather than holding it,
+--- so it is a different thing from a pause, and which of the two a moment
+--- wants is a game's answer rather than this layer's.
 function Audio:pause(handle: integer)
     local voice = voiceOf(self, handle)
     if voice == nil or voice.paused or voice.stopping then return end
@@ -965,31 +1096,83 @@ end
 --- Sets a voice's playback rate. 1 is unchanged.
 function Audio:setPitch(handle: integer, ratio: number)
     local voice = voiceOf(self, handle)
-    if voice == nil or voice.pitch == ratio then return end
-    voice.pitch = ratio
-    self._backend.setPitch(voice.track, ratio)
+    if voice == nil then return end
+    applyPitch(self, voice, ratio)
+end
+
+--- Changes whether a voice repeats, part way through.
+---
+--- The mixer replaces the count it was started with, so clearing this on a
+--- looping piece of music lets it play out to its end rather than cutting it,
+--- and setting it on a one-shot keeps it going. It reaches a sounding voice
+--- only: a stopped one takes its count from the next play.
+function Audio:setLoop(handle: integer, loop: boolean)
+    local voice = voiceOf(self, handle)
+    if voice == nil then return end
+    applyLoop(self, voice, loop == true)
+end
+
+--- Whether a voice repeats when it reaches the end.
+function Audio:looping(handle: integer): boolean
+    local voice = voiceOf(self, handle)
+    return voice ~= nil and voice.loop
+end
+
+--- Moves a voice's read position, in seconds from the start of its clip.
+---
+--- False when the handle names nothing, or when the input cannot seek: a
+--- decoder is allowed not to be able to, and some can only reach a time
+--- rather than an exact sample.
+function Audio:seek(handle: integer, seconds: number): boolean
+    local voice = voiceOf(self, handle)
+    if voice == nil then return false end
+    return self._backend.seek(voice.track, math.floor(seconds * 1000))
+end
+
+--- Seconds into its clip a voice is reading, or nil.
+---
+--- Nil when the handle names nothing or the mixer cannot say. A paused voice
+--- reports where it stopped, which with `seek` and `fadeIn` is what taking a
+--- sound back where it left off is built from.
+function Audio:tell(handle: integer): number
+    local voice = voiceOf(self, handle)
+    if voice == nil then return nil end
+    local ms = self._backend.tell(voice.track)
+    if ms < 0 then return nil end
+    return ms / 1000
 end
 
 --- Places a voice in space. See `Sound` for what the numbers mean.
+---
+--- Replaces a pan set by `setStereo` rather than combining with it.
 function Audio:setPosition(handle: integer, x: number, y: number, z: number)
     local voice = voiceOf(self, handle)
     if voice == nil then return end
-    if voice.spatial and voice.x == x and voice.y == y and voice.z == z then
-        return
-    end
-    voice.spatial = true
-    voice.x = x
-    voice.y = y
-    voice.z = z
-    self._backend.setPosition(voice.track, x, y, z)
+    applyPosition(self, voice, x, y, z)
 end
 
---- Returns a voice to unpositioned mixing.
-function Audio:clearPosition(handle: integer)
+--- Pins a voice to the front pair of speakers at explicit gains.
+---
+--- A pan rather than a position, and usually what a game laid out on a plane
+--- wants: there is no listener to subtract and no distance model to argue
+--- with, only "how much of this comes out of each side". `left` at 0.8 and
+--- `right` at 0.2 is a sound over to the left, whatever the speakers are.
+--- Negative reads as silence and above 1 is louder, on the same terms as a
+--- gain.
+---
+--- Replaces a position set by `setPosition` rather than combining with it:
+--- the mixer holds one placement per track, and each call writes it.
+function Audio:setStereo(handle: integer, left: number, right: number)
     local voice = voiceOf(self, handle)
-    if voice == nil or not voice.spatial then return end
-    voice.spatial = false
-    self._backend.clearPosition(voice.track)
+    if voice == nil then return end
+    applyStereo(self, voice, left, right)
+end
+
+--- Returns a voice to unpositioned mixing, out of either placement.
+function Audio:clearSpatial(handle: integer)
+    local voice = voiceOf(self, handle)
+    if voice == nil then return end
+    applyUnplaced(self, voice)
 end
 
 --- Scales everything. One number on the mixer, so this costs the same whether
@@ -1258,10 +1441,14 @@ function Audio:voices(): {Audio.VoiceInfo}
                 paused = voice.paused,
                 stopping = voice.stopping,
                 owned = voice.owned,
+                loop = voice.loop,
                 spatial = voice.spatial,
                 x = voice.x,
                 y = voice.y,
                 z = voice.z,
+                stereo = voice.stereo,
+                left = voice.left,
+                right = voice.right,
             }
         end
     end
@@ -1300,18 +1487,55 @@ end
 --- allocates nothing.
 local rowOptions <const>: Audio.PlayOptions = {}
 
---- Starts, stops and reaps the voices `Sound` components ask for.
+--- Puts the rows of entities something has disabled back to rest.
 ---
---- One walk answers all three. A row with no voice starts one; a row whose
---- voice has ended is marked so it does not start again; and a voice nothing
---- referred to during the walk belonged to an entity that has gone, so it is
---- stopped. That last case is what makes despawning something mid-sound work
---- without an observer on every archetype that might hold one.
-local function reconcile(self: Audio, sounds: ecs.Query)
+--- `Disabled` is excluded from every query that does not name it, so a
+--- disabled row is not walked below and the voice it holds is taken by the
+--- sweep for looking abandoned. The row is left naming a voice that has gone,
+--- which reads on re-enabling as a one-shot that finished, and the sound never
+--- comes back. Clearing the handle here is what makes it.
+---
+--- Archetype-shaped rather than per-row: a disabled entity is in an archetype
+--- of its own, so a world with nothing disabled matches nothing and this walks
+--- nothing. Only the frame something is disabled on writes.
+local function hush(hushed: ecs.Query)
+    for archetype, length in hushed:iter() do
+        local rows = archetype:get(Sound) as {Sound}
+        local mutable: {Sound} = nil
+        for row = 1, length do
+            if (rows[row].voice as integer) > 0 then
+                if mutable == nil then
+                    mutable = archetype:getMut(Sound) as {Sound}
+                end
+                -- Zero rather than finished: a voice the sweep is about to
+                -- take back is not one that ran to its end.
+                mutable[row].voice = 0
+            end
+        end
+    end
+end
+
+--- Starts, stops, follows and reaps the voices `Sound` components ask for.
+---
+--- One walk answers all of it. A row asking to sound with no voice starts one;
+--- a sounding row has its gain, rate, loop and position followed; a row that
+--- has stopped asking, or whose voice has ended, is put back to rest; and a
+--- voice nothing referred to during the walk belonged to an entity that has
+--- gone or been disabled, so it is stopped. That last case is what makes
+--- despawning something mid-sound work without an observer on every archetype
+--- that might hold one.
+---
+--- Following is a read and a compare per field per sounding row. Every field
+--- on the list is one a game changes without wanting the sound to restart,
+--- and every field left off it takes a stop and a fresh start to change
+--- anyway, so nothing here is paid for on behalf of a case that cannot use it.
+local function reconcile(self: Audio, sounds: ecs.Query, hushed: ecs.Query)
     local voices = self._voices
     for slot = 1, #voices do
         voices[slot].referenced = false
     end
+
+    hush(hushed)
 
     for archetype, length in sounds:iter() do
         local rows = archetype:get(Sound) as {Sound}
@@ -1324,7 +1548,23 @@ local function reconcile(self: Audio, sounds: ecs.Query)
             local entry = rows[row]
             local handle = entry.voice as integer
 
-            if handle == 0 then
+            if (entry.playing as integer) == 0 then
+                -- Asked for silence. Whatever is sounding ends now, and the
+                -- row goes back to zero rather than to finished, so that
+                -- setting the flag again starts it: a one-shot that has run
+                -- out plays a second time instead of staying spent.
+                if handle ~= 0 then
+                    local voice = voiceOf(self, handle)
+                    if voice ~= nil then
+                        self._backend.stop(voice.track, 0)
+                        release(self, handle % SLOT_SPAN)
+                    end
+                    if mutable == nil then
+                        mutable = archetype:getMut(Sound) as {Sound}
+                    end
+                    mutable[row].voice = 0
+                end
+            elseif handle == 0 then
                 rowOptions.gain = entry.gain as number
                 rowOptions.loop = (entry.loop as integer) ~= 0
                 rowOptions.pitch = entry.pitch as number
@@ -1355,14 +1595,27 @@ local function reconcile(self: Audio, sounds: ecs.Query)
                     mutable[row].voice = FINISHED
                 else
                     voice.referenced = true
+                    -- Each of these is a load and a compare, and the call
+                    -- past it runs only on the frame the value moved. The
+                    -- guard is written out rather than left to the helper so
+                    -- that an unchanged row makes no call at all.
                     if voice.gain ~= entry.gain then
-                        self:setGain(handle, entry.gain as number)
+                        voice.gain = entry.gain as number
+                        applyGain(self, voice)
+                    end
+                    local pitch = entry.pitch as number
+                    if voice.pitch ~= pitch then
+                        applyPitch(self, voice, pitch)
+                    end
+                    local loop = (entry.loop as integer) ~= 0
+                    if voice.loop ~= loop then
+                        applyLoop(self, voice, loop)
                     end
                     if (entry.spatial as integer) ~= 0 then
-                        self:setPosition(handle, entry.x as number,
+                        applyPosition(self, voice, entry.x as number,
                             entry.y as number, entry.z as number)
                     elseif voice.spatial then
-                        self:clearPosition(handle)
+                        applyUnplaced(self, voice)
                     end
                 end
             end
@@ -1479,12 +1732,20 @@ function Audio:install(world: ecs.World)
         include = { Sound },
     })
 
+    -- Naming `Disabled` opts out of the exclusion every other query gets, so
+    -- this is the disabled rows and only those. They are in archetypes of
+    -- their own, so it matches nothing until something is disabled.
+    local hushed = world:query({
+        name = "tecs.DisabledSounds",
+        include = { Sound, ecs.builtins.Disabled },
+    })
+
     world:addSystem({
         name = "tecs.PlaySounds",
         -- After gameplay has decided what exists and before anything renders,
         -- so a sound spawned this frame starts this frame.
         phase = ecs.phases.PostUpdate,
-        run = function() reconcile(self, sounds) end,
+        run = function() reconcile(self, sounds, hushed) end,
     })
 
     world:addSnapshotHandler({
