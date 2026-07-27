@@ -144,6 +144,17 @@ local record Pivot is Component
     --- Index of the slice within that sheet, from `Sheet:sliceId`, or zero
     --- for a pivot written directly.
     slice: number
+    --- How far the point above can move over the cycle being played, as half
+    --- the range in each axis and a fraction of the frame.
+    ---
+    --- Zero for a pivot written directly and for a slice with a single key,
+    --- which is nearly every one of them, and the cull bound is then exactly
+    --- the quad's own. Playback on the GPU resolves the frame after the bound is
+    --- written, so a slice that genuinely moves has to have its travel covered:
+    --- `x` and `y` are then the middle of where it goes and this is how far
+    --- either side of that the quad can be drawn.
+    halfX: number
+    halfY: number
 end
 
 --- An image divided into frames.
@@ -684,14 +695,18 @@ ecs.newFFIComponent({
     fields = {
         { "x", "float" }, { "y", "float" },
         { "sheet", "int32_t" }, { "slice", "int32_t" },
+        { "halfX", "float" }, { "halfY", "float" },
     },
     -- The middle of the frame, which is where a quad with no Pivot at all
     -- sits: adding the component without saying where moves nothing.
-    defaults = { 0.5, 0.5, 0, 0 },
+    defaults = { 0.5, 0.5, 0, 0, 0.0, 0.0 },
     -- A sheet id and a slice id are this process's answers, decided by the
     -- order sheets and their slices were built in. What crosses a save is the
     -- pair of names, resolved again on the way back in, and the fraction goes
-    -- with them so a pivot written directly survives as well.
+    -- with them so a pivot written directly survives as well. The travel is
+    -- deliberately dropped: it is the playback's answer rather than the
+    -- entity's, and the first step after a load writes it from the registration
+    -- this run made.
     serialize = function(instance: Pivot): {string: any}
         local source = sheet.byId(instance.sheet as integer)
         local name: string = nil

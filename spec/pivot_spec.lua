@@ -165,6 +165,43 @@ describe("a pivoted quad", function()
         near(pey, 30)
     end)
 
+    -- The one case where the shift is not known here. Playback on the GPU
+    -- resolves the frame after this is written, so a pivot that follows a slice
+    -- moving between frames carries how far it can travel and the bound covers
+    -- all of it. Everything else, which is every pivot written directly and
+    -- every slice with a single key, travels nothing and is the case above.
+    it("grows the bound by exactly the travel of a moving pivot", function()
+        local world, _, _, bounds = newExtraction()
+        -- A tenth of the frame across and a quarter down, on a 40 by 60 quad,
+        -- which is four world units and fifteen.
+        world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0, 0, 0, 0.1, 0.25))
+
+        world:update(1 / 60)
+
+        local cx, cy, ex, ey = boundAt(bounds, 0)
+        near(cx, 100, "the centre is still the middle pivot's")
+        near(cy, 170, "bound centre y")
+        near(ex, 24, "half the width plus the travel across")
+        near(ey, 45, "half the height plus the travel down")
+    end)
+
+    it("grows a turned bound in the safe direction", function()
+        local world, _, _, bounds = newExtraction()
+        world:spawn(quad(math.pi / 4), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0, 0, 0, 0.1, 0.25))
+
+        world:update(1 / 60)
+
+        -- A turned quad's bound is half the sum of both scales on both axes,
+        -- and the travel is covered the same way: looser than the true extent
+        -- and never smaller, so the cull can only keep what it might have
+        -- dropped.
+        -- Half of forty plus sixty is fifty, and the travel of eight by thirty
+        -- world units adds nineteen the same way.
+        local _, _, ex, ey = boundAt(bounds, 0)
+        near(ex, 69, "half the sum of the scales, plus the travel's")
+        near(ey, ex, "and the same on both axes")
+    end)
+
     it("sorts on the entity's position rather than the quad's middle", function()
         local world, _, instances = newExtraction()
         -- Absurdly tall on purpose. The topdown sort spreads ten thousand

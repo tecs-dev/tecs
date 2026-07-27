@@ -79,9 +79,11 @@ layout(location = 6) flat out int vClip;
 // hangs off the point it is drawn at, and `Extractor.tl` folds it into
 // `origin.xy` before the instance is written, because origin - basis * pivot
 // places every corner exactly where corner - pivot would: the same geometry
-// for no extra bytes in the instance. Two things here decide the sign it uses:
-// these corners, and the `corner + 0.5` below that maps them onto UV. Change
-// either and the pivot's Y follows.
+// for no extra bytes in the instance. What it folds for an animated quad is the
+// middle of where its pivot goes over the cycle, and the frame table carries
+// each step's offset from that middle, applied below. Two things here decide the
+// sign both use: these corners, and the `corner + 0.5` below that maps them onto
+// UV. Change either and the pivot's Y follows.
 const vec2 CORNERS[4] = vec2[4](
     vec2(-0.5, -0.5), vec2( 0.5, -0.5),
     vec2(-0.5,  0.5), vec2( 0.5,  0.5)
@@ -107,8 +109,35 @@ void main() {
     // that scales along world axes after rotating, so a turned rectangle keeps
     // an upright footprint and only its sampling spins.
     mat2 basis = mat2(c * sx, s * sx, -s * sy, c * sy);
+
+    // An animated instance resolves its region here rather than carrying one,
+    // which is what stops a frame changing from being a write to the instance
+    // and a rewrite of every instance sharing its archetype. The layer comes
+    // from the table too, so rebinding a sheet to another image moves the table
+    // and touches no instance. Static instances take the comparison and no
+    // memory traffic.
+    //
+    // Resolved before the corner is placed, because a pivot that follows a
+    // slice moves between frames and the offset is part of where the quad goes.
+    vec4 region = self.uvRect;
+    // Negative for an instance the table has nothing to say about, which is
+    // every static one and every animated one whose sheet names no image.
+    float frameLayer = -1.0;
+    vec2 pivotOffset = vec2(0.0);
+    if (isPlayback(region)) {
+        Playback frame = resolvePlayback(region, layers.camera.w);
+        region = frame.rect;
+        frameLayer = frame.layer;
+        pivotOffset = frame.pivot;
+    }
+
     vec2 corner = CORNERS[gl_VertexIndex];
-    vec2 world = self.origin.xy + basis * corner;
+    // The offset is measured from the middle pivot `Extractor.tl` already
+    // folded into the origin, so subtracting it here places the quad exactly
+    // where a host that knew the frame would have folded the frame's own pivot.
+    // Two multiply-adds on a basis that is already built, and exactly zero for
+    // every instance whose pivot does not move.
+    vec2 world = self.origin.xy + basis * (corner - pivotOffset);
 
     // Depth is the transform's fourth float, in zero to one with zero nearest.
     float depth = self.xform.w;
@@ -170,20 +199,9 @@ void main() {
     float arrayLayer = mod(packedSlot, LAYER_SLOTS);
     vClip = int(floor(packedSlot / LAYER_SLOTS));
 
-    // An animated instance resolves its region here rather than carrying one,
-    // which is what stops a frame changing from being a write to the instance
-    // and a rewrite of every instance sharing its archetype. The layer comes
-    // from the table too, so rebinding a sheet to another image moves the table
-    // and touches no instance. Static instances take the comparison and no
-    // memory traffic.
-    vec4 region = self.uvRect;
-    if (isPlayback(region)) {
-        Playback frame = resolvePlayback(region, layers.camera.w);
-        region = frame.rect;
-        // A sheet bound to no image names no layer, and the instance keeps the
-        // one it was written with.
-        if (frame.layer >= 0.0) { arrayLayer = frame.layer; }
-    }
+    // A sheet bound to no image names no layer, and the instance keeps the one
+    // it was written with.
+    if (frameLayer >= 0.0) { arrayLayer = frameLayer; }
 
     // Corners run -0.5..0.5, so shifting by a half is the fraction across the
     // frame. Both axes map the same way and neither is flipped: world Y runs

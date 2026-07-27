@@ -467,6 +467,14 @@ local function writeRun(self: Extractor, packet: FramePacket,
         -- anything to say about.
         local centreX = originX
         local centreY = originY
+        -- What the bound has to cover beyond the quad itself, which is nothing
+        -- unless a pivot follows a slice that moves between frames. Playback on
+        -- the GPU resolves the frame after this is written, so the shader can
+        -- offset the quad by up to the slice's travel and the bound is grown by
+        -- exactly that. Zero for a pivot written directly and for a slice with
+        -- one key, and the bound is then bit for bit what it always was.
+        local growX = 0.0
+        local growY = 0.0
         if pivots ~= nil then
             local pivot = pivots[row]
             -- Quad-local units, where the quad's corners run -0.5 to 0.5 and
@@ -475,6 +483,16 @@ local function writeRun(self: Extractor, packet: FramePacket,
             -- straight off the corner.
             local px <const> = pivot.x - 0.5
             local py <const> = pivot.y - 0.5
+            local halfX <const> = pivot.halfX
+            local halfY <const> = pivot.halfY
+            if halfX ~= 0.0 or halfY ~= 0.0 then
+                -- The travel is a fraction of the frame, so it scales with the
+                -- quad and turns with it. `extentOf` covers a box of that size
+                -- at this rotation, which is exactly the travel unturned and
+                -- conservative in the safe direction turned.
+                growX, growY = extentOf(angle, halfX * 2.0 * scaleX,
+                    halfY * 2.0 * scaleY)
+            end
             if angle == 0.0 then
                 centreX = originX - px * scaleX
                 centreY = originY - py * scaleY
@@ -529,6 +547,8 @@ local function writeRun(self: Extractor, packet: FramePacket,
             ey = UNBOUNDED
         else
             ex, ey = extentOf(angle, scaleX, scaleY)
+            ex = ex + growX
+            ey = ey + growY
         end
 
         -- Centred on the quad and not on the entity, because the extents
@@ -536,7 +556,9 @@ local function writeRun(self: Extractor, packet: FramePacket,
         -- geometry within its bound, so the bound moves with it and stays
         -- exactly as big as it was: growing it instead would keep offscreen
         -- instances alive for every pivoted entity in the world to cover a
-        -- shift that is already known here.
+        -- shift that is already known here. A slice that moves between frames
+        -- is the one case where the shift is not known here, and only that case
+        -- pays for it, in `growX` and `growY` above.
         local bound = (offset + row - 1) * BOUND_FLOATS
         bounds[bound] = centreX
         bounds[bound + 1] = centreY

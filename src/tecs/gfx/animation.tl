@@ -1,24 +1,33 @@
 --- Sprite-sheet playback.
 ---
 --- An `Animation` says which tag of a sheet is playing, how fast, whether it
---- repeats, whether it is running, and where in the tag it has got to. The
---- system installed by `animation.plugin` advances it and writes the frame's
---- region into the entity's `Sprite`, which is what the renderer reads.
+--- repeats, whether it is running, and where in the tag it has got to.
 ---
---- Playback advances in the fixed phases, because animation is simulation. Two
---- machines fed the same recording have to show the same frame, and a system
---- driven by frame time shows a different one on the machine that drew more
---- frames. `FixedPostUpdate` is late enough that gameplay logic in
---- `FixedUpdate` has already chosen what should be playing.
+--- There are two paths from that to a picture and `useGPU` chooses between them.
+--- On, which is the default, `tecs.EncodeAnimation` writes which playback the
+--- entity is on into its `Sprite` and the vertex shader resolves the frame, so a
+--- frame changing writes nothing at all. Off, `tecs.AdvanceAnimation` walks
+--- every playing animation on every fixed step and writes the frame's region
+--- into the `Sprite` itself. They agree on the frame and differ on what they
+--- write to reach it; `animation.frameOf` is what answers either way.
+---
+--- Playback is quantised to the fixed step whichever path it takes, because
+--- animation is simulation. Two machines fed the same recording have to show the
+--- same frame, and a system driven by frame time shows a different one on the
+--- machine that drew more frames. So the host path runs in `FixedPostUpdate`,
+--- late enough that gameplay logic in `FixedUpdate` has already chosen what
+--- should be playing, and the GPU path's clock counts whole fixed steps.
 ---
 --- The component carries a sheet id rather than a sheet. A component is plain
 --- C memory and a sheet is a table, and the indirection is the point besides:
 --- every entity playing one walk cycle shares one sheet.
 ---
---- An entity carrying a `Pivot` bound to one of the sheet's slices has it
---- resolved again on every frame the sprite changes, because an Aseprite slice
---- moves from frame to frame and a pivot that did not follow it would drift
---- off the part of the drawing it names.
+--- An entity carrying a `Pivot` bound to one of the sheet's slices has it follow
+--- the slice, because an Aseprite slice moves from frame to frame and a pivot
+--- that did not follow it would drift off the part of the drawing it names. On
+--- the host that is a fresh resolve on every frame the sprite changes; on the
+--- GPU the entity carries the middle of where the slice goes and the frame table
+--- carries each step's offset from it.
 
 local ecs <const> = require("tecs.ecs")
 local components <const> = require("tecs.components")
@@ -32,6 +41,8 @@ local type Sheet = sheet.Sheet
 
 local Sprite <const> = components.Sprite
 local Pivot <const> = sheet.Pivot
+
+local floor <const> = math.floor
 
 local TICK_HZ <const> = frametable.TICK_HZ
 
@@ -74,6 +85,18 @@ local record Animation is Component
     --- Whether time advances.
     playing: boolean
 end
+
+--- Asks for `Completed` and `Looped` on an entity.
+---
+--- Nothing is emitted for an entity that does not carry this, and the reason is
+--- the archetype: a crowd of animating entities is visited by no query at all
+--- while the handful that a game listens to sit together and are walked on
+--- their own. Adding it costs an archetype move once and nothing per step.
+---
+--- With playback resolved on the host the events are emitted whether or not
+--- this is carried, since the system that advances the frame is already looking
+--- at the row when it wraps.
+local record AnimationEvents is Component end
 
 --- Emitted at address zero on the step a tag that does not loop runs past its
 --- last frame. The animation stops and holds that frame, so this fires once per
@@ -128,6 +151,9 @@ local record animation
     --- Emitted when a looping tag passes its last frame and restarts.
     Looped: Looped
 
+    --- Asks for `Completed` and `Looped` on an entity.
+    AnimationEvents: AnimationEvents
+
     --- An Animation playing a named tag of a sheet, ready to spawn.
     ---
     --- Omit the tag to play the whole sheet in order. Fails on a tag the sheet
@@ -171,6 +197,32 @@ local record animation
     ---     entity untouched, since there is nothing to say what it would play.
     restart: function(world: World, entity: integer): boolean
 
+    --- How far into its tag's cycle an entity's animation has got, in seconds.
+    ---
+    --- Recomputed on the call rather than kept in a column, because keeping it
+    --- means writing every animating entity on every step and that is the cost
+    --- the GPU path exists to remove. A few hundred calls a step is free; it
+    --- stops being free somewhere in the tens of thousands, which is a game
+    --- asking a question this is the wrong shape for.
+    --- @param world The world the entity lives in.
+    --- @param entity A live entity.
+    --- @return Seconds into the cycle, wrapped for a looping tag and clamped at
+    ---     the end for a one-shot. Zero for an entity carrying no Animation and
+    ---     for one whose sheet this run does not have.
+    timeOf: function(world: World, entity: integer): number
+
+    --- The sheet frame an entity's animation is showing.
+    ---
+    --- The same answer the vertex shader draws, because both are `frameAt` over
+    --- the same tag: the shader reads a table built from it and this calls it.
+    --- What a hitbox on frame five, a footstep on frame three or a muzzle on an
+    --- animated hand asks for.
+    --- @param world The world the entity lives in.
+    --- @param entity A live entity.
+    --- @return A frame index into the whole sheet, counting from one, or zero
+    ---     for an entity with nothing to play.
+    frameOf: function(world: World, entity: integer): integer
+
     --- Adds the system that advances playback.
     ---
     --- Not installed for you, so a world that draws no sprite sheets pays
@@ -181,7 +233,9 @@ local record animation
     --- `tecs.AdvanceAnimation` in `FixedPostUpdate`, whose query is a logic
     --- query, so a paused entity holds the frame it is on. On the GPU it is
     --- `tecs.EncodeAnimation` in `PostUpdate`, which writes nothing on a step
-    --- where nothing changed what is playing.
+    --- where nothing changed what is playing, followed by
+    --- `tecs.ReportAnimation`, which derives `Completed` and `Looped` for the
+    --- entities carrying `AnimationEvents` and writes nothing at all.
     --- @param world The world to add the system to.
     plugin: function(world: World)
 
@@ -200,10 +254,19 @@ local record animation
     --- so what a step costs is what actually changed rather than what is
     --- shaped like it.
     ---
-    --- Set before `plugin`, since it decides which system that installs. Worlds
-    --- already carrying one keep it.
-    --- @param enabled Defaults to false while this is being measured against
-    ---     the host path.
+    --- Three things read differently with this on. `Animation.frame` and
+    --- `Animation.time` stop being written, and `frameOf` and `timeOf` answer
+    --- from the clock instead. `Completed` and `Looped` reach only the entities
+    --- carrying `AnimationEvents`, and a one-shot that finishes leaves `playing`
+    --- alone unless something is listening for it. And the `Sprite` carries a
+    --- playback rather than a region, so its layer and image stop following the
+    --- sheet: the frame table carries both and the shader reads them there.
+    ---
+    --- On is the default. Set this before `plugin`, since it decides which
+    --- systems that installs, and worlds already carrying them keep them.
+    --- @param enabled False puts playback back on the host, for a world that
+    ---     wants events and frame queries without opting in or recomputing and
+    ---     is small enough to pay a walk of every animation on every step.
     useGPU: function(enabled: boolean)
 
     --- Whether playback resolves on the GPU.
@@ -257,9 +320,15 @@ ecs.newFFIComponent({
     end,
 })
 
+ecs.newComponent({
+    name = "AnimationEvents",
+    container = AnimationEvents,
+})
+
 animation.Animation = Animation
 animation.Completed = Completed
 animation.Looped = Looped
+animation.AnimationEvents = AnimationEvents
 
 animation.Completed.init = function(event: Completed, entity: integer,
                                     source: Sheet, tag: string)
@@ -499,7 +568,7 @@ end
 -------------------------------------------------------------------------------
 
 --- Whether `plugin` installs the encoder rather than the advance system.
-local useGPU = false
+local useGPU = true
 
 function animation.useGPU(enabled: boolean)
     useGPU = enabled == true
@@ -524,20 +593,39 @@ end
 --- playback began on. An entity moving in or out of `Paused` changes archetype,
 --- and a move marks every component on the destination dirty, so the freeze and
 --- the thaw both arrive here without anything having to notice them.
-local function encode(world: World, query: Query, held: boolean)
+---
+--- `clock` is the step count this update began on and not the one it has
+--- reached, because `Animation.time` is the phase before this update's steps
+--- ran: an entity spawned between two updates, and a snapshot loaded between
+--- them, were both written before the fixed loop. Anchoring on the count now
+--- would make an entity's phase depend on how many fixed steps happened to fall
+--- inside the update it was first seen in, and two machines fed the same steps
+--- in different sized updates would show different frames. That is the promise
+--- the fixed step is quantised to keep.
+local function encode(world: World, query: Query, held: boolean, clock: number)
     local timestep <const> = world:getFixedTiming()
-    local clock <const> = world:fixedStepCount()
 
     for archetype, length in query:iter() do
-        if archetype:isComponentDirty(Animation) then
+        -- The Pivot column joins the gate because a playback is keyed on the
+        -- slice as well as the tag: pointing an entity at another slice changes
+        -- which playback it is on, and nothing about its Animation moved to say
+        -- so. An archetype carrying no Pivot answers false and pays a lookup.
+        if archetype:isComponentDirty(Animation)
+            or archetype:isComponentDirty(Pivot) then
             local animations <const> = archetype:get(Animation)
             local sprites <const> = archetype:getMut(Sprite)
+            -- Absent on every archetype that turns about its middle, which is
+            -- most of them.
+            local pivots <const> = archetype:get(Pivot)
+            local moved = false
             -- Sheets are few and neighbouring rows tend to share one, and a
-            -- crowd playing one cycle shares the tag as well.
+            -- crowd playing one cycle shares the tag and the slice as well.
             local cachedId = 0
             local cachedTag = -1
+            local cachedSlice = -1
             local cached: Sheet = nil
             local playback = 0
+            local midX, midY, halfX, halfY = 0.5, 0.5, 0.0, 0.0
 
             for row = 1, length do
                 local instance <const> = animations[row]
@@ -550,21 +638,57 @@ local function encode(world: World, query: Query, held: boolean)
                 end
 
                 if cached ~= nil then
-                    if tagId ~= cachedTag then
-                        cachedTag = tagId
-                        playback = frametable.register(cached, tagId)
+                    -- A slice bound to another sheet names nothing here: a
+                    -- frame index counts through this sheet's frames and means
+                    -- something else in another's, so the playback follows no
+                    -- slice and the pivot stays where it was written.
+                    local sliceId = 0
+                    if pivots ~= nil
+                        and pivots[row].sheet as integer == sheetId then
+                        sliceId = pivots[row].slice as integer
+                    end
+
+                    if tagId ~= cachedTag or sliceId ~= cachedSlice then
+                        cachedTag, cachedSlice = tagId, sliceId
+                        playback = frametable.register(cached, tagId, sliceId)
+                        midX, midY, halfX, halfY = frametable.pivotOf(playback)
+                    end
+
+                    -- The middle of where the slice goes over the cycle, which
+                    -- extraction folds into the quad's origin, and how far
+                    -- either side of it the frame table can move the quad. Both
+                    -- are the playback's answer rather than the frame's, so a
+                    -- frame changing still writes nothing.
+                    if sliceId > 0 then
+                        if not moved then
+                            archetype:getMut(Pivot)
+                            moved = true
+                        end
+                        local target <const> = pivots[row]
+                        target.x, target.y = midX, midY
+                        target.halfX, target.halfY = halfX, halfY
                     end
 
                     -- Where in the cycle the entity is, in ticks. `time` is
                     -- what the host path advances and what a snapshot carries,
                     -- so reading the phase from it is what makes the two paths
                     -- interchangeable and a restored entity resume where it was.
-                    local ticks <const> = instance.time * TICK_HZ
+                    local ticks = instance.time * TICK_HZ
                     local speed <const> = instance.speed
                     local running <const> = not held and instance.playing
                         and speed > 0.0
                     if running then
                         local rate <const> = timestep * speed * TICK_HZ
+                        -- A one-shot parks one whole cycle in and stops, so
+                        -- finding one there and playing is something having
+                        -- asked for it again. It starts over, exactly as the
+                        -- host path does and for the same reason: advancing
+                        -- from the end would park it again on every step from
+                        -- here and complete on each of them.
+                        if not instance.loop
+                            and ticks >= frametable.tickCount(playback) then
+                            ticks = 0.0
+                        end
                         frametable.encode(sprites[row], playback,
                             clock - ticks / rate, rate, instance.loop)
                     else
@@ -575,6 +699,152 @@ local function encode(world: World, query: Query, held: boolean)
             end
         end
     end
+end
+
+--- Emits `Completed` and `Looped` for the entities that asked for them.
+---
+--- Derived rather than observed, and that is what makes it free. Whether an
+--- entity crossed its cycle between two step counts is a function of the start
+--- and the rate its `Sprite` already carries, so this reads two columns and
+--- writes nothing: no `getMut`, no dirty column, and no rewrite of a run
+--- because a crowd of animations wrapped.
+---
+--- The one write is the flag a finished one-shot parks behind, which is what
+--- `Completed` has always meant and is the only thing here a caller can see
+--- afterwards. It costs one row on the step it finishes and nothing before or
+--- after, and only rows carrying `AnimationEvents` reach this at all.
+local function report(world: World, query: Query, from: number, to: number)
+    -- Hoisted, because a large world wrapping animations would otherwise ask
+    -- the bus the same question once per wrap.
+    local wantsCompleted <const> = world:hasObservers(0, animation.Completed)
+    local wantsLooped <const> = world:hasObservers(0, animation.Looped)
+
+    -- Walked whether or not anything is listening, because carrying
+    -- `AnimationEvents` is what asks for this and observing is a separate
+    -- question: a one-shot's flag has to park for a game that reads it later
+    -- rather than subscribing. The tag is what keeps the walk small.
+    for archetype, length, entities in query:iter() do
+        local animations <const> = archetype:get(Animation)
+        local sprites <const> = archetype:get(Sprite)
+        local parked = false
+        local cachedId = 0
+        local cached: Sheet = nil
+
+        for row = 1, length do
+            local target <const> = sprites[row]
+            -- A held playback has no rate and cannot cross anything, which is
+            -- what a paused entity and one whose speed is zero both look like
+            -- from here. A row that has never been encoded carries a region.
+            local rate <const> = target.u1
+            if rate > 0.0 and frametable.isPlayback(target) then
+                local id <const> = frametable.playbackOf(target)
+                local count <const> = frametable.tickCount(id)
+                local start <const> = target.v0
+                -- Clamped, because an entity encoded during this step started
+                -- at a clock this window opened before and would otherwise
+                -- read as having come round from behind zero.
+                local before = (from - start) * rate
+                if before < 0.0 then before = 0.0 end
+                local after <const> = (to - start) * rate
+
+                if count > 0 and after > before then
+                    local instance <const> = animations[row]
+                    local looped <const> = instance.loop
+                        and floor(after / count) > floor(before / count)
+                    local completed <const> = not instance.loop
+                        and before < count and after >= count
+
+                    if completed or looped then
+                        local sheetId <const> = instance.sheet as integer
+                        if sheetId ~= cachedId then
+                            cached = sheet.byId(sheetId)
+                            cachedId = sheetId
+                        end
+                    end
+
+                    if completed and cached ~= nil then
+                        -- Parked where the host path parks it, one whole cycle
+                        -- in, so a later encode holds the last frame rather
+                        -- than starting the cycle again. The shader is already
+                        -- drawing that frame, because a one-shot clamps at its
+                        -- last tick whether or not anything is listening.
+                        if not parked then
+                            archetype:getMut(Animation)
+                            parked = true
+                        end
+                        instance.playing = false
+                        instance.time = count / TICK_HZ
+                        if wantsCompleted then
+                            world:emit(0, animation.Completed, entities[row],
+                                cached, cached:tagName(instance.tag as integer))
+                        end
+                    elseif looped and wantsLooped and cached ~= nil then
+                        world:emit(0, animation.Looped, entities[row], cached,
+                            cached:tagName(instance.tag as integer))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Asking what an entity is showing
+-------------------------------------------------------------------------------
+
+--- Where an entity's animation has got to, as a sheet, a tag and a time.
+---
+--- One function behind both queries below, so the two cannot answer from
+--- different places. With playback on the host the component carries the time
+--- and this hands it over; with playback on the GPU the `Sprite` carries a
+--- start and a rate and the time comes out of them and the clock.
+local function phaseOf(world: World, entity: integer): Sheet, integer, number
+    if not world:has(entity, Animation) then return nil, 0, 0.0 end
+    local instance <const> = world:get(entity, Animation)
+    local source <const> = sheet.byId(instance.sheet as integer)
+    if source == nil then return nil, 0, 0.0 end
+    local tagId <const> = instance.tag as integer
+
+    if not useGPU or not world:has(entity, Sprite) then
+        return source, tagId, instance.time
+    end
+    local target <const> = world:get(entity, Sprite)
+    if not frametable.isPlayback(target) then
+        -- Carrying a region rather than a playback, which is an entity that
+        -- has not been encoded yet. What it is playing is what it says.
+        return source, tagId, instance.time
+    end
+
+    local id <const> = frametable.playbackOf(target)
+    local count <const> = frametable.tickCount(id)
+    if count < 1 then return source, tagId, instance.time end
+
+    local rate <const> = target.u1
+    local ticks = rate == 0.0 and target.v0
+        or (world:fixedStepCount() - target.v0) * rate
+    if instance.loop then
+        ticks = ticks % count
+    elseif ticks < 0.0 then
+        ticks = 0.0
+    elseif ticks > count - 1 then
+        ticks = count - 1
+    end
+
+    -- The middle of the tick, which is where the frame table samples. Answering
+    -- from anywhere else in it would put this and the shader on opposite sides
+    -- of a boundary authored in whole milliseconds.
+    return source, tagId, (floor(ticks) + 0.5) / TICK_HZ
+end
+
+function animation.timeOf(world: World, entity: integer): number
+    local _, _, time <const> = phaseOf(world, entity)
+    return time
+end
+
+function animation.frameOf(world: World, entity: integer): integer
+    local source <const>, tagId <const>, time <const> = phaseOf(world, entity)
+    if source == nil then return 0 end
+    return source:frameAt(tagId, time)
 end
 
 --- Worlds the plugin has already installed into.
@@ -600,6 +870,10 @@ function animation.plugin(world: World)
             include = { Animation, Sprite, ecs.builtins.Paused },
         })
 
+        -- The step count each update began on, which is the count the last one
+        -- ended at because nothing between two updates moves it.
+        local began = world:fixedStepCount()
+
         -- `PostUpdate` rather than a render phase, so this lands before
         -- extraction whatever order the renderer and this plugin were
         -- installed in.
@@ -607,8 +881,30 @@ function animation.plugin(world: World)
             name = "tecs.EncodeAnimation",
             phase = ecs.phases.PostUpdate,
             run = function()
-                encode(world, running, false)
-                encode(world, paused, true)
+                encode(world, running, false, began)
+                encode(world, paused, true, began)
+            end,
+        })
+
+        -- Beside the encoder rather than in the fixed phases, because what says
+        -- whether an entity crossed its cycle is the encoding, and the encoding
+        -- for an entity that only just started playing is written above. A
+        -- window of steps rather than one step: an update that ran several
+        -- fixed steps reports one crossing over all of them, which is the
+        -- contract `Looped` already had.
+        local subscribed <const> = world:query({
+            name = "tecs.AnimationSubscribers",
+            include = { Animation, Sprite, AnimationEvents },
+        })
+        world:addSystem({
+            name = "tecs.ReportAnimation",
+            phase = ecs.phases.PostUpdate,
+            run = function()
+                local clock <const> = world:fixedStepCount()
+                if clock ~= began then
+                    report(world, subscribed, began, clock)
+                    began = clock
+                end
             end,
         })
         return

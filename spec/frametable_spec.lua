@@ -53,6 +53,25 @@ local function near(actual, expected, what)
     )
 end
 
+-- Two 16x16 frames whose "feet" slice moves from the bottom middle of the
+-- first to the top quarter of the second, and a "head" slice that never moves.
+-- Following the slice and standing still are then two different answers, and
+-- the second slice is what says the offsets are the playback's rather than the
+-- sheet's.
+local function walkerSheet()
+    return sheet
+        .build(uniqueName("walker"), 32, 16)
+        :frame(0, 0, 16, 16)
+        :frame(16, 0, 16, 16)
+        :tag("run", 1, 2)
+        :sliceKeys("feet", nil, {
+            { frame = 1, x = 4, y = 12, w = 8, h = 4, pivotX = 4, pivotY = 4 },
+            { frame = 2, x = 8, y = 0, w = 8, h = 4, pivotX = 4, pivotY = 0 },
+        })
+        :slice("head", 4, 0, 8, 4, 4, 2)
+        :finish()
+end
+
 -- Four frames in a row, tagged forward, reverse and pingpong over the same
 -- span, so one sheet exercises all three orders. Frames are retimed unevenly
 -- on purpose: a table that only ever sees equal durations would pass whatever
@@ -151,6 +170,113 @@ describe("a frame table", function()
             near(data[at + 3], v1, "v1")
             near(data[at + 4], 3, "array layer")
         end)
+
+        it("rebuilds a cycle a sheet overwritten in place retimed", function()
+            local name = uniqueName("retimed")
+            local live =
+                sheet.build(name, 32, 16):frame(0, 0, 16, 16, 100):frame(16, 0, 16, 16, 100):tag("run", 1, 2):finish()
+            local id = frametable.register(live, live:tagId("run"))
+            assert.are.equal(200, frametable.tickCount(id))
+
+            -- The reverse of building under a taken name: an entity already
+            -- playing keeps the id, so the table it reads has to follow the
+            -- frames rather than the ones it copied when it was registered.
+            sheet.replace(
+                sheet.build(name, 32, 16):frame(0, 0, 16, 16, 50):frame(16, 0, 16, 16, 50):tag("run", 1, 2):finish()
+            )
+            frametable.floats()
+
+            assert.are.equal(100, frametable.tickCount(id), "the retimed cycle")
+        end)
+    end)
+
+    -- A pivot follows the slice it names and a slice moves from frame to
+    -- frame, so with the frame resolved in the shader the offset has to travel
+    -- with it. What is stored is the offset from the middle of where the slice
+    -- goes rather than the pivot itself, which is what keeps the host's fold
+    -- and the cull bound exactly as they were for every slice that stays put.
+    describe("a pivot that follows a moving slice", function()
+        -- The offset the entry a tick names carries.
+        local function offsetAt(id, tick)
+            local data = frametable.floats()
+            local directory = (id - 1) * frametable.DIRECTORY_FLOATS
+            local tickBase = data[directory + 1]
+            local entry = data[tickBase + tick]
+            return data[entry + 5], data[entry + 6]
+        end
+
+        it("puts the middle and an offset where the frame's own pivot is", function()
+            local source = walkerSheet()
+            local slice = source:sliceId("feet")
+            local id = frametable.register(source, source:tagId("run"), slice)
+
+            -- The slice sits at 0.5, 1.0 on the first frame and 0.75, 0.0 on
+            -- the second, so the middle is between the two and the travel is
+            -- half the range.
+            local midX, midY, halfX, halfY = frametable.pivotOf(id)
+            near(midX, 0.625, "middle x")
+            near(midY, 0.5, "middle y")
+            near(halfX, 0.125, "half the travel across")
+            near(halfY, 0.5, "half the travel down")
+
+            -- And the pair reconstructs the pivot exactly, at every tick, which
+            -- is the property the picture depends on: the host folds the middle
+            -- into the origin and the shader adds the offset back.
+            for tick = 0, frametable.tickCount(id) - 1 do
+                local frame = frametable.frameAt(id, tick, true)
+                local px, py = source:pivotOf(slice, frame)
+                local dx, dy = offsetAt(id, tick)
+                near(midX + dx, px, ("pivot x at tick %d"):format(tick))
+                near(midY + dy, py, ("pivot y at tick %d"):format(tick))
+            end
+        end)
+
+        it("offsets nothing for a slice with a single key", function()
+            local source = walkerSheet()
+            local slice = source:sliceId("head")
+            local id = frametable.register(source, source:tagId("run"), slice)
+
+            -- 4,0 plus a pivot 4,2 into the slice is 8,2 of a 16x16 frame.
+            local midX, midY, halfX, halfY = frametable.pivotOf(id)
+            near(midX, 0.5, "middle x")
+            near(midY, 0.125, "middle y")
+            near(halfX, 0.0, "and nothing to travel")
+            near(halfY, 0.0)
+
+            for tick = 0, frametable.tickCount(id) - 1 do
+                local dx, dy = offsetAt(id, tick)
+                near(dx, 0.0, ("offset x at tick %d"):format(tick))
+                near(dy, 0.0, ("offset y at tick %d"):format(tick))
+            end
+        end)
+
+        it("offsets nothing for a playback that follows no slice", function()
+            local source = walkerSheet()
+            local id = frametable.register(source, source:tagId("run"))
+
+            local midX, midY, halfX, halfY = frametable.pivotOf(id)
+            near(midX, 0.5, "the middle of the frame")
+            near(midY, 0.5)
+            near(halfX, 0.0)
+            near(halfY, 0.0)
+
+            for tick = 0, frametable.tickCount(id) - 1 do
+                local dx, dy = offsetAt(id, tick)
+                near(dx, 0.0, ("offset x at tick %d"):format(tick))
+                near(dy, 0.0, ("offset y at tick %d"):format(tick))
+            end
+        end)
+
+        it("gives one tag bound to two slices two playbacks", function()
+            -- The offsets are measured from the playback's own middle, so two
+            -- slices over one tag cannot share a table.
+            local source = walkerSheet()
+            local tag = source:tagId("run")
+            local feet = frametable.register(source, tag, source:sliceId("feet"))
+            local head = frametable.register(source, tag, source:sliceId("head"))
+            assert.are_not.equal(feet, head)
+            assert.are_not.equal(feet, frametable.register(source, tag))
+        end)
     end)
 
     describe("the encoding an instance carries", function()
@@ -228,8 +354,13 @@ describe("playback resolved on the GPU", function()
         assert.is_true(id < 0, "a playback is a negative first float")
         near(rate, STEP * TICK_HZ, "one step of clip time at speed one")
         near(flags, 1.0, "looping")
-        -- Spawned at the top of its cycle on the step the world has run.
-        near(start, world:fixedStepCount(), "start step")
+        -- Spawned at the top of its cycle, and the cycle is measured from the
+        -- step count the update began on rather than the one it reached: the
+        -- component's time is the phase before the update's steps ran, and
+        -- anchoring on the count after them would make the phase depend on how
+        -- many of them the update happened to hold.
+        assert.is_true(world:fixedStepCount() > 0, "a step ran")
+        near(start, 0, "start step")
     end)
 
     it("writes nothing on a step where nothing changed what is playing", function()

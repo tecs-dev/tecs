@@ -5,11 +5,18 @@
 --- started, and how fast it runs. The regions themselves move here, once,
 --- shared by every entity playing the same thing.
 ---
---- What a playback is: one sheet, one tag, registered together and given an
---- index. A thousand entities walking the same cycle share one, for the reason
---- they already share one sheet. Speed is deliberately not part of the key: it
---- rides the instance, so two entities playing one tag at two speeds are one
---- registration and not two tables.
+--- What a playback is: one sheet, one tag and one slice, registered together
+--- and given an index. A thousand entities walking the same cycle share one,
+--- for the reason they already share one sheet. Speed is deliberately not part
+--- of the key: it rides the instance, so two entities playing one tag at two
+--- speeds are one registration and not two tables.
+---
+--- The slice is part of the key because a pivot follows the slice it names and
+--- a slice moves from frame to frame. What the entry carries is the offset from
+--- the middle of where the slice goes over the cycle, so two playbacks of one
+--- tag bound to two slices want different offsets for the same frame. A slice
+--- with a single key, and no slice at all, both give an offset of zero on every
+--- frame, which is the overwhelming majority and costs the same as before.
 ---
 --- The table is three regions of one buffer, all floats:
 ---
@@ -18,7 +25,7 @@
 ---   ticks       one per millisecond of the cycle, holding the offset of the
 ---               entry in force at that millisecond
 ---   entries     eight per step of the cycle: the region, the array layer, and
----               a pivot offset stage 2 fills in
+---               the pivot offset that step is drawn at
 ---
 --- A millisecond is the resolution because a millisecond is the unit the model
 --- is authored in: `Builder:frame` takes milliseconds and `sheet.fromAseprite`
@@ -52,21 +59,37 @@ local TICK_HZ <const> = 1000.0
 local DIRECTORY_FLOATS <const> = 4
 
 --- Floats per frame entry: u0, v0, u1, v1, array layer, pivot x, pivot y, and
---- one reserved. Reserved rather than trimmed: stage 2 writes the pivot, and a
---- slice generation would go in the eighth if a caller ever needs to reject a
---- layer that was reallocated under it. Widening this later would mean
---- rewriting an upload format already in use.
+--- one reserved. Reserved rather than trimmed: a slice generation would go in
+--- the eighth if a caller ever needs to reject a layer that was reallocated
+--- under it. Widening this later would mean rewriting an upload format already
+--- in use.
 local ENTRY_FLOATS <const> = 8
+
+--- Where a quad sits when nothing names a point on it, which is its middle.
+local CENTRE <const> = 0.5
 
 --- One registered playback, on the host side.
 local record Playback
     source: Sheet
     tag: integer
+    --- Slice the pivot follows, or zero for a playback that moves none.
+    slice: integer
     --- Sheet frame shown at each step of the cycle, which is `Sheet._order`
     --- with the direction already spent.
     order: {integer}
     --- Step in force at each tick, one-based into `order`.
     ticks: {integer}
+    --- Pivot offset at each step of the cycle, as a fraction of the frame from
+    --- the middle pivot below. Zero on every step unless the slice moves.
+    pivotX: {number}
+    pivotY: {number}
+    --- The middle of the pivots the cycle visits, and half their travel. The
+    --- middle is what an entity's `Pivot` carries and the host folds into the
+    --- quad's origin; the travel is what the cull bound grows by.
+    midX: number
+    midY: number
+    halfX: number
+    halfY: number
     --- Offsets into the assembled buffer, filled in when it is assembled.
     entryBase: integer
     tickBase: integer
@@ -78,14 +101,30 @@ local record frametable
     DIRECTORY_FLOATS: integer
     ENTRY_FLOATS: integer
 
-    --- Registers a sheet and tag, or answers the index they already have.
+    --- Registers a sheet, tag and slice, or answers the index they have.
     ---
-    --- Cheap to call repeatedly: the pair is cached, so the encode pass calls
+    --- Cheap to call repeatedly: the triple is cached, so the encode pass calls
     --- this per row without building anything after the first.
     --- @param source The sheet to play. Nil raises.
     --- @param tag A tag index from `Sheet:tagId`, or zero for the whole sheet.
+    --- @param slice A slice index from `Sheet:sliceId` for a pivot that follows
+    ---     it, or zero for a playback whose pivot does not move.
     --- @return The index an instance carries, counting from one.
-    register: function(source: Sheet, tag: integer): integer
+    register: function(source: Sheet, tag: integer, slice?: integer): integer
+
+    --- Where a playback's pivot sits and how far it travels.
+    ---
+    --- The middle is the point an entity's `Pivot` carries and extraction folds
+    --- into the quad's origin, and the frame table holds each step's offset from
+    --- it, so the two together place the quad exactly where a host that resolved
+    --- the frame would have. The travel is half the range of those offsets,
+    --- which is what the cull bound grows by and is zero for a slice that stays
+    --- put.
+    --- @param id An index from `register`. Anything else answers the middle of
+    ---     the frame and no travel, which is where a quad naming no point sits.
+    --- @return The middle pivot's x and y, then half its travel in each axis,
+    ---     all as fractions of the frame.
+    pivotOf: function(id: integer): number, number, number, number
 
     --- How many times the table has changed since the process started.
     ---
@@ -161,6 +200,15 @@ local ids: {string: integer} = {}
 local changes = 0
 local sheetsAt = sheet.revision()
 
+--- Whether a sheet's frames have moved since the last assembly.
+---
+--- A rebind moves regions and re-reading them costs a walk of the entries, which
+--- happens on every assembly anyway. Overwriting a sheet in place can move the
+--- steps of a cycle and how long each is held, and rebuilding a tick table costs
+--- the length of the cycle, so that is done only when a sheet says it happened
+--- rather than on every registration.
+local framesMoved = false
+
 --- The assembled buffer, the floats it holds, and what it was assembled from.
 local buffer: loader.CArray = nil
 local capacity = 0
@@ -171,6 +219,7 @@ function frametable.revision(): integer
     local current <const> = sheet.revision()
     if current ~= sheetsAt then
         sheetsAt = current
+        framesMoved = true
         changes = changes + 1
     end
     return changes
@@ -187,20 +236,75 @@ local function stepAt(timing: {number}, steps: integer, time: number): integer
     return steps
 end
 
-function frametable.register(source: Sheet, tag: integer): integer
-    if source == nil then
-        error("tecs: a playback needs a sheet", 2)
+--- Works out where a playback's pivot sits at each step of its cycle.
+---
+--- What an entry carries is an offset from the middle of the pivots the cycle
+--- visits rather than the pivot itself, and the reason is the cull bound. The
+--- host folds the middle into the quad's origin as it always did and grows the
+--- bound by the travel, so a slice that stays put has an offset of zero on
+--- every step, folds exactly as before, and keeps a bound that is exact.
+---
+--- Run when the playback is registered and again whenever a sheet's frames
+--- move, since a re-export can move the slice a playback follows.
+local function resolvePivots(playback: Playback)
+    local order <const> = playback.order
+    local steps <const> = #order
+    local pivotX <const> = playback.pivotX
+    local pivotY <const> = playback.pivotY
+    local slice <const> = playback.slice
+
+    if slice < 1 then
+        playback.midX, playback.midY = CENTRE, CENTRE
+        playback.halfX, playback.halfY = 0.0, 0.0
+        for step = 1, steps do
+            pivotX[step], pivotY[step] = 0.0, 0.0
+        end
+        return
     end
-    tag = tag or 0
 
-    local key <const> = source.id .. ":" .. tag
-    local existing <const> = ids[key]
-    if existing ~= nil then return existing end
+    local source <const> = playback.source
+    local minX, maxX = math.huge, -math.huge
+    local minY, maxY = math.huge, -math.huge
+    for step = 1, steps do
+        local x <const>, y <const> = source:pivotOf(slice, order[step])
+        pivotX[step], pivotY[step] = x, y
+        if x < minX then minX = x end
+        if x > maxX then maxX = x end
+        if y < minY then minY = y end
+        if y > maxY then maxY = y end
+    end
 
+    local midX <const> = (minX + maxX) * 0.5
+    local midY <const> = (minY + maxY) * 0.5
+    playback.midX, playback.midY = midX, midY
+    playback.halfX = (maxX - minX) * 0.5
+    playback.halfY = (maxY - minY) * 0.5
+    for step = 1, steps do
+        pivotX[step] = pivotX[step] - midX
+        pivotY[step] = pivotY[step] - midY
+    end
+end
+
+function frametable.pivotOf(id: integer): number, number, number, number
+    local playback <const> = playbacks[id]
+    if playback == nil then return CENTRE, CENTRE, 0.0, 0.0 end
+    -- Assembled on demand, because a rebind or a re-export can move the slice
+    -- since this was registered and a caller asking where the pivot is wants
+    -- the answer the shader is about to draw with.
+    frametable.floats()
+    return playback.midX, playback.midY, playback.halfX, playback.halfY
+end
+
+--- Reads a tag's steps and the step in force at each tick out of a sheet.
+---
+--- Ticks are sampled at the middle rather than at the edge. A boundary authored
+--- in whole milliseconds then falls between two samples instead of on one, so
+--- which side a tick lands on does not turn on a comparison against a value the
+--- other side computed slightly differently.
+local function planTicks(playback: Playback)
+    local source <const> = playback.source
+    local tag <const> = playback.tag
     local order <const> = source._order[tag]
-    if order == nil then
-        error(("tecs: sheet '%s' has no tag %d"):format(source.name, tag), 2)
-    end
     local timing <const> = source._timing[tag]
     local steps <const> = #order
 
@@ -210,24 +314,50 @@ function frametable.register(source: Sheet, tag: integer): integer
     local count = floor(cycle * TICK_HZ + 0.5)
     if count < 1 then count = 1 end
 
-    -- Sampled at the middle of each tick rather than its edge. A boundary
-    -- authored in whole milliseconds then falls between two samples instead of
-    -- on one, so which side a tick lands on does not turn on a comparison
-    -- against a value the other side computed slightly differently.
     local ticks: {integer} = {}
     for tick = 0, count - 1 do
         ticks[tick + 1] = stepAt(timing, steps, (tick + 0.5) / TICK_HZ)
     end
 
+    playback.order = order
+    playback.ticks = ticks
+end
+
+function frametable.register(source: Sheet, tag: integer,
+                             slice?: integer): integer
+    if source == nil then
+        error("tecs: a playback needs a sheet", 2)
+    end
+    tag = tag or 0
+    slice = slice or 0
+
+    local key <const> = source.id .. ":" .. tag .. ":" .. slice
+    local existing <const> = ids[key]
+    if existing ~= nil then return existing end
+
+    if source._order[tag] == nil then
+        error(("tecs: sheet '%s' has no tag %d"):format(source.name, tag), 2)
+    end
+
     local id <const> = #playbacks + 1
-    playbacks[id] = {
+    local playback <const>: Playback = {
         source = source,
         tag = tag,
-        order = order,
-        ticks = ticks,
+        slice = slice,
+        order = nil,
+        ticks = nil,
+        pivotX = {},
+        pivotY = {},
+        midX = CENTRE,
+        midY = CENTRE,
+        halfX = 0.0,
+        halfY = 0.0,
         entryBase = 0,
         tickBase = 0,
     }
+    planTicks(playback)
+    resolvePivots(playback)
+    playbacks[id] = playback
     ids[key] = id
     changes = changes + 1
     return id
@@ -292,6 +422,8 @@ local function writeEntries(data: loader.CArray, at: integer,
     local uvs <const> = source._uvs
     local layer <const> = source._slot
     local order <const> = playback.order
+    local pivotX <const> = playback.pivotX
+    local pivotY <const> = playback.pivotY
 
     for step = 1, #order do
         local frame <const> = order[step]
@@ -306,11 +438,13 @@ local function writeEntries(data: loader.CArray, at: integer,
         -- layer the instance already carried, so an unbound sheet animates its
         -- region and leaves the picture alone exactly as it does on the host.
         data[base + 4] = layer
-        -- Stage 2 writes the pivot offset here. Zero is a pivot that does not
-        -- move between frames, which is what the host already folded into the
-        -- origin, so zero is also the correct value for every sheet today.
-        data[base + 5] = 0.0
-        data[base + 6] = 0.0
+        -- How far this step's pivot sits from the middle the entity's `Pivot`
+        -- carries, in fractions of the frame, which is the same units the
+        -- quad's corners run in. Zero for a slice that stays put and for a
+        -- playback that follows none, so the shader adds nothing and the quad
+        -- lands where the host's fold alone would have put it.
+        data[base + 5] = pivotX[step]
+        data[base + 6] = pivotY[step]
         data[base + 7] = 0.0
     end
 
@@ -320,6 +454,17 @@ end
 --- Lays the three regions out and writes them.
 local function assemble()
     local count <const> = #playbacks
+
+    if framesMoved then
+        -- A sheet was bound or overwritten in place. Binding moves regions,
+        -- which the entry walk below re-reads whatever happens; overwriting can
+        -- change how long a frame is held and how many steps a cycle runs for,
+        -- and only a fresh tick table says the new answer.
+        framesMoved = false
+        for id = 1, count do
+            planTicks(playbacks[id])
+        end
+    end
 
     local total = count * DIRECTORY_FLOATS
     for id = 1, count do
@@ -349,6 +494,11 @@ local function assemble()
     for id = 1, count do
         local playback <const> = playbacks[id]
         playback.entryBase = at
+        -- Resolved again rather than trusted from registration, because this
+        -- runs on every revision and a revision is a sheet's frames having
+        -- moved. A re-export can move the slice a playback follows, and the
+        -- offsets and the travel both have to follow it.
+        resolvePivots(playback)
         at = writeEntries(data, at, playback)
     end
 
@@ -388,6 +538,7 @@ function frametable.reset()
     playbacks = {}
     ids = {}
     changes = changes + 1
+    framesMoved = false
     assembledAt = -1
     liveFloats = 0
 end

@@ -2693,5 +2693,89 @@ describe("ecs.Renderer", function()
             assert.are.equal(255, second.g, "and the second is green")
             assert.are_not.equal(first.g, second.g)
         end)
+
+        -- A pivot follows the slice it names and a slice moves from frame to
+        -- frame, so the host cannot fold it once when it does not know the
+        -- frame. What it folds instead is the middle of where the slice goes,
+        -- and the frame table carries each frame's offset from that middle.
+        -- Whether the two together put the quad where the host would have is a
+        -- claim about geometry, and the only way to hold it is to draw both.
+        local function movingPivotSheet(renderer)
+            nextSheet = nextSheet + 1
+            local name = "spec://pivots" .. nextSheet
+            local pixels = loader.newArray("uint8_t[8]")
+            pixels[0], pixels[1], pixels[2], pixels[3] = 0, 0, 255, 255
+            pixels[4], pixels[5], pixels[6], pixels[7] = 0, 0, 255, 255
+            local sprite = renderer:registerImage({
+                status = "ready",
+                path = name,
+                pixels = pixels,
+                width = 2,
+                height = 1,
+                pitch = 8,
+                release = function() end,
+            })
+            -- One texel per frame, and a slice whose pivot sits on the left
+            -- edge of the first and the right edge of the second. Which frame
+            -- is showing is then which side of the entity the quad hangs off,
+            -- and the difference is half a screen rather than a subpixel.
+            return sheet
+                .build(name, 2, 1)
+                :frame(0, 0, 1, 1)
+                :frame(1, 0, 1, 1)
+                :sliceKeys("feet", nil, {
+                    { frame = 1, x = 0, y = 0, w = 1, h = 1, pivotX = 0, pivotY = 0.5 },
+                    { frame = 2, x = 0, y = 0, w = 1, h = 1, pivotX = 1, pivotY = 0.5 },
+                })
+                :finish()
+                :bind(sprite)
+        end
+
+        -- Whether the left and right halves of the screen are covered.
+        local function hangsAfter(steps, gpu)
+            animation.useGPU(gpu)
+            local world, renderer = newScene()
+            local source = movingPivotSheet(renderer)
+            world:addPlugin(animation.plugin)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE / 2, SIZE / 2),
+                Tint(1, 1, 1, 1),
+                Renderable(),
+                source:sprite(1),
+                animation.of(source),
+                source:pivot("feet")
+            )
+
+            local pixels
+            for _ = 1, steps do
+                pixels = frameAt(world, renderer, STEP)
+            end
+            local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+            local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+            renderer:destroy()
+            animation.useGPU(false)
+            return left.b, right.b
+        end
+
+        it("hangs the quad off the pivot of the frame it is showing", function()
+            -- Three steps in is the middle of the first frame and nine the
+            -- middle of the second, so neither sample sits on a boundary.
+            for _, steps in ipairs({ 3, 9 }) do
+                local hostLeft, hostRight = hangsAfter(steps, false)
+                local gpuLeft, gpuRight = hangsAfter(steps, true)
+                assert.are.equal(hostLeft, gpuLeft, ("left after %d steps"):format(steps))
+                assert.are.equal(hostRight, gpuRight, ("right after %d steps"):format(steps))
+            end
+        end)
+
+        it("moves the quad as the slice moves under it", function()
+            local firstLeft, firstRight = hangsAfter(3, true)
+            local secondLeft, secondRight = hangsAfter(9, true)
+
+            assert.are.equal(255, firstRight, "the first frame hangs off its left edge")
+            assert.are.equal(0, firstLeft)
+            assert.are.equal(255, secondLeft, "and the second off its right")
+            assert.are.equal(0, secondRight)
+        end)
     end)
 end)

@@ -5,6 +5,12 @@
 -- however many frames were drawn between them. And a sprite whose frame did
 -- not change this step must leave its column clean, because the renderer skips
 -- archetypes on exactly that bit.
+--
+-- Playback resolves on the GPU by default and on the host behind the flag, and
+-- the two agree on the frame while differing on what they write to reach it.
+-- So a case that asks which frame is showing asks `animation.frameOf`, which
+-- answers from wherever the path it is on keeps the answer, and a case about
+-- what a path writes names its path with `withPlayback`.
 
 -- The build directory is the build system's to choose, so it is passed in.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
@@ -14,9 +20,11 @@ local tecs = require("tecs")
 local components = require("tecs.components")
 local sheet = require("tecs.gfx.sheet")
 local animation = require("tecs.gfx.animation")
+local frametable = require("tecs.gfx.frametable")
 
 local Sprite = components.Sprite
 local Animation = animation.Animation
+local AnimationEvents = animation.AnimationEvents
 local Pivot = sheet.Pivot
 
 local STEP = 1 / 60
@@ -69,6 +77,19 @@ end
 local function drive(world, steps)
     for _ = 1, steps do
         world:update(STEP)
+    end
+end
+
+-- Runs a body on one playback path and puts the flag back however it ends.
+-- Which systems a world gets is decided when the plugin is added, so the flag
+-- has to be set before `animatedWorld` and not after it.
+local function withPlayback(gpu, body)
+    local was = animation.usesGPU()
+    animation.useGPU(gpu)
+    local ok, err = pcall(body)
+    animation.useGPU(was)
+    if not ok then
+        error(err, 0)
     end
 end
 
@@ -339,16 +360,16 @@ describe("tecs.gfx.sheet", function()
             local entity = world:spawn(s:sprite(1), animation.of(s))
 
             drive(world, 3)
-            assert.equal(1, world:get(entity, Animation).frame)
+            assert.equal(1, animation.frameOf(world, entity))
 
             -- Six steps in is past the first frame's hundred milliseconds and
             -- nowhere near the end of the second's five hundred.
             drive(world, 6)
-            assert.equal(2, world:get(entity, Animation).frame)
+            assert.equal(2, animation.frameOf(world, entity))
             drive(world, 20)
-            assert.equal(2, world:get(entity, Animation).frame, "the held frame is still up half a second in")
+            assert.equal(2, animation.frameOf(world, entity), "the held frame is still up half a second in")
             drive(world, 8)
-            assert.equal(1, world:get(entity, Animation).frame, "and the cycle wraps once it is spent")
+            assert.equal(1, animation.frameOf(world, entity), "and the cycle wraps once it is spent")
         end)
 
         it("scales the whole cycle by an entity's speed", function()
@@ -358,11 +379,11 @@ describe("tecs.gfx.sheet", function()
 
             -- Twice as fast is three steps to the frame rather than six.
             drive(world, 2)
-            assert.equal(1, world:get(entity, Animation).frame)
+            assert.equal(1, animation.frameOf(world, entity))
             drive(world, 2)
-            assert.equal(2, world:get(entity, Animation).frame)
+            assert.equal(2, animation.frameOf(world, entity))
             drive(world, 3)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
         end)
     end)
 
@@ -382,13 +403,16 @@ describe("tecs.gfx.sheet", function()
             local seen = {}
             for _ = 1, steps do
                 world:update(STEP)
-                seen[#seen + 1] = world:get(entity, Animation).frame
+                seen[#seen + 1] = animation.frameOf(world, entity)
             end
             return seen, s
         end
 
         -- Sampled in the middle of each frame rather than at its edges, so a
-        -- rounding difference at a boundary cannot decide the answer.
+        -- rounding difference at a boundary cannot decide the answer. A frame
+        -- runs for six steps, and the two paths anchor a fresh entity's cycle
+        -- one step apart, so a sample within a step of a boundary is one the
+        -- suite decides by luck rather than by measurement.
         local function atFrames(seen, ...)
             local out = {}
             for index = 1, select("#", ...) do
@@ -411,9 +435,13 @@ describe("tecs.gfx.sheet", function()
             -- Three frames pingpong is 1, 2, 3, 2 and then round: five
             -- steps of a hundred milliseconds is a cycle of four frames,
             -- not six, because neither end plays twice.
-            local seen, s = walked("pingpong", 30)
+            --
+            -- The sixth sample is at 33 rather than 30 because 30 steps is 500
+            -- milliseconds, which is a hundred into the second cycle and so
+            -- exactly on a frame boundary.
+            local seen, s = walked("pingpong", 33)
             near(s:cycle(s:tagId("go")), 0.4, "the cycle skips both ends")
-            assert.are.same({ 1, 2, 3, 2, 1, 2 }, atFrames(seen, 3, 9, 15, 21, 27, 30))
+            assert.are.same({ 1, 2, 3, 2, 1, 2 }, atFrames(seen, 3, 9, 15, 21, 27, 33))
         end)
 
         it("defaults to forward", function()
@@ -774,13 +802,13 @@ describe("tecs.gfx.sheet", function()
             near(s:cycle(s:tagId("walk")), 0.38, "the walk cycle")
 
             drive(world, 3)
-            assert.equal(2, world:get(entity, Animation).frame)
+            assert.equal(2, animation.frameOf(world, entity))
             drive(world, 14)
-            assert.equal(2, world:get(entity, Animation).frame, "the three hundred millisecond frame is still up")
+            assert.equal(2, animation.frameOf(world, entity), "the three hundred millisecond frame is still up")
             drive(world, 3)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
             drive(world, 4)
-            assert.equal(2, world:get(entity, Animation).frame, "and the cycle wrapped once both were spent")
+            assert.equal(2, animation.frameOf(world, entity), "and the cycle wrapped once both were spent")
         end)
     end)
 
@@ -902,10 +930,13 @@ describe("tecs.gfx.sheet", function()
             drive(world, 12)
 
             -- The id never moved, so playback resolved through the same sheet
-            -- and wrote a region from the frames it now holds.
+            -- and landed on a frame of the ones it now holds. Eight pixels
+            -- across is the re-export's cut and four the one it displaced, so
+            -- the frame's own width is what says which sheet answered.
             assert.are.equal(live.id, world:get(entity, Animation).sheet)
-            local _, _, u1 = live:uv(world:get(entity, Animation).frame)
-            near(world:get(entity, Sprite).u1, u1, "the sprite is showing a frame of the sheet as it reads now")
+            local frame = animation.frameOf(world, entity)
+            assert.is_true(frame >= 1 and frame <= live.count, "a frame of the sheet as it reads now")
+            near(select(3, live:rect(frame)), 8, "and cut to the re-export's size")
         end)
     end)
 end)
@@ -926,8 +957,21 @@ describe("tecs.gfx.animation", function()
             local expected = { 1, 2, 3, 4 }
             for index = 1, #expected do
                 drive(world, index == 1 and 3 or STEPS_PER_FRAME)
-                local frame = expected[index]
-                assert.equal(frame, world:get(entity, Animation).frame)
+                assert.equal(expected[index], animation.frameOf(world, entity))
+            end
+        end)
+
+        -- Which frame is showing is one answer and what the entity carries to
+        -- reach it is the other, and the two paths differ only in the second.
+        it("writes the frame's region into the Sprite on the host", function()
+            withPlayback(false, function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+                drive(world, 3 + STEPS_PER_FRAME)
+                local frame = animation.frameOf(world, entity)
+                assert.equal(2, frame)
 
                 local u0, v0, u1, v1 = s:uv(frame)
                 local sprite = world:get(entity, Sprite)
@@ -935,7 +979,25 @@ describe("tecs.gfx.animation", function()
                 near(sprite.v0, v0, "v0 of frame " .. frame)
                 near(sprite.u1, u1, "u1 of frame " .. frame)
                 near(sprite.v1, v1, "v1 of frame " .. frame)
-            end
+            end)
+        end)
+
+        it("carries a playback rather than a region on the GPU", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+                drive(world, 3 + STEPS_PER_FRAME)
+                assert.equal(2, animation.frameOf(world, entity))
+
+                -- The region the frame resolves to lives in the table the
+                -- shader reads, and what the entity carries is which playback
+                -- it is on. The frame moving is then not a write at all.
+                local sprite = world:get(entity, Sprite)
+                assert.is_true(frametable.isPlayback(sprite), "the Sprite names a playback")
+                assert.equal(frametable.register(s, s:tagId("run")), frametable.playbackOf(sprite))
+            end)
         end)
 
         it("plays only the frames the tag names", function()
@@ -944,16 +1006,16 @@ describe("tecs.gfx.animation", function()
             local entity = world:spawn(s:sprite(1), animation.of(s, "walk"))
 
             drive(world, 3)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
 
             drive(world, STEPS_PER_FRAME)
-            assert.equal(4, world:get(entity, Animation).frame)
+            assert.equal(4, animation.frameOf(world, entity))
 
             -- Two frames at ten a second is a fifth of a second, so the next
             -- step past it is back at the tag's first frame and not the
             -- sheet's.
             drive(world, STEPS_PER_FRAME)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
         end)
 
         it("plays the whole sheet when no tag is named", function()
@@ -962,7 +1024,7 @@ describe("tecs.gfx.animation", function()
             local entity = world:spawn(s:sprite(1), animation.of(s, nil))
 
             drive(world, 3 + STEPS_PER_FRAME * 2)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
         end)
 
         it("refuses a tag the sheet does not carry", function()
@@ -982,26 +1044,39 @@ describe("tecs.gfx.animation", function()
             -- Four frames at ten a second is 24 steps to the cycle. Three past
             -- the wrap is the first frame again, not the last.
             drive(world, 27)
-            local instance = world:get(entity, Animation)
-            assert.equal(1, instance.frame)
-            assert.is_true(instance.playing)
+            assert.equal(1, animation.frameOf(world, entity))
+            assert.is_true(world:get(entity, Animation).playing)
         end)
 
         it("parks a one-shot on its last frame and stops", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+            -- The flag a one-shot parks behind is what `Completed` sets, and
+            -- the event reaches the entities that asked for it, so this asks.
+            -- The frame parks either way: playback that runs off the end of a
+            -- tag that does not loop holds the last tick whether or not
+            -- anything is listening.
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())
 
             drive(world, 27)
-            local instance = world:get(entity, Animation)
-            assert.equal(4, instance.frame)
-            assert.is_false(instance.playing)
+            assert.equal(4, animation.frameOf(world, entity))
+            assert.is_false(world:get(entity, Animation).playing)
 
             -- And stays there however long the world keeps running.
             drive(world, 120)
-            instance = world:get(entity, Animation)
-            assert.equal(4, instance.frame)
-            assert.is_false(instance.playing)
+            assert.equal(4, animation.frameOf(world, entity))
+            assert.is_false(world:get(entity, Animation).playing)
+        end)
+
+        it("parks the frame of a one-shot nothing is listening to", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+
+            drive(world, 27)
+            assert.equal(4, animation.frameOf(world, entity))
+            drive(world, 120)
+            assert.equal(4, animation.frameOf(world, entity), "and holds it")
         end)
 
         it("holds the first frame when the rate is zero", function()
@@ -1010,15 +1085,20 @@ describe("tecs.gfx.animation", function()
             local entity = world:spawn(s:sprite(1), animation.of(s, "run", { speed = 0 }))
 
             drive(world, 60)
-            assert.equal(1, world:get(entity, Animation).frame)
+            assert.equal(1, animation.frameOf(world, entity))
         end)
     end)
 
+    -- Both events are derived rather than observed on the GPU path: what says
+    -- an entity crossed its cycle is its start and its rate against the step
+    -- count, so nothing is written to report one. The cost of that is the
+    -- opt-in, which puts the entities a game listens to in an archetype of
+    -- their own and leaves a crowd of animations visited by no query at all.
     describe("events", function()
         it("reports a one-shot completing once", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())
 
             local seen = {}
             world:observe(0, animation.Completed, function(event)
@@ -1040,7 +1120,7 @@ describe("tecs.gfx.animation", function()
         it("reports a looping tag wrapping once per cycle", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = true }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = true }), AnimationEvents())
 
             local seen = {}
             world:observe(0, animation.Looped, function(event)
@@ -1061,7 +1141,7 @@ describe("tecs.gfx.animation", function()
         it("does not report a loop for a one-shot, or the reverse", function()
             local world = animatedWorld()
             local s = stripSheet()
-            world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+            world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())
 
             local loops, completions = 0, 0
             world:observe(0, animation.Looped, function()
@@ -1075,6 +1155,62 @@ describe("tecs.gfx.animation", function()
 
             assert.equal(0, loops)
             assert.equal(1, completions)
+        end)
+
+        it("reaches only the entities that asked, once playback is on the GPU", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+                world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())
+
+                local completions = 0
+                world:observe(0, animation.Completed, function()
+                    completions = completions + 1
+                end)
+
+                drive(world, 120)
+
+                assert.equal(1, completions, "one of the two subscribed")
+            end)
+        end)
+
+        it("writes nothing to report a cycle wrapping on the GPU", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                world:spawn(s:sprite(1), animation.of(s, "run", { loop = true }), AnimationEvents())
+
+                local wraps = 0
+                world:observe(0, animation.Looped, function()
+                    wraps = wraps + 1
+                end)
+
+                local dirtied = false
+                local query = world:query({
+                    name = "spec.SubscriberProbe",
+                    include = { Animation, Sprite, AnimationEvents },
+                })
+                world:addSystem({
+                    name = "spec.ReadSubscriberDirty",
+                    phase = tecs.phases.Last,
+                    run = function()
+                        for archetype in query:iter() do
+                            if archetype:isComponentDirty(Sprite) or archetype:isComponentDirty(Animation) then
+                                dirtied = true
+                            end
+                        end
+                    end,
+                })
+
+                -- Past the first encode, which is a write and the only one.
+                drive(world, 2)
+                dirtied = false
+                drive(world, 60)
+
+                assert.is_true(wraps >= 2, "two cycles went by")
+                assert.is_false(dirtied, "and neither column was touched to say so")
+            end)
         end)
     end)
 
@@ -1106,27 +1242,53 @@ describe("tecs.gfx.animation", function()
         end
 
         it("leaves the Sprite column clean on a step that changed no frame", function()
-            local world = animatedWorld()
-            local s = stripSheet()
-            world:spawn(s:sprite(1), animation.of(s, "run"))
-            local seen = probe(world)
+            withPlayback(false, function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                world:spawn(s:sprite(1), animation.of(s, "run"))
+                local seen = probe(world)
 
-            -- The first step resolves the frame, which is a write.
-            world:update(STEP)
-            assert.is_true(seen.sprite)
-            assert.is_true(seen.animation)
-
-            -- The next five stay on it. Time still moves, so the two
-            -- columns have to disagree or the gate is not per component.
-            for _ = 1, 4 do
+                -- The first step resolves the frame, which is a write.
                 world:update(STEP)
-                assert.is_false(seen.sprite)
+                assert.is_true(seen.sprite)
                 assert.is_true(seen.animation)
-            end
 
-            -- Sixth step crosses into the next frame.
-            world:update(STEP)
-            assert.is_true(seen.sprite)
+                -- The next five stay on it. Time still moves, so the two
+                -- columns have to disagree or the gate is not per component.
+                for _ = 1, 4 do
+                    world:update(STEP)
+                    assert.is_false(seen.sprite)
+                    assert.is_true(seen.animation)
+                end
+
+                -- Sixth step crosses into the next frame.
+                world:update(STEP)
+                assert.is_true(seen.sprite)
+            end)
+        end)
+
+        -- The same property one step further, which is the whole reason the
+        -- GPU path exists: a frame changing is not a write at all, so a step
+        -- that crosses a frame boundary leaves both columns exactly as clean as
+        -- one that stayed put.
+        it("writes the Sprite column once and never again on the GPU", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                world:spawn(s:sprite(1), animation.of(s, "run"))
+                local seen = probe(world)
+
+                -- The first step encodes what is playing, which is a write.
+                world:update(STEP)
+                assert.is_true(seen.sprite)
+
+                -- Two whole cycles, crossing eight frame boundaries.
+                for step = 1, 48 do
+                    world:update(STEP)
+                    assert.is_false(seen.sprite, "step " .. step)
+                    assert.is_false(seen.animation, "step " .. step)
+                end
+            end)
         end)
 
         -- Counts what a step asks the sheet for. Shadowing the method on the
@@ -1144,36 +1306,57 @@ describe("tecs.gfx.animation", function()
         end
 
         it("looks up no frame for a row whose time stood still", function()
-            -- A world of sprites is mostly sprites standing still at any
-            -- moment, and a walk over all of them that looks each one up
-            -- again makes a scene where a hundredth of them animate cost what
-            -- one where all of them do costs.
-            local world = animatedWorld()
-            local s = stripSheet()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+            withPlayback(false, function()
+                -- A world of sprites is mostly sprites standing still at any
+                -- moment, and a walk over all of them that looks each one up
+                -- again makes a scene where a hundredth of them animate cost
+                -- what one where all of them do costs.
+                local world = animatedWorld()
+                local s = stripSheet()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
 
-            -- One step to settle it on a frame, then stop its clock.
-            world:update(STEP)
-            world:getMut(entity, Animation).playing = false
+                -- One step to settle it on a frame, then stop its clock.
+                world:update(STEP)
+                world:getMut(entity, Animation).playing = false
 
-            local counted = countLookups(s)
-            drive(world, 10)
+                local counted = countLookups(s)
+                drive(world, 10)
 
-            assert.equal(0, counted.frames, "a paused sprite shows the frame it already has")
+                assert.equal(0, counted.frames, "a paused sprite shows the frame it already has")
+            end)
         end)
 
         it("looks a paused row up until it has a frame at all", function()
-            -- Zero is no frame written yet, so a sprite that has never been
-            -- resolved has to be, playing or not, or it draws whatever its
-            -- Sprite happened to carry.
-            local world = animatedWorld()
-            local s = stripSheet()
-            world:spawn(Sprite(3, 0, 0, 1, 1, 6), animation.of(s, "run", { playing = false }))
+            withPlayback(false, function()
+                -- Zero is no frame written yet, so a sprite that has never been
+                -- resolved has to be, playing or not, or it draws whatever its
+                -- Sprite happened to carry.
+                local world = animatedWorld()
+                local s = stripSheet()
+                world:spawn(Sprite(3, 0, 0, 1, 1, 6), animation.of(s, "run", { playing = false }))
 
-            local counted = countLookups(s)
-            drive(world, 4)
+                local counted = countLookups(s)
+                drive(world, 4)
 
-            assert.equal(1, counted.frames, "once to settle it, and never again")
+                assert.equal(1, counted.frames, "once to settle it, and never again")
+            end)
+        end)
+
+        it("looks no frame up at all once playback is on the GPU", function()
+            withPlayback(true, function()
+                -- The whole cost this removes: a scene of animations asks the
+                -- sheet nothing, however many of them are running, because the
+                -- frame is worked out where it is drawn.
+                local world = animatedWorld()
+                local s = stripSheet()
+                world:spawn(s:sprite(1), animation.of(s, "run"))
+
+                world:update(STEP)
+                local counted = countLookups(s)
+                drive(world, 30)
+
+                assert.equal(0, counted.frames, "five frame boundaries and no lookup")
+            end)
         end)
 
         it("leaves both columns clean when nothing is playing", function()
@@ -1210,9 +1393,9 @@ describe("tecs.gfx.animation", function()
             })
         end
 
-        -- Copied out rather than handed back: what `get` returns for an FFI
-        -- component points into the archetype's column, and the world holding
-        -- it goes out of scope when this returns.
+        -- Asked rather than read out of a column: the two paths keep the answer
+        -- in different places and `frameOf` is what both of them answer from.
+        -- The region is the frame's, so holding the frame holds the picture.
         local function played(steps, frameLength)
             local world = animatedWorld()
             local s = eightFrames()
@@ -1220,13 +1403,9 @@ describe("tecs.gfx.animation", function()
             for _ = 1, steps do
                 world:update(frameLength)
             end
-            local instance = world:get(entity, Animation)
-            local sprite = world:get(entity, Sprite)
             return {
-                frame = instance.frame,
-                time = instance.time,
-                u0 = sprite.u0,
-                u1 = sprite.u1,
+                frame = animation.frameOf(world, entity),
+                time = animation.timeOf(world, entity),
             }
         end
 
@@ -1238,8 +1417,6 @@ describe("tecs.gfx.animation", function()
 
             assert.equal(a.frame, b.frame)
             assert.equal(a.time, b.time)
-            assert.equal(a.u0, b.u0)
-            assert.equal(a.u1, b.u1)
         end)
 
         it("ignores the leftover of frames that did not fill a step", function()
@@ -1271,19 +1448,78 @@ describe("tecs.gfx.animation", function()
         end
 
         it("moves a bound pivot with the slice as the frame changes", function()
-            local world = animatedWorld()
-            local s = walker()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+            withPlayback(false, function()
+                local world = animatedWorld()
+                local s = walker()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
 
-            world:update(STEP)
-            local p = world:get(entity, Pivot)
-            near(p.x, 0.5, "pivot x on frame one")
-            near(p.y, 1.0, "pivot y on frame one")
+                world:update(STEP)
+                local p = world:get(entity, Pivot)
+                near(p.x, 0.5, "pivot x on frame one")
+                near(p.y, 1.0, "pivot y on frame one")
 
-            drive(world, STEPS_PER_FRAME)
-            p = world:get(entity, Pivot)
-            near(p.x, 0.75, "pivot x on frame two")
-            near(p.y, 0.0, "pivot y on frame two")
+                drive(world, STEPS_PER_FRAME)
+                p = world:get(entity, Pivot)
+                near(p.x, 0.75, "pivot x on frame two")
+                near(p.y, 0.0, "pivot y on frame two")
+            end)
+        end)
+
+        -- With the frame resolved in the shader the host cannot write the
+        -- frame's pivot, because it does not know the frame. What it writes
+        -- instead is the middle of where the slice goes and how far either side
+        -- of it the slice reaches: the middle is folded into the quad's origin
+        -- exactly as a resolved pivot was, the frame table carries each step's
+        -- offset from it, and the travel is what the cull bound grows by.
+        it("writes the middle of a moving slice and how far it travels", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local s = walker()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+
+                -- The slice sits at 0.5, 1.0 on the first frame and 0.75, 0.0
+                -- on the second, so the middle is 0.625, 0.5 and the travel a
+                -- half range of 0.125 and 0.5.
+                world:update(STEP)
+                local p = world:get(entity, Pivot)
+                near(p.x, 0.625, "pivot x")
+                near(p.y, 0.5, "pivot y")
+                near(p.halfX, 0.125, "half the travel across")
+                near(p.halfY, 0.5, "half the travel down")
+
+                -- And stays there, because it is the playback's answer rather
+                -- than the frame's.
+                drive(world, STEPS_PER_FRAME)
+                p = world:get(entity, Pivot)
+                near(p.x, 0.625, "pivot x a frame later")
+                near(p.y, 0.5, "pivot y a frame later")
+            end)
+        end)
+
+        it("leaves a slice that never moves exactly where it was", function()
+            withPlayback(true, function()
+                -- One key, which is what `Builder:slice` writes and what an
+                -- Aseprite slice that does not move exports. The middle is then
+                -- the pivot itself, the travel is nothing, and both the fold
+                -- and the cull bound are what they always were.
+                local world = animatedWorld()
+                local s = sheet
+                    .build(uniqueName("still"), 32, 16)
+                    :frame(0, 0, 16, 16)
+                    :frame(16, 0, 16, 16)
+                    :tag("run", 1, 2)
+                    :slice("feet", 4, 12, 8, 4, 4, 4)
+                    :finish()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+
+                drive(world, 2 * STEPS_PER_FRAME + 1)
+
+                local p = world:get(entity, Pivot)
+                near(p.x, 0.5, "pivot x")
+                near(p.y, 1.0, "pivot y")
+                near(p.halfX, 0.0, "and no travel to cover")
+                near(p.halfY, 0.0)
+            end)
         end)
 
         it("leaves a pivot bound to nothing where it was written", function()
@@ -1319,12 +1555,11 @@ describe("tecs.gfx.animation", function()
             near(p.y, 0.125, "pivot y")
         end)
 
-        it("leaves the Pivot column clean on a step that changed no frame", function()
-            local world = animatedWorld()
-            local s = walker()
-            world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
-
-            local seen = false
+        -- Watches the Pivot column's dirty bit through a world's updates.
+        -- Dirty bits clear at the end of world:update, so the answer has to be
+        -- read inside the frame that produced it.
+        local function pivotProbe(world)
+            local seen = { dirty = false }
             local query = world:query({
                 name = "spec.PivotProbe",
                 include = { Animation, Pivot },
@@ -1333,29 +1568,59 @@ describe("tecs.gfx.animation", function()
                 name = "spec.ReadPivotDirty",
                 phase = tecs.phases.Last,
                 run = function()
-                    seen = false
+                    seen.dirty = false
                     for archetype in query:iter() do
                         if archetype:isComponentDirty(Pivot) then
-                            seen = true
+                            seen.dirty = true
                         end
                     end
                 end,
             })
+            return seen
+        end
 
-            -- The first step resolves the frame, which moves the pivot.
-            world:update(STEP)
-            assert.is_true(seen)
+        it("leaves the Pivot column clean on a step that changed no frame", function()
+            withPlayback(false, function()
+                local world = animatedWorld()
+                local s = walker()
+                world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+                local seen = pivotProbe(world)
 
-            -- Four more stay on it. A frame's hundred milliseconds is six
-            -- steps and the sixth lands a hair past the end of it, so that is
-            -- the one that crosses.
-            for _ = 1, STEPS_PER_FRAME - 2 do
+                -- The first step resolves the frame, which moves the pivot.
                 world:update(STEP)
-                assert.is_false(seen, "the frame stood still, so the pivot did")
-            end
+                assert.is_true(seen.dirty)
 
-            world:update(STEP)
-            assert.is_true(seen, "crossing into the next frame moves it again")
+                -- Four more stay on it. A frame's hundred milliseconds is six
+                -- steps and the sixth lands a hair past the end of it, so that
+                -- is the one that crosses.
+                for _ = 1, STEPS_PER_FRAME - 2 do
+                    world:update(STEP)
+                    assert.is_false(seen.dirty, "the frame stood still, so the pivot did")
+                end
+
+                world:update(STEP)
+                assert.is_true(seen.dirty, "crossing into the next frame moves it again")
+            end)
+        end)
+
+        it("writes the Pivot column once and never again on the GPU", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local s = walker()
+                world:spawn(s:sprite(1), animation.of(s, "run"), s:pivot("feet"))
+                local seen = pivotProbe(world)
+
+                -- The middle and the travel are the playback's answer, so they
+                -- are written when what is playing changes and never when a
+                -- frame does.
+                world:update(STEP)
+                assert.is_true(seen.dirty)
+
+                for step = 1, 4 * STEPS_PER_FRAME do
+                    world:update(STEP)
+                    assert.is_false(seen.dirty, "step " .. step)
+                end
+            end)
         end)
     end)
 
@@ -1366,7 +1631,7 @@ describe("tecs.gfx.animation", function()
             local entity = world:spawn(s:sprite(1), animation.of(s, "whole"))
 
             drive(world, 3 + STEPS_PER_FRAME)
-            assert.equal(2, world:get(entity, Animation).frame)
+            assert.equal(2, animation.frameOf(world, entity))
 
             animation.play(world, entity, s, "walk")
             local instance = world:get(entity, Animation)
@@ -1374,7 +1639,7 @@ describe("tecs.gfx.animation", function()
             assert.equal(0, instance.time)
 
             drive(world, 3)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
         end)
 
         it("adds an Animation to an entity carrying none", function()
@@ -1385,7 +1650,7 @@ describe("tecs.gfx.animation", function()
             animation.play(world, entity, s, "run")
             drive(world, 3)
 
-            assert.equal(1, world:get(entity, Animation).frame)
+            assert.equal(1, animation.frameOf(world, entity))
         end)
 
         -- A frame is a region of an image. Playback that wrote only the region
@@ -1393,49 +1658,110 @@ describe("tecs.gfx.animation", function()
         -- the old layer with the new rect, which draws part of the wrong
         -- picture rather than nothing at all.
         it("moves the Sprite's image when the sheet does", function()
-            local world = animatedWorld()
-            local first = stripSheet()
-            local second = stripSheet()
-            -- What Renderer:sprite hands back for two images that landed on
-            -- different layers of the array.
-            first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
-            second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+            withPlayback(false, function()
+                local world = animatedWorld()
+                local first = stripSheet()
+                local second = stripSheet()
+                -- What Renderer:sprite hands back for two images that landed on
+                -- different layers of the array.
+                first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+                second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
 
-            local entity = world:spawn(first:sprite(1), animation.of(first, "run"))
-            drive(world, 3)
-            assert.equal(2, world:get(entity, Sprite).slot)
+                local entity = world:spawn(first:sprite(1), animation.of(first, "run"))
+                drive(world, 3)
+                assert.equal(2, world:get(entity, Sprite).slot)
 
-            animation.play(world, entity, second, "run")
-            drive(world, 3)
+                animation.play(world, entity, second, "run")
+                drive(world, 3)
 
-            local sprite = world:get(entity, Sprite)
-            assert.equal(5, sprite.slot, "the layer follows the sheet")
-            assert.equal(9, sprite.image, "and so does the image it names")
+                local sprite = world:get(entity, Sprite)
+                assert.equal(5, sprite.slot, "the layer follows the sheet")
+                assert.equal(9, sprite.image, "and so does the image it names")
+            end)
+        end)
+
+        -- The layer is a property of the frame rather than of the entity once
+        -- the shader resolves the frame, so it lives in the table beside the
+        -- region and the Sprite is left alone. That is what makes rebinding a
+        -- sheet to another image cost one table and no instances at all.
+        it("moves the layer in the table rather than in the Sprite on the GPU", function()
+            withPlayback(true, function()
+                local world = animatedWorld()
+                local first = stripSheet()
+                local second = stripSheet()
+                first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+                second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+
+                local entity = world:spawn(first:sprite(1), animation.of(first, "run"))
+                drive(world, 3)
+                assert.equal(
+                    frametable.register(first, first:tagId("run")),
+                    frametable.playbackOf(world:get(entity, Sprite))
+                )
+
+                animation.play(world, entity, second, "run")
+                drive(world, 3)
+
+                assert.equal(
+                    frametable.register(second, second:tagId("run")),
+                    frametable.playbackOf(world:get(entity, Sprite)),
+                    "the entity is on the second sheet's playback"
+                )
+                assert.equal(2, world:get(entity, Sprite).slot, "and its own layer was never touched")
+            end)
         end)
 
         it("moves the image even when the frame index does not change", function()
-            -- Both sheets are playing their first frame, so the index the
-            -- second one lands on is the one the first one left behind.
-            -- Gating the write on the frame alone misses this entirely.
-            local world = animatedWorld()
-            local first = stripSheet()
-            local second = stripSheet()
-            first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
-            second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+            withPlayback(false, function()
+                -- Both sheets are playing their first frame, so the index the
+                -- second one lands on is the one the first one left behind.
+                -- Gating the write on the frame alone misses this entirely.
+                local world = animatedWorld()
+                local first = stripSheet()
+                local second = stripSheet()
+                first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+                second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
 
-            local entity = world:spawn(first:sprite(1), animation.of(first, "run", { speed = 0 }))
-            drive(world, 3)
-            assert.equal(1, world:get(entity, Animation).frame)
+                local entity = world:spawn(first:sprite(1), animation.of(first, "run", { speed = 0 }))
+                drive(world, 3)
+                assert.equal(1, world:get(entity, Animation).frame)
 
-            -- Written straight into the component, which is the case
-            -- `play` would have papered over by resetting the frame.
-            world:getMut(entity, Animation).sheet = second.id
-            drive(world, 1)
+                -- Written straight into the component, which is the case
+                -- `play` would have papered over by resetting the frame.
+                world:getMut(entity, Animation).sheet = second.id
+                drive(world, 1)
 
-            local sprite = world:get(entity, Sprite)
-            assert.equal(1, world:get(entity, Animation).frame, "the frame index is the one it already had")
-            assert.equal(5, sprite.slot, "and the layer moved anyway")
-            assert.equal(9, sprite.image)
+                local sprite = world:get(entity, Sprite)
+                assert.equal(1, world:get(entity, Animation).frame, "the frame index is the one it already had")
+                assert.equal(5, sprite.slot, "and the layer moved anyway")
+                assert.equal(9, sprite.image)
+            end)
+        end)
+
+        it("re-encodes a sheet written straight into the component on the GPU", function()
+            withPlayback(true, function()
+                -- The same case from the other side: the sheet moved and the
+                -- frame index did not, and what has to follow is which playback
+                -- the entity is on rather than a region it carries.
+                local world = animatedWorld()
+                local first = stripSheet()
+                local second = stripSheet()
+                first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+                second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+
+                local entity = world:spawn(first:sprite(1), animation.of(first, "run", { speed = 0 }))
+                drive(world, 3)
+
+                world:getMut(entity, Animation).sheet = second.id
+                drive(world, 1)
+
+                assert.equal(1, animation.frameOf(world, entity), "the frame index is the one it already had")
+                assert.equal(
+                    frametable.register(second, second:tagId("run")),
+                    frametable.playbackOf(world:get(entity, Sprite)),
+                    "and the playback moved anyway"
+                )
+            end)
         end)
 
         it("leaves the Sprite's image alone for an unbound sheet", function()
@@ -1459,7 +1785,7 @@ describe("tecs.gfx.animation", function()
         it("plays a finished one-shot again instead of completing forever", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())
 
             local completions = 0
             world:observe(0, animation.Completed, function()
@@ -1472,7 +1798,7 @@ describe("tecs.gfx.animation", function()
 
             world:getMut(entity, Animation).playing = true
             drive(world, 3)
-            assert.equal(1, world:get(entity, Animation).frame, "asking for it again starts it again")
+            assert.equal(1, animation.frameOf(world, entity), "asking for it again starts it again")
             assert.equal(1, completions, "and does not complete on the way")
 
             -- Through the whole cycle once more: one more completion, not
@@ -1489,7 +1815,7 @@ describe("tecs.gfx.animation", function()
             local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
             drive(world, 3 + STEPS_PER_FRAME * 2)
-            assert.equal(3, world:get(entity, Animation).frame)
+            assert.equal(3, animation.frameOf(world, entity))
 
             assert.is_true(animation.restart(world, entity))
             local instance = world:get(entity, Animation)
@@ -1501,22 +1827,21 @@ describe("tecs.gfx.animation", function()
             assert.is_false(instance.loop)
 
             drive(world, 3)
-            assert.equal(1, world:get(entity, Animation).frame)
+            assert.equal(1, animation.frameOf(world, entity))
         end)
 
         it("restarts a one-shot that has already finished", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }), AnimationEvents())
 
             drive(world, 27)
             assert.is_false(world:get(entity, Animation).playing)
 
             animation.restart(world, entity)
             drive(world, 3)
-            local instance = world:get(entity, Animation)
-            assert.equal(1, instance.frame)
-            assert.is_true(instance.playing)
+            assert.equal(1, animation.frameOf(world, entity))
+            assert.is_true(world:get(entity, Animation).playing)
         end)
 
         it("answers false for an entity carrying no Animation", function()

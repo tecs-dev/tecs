@@ -76,9 +76,9 @@ Working today:
 - Sprite sheets on Aseprite's model: frames with their own durations, named
   tags playing forward, in reverse or pingpong, and slices carrying pivots,
   built by a grid, an explicit rect list, a builder, or read from an Aseprite
-  JSON export; and a fixed-phase system that writes the current frame's region
-  and image into `Sprite` and reports a tag completing or looping on the
-  world's event bus
+  JSON export; with playback resolved in the vertex shader against a shared
+  frame table, so a frame changing writes nothing and two hundred thousand
+  animating sprites cost what two hundred thousand still ones do
 - Layers: sixteen bands of the depth range, each choosing how its contents sort
   within it, and each able to sit in screen pixels, in virtual coordinates,
   outside the camera's zoom, at its own parallax, or unlit
@@ -1067,6 +1067,11 @@ and the depth sort still runs on the entity's position, which is the whole
 reason a pivot at the feet is worth having, since two characters standing on
 the same line then sort together however tall either drawing is.
 
+The bound is exact for every pivot the host knows, which is every one written
+directly and every slice with a single key. A slice that moves between frames is
+resolved in the shader and the bound grows by the slice's own travel to cover it,
+which is the one qualifier on the paragraph above and is worked out below.
+
 A sheet is data, not a component: a hundred entities drawing one character
 share one sheet and point at it. What the `Animation` component carries is the
 sheet's registration index and the index of a tag within it, because a
@@ -1083,6 +1088,13 @@ That second fraction is the renderer's answer, so `sheet:bind` takes what
 `Renderer:sprite` returns for a whole image and rescales every frame once.
 Before it, a frame's region is its plain fraction of the image, which is what a
 sheet can say without a renderer and what makes one testable headless.
+
+There are two paths from an `Animation` to a picture and `animation.useGPU`
+chooses between them. The rest of this section is the host one, which walks every
+playing animation on every fixed step and writes the frame's region into the
+entity's `Sprite`; the section after it is the one that defaults on, which writes
+what is playing and lets the shader work the frame out. They agree on the frame
+and differ on what they write to reach it.
 
 Playback advances in `FixedPostUpdate`, not per frame, because animation is
 simulation: two machines fed the same recording have to show the same frame,
@@ -1141,14 +1153,15 @@ of two hundred thousand cost two hundred thousand instances written. That is
 measured rather than argued: `make bench-sprites` reports it as `rewritten`, and
 the sparse regime exists to show it.
 
-`animation.useGPU(true)` moves the resolution to the shader. The instance's
-region fields stop carrying a region and start carrying enough to compute one:
-which animation is playing, the fixed step it began on, and how many ticks of
-clip time it advances per step. A frame changing then writes nothing at all, and
-what a step costs is what actually changed rather than what is shaped like it.
-At two hundred thousand sprites all animating, `rewritten` goes from a mean of
-eighty-five thousand per frame to zero, and the frame time lands on what a scene
-of the same size that never animates costs.
+Playback therefore resolves in the shader, which is what `animation.useGPU`
+selects and what it defaults to. The instance's region fields stop carrying a
+region and start carrying enough to compute one: which animation is playing, the
+fixed step it began on, and how many ticks of clip time it advances per step. A
+frame changing then writes nothing at all, and what a step costs is what actually
+changed rather than what is shaped like it. At two hundred thousand sprites all
+animating, `rewritten` goes from a mean of eighty-five thousand per frame to
+zero, and the frame time lands on what a scene of the same size that never
+animates costs.
 
 What makes it fit in the instance is that it needs no room. A region is four
 floats and a playback is four floats, and no region is ever negative, so the
@@ -1194,6 +1207,14 @@ any direct write. So a step where nothing changed visits no archetype, and a
 either knowing this exists. The phase is `PostUpdate` rather than a render one
 so it lands before extraction whatever order the plugins were installed in.
 
+The encoder anchors on the step count the update began on rather than the one it
+reached, because `Animation.time` is the phase before that update's steps ran: an
+entity spawned between two updates, and a snapshot loaded between them, were both
+written before the fixed loop. Anchoring on the count after it would make a
+playback's phase depend on how many fixed steps happened to fall inside the
+update it was first seen in, and two machines fed the same steps in differently
+sized updates would show different frames.
+
 Pausing has to be said rather than assumed, because the world's clock does not
 stop for one entity. A rate of zero means held, and the second field then
 carries the tick to hold instead of the step playback began on. `Paused` moves
@@ -1201,11 +1222,67 @@ an entity to another archetype and a move marks every component on the
 destination dirty, so the freeze and the thaw both arrive at the encoder without
 anything having to notice them.
 
-The host path is still the default while the two are measured against each
-other, and what is not ported to the GPU one yet is the pivot that follows a
-moving slice, the `Completed` and `Looped` events, and reading the current frame
-back on the host. `../tecs-plans/gpu-animation.md` is the design and says what
-each of those costs.
+### The pivot that follows a moving slice
+
+A pivot bound to a slice moves as the frame does, and the host cannot fold it
+once when it is the shader that knows the frame. What it folds instead is the
+middle of where the slice goes over the cycle, and the frame table carries each
+step's offset from that middle; the shader subtracts the offset from the corner,
+which is two multiply-adds on a basis it has already built.
+
+The middle rather than the pivot is what keeps the cull bound honest. A pivot
+written directly and a slice with a single key both offset nothing on every
+frame, which is `Builder:slice` and every Aseprite slice that does not move, so
+their fold and their bound are bit for bit what they were. Only a slice that
+genuinely moves pays, and it pays exactly its own travel: `Pivot` carries `halfX`
+and `halfY` beside the point, extraction grows the half extents by them, and the
+bound stays conservative in the direction that can only keep an instance the cull
+might have dropped.
+
+The slice is therefore part of a playback's key alongside the sheet and the tag,
+because two playbacks of one tag bound to two slices want different offsets for
+the same frame. The `Pivot` column joins the encoder's gate for the same reason:
+pointing an entity at another slice changes which playback it is on and nothing
+about its `Animation` moved to say so.
+
+### Events, derived rather than observed
+
+Whether an entity crossed its cycle during a window of steps is a function of the
+start and the rate its `Sprite` already carries against the step count, so
+`tecs.ReportAnimation` reads two columns and writes nothing: no `getMut`, no
+dirty column, and no run rewritten because a crowd of animations wrapped. The one
+write is the flag a finished one-shot parks behind, on the step it finishes and
+never again.
+
+Which entities it walks is an opt-in, `animation.AnimationEvents`. That is what
+keeps the walk small: the handful a game listens to sit in an archetype of their
+own and the crowd is visited by no query at all. Keeping full host playback for
+the subscribers instead would be worse, and for a specific reason: those entities
+share archetypes with everything else of their shape, so writing their `Sprite`
+column rewrites those runs, which is the same cliff at a smaller scale and lands
+on the archetypes a game cares most about.
+
+### Asking what an entity is showing
+
+`animation.frameOf` and `animation.timeOf` recompute on the call, against the
+same tick tables the shader reads, through the `Sheet:frameAt` that already
+exists. No walk, no column and no readback. A few hundred calls a step is free;
+it stops being free somewhere in the tens of thousands, which is a game asking a
+question this is the wrong shape for. Both answer from wherever the path they are
+on keeps the answer, so a case that asks which frame is showing reads the same on
+either side of the flag.
+
+The two paths anchor a fresh entity's cycle to the same step and agree frame for
+frame, except within a millisecond of a boundary: one reaches the boundary by
+accumulating a step at a time and the other by multiplying a step count, and
+which side of it they land on is then a last-place difference. That is a display
+difference of well under a fixed step and it cannot reach simulation, because
+gameplay reads `frameOf` rather than the GPU's answer.
+
+`animation.useGPU(false)` puts playback back on the host, for a world that wants
+events and frame queries without opting in or recomputing and is small enough to
+pay a walk of every animation on every step.
+`../tecs-plans/gpu-animation.md` is the design.
 
 ## Buffer writes
 
