@@ -29,7 +29,7 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
         deps package check-package presets shaders bench bench-physics \
-        bench-ecs bench-json bench-snapshot bench-bitset
+        bench-latency bench-ecs bench-json bench-snapshot bench-bitset
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -76,6 +76,9 @@ bench: build $(OUT)/bench/shapes.lua ## Run the shapes benchmark
 
 bench-physics: build $(OUT)/bench/physics.lua ## Run the physics benchmark
 	@$(BIN) --entry $(OUT)/bench/physics.lua
+
+bench-latency: build $(OUT)/bench/latency.lua ## Measure event-to-photon latency
+	@$(BIN) --entry $(OUT)/bench/latency.lua
 
 # The ECS benchmarks run under a plain interpreter rather than the host, since
 # none of them draw. They still need TECS_LIB, which the exports above set:

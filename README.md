@@ -59,7 +59,8 @@ Working today:
 - A debug server over HTTP that survives a crash in game code, with tools that
   read and write the world
 - Per-stage frame timing with percentiles, which is how any of the numbers in
-  this file were arrived at
+  this file were arrived at, and event-to-photon latency reported through the
+  same stages
 - Deterministic sequencing with tweening merged into it: programs compiled to
   instructions, playback position kept as data so it survives a snapshot, and
   three clocks (fixed, frame, presentation) for the three rates gameplay,
@@ -161,6 +162,37 @@ distinct fingers could collapse into one.
 The engine acts on lifecycle and input events and then hands every event to the
 game anyway. An engine that consumed events would leave a game unable to tell
 an event it never received from one it mishandled.
+
+Every event carries an `arrival`: the performance counter as the host received
+it from SDL, in the units `clock.now` reports. SDL's own `timestamp` is
+nanoseconds on the `SDL_GetTicksNS` epoch, which orders events against each
+other and against nothing else, so the host takes its own reading instead of
+converting that one across an offset SDL does not promise. It is stamped where
+SDL hands the event over rather than where a step picks it up, because the
+interval between those two is the thing worth measuring.
+
+## Measuring latency
+
+Frame time cannot see how long a player waits for a press to reach the screen,
+and the two move independently: pipelining a frame buys throughput and pays for
+it in latency. So the interval from arrival to submission is reported as stages
+beside the frame stages, in one table, and it divides into three parts that sum
+to the whole: `latencyWait` from arrival to the step that took the batch,
+`latencyStep` for that step, and `latencyDraw` for drawing what it produced. A
+regression is then attributable rather than merely visible.
+
+Only frames that consumed an event are sampled, and a batch is charged to the
+frame from its oldest event. A frame nobody was waiting on has no latency, and
+averaging it in only makes the number smaller.
+
+`make bench-latency` produces the number without a human at the keyboard. It
+pushes synthetic events through SDL's own queue rather than through
+`events.source`, so they are delivered to the host and stamped exactly as a
+real press is: a replay source would skip the arrival stamp and leave the
+harness measuring its own call. Presentation is submission, since the engine
+knows when it handed a frame over and cannot see the display.
+`BENCH_PRESENT=vsync` puts the display's own wait back into `latencyDraw`,
+where it lands as a block in acquire.
 
 ## Input
 
