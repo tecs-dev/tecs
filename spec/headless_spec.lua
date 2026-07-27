@@ -79,6 +79,31 @@ describe("tecs headless", function()
         -- eager half of the surface would break a pure ECS tool, and would do
         -- it silently: everything still works on a developer's machine, where
         -- the libraries are installed.
+        it("builds a world through the ECS half alone", function()
+            -- The half engine modules require, reached first and on its own.
+            -- Under the whole surface this always works, because that requires
+            -- the compatibility shim before anything else; this half has to
+            -- stand up without it having been asked for. A fresh interpreter is
+            -- the only place a load-order fault like that appears.
+            local output = run(
+                [[
+                local ecs = require("tecs.ecs")
+                local world = ecs.newWorld()
+                local Marker = ecs.newComponent({
+                    name = "HalfOnly",
+                    container = {},
+                    fields = { "value" },
+                    defaults = { 0 },
+                })
+                local entity = world:spawn(Marker(7))
+                world:update(1 / 60)
+                print(("ok %d"):format(world:get(entity, Marker).value))
+            ]],
+                false
+            )
+            assert.are.equal("ok 7\n", output)
+        end)
+
         it("loads no engine module until one is named", function()
             local output = run(
                 [[

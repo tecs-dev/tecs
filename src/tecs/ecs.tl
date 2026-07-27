@@ -8,6 +8,12 @@
 --- depends on the whole. This carries what the engine actually uses rather
 --- than the whole ECS API, so the dependency stays legible.
 
+-- First, as in the whole surface. `componentcodegen` captures `table.unpack`
+-- when it loads, and on this interpreter that name only exists once this has
+-- run. Requiring the halves in either order has to work, and this half is what
+-- a tool reaching for the ECS alone requires.
+require("tecs.internal.compat")
+
 local types <const> = require("tecs.types")
 local components <const> = require("tecs.internal.components")
 local events <const> = require("tecs.internal.events")
