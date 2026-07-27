@@ -30,29 +30,31 @@ local function path_join(a, b)
     return a .. "/" .. b
 end
 
-local function find_spec_files_lfs(root, files)
+local function find_files_lfs(root, extension, files)
     for name in lfs.dir(root) do
         if name ~= "." and name ~= ".." then
             local path = path_join(root, name)
             local mode = lfs.attributes(path, "mode")
             if mode == "directory" then
-                find_spec_files_lfs(path, files)
-            elseif mode == "file" and path:match("%.tl$") then
+                find_files_lfs(path, extension, files)
+            elseif mode == "file" and path:match("%." .. extension .. "$") then
                 files[#files + 1] = path
             end
         end
     end
 end
 
-local function find_spec_files()
+local function find_files(root, extension)
     local files = {}
     if ok_lfs then
-        find_spec_files_lfs(SPEC_DIR, files)
+        if lfs.attributes(root, "mode") ~= "directory" then return files end
+        find_files_lfs(root, extension, files)
         table.sort(files)
         return files
     end
 
-    local handle = io.popen("find " .. SPEC_DIR .. " -name '*.tl' 2>/dev/null")
+    local handle = io.popen("find " .. root .. " -name '*." .. extension
+        .. "' 2>/dev/null")
     if not handle then return files end
     for line in handle:lines() do
         if line and line ~= "" then
@@ -62,6 +64,10 @@ local function find_spec_files()
     handle:close()
     table.sort(files)
     return files
+end
+
+local function find_spec_files()
+    return find_files(SPEC_DIR, "tl")
 end
 
 local function read_file(path)
@@ -109,6 +115,35 @@ local function output_path_for(input)
     return ((OUT_PREFIX .. "/" .. relative):gsub("%.tl$", ".lua"))
 end
 
+-- Where `output_path_for` puts things, which is the tree an orphan is found in.
+local function output_root()
+    if SPEC_DIR:sub(1, 1) == "/" then
+        return OUT_PREFIX .. "/spec"
+    end
+    return OUT_PREFIX .. "/" .. SPEC_DIR
+end
+
+--- Deletes compiled specs whose source is gone.
+---
+--- Nothing else removes them, and the test runner loads whatever `.lua` it
+--- finds in this tree. A spec deleted along with the code it covered otherwise
+--- keeps being compiled output that keeps passing, so the suite reports a green
+--- run for a module that no longer exists. Everything here is emitted from a
+--- `.tl` beside it, so anything without one is an orphan by construction.
+local function prune_orphans(expected)
+    local removed = 0
+    for _, path in ipairs(find_files(output_root(), "lua")) do
+        if not expected[path] then
+            os.remove(path)
+            removed = removed + 1
+        end
+    end
+    if removed > 0 then
+        print(string.format("Removed %d compiled spec(s) with no source",
+            removed))
+    end
+end
+
 local function file_mtime(path)
     if ok_lfs then
         return lfs.attributes(path, "modification") or 0
@@ -132,11 +167,18 @@ local function main()
     if #files == 0 then return end
 
     local to_compile = {}
+    local expected = {}
     for _, src_path in ipairs(files) do
-        if needs_rebuild(src_path, output_path_for(src_path)) then
+        local out_path = output_path_for(src_path)
+        expected[out_path] = true
+        if needs_rebuild(src_path, out_path) then
             to_compile[#to_compile + 1] = src_path
         end
     end
+
+    -- Before the early return below, since a run where nothing needs compiling
+    -- is exactly the run after a spec was deleted and nothing else changed.
+    prune_orphans(expected)
 
     if #to_compile == 0 then return end
 
