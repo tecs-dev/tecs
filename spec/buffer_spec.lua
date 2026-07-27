@@ -4,6 +4,10 @@
 -- also erases the bytes it did not write looks exactly like a producer bug in
 -- whatever reads the buffer later. So these tests write disjoint regions in
 -- separate flushes and check that earlier regions survive.
+--
+-- The slot tests are the same worry one level up. Two slots share one device
+-- buffer, so a slot that copies more than it recorded, or that clears
+-- bookkeeping belonging to the other, corrupts data nobody wrote.
 
 -- Our build first, so it wins over the ECS repo's own engine tree.
 -- The build directory is the build system's to choose, so it is passed in.
@@ -104,6 +108,30 @@ void main() { o = data.item[pick.index]; }
         return wrote
     end
 
+    -- The same two, addressed by slot. The pair above stays on the implied
+    -- slot zero API, so both surfaces are exercised.
+    local function writeSlotElement(buffer, slot, index, r, g, b)
+        local floats = buffer:mapSlotAs(slot, "float *")
+        local base = index * 4
+        floats[base] = r
+        floats[base + 1] = g
+        floats[base + 2] = b
+        floats[base + 3] = 1.0
+        buffer:markSlotDirty(slot, index * 16, 16)
+    end
+
+    local function flushSlot(buffer, slot)
+        local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+        local wrote = buffer:flushSlot(slot, commandBuffer)
+        assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+        return wrote
+    end
+
+    -- Slots are indexed from zero; the backing table is a Lua array.
+    local function slotOf(buffer, slot)
+        return buffer._slots[slot + 1]
+    end
+
     it("uploads a range written directly into mapped memory", function()
         local buffer = Buffer.create(device.handle,
             { usage = { "storage" }, size = 16 * 8 })
@@ -144,7 +172,7 @@ void main() { o = data.item[pick.index]; }
         buffer:markDirty(0, 16)
         buffer:markDirty(16, 16)
         buffer:markDirty(32, 16)
-        assert.are.equal(1, buffer._rangeCount,
+        assert.are.equal(1, slotOf(buffer, 0).rangeCount,
             "sequential rows should collapse into a single copy")
         assert.are.equal(48, buffer.dirtyBytes)
         buffer:destroy()
@@ -156,7 +184,7 @@ void main() { o = data.item[pick.index]; }
         buffer:map()
         buffer:markDirty(0, 16)
         buffer:markDirty(512, 16)
-        assert.are.equal(2, buffer._rangeCount)
+        assert.are.equal(2, slotOf(buffer, 0).rangeCount)
         buffer:destroy()
     end)
 
@@ -168,9 +196,9 @@ void main() { o = data.item[pick.index]; }
         for index = 0, 200 do
             buffer:markDirty(index * 64, 16)
         end
-        assert.are.equal(1, buffer._rangeCount,
+        assert.are.equal(1, slotOf(buffer, 0).rangeCount,
             "overflow must collapse, never drop a range")
-        local ranges = buffer._ranges
+        local ranges = slotOf(buffer, 0).ranges
         assert.are.equal(0, tonumber(ranges[0]))
         assert.is_true(tonumber(ranges[1]) >= 200 * 64,
             "the collapsed span must cover every marked write")
@@ -195,5 +223,153 @@ void main() { o = data.item[pick.index]; }
 
         buffer:destroy()
         bounded:destroy()
+    end)
+
+    it("writes and flushes two slots without either disturbing the other",
+        function()
+        local buffer = Buffer.create(device.handle,
+            { usage = { "storage" }, size = 16 * 8 })
+
+        writeSlotElement(buffer, 0, 0, 1.0, 0.0, 0.0)
+        writeSlotElement(buffer, 1, 3, 0.0, 0.0, 1.0)
+
+        assert.are.equal(1, slotOf(buffer, 0).rangeCount)
+        assert.are.equal(1, slotOf(buffer, 1).rangeCount)
+        assert.are.equal(0, tonumber(slotOf(buffer, 0).ranges[0]))
+        assert.are.equal(48, tonumber(slotOf(buffer, 1).ranges[0]),
+            "each slot records its own offsets")
+        assert.are.equal(16, buffer:slotDirtyBytes(0))
+        assert.are.equal(16, buffer:slotDirtyBytes(1))
+
+        assert.is_true(flushSlot(buffer, 0))
+        assert.are.equal(0, buffer:slotDirtyBytes(0))
+        assert.are.equal(16, buffer:slotDirtyBytes(1),
+            "flushing one slot must leave the other's bookkeeping alone")
+        assert.are.equal(1, slotOf(buffer, 1).rangeCount)
+
+        assert.is_true(flushSlot(buffer, 1))
+        assert.are.equal(0, buffer:slotDirtyBytes(1))
+
+        assert.are.equal(255, readElement(buffer, 0).r)
+        assert.are.equal(255, readElement(buffer, 3).b)
+        buffer:destroy()
+    end)
+
+    it("keeps a range written to one slot out of the other", function()
+        local buffer = Buffer.create(device.handle,
+            { usage = { "storage" }, size = 16 * 8 })
+
+        -- Define element five so there is something to compare against.
+        writeSlotElement(buffer, 0, 5, 0.0, 1.0, 0.0)
+        flushSlot(buffer, 0)
+
+        -- Slot one overwrites it, but only slot zero is flushed.
+        writeSlotElement(buffer, 1, 5, 0.0, 0.0, 1.0)
+        writeSlotElement(buffer, 0, 1, 1.0, 0.0, 0.0)
+        flushSlot(buffer, 0)
+
+        local pixel = readElement(buffer, 5)
+        assert.are.equal(255, pixel.g, "slot one's write must not ride along")
+        assert.are.equal(0, pixel.b)
+        assert.are.equal(255, readElement(buffer, 1).r)
+
+        -- It lands only once its own slot is flushed.
+        flushSlot(buffer, 1)
+        assert.are.equal(255, readElement(buffer, 5).b)
+        buffer:destroy()
+    end)
+
+    it("remaps a flushed slot with cycling", function()
+        local buffer = Buffer.create(device.handle,
+            { usage = { "storage" }, size = 16 * 8 })
+
+        -- Slot zero stays mapped and unflushed throughout, so cycling slot one
+        -- has an obvious way to go wrong.
+        writeSlotElement(buffer, 0, 7, 1.0, 0.0, 0.0)
+        local held = slotOf(buffer, 0).mapped
+
+        writeSlotElement(buffer, 1, 2, 0.0, 1.0, 0.0)
+        flushSlot(buffer, 1)
+        assert.is_nil(slotOf(buffer, 1).mapped, "a flush must unmap its slot")
+
+        local pointer, capacity = buffer:cycleSlot(1)
+        assert.is_not_nil(pointer)
+        assert.are.equal(16 * 8, capacity, "the handback carries the capacity")
+        assert.is_not_nil(slotOf(buffer, 1).mapped)
+        assert.are.equal(0, buffer:slotDirtyBytes(1))
+        assert.are.equal(held, slotOf(buffer, 0).mapped,
+            "cycling one slot must not move the other's address")
+
+        -- The handback is writable and the next flush lands.
+        local floats = ffi.cast("float *", pointer)
+        floats[16] = 0.0
+        floats[17] = 0.0
+        floats[18] = 1.0
+        floats[19] = 1.0
+        buffer:markSlotDirty(1, 64, 16)
+        assert.is_true(flushSlot(buffer, 1))
+        assert.are.equal(255, readElement(buffer, 4).b)
+
+        flushSlot(buffer, 0)
+        assert.are.equal(255, readElement(buffer, 7).r)
+        buffer:destroy()
+    end)
+
+    it("grows while both slots hold data", function()
+        local buffer = Buffer.create(device.handle,
+            { usage = { "storage" }, size = 16 * 4 })
+
+        -- Resident before the grow, and rewritten by nobody after it.
+        writeSlotElement(buffer, 0, 0, 1.0, 0.0, 0.0)
+        flushSlot(buffer, 0)
+
+        writeSlotElement(buffer, 0, 1, 0.0, 1.0, 0.0)
+        writeSlotElement(buffer, 1, 2, 0.0, 0.0, 1.0)
+
+        assert.is_true(buffer:grow(16 * 16))
+        assert.are.equal(16 * 16, buffer.size)
+        assert.are.equal(16 * 16, buffer._transferSize)
+        assert.are.equal(1, slotOf(buffer, 0).rangeCount,
+            "a grow must not disturb recorded ranges")
+        assert.are.equal(1, slotOf(buffer, 1).rangeCount)
+
+        flushSlot(buffer, 0)
+        flushSlot(buffer, 1)
+
+        assert.are.equal(255, readElement(buffer, 0).r,
+            "the grow must carry the destination's contents across")
+        assert.are.equal(255, readElement(buffer, 1).g,
+            "staging held across a grow must still reach the device")
+        assert.are.equal(255, readElement(buffer, 2).b)
+
+        assert.is_false(buffer:grow(16), "a smaller size is a no-op")
+        buffer:destroy()
+    end)
+
+    it("retains destination ranges no slot rewrote", function()
+        -- The persistent buffer is never cycled, so a flush from either slot
+        -- leaves everything it did not record exactly where it was.
+        local buffer = Buffer.create(device.handle,
+            { usage = { "storage" }, size = 16 * 8 })
+
+        writeSlotElement(buffer, 0, 0, 1.0, 0.0, 0.0)
+        flushSlot(buffer, 0)
+
+        writeSlotElement(buffer, 1, 6, 0.0, 0.0, 1.0)
+        flushSlot(buffer, 1)
+
+        local first = readElement(buffer, 0)
+        assert.are.equal(255, first.r, "the other slot's flush must not erase it")
+        assert.are.equal(0, first.b)
+        assert.are.equal(255, readElement(buffer, 6).b)
+        buffer:destroy()
+    end)
+
+    it("rejects a slot index outside the range it has", function()
+        local buffer = Buffer.create(device.handle,
+            { usage = { "storage" }, size = 64 })
+        assert.has_error(function() buffer:mapSlot(Buffer.slotCount) end)
+        assert.has_error(function() buffer:markSlotDirty(-1, 0, 16) end)
+        buffer:destroy()
     end)
 end)
