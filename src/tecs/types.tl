@@ -1403,16 +1403,6 @@ local record types
         onExit: string | Action | function(World)
     end
 
-    --- Interface for components that provide axis-aligned bounding boxes.
-    --- Used for layout calculations, culling, and collision detection.
-    interface Rect
-        --- Get the offset and size for this component relative to the entity's position.
-        --- @return offsetX The x offset from the entity position.
-        --- @return offsetY The y offset from the entity position.
-        --- @return width The width of the bounding box.
-        --- @return height The height of the bounding box.
-        getRect: function(self): number, number, number, number
-    end
 end
 
 return types
