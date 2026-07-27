@@ -223,7 +223,12 @@ release consumes a prebuilt shader pack and links no compiler, which
 `make check-package` enforces, so this section applies to a development build
 and to any tool that ships one, not to a shipped game.
 
-shaderc builds in third-party projects of its own:
+shaderc builds in third-party projects of its own, and vendors none of them. It
+carries a `DEPS` file naming a commit of each and a `git-sync-deps` script that
+clones what that names, so pinning shaderc alone pins the wrapper and leaves the
+compiler inside it moving. The three that reach object code are pinned in
+`cmake/Revisions.cmake` at the revisions shaderc's own `DEPS` names at the
+shaderc revision beside them:
 
 - **SPIRV-Tools**, Apache-2.0
 - **SPIRV-Headers**, MIT
@@ -287,7 +292,11 @@ the rule here. Both of these are refused in `cmake/Pinned.cmake` and denied by
 `spec/licenses_spec.lua`, because absence by luck is not absence:
 
 - **libidn2** is dual GPL-2.0-or-later or LGPL-3.0-or-later, so even its better
-  arm is disqualifying, and it is auto-detected on. `CURL_USE_LIBIDN2` is OFF.
+  arm is disqualifying, and it is auto-detected on. `USE_LIBIDN2` is OFF, and
+  the spelling is the point: curl names this option without its own prefix, and
+  the prefixed one this tree set for a while was an option curl has never
+  defined, so libidn2 was detected and linked while a cache variable nothing
+  read said otherwise.
 - **libpsl** is the quiet one. libpsl is MIT, but curl's configure fails without
   it unless it is refused, and libpsl's own runtime resolves to libidn2 and
   libunistring on Linux, putting back exactly what refusing libidn2 removed. Its

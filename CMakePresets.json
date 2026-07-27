@@ -33,13 +33,20 @@
             "name": "macos-arm64",
             "inherits": "packaged",
             "displayName": "macOS arm64, packaged, Metal",
-            "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64" }
+            "description": "11.0 is where arm64 macOS starts, so it is the oldest release this can run on at all.",
+            "cacheVariables": {
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0"
+            }
         },
         {
             "name": "macos-x64",
             "inherits": "packaged",
             "displayName": "macOS x86-64, packaged, Metal",
-            "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "x86_64" }
+            "cacheVariables": {
+                "CMAKE_OSX_ARCHITECTURES": "x86_64",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "10.15"
+            }
         },
         {
             "name": "linux-x64-dev",

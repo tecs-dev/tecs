@@ -21,9 +21,8 @@ set(TECS_VERSION_DRIFT "")
 Compares one resolved version against the revision Revisions.cmake names.
 
 `mode` is EXACT where a tag is a version, or PREFIX where a tag names
-something coarser than what the system reports: LuaJIT's v2.1 is a branch
-whose builds carry a timestamp, and shaderc's release tags carry no patch
-component while its builds do.
+something coarser than what the system reports: shaderc's release tags carry
+no patch component while its builds do.
 ]]
 function(tecs_check_version name found tag mode)
     if(NOT found)
@@ -53,7 +52,10 @@ tecs_check_version("SDL3" "${SDL3_VERSION}" "${TECS_SDL3_TAG}" EXACT)
 tecs_check_version("SDL3_image" "${SDL3_IMAGE_VERSION}" "${TECS_SDL3_IMAGE_TAG}" EXACT)
 tecs_check_version("SDL3_mixer" "${SDL3_MIXER_VERSION}" "${TECS_SDL3_MIXER_TAG}" EXACT)
 tecs_check_version("SDL3_net" "${SDL3_NET_VERSION}" "${TECS_SDL3_NET_TAG}" EXACT)
-tecs_check_version("LuaJIT" "${LUAJIT_VERSION}" "${TECS_LUAJIT_TAG}" PREFIX)
+# Against the rolling version rather than the commit, because that is the one
+# of the two a build reports about itself. The commit is what the packaged
+# preset fetches, and Revisions.cmake names the pair together.
+tecs_check_version("LuaJIT" "${LUAJIT_VERSION}" "${TECS_LUAJIT_ROLLING}" EXACT)
 tecs_check_version("shaderc" "${SHADERC_VERSION}" "${TECS_SHADERC_TAG}" PREFIX)
 
 # Four are unchecked, for two different reasons.

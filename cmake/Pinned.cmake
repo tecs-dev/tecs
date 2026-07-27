@@ -7,8 +7,21 @@
 #
 # Revisions are pinned rather than tracked so a release is reproducible.
 
+include(ExternalProject)
 include(FetchContent)
 include(${CMAKE_CURRENT_LIST_DIR}/Revisions.cmake)
+
+# Everything here ends up inside a shared object, so it is all compiled to be
+# placeable. Stated once rather than left to each dependency's own opinion,
+# because a static archive built without it links into a library only on the
+# platforms where that happens to be the default.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Where the zlib fetched below lands. Named here because SDL_image's
+# declaration reads it and comes first; FetchContent puts a dependency's
+# checkout at <base>/<name>-src, and the base is the cache variable it defines
+# when it is included.
+set(TECS_ZLIB_SOURCE "${FETCHCONTENT_BASE_DIR}/zlib-src")
 
 FetchContent_Declare(
     SDL3
@@ -78,11 +91,28 @@ set(SDLIMAGE_XCF OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_XPM OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_XV OFF CACHE BOOL "" FORCE)
 
+# VENDORED is the one that decides whether any of the above describes a shipped
+# binary. Without it SDL_image resolves libpng with `find_package(PNG)` against
+# the build machine, and on this one that found a header inside
+# /Library/Frameworks/Mono.framework declaring libpng 1.4.12 and linked
+# Homebrew's 1.6.58 beside it. That configures, builds, links an absolute path
+# out of the package, warns at run time that the two disagree, and then
+# corrupts memory: `png_struct` is not the same shape in the two versions.
+#
+# With it on, libpng comes from SDL_image's own submodule at the revision the
+# pinned SDL_image names, and is static, so it ends up inside libSDL3_image
+# rather than beside it. Only that one submodule is fetched; the zlib beside it
+# is replaced by the patch step with the revision this file pins, for the
+# reason written at the zlib declaration below.
+set(SDLIMAGE_VENDORED ON CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     SDL3_image
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
     GIT_TAG ${TECS_SDL3_IMAGE_TAG}
     GIT_SHALLOW TRUE
+    GIT_SUBMODULES "external/libpng"
+    PATCH_COMMAND ${CMAKE_COMMAND} -E copy_directory "${TECS_ZLIB_SOURCE}" "<SOURCE_DIR>/external/zlib"
 )
 FetchContent_Declare(
     SDL3_net
@@ -140,6 +170,14 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
     GIT_SUBMODULES "external/ogg;external/opus;external/opusfile;external/wavpack"
 )
+# Box2D. Its samples pull in a windowing toolkit and an immediate-mode UI, and
+# its benchmarks and unit tests are programs nothing here runs.
+set(BOX2D_SAMPLES OFF CACHE BOOL "" FORCE)
+set(BOX2D_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(BOX2D_DOCS OFF CACHE BOOL "" FORCE)
+set(BOX2D_PROFILE OFF CACHE BOOL "" FORCE)
+set(BOX2D_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     box2d
     GIT_REPOSITORY https://github.com/erincatto/box2d.git
@@ -148,17 +186,45 @@ FetchContent_Declare(
 )
 
 # zlib. Pinned rather than borrowed: libcurl needs it to answer a
-# Content-Encoding, and SDL3_image already links whichever copy the machine
-# happens to have. A shipped build gets the one named here instead.
+# Content-Encoding, and SDL3_image needs it under libpng. A shipped build gets
+# the one named here instead of whichever copy the machine happens to have.
 #
-# Shared, because the engine reaches it through the FFI, which loads a library
-# rather than linking one. The tests build example programs that nothing runs.
+# Both kinds, because two things want it differently. The engine reaches it
+# through the FFI, which loads a library rather than links one, so there has to
+# be a shared object; libpng goes inside libSDL3_image, so that copy is static
+# and leaves no second zlib beside it. The tests build example programs that
+# nothing runs.
 set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(ZLIB_BUILD_SHARED ON CACHE BOOL "" FORCE)
-set(ZLIB_BUILD_STATIC OFF CACHE BOOL "" FORCE)
-set(ZLIB_INSTALL ON CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
+# No install rules of its own. The package installs the one component it names,
+# and zlib's export set is not exportable from where SDL_image adds it: the
+# include directory it is given there is inside another project's tree.
+set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(zlib GIT_REPOSITORY https://github.com/madler/zlib.git GIT_TAG ${TECS_ZLIB_TAG} GIT_SHALLOW TRUE)
+# Fetched here, and added by SDL_image rather than here.
+#
+# SDL_image vendors zlib itself, out of a submodule, and its CMakeLists adds it
+# whenever it vendors libpng, with no test for whether the target already
+# exists. zlib's own CMakeLists creates `zlib` and `zlibstatic` unconditionally,
+# so a tree that adds zlib and then adds SDL_image defines both twice and does
+# not configure. There is no option either way round: SDL_image treats a
+# vendored libpng without a vendored zlib as an internal error.
+#
+# So there is one add, and this decides what it adds. The submodule is not
+# fetched, the source below is copied into its place by SDL_image's patch step,
+# and what comes out is one zlib at TECS_ZLIB_TAG: shared for the FFI and
+# libcurl, static inside libpng.
+#
+# SOURCE_SUBDIR names a directory with no CMakeLists.txt in it, which is how
+# FetchContent is asked to fetch something and add nothing.
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG ${TECS_ZLIB_TAG}
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR tecs-added-by-sdl-image
+)
 
 # Mbed TLS, which is libcurl's TLS backend here.
 #
@@ -205,6 +271,30 @@ set(USE_STATIC_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
 # newer than the pin a build failure in a dependency rather than a warning.
 set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
 
+# Asked here rather than left to be discovered. Mbed TLS generates part of its
+# own source and needs those two modules to do it, and without them the build
+# fails a quarter of an hour in, inside a dependency, as an import error naming
+# neither Mbed TLS nor this project. The same interpreter is what the build
+# generates bindings with, so finding it once here settles both.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c "import jinja2, jsonschema"
+    RESULT_VARIABLE tecsMbedtlsPythonModules
+    OUTPUT_QUIET
+    ERROR_QUIET
+)
+if(NOT tecsMbedtlsPythonModules EQUAL 0)
+    message(
+        FATAL_ERROR
+        "tecs: ${Python3_EXECUTABLE} cannot import jinja2 and jsonschema, and Mbed TLS "
+        "generates sources with them when it is built from a git revision rather than "
+        "a release archive.\n\n"
+        "Install both for that interpreter, or point Python3_EXECUTABLE at one that has "
+        "them: python3 -m venv <dir> && <dir>/bin/pip install jinja2 jsonschema, then "
+        "configure with -DPython3_EXECUTABLE=<dir>/bin/python."
+    )
+endif()
+
 FetchContent_Declare(
     mbedtls
     GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
@@ -248,12 +338,15 @@ set(CURL_ZLIB ON CACHE BOOL "" FORCE)
 set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
 set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
 set(CURL_USE_GSSAPI OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+# USE_LIBIDN2, not CURL_USE_LIBIDN2. curl names this one without its own
+# prefix, and the difference is not cosmetic: the prefixed spelling is an
+# option curl has never defined, so what it made was a cache variable nothing
+# read, while libidn2 was auto-detected on and linked from the build machine.
+set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBSSH OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
 set(ENABLE_ARES OFF CACHE BOOL "" FORCE)
-set(USE_LIBRTMP OFF CACHE BOOL "" FORCE)
 set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_DICT ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_FILE ON CACHE BOOL "" FORCE)
@@ -265,15 +358,30 @@ set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_LDAPS ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_MQTT ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_NEGOTIATE_AUTH ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_NTLM ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_POP3 ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_RTSP ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_SMB ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_SMTP ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_TELNET ON CACHE BOOL "" FORCE)
 set(CURL_DISABLE_TFTP ON CACHE BOOL "" FORCE)
+# NTLM and SMB are the two curl spells as enables rather than disables, and
+# both are off by default at this revision. Named anyway, because a default is
+# a decision somebody else gets to change.
+set(CURL_ENABLE_NTLM OFF CACHE BOOL "" FORCE)
+set(CURL_ENABLE_SMB OFF CACHE BOOL "" FORCE)
+# No exported CMake package. Nothing here consumes one, and an export set has
+# to name every target its members link, which curl cannot do for a zlib built
+# beside it in the same tree.
+set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG ${TECS_CURL_TAG} GIT_SHALLOW TRUE)
+
+# SPIRV-Cross ships static archives, which native/spirvcross.c links whole into
+# one shared object the FFI can load. So its own install rules have nothing to
+# contribute, and its command line tool and tests are not built.
+set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     SPIRV-Cross
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
@@ -281,10 +389,18 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 
-# LuaJIT and shaderc build with their own systems rather than CMake, so they
-# are driven as external projects rather than added as subdirectories.
-message(STATUS "tecs: pinned dependencies declared; run cmake --build to fetch")
+message(STATUS "tecs: fetching pinned dependencies")
 
+# Box2D and libcurl take their library kind from BUILD_SHARED_LIBS, and the
+# engine reaches both through the FFI, which loads a library by name rather
+# than linking one. A static archive would link into the host and leave every
+# other way of running this tree, a spec under a plain interpreter among them,
+# with nothing to load.
+set(BUILD_SHARED_LIBS ON)
+
+# zlib first and alone. It is only fetched here, and it has to be on disk
+# before SDL_image is, because SDL_image's patch step copies it into place.
+FetchContent_MakeAvailable(zlib)
 FetchContent_MakeAvailable(
     SDL3
     SDL3_image
@@ -292,7 +408,252 @@ FetchContent_MakeAvailable(
     SDL3_mixer
     box2d
     SPIRV-Cross
-    zlib
     mbedtls
-    curl
+)
+
+# curl is asked separately, because it has to be told which Mbed TLS this is.
+# Its FindMbedTLS looks the library up on the machine unless all four of these
+# are already set, and a pinned TLS backend that a build then resolves from
+# Homebrew is the exact failure this whole file exists to prevent: it linked
+# 3.6.3 from /opt/homebrew beside the 4.1.1 sitting unused in the build tree.
+#
+# The three libraries are named as targets rather than as paths, so link order
+# and include directories come from the targets themselves. 4.x is where the
+# crypto moved into TF-PSA-Crypto, which is why the third is not mbedcrypto.
+set(MBEDTLS_INCLUDE_DIR "${mbedtls_SOURCE_DIR}/include" CACHE STRING "" FORCE)
+set(MBEDTLS_LIBRARY mbedtls CACHE STRING "" FORCE)
+set(MBEDX509_LIBRARY mbedx509 CACHE STRING "" FORCE)
+set(MBEDCRYPTO_LIBRARY tfpsacrypto CACHE STRING "" FORCE)
+
+FetchContent_MakeAvailable(curl)
+
+# ------------------------------------------------------------------- LuaJIT
+
+# LuaJIT is the one dependency here with no CMake build, so it is driven as an
+# external project: its own make, into a prefix inside the build tree, and
+# linked out of there.
+#
+# Two things have to be said to it that a CMake dependency would infer.
+# MACOSX_DEPLOYMENT_TARGET is refused rather than defaulted by its Makefile, so
+# it is passed through from the toolchain. And its install name is otherwise
+# the absolute prefix it was installed to, which would bake this build tree
+# into every binary that links it; @rpath is what lets the same library answer
+# from a build tree and from an unpacked package.
+
+set(TECS_LUAJIT_PREFIX "${CMAKE_BINARY_DIR}/luajit")
+set(TECS_LUAJIT_INCLUDE_DIRS "${TECS_LUAJIT_PREFIX}/include/luajit-2.1")
+
+# What LuaJIT's own Makefile calls these: ABIVER is 5.1, and its install leaves
+# an unversioned link beside the file the version number is in.
+if(APPLE)
+    set(tecsLuajitLibrary "${TECS_LUAJIT_PREFIX}/lib/libluajit-5.1.dylib")
+else()
+    set(tecsLuajitLibrary "${TECS_LUAJIT_PREFIX}/lib/libluajit-5.1.so")
+endif()
+
+cmake_path(GET tecsLuajitLibrary FILENAME tecsLuajitSoname)
+
+# The versioned file that link points at. Its name carries the rolling version,
+# which is the other half of what Revisions.cmake pins, so a commit raised
+# without its version raised beside it fails the install rather than quietly
+# packaging a name that resolves to nothing.
+if(APPLE)
+    set(tecsLuajitVersioned "libluajit-5.1.${TECS_LUAJIT_ROLLING}.dylib")
+else()
+    set(tecsLuajitVersioned "libluajit-5.1.so.${TECS_LUAJIT_ROLLING}")
+endif()
+
+set(tecsLuajitFlags PREFIX=${TECS_LUAJIT_PREFIX})
+set(tecsLuajitEnv "")
+if(NOT APPLE)
+    list(APPEND tecsLuajitFlags TARGET_SONAME=${tecsLuajitSoname})
+endif()
+if(APPLE)
+    list(APPEND tecsLuajitFlags TARGET_DYLIBPATH=@rpath/${tecsLuajitSoname})
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        message(FATAL_ERROR "tecs: set CMAKE_OSX_DEPLOYMENT_TARGET; LuaJIT's build requires one and will not guess.")
+    endif()
+    list(APPEND tecsLuajitEnv MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET})
+endif()
+# One architecture at a time. LuaJIT generates its own interpreter for the
+# architecture it is built for, so a universal binary is two builds joined
+# afterwards rather than a flag, and nothing here asks for one.
+list(LENGTH CMAKE_OSX_ARCHITECTURES tecsLuajitArchCount)
+if(tecsLuajitArchCount GREATER 1)
+    message(FATAL_ERROR "tecs: LuaJIT builds one architecture at a time, and CMAKE_OSX_ARCHITECTURES names several.")
+elseif(CMAKE_OSX_ARCHITECTURES)
+    list(APPEND tecsLuajitFlags "CFLAGS=-arch ${CMAKE_OSX_ARCHITECTURES}" "LDFLAGS=-arch ${CMAKE_OSX_ARCHITECTURES}")
+endif()
+
+# No GIT_SHALLOW: the revision is a commit rather than a branch or a tag, and
+# a shallow fetch can only ask a server for a ref it advertises.
+ExternalProject_Add(
+    tecs_luajit_build
+    GIT_REPOSITORY https://github.com/LuaJIT/LuaJIT.git
+    GIT_TAG ${TECS_LUAJIT_TAG}
+    PREFIX "${CMAKE_BINARY_DIR}/luajit-build"
+    BUILD_IN_SOURCE TRUE
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${CMAKE_COMMAND} -E env ${tecsLuajitEnv} -- make ${tecsLuajitFlags}
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E env ${tecsLuajitEnv} -- make ${tecsLuajitFlags} install
+    BUILD_BYPRODUCTS "${tecsLuajitLibrary}"
+    USES_TERMINAL_BUILD TRUE
+)
+
+add_library(tecs_luajit INTERFACE)
+add_dependencies(tecs_luajit tecs_luajit_build)
+target_include_directories(tecs_luajit INTERFACE "${TECS_LUAJIT_INCLUDE_DIRS}")
+target_link_libraries(tecs_luajit INTERFACE "${tecsLuajitLibrary}")
+add_library(tecs::luajit ALIAS tecs_luajit)
+
+# The versioned file, under the unversioned name its install name announces.
+# Installing the link instead copies a link, and the file it points at is not
+# one of the two this package wants, so what would arrive is a name resolving
+# to nothing.
+install(
+    FILES "${TECS_LUAJIT_PREFIX}/lib/${tecsLuajitVersioned}"
+    DESTINATION lib
+    COMPONENT tecs
+    RENAME ${tecsLuajitSoname}
+)
+
+# ------------------------------------------------------------------- shaderc
+
+# shaderc is a CMake project, so it is added as a subdirectory like the rest.
+# What it is not is self-contained: it carries a DEPS file naming a commit of
+# glslang, SPIRV-Tools and SPIRV-Headers and a utils/git-sync-deps script that
+# clones whatever that names. A build which pins shaderc and then lets that
+# script run has pinned the wrapper and left the compiler inside it floating,
+# so the three are fetched here at the revisions that file names and shaderc is
+# pointed at them through the cache variables it reads.
+#
+# The three are added here rather than under shaderc, which is what makes their
+# options reachable. shaderc's third_party directory adds each only when the
+# target it defines does not exist yet, so defining them first leaves it with
+# nothing to do and leaves the install rules, the test suites and the command
+# line programs of all three settable from one place.
+#
+# All three are compiled into libshaderc_shared and are static for that, and
+# none of them installs: the one artifact this needs out of the whole subtree
+# is that library, and the rest is headers and archives a package would carry
+# and never open.
+set(BUILD_SHARED_LIBS OFF)
+
+set(SPIRV_HEADERS_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
+set(SPIRV_HEADERS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    spirv-headers
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
+    GIT_TAG ${TECS_SPIRV_HEADERS_TAG}
+)
+FetchContent_MakeAvailable(spirv-headers)
+
+set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+set(SPIRV_SKIP_TESTS ON CACHE BOOL "" FORCE)
+set(SPIRV_WERROR OFF CACHE BOOL "" FORCE)
+set(SKIP_SPIRV_TOOLS_INSTALL ON)
+FetchContent_Declare(
+    spirv-tools
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
+    GIT_TAG ${TECS_SPIRV_TOOLS_TAG}
+)
+FetchContent_MakeAvailable(spirv-tools)
+
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(glslang GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git GIT_TAG ${TECS_GLSLANG_TAG})
+FetchContent_MakeAvailable(glslang)
+
+set(SHADERC_SKIP_TESTS ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_COPYRIGHT_CHECK ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+# shaderc compiles itself with warnings as errors, which turns a compiler newer
+# than the pin into a build failure in a dependency rather than a warning.
+set(SHADERC_ENABLE_WERROR_COMPILE OFF CACHE BOOL "" FORCE)
+# SPIRV-Headers is the one of the three shaderc adds without first asking
+# whether the target already exists, so it is pointed at a path that is not a
+# directory. Existing is the whole of the test it makes.
+set(SHADERC_SPIRV_HEADERS_DIR "${CMAKE_BINARY_DIR}/spirv-headers-added-already" CACHE STRING "" FORCE)
+
+FetchContent_Declare(
+    shaderc
+    GIT_REPOSITORY https://github.com/google/shaderc.git
+    GIT_TAG ${TECS_SHADERC_TAG}
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(shaderc)
+
+set(TECS_SHADERC_INCLUDE_DIRS "${shaderc_SOURCE_DIR}/libshaderc/include")
+
+# ------------------------------------------------- what the rest is built from
+
+# The common names the two dependency branches agree on. Everything above is
+# about how these are obtained; everything below this file only uses them.
+#
+# Wrapped rather than aliased, because most of what these name is itself an
+# alias its project publishes and CMake will not alias one of those again.
+function(tecs_pinned_library name target)
+    add_library(tecs_${name} INTERFACE)
+    target_link_libraries(tecs_${name} INTERFACE ${target})
+    add_library(tecs::${name} ALIAS tecs_${name})
+endfunction()
+
+tecs_pinned_library(sdl3 SDL3::SDL3)
+tecs_pinned_library(sdl3image SDL3_image::SDL3_image)
+tecs_pinned_library(sdl3mixer SDL3_mixer::SDL3_mixer)
+tecs_pinned_library(sdl3net SDL3_net::SDL3_net)
+tecs_pinned_library(box2d box2d)
+tecs_pinned_library(curl CURL::libcurl)
+tecs_pinned_library(zlib ZLIB::ZLIB)
+tecs_pinned_library(shaderc shaderc_shared)
+
+# Header directories, for the binding generator. It runs the preprocessor
+# itself rather than compiling through a target, so it is given directories
+# rather than the targets that carry them. A source tree splits its headers
+# across the checkout and the build directory wherever one of them is
+# generated, which is why several of these name both.
+set(TECS_SDL3_INCLUDE_DIRS "${sdl3_SOURCE_DIR}/include" "${sdl3_BINARY_DIR}/include")
+set(TECS_SDL3_IMAGE_INCLUDE_DIRS "${sdl3_image_SOURCE_DIR}/include")
+set(TECS_SDL3_NET_INCLUDE_DIRS "${sdl3_net_SOURCE_DIR}/include")
+set(TECS_SDL3_MIXER_INCLUDE_DIRS "${sdl3_mixer_SOURCE_DIR}/include")
+set(TECS_BOX2D_INCLUDE_DIRS "${box2d_SOURCE_DIR}/include")
+set(TECS_SPVC_INCLUDE_DIRS "${spirv-cross_SOURCE_DIR}")
+set(TECS_CURL_INCLUDE_DIRS "${curl_SOURCE_DIR}/include")
+# zlib is configured where SDL_image added it, so its generated zconf.h is
+# under that build rather than under one of its own.
+set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl3_image_SOURCE_DIR}/external/zlib")
+
+# ---------------------------------------------- what a packaged tree carries
+
+# The shared libraries a packaged binary references, named one at a time.
+#
+# Their own projects install more than this, and several install nothing at all
+# as a subproject, so neither taking their rules nor leaving them produces a
+# package. Naming them here does, and it makes the set enumerable: this list
+# and the link table of an installed binary have to agree, which is what
+# scripts/checkpackage.py reads and what its LINKED_LIBRARIES declares a
+# licence for.
+#
+# Everything absent is absent for a reason worth knowing. SPIRV-Cross, glslang,
+# SPIRV-Tools, libpng and SDL_mixer's four decoders are static, and are inside
+# the libraries above rather than beside them. LuaJIT is installed further up,
+# by name, because its build is not one of these.
+install(
+    TARGETS
+        SDL3-shared
+        SDL3_image-shared
+        SDL3_mixer-shared
+        SDL3_net-shared
+        box2d
+        libcurl_shared
+        zlib
+        mbedtls
+        mbedx509
+        tfpsacrypto
+        shaderc_shared
+    LIBRARY DESTINATION lib COMPONENT tecs
 )

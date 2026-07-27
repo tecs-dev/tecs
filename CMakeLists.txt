@@ -19,10 +19,21 @@ set(TECS_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH "Where compiled Lua and ge
 
 # ---------------------------------------------------------------- dependencies
 
+# Two ways of resolving the same set, and everything below this section is
+# written against neither. Each branch answers the same two questions and
+# nothing after it knows which one ran:
+#
+#   tecs::<library>              what to link, one target per library
+#   TECS_<LIBRARY>_INCLUDE_DIRS  where its headers are, for the binding
+#                                generator and for the C that includes them
+#
+# Naming a variable only one branch defines is what kept the pinned build from
+# reaching generate, and it fails as a missing include or an empty link line
+# rather than as anything that says which side is at fault.
+
 if(NOT TECS_SYSTEM_DEPS)
-    # Pinned revisions for anything shipped. Left declared rather than fetched
-    # by default because building this set from source is a long build, and
-    # desktop development does not need it.
+    # Pinned revisions for anything shipped. A long build, which is why
+    # desktop development uses the branch below instead.
     include(cmake/Pinned.cmake)
 else()
     find_package(PkgConfig REQUIRED)
@@ -55,6 +66,42 @@ else()
     endif()
 
     include(cmake/SystemVersions.cmake)
+
+    # The common names, from what pkg-config and find_library answered. The two
+    # located by hand get a target built around them, so a consumer links a
+    # library the same way whichever way it was found.
+    add_library(tecs::sdl3 ALIAS PkgConfig::SDL3)
+    add_library(tecs::sdl3image ALIAS PkgConfig::SDL3_IMAGE)
+    add_library(tecs::sdl3mixer ALIAS PkgConfig::SDL3_MIXER)
+    add_library(tecs::luajit ALIAS PkgConfig::LUAJIT)
+    add_library(tecs::curl ALIAS PkgConfig::CURL)
+    add_library(tecs::zlib ALIAS PkgConfig::ZLIB)
+
+    add_library(tecs_sdl3net INTERFACE)
+    target_link_libraries(tecs_sdl3net INTERFACE ${SDL3_NET_LIBRARY})
+    target_include_directories(tecs_sdl3net INTERFACE ${SDL3_NET_INCLUDE_DIR})
+    add_library(tecs::sdl3net ALIAS tecs_sdl3net)
+
+    add_library(tecs_box2d INTERFACE)
+    target_link_libraries(tecs_box2d INTERFACE ${BOX2D_LIBRARY})
+    target_include_directories(tecs_box2d INTERFACE ${BOX2D_INCLUDE_DIR})
+    add_library(tecs::box2d ALIAS tecs_box2d)
+
+    if(TECS_RUNTIME_SHADERS)
+        add_library(tecs::shaderc ALIAS PkgConfig::SHADERC)
+    endif()
+
+    set(TECS_SDL3_INCLUDE_DIRS ${SDL3_INCLUDE_DIRS})
+    set(TECS_SDL3_IMAGE_INCLUDE_DIRS ${SDL3_IMAGE_INCLUDE_DIRS})
+    set(TECS_SDL3_NET_INCLUDE_DIRS ${SDL3_NET_INCLUDE_DIR})
+    set(TECS_SDL3_MIXER_INCLUDE_DIRS ${SDL3_MIXER_INCLUDE_DIRS})
+    set(TECS_BOX2D_INCLUDE_DIRS ${BOX2D_INCLUDE_DIR})
+    set(TECS_LUAJIT_INCLUDE_DIRS ${LUAJIT_INCLUDE_DIRS})
+    set(TECS_SHADERC_INCLUDE_DIRS ${SHADERC_INCLUDE_DIRS})
+    set(TECS_SPVC_INCLUDE_DIRS ${SPIRV_CROSS_INCLUDE_DIRS})
+    set(TECS_SPVC_LIBRARY_DIRS ${SPIRV_CROSS_LIBRARY_DIRS})
+    set(TECS_CURL_INCLUDE_DIRS ${CURL_INCLUDE_DIRS})
+    set(TECS_ZLIB_INCLUDE_DIRS ${ZLIB_INCLUDE_DIRS})
 endif()
 
 # Runtime search paths are relative, so a package finds its own libraries
@@ -96,17 +143,16 @@ set(TECS_CJSON_DEFINES USE_INTERNAL_FPCONV MULTIPLE_THREADS)
 
 add_library(tecs_cjson STATIC ${TECS_CJSON_SOURCES})
 target_compile_definitions(tecs_cjson PRIVATE ${TECS_CJSON_DEFINES})
-target_include_directories(tecs_cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
+target_link_libraries(tecs_cjson PRIVATE tecs::luajit)
 set_target_properties(tecs_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(cjson MODULE ${TECS_CJSON_SOURCES})
 target_compile_definitions(cjson PRIVATE ${TECS_CJSON_DEFINES})
-target_include_directories(cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
 set_target_properties(
     cjson
     PROPERTIES PREFIX "" SUFFIX ".so" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
-target_link_libraries(cjson PRIVATE ${LUAJIT_LINK_LIBRARIES})
+target_link_libraries(cjson PRIVATE tecs::luajit)
 
 add_library(
     tecs_worker
@@ -118,11 +164,11 @@ add_library(
     native/luamods.c
 )
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-target_link_libraries(tecs_worker PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
+target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit)
 # Box2D's headers, for the task callback types the pool is declared with. No
 # Box2D symbol is referenced: the solver calls in, through pointers it was
 # given, so this links nothing.
-target_include_directories(tecs_worker PRIVATE ${BOX2D_INCLUDE_DIR})
+target_include_directories(tecs_worker PRIVATE ${TECS_BOX2D_INCLUDE_DIRS})
 
 # SPIRV-Cross ships static archives only, and the FFI needs a shared object.
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
@@ -132,7 +178,7 @@ set_target_properties(
     tecs_spirvcross
     PROPERTIES OUTPUT_NAME spirvcrossc LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
-target_include_directories(tecs_spirvcross PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
+target_include_directories(tecs_spirvcross PRIVATE ${TECS_SPVC_INCLUDE_DIRS})
 
 set(TECS_SPVC_ARCHIVES
     spirv-cross-c
@@ -144,9 +190,17 @@ set(TECS_SPVC_ARCHIVES
     spirv-cross-util
     spirv-cross-core
 )
+# A pinned build has these as targets and an installed one as files on disk,
+# and SPIRV-Cross names them the same either way. So each is taken as a target
+# where one exists and looked for otherwise, rather than by asking which
+# dependency branch ran.
 set(TECS_SPVC_WHOLE "")
 foreach(archive IN LISTS TECS_SPVC_ARCHIVES)
-    find_library(SPVC_${archive}_LIB NAMES ${archive} HINTS ${SPIRV_CROSS_LIBRARY_DIRS})
+    if(TARGET ${archive})
+        list(APPEND TECS_SPVC_WHOLE ${archive})
+        continue()
+    endif()
+    find_library(SPVC_${archive}_LIB NAMES ${archive} HINTS ${TECS_SPVC_LIBRARY_DIRS})
     if(NOT SPVC_${archive}_LIB)
         message(FATAL_ERROR "SPIRV-Cross archive ${archive} not found")
     endif()
@@ -175,7 +229,7 @@ add_executable(tecs native/host.c native/luamods.c native/mcodearena.c)
 set(TECS_CONTENT "../share/tecs/lua/" CACHE STRING "Content directory relative to the installed executable")
 target_compile_definitions(tecs PRIVATE TECS_CONTENT="${TECS_CONTENT}")
 set_target_properties(tecs PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-target_link_libraries(tecs PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
+target_link_libraries(tecs PRIVATE tecs::sdl3 tecs::luajit)
 
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     # LuaJIT on x64 macOS needs its allocations below 2GB.
@@ -244,22 +298,38 @@ if(TECS_BUILD_LUA)
         )
     endfunction()
 
-    tecs_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3image SDL3_image/SDL_image.h /SDL3_image/ IMG_ ${SDL3_IMAGE_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_ ${SDL3_NET_INCLUDE_DIR} ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3mixer SDL3_mixer/SDL_mixer.h /SDL3_mixer/ MIX_ ${SDL3_MIXER_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(box2d box2d/box2d.h /box2d/ B2_ ${BOX2D_INCLUDE_DIR})
-    tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_ ${SHADERC_INCLUDE_DIRS})
-    # pkg-config points into the spirv_cross directory rather than at its
-    # parent, so the header is named relative to that.
-    tecs_cdef(spvc spirv_cross_c.h /spirv_cross/ SPVC_ ${SPIRV_CROSS_INCLUDE_DIRS})
+    tecs_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${TECS_SDL3_INCLUDE_DIRS})
+    tecs_cdef(
+        sdl3image
+        SDL3_image/SDL_image.h
+        /SDL3_image/
+        IMG_
+        ${TECS_SDL3_IMAGE_INCLUDE_DIRS}
+        ${TECS_SDL3_INCLUDE_DIRS}
+    )
+    tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_ ${TECS_SDL3_NET_INCLUDE_DIRS} ${TECS_SDL3_INCLUDE_DIRS})
+    tecs_cdef(
+        sdl3mixer
+        SDL3_mixer/SDL_mixer.h
+        /SDL3_mixer/
+        MIX_
+        ${TECS_SDL3_MIXER_INCLUDE_DIRS}
+        ${TECS_SDL3_INCLUDE_DIRS}
+    )
+    tecs_cdef(box2d box2d/box2d.h /box2d/ B2_ ${TECS_BOX2D_INCLUDE_DIRS})
+    tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_ ${TECS_SHADERC_INCLUDE_DIRS})
+    # The header is named without a directory, because that is how it is
+    # reached from both layouts: an installed SPIRV-Cross puts it in a
+    # spirv_cross directory pkg-config points into, and its source tree has it
+    # at the top. The two headers are named for the same reason.
+    tecs_cdef(spvc spirv_cross_c.h "/spirv_cross_c.h;/spirv.h" SPVC_ ${TECS_SPVC_INCLUDE_DIRS})
 
     # zlib splits itself in two: zconf.h carries the typedefs its declarations
     # are written in, so a binding built from zlib.h alone names types it never
     # declares and does not parse. `off_t` is the platform's, and reaches the
     # binding through the file offset in `gz_header`.
     set(TECS_CDEF_NEED off_t)
-    tecs_cdef(zlib zlib.h "/zlib.h;/zconf.h" Z ${ZLIB_INCLUDE_DIRS})
+    tecs_cdef(zlib zlib.h "/zlib.h;/zconf.h" Z ${TECS_ZLIB_INCLUDE_DIRS})
     set(TECS_CDEF_NEED "")
 
     # curl's public headers, named one at a time rather than by their directory,
@@ -277,7 +347,7 @@ if(TECS_BUILD_LUA)
         curl/curl.h
         "/curl/curl.h;/curl/easy.h;/curl/multi.h;/curl/system.h;/curl/urlapi.h;/curl/options.h;/curl/header.h;/curl/websockets.h"
         CURL
-        ${CURL_INCLUDE_DIRS}
+        ${TECS_CURL_INCLUDE_DIRS}
     )
     set(TECS_CDEF_NEED "")
 
@@ -362,32 +432,24 @@ if(TECS_BUILD_LUA)
     target_include_directories(tecs_registry PUBLIC "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
     target_link_libraries(
         tecs_registry
-        PUBLIC
-            PkgConfig::SDL3
-            PkgConfig::SDL3_IMAGE
-            PkgConfig::SDL3_MIXER
-            PkgConfig::LUAJIT
-            PkgConfig::CURL
-            PkgConfig::ZLIB
-            ${BOX2D_LIBRARY}
-            ${SDL3_NET_LIBRARY}
+        PUBLIC tecs::sdl3 tecs::sdl3image tecs::sdl3mixer tecs::sdl3net tecs::luajit tecs::curl tecs::zlib tecs::box2d
     )
 
     # Taking the address of a shader compiler's functions means linking it.
     # That is the coupling TECS_RUNTIME_SHADERS exists to remove: a release
     # generates no table for them and links neither.
     if(TECS_RUNTIME_SHADERS)
-        target_link_libraries(tecs_registry PUBLIC PkgConfig::SHADERC tecs_spirvcross)
+        target_link_libraries(tecs_registry PUBLIC tecs::shaderc tecs_spirvcross)
     endif()
     target_include_directories(
         tecs_registry
         PRIVATE
-            ${BOX2D_INCLUDE_DIR}
-            ${SDL3_NET_INCLUDE_DIR}
-            ${SHADERC_INCLUDE_DIRS}
-            ${SPIRV_CROSS_INCLUDE_DIRS}
-            ${CURL_INCLUDE_DIRS}
-            ${ZLIB_INCLUDE_DIRS}
+            ${TECS_BOX2D_INCLUDE_DIRS}
+            ${TECS_SDL3_NET_INCLUDE_DIRS}
+            ${TECS_SHADERC_INCLUDE_DIRS}
+            ${TECS_SPVC_INCLUDE_DIRS}
+            ${TECS_CURL_INCLUDE_DIRS}
+            ${TECS_ZLIB_INCLUDE_DIRS}
     )
 
     # Linked here rather than where the executables are declared, because the
@@ -496,6 +558,17 @@ endif()
 
 # --------------------------------------------------------------- packaging
 
+# Every rule below names the `tecs` component, and `make package` installs that
+# component and nothing else. A pinned build adds ten other projects to this
+# tree, each with install rules of its own, and taking the default would ship
+# their headers, their pkg-config files, their CMake package definitions and in
+# curl's case a shell script, none of which a game unpacks this to use.
+#
+# The point is not the size. It is that a package then holds exactly what
+# something here asked for by name, so "carries its own dependencies" is a list
+# somebody wrote rather than whatever ten projects happened to install.
+# cmake/Pinned.cmake names the libraries a packaged build links.
+
 # Records how the tree was built, so a check can tell a development install
 # from a shippable one rather than guessing from what it finds.
 file(
@@ -504,7 +577,7 @@ file(
     "system=${CMAKE_SYSTEM_NAME}\n"
     "arch=${CMAKE_SYSTEM_PROCESSOR}\n"
 )
-install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs)
+install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs COMPONENT tecs)
 
 # The notices ship with the binaries they describe. Almost everything linked
 # here is permissive, and permissive still means the copyright notice travels
@@ -518,13 +591,14 @@ install(
         "${CMAKE_SOURCE_DIR}/LICENSE-MIT"
         "${CMAKE_SOURCE_DIR}/LICENSE-APACHE"
     DESTINATION share/tecs
+    COMPONENT tecs
 )
 
-install(TARGETS tecs RUNTIME DESTINATION bin)
-install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib)
-install(TARGETS cjson LIBRARY DESTINATION lib)
+install(TARGETS tecs RUNTIME DESTINATION bin COMPONENT tecs)
+install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib COMPONENT tecs)
+install(TARGETS cjson LIBRARY DESTINATION lib COMPONENT tecs)
 if(TECS_BUILD_LUA)
-    install(DIRECTORY "${TECS_LUA_OUT}/" DESTINATION share/tecs/lua)
+    install(DIRECTORY "${TECS_LUA_OUT}/" DESTINATION share/tecs/lua COMPONENT tecs)
 endif()
 
 # The Teal sources are the package's type information. `tl` reads types out of
@@ -533,4 +607,4 @@ endif()
 # them. `tecs/global.d.tl` is among them, and is what declares the `tecs`
 # global; it derives its type from `tecs/init.tl` rather than restating it, so
 # it only works with the rest of the tree beside it.
-install(DIRECTORY "${CMAKE_SOURCE_DIR}/src/" DESTINATION share/tecs/teal FILES_MATCHING PATTERN "*.tl")
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/src/" DESTINATION share/tecs/teal COMPONENT tecs FILES_MATCHING PATTERN "*.tl")

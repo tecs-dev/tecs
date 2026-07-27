@@ -101,6 +101,7 @@ local REQUIRED = {
     SDLIMAGE_XCF = { "OFF", "n/a", "not a format this engine decodes" },
     SDLIMAGE_XPM = { "OFF", "n/a", "not a format this engine decodes" },
     SDLIMAGE_XV = { "OFF", "n/a", "not a format this engine decodes" },
+    SDLIMAGE_VENDORED = { "ON", "libpng-2.0", "builds libpng from a pinned source, not from the machine" },
     SDLIMAGE_STRICT = { "ON", "n/a", "a libpng that cannot be found fails the configure" },
     SDLIMAGE_DEPS_SHARED = { "OFF", "n/a", "links libpng, so a binary's link table shows it" },
     SDLIMAGE_SAMPLES = { "OFF", "n/a", "not shipped" },
@@ -147,6 +148,11 @@ local NOTICE_NAMES = {
     BOX2D = "Box2D",
     LUAJIT = "LuaJIT",
     SHADERC = "shaderc",
+    -- shaderc's own three, pinned here rather than left to the script that
+    -- clones whatever its DEPS file names.
+    GLSLANG = "glslang",
+    SPIRV_TOOLS = "SPIRV-Tools",
+    SPIRV_HEADERS = "SPIRV-Headers",
     SPVC = "SPIRV-Cross",
     ZLIB = "zlib",
     CURL = "libcurl",

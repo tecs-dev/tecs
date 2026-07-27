@@ -21,14 +21,46 @@ export TECS_LIB := $(CURDIR)/$(OUT)/lib
 export TECS_ASSETS := $(CURDIR)/$(LUA)
 export TECS_SPEC := $(CURDIR)/$(OUT)/spec
 
+# The same four pointed at an installed tree instead, so the suite can be run
+# against what a package carries rather than against a build tree. The specs
+# themselves are not installed, since a package is not a place to run them
+# from, so that one still comes out of the build.
+#
+# Then one override per library, which is not tidiness. `loader.library` tries
+# a library's plain soname before any directory it was told about, so
+# `ffi.load("SDL3")` reaches whatever the machine has installed even from
+# inside a package carrying its own, while the C that was linked resolves the
+# packaged one through @rpath. Two SDL3 images end up in one process, and what
+# that looks like is the Objective-C runtime writing duplicate-class warnings
+# onto a spec's stdout. The explicit path is consulted first, so these are what
+# make a packaged run test the packaged libraries.
+#
+# DYLD_LIBRARY_PATH would cover all of them at once and is deliberately not
+# used: the headless specs reach their subject through io.popen, and macOS
+# strips every DYLD_ variable when it spawns /bin/sh.
+PACKAGE     := $(CURDIR)/out/package
+PACKAGE_LUA := $(PACKAGE)/share/tecs/lua
+PACKAGE_LIB := $(PACKAGE)/lib
+PACKAGE_ENV  = TECS_LUA=$(PACKAGE_LUA) TECS_LIB=$(PACKAGE_LIB) \
+               TECS_ASSETS=$(PACKAGE_LUA) TECS_SPEC=$(CURDIR)/$(OUT)/spec \
+               TECS_SDL3_PATH=$(PACKAGE_LIB)/libSDL3.dylib \
+               TECS_SDL3IMAGE_PATH=$(PACKAGE_LIB)/libSDL3_image.dylib \
+               TECS_SDL3MIXER_PATH=$(PACKAGE_LIB)/libSDL3_mixer.dylib \
+               TECS_SDL3NET_PATH=$(PACKAGE_LIB)/libSDL3_net.dylib \
+               TECS_BOX2D_PATH=$(PACKAGE_LIB)/libbox2d.dylib \
+               TECS_CURL_PATH=$(PACKAGE_LIB)/libcurl.dylib \
+               TECS_ZLIB_PATH=$(PACKAGE_LIB)/libz.dylib \
+               TECS_SHADERC_PATH=$(PACKAGE_LIB)/libshaderc_shared.dylib \
+               TECS_SPVC_PATH=$(PACKAGE_LIB)/libspirvcrossc.dylib
+
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
 SPEC_TL   := $(shell find spec -name '*.tl' 2>/dev/null)
 BENCH_TL  := $(shell find bench -name '*.tl' 2>/dev/null)
 # tl searches include paths last-first, so ours come last and win.
 TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
-.PHONY: help all configure build check test abi-check run clean rebuild \
-        deps package check-package presets shaders bench bench-physics \
+.PHONY: help all configure build check test test-package abi-check run clean \
+        rebuild deps package check-package presets shaders bench bench-physics \
         bench-sprites bench-text bench-particles bench-latency bench-ecs \
         bench-json \
         bench-snapshot bench-bitset format format-check
@@ -139,7 +171,16 @@ run: build $(LUA)/main.lua ## Run the demo
 	@$(BIN) --entry $(LUA)/main.lua
 
 package: build shaders $(LUA)/main.lua ## Install a tree into out/package
-	@cmake --install $(OUT) --prefix $(CURDIR)/out/package
+	@cmake --install $(OUT) --prefix $(PACKAGE) --component tecs
+
+# The suite against an installed tree. `make test` runs against a build tree,
+# which on a development preset means against the machine's own SDL, Box2D and
+# libcurl rather than against the revisions a release ships. This is what runs
+# it against those, and it needs a packaged preset to be worth anything:
+# PRESET=macos-arm64 make test-package.
+test-package: package ## Run the spec suite against out/package
+	@$(PACKAGE_ENV) busted --pattern=headless_spec
+	@$(PACKAGE_ENV) busted --exclude-pattern=headless_spec
 
 check-package: package ## Verify a package carries its own dependencies
 	@python3 scripts/checkpackage.py $(CURDIR)/out/package --allow-compiler \

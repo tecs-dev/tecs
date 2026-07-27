@@ -2580,6 +2580,7 @@ make check          type-check Teal sources
 make abi-check      verify generated cdefs against the C ABI
 make package        install a tree into out/package
 make check-package  verify a package carries its own dependencies
+make test-package   run the spec suite against out/package
 make deps           install development dependencies (Homebrew)
 ```
 
@@ -2589,13 +2590,30 @@ convenient and not shippable: it links the build machine's libraries by
 absolute path. A packaged preset builds pinned revisions from source, so a
 release is reproducible and carries no path from the machine that made it.
 
+A packaged preset asks two things of the build host that a development one does
+not. Mbed TLS generates part of its own source when it is built from a git
+revision rather than a release archive, so the Python the configure finds needs
+`jinja2` and `jsonschema`; the configure says so rather than letting the build
+fail inside a dependency a quarter of an hour later. And LuaJIT's Makefile
+refuses to guess a deployment target on Apple, so the macOS presets name one.
+
 `make check-package` is the gate on that distinction. It inspects the installed
 binaries for search paths and absolute references that leave the package, and
-for a shader compiler a release is not meant to ship. On a development install
-it reports what it found and passes, because those references are expected
-there; on a packaged one it fails. A package that resolved a library from the
-build machine works there and nowhere else, and the failure only appears once
-someone else unpacks it.
+for a shader compiler a release is not meant to ship. Only a packaged install
+can pass that: a development one keeps its link paths on purpose, so what runs
+against one is the half that is about the tree rather than the preset, the
+licence position and the packaged types, and the rest is reported as not run.
+A package that resolved a library from the build machine works there and
+nowhere else, and the failure only appears once someone else unpacks it.
+
+`make test-package` is the other half of the same idea. `make test` runs the
+suite against a build tree, which on a development preset means against the
+machine's own SDL, Box2D and libcurl; against an installed packaged tree it is
+the only thing that exercises the revisions a release actually ships. It sets a
+path per library, because `loader.library` tries a library's plain soname
+before any directory it was told about, so `ffi.load("SDL3")` otherwise reaches
+whatever the machine has installed from inside a package carrying its own, and
+two SDL3 images end up in one process.
 
 It holds the installed types to the same standard, for the same reason: it
 type-checks a file that uses the `tecs` global against `share/tecs/teal` and

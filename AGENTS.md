@@ -36,13 +36,15 @@ make abi-check      # Verify generated cdefs against the C ABI
 make shaders        # Build the shader pack a target without a compiler consumes
 make package        # Install a tree into out/package
 make check-package  # Verify a package carries its own dependencies
+make test-package   # Run the spec suite against out/package
 make presets        # List the platform matrix
 make deps           # Install development dependencies (Homebrew)
 ```
 
 `PRESET=` selects the target and defaults to `macos-arm64-dev`. A development preset resolves dependencies from
 the system, which is convenient and not shippable. A packaged preset builds pinned revisions from source, and
-`make check-package` is the gate on the difference.
+`make check-package` is the gate on the difference, and only a packaged install can pass it. A packaged preset also
+needs a Python with `jinja2` and `jsonschema` on the build host, which Mbed TLS generates sources with.
 
 ## Project Structure
 

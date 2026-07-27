@@ -76,6 +76,8 @@ LINKED_LIBRARIES = (
     (r"shaderc(_shared)?", "Apache-2.0", "a development build's shader compiler; a release links none"),
     (r"png\d*", "libpng-2.0", "PNG decoding under SDL3_image"),
     (r"z", "Zlib", "the deflate libpng reads through"),
+    (r"curl", "curl", "HTTP and HTTPS"),
+    (r"(mbedtls|mbedx509|tfpsacrypto)", "Apache-2.0", "Mbed TLS, curl's TLS backend, with Apache-2.0 elected"),
     (r"(ogg|opus|opusfile)", "BSD-3-Clause", "SDL_mixer's Opus decoder and its container"),
     (r"wavpack", "BSD-3-Clause", "SDL_mixer's WavPack decoder"),
 )
@@ -207,9 +209,13 @@ def main():
     if not prefix.is_dir():
         sys.exit(f"no such install prefix: {prefix}")
 
-    # A development install links the build machine's libraries on purpose.
-    # Reporting that as a failure would train people to ignore this check, so
-    # it is stated and passed instead; only a packaged build is held to it.
+    # A development install links the build machine's libraries on purpose:
+    # CMakeLists.txt keeps its link paths deliberately, so it cannot pass the
+    # self-contained half of this and no version of it could. Failing it would
+    # say nothing about the tree and would train people to ignore the check, so
+    # what runs against one is the part that is about the tree rather than the
+    # preset, the licence position and the packaged types. The rest is
+    # reported, and reported as not run rather than as passed.
     info = prefix / "share" / "tecs" / "build-info.txt"
     development = "systemDeps=ON" in info.read_text() if info.exists() else False
 
@@ -284,9 +290,10 @@ def main():
         sys.exit(1)
 
     if development:
-        print("development install: system dependencies are expected here")
+        print("\ndevelopment install: whether it carries its own dependencies was NOT checked.")
+        print("Build a packaged preset to check that, for instance PRESET=macos-arm64 make check-package.")
         if problems:
-            print(f"{len(problems)} references to the build machine, which a packaged preset would not have:")
+            print(f"\n{len(problems)} references to the build machine, which a packaged preset would not have:")
             for problem in problems:
                 print(f"  {problem}")
         return
