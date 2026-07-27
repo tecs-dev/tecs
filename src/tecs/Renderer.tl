@@ -51,6 +51,7 @@ local Texture <const> = require("tecs.gpu.Texture")
 local Camera <const> = require("tecs.gfx.Camera")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
+local layers <const> = require("tecs.gfx.layers")
 local timing <const> = require("tecs.timing")
 
 local C <const> = sdl.C
@@ -289,7 +290,11 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         floats[base] = angle
         floats[base + 1] = scaleX
         floats[base + 2] = scaleY
-        floats[base + 3] = 0.0
+        -- The band this entity's layer owns, and where in it the sort mode
+        -- puts it. Zero is nearest, so a higher layer resolves to a smaller
+        -- value and covers everything below it whatever the two contain.
+        floats[base + 3] = layers.depthOf(transform.layer as integer,
+            transform.z, originX, originY)
 
         floats[base + 4] = originX
         floats[base + 5] = originY

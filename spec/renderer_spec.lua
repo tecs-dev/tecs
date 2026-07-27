@@ -1156,4 +1156,70 @@ describe("ecs.Renderer", function()
         end)
     end)
 
+
+    -- Layers are bands of the depth range, and a band never sorts against
+    -- another one. That is the guarantee content is authored against: put the
+    -- HUD on a higher layer and it covers the world, whatever the world does.
+    describe("layers", function()
+        local layers = require("tecs.gfx.layers")
+
+        local function quad(world, x, y, layer, z, r, g, b)
+            world:spawn(
+                Transform(x, y, z, layer, 0, SIZE, SIZE),
+                Tint(r, g, b, 1), Renderable())
+        end
+
+        it("draws a higher layer in front whatever the lower one does", function()
+            local world, renderer = newScene()
+            -- The blue one is spawned first, so draw order would put red on
+            -- top. Its layer is what must decide instead.
+            quad(world, SIZE / 2, SIZE / 2, 8, 0, 0, 0, 1)
+            quad(world, SIZE / 2, SIZE / 2, 1, 0, 1, 0, 0)
+
+            local pixels = frameOnce(world, renderer)
+            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            assert.is_true(centre.b > 200, "the higher layer is what you see")
+            assert.is_true(centre.r < 50, "not the one drawn after it")
+            renderer:destroy()
+        end)
+
+        it("sorts by depth down the screen within one layer", function()
+            local world, renderer = newScene()
+            -- Same layer, so position decides. The lower one is nearer.
+            quad(world, SIZE / 2, SIZE * 0.25, 1, 0, 1, 0, 0)
+            quad(world, SIZE / 2, SIZE * 0.75, 1, 0, 0, 0, 1)
+
+            local pixels = frameOnce(world, renderer)
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 2, SIZE / 2).b > 200,
+                "the entity lower on the screen is in front")
+            renderer:destroy()
+        end)
+
+        it("lets z decide on a layer that sorts by z", function()
+            local world, renderer = newScene()
+            layers.configure(2, { sort = "z" })
+            -- The one higher up the screen would lose under a top-down sort,
+            -- and wins here because its z is greater.
+            quad(world, SIZE / 2, SIZE * 0.25, 2, 100, 0, 0, 1)
+            quad(world, SIZE / 2, SIZE * 0.75, 2, 0, 1, 0, 0)
+
+            local pixels = frameOnce(world, renderer)
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 2, SIZE / 2).b > 200,
+                "greater z is in front when the layer sorts by z")
+            layers.configure(2, { sort = "topdown" })
+            renderer:destroy()
+        end)
+
+        it("refuses a layer outside the range it has bands for", function()
+            assert.has_error(function()
+                layers.configure(layers.MAX + 1, { sort = "z" })
+            end)
+            assert.has_error(function()
+                layers.configure(1, { sort = "sideways" })
+            end)
+        end)
+    end)
+
 end)
