@@ -9,7 +9,10 @@
 ---
 --- Every layer shares one size and format, which is the constraint arrays
 --- carry. What a caller sees is a sub-rect of a layer rather than a layer, so
---- where inside one an image landed is this module's business alone.
+--- where inside one an image landed is this module's business alone. `replace`
+--- is what that indirection buys: new pixels can be written over an image at
+--- the texels it already occupies, and every instance sampling it goes on
+--- naming the right ones.
 ---
 --- Packing is what makes that indirection worth having. A layer holds one image
 --- by default, which costs a whole cell for a sixteen-pixel icon and puts a
@@ -81,6 +84,11 @@ local record TextureArray
         v0: number
         u1: number
         v1: number
+        --- The image's own top-left within its layer, in texels, outside any
+        --- gutter. Carried rather than recovered from the UVs, so writing over
+        --- an image again lands on the texels it already occupies exactly.
+        x: integer
+        y: integer
         --- Size in pixels as uploaded, for a caller that needs the image's own
         --- dimensions rather than its share of the cell.
         width: integer
@@ -294,10 +302,42 @@ local function stage(self: TextureArray, pixels: loader.CValue, width: integer,
     return rowTexels
 end
 
---- Uploads RGBA pixels into the array.
+--- Copies the staged rectangle onto a layer.
 ---
---- Submits its own command buffer, so this is a load-time path: an asset
---- arrives once, not once per frame.
+--- Its own command buffer, submitted here. That makes this a load-time path:
+--- an image arrives once, not once per frame, and the copy is ordered against
+--- everything after it without a frame having to carry it.
+--- @param x The rectangle's left edge in the layer, gutter included, so this is
+---     where the placement starts rather than where the image does.
+local function upload(self: TextureArray, layer: integer, x: integer,
+                      y: integer, rowTexels: integer, width: integer,
+                      height: integer)
+    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
+    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
+
+    local from = loader.newArray("SDL_GPUTextureTransferInfo[1]")
+    local sourceInfo = from[0] as loader.CStruct
+    sourceInfo.transfer_buffer = self._transfer
+    sourceInfo.offset = 0
+    sourceInfo.pixels_per_row = rowTexels
+    sourceInfo.rows_per_layer = height
+
+    local to = loader.newArray("SDL_GPUTextureRegion[1]")
+    local region = to[0] as loader.CStruct
+    region.texture = self.handle
+    region.mip_level = 0
+    region.layer = layer
+    region.x, region.y, region.z = x, y, 0
+    region.w, region.h, region.d = width, height, 1
+
+    C.SDL_UploadToGPUTexture(copyPass, from, to, false)
+    C.SDL_EndGPUCopyPass(copyPass)
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
+        "SDL_SubmitGPUCommandBuffer")
+end
+
+--- Uploads RGBA pixels into the array.
 ---
 --- Raises when the array is full or the image is larger than a cell. Both are
 --- authoring mistakes with no useful runtime answer, and a silently dropped
@@ -318,30 +358,7 @@ function TextureArray:add(pixels: loader.CValue, width: integer,
     end
 
     local rowTexels <const> = stage(self, pixels, width, height, pitch, pad)
-
-    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
-    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
-    local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
-
-    local from = loader.newArray("SDL_GPUTextureTransferInfo[1]")
-    local sourceInfo = from[0] as loader.CStruct
-    sourceInfo.transfer_buffer = self._transfer
-    sourceInfo.offset = 0
-    sourceInfo.pixels_per_row = rowTexels
-    sourceInfo.rows_per_layer = height + pad * 2
-
-    local to = loader.newArray("SDL_GPUTextureRegion[1]")
-    local region = to[0] as loader.CStruct
-    region.texture = self.handle
-    region.mip_level = 0
-    region.layer = layer
-    region.x, region.y, region.z = x, y, 0
-    region.w, region.h, region.d = width + pad * 2, height + pad * 2, 1
-
-    C.SDL_UploadToGPUTexture(copyPass, from, to, false)
-    C.SDL_EndGPUCopyPass(copyPass)
-    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
-        "SDL_SubmitGPUCommandBuffer")
+    upload(self, layer, x, y, rowTexels, width + pad * 2, height + pad * 2)
 
     -- The rect the caller samples is the image's own texels and never the
     -- gutter around them, so a neighbour packed one texel away is unreachable
@@ -354,9 +371,42 @@ function TextureArray:add(pixels: loader.CValue, width: integer,
         v0 = top / self.height,
         u1 = (left + width) / self.width,
         v1 = (top + height) / self.height,
+        x = left,
+        y = top,
         width = width,
         height = height,
     }
+end
+
+--- Writes new pixels over an image already in the array.
+---
+--- Nothing moves. The region handed in is where the image is, the replacement
+--- lands on those same texels, and the region is as true afterwards as it was
+--- before. That is what makes this different from adding: every `Sprite`,
+--- `Sheet` and glyph already holding a layer and a UV rect keeps holding the
+--- right one, so there is nothing to invalidate and nothing in the world to
+--- touch.
+---
+--- The gutter is rewritten too, since it is a copy of the image's own edge and
+--- the new image's edge is a different colour.
+---
+--- Raises where the replacement is not the size the region was cut for. A
+--- different size is a different rect, packed or not, and the sprites holding
+--- the old one have no way to be told.
+--- @param region What `add` returned for this image, unchanged.
+--- @param pitch The source's row stride in bytes, as `add` takes it.
+function TextureArray:replace(region: TextureArray.Region,
+                              pixels: loader.CValue, width: integer,
+                              height: integer, pitch: integer)
+    if width ~= region.width or height ~= region.height then
+        error(("tecs: an image occupying %dx%d texels cannot be replaced by a "
+            .. "%dx%d one"):format(region.width, region.height, width, height), 2)
+    end
+
+    local pad <const> = self.packed and PADDING or 0
+    local rowTexels <const> = stage(self, pixels, width, height, pitch, pad)
+    upload(self, region.layer, region.x - pad, region.y - pad, rowTexels,
+        width + pad * 2, height + pad * 2)
 end
 
 function TextureArray:usage(): integer, integer

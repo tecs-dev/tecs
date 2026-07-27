@@ -224,6 +224,13 @@ function Application:_init(): boolean
         local tools = require("tecs.mcp.tools")
         tools.bind(self.renderer, self.world)
 
+        -- The device's half of a shader reload. The tool re-reads the sources
+        -- and refuses the reloads that would renumber a material; what it
+        -- cannot do on its own is make a frame draw from what it read, which
+        -- is a pipeline swap and belongs to whoever owns the device.
+        local renderer = self.renderer
+        tools.bindReload(function() renderer:rebuildPipelines() end)
+
         -- The engine's own components, plus the ECS builtins. A game adds its
         -- own through mcpWorld.register, since nothing here can know them.
         local mcpWorld = require("tecs.mcp.world")

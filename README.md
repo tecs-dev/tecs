@@ -1120,6 +1120,20 @@ refused by name rather than attempted.
 What makes the swap cheap is that the pipeline objects a frame binds are read
 through the backend every frame, so replacing them is picked up by the next
 frame with no pass graph rebuilt and nothing in the world touched.
+`Backend:rebuildPipelines` is that half. It waits for the device to go idle,
+builds the geometry pipeline, the three cull pipelines and the deferred pass's
+own two against the formats the G-buffer was created with, and installs them
+only once every one of them has compiled, so a source that no longer compiles
+raises and leaves the process drawing exactly what it drew.
+
+Images re-read on the same principle, through `reload_image`. A file is decoded
+again and written over the texels its name already occupies, so the layer and
+the UV rect that every `Sprite`, `Sheet` and glyph is holding stay true and
+there is nothing to invalidate. That is what makes it identity rather than a
+second upload, and it is also why the size has to match: a resize is a different
+rect, packed or not, and the instances already carrying the old one have no way
+to be told. Packed or not, only the image's own rectangle and the gutter around
+it are written, so the neighbours sharing its layer are untouched.
 
 Content is never resolved against the working directory. That happens to work
 when a build is launched from a project root and is meaningless the moment

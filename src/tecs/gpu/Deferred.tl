@@ -296,6 +296,41 @@ function Deferred:render(frame: Frame)
     self.graph:execute(frame)
 end
 
+--- Rebuilds the lighting and composite pipelines from their shaders.
+---
+--- The same formats and the same graph: only the two pipeline objects change,
+--- and both passes read them through `self` when they execute, so the next
+--- frame binds the new ones with nothing rebuilt around them.
+---
+--- Both are built before either old one is released, so a shader that no longer
+--- compiles leaves the pipeline exactly as it was and raises. Must not run
+--- inside a pass: what it releases is what a recorded pass is still reading.
+function Deferred:rebuildPipelines()
+    local device <const> = self._device
+    C.SDL_WaitForGPUIdle(device)
+
+    local lighting: GraphicsPipeline = nil
+    local composite: GraphicsPipeline = nil
+    local built, reason = pcall(function(): string
+        lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8,
+            "lighting")
+        composite = buildPipeline(device, "deferred.composite.frag",
+            self.graph.swapchainFormat, "composite")
+    end)
+    if not built then
+        if lighting ~= nil then lighting:destroy() end
+        if composite ~= nil then composite:destroy() end
+        error(reason, 0)
+    end
+
+    local oldLighting <const> = self._lightingPipeline
+    local oldComposite <const> = self._compositePipeline
+    self._lightingPipeline = lighting
+    self._compositePipeline = composite
+    oldLighting:destroy()
+    oldComposite:destroy()
+end
+
 --- Returns the two formats a geometry pipeline must be created against.
 ---
 --- In attachment order, so a pipeline passes them straight through as its

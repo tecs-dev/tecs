@@ -22,6 +22,7 @@ local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local components = require("tecs.components")
 local materials = require("tecs.gpu.materials")
+local shaders = require("tecs.gpu.shaders")
 local Camera = require("tecs.gfx.Camera")
 
 local C = sdl.C
@@ -593,6 +594,55 @@ describe("ecs.Renderer", function()
             renderer:destroy()
         end)
 
+        it("replaces a packed image without touching its neighbours", function()
+            -- The assertion the packer makes replacing hard. Four images share
+            -- a layer, so writing the layer, or writing at its origin, or
+            -- forgetting the gutter would all reach a neighbour: each of them
+            -- is a different colour, and each is drawn back afterwards.
+            local world, renderer = packedScene()
+            for index = 1, 4 do
+                renderer:registerImage(block("spec://replace" .. index, 8, 0, 0, index * 60))
+            end
+            local before = renderer.images:usage()
+
+            renderer:replaceImage(block("spec://replace2", 8, 255, 0, 0))
+            local after = renderer.images:usage()
+            assert.are.equal(before, after, "a replacement takes no more of the array")
+            assert.are.equal(1, renderer.images.used, "nor another layer")
+
+            local entity = world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0),
+                -- The Sprite resolved before the replacement, because a
+                -- replacement that needed a new one would not be a replacement.
+                renderer:sprite("spec://replace2"),
+                Renderable()
+            )
+
+            local pixels = frameOnce(world, renderer)
+            for _, at in ipairs({ { SIZE / 2, SIZE / 2 }, { 3, 3 }, { SIZE - 3, SIZE - 3 } }) do
+                local pixel = screen:getPixel(pixels, at[1], at[2])
+                assert.are.equal(255, pixel.r, ("the new pixels at %d,%d"):format(at[1], at[2]))
+                assert.are.equal(0, pixel.b)
+            end
+
+            for _, index in ipairs({ 1, 3, 4 }) do
+                local sprite = world:getMut(entity, Sprite)
+                local wanted = renderer:sprite("spec://replace" .. index)
+                sprite.image, sprite.slot = wanted.image, wanted.slot
+                sprite.u0, sprite.v0 = wanted.u0, wanted.v0
+                sprite.u1, sprite.v1 = wanted.u1, wanted.v1
+
+                local neighbour = frameOnce(world, renderer)
+                for _, at in ipairs({ { SIZE / 2, SIZE / 2 }, { 3, 3 }, { SIZE - 3, SIZE - 3 } }) do
+                    local pixel = screen:getPixel(neighbour, at[1], at[2])
+                    assert.are.equal(0, pixel.r, ("image %d at %d,%d"):format(index, at[1], at[2]))
+                    assert.are.equal(index * 60, pixel.b)
+                end
+            end
+            renderer:destroy()
+        end)
+
         it("leaves one image a layer when packing is off", function()
             local world, renderer = newScene()
             renderer:registerImage(solid("spec://unpacked1", 255, 0, 0))
@@ -611,6 +661,189 @@ describe("ecs.Renderer", function()
                 Renderable()
             )
             assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).g)
+            renderer:destroy()
+        end)
+    end)
+
+    -- Reloading, which is the same promise made twice. A shader reload swaps
+    -- the pipeline objects a frame binds; an image reload writes new pixels
+    -- into the rect a name already holds. Neither may touch the world, and both
+    -- have to be visible in what the very next frame draws.
+    describe("reloading", function()
+        -- The shipped source with one statement rewritten, so what is being
+        -- tested is the swap rather than a shader written to be swapped.
+        local function patch(name, pattern, replacement)
+            materials.install()
+            local patched, count = shaders.source(name):gsub(pattern, replacement)
+            assert.are.equal(1, count, name .. " no longer reads the way this patch expects")
+            shaders.override(name, patched)
+        end
+
+        local function redQuad(world)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 0.0, 0.0, 1.0),
+                Renderable()
+            )
+        end
+
+        it("draws through the graphics pipeline a rebuild installed", function()
+            local world, renderer = newScene()
+            redQuad(world)
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+
+            patch("instance.frag", "albedo = shaded%.albedo;", "albedo = vec4(0.0, 0.0, 1.0, 1.0);")
+            renderer:rebuildPipelines()
+            local pixels = frameOnce(world, renderer)
+            shaders.override("instance.frag", nil)
+
+            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            assert.are.equal(255, centre.b, "the frame is still binding the pipeline it started with")
+            assert.are.equal(0, centre.r)
+
+            -- And back, because reloading after a mistake is most of what a
+            -- reload is for.
+            renderer:rebuildPipelines()
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+            renderer:destroy()
+        end)
+
+        it("rebuilds the cull pipelines and not only the draw", function()
+            local world, renderer = newScene()
+            redQuad(world)
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+
+            patch("instance.mark.comp", "keep = outside %? 0u : 1u;", "keep = 0u;")
+            renderer:rebuildPipelines()
+            local pixels = frameOnce(world, renderer)
+            shaders.override("instance.mark.comp", nil)
+
+            assert.are.equal(1, renderer.count, "the instance is still resident")
+            assert.are.equal(
+                0,
+                screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+                "and a cull keeping nothing must draw nothing"
+            )
+
+            renderer:rebuildPipelines()
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+            renderer:destroy()
+        end)
+
+        it("rebuilds the deferred pipelines behind the geometry pass", function()
+            -- Composite is the last thing between the lit target and the
+            -- screen, and it belongs to Deferred rather than to the backend. A
+            -- rebuild that stopped at the pipelines it owns itself would leave
+            -- this one drawing the shader the process started with.
+            local world, renderer = newScene()
+            redQuad(world)
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+
+            patch(
+                "deferred.composite.frag",
+                "outColor = texture%(litTexture, vUV%);",
+                "outColor = vec4(0.0, 1.0, 0.0, 1.0);"
+            )
+            renderer:rebuildPipelines()
+            local pixels = frameOnce(world, renderer)
+            shaders.override("deferred.composite.frag", nil)
+
+            assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).g)
+            assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r)
+
+            renderer:rebuildPipelines()
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+            renderer:destroy()
+        end)
+
+        it("leaves every pipeline alone when a source no longer compiles", function()
+            local world, renderer = newScene()
+            redQuad(world)
+            frameOnce(world, renderer)
+
+            shaders.override("instance.frag", "#version 450\nthis is not glsl\n")
+            local built = pcall(function()
+                renderer:rebuildPipelines()
+            end)
+            shaders.override("instance.frag", nil)
+
+            assert.is_false(built, "a source that does not compile must not reach a pipeline")
+            assert.are.equal(
+                255,
+                screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r,
+                "a refused reload leaves the process drawing what it drew"
+            )
+            renderer:destroy()
+        end)
+
+        it("draws the new pixels of an image replaced in place", function()
+            local world, renderer = newScene()
+            local sprite = renderer:registerImage(solid("spec://replaced", 255, 0, 0))
+            local used = renderer.images.used
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0),
+                sprite,
+                Renderable()
+            )
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+
+            local again = renderer:replaceImage(solid("spec://replaced", 0, 0, 255))
+            assert.are.equal(sprite.slot, again.slot, "a replacement keeps the layer it had")
+            assert.are.equal(sprite.u0, again.u0, "and the rect within it")
+            assert.are.equal(sprite.u1, again.u1)
+            assert.are.equal(used, renderer.images.used, "and consumes no further layer")
+
+            -- Nothing wrote to the entity between the two frames. What it holds
+            -- is the Sprite it was spawned with, and that is what has to come
+            -- back drawing the new pixels.
+            local pixels = frameOnce(world, renderer)
+            assert.are.equal(0, renderer.rewritten, "replacing an image must not touch the world")
+            assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b)
+            assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r)
+            renderer:destroy()
+        end)
+
+        it("refuses a replacement of another size", function()
+            local _, renderer = newScene()
+            renderer:registerImage(solid("spec://resized", 255, 0, 0))
+
+            -- One texel registered, two offered: the rect would move, and every
+            -- Sprite already holding the old one has no way to hear about it.
+            local ok, reason = pcall(function()
+                renderer:replaceImage(cutout("spec://resized", 0, 255, 0))
+            end)
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("spec://resized", 1, true), tostring(reason))
+            assert.is_truthy(tostring(reason):find("1x1", 1, true), tostring(reason))
+            assert.is_truthy(tostring(reason):find("2x1", 1, true), tostring(reason))
+            renderer:destroy()
+        end)
+
+        it("refuses a resize at the array, not only at the name", function()
+            -- The array is reachable as `renderer.images`, and the rect is what
+            -- it alone knows, so the refusal has to be there as well as in
+            -- front of it.
+            local _, renderer = newScene()
+            local _, region = renderer:registerImage(solid("spec://arrayresized", 255, 0, 0))
+            local wider = cutout("spec://arrayresized", 0, 255, 0)
+
+            local ok, reason = pcall(function()
+                renderer.images:replace(region, wider.pixels, wider.width, wider.height, wider.pitch)
+            end)
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("1x1", 1, true), tostring(reason))
+            assert.is_truthy(tostring(reason):find("2x1", 1, true), tostring(reason))
+            renderer:destroy()
+        end)
+
+        it("refuses to replace an image nothing registered", function()
+            local _, renderer = newScene()
+            local ok, reason = pcall(function()
+                renderer:replaceImage(solid("spec://neverregistered", 0, 255, 0))
+            end)
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("spec://neverregistered", 1, true), tostring(reason))
             renderer:destroy()
         end)
     end)
