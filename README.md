@@ -60,7 +60,7 @@ Working today:
   one and uploads on the main thread
 - Frame pacing from the swapchain, with no sleep heuristic
 - Shaders packaged as artifacts, so a release links no compiler
-- A platform contract with six seams, and an SDL implementation of all six
+- A platform contract with seven seams, and an SDL implementation of all seven
 - A debug server over HTTP that survives a crash in game code, with tools that
   read and write the world
 - Per-stage frame timing with percentiles, which is how any of the numbers in
@@ -79,9 +79,11 @@ Working today:
 - Layers: sixteen bands of the depth range, each choosing how its contents sort
   within it, and each able to sit in screen pixels, in virtual coordinates,
   outside the camera's zoom, at its own parallax, or unlit
+- Sound: WAV clips read on the asset worker, a voice per platform stream so the
+  platform does the mixing, and a `Sound` component that plays for as long as
+  its entity exists
 
-Not built yet: shadows, post-processing, audio, UI, tiled maps and
-multi-camera.
+Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -114,6 +116,72 @@ uploads. The worker returns the *address* of a decoded surface rather than its
 pixels: surfaces live in process memory, so the pointer is valid in either
 state, and passing it avoids copying an image through a serialized message
 only to copy it again into staging. Ownership transfers with the address.
+
+Sound takes the same route. A WAV is read and converted to the output's format
+on the worker and handed back as the address of its PCM, so a clip that turns
+out to be mono at 22050 costs the frame nothing and every voice that plays it
+resamples nothing.
+
+## Sound
+
+`app.audio` is the whole surface: load a clip, play it, set a gain, stop it,
+loop it. It is built on SDL's audio streams and on four decisions.
+
+**WAV only.** Clips come through `SDL_LoadWAV`. There is no SDL_mixer here and
+no decoder, so Ogg Vorbis, Opus, MP3, FLAC and tracker modules do not load, and
+a compressed file fails rather than being resampled into something. Adding a
+decoder adds a dependency and a licence to the build, which is a decision worth
+making on its own rather than as a side effect of wanting background music.
+
+**A voice is a stream, and the platform mixes.** Playing a sound binds a stream
+to the output; playing the same clip three times over binds three streams
+reading one buffer. Nothing in this engine sums samples, which is why
+`SDL_MixAudio` goes unused: the only thing it could add is summing into a
+buffer the engine owns, and there is no such buffer. Thirty-two voices by
+default, and a thirty-third play declines rather than stealing one, because a
+sound that stops halfway through because something else started is harder to
+explain than one that never started.
+
+**No callback runs on an audio thread.** SDL can pull audio from a callback,
+and that callback fires on a thread the Lua VM did not create; a Lua function
+invoked from such a thread is the same unsafe case that keeps raw thread
+creation unexposed. The device is fed by queueing instead, from the iteration,
+on the thread everything else runs on. A callback mixer would need a native
+bridge and there is not one.
+
+**Every voice is fed in pieces.** Each update tops a voice's stream up to a
+quarter of a second of lead and no further, so a long piece of music holds a
+bounded queue instead of being handed over whole, and looping is the cursor
+wrapping rather than a second mechanism. What that is not is streaming from
+disk: `SDL_LoadWAV` has no partial-read form, so the file is resident even
+though the queue is not, and reading a WAV incrementally would mean parsing the
+container here, which is the decoder that is deliberately absent.
+
+The output is the platform's default rather than a device chosen by name, so
+SDL migrates the logical device when the system default changes and plugged-in
+headphones need no handling. That has one consequence worth writing down:
+`SDL_OpenAudioDeviceStream` opens a device and one stream together and then
+refuses every further binding on it, so the device is opened with
+`SDL_OpenAudioDevice` and voices are bound to it, which is also the form that
+starts unpaused.
+
+A `Sound` component is how a sound belongs to an entity. Presence is the
+instruction: an entity carrying one with a loaded clip starts sounding on the
+next audio pass and stops when the component or the entity goes away. One walk
+per frame starts what has not started, marks what has finished, and releases
+any voice no component referred to, which is what makes despawning something
+mid-sound do the obvious thing without an observer on every archetype.
+
+There is no listener and no panning. SDL gives a stream one gain and a channel
+map, and a channel map reorders channels rather than attenuating them, so
+constant-power panning means either summing samples here or splitting every
+mono clip across two streams. Both are real designs, and neither is worth
+committing to before the questions under it are answered: what units distance
+is in, what the falloff curve is, whether the listener follows the camera or an
+entity, and what a sound on a screen-space layer does. Attenuating by distance
+alone is the cheap half of that, and shipping the cheap half fixes the answers
+to the rest by accident. `Sound.gain` is the seam it arrives through when it
+does.
 
 ## Physics threads
 
@@ -602,7 +670,7 @@ installed tree runs from an unrelated directory with nothing in the environment.
 SDL covers every platform this engine can be built for openly. It does not
 cover the ones whose SDKs are licensed, and those cannot live in this repository
 even for someone who holds a licence, because their headers may not be
-redistributed. So the engine names its platform seams instead. There are six,
+redistributed. So the engine names its platform seams instead. There are seven,
 and a port supplies these and touches nothing above them:
 
 ```
@@ -612,6 +680,7 @@ and a port supplies these and touches nothing above them:
              _iterate, _shutdown
  events      Typed events, produced directly            adapter.events
  input       Devices, rumble, cursor modes, text input  adapter.input
+ audio       An output, streams, PCM, gain              adapter.audio
  static FFI  Function pointers taken at build time      native/registry.c
  storage     Content and writable roots                 adapter.basePath/prefPath
  shaders     A pack in the platform's own format        adapter.shaderFormat
@@ -624,7 +693,9 @@ both call the same four methods. Events are one typed stream discriminated by
 `kind`, so a platform with no `SDL_Event` produces those values directly.
 Input needs a second face because rumble, an LED, a cursor mode and a text
 input session are commands going the other way, and no event vocabulary can
-express one. A target that forbids `dlopen` reaches its libraries through a
+express one. Audio is that direction and only that direction: an output opens,
+PCM goes in, a gain is set, a voice stops, and nothing about sound comes back
+as an event. A target that forbids `dlopen` reaches its libraries through a
 table of pointers
 taken at build time, and nothing calls `ffi.load` when one is present. The pack
 layout does not change for a platform with private bytecode; only the declared
@@ -768,11 +839,12 @@ host/main.c                 process entry: a Lua state and argv, nothing else
 scripts/gencdef.py          header -> cdef + constants generator
 scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs/ffi/             library loading and generated binding wrappers
-src/tecs/platform/        window, clock, events
+src/tecs/platform/        window, clock, events, input and audio backends
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sprite sheets and their playback
 src/tecs/Renderer.tl      the world-to-GPU bridge
+src/tecs/Audio.tl         clips, voices, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
 spec/                       busted suite

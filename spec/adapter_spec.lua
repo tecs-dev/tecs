@@ -22,8 +22,31 @@ local Input = require("tecs.platform.Input")
 local capabilities = require("tecs.platform.capabilities")
 local shadercompiler = require("tecs.gpu.shadercompiler")
 local shaderpack = require("tecs.gpu.shaderpack")
+local Audio = require("tecs.Audio")
 
 local C = sdl.C
+
+-- Sound output for a platform that has none of SDL's. Enough of the contract
+-- to open something and be asked for a stream, which is as far as anything
+-- gets without a clip.
+local function fakeAudio()
+    local backend = { name = "spec.console.audio", opens = 0 }
+    backend.openDevice = function(spec)
+        backend.opens = backend.opens + 1
+        backend.spec = spec
+        return 41
+    end
+    backend.closeDevice = function() end
+    backend.createStream = function() return {} end
+    backend.destroyStream = function() end
+    backend.bindStream = function() return true end
+    backend.unbindStream = function() end
+    backend.putData = function() return true end
+    backend.pendingBytes = function() return 0 end
+    backend.clearStream = function() end
+    backend.setStreamGain = function() return true end
+    return backend
+end
 
 -- A platform with none of SDL's answers. Deliberately implausible values, so a
 -- path that quietly went back to SDL is visible rather than plausible.
@@ -167,6 +190,22 @@ describe("platform contract", function()
         adapter.reset()
         assert.are_not.equal("spec.console", capabilities.get().target,
             "removing the platform must be reflected too")
+    end)
+
+    it("plays sound through the platform's own output", function()
+        -- Audio is outbound commands and nothing else, so the evidence that it
+        -- is a seam is that an output which is not SDL's opens and is asked
+        -- for what it is asked for.
+        local platform = fakePlatform()
+        platform.audio = fakeAudio()
+        adapter.install(platform)
+
+        local audio = Audio.create({ frequency = 22050, channels = 1 })
+        assert.is_true(audio.available)
+        assert.are.equal(1, platform.audio.opens)
+        assert.are.equal(22050, platform.audio.spec.frequency)
+        assert.are.equal(1, platform.audio.spec.channels)
+        audio:destroy()
     end)
 
     it("returns to SDL when a platform is removed", function()

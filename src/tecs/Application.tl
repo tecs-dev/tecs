@@ -16,6 +16,7 @@ local Input <const> = require("tecs.platform.Input")
 local Window <const> = require("tecs.platform.Window")
 local Device <const> = require("tecs.gpu.Device")
 local Renderer <const> = require("tecs.Renderer")
+local Audio <const> = require("tecs.Audio")
 local components <const> = require("tecs.components")
 local sequence <const> = require("tecs.sequence")
 local paths <const> = require("tecs.platform.paths")
@@ -60,6 +61,9 @@ local record Application
         --- Shader pack to read, relative to the asset root. Defaults to
         --- `shaders.tsp`. A build that links a compiler runs without one.
         shaderPack: string
+        --- Sound output. Omitted takes the defaults, which open the
+        --- platform's default device.
+        audio: Audio.Config
         --- Log file name, under the writable root. Defaults to `log.jsonl`.
         --- Set to "" to write only to the platform's own destination.
         logFile: string
@@ -83,6 +87,7 @@ local record Application
     world: ecs.World
     renderer: Renderer
     input: Input
+    audio: Audio
     --- The debug server, when one was asked for.
     mcp: mcp.Server
 
@@ -178,6 +183,12 @@ function Application:_init(): boolean
             capacity = config.capacity,
         })
     self.renderer:install(self.world)
+
+    -- Opened before the game's load, so a game may load a clip there. A
+    -- machine with no output still gets an object: nothing here fails over
+    -- the absence of a sound card.
+    self.audio = Audio.create(config.audio)
+    self.audio:install(self.world)
 
     -- Tweening and sequencing are one plugin, and it belongs to the engine
     -- rather than to the game: both drive entities through the fixed phases,
@@ -317,6 +328,12 @@ function Application:_iterate(queue: loader.CValue, count: integer,
         if self._crashed == nil then self:_simulate(dt) end
     end
 
+    -- Outside the suspension guard and outside the crash guard. A queue that
+    -- is not topped up runs dry, and a sound that breaks up because the game
+    -- crashed or the window went to the background is a second failure on top
+    -- of the first.
+    if self.audio ~= nil then self.audio:update() end
+
     timing.finish(FRAME, frameStart)
 
     self.frame = self.frame + 1
@@ -401,6 +418,7 @@ function Application:_shutdown(): boolean
     -- Before SDL_Quit, since closing a device after the subsystem it belongs
     -- to has gone is undefined.
     if self.input ~= nil then self.input:destroy() end
+    if self.audio ~= nil then self.audio:destroy() end
     log.closeFile()
 
     if self.device ~= nil then
