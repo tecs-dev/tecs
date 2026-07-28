@@ -590,8 +590,7 @@ describe("Application", function()
             assert.is_truthy(app:crashed():match("gameplay boom"))
 
             stop()
-            assert.is_true(app:clearCrash(),
-                "a build running only the watcher refused to carry on")
+            assert.is_true(app:clearCrash(), "a build running only the watcher refused to carry on")
             app:_iterate(nil, 0, nil)
             assert.is_true(ran() > 0, "the loop did not simulate again")
             app:_shutdown()
