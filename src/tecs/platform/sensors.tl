@@ -20,15 +20,35 @@ local record Device
     platformType: integer
 end
 
+--- An opened sensor, read by polling rather than through events.
 local record Sensor
+    --- Instance id, as `Device.id` reported it.
     id: number
     name: string
+    --- The same set of names `Device.kind` uses.
     kind: string
+    --- Platform-specific type number. Zero when there is none.
     platformType: integer
     _handle: loader.CPtr
     _destroyed: boolean
 
+    --- Reads the newest values.
+    ---
+    --- Three values is the natural size for accelerometers and gyroscopes. A
+    --- platform-specific sensor can request up to sixteen.
+    ---
+    --- @param count How many values to take, defaulting to three. An integer
+    ---     from 1 to 16; anything else is reported rather than raised. Asking
+    ---     for fewer than the sensor produces takes the first few rather than
+    ---     failing.
+    --- @return The values, a fresh list the caller owns and indexed from one.
+    ---     Units are the sensor's own: SDL reports acceleration in metres per
+    ---     second squared and rotation in radians per second. Nil on failure,
+    ---     which includes reading a destroyed sensor.
+    --- @return The reason, when the first return is nil.
     read: function(self: Sensor, count?: integer): {number}, string
+
+    --- Closes the sensor. Safe to call more than once.
     destroy: function(self: Sensor)
 end
 
@@ -62,6 +82,15 @@ local function ensureSubsystem(): boolean, string
 end
 
 --- Sensors attached now, in platform order.
+---
+--- A snapshot, not a subscription: a sensor unplugged after this leaves an id
+--- that `open` refuses.
+---
+--- @return The devices, listed afresh each call and the caller's to keep.
+---     Empty rather than nil when the sensor subsystem cannot start, so a
+---     caller that only iterates needs no nil check. Most desktop machines
+---     genuinely have none, which is an empty list and not a failure.
+--- @return SDL's reason, when something went wrong.
 function sensors.devices(): {Device}, string
     local ok, err = ensureSubsystem()
     if not ok then
@@ -89,6 +118,15 @@ function sensors.devices(): {Device}, string
 end
 
 --- Opens an attached sensor by instance id.
+---
+--- @param id An instance id from `devices`. Ids name a device while it stays
+---     attached rather than a slot, so one kept across an unplug does not come
+---     back to the same sensor.
+--- @return The open sensor, whose `name` and `kind` are read from the device
+---     itself rather than copied from the listing. Nil on failure, with the
+---     reason beside it, and nothing is left open in that case. Closing is the
+---     caller's, through `destroy`.
+--- @return The reason, when the first return is nil.
 function sensors.open(id: number): Sensor, string
     local ok, err = ensureSubsystem()
     if not ok then
@@ -109,10 +147,6 @@ function sensors.open(id: number): Sensor, string
     } as Sensor, SensorMT), nil
 end
 
---- Reads the newest values.
----
---- Three values is the natural size for accelerometers and gyroscopes. A
---- platform-specific sensor can request up to sixteen.
 function Sensor:read(count?: integer): {number}, string
     if self._destroyed then
         return nil, "sensor is destroyed"
@@ -132,7 +166,6 @@ function Sensor:read(count?: integer): {number}, string
     return out, nil
 end
 
---- Closes the sensor. Safe to call more than once.
 function Sensor:destroy()
     if self._destroyed then
         return

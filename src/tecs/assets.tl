@@ -265,6 +265,13 @@ local record assets
         ---
         --- Adding one handle twice waits on it twice and calls back twice. Adding one
         --- already finished is allowed; the next `resolve` hands it over.
+        ---
+        --- @param handle Held rather than copied, so the batch sees whatever the
+        ---     worker settles it to. Nothing is started here: the load was already
+        ---     in flight before it arrived.
+        --- @param key The caller's own value, handed back beside the handle at
+        ---     `resolve` so the callback knows which load it is looking at. Not
+        ---     read or compared by the batch, so duplicates are fine.
         add: function(self, handle: Handle, key: T)
 
         --- Loads still in flight.
@@ -298,6 +305,10 @@ local record assets
     ---
     --- For a subsystem that loads an asset of its own and has no way of knowing whether the
     --- game has started the worker yet.
+    ---
+    --- @return Whether the worker exists, which is a fact about the process rather
+    ---     than about any world. False means a load raises rather than queueing,
+    ---     so this is the guard rather than an optimisation.
     installed: function(): boolean
 end
 

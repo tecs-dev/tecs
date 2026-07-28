@@ -1978,6 +1978,8 @@ local record particles
     ---
     --- @param name Nil answers nil rather than raising, so a restore holding no
     ---     name takes the same path as one holding an unknown name.
+    --- @return The registered effect itself, not a copy, so two callers finding
+    ---     one name share it. Nil when nothing has that name.
     find: function(name: string): Effect
 
     --- Every registered effect's name, in registration order.
@@ -1995,12 +1997,18 @@ local record particles
     ---     anywhere in that span and need not be sorted; what comes out is the
     ---     piecewise-linear curve through them at a fixed resolution. Empty or
     ---     nil raises, and one key is a constant.
+    --- @return A resampled curve at `CURVE_SAMPLES` points, so the keys are not
+    ---     kept and the shape between two distant ones is straight. Ages
+    ---     outside zero to one read as the nearest end.
     curve: function(keys: {CurveKey}): Curve
 
     --- Compiles keyframes into a colour gradient over normalised age.
     ---
     --- @param keys `{age, colour}` pairs, on the same terms as `curve` takes
     ---     its values. The alpha channel is carried and is inert.
+    --- @return A gradient resampled like a curve, interpolating each channel
+    ---     separately, so two colours blend through whatever lies between them
+    ---     componentwise rather than around a colour wheel.
     gradient: function(keys: {CurveKey}): Gradient
 
     --- Installs the pool on a world. Nothing is allocated or dispatched
@@ -2014,6 +2022,8 @@ local record particles
 
     --- The pool installed on a world, or nil. For tests and tooling.
     ---
+    --- @param world Any world, with or without the plugin, so this doubles as
+    ---     the test for whether particles are installed on one.
     --- @return Nil when the plugin was never installed on that world. The
     ---     pool itself, not a copy, so writing through it writes the world's.
     poolOf: function(world: World): Pool

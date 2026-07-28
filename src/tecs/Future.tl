@@ -220,6 +220,9 @@ local record Future<T>
     --- @param recovery Given the upstream's error string. Raising inside it fails this
     ---     link with that raise instead, so a recovery cannot fail silently. Nil raises
     ---     here and now.
+    --- @return A new future watching this one, carrying the same type: a recovery
+    ---     produces a value where the upstream produced an error, so a ready
+    ---     upstream passes through untouched.
     recover: function(self: Future<T>, recovery: function(string): T): Future<T>
 
     --- Blocks until this future settles, advancing its source.
@@ -302,6 +305,9 @@ local record Future<T>
     --- A future already carrying a failure.
     ---
     --- @param err Nil becomes "failed".
+    --- @return A future at "failed" with no source, so `wait` on it returns at once
+    ---     and `cancel` does nothing. `map` on it propagates without running the
+    ---     transform, while `recover` on it is the one thing that still runs.
     failed: function<U>(err: string): Future<U>
 
     --- A future carrying every input's value, in input order.

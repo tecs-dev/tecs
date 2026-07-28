@@ -289,6 +289,10 @@ local record animation
     useGPU: function(enabled: boolean)
 
     --- Whether playback resolves on the GPU.
+    ---
+    --- @return The setting as it stands now, which decides what the next world to
+    ---     install the plugin gets. Worlds already carrying the systems keep the
+    ---     ones they were built with, so this does not describe them.
     usesGPU: function(): boolean
 
     --- Sheets, which live in `tecs.gfx.sheet` and are reached through here.

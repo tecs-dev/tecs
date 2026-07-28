@@ -353,6 +353,9 @@ local record Self
     --- @param timeoutMs Milliseconds. Omitted waits indefinitely, which is the opposite of
     ---     `Channel:receive`; zero polls. Only the waiting form's nil means the spawner has
     ---     asked this worker to stop, since a poll answers nil for a merely empty queue.
+    --- @return The next task, decoded into this state's own tables, so it shares
+    ---     nothing with what the spawner sent and mutating it is safe. Nil is the
+    ---     stop signal or an empty queue, on the terms above.
     receive: function(self: Self, timeoutMs?: number): any
 
     --- Returns a result to the spawner.
