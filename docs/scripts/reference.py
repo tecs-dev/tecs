@@ -51,7 +51,7 @@ Every function and type this module carries, rendered from {sources}."""
 # A module that sits inside another module has its own page in a directory
 # named for the parent, rather than a section of the parent's page. One page per
 # module keeps a page the size of the module it documents: the sheet fold into
-# `tecs.animation` already produced thirteen hundred lines, and a parent holding
+# `tecs.gfx.animation` already produced thirteen hundred lines, and a parent holding
 # several of those would produce a page nobody scrolls through. It also keeps
 # one source per page, so the name each member is rendered under is the name a
 # game writes it as, with nothing to disambiguate.
@@ -71,7 +71,6 @@ Every function and type this module carries, rendered from {sources}."""
 # that is about to move. Both come back here when they settle.
 MODULES = [
     ("docs/ecs/index.md", [("src/tecs/ecs.tl", "tecs.ecs")]),
-    ("docs/modules/animation.md", [("src/tecs/gfx/animation.tl", "tecs.animation")]),
     ("docs/modules/application.md", [("src/tecs/Application.tl", "tecs.application.Application")]),
     ("docs/modules/assets.md", [("src/tecs/assets.tl", "tecs.assets")]),
     (
@@ -85,7 +84,10 @@ MODULES = [
     ("docs/modules/filesystem/index.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
     ("docs/modules/filesystem/watch.md", [("src/tecs/platform/watch.tl", "tecs.filesystem.watch")]),
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
+    ("docs/modules/gfx/animation.md", [("src/tecs/gfx/animation.tl", "tecs.gfx.animation")]),
     ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),
+    ("docs/modules/gfx/materials.md", [("src/tecs/gpu/materials.tl", "tecs.gfx.materials")]),
+    ("docs/modules/gfx/particles.md", [("src/tecs/gfx/particles.tl", "tecs.gfx.particles")]),
     (
         "docs/modules/input.md",
         [
@@ -95,10 +97,8 @@ MODULES = [
         ],
     ),
     ("docs/modules/log.md", [("src/tecs/log.tl", "tecs.log")]),
-    ("docs/modules/materials.md", [("src/tecs/gpu/materials.tl", "tecs.materials")]),
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
     ("docs/modules/net.md", [("src/tecs/net.tl", "tecs.net")]),
-    ("docs/modules/particles.md", [("src/tecs/gfx/particles.tl", "tecs.particles")]),
     ("docs/modules/renderer.md", [("src/tecs/Renderer.tl", "tecs.renderer.Renderer")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),

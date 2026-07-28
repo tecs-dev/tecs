@@ -9,9 +9,17 @@ itself, and every name it carries is a module one level below it with a page of 
 
 ## What is under it
 
-| Module                                   | What it is                         |
-| ---------------------------------------- | ---------------------------------- |
-| [`tecs.gfx.layers`](/modules/gfx/layers) | z-ordering and per-layer behaviour |
+| Module                                         | What it is                                      |
+| ---------------------------------------------- | ----------------------------------------------- |
+| [`tecs.gfx.animation`](/modules/gfx/animation) | sprite sheets, and the playback that reads them |
+| [`tecs.gfx.layers`](/modules/gfx/layers)       | z-ordering and per-layer behaviour              |
+| [`tecs.gfx.materials`](/modules/gfx/materials) | the material a draw dispatches to               |
+| [`tecs.gfx.particles`](/modules/gfx/particles) | emitters                                        |
+
+`materials` stays a module of its own rather than a section of this page for a reason worth stating: the
+record it hands back describes a material _file_, while `Material` is the component that selects one by
+id. Two things named alike is how a reader ends up assigning the wrong one, and one extra segment is what
+keeps them apart.
 
 ## One level, and no deeper
 

@@ -27,7 +27,7 @@ features:
     details: An <a href="/ecs/archetype">archetype-based ECS</a> with FFI components, contiguous columns, and a dirty model the GPU reads.
     icon: ⚡
   - title: Batteries included
-    details: <a href="/modules/physics">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/particles">particles</a>, <a href="/modules/text">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/animation">sprite sheets</a> and hot reload ship in the box, sharing one data model.
+    details: <a href="/modules/physics">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/gfx/particles">particles</a>, <a href="/modules/text">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/gfx/animation">sprite sheets</a> and hot reload ship in the box, sharing one data model.
     icon: 🔋
   - title: Static typing
     details: Catch errors at compile time, not runtime. Tecs is designed from the ground up for static typing with <a href="https://github.com/teal-language/tl"><u>Teal</u></a>.
@@ -220,7 +220,6 @@ behind each one.
 
 <div class="module-columns">
 
-- [`tecs.animation`](/modules/animation) - sprite sheets, and the playback that reads them
 - [`tecs.application`](/modules/application) - the object an entry file returns, and what builds one
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
@@ -233,14 +232,15 @@ behind each one.
 - [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
 - [`tecs.future`](/modules/future) - a value that settles once
 - [`tecs.gfx`](/modules/gfx/) - drawing, and the modules a scene is described in
+- [`tecs.gfx.animation`](/modules/gfx/animation) - sprite sheets, and the playback that reads them
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
+- [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
+- [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
 - [`tecs.http`](/modules/http) - fetching over HTTP without stopping the frame
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
-- [`tecs.materials`](/modules/materials) - one fragment shader, compiled from the material set
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net) - nonblocking TCP streams and UDP datagrams
-- [`tecs.particles`](/modules/particles) - emitters
 - [`tecs.physics`](/modules/physics) - Box2D 3, solved across a shared thread pool
 - [`tecs.renderer`](/modules/renderer) - deferred and GPU-driven, with compute culling and one indirect draw
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them

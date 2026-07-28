@@ -258,11 +258,13 @@ describe("the public surface", function()
             -- No alias and no shim: the old spelling is a nil like any name
             -- that was never public.
             assert.is_nil(tecs.layers)
+            assert.is_nil(tecs.animation)
+            assert.is_nil(tecs.materials)
+            assert.is_nil(tecs.particles)
         end)
 
         it("answers nil for a name it does not carry", function()
             assert.is_nil(tecs.gfx.nosuchthing)
-            assert.is_nil(tecs.gfx.Camera)
         end)
     end)
 

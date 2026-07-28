@@ -3,7 +3,7 @@ description: "Sprite sheets and the playback that reads them: frames, tags, slic
 outline: deep
 ---
 
-# tecs.animation
+# tecs.gfx.animation
 
 An image divided into frames, and the playback that walks them. Both halves are here because they are one
 subject: a game that draws sprite sheets builds one and plays it, and having to know that constructing and
@@ -100,7 +100,7 @@ between its cells. Frames come out in row-major order.
 **Example:**
 
 ```teal
-local walk <const> = tecs.animation.grid({
+local walk <const> = tecs.gfx.animation.grid({
     name = "hero.png",
     imageWidth = 256,
     imageHeight = 64,
@@ -194,7 +194,7 @@ companion textures are not part of the model.
 
 ```teal
 local text <const> = tecs.filesystem.read("hero.json")
-local hero <const> = tecs.animation.fromAseprite({ json = text })
+local hero <const> = tecs.gfx.animation.fromAseprite({ json = text })
 ```
 
 ### build
@@ -303,7 +303,7 @@ Raises on a sheet with no frames, and on a tag whose span falls outside them.
 **Example:**
 
 ```teal
-local sheet <const> = tecs.animation.build("banner.png", 128, 64)
+local sheet <const> = tecs.gfx.animation.build("banner.png", 128, 64)
     :frame(0, 0, 64, 64, 250)
     :frame(64, 0, 64, 64)
     :tag("flash", 1, 2, "pingpong")
@@ -592,7 +592,7 @@ written directly, which nothing rewrites.
 nearly every one of them, and the cull bound is then exactly the quad's own. Playback on the GPU resolves
 the frame after the bound is written, so a slice that genuinely moves has to have its travel covered: `x`
 and `y` are then the middle of where it goes and the halves are how far either side of that the quad can
-be drawn. See [animation](/modules/animation#the-pivot-that-follows-a-moving-slice).
+be drawn. See [animation](/modules/gfx/animation#the-pivot-that-follows-a-moving-slice).
 
 A snapshot carries the sheet's name and the slice's name alongside the fraction, and they are resolved
 again on the way back in. The travel is deliberately dropped: it is playback's answer rather than the
@@ -708,8 +708,8 @@ the fold is done and only one of them may be bound.
 **Example:**
 
 ```teal
-local rebuilt <const> = tecs.animation.fromAseprite({ json = text })
-local live <const>, why <const> = tecs.animation.replace(rebuilt)
+local rebuilt <const> = tecs.gfx.animation.fromAseprite({ json = text })
+local live <const>, why <const> = tecs.gfx.animation.replace(rebuilt)
 if live == nil then
     LOGGER:warn("sheet reload refused: %s", why)
 end
@@ -750,7 +750,7 @@ second call on the same world is ignored, because adding a system twice under on
 
 ```teal
 local world <const> = tecs.ecs.newWorld()
-world:addPlugin(tecs.animation.plugin)
+world:addPlugin(tecs.gfx.animation.plugin)
 ```
 
 Which systems this installs depends on [`useGPU`](#usegpu):
@@ -832,7 +832,7 @@ function animation.of(source: Sheet, tag?: string, options?: PlayOptions): Anima
 **Example:**
 
 ```teal
-local animation <const> = tecs.animation
+local animation <const> = tecs.gfx.animation
 local components <const> = tecs.components
 
 local hero <const> = world:spawn(
@@ -866,7 +866,7 @@ the entity was showing. An entity carrying no `Animation` gets one.
 **Example:**
 
 ```teal
-tecs.animation.play(world, hero, heroSheet, "attack", { loop = false })
+tecs.gfx.animation.play(world, hero, heroSheet, "attack", { loop = false })
 ```
 
 ### restart
@@ -912,7 +912,7 @@ Both are emitted at address zero, with these fields:
 **Example:**
 
 ```teal
-local animation <const> = tecs.animation
+local animation <const> = tecs.gfx.animation
 
 world:observe(0, animation.Completed, function(event: animation.Completed)
     if event.tag == "attack" then
@@ -966,7 +966,7 @@ on an animated hand asks for.
 **Example:**
 
 ```teal
-if tecs.animation.frameOf(world, hero) == 3 then
+if tecs.gfx.animation.frameOf(world, hero) == 3 then
     footstep()
 end
 ```
@@ -1075,147 +1075,147 @@ gate: pointing an entity at another slice changes which playback it is on and no
 
 Every function and type this module carries, rendered from `src/tecs/gfx/animation.tl`.
 
-<a id="tecs.animation.Animation"></a>
+<a id="tecs.gfx.animation.Animation"></a>
 
-### tecs.animation.Animation
+### tecs.gfx.animation.Animation
 
-<pre><code v-pre><a href="#tecs.animation.Animation">tecs.animation.Animation</a>: Animation
+<pre><code v-pre><a href="#tecs.gfx.animation.Animation">tecs.gfx.animation.Animation</a>: Animation
 </code></pre>
 
 Playback state for one entity.
-<a id="tecs.animation.AnimationEvents"></a>
+<a id="tecs.gfx.animation.AnimationEvents"></a>
 
-### tecs.animation.AnimationEvents
+### tecs.gfx.animation.AnimationEvents
 
-<pre><code v-pre><a href="#tecs.animation.AnimationEvents">tecs.animation.AnimationEvents</a>: AnimationEvents
+<pre><code v-pre><a href="#tecs.gfx.animation.AnimationEvents">tecs.gfx.animation.AnimationEvents</a>: AnimationEvents
 </code></pre>
 
 Asks for `Completed` and `Looped` on an entity.
-<a id="tecs.animation.AsepriteOptions"></a>
+<a id="tecs.gfx.animation.AsepriteOptions"></a>
 
-### tecs.animation.AsepriteOptions
+### tecs.gfx.animation.AsepriteOptions
 
-<pre><code v-pre>type <a href="#tecs.animation.AsepriteOptions">tecs.animation.AsepriteOptions</a> = sheet.AsepriteOptions
+<pre><code v-pre>type <a href="#tecs.gfx.animation.AsepriteOptions">tecs.gfx.animation.AsepriteOptions</a> = sheet.AsepriteOptions
 </code></pre>
 
 What `fromAseprite` takes.
-<a id="tecs.animation.Builder"></a>
+<a id="tecs.gfx.animation.Builder"></a>
 
-### tecs.animation.Builder
+### tecs.gfx.animation.Builder
 
-<pre><code v-pre>type <a href="#tecs.animation.Builder">tecs.animation.Builder</a> = sheet.Builder
+<pre><code v-pre>type <a href="#tecs.gfx.animation.Builder">tecs.gfx.animation.Builder</a> = sheet.Builder
 </code></pre>
 
 What `build` answers with.
-<a id="tecs.animation.Completed"></a>
+<a id="tecs.gfx.animation.Completed"></a>
 
-### tecs.animation.Completed
+### tecs.gfx.animation.Completed
 
-<pre><code v-pre><a href="#tecs.animation.Completed">tecs.animation.Completed</a>: Completed
+<pre><code v-pre><a href="#tecs.gfx.animation.Completed">tecs.gfx.animation.Completed</a>: Completed
 </code></pre>
 
 Emitted when a tag that does not loop runs past its last frame.
-<a id="tecs.animation.DEFAULT_DURATION"></a>
+<a id="tecs.gfx.animation.DEFAULT_DURATION"></a>
 
-### tecs.animation.DEFAULT_DURATION
+### tecs.gfx.animation.DEFAULT_DURATION
 
-<pre><code v-pre><a href="#tecs.animation.DEFAULT_DURATION">tecs.animation.DEFAULT_DURATION</a>: number
+<pre><code v-pre><a href="#tecs.gfx.animation.DEFAULT_DURATION">tecs.gfx.animation.DEFAULT_DURATION</a>: number
 </code></pre>
 
 Milliseconds a frame is held when nothing says otherwise.
-<a id="tecs.animation.Direction"></a>
+<a id="tecs.gfx.animation.Direction"></a>
 
-### tecs.animation.Direction
+### tecs.gfx.animation.Direction
 
-<pre><code v-pre>type <a href="#tecs.animation.Direction">tecs.animation.Direction</a> = sheet.Direction
+<pre><code v-pre>type <a href="#tecs.gfx.animation.Direction">tecs.gfx.animation.Direction</a> = sheet.Direction
 </code></pre>
 
 How a tag walks its span.
-<a id="tecs.animation.GridOptions"></a>
+<a id="tecs.gfx.animation.GridOptions"></a>
 
-### tecs.animation.GridOptions
+### tecs.gfx.animation.GridOptions
 
-<pre><code v-pre>type <a href="#tecs.animation.GridOptions">tecs.animation.GridOptions</a> = sheet.GridOptions
+<pre><code v-pre>type <a href="#tecs.gfx.animation.GridOptions">tecs.gfx.animation.GridOptions</a> = sheet.GridOptions
 </code></pre>
 
 What `grid` takes.
-<a id="tecs.animation.Looped"></a>
+<a id="tecs.gfx.animation.Looped"></a>
 
-### tecs.animation.Looped
+### tecs.gfx.animation.Looped
 
-<pre><code v-pre><a href="#tecs.animation.Looped">tecs.animation.Looped</a>: Looped
+<pre><code v-pre><a href="#tecs.gfx.animation.Looped">tecs.gfx.animation.Looped</a>: Looped
 </code></pre>
 
 Emitted when a looping tag passes its last frame and restarts.
-<a id="tecs.animation.Pivot"></a>
+<a id="tecs.gfx.animation.Pivot"></a>
 
-### tecs.animation.Pivot
+### tecs.gfx.animation.Pivot
 
-<pre><code v-pre><a href="#tecs.animation.Pivot">tecs.animation.Pivot</a>: sheet.Pivot
+<pre><code v-pre><a href="#tecs.gfx.animation.Pivot">tecs.gfx.animation.Pivot</a>: sheet.Pivot
 </code></pre>
 
 Where an entity's quad turns and scales about.
-<a id="tecs.animation.PlayOptions"></a>
+<a id="tecs.gfx.animation.PlayOptions"></a>
 
-### tecs.animation.PlayOptions
+### tecs.gfx.animation.PlayOptions
 
-<pre><code v-pre>type <a href="#tecs.animation.PlayOptions">tecs.animation.PlayOptions</a> = PlayOptions
+<pre><code v-pre>type <a href="#tecs.gfx.animation.PlayOptions">tecs.gfx.animation.PlayOptions</a> = PlayOptions
 </code></pre>
 
 What `of` and `play` take.
-<a id="tecs.animation.Rect"></a>
+<a id="tecs.gfx.animation.Rect"></a>
 
-### tecs.animation.Rect
+### tecs.gfx.animation.Rect
 
-<pre><code v-pre>type <a href="#tecs.animation.Rect">tecs.animation.Rect</a> = sheet.Rect
+<pre><code v-pre>type <a href="#tecs.gfx.animation.Rect">tecs.gfx.animation.Rect</a> = sheet.Rect
 </code></pre>
 
 One frame, as `rects` and the builder take it.
-<a id="tecs.animation.RectsOptions"></a>
+<a id="tecs.gfx.animation.RectsOptions"></a>
 
-### tecs.animation.RectsOptions
+### tecs.gfx.animation.RectsOptions
 
-<pre><code v-pre>type <a href="#tecs.animation.RectsOptions">tecs.animation.RectsOptions</a> = sheet.RectsOptions
+<pre><code v-pre>type <a href="#tecs.gfx.animation.RectsOptions">tecs.gfx.animation.RectsOptions</a> = sheet.RectsOptions
 </code></pre>
 
 What `rects` takes.
-<a id="tecs.animation.Sheet"></a>
+<a id="tecs.gfx.animation.Sheet"></a>
 
-### tecs.animation.Sheet
+### tecs.gfx.animation.Sheet
 
-<pre><code v-pre><a href="#tecs.animation.Sheet">tecs.animation.Sheet</a>: sheet.Sheet
+<pre><code v-pre><a href="#tecs.gfx.animation.Sheet">tecs.gfx.animation.Sheet</a>: sheet.Sheet
 </code></pre>
 
 An image divided into frames.
-<a id="tecs.animation.Slice"></a>
+<a id="tecs.gfx.animation.Slice"></a>
 
-### tecs.animation.Slice
+### tecs.gfx.animation.Slice
 
-<pre><code v-pre>type <a href="#tecs.animation.Slice">tecs.animation.Slice</a> = sheet.Slice
+<pre><code v-pre>type <a href="#tecs.gfx.animation.Slice">tecs.gfx.animation.Slice</a> = sheet.Slice
 </code></pre>
 
 A named region that moves across the frames.
-<a id="tecs.animation.SliceKey"></a>
+<a id="tecs.gfx.animation.SliceKey"></a>
 
-### tecs.animation.SliceKey
+### tecs.gfx.animation.SliceKey
 
-<pre><code v-pre>type <a href="#tecs.animation.SliceKey">tecs.animation.SliceKey</a> = sheet.SliceKey
+<pre><code v-pre>type <a href="#tecs.gfx.animation.SliceKey">tecs.gfx.animation.SliceKey</a> = sheet.SliceKey
 </code></pre>
 
 Where a slice sits from one frame on.
-<a id="tecs.animation.Tag"></a>
+<a id="tecs.gfx.animation.Tag"></a>
 
-### tecs.animation.Tag
+### tecs.gfx.animation.Tag
 
-<pre><code v-pre>type <a href="#tecs.animation.Tag">tecs.animation.Tag</a> = sheet.Tag
+<pre><code v-pre>type <a href="#tecs.gfx.animation.Tag">tecs.gfx.animation.Tag</a> = sheet.Tag
 </code></pre>
 
 A named span of frames, as the constructors take it.
-<a id="tecs.animation.build"></a>
+<a id="tecs.gfx.animation.build"></a>
 
-### tecs.animation.build
+### tecs.gfx.animation.build
 
-<pre><code v-pre>function <a href="#tecs.animation.build">tecs.animation.build</a>(name: string, imageWidth: number, imageHeight: number): sheet.Builder
+<pre><code v-pre>function <a href="#tecs.gfx.animation.build">tecs.gfx.animation.build</a>(name: string, imageWidth: number, imageHeight: number): sheet.Builder
 </code></pre>
 
 A builder, for a sheet no constructor above describes.
@@ -1234,11 +1234,11 @@ A builder, for a sheet no constructor above describes.
 | -------------------------------- | ------------------------------------------------------------- |
 | <code v-pre>sheet.Builder</code> | A builder, which registers the sheet when `finish` is called. |
 
-<a id="tecs.animation.frameOf"></a>
+<a id="tecs.gfx.animation.frameOf"></a>
 
-### tecs.animation.frameOf
+### tecs.gfx.animation.frameOf
 
-<pre><code v-pre>function <a href="#tecs.animation.frameOf">tecs.animation.frameOf</a>(world: World, entity: integer): integer
+<pre><code v-pre>function <a href="#tecs.gfx.animation.frameOf">tecs.gfx.animation.frameOf</a>(world: World, entity: integer): integer
 </code></pre>
 
 The sheet frame an entity's animation is showing.
@@ -1261,11 +1261,11 @@ animated hand asks for.
 | -------------------------- | -------------------------------------------------------------------------------------------------- |
 | <code v-pre>integer</code> | A frame index into the whole sheet, counting from one, or zero for an entity with nothing to play. |
 
-<a id="tecs.animation.fromAseprite"></a>
+<a id="tecs.gfx.animation.fromAseprite"></a>
 
-### tecs.animation.fromAseprite
+### tecs.gfx.animation.fromAseprite
 
-<pre><code v-pre>function <a href="#tecs.animation.fromAseprite">tecs.animation.fromAseprite</a>(options: sheet.AsepriteOptions): sheet.Sheet
+<pre><code v-pre>function <a href="#tecs.gfx.animation.fromAseprite">tecs.gfx.animation.fromAseprite</a>(options: sheet.AsepriteOptions): sheet.Sheet
 </code></pre>
 
 A sheet from an Aseprite JSON export.
@@ -1282,11 +1282,11 @@ A sheet from an Aseprite JSON export.
 | ------------------------------ | --------------------------------------- |
 | <code v-pre>sheet.Sheet</code> | The finished sheet, already registered. |
 
-<a id="tecs.animation.grid"></a>
+<a id="tecs.gfx.animation.grid"></a>
 
-### tecs.animation.grid
+### tecs.gfx.animation.grid
 
-<pre><code v-pre>function <a href="#tecs.animation.grid">tecs.animation.grid</a>(options: sheet.GridOptions): sheet.Sheet
+<pre><code v-pre>function <a href="#tecs.gfx.animation.grid">tecs.gfx.animation.grid</a>(options: sheet.GridOptions): sheet.Sheet
 </code></pre>
 
 A sheet whose frames are the cells of a uniform grid.
@@ -1303,11 +1303,11 @@ A sheet whose frames are the cells of a uniform grid.
 | ------------------------------ | --------------------------------------------------------------------------- |
 | <code v-pre>sheet.Sheet</code> | The finished sheet, already registered under its name and carrying an `id`. |
 
-<a id="tecs.animation.of"></a>
+<a id="tecs.gfx.animation.of"></a>
 
-### tecs.animation.of
+### tecs.gfx.animation.of
 
-<pre><code v-pre>function <a href="#tecs.animation.of">tecs.animation.of</a>(source: <a href="#tecs.animation.Sheet">Sheet</a>, tag: string, options: <a href="#tecs.animation.PlayOptions">PlayOptions</a>): <a href="#tecs.animation.Animation">Animation</a>
+<pre><code v-pre>function <a href="#tecs.gfx.animation.of">tecs.gfx.animation.of</a>(source: <a href="#tecs.gfx.animation.Sheet">Sheet</a>, tag: string, options: <a href="#tecs.gfx.animation.PlayOptions">PlayOptions</a>): <a href="#tecs.gfx.animation.Animation">Animation</a>
 </code></pre>
 
 An Animation playing a named tag of a sheet, ready to spawn.
@@ -1322,23 +1322,23 @@ advances nothing.
 
 #### Parameters
 
-| Type                                                                     | Name                       | Description                                                |
-| ------------------------------------------------------------------------ | -------------------------- | ---------------------------------------------------------- |
-| <code v-pre><a href="#tecs.animation.Sheet">Sheet</a></code>             | <code v-pre>source</code>  | The sheet to play. Nil raises.                             |
-| <code v-pre>string</code>                                                | <code v-pre>tag</code>     | A tag the sheet names, or nil for the whole sheet.         |
-| <code v-pre><a href="#tecs.animation.PlayOptions">PlayOptions</a></code> | <code v-pre>options</code> | Defaults are the sheet's own timing, looping, and playing. |
+| Type                                                                         | Name                       | Description                                                |
+| ---------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.animation.Sheet">Sheet</a></code>             | <code v-pre>source</code>  | The sheet to play. Nil raises.                             |
+| <code v-pre>string</code>                                                    | <code v-pre>tag</code>     | A tag the sheet names, or nil for the whole sheet.         |
+| <code v-pre><a href="#tecs.gfx.animation.PlayOptions">PlayOptions</a></code> | <code v-pre>options</code> | Defaults are the sheet's own timing, looping, and playing. |
 
 #### Returns
 
-| Type                                                                 | Description                                                                         |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.animation.Animation">Animation</a></code> | A component value, not an entity: pass it to `world:spawn` or `world:set` yourself. |
+| Type                                                                     | Description                                                                         |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.animation.Animation">Animation</a></code> | A component value, not an entity: pass it to `world:spawn` or `world:set` yourself. |
 
-<a id="tecs.animation.play"></a>
+<a id="tecs.gfx.animation.play"></a>
 
-### tecs.animation.play
+### tecs.gfx.animation.play
 
-<pre><code v-pre>function <a href="#tecs.animation.play">tecs.animation.play</a>(world: World, entity: integer, source: <a href="#tecs.animation.Sheet">Sheet</a>, tag: string, options: <a href="#tecs.animation.PlayOptions">PlayOptions</a>)
+<pre><code v-pre>function <a href="#tecs.gfx.animation.play">tecs.gfx.animation.play</a>(world: World, entity: integer, source: <a href="#tecs.gfx.animation.Sheet">Sheet</a>, tag: string, options: <a href="#tecs.gfx.animation.PlayOptions">PlayOptions</a>)
 </code></pre>
 
 Points a live entity at a tag and restarts it there.
@@ -1349,19 +1349,19 @@ carrying no Animation gets one.
 
 #### Parameters
 
-| Type                                                                     | Name                       | Description                                                     |
-| ------------------------------------------------------------------------ | -------------------------- | --------------------------------------------------------------- |
-| <code v-pre>World</code>                                                 | <code v-pre>world</code>   | The world the entity lives in.                                  |
-| <code v-pre>integer</code>                                               | <code v-pre>entity</code>  | A live entity, which needs a `Sprite` for playback to reach it. |
-| <code v-pre><a href="#tecs.animation.Sheet">Sheet</a></code>             | <code v-pre>source</code>  | The sheet to play. Nil raises.                                  |
-| <code v-pre>string</code>                                                | <code v-pre>tag</code>     | A tag the sheet names, or nil for the whole sheet.              |
-| <code v-pre><a href="#tecs.animation.PlayOptions">PlayOptions</a></code> | <code v-pre>options</code> | Defaults are the sheet's own timing, looping, and playing.      |
+| Type                                                                         | Name                       | Description                                                     |
+| ---------------------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------- |
+| <code v-pre>World</code>                                                     | <code v-pre>world</code>   | The world the entity lives in.                                  |
+| <code v-pre>integer</code>                                                   | <code v-pre>entity</code>  | A live entity, which needs a `Sprite` for playback to reach it. |
+| <code v-pre><a href="#tecs.gfx.animation.Sheet">Sheet</a></code>             | <code v-pre>source</code>  | The sheet to play. Nil raises.                                  |
+| <code v-pre>string</code>                                                    | <code v-pre>tag</code>     | A tag the sheet names, or nil for the whole sheet.              |
+| <code v-pre><a href="#tecs.gfx.animation.PlayOptions">PlayOptions</a></code> | <code v-pre>options</code> | Defaults are the sheet's own timing, looping, and playing.      |
 
-<a id="tecs.animation.plugin"></a>
+<a id="tecs.gfx.animation.plugin"></a>
 
-### tecs.animation.plugin
+### tecs.gfx.animation.plugin
 
-<pre><code v-pre>function <a href="#tecs.animation.plugin">tecs.animation.plugin</a>(world: World)
+<pre><code v-pre>function <a href="#tecs.gfx.animation.plugin">tecs.gfx.animation.plugin</a>(world: World)
 </code></pre>
 
 Adds the system that advances playback.
@@ -1384,11 +1384,11 @@ entities carrying `AnimationEvents` and writes nothing at all.
 | ------------------------ | ------------------------ | ------------------------------- |
 | <code v-pre>World</code> | <code v-pre>world</code> | The world to add the system to. |
 
-<a id="tecs.animation.rects"></a>
+<a id="tecs.gfx.animation.rects"></a>
 
-### tecs.animation.rects
+### tecs.gfx.animation.rects
 
-<pre><code v-pre>function <a href="#tecs.animation.rects">tecs.animation.rects</a>(options: sheet.RectsOptions): sheet.Sheet
+<pre><code v-pre>function <a href="#tecs.gfx.animation.rects">tecs.gfx.animation.rects</a>(options: sheet.RectsOptions): sheet.Sheet
 </code></pre>
 
 A sheet whose frames are listed one rect at a time.
@@ -1405,11 +1405,11 @@ A sheet whose frames are listed one rect at a time.
 | ------------------------------ | --------------------------------------------------------------------------- |
 | <code v-pre>sheet.Sheet</code> | The finished sheet, already registered under its name and carrying an `id`. |
 
-<a id="tecs.animation.replace"></a>
+<a id="tecs.gfx.animation.replace"></a>
 
-### tecs.animation.replace
+### tecs.gfx.animation.replace
 
-<pre><code v-pre>function <a href="#tecs.animation.replace">tecs.animation.replace</a>(built: sheet.Sheet): sheet.Sheet, string
+<pre><code v-pre>function <a href="#tecs.gfx.animation.replace">tecs.gfx.animation.replace</a>(built: sheet.Sheet): sheet.Sheet, string
 </code></pre>
 
 Folds a re-exported sheet into the one already registered under its
@@ -1428,11 +1428,11 @@ name, in place, so an entity playing the old id shows the new frames.
 | <code v-pre>sheet.Sheet</code> | The live sheet, and nil, or nil and the reason it was refused. |
 | <code v-pre>string</code>      |                                                                |
 
-<a id="tecs.animation.restart"></a>
+<a id="tecs.gfx.animation.restart"></a>
 
-### tecs.animation.restart
+### tecs.gfx.animation.restart
 
-<pre><code v-pre>function <a href="#tecs.animation.restart">tecs.animation.restart</a>(world: World, entity: integer): boolean
+<pre><code v-pre>function <a href="#tecs.gfx.animation.restart">tecs.gfx.animation.restart</a>(world: World, entity: integer): boolean
 </code></pre>
 
 Plays an entity's animation again from the start of its tag.
@@ -1455,11 +1455,11 @@ not.
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>boolean</code> | Whether there was an Animation to restart. False leaves the entity untouched, since there is nothing to say what it would play. |
 
-<a id="tecs.animation.sheetById"></a>
+<a id="tecs.gfx.animation.sheetById"></a>
 
-### tecs.animation.sheetById
+### tecs.gfx.animation.sheetById
 
-<pre><code v-pre>function <a href="#tecs.animation.sheetById">tecs.animation.sheetById</a>(id: integer): sheet.Sheet
+<pre><code v-pre>function <a href="#tecs.gfx.animation.sheetById">tecs.gfx.animation.sheetById</a>(id: integer): sheet.Sheet
 </code></pre>
 
 The sheet a process-wide id names.
@@ -1476,11 +1476,11 @@ The sheet a process-wide id names.
 | ------------------------------ | ----------------------------------------- |
 | <code v-pre>sheet.Sheet</code> | The sheet, or nil when the id names none. |
 
-<a id="tecs.animation.sheetByName"></a>
+<a id="tecs.gfx.animation.sheetByName"></a>
 
-### tecs.animation.sheetByName
+### tecs.gfx.animation.sheetByName
 
-<pre><code v-pre>function <a href="#tecs.animation.sheetByName">tecs.animation.sheetByName</a>(name: string): sheet.Sheet
+<pre><code v-pre>function <a href="#tecs.gfx.animation.sheetByName">tecs.gfx.animation.sheetByName</a>(name: string): sheet.Sheet
 </code></pre>
 
 The sheet a name was registered under.
@@ -1497,11 +1497,11 @@ The sheet a name was registered under.
 | ------------------------------ | ------------------------------------------- |
 | <code v-pre>sheet.Sheet</code> | The sheet, or nil when the name names none. |
 
-<a id="tecs.animation.sheetRevision"></a>
+<a id="tecs.gfx.animation.sheetRevision"></a>
 
-### tecs.animation.sheetRevision
+### tecs.gfx.animation.sheetRevision
 
-<pre><code v-pre>function <a href="#tecs.animation.sheetRevision">tecs.animation.sheetRevision</a>(): integer
+<pre><code v-pre>function <a href="#tecs.gfx.animation.sheetRevision">tecs.gfx.animation.sheetRevision</a>(): integer
 </code></pre>
 
 How many times any sheet's frames have changed.
@@ -1515,11 +1515,11 @@ sheet replaced or rebound under a running game invalidates it.
 | -------------------------- | ---------------------------------- |
 | <code v-pre>integer</code> | A number that only ever increases. |
 
-<a id="tecs.animation.timeOf"></a>
+<a id="tecs.gfx.animation.timeOf"></a>
 
-### tecs.animation.timeOf
+### tecs.gfx.animation.timeOf
 
-<pre><code v-pre>function <a href="#tecs.animation.timeOf">tecs.animation.timeOf</a>(world: World, entity: integer): number
+<pre><code v-pre>function <a href="#tecs.gfx.animation.timeOf">tecs.gfx.animation.timeOf</a>(world: World, entity: integer): number
 </code></pre>
 
 How far into its tag's cycle an entity's animation has got, in seconds.
@@ -1543,11 +1543,11 @@ asking a question this is the wrong shape for.
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>number</code> | Seconds into the cycle, wrapped for a looping tag and clamped at the end for a one-shot. Zero for an entity carrying no Animation and for one whose sheet this run does not have. |
 
-<a id="tecs.animation.useGPU"></a>
+<a id="tecs.gfx.animation.useGPU"></a>
 
-### tecs.animation.useGPU
+### tecs.gfx.animation.useGPU
 
-<pre><code v-pre>function <a href="#tecs.animation.useGPU">tecs.animation.useGPU</a>(enabled: boolean)
+<pre><code v-pre>function <a href="#tecs.gfx.animation.useGPU">tecs.gfx.animation.useGPU</a>(enabled: boolean)
 </code></pre>
 
 Chooses whether playback is resolved on the GPU.
@@ -1582,11 +1582,11 @@ systems that installs, and worlds already carrying them keep them.
 | -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>boolean</code> | <code v-pre>enabled</code> | False puts playback back on the host, for a world that wants events and frame queries without opting in or recomputing and is small enough to pay a frame lookup and a Sprite write per playing animation on every step. A parked one costs the row it sits in and nothing more, so what a step costs is what is running. |
 
-<a id="tecs.animation.usesGPU"></a>
+<a id="tecs.gfx.animation.usesGPU"></a>
 
-### tecs.animation.usesGPU
+### tecs.gfx.animation.usesGPU
 
-<pre><code v-pre>function <a href="#tecs.animation.usesGPU">tecs.animation.usesGPU</a>(): boolean
+<pre><code v-pre>function <a href="#tecs.gfx.animation.usesGPU">tecs.gfx.animation.usesGPU</a>(): boolean
 </code></pre>
 
 Whether playback resolves on the GPU.

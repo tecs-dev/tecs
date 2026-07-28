@@ -254,7 +254,7 @@ those is a decision rather than an omission of effort.
 
 Glyphs are drawn by the `glyph` material, which is unlit: text draws at its own colour rather than
 taking whatever the scene's lights leave it in. A label that should take the light is a material of
-its own; see [materials](/modules/materials).
+its own; see [materials](/modules/gfx/materials).
 
 ### measure
 

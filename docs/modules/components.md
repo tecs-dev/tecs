@@ -159,10 +159,10 @@ drawing the layer the old name resolved to.
 
 The UV rect selects a region, so an atlas is the same thing as a whole image with the rect set to the full
 range. A Sprite is normally not built by hand: [`Renderer`](/modules/renderer) hands one back when an image is
-registered, and [`animation`](/modules/animation) builds them per frame and per slice.
+registered, and [`animation`](/modules/gfx/animation) builds them per frame and per slice.
 
 **Pairs with:** `Renderable` and `Tint`, which the renderable query requires; `Animation` from
-[`animation`](/modules/animation), which drives playback by writing the UV lanes. When an animation resolves on
+[`animation`](/modules/gfx/animation), which drives playback by writing the UV lanes. When an animation resolves on
 the GPU those four lanes carry a playback rather than a rect, which is why a serialized Sprite in that state
 writes the whole image and lets the animation put its own answer back on the first step after a load.
 
@@ -172,13 +172,13 @@ Which material shades a renderable's quad.
 
 | Field   | Type      | Default | Description                                                                                                                  |
 | ------- | --------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `id`    | `int32_t` | `0`     | Material id, from `tecs.materials.id(name)`.                                                                                 |
+| `id`    | `int32_t` | `0`     | Material id, from `tecs.gfx.materials.id(name)`.                                                                             |
 | `param` | `float`   | `0.25`  | Passed to the material, 0 to 1. What it means is the material's business; the rounded rectangle reads it as a corner radius. |
 
 Absent means the default, which samples the image array and covers the whole quad, so an entity with neither a
 `Sprite` nor a `Material` still draws. Present selects one of the materials found under `materials/`.
 
-The id comes from [`materials`](/modules/materials) rather than being written as a number, because the numbering
+The id comes from [`materials`](/modules/gfx/materials) rather than being written as a number, because the numbering
 depends on which material files exist and a literal would break the moment one was added ahead of it
 alphabetically. One instance format either way: the batch, the cull and the draw do not know which material an
 entity uses, which is what keeps the whole scene one draw.
@@ -327,11 +327,11 @@ Subsystems register components of their own, and they are documented with the su
 
 | Component             | Module                                           | What it does                                          |
 | --------------------- | ------------------------------------------------ | ----------------------------------------------------- |
-| `Pivot`               | [`animation`](/modules/animation)                | Hangs the quad off a point other than its middle.     |
-| `Animation`           | [`animation`](/modules/animation)                | Sprite-sheet playback, resolved in the vertex shader. |
-| `AnimationEvents`     | [`animation`](/modules/animation)                | Events derived from playback.                         |
+| `Pivot`               | [`animation`](/modules/gfx/animation)            | Hangs the quad off a point other than its middle.     |
+| `Animation`           | [`animation`](/modules/gfx/animation)            | Sprite-sheet playback, resolved in the vertex shader. |
+| `AnimationEvents`     | [`animation`](/modules/gfx/animation)            | Events derived from playback.                         |
 | `Text`                | [`text`](/modules/text)                          | A run of distance-field text.                         |
-| `ParticleEmitter`     | [`particles`](/modules/particles)                | An emitter, whose particles are not entities.         |
+| `ParticleEmitter`     | [`particles`](/modules/gfx/particles)            | An emitter, whose particles are not entities.         |
 | `Sound`               | [`Audio`](/modules/audio)                        | A voice attached to an entity.                        |
 | `RigidBody`           | [`physics`](/modules/physics)                    | The body an entity is.                                |
 | `TweenTrackingTarget` | [`sequence`](/modules/sequence#tracking-sources) | Selects the entity a tracking tween chases.           |

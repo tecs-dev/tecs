@@ -162,10 +162,10 @@ own pages:
 
 - [`tecs.camera.Camera`](/modules/camera), the view it draws from
 - [`tecs.gfx.layers`](/modules/gfx/layers), z-ordering and per-layer behaviour
-- [`tecs.animation`](/modules/animation), sprite sheets and playback
+- [`tecs.gfx.animation`](/modules/gfx/animation), sprite sheets and playback
 - [`tecs.text`](/modules/text), distance-field text drawn through an instance producer
-- [`tecs.particles`](/modules/particles), emitters
-- [`tecs.materials`](/modules/materials), the material a draw dispatches to
+- [`tecs.gfx.particles`](/modules/gfx/particles), emitters
+- [`tecs.gfx.materials`](/modules/gfx/materials), the material a draw dispatches to
 
 ## What it reports
 

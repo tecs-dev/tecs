@@ -80,15 +80,15 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | `FixedUpdate`     | `ttl`                           | builtins, every world                              |
 | `FixedUpdate`     | `tecs.StepPhysics`              | [`physics`](/modules/physics) plugin               |
 | `FixedPostUpdate` | `tecs.SyncBodyTransforms`       | [`physics`](/modules/physics) plugin               |
-| `FixedPostUpdate` | `tecs.AdvanceAnimation`         | [`animation`](/modules/animation) plugin           |
+| `FixedPostUpdate` | `tecs.AdvanceAnimation`         | [`animation`](/modules/gfx/animation) plugin       |
 | `FixedLast`       | `tecs.ExitFixedInput`           | [`Application`](/modules/application)              |
 | `Update`          | `sequence.AdvancePresentation`  | [`sequence`](/modules/sequence), every application |
 | `PostUpdate`      | `RelativeTransform`             | builtins, every world                              |
 | `PostUpdate`      | `tecs.PlaySounds`               | [`Audio`](/modules/audio)                          |
-| `PostUpdate`      | `tecs.EncodeAnimation`          | [`animation`](/modules/animation) plugin           |
-| `PostUpdate`      | `tecs.ReportAnimation`          | [`animation`](/modules/animation) plugin           |
+| `PostUpdate`      | `tecs.EncodeAnimation`          | [`animation`](/modules/gfx/animation) plugin       |
+| `PostUpdate`      | `tecs.ReportAnimation`          | [`animation`](/modules/gfx/animation) plugin       |
 | `PostUpdate`      | `tecs.TextLayout`               | [`text`](/modules/text) plugin                     |
-| `PostUpdate`      | `tecs.ParticleEmitterSync`      | [`particles`](/modules/particles) plugin           |
+| `PostUpdate`      | `tecs.ParticleEmitterSync`      | [`particles`](/modules/gfx/particles) plugin       |
 | `RenderFirst`     | `tecs.SyncRenderState`          | [`Renderer`](/modules/renderer)                    |
 | `RenderLast`      | `RelativeTransformDirtySampler` | builtins, every world                              |
 

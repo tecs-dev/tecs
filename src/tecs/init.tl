@@ -222,7 +222,10 @@ end
 --- one, because they share a subject and nothing else: a game that positions
 --- bands never reads a glyph, and loading one has no reason to load the rest.
 local record gfx
+    animation: animation
     layers: layers
+    materials: materials
+    particles: particles
 end
 
 local record tecs
@@ -270,7 +273,6 @@ local record tecs
     --- resolved on demand.
     ecs: ecs
 
-    animation: animation
     application: application
     assets: assets
     audio: audio
@@ -284,10 +286,8 @@ local record tecs
     http: http
     input: input
     log: log
-    materials: materials
     mcp: mcp
     net: net
-    particles: particles
     physics: physics
     renderer: renderer
     sequence: sequence
@@ -346,7 +346,6 @@ end
 --- other name here answers with one module, which is what lets the module's own
 --- record type it.
 local SURFACE <const>: {string: Namespace} = {
-    animation = {module = "tecs.gfx.animation"},
     application = {module = "tecs.Application", class = "Application"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
@@ -359,7 +358,14 @@ local SURFACE <const>: {string: Namespace} = {
         within = {watch = {module = "tecs.platform.watch"}},
     },
     future = {module = "tecs.Future", class = "Future"},
-    gfx = {within = {layers = {module = "tecs.gfx.layers"}}},
+    gfx = {
+        within = {
+            animation = {module = "tecs.gfx.animation"},
+            layers = {module = "tecs.gfx.layers"},
+            materials = {module = "tecs.gpu.materials"},
+            particles = {module = "tecs.gfx.particles"},
+        },
+    },
     http = {module = "tecs.http"},
     input = {
         module = "tecs.platform.Input",
@@ -368,10 +374,8 @@ local SURFACE <const>: {string: Namespace} = {
         within = {Gamepad = {module = "tecs.platform.Gamepad"}},
     },
     log = {module = "tecs.log"},
-    materials = {module = "tecs.gpu.materials"},
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net"},
-    particles = {module = "tecs.gfx.particles"},
     physics = {module = "tecs.physics"},
     renderer = {module = "tecs.Renderer", class = "Renderer"},
     sequence = {module = "tecs.sequence"},

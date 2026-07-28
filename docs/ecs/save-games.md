@@ -83,7 +83,7 @@ are the worked examples of why:
 - **`tecs.components.Sprite`** holds an image's intern index, handed out in the order images were registered.
   A number that depends on load order cannot survive a save, so `serialize` writes the image's _name_ and
   `deserialize` interns it again. What a saved sprite refers to is decided by the name on both sides.
-- **`tecs.animation.Animation`** holds a sheet id and a tag id, both decided by the order sheets were built in,
+- **`tecs.gfx.animation.Animation`** holds a sheet id and a tag id, both decided by the order sheets were built in,
   and saves the pair of names instead. The frame index is deliberately dropped to zero, so the first step after
   a load rewrites the Sprite's region rather than trusting the region it was saved holding.
 - **`tecs.audio.Sound`** crosses as the clip path and the group name it interned from. The voice is not

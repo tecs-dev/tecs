@@ -3,7 +3,7 @@ description: "How a material is authored, how a name becomes an id, and the modu
 outline: deep
 ---
 
-# tecs.materials
+# tecs.gfx.materials
 
 A material is what a fragment is, decided per instance. It is a `.glsl` file under `materials/`
 implementing the contract in `shaders/include/material.glsl`. Every material found is compiled into
@@ -15,7 +15,7 @@ material, and the whole point of the unified batch is that the scene is one draw
 fragment divergence where adjacent instances differ, which archetype-contiguous layout already keeps
 small: entities of a kind cluster.
 
-`tecs.materials` is the host half of that: it finds the files, assigns the ids, builds the dispatch
+`tecs.gfx.materials` is the host half of that: it finds the files, assigns the ids, builds the dispatch
 and hands it to the shader loader.
 
 ## Selecting a material on an entity
@@ -297,46 +297,46 @@ file added there is in the build the next time it runs.
 
 Every function and type this module carries, rendered from `src/tecs/gpu/materials.tl`.
 
-<a id="tecs.materials.Material"></a>
+<a id="tecs.gfx.materials.Material"></a>
 
-### tecs.materials.Material
+### tecs.gfx.materials.Material
 
-<pre><code v-pre>record <a href="#tecs.materials.Material">tecs.materials.Material</a>
+<pre><code v-pre>record <a href="#tecs.gfx.materials.Material">tecs.gfx.materials.Material</a>
 </code></pre>
 
 One material: its name, the id this build gave it, and its source.
-<a id="tecs.materials.Material.name"></a>
+<a id="tecs.gfx.materials.Material.name"></a>
 
-### tecs.materials.Material.name
+### tecs.gfx.materials.Material.name
 
-<pre><code v-pre><a href="#tecs.materials.Material.name">tecs.materials.Material.name</a>: string
+<pre><code v-pre><a href="#tecs.gfx.materials.Material.name">tecs.gfx.materials.Material.name</a>: string
 </code></pre>
 
 The file's name without its extension, and how a game asks for it.
-<a id="tecs.materials.Material.id"></a>
+<a id="tecs.gfx.materials.Material.id"></a>
 
-### tecs.materials.Material.id
+### tecs.gfx.materials.Material.id
 
-<pre><code v-pre><a href="#tecs.materials.Material.id">tecs.materials.Material.id</a>: integer
+<pre><code v-pre><a href="#tecs.gfx.materials.Material.id">tecs.gfx.materials.Material.id</a>: integer
 </code></pre>
 
 What an instance carries to select this material. Assigned by
 `install` from sorted order, so it holds only for the set of files
 that were present when the dispatch was built.
-<a id="tecs.materials.Material.source"></a>
+<a id="tecs.gfx.materials.Material.source"></a>
 
-### tecs.materials.Material.source
+### tecs.gfx.materials.Material.source
 
-<pre><code v-pre><a href="#tecs.materials.Material.source">tecs.materials.Material.source</a>: string
+<pre><code v-pre><a href="#tecs.gfx.materials.Material.source">tecs.gfx.materials.Material.source</a>: string
 </code></pre>
 
 The material's GLSL, as read. Renamed on the way into the dispatch
 rather than here, so this is still the text the file holds.
-<a id="tecs.materials.addRoot"></a>
+<a id="tecs.gfx.materials.addRoot"></a>
 
-### tecs.materials.addRoot
+### tecs.gfx.materials.addRoot
 
-<pre><code v-pre>function <a href="#tecs.materials.addRoot">tecs.materials.addRoot</a>(path: string)
+<pre><code v-pre>function <a href="#tecs.gfx.materials.addRoot">tecs.gfx.materials.addRoot</a>(path: string)
 </code></pre>
 
 Adds a directory to search before the ones already known, so a game's
@@ -348,19 +348,19 @@ materials are found alongside the engine's.
 | ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>string</code> | <code v-pre>path</code> | Searched ahead of every root already added, so a game's file of a given name beats the engine's. A trailing slash is added when it is missing. The directory is not read here: this only puts the next `install` back on. |
 
-<a id="tecs.materials.defaultName"></a>
+<a id="tecs.gfx.materials.defaultName"></a>
 
-### tecs.materials.defaultName
+### tecs.gfx.materials.defaultName
 
-<pre><code v-pre><a href="#tecs.materials.defaultName">tecs.materials.defaultName</a>: string
+<pre><code v-pre><a href="#tecs.gfx.materials.defaultName">tecs.gfx.materials.defaultName</a>: string
 </code></pre>
 
 Name of the material an entity with no Material component draws as.
-<a id="tecs.materials.define"></a>
+<a id="tecs.gfx.materials.define"></a>
 
-### tecs.materials.define
+### tecs.gfx.materials.define
 
-<pre><code v-pre>function <a href="#tecs.materials.define">tecs.materials.define</a>(name: string, source: string)
+<pre><code v-pre>function <a href="#tecs.gfx.materials.define">tecs.gfx.materials.define</a>(name: string, source: string)
 </code></pre>
 
 Supplies a material from memory rather than a file.
@@ -376,11 +376,11 @@ file of the same name in any root, and renumbers the set on the next
 | <code v-pre>string</code> | <code v-pre>name</code>   | The name a game asks for, and what a file would have been called without its extension. |
 | <code v-pre>string</code> | <code v-pre>source</code> | The material's GLSL, taken as given and renamed only on the way into the dispatch.      |
 
-<a id="tecs.materials.find"></a>
+<a id="tecs.gfx.materials.find"></a>
 
-### tecs.materials.find
+### tecs.gfx.materials.find
 
-<pre><code v-pre>function <a href="#tecs.materials.find">tecs.materials.find</a>(name: string): integer
+<pre><code v-pre>function <a href="#tecs.gfx.materials.find">tecs.gfx.materials.find</a>(name: string): integer
 </code></pre>
 
 The id a material is dispatched by, or nil when nothing has that name.
@@ -402,11 +402,11 @@ rather than about the call site, and the message says so.
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>integer</code> | The id, or nil for a name nothing has. Installs first, so a name is resolved against the materials on disk rather than against whatever had been read so far. |
 
-<a id="tecs.materials.id"></a>
+<a id="tecs.gfx.materials.id"></a>
 
-### tecs.materials.id
+### tecs.gfx.materials.id
 
-<pre><code v-pre>function <a href="#tecs.materials.id">tecs.materials.id</a>(name: string): integer
+<pre><code v-pre>function <a href="#tecs.gfx.materials.id">tecs.gfx.materials.id</a>(name: string): integer
 </code></pre>
 
 The id a material is dispatched by, or an error naming what was found.
@@ -427,11 +427,11 @@ material was added ahead of it alphabetically.
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>integer</code> | The id an instance carries to select it. Raises on a name nothing has, listing what there was, because a misspelled material is a build mistake rather than a runtime condition. |
 
-<a id="tecs.materials.install"></a>
+<a id="tecs.gfx.materials.install"></a>
 
-### tecs.materials.install
+### tecs.gfx.materials.install
 
-<pre><code v-pre>function <a href="#tecs.materials.install">tecs.materials.install</a>()
+<pre><code v-pre>function <a href="#tecs.gfx.materials.install">tecs.gfx.materials.install</a>()
 </code></pre>
 
 Reads the materials and publishes the dispatch. Idempotent.
@@ -440,11 +440,11 @@ Called by shader loading rather than by a game, so a fragment shader
 cannot be built before the materials it dispatches to are known. Adding
 a root or defining a material puts this back on, and the next load
 rebuilds.
-<a id="tecs.materials.name"></a>
+<a id="tecs.gfx.materials.name"></a>
 
-### tecs.materials.name
+### tecs.gfx.materials.name
 
-<pre><code v-pre>function <a href="#tecs.materials.name">tecs.materials.name</a>(id: integer): string
+<pre><code v-pre>function <a href="#tecs.gfx.materials.name">tecs.gfx.materials.name</a>(id: integer): string
 </code></pre>
 
 The material an id dispatches to, or nil when nothing has that id.
@@ -466,11 +466,11 @@ assigned from rather than a second copy of it.
 | ------------------------- | ----------------------------------------------------- |
 | <code v-pre>string</code> | The material's name, or nil when nothing has that id. |
 
-<a id="tecs.materials.names"></a>
+<a id="tecs.gfx.materials.names"></a>
 
-### tecs.materials.names
+### tecs.gfx.materials.names
 
-<pre><code v-pre>function <a href="#tecs.materials.names">tecs.materials.names</a>(): {string}
+<pre><code v-pre>function <a href="#tecs.gfx.materials.names">tecs.gfx.materials.names</a>(): {string}
 </code></pre>
 
 Every material name, in id order.
@@ -485,11 +485,11 @@ has to mean, wherever its own name would otherwise fall.
 | --------------------------- | ------------------------------------------------------------------------------------------ |
 | <code v-pre>{string}</code> | A fresh list the caller owns, indexed from one while the ids it describes count from zero. |
 
-<a id="tecs.materials.reload"></a>
+<a id="tecs.gfx.materials.reload"></a>
 
-### tecs.materials.reload
+### tecs.gfx.materials.reload
 
-<pre><code v-pre>function <a href="#tecs.materials.reload">tecs.materials.reload</a>(): boolean, string
+<pre><code v-pre>function <a href="#tecs.gfx.materials.reload">tecs.gfx.materials.reload</a>(): boolean, string
 </code></pre>
 
 Re-reads every material and republishes the dispatch.
@@ -512,11 +512,11 @@ them.
 | <code v-pre>boolean</code> | Whether the dispatch was rebuilt.                   |
 | <code v-pre>string</code>  | Why not, and nil whenever the first answer is true. |
 
-<a id="tecs.materials.reset"></a>
+<a id="tecs.gfx.materials.reset"></a>
 
-### tecs.materials.reset
+### tecs.gfx.materials.reset
 
-<pre><code v-pre>function <a href="#tecs.materials.reset">tecs.materials.reset</a>()
+<pre><code v-pre>function <a href="#tecs.gfx.materials.reset">tecs.gfx.materials.reset</a>()
 </code></pre>
 
 Forgets everything read, so a spec can start from the files again.

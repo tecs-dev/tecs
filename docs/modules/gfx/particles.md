@@ -3,9 +3,9 @@ description: "GPU-simulated particle emitters: effects, curves and gradients, th
 outline: deep
 ---
 
-# tecs.particles
+# tecs.gfx.particles
 
-`tecs.particles` simulates particles on the GPU and draws them as ordinary instances. An entity is an
+`tecs.gfx.particles` simulates particles on the GPU and draws them as ordinary instances. An entity is an
 emitter, not a particle. Per-particle state lives in a buffer the CPU never reads and the vertex
 shader never sees, and it outlives the frame: a slot is handed out once, at spawn, and held until the
 particle expires. What crosses back to the host is nothing at all.
@@ -177,7 +177,7 @@ curve multiplies by one and an absent gradient by white, so leaving either out c
 An animated effect plays its cycle exactly once over each particle's own life and clamps at the end,
 so a randomised lifetime randomises the playback speed. Per-frame durations, reverse and pingpong
 all arrive already spent, because this uses the same frame table an animated entity does; see
-[animation](/modules/animation). A `layer` outside one to [`layers.MAX`](/modules/gfx/layers), and an `alignment`
+[animation](/modules/gfx/animation). A `layer` outside one to [`layers.MAX`](/modules/gfx/layers), and an `alignment`
 that is neither of the two, both raise.
 
 One depth is taken for the whole effect rather than one per particle: an effect names one layer, so
@@ -418,35 +418,35 @@ to each other, which is the only reason they are public.
 
 Every function and type this module carries, rendered from `src/tecs/gfx/particles.tl`.
 
-<a id="tecs.particles.CURVE_SAMPLES"></a>
+<a id="tecs.gfx.particles.CURVE_SAMPLES"></a>
 
-### tecs.particles.CURVE_SAMPLES
+### tecs.gfx.particles.CURVE_SAMPLES
 
-<pre><code v-pre><a href="#tecs.particles.CURVE_SAMPLES">tecs.particles.CURVE_SAMPLES</a>: integer
+<pre><code v-pre><a href="#tecs.gfx.particles.CURVE_SAMPLES">tecs.gfx.particles.CURVE_SAMPLES</a>: integer
 </code></pre>
 
 Samples one compiled curve or gradient holds.
-<a id="tecs.particles.Color"></a>
+<a id="tecs.gfx.particles.Color"></a>
 
-### tecs.particles.Color
+### tecs.gfx.particles.Color
 
-<pre><code v-pre>type <a href="#tecs.particles.Color">tecs.particles.Color</a> = Color
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Color">tecs.gfx.particles.Color</a> = Color
 </code></pre>
 
 Accepted wherever a colour is asked for.
-<a id="tecs.particles.Curve"></a>
+<a id="tecs.gfx.particles.Curve"></a>
 
-### tecs.particles.Curve
+### tecs.gfx.particles.Curve
 
-<pre><code v-pre>type <a href="#tecs.particles.Curve">tecs.particles.Curve</a> = Curve
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Curve">tecs.gfx.particles.Curve</a> = Curve
 </code></pre>
 
 What `curve` answers with.
-<a id="tecs.particles.EFFECT"></a>
+<a id="tecs.gfx.particles.EFFECT"></a>
 
-### tecs.particles.EFFECT
+### tecs.gfx.particles.EFFECT
 
-<pre><code v-pre><a href="#tecs.particles.EFFECT">tecs.particles.EFFECT</a>: {string : integer}
+<pre><code v-pre><a href="#tecs.gfx.particles.EFFECT">tecs.gfx.particles.EFFECT</a>: {string : integer}
 </code></pre>
 
 Where each field sits within an effect and an emitter record.
@@ -455,125 +455,125 @@ Published because the shaders state the same offsets and a
 disagreement between the two is silent: it draws something, just not
 the right thing. `spec/particles_spec.lua` reads both and holds them to
 each other, which is the only reason this is on the surface.
-<a id="tecs.particles.EFFECT_FLOATS"></a>
+<a id="tecs.gfx.particles.EFFECT_FLOATS"></a>
 
-### tecs.particles.EFFECT_FLOATS
+### tecs.gfx.particles.EFFECT_FLOATS
 
-<pre><code v-pre><a href="#tecs.particles.EFFECT_FLOATS">tecs.particles.EFFECT_FLOATS</a>: integer
+<pre><code v-pre><a href="#tecs.gfx.particles.EFFECT_FLOATS">tecs.gfx.particles.EFFECT_FLOATS</a>: integer
 </code></pre>
 
 Floats per effect and per emitter record, which the shaders state again.
-<a id="tecs.particles.EMITTER"></a>
+<a id="tecs.gfx.particles.EMITTER"></a>
 
-### tecs.particles.EMITTER
+### tecs.gfx.particles.EMITTER
 
-<pre><code v-pre><a href="#tecs.particles.EMITTER">tecs.particles.EMITTER</a>: {string : integer}
+<pre><code v-pre><a href="#tecs.gfx.particles.EMITTER">tecs.gfx.particles.EMITTER</a>: {string : integer}
 </code></pre>
 
 The same for an emitter record. Both are keyed by field name and give a
 float offset from the record's start, counting from zero.
-<a id="tecs.particles.EMITTER_FLOATS"></a>
+<a id="tecs.gfx.particles.EMITTER_FLOATS"></a>
 
-### tecs.particles.EMITTER_FLOATS
+### tecs.gfx.particles.EMITTER_FLOATS
 
-<pre><code v-pre><a href="#tecs.particles.EMITTER_FLOATS">tecs.particles.EMITTER_FLOATS</a>: integer
+<pre><code v-pre><a href="#tecs.gfx.particles.EMITTER_FLOATS">tecs.gfx.particles.EMITTER_FLOATS</a>: integer
 </code></pre>
 
 The second of that pair, and a different number: an emitter record is
 much the smaller of the two.
-<a id="tecs.particles.Effect"></a>
+<a id="tecs.gfx.particles.Effect"></a>
 
-### tecs.particles.Effect
+### tecs.gfx.particles.Effect
 
-<pre><code v-pre>type <a href="#tecs.particles.Effect">tecs.particles.Effect</a> = Effect
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Effect">tecs.gfx.particles.Effect</a> = Effect
 </code></pre>
 
 The handle `effect` answers with and a `ParticleEmitter` names.
-<a id="tecs.particles.EffectOptions"></a>
+<a id="tecs.gfx.particles.EffectOptions"></a>
 
-### tecs.particles.EffectOptions
+### tecs.gfx.particles.EffectOptions
 
-<pre><code v-pre>type <a href="#tecs.particles.EffectOptions">tecs.particles.EffectOptions</a> = EffectOptions
+<pre><code v-pre>type <a href="#tecs.gfx.particles.EffectOptions">tecs.gfx.particles.EffectOptions</a> = EffectOptions
 </code></pre>
 
 What `effect` takes.
-<a id="tecs.particles.EmitterOptions"></a>
+<a id="tecs.gfx.particles.EmitterOptions"></a>
 
-### tecs.particles.EmitterOptions
+### tecs.gfx.particles.EmitterOptions
 
-<pre><code v-pre>type <a href="#tecs.particles.EmitterOptions">tecs.particles.EmitterOptions</a> = EmitterOptions
+<pre><code v-pre>type <a href="#tecs.gfx.particles.EmitterOptions">tecs.gfx.particles.EmitterOptions</a> = EmitterOptions
 </code></pre>
 
 What a `ParticleEmitter` is constructed from.
-<a id="tecs.particles.EmitterState"></a>
+<a id="tecs.gfx.particles.EmitterState"></a>
 
-### tecs.particles.EmitterState
+### tecs.gfx.particles.EmitterState
 
-<pre><code v-pre>type <a href="#tecs.particles.EmitterState">tecs.particles.EmitterState</a> = EmitterState
+<pre><code v-pre>type <a href="#tecs.gfx.particles.EmitterState">tecs.gfx.particles.EmitterState</a> = EmitterState
 </code></pre>
 
 The three values an emitter's `state` takes.
-<a id="tecs.particles.Gradient"></a>
+<a id="tecs.gfx.particles.Gradient"></a>
 
-### tecs.particles.Gradient
+### tecs.gfx.particles.Gradient
 
-<pre><code v-pre>type <a href="#tecs.particles.Gradient">tecs.particles.Gradient</a> = Gradient
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Gradient">tecs.gfx.particles.Gradient</a> = Gradient
 </code></pre>
 
 What `gradient` answers with.
-<a id="tecs.particles.ParticleEmitter"></a>
+<a id="tecs.gfx.particles.ParticleEmitter"></a>
 
-### tecs.particles.ParticleEmitter
+### tecs.gfx.particles.ParticleEmitter
 
-<pre><code v-pre><a href="#tecs.particles.ParticleEmitter">tecs.particles.ParticleEmitter</a>: ParticleEmitter
+<pre><code v-pre><a href="#tecs.gfx.particles.ParticleEmitter">tecs.gfx.particles.ParticleEmitter</a>: ParticleEmitter
 </code></pre>
 
 The emitter component.
-<a id="tecs.particles.Pool"></a>
+<a id="tecs.gfx.particles.Pool"></a>
 
-### tecs.particles.Pool
+### tecs.gfx.particles.Pool
 
-<pre><code v-pre>type <a href="#tecs.particles.Pool">tecs.particles.Pool</a> = Pool
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Pool">tecs.gfx.particles.Pool</a> = Pool
 </code></pre>
 
 What `poolOf` answers with.
-<a id="tecs.particles.PoolOptions"></a>
+<a id="tecs.gfx.particles.PoolOptions"></a>
 
-### tecs.particles.PoolOptions
+### tecs.gfx.particles.PoolOptions
 
-<pre><code v-pre>type <a href="#tecs.particles.PoolOptions">tecs.particles.PoolOptions</a> = PoolOptions
+<pre><code v-pre>type <a href="#tecs.gfx.particles.PoolOptions">tecs.gfx.particles.PoolOptions</a> = PoolOptions
 </code></pre>
 
 What `plugin` takes.
-<a id="tecs.particles.Range"></a>
+<a id="tecs.gfx.particles.Range"></a>
 
-### tecs.particles.Range
+### tecs.gfx.particles.Range
 
-<pre><code v-pre>type <a href="#tecs.particles.Range">tecs.particles.Range</a> = Range
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Range">tecs.gfx.particles.Range</a> = Range
 </code></pre>
 
 The two-bound form of a `Value`.
-<a id="tecs.particles.STATE_FLOATS"></a>
+<a id="tecs.gfx.particles.STATE_FLOATS"></a>
 
-### tecs.particles.STATE_FLOATS
+### tecs.gfx.particles.STATE_FLOATS
 
-<pre><code v-pre><a href="#tecs.particles.STATE_FLOATS">tecs.particles.STATE_FLOATS</a>: integer
+<pre><code v-pre><a href="#tecs.gfx.particles.STATE_FLOATS">tecs.gfx.particles.STATE_FLOATS</a>: integer
 </code></pre>
 
 Floats of state one particle carries, on the GPU and nowhere else.
-<a id="tecs.particles.Value"></a>
+<a id="tecs.gfx.particles.Value"></a>
 
-### tecs.particles.Value
+### tecs.gfx.particles.Value
 
-<pre><code v-pre>type <a href="#tecs.particles.Value">tecs.particles.Value</a> = Value
+<pre><code v-pre>type <a href="#tecs.gfx.particles.Value">tecs.gfx.particles.Value</a> = Value
 </code></pre>
 
 Accepted wherever a property may vary per particle.
-<a id="tecs.particles.curve"></a>
+<a id="tecs.gfx.particles.curve"></a>
 
-### tecs.particles.curve
+### tecs.gfx.particles.curve
 
-<pre><code v-pre>function <a href="#tecs.particles.curve">tecs.particles.curve</a>(keys: {CurveKey}): <a href="#tecs.particles.Curve">Curve</a>
+<pre><code v-pre>function <a href="#tecs.gfx.particles.curve">tecs.gfx.particles.curve</a>(keys: {CurveKey}): <a href="#tecs.gfx.particles.Curve">Curve</a>
 </code></pre>
 
 Compiles keyframes into a curve over normalised age.
@@ -586,15 +586,15 @@ Compiles keyframes into a curve over normalised age.
 
 #### Returns
 
-| Type                                                         | Description                                                                                                                                                                 |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.particles.Curve">Curve</a></code> | A resampled curve at `CURVE_SAMPLES` points, so the keys are not kept and the shape between two distant ones is straight. Ages outside zero to one read as the nearest end. |
+| Type                                                             | Description                                                                                                                                                                 |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.Curve">Curve</a></code> | A resampled curve at `CURVE_SAMPLES` points, so the keys are not kept and the shape between two distant ones is straight. Ages outside zero to one read as the nearest end. |
 
-<a id="tecs.particles.effect"></a>
+<a id="tecs.gfx.particles.effect"></a>
 
-### tecs.particles.effect
+### tecs.gfx.particles.effect
 
-<pre><code v-pre>function <a href="#tecs.particles.effect">tecs.particles.effect</a>(options: <a href="#tecs.particles.EffectOptions">EffectOptions</a>): <a href="#tecs.particles.Effect">Effect</a>
+<pre><code v-pre>function <a href="#tecs.gfx.particles.effect">tecs.gfx.particles.effect</a>(options: <a href="#tecs.gfx.particles.EffectOptions">EffectOptions</a>): <a href="#tecs.gfx.particles.Effect">Effect</a>
 </code></pre>
 
 Registers an effect under `options.name`. Immutable once registered,
@@ -603,21 +603,21 @@ already taken is refused.
 
 #### Parameters
 
-| Type                                                                         | Name                       | Description                                                              |
-| ---------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------ |
-| <code v-pre><a href="#tecs.particles.EffectOptions">EffectOptions</a></code> | <code v-pre>options</code> | Every section but `name` is optional and defaults to something drawable. |
+| Type                                                                             | Name                       | Description                                                              |
+| -------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------ |
+| <code v-pre><a href="#tecs.gfx.particles.EffectOptions">EffectOptions</a></code> | <code v-pre>options</code> | Every section but `name` is optional and defaults to something drawable. |
 
 #### Returns
 
-| Type                                                           | Description                                                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.particles.Effect">Effect</a></code> | A handle that stays valid until `reset`. Registration is process-wide, so this is reachable from every world. |
+| Type                                                               | Description                                                                                                   |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.Effect">Effect</a></code> | A handle that stays valid until `reset`. Registration is process-wide, so this is reachable from every world. |
 
-<a id="tecs.particles.find"></a>
+<a id="tecs.gfx.particles.find"></a>
 
-### tecs.particles.find
+### tecs.gfx.particles.find
 
-<pre><code v-pre>function <a href="#tecs.particles.find">tecs.particles.find</a>(name: string): <a href="#tecs.particles.Effect">Effect</a>
+<pre><code v-pre>function <a href="#tecs.gfx.particles.find">tecs.gfx.particles.find</a>(name: string): <a href="#tecs.gfx.particles.Effect">Effect</a>
 </code></pre>
 
 The effect registered under `name`, or nil when nothing has that name.
@@ -630,15 +630,15 @@ The effect registered under `name`, or nil when nothing has that name.
 
 #### Returns
 
-| Type                                                           | Description                                                                                                         |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.particles.Effect">Effect</a></code> | The registered effect itself, not a copy, so two callers finding one name share it. Nil when nothing has that name. |
+| Type                                                               | Description                                                                                                         |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.Effect">Effect</a></code> | The registered effect itself, not a copy, so two callers finding one name share it. Nil when nothing has that name. |
 
-<a id="tecs.particles.gradient"></a>
+<a id="tecs.gfx.particles.gradient"></a>
 
-### tecs.particles.gradient
+### tecs.gfx.particles.gradient
 
-<pre><code v-pre>function <a href="#tecs.particles.gradient">tecs.particles.gradient</a>(keys: {CurveKey}): <a href="#tecs.particles.Gradient">Gradient</a>
+<pre><code v-pre>function <a href="#tecs.gfx.particles.gradient">tecs.gfx.particles.gradient</a>(keys: {CurveKey}): <a href="#tecs.gfx.particles.Gradient">Gradient</a>
 </code></pre>
 
 Compiles keyframes into a colour gradient over normalised age.
@@ -651,15 +651,15 @@ Compiles keyframes into a colour gradient over normalised age.
 
 #### Returns
 
-| Type                                                               | Description                                                                                                                                                                        |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.particles.Gradient">Gradient</a></code> | A gradient resampled like a curve, interpolating each channel separately, so two colours blend through whatever lies between them componentwise rather than around a colour wheel. |
+| Type                                                                   | Description                                                                                                                                                                        |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.Gradient">Gradient</a></code> | A gradient resampled like a curve, interpolating each channel separately, so two colours blend through whatever lies between them componentwise rather than around a colour wheel. |
 
-<a id="tecs.particles.names"></a>
+<a id="tecs.gfx.particles.names"></a>
 
-### tecs.particles.names
+### tecs.gfx.particles.names
 
-<pre><code v-pre>function <a href="#tecs.particles.names">tecs.particles.names</a>(): {string}
+<pre><code v-pre>function <a href="#tecs.gfx.particles.names">tecs.gfx.particles.names</a>(): {string}
 </code></pre>
 
 Every registered effect's name, in registration order.
@@ -670,11 +670,11 @@ Every registered effect's name, in registration order.
 | --------------------------- | ------------------------------------------------------------ |
 | <code v-pre>{string}</code> | A fresh table each call, the caller's to keep and to modify. |
 
-<a id="tecs.particles.plugin"></a>
+<a id="tecs.gfx.particles.plugin"></a>
 
-### tecs.particles.plugin
+### tecs.gfx.particles.plugin
 
-<pre><code v-pre>function <a href="#tecs.particles.plugin">tecs.particles.plugin</a>(options: <a href="#tecs.particles.PoolOptions">PoolOptions</a>): function(World)
+<pre><code v-pre>function <a href="#tecs.gfx.particles.plugin">tecs.gfx.particles.plugin</a>(options: <a href="#tecs.gfx.particles.PoolOptions">PoolOptions</a>): function(World)
 </code></pre>
 
 Installs the pool on a world. Nothing is allocated or dispatched
@@ -682,9 +682,9 @@ without it.
 
 #### Parameters
 
-| Type                                                                     | Name                       | Description                                         |
-| ------------------------------------------------------------------------ | -------------------------- | --------------------------------------------------- |
-| <code v-pre><a href="#tecs.particles.PoolOptions">PoolOptions</a></code> | <code v-pre>options</code> | `renderer` is required; the two capacities default. |
+| Type                                                                         | Name                       | Description                                         |
+| ---------------------------------------------------------------------------- | -------------------------- | --------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.PoolOptions">PoolOptions</a></code> | <code v-pre>options</code> | `renderer` is required; the two capacities default. |
 
 #### Returns
 
@@ -692,11 +692,11 @@ without it.
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>function(World)</code> | The plugin, to be handed to a world. Installing it on a world that already has a pool does nothing, and installing it on two worlds gives each its own run of the one renderer's buffer. |
 
-<a id="tecs.particles.poolOf"></a>
+<a id="tecs.gfx.particles.poolOf"></a>
 
-### tecs.particles.poolOf
+### tecs.gfx.particles.poolOf
 
-<pre><code v-pre>function <a href="#tecs.particles.poolOf">tecs.particles.poolOf</a>(world: World): <a href="#tecs.particles.Pool">Pool</a>
+<pre><code v-pre>function <a href="#tecs.gfx.particles.poolOf">tecs.gfx.particles.poolOf</a>(world: World): <a href="#tecs.gfx.particles.Pool">Pool</a>
 </code></pre>
 
 The pool installed on a world, or nil. For tests and tooling.
@@ -709,15 +709,15 @@ The pool installed on a world, or nil. For tests and tooling.
 
 #### Returns
 
-| Type                                                       | Description                                                                                                                   |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.particles.Pool">Pool</a></code> | Nil when the plugin was never installed on that world. The pool itself, not a copy, so writing through it writes the world's. |
+| Type                                                           | Description                                                                                                                   |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.Pool">Pool</a></code> | Nil when the plugin was never installed on that world. The pool itself, not a copy, so writing through it writes the world's. |
 
-<a id="tecs.particles.reset"></a>
+<a id="tecs.gfx.particles.reset"></a>
 
-### tecs.particles.reset
+### tecs.gfx.particles.reset
 
-<pre><code v-pre>function <a href="#tecs.particles.reset">tecs.particles.reset</a>()
+<pre><code v-pre>function <a href="#tecs.gfx.particles.reset">tecs.gfx.particles.reset</a>()
 </code></pre>
 
 Forgets every registered effect, so a spec can register a set again.
