@@ -96,6 +96,11 @@ local packSlot <const> = instancelayout.packSlot
 --- doubles from.
 local MINIMUM_SLOTS <const> = 64
 
+--- The logger name is a compatibility surface rather than an identifier, and
+--- it stays what it is now that a game reaches this module as `tecs.gfx`. A
+--- logger name is what `SDL_SetLogPriority` filters on, so it is configuration
+--- a developer types into a shell rather than a name this tree can rename in
+--- one commit.
 local logger <const> = log.get("tecs.text")
 
 --- One glyph's metrics, in the units the atlas was generated at.
@@ -250,7 +255,7 @@ local record text
     type GlyphMetrics = GlyphMetrics
     --- What `loadFont` takes.
     type FontOptions = FontOptions
-    --- What `plugin` takes.
+    --- What `textPlugin` takes.
     type TextOptions = TextOptions
 
     --- The text component.
@@ -260,9 +265,9 @@ local record text
     defaultFont: function(): Font
     fontByName: function(name: string): Font
     reloadFont: function(path: string): Font
-    measure: function(item: Text): number, number
-    plugin: function(options: TextOptions): function(World)
-    layouts: function(world: World): integer
+    measureText: function(item: Text): number, number
+    textPlugin: function(options: TextOptions): function(World)
+    textLayouts: function(world: World): integer
     glyphAt: function(world: World, entity: integer, index: integer): number, number, number, number
 end
 
@@ -1031,7 +1036,7 @@ end
 ---     one with no string.
 --- @return Height on the same terms, counting whole lines: a one-line text is
 ---     one line height rather than the ink's extent.
-function text.measure(item: Text): number, number
+function text.measureText(item: Text): number, number
     if item == nil or item.font == nil or item.text == nil then
         return 0.0, 0.0
     end
@@ -1182,7 +1187,7 @@ end
 ---
 --- @return A count that only ever increases, and zero for a world the plugin
 ---     was never installed on. It counts rows laid out, not frames.
-function text.layouts(world: World): integer
+function text.textLayouts(world: World): integer
     return layoutCounts[world] or 0
 end
 
@@ -1424,7 +1429,7 @@ end
 --- @return The plugin, to be handed to a world. Each world it is installed on
 ---     gets its own producer run of the one renderer's instance buffer, and
 ---     the fonts themselves are shared across all of them.
-function text.plugin(options: TextOptions): function(World)
+function text.textPlugin(options: TextOptions): function(World)
     if options == nil or options.renderer == nil then
         error("tecs: the text plugin needs a `renderer`", 2)
     end

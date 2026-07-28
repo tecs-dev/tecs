@@ -29,35 +29,34 @@ and checked against a fresh render so it cannot drift.
 
 ## Every module
 
-| Module                                               | What it is                                                                |
-| ---------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`tecs.application`](/modules/application)           | the object an entry file returns, and what builds one                     |
-| [`tecs.assets`](/modules/assets)                     | loading content, cached and off the main thread                           |
-| [`tecs.audio`](/modules/audio)                       | clips, voices, groups, limits, the `Sound` component, and devices         |
-| [`tecs.data`](/modules/data)                         | JSON, DEFLATE and hashes over byte strings                                |
-| [`tecs.ecs`](/ecs/)                                  | worlds, components, queries, systems, events and resources                |
-| [`tecs.events`](/modules/events)                     | platform events, typed once and routed                                    |
-| [`tecs.filesystem`](/modules/filesystem/)            | where a game may read and write, and what to do with a path               |
-| [`tecs.filesystem.watch`](/modules/filesystem/watch) | watching files for change                                                 |
-| [`tecs.future`](/modules/future)                     | a value that settles once                                                 |
-| [`tecs.gfx`](/modules/gfx/)                          | the camera, the components, the renderer, and the vocabularies below them |
-| [`tecs.gfx.animation`](/modules/gfx/animation)       | sprite sheets, and the playback that reads them                           |
-| [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behaviour                                        |
-| [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to                                         |
-| [`tecs.gfx.particles`](/modules/gfx/particles)       | emitters                                                                  |
-| [`tecs.http`](/modules/http)                         | fetching over HTTP without stopping the frame                             |
-| [`tecs.input`](/modules/input)                       | gameplay input, the gamepads on it, and standalone sensors                |
-| [`tecs.log`](/modules/log)                           | SDL's logging, per platform, with a named logger as the unit of filtering |
-| [`tecs.mcp`](/modules/mcp)                           | the debug server: transport, tools, sandbox                               |
-| [`tecs.net`](/modules/net)                           | nonblocking TCP streams and UDP datagrams                                 |
-| [`tecs.physics`](/modules/physics)                   | rigid-body simulation on Box2D 3                                          |
-| [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                           |
-| [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers |
-| [`tecs.text`](/modules/text)                         | distance-field text, drawn through an instance producer                   |
-| [`tecs.time`](/modules/time)                         | monotonic time                                                            |
-| [`tecs.version`](/modules/)                          | the version of this build, as a string                                    |
-| [`tecs.window`](/modules/window)                     | the window, its size, its display and its mode                            |
-| [`tecs.workers`](/modules/workers)                   | typed background jobs                                                     |
+| Module                                               | What it is                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| [`tecs.application`](/modules/application)           | the object an entry file returns, and what builds one                      |
+| [`tecs.assets`](/modules/assets)                     | loading content, cached and off the main thread                            |
+| [`tecs.audio`](/modules/audio)                       | clips, voices, groups, limits, the `Sound` component, and devices          |
+| [`tecs.data`](/modules/data)                         | JSON, DEFLATE and hashes over byte strings                                 |
+| [`tecs.ecs`](/ecs/)                                  | worlds, components, queries, systems, events and resources                 |
+| [`tecs.events`](/modules/events)                     | platform events, typed once and routed                                     |
+| [`tecs.filesystem`](/modules/filesystem/)            | where a game may read and write, and what to do with a path                |
+| [`tecs.filesystem.watch`](/modules/filesystem/watch) | watching files for change                                                  |
+| [`tecs.future`](/modules/future)                     | a value that settles once                                                  |
+| [`tecs.gfx`](/modules/gfx/)                          | the camera, the components, the renderer, text, and the vocabularies below |
+| [`tecs.gfx.animation`](/modules/gfx/animation)       | sprite sheets, and the playback that reads them                            |
+| [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behaviour                                         |
+| [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to                                          |
+| [`tecs.gfx.particles`](/modules/gfx/particles)       | emitters                                                                   |
+| [`tecs.http`](/modules/http)                         | fetching over HTTP without stopping the frame                              |
+| [`tecs.input`](/modules/input)                       | gameplay input, the gamepads on it, and standalone sensors                 |
+| [`tecs.log`](/modules/log)                           | SDL's logging, per platform, with a named logger as the unit of filtering  |
+| [`tecs.mcp`](/modules/mcp)                           | the debug server: transport, tools, sandbox                                |
+| [`tecs.net`](/modules/net)                           | nonblocking TCP streams and UDP datagrams                                  |
+| [`tecs.physics`](/modules/physics)                   | rigid-body simulation on Box2D 3                                           |
+| [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                            |
+| [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers  |
+| [`tecs.time`](/modules/time)                         | monotonic time                                                             |
+| [`tecs.version`](/modules/)                          | the version of this build, as a string                                     |
+| [`tecs.window`](/modules/window)                     | the window, its size, its display and its mode                             |
+| [`tecs.workers`](/modules/workers)                   | typed background jobs                                                      |
 
 ## tecs.ecs
 

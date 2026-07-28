@@ -66,7 +66,7 @@ describe("gfx.text", function()
             capacity = 4096,
         })
         renderer:install(world)
-        world:addPlugin(text.plugin({ renderer = renderer }))
+        world:addPlugin(text.textPlugin({ renderer = renderer }))
         return world, renderer
     end
 
@@ -316,23 +316,23 @@ describe("gfx.text", function()
         spawnText(world, 30, 60, "Static", 48)
         settle(world, renderer)
 
-        local built = text.layouts(world)
+        local built = text.textLayouts(world)
         assert.is_true(built >= 1, "the text was laid out at least once")
 
         for _ = 1, 8 do
             frame(world, renderer)
         end
-        assert.are.equal(built, text.layouts(world), "an unchanged string must not be laid out again")
+        assert.are.equal(built, text.textLayouts(world), "an unchanged string must not be laid out again")
 
         -- And the gate opens for a change, so it is a gate and not a
         -- permanent stop.
         local entity = spawnText(world, 30, 140, "Moved", 48)
         frame(world, renderer)
-        assert.are.equal(built + 1, text.layouts(world))
+        assert.are.equal(built + 1, text.textLayouts(world))
 
         world:getMut(entity, text.Text).text = "Moved on"
         frame(world, renderer)
-        assert.are.equal(built + 2, text.layouts(world))
+        assert.are.equal(built + 2, text.textLayouts(world))
         renderer:destroy()
     end)
 
@@ -373,7 +373,7 @@ describe("gfx.text", function()
         assert.is_true(ink(before, 0, 0, SIZE / 2, SIZE) > 500)
         assert.are.equal(0, ink(before, SIZE / 2, 0, SIZE, SIZE))
 
-        local built = text.layouts(world)
+        local built = text.textLayouts(world)
         local span = world:get(entity, text.Text)._span
         local transform = world:getMut(entity, Transform)
         transform.x = transform.x + SIZE / 2
@@ -381,7 +381,11 @@ describe("gfx.text", function()
 
         assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE), "the glyph left the half it started in")
         assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500, "and arrived in the other one")
-        assert.are.equal(built + 1, text.layouts(world), "a move is a relayout, since the glyphs carry where they are")
+        assert.are.equal(
+            built + 1,
+            text.textLayouts(world),
+            "a move is a relayout, since the glyphs carry where they are"
+        )
         assert.are.equal(
             span,
             world:get(entity, text.Text)._span,
@@ -647,7 +651,7 @@ describe("gfx.text", function()
             settle(world, renderer)
             assert.are.equal(4, renderer.count)
 
-            local before = text.layouts(world)
+            local before = text.textLayouts(world)
             local keptSpan = world:get(kept, text.Text)._span
             local keptX, keptY = text.glyphAt(world, kept, 2)
 
@@ -662,7 +666,7 @@ describe("gfx.text", function()
             assets.waitAll()
             frame(world, renderer)
 
-            assert.are.equal(before + 1, text.layouts(world), "a text naming another font was laid out again")
+            assert.are.equal(before + 1, text.textLayouts(world), "a text naming another font was laid out again")
             assert.are.equal(keptSpan, world:get(kept, text.Text)._span, "and it kept its span")
             local afterX, afterY = text.glyphAt(world, kept, 2)
             assert.are.equal(keptX, afterX, "and its glyphs are where they were")
@@ -703,9 +707,9 @@ describe("gfx.text", function()
             assert.is_truthy(tostring(reason):find("1024", 1, true), "unexpected refusal: " .. tostring(reason))
             assert.are.equal(512, second.atlasWidth, "a refusal leaves the font as it was")
 
-            local before = text.layouts(world)
+            local before = text.textLayouts(world)
             frame(world, renderer)
-            assert.are.equal(before, text.layouts(world), "a refused re-read must not lay anything out")
+            assert.are.equal(before, text.textLayouts(world), "a refused re-read must not lay anything out")
             assert.are.equal(2, renderer.count)
             renderer:destroy()
         end)

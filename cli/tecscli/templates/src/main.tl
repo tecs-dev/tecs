@@ -24,16 +24,16 @@ return tecs.application.create({
 
         -- Drawing text is opt-in, because a font atlas is uploaded into one
         -- particular renderer. This is what teaches the world to draw strings.
-        world:addPlugin(tecs.text.plugin({renderer = app.renderer}))
+        world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
 
         -- Measuring first is how the greeting ends up centred. It reads the
         -- font and touches no entity.
-        local greeting <const> = tecs.text.Text.new({
+        local greeting <const> = tecs.gfx.Text.new({
             text = "Hello Tecs",
-            font = tecs.text.defaultFont(),
+            font = tecs.gfx.defaultFont(),
             size = 96,
         })
-        local textWidth <const>, textHeight <const> = tecs.text.measure(greeting)
+        local textWidth <const>, textHeight <const> = tecs.gfx.measureText(greeting)
         local width <const>, height <const> = app.window:getPixelSize()
         local restY <const> = (height - textHeight) * 0.5
 

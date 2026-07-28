@@ -160,13 +160,13 @@ return tecs.application.create({
         -- Text is entities too. The plugin lays the string out into one child
         -- entity per glyph, and each of those is an ordinary renderable that
         -- the same cull and the same draw pick up.
-        world:addPlugin(tecs.text.plugin({renderer = app.renderer}))
+        world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
         world:spawn(
             Transform(24, 24, 0, 1),
             Tint(0.92, 0.96, 1.0, 1.0),
-            tecs.text.Text.new({
+            tecs.gfx.Text.new({
                 text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                font = tecs.text.defaultFont(),
+                font = tecs.gfx.defaultFont(),
                 size = 28,
             })
         )

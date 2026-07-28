@@ -68,7 +68,7 @@ nonzero alpha because coverage here is a yes or a no: a texel kept at low alpha 
 dark fringe rather than as a soft edge. An image authored with a soft edge therefore gets a hard one, cut
 where the artwork crosses half alpha.
 
-`glyph` is the material [text](/modules/text) selects, and it is unlit, so a caption draws at its own
+`glyph` is the material [text](/modules/gfx/) selects, and it is unlit, so a caption draws at its own
 colour rather than being left in the dark by a scene's lights.
 
 Only three of them claim a shape to the lighting pass: `circle` and `ellipse` return a dome, `capsule`

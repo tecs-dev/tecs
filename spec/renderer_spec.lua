@@ -2705,7 +2705,7 @@ describe("ecs.Renderer", function()
 
             local function scene(clip)
                 local world, renderer = newScene()
-                world:addPlugin(text.plugin({ renderer = renderer }))
+                world:addPlugin(text.textPlugin({ renderer = renderer }))
                 local parts = {
                     Transform(2, 2, 0, 1),
                     Tint(0.0, 1.0, 0.0, 1.0),

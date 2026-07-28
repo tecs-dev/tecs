@@ -824,7 +824,7 @@ configuration, ordering, conditional execution, and removal rules.
 Use plugins to add systems, components, states, and more to a `World`. Tecs builds everything around plugins:
 a game itself is one, the `function(world, app)` an [`Application`](/modules/application) is configured with,
 and a game with several modules calls `world:addPlugin` from inside it rather than growing a second composition
-mechanism. Engine features arrive the same way, for example `tecs.text.plugin({ renderer = app.renderer })`.
+mechanism. Engine features arrive the same way, for example `tecs.gfx.textPlugin({ renderer = app.renderer })`.
 
 ### addPlugin
 

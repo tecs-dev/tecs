@@ -264,6 +264,7 @@ describe("the public surface", function()
             assert.is_nil(tecs.camera)
             assert.is_nil(tecs.renderer)
             assert.is_nil(tecs.components)
+            assert.is_nil(tecs.text)
         end)
 
         it("does not carry the transform every subsystem moves", function()

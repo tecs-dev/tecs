@@ -100,7 +100,7 @@ return tecs.application.create({
         -- for the report.
         time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
 
-        world:addPlugin(text.plugin({renderer = renderer}))
+        world:addPlugin(text.textPlugin({renderer = renderer}))
         local font = text.defaultFont()
         transientFont = font
 
@@ -202,7 +202,7 @@ return tecs.application.create({
                 local frames <const> = math.max(1, frame - WARMUP)
                 print(
                     ("%d instances drawn, %d layouts, %.0f instances " .. "rewritten per frame"):format(
-                        glyphs, text.layouts(world), rewritten / frames
+                        glyphs, text.textLayouts(world), rewritten / frames
                     )
                 )
                 local report = timing.format()

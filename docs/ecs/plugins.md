@@ -66,7 +66,7 @@ rather than two. It is also how the engine's own optional pieces are installed; 
 plugin this way:
 
 ```teal
-world:addPlugin(tecs.text.plugin({ renderer = app.renderer }))
+world:addPlugin(tecs.gfx.textPlugin({ renderer = app.renderer }))
 ```
 
 ## Writing a plugin
@@ -137,7 +137,7 @@ health while the game is paused, without the system knowing anything about state
 
 ### Configuration through a closure
 
-Return the plugin from a function that takes the configuration. This is the shape `tecs.text.plugin` uses, and
+Return the plugin from a function that takes the configuration. This is the shape `tecs.gfx.textPlugin` uses, and
 it keeps the configuration typed rather than reaching it out of a table at run time.
 
 ```teal

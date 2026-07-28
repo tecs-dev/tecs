@@ -139,7 +139,6 @@ export default defineConfig({
                     { text: "tecs.physics", link: "/modules/physics" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
                     { text: "tecs.system", link: "/modules/system" },
-                    { text: "tecs.text", link: "/modules/text" },
                     { text: "tecs.time", link: "/modules/time" },
                     { text: "tecs.window", link: "/modules/window" },
                     { text: "tecs.workers", link: "/modules/workers" },

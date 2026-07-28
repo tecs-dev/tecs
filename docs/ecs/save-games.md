@@ -89,7 +89,7 @@ are the worked examples of why:
 - **`tecs.audio.Sound`** crosses as the clip path and the group name it interned from. The voice is not
   restored: a snapshot records that an entity has a sound, not how far through it the mixer had got, so it
   starts.
-- **`tecs.text.Text`** saves the authored fields and the font by name. A font never loaded in this process
+- **`tecs.gfx.Text`** saves the authored fields and the font by name. A font never loaded in this process
   leaves the restored text without one, which lays out nothing rather than failing the load.
 - **`tecs.physics.RigidBody`** serializes to nothing at all and restores as the null handle, because a Box2D
   handle is dense and reused, so a saved one would name whichever body the loading run happened to put in that

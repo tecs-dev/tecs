@@ -341,6 +341,53 @@ local record gfx
     --- @return The normalised name, or nil when the index names nothing.
     imageName: function(id: integer): string
 
+    --- What `loadFont` answers with, and what a `Text` names.
+    type Font = text.Font
+    --- One entry of a font's `glyphs`, in the units the atlas was generated
+    --- at.
+    type GlyphMetrics = text.GlyphMetrics
+    --- What `loadFont` takes.
+    type FontOptions = text.FontOptions
+    --- What `textPlugin` takes.
+    type TextOptions = text.TextOptions
+
+    --- A run of distance-field text, drawn as one entity whose glyphs are not
+    --- entities. Needs `textPlugin` installed on the world.
+    Text: text.Text
+
+    --- Loads a font's metrics and names its atlas, answering with the font
+    --- already loaded under that path rather than reading it twice.
+    loadFont: function(options: text.FontOptions): text.Font
+
+    --- The font the engine ships, loaded on first use.
+    defaultFont: function(): text.Font
+
+    --- The font loaded under a metrics path, or nil for one nothing loaded.
+    --- Kept as it is rather than made a `findFoo`: the verb sweep is a later
+    --- pass, and `sheetByName` beside it reads the same way.
+    fontByName: function(name: string): text.Font
+
+    --- Re-reads a loaded font's metrics in place, so every `Text` naming it
+    --- keeps pointing at the same table.
+    reloadFont: function(path: string): text.Font
+
+    --- Extent of a `Text` in world units, laid out the way the system lays it
+    --- out and without touching any entity.
+    measureText: function(item: text.Text): number, number
+
+    --- The plugin that lays texts out and produces their glyph instances.
+    --- Named for what it installs, since `tecs.gfx.plugin` would read as the
+    --- plugin for drawing rather than the one for text.
+    textPlugin: function(options: text.TextOptions): function(types.World)
+
+    --- How many texts have been laid out in a world since it was created,
+    --- which is what asserts the dirty gates rather than assuming them.
+    textLayouts: function(world: types.World): integer
+
+    --- Where the `index`th glyph of an entity's `Text` landed, as world x, y,
+    --- width and height.
+    glyphAt: function(world: types.World, entity: integer, index: integer): number, number, number, number
+
     animation: animation
     layers: layers
     materials: materials
@@ -408,7 +455,6 @@ local record tecs
     physics: physics
     sequence: sequence
     system: system
-    text: text
     time: time
     window: window
     workers: workers
@@ -475,7 +521,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     future = {module = "tecs.Future", class = "Future"},
     gfx = {
-        beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer"},
+        beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
         within = {
             Camera = {module = "tecs.gfx.Camera"},
             Renderer = {module = "tecs.Renderer"},
@@ -498,7 +544,6 @@ local SURFACE <const>: {string: Namespace} = {
     physics = {module = "tecs.physics"},
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
-    text = {module = "tecs.gfx.text"},
     time = {module = "tecs.platform.time"},
     window = {module = "tecs.platform.Window", class = "Window"},
     workers = {module = "tecs.workers"},

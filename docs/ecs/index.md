@@ -173,7 +173,7 @@ end)
 
 There is one composition mechanism rather than two. The entry plugin `tecs.application.create` takes is the same shape
 with the application passed alongside, and a game with several modules calls `world:addPlugin` from inside it.
-The engine installs its own pieces the same way: `tecs.text.plugin({renderer = app.renderer})` is an ordinary
+The engine installs its own pieces the same way: `tecs.gfx.textPlugin({renderer = app.renderer})` is an ordinary
 plugin.
 
 > See the [Plugins reference](/ecs/plugins).

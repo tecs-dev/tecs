@@ -87,7 +87,7 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | `PostUpdate`      | `tecs.PlaySounds`               | [`Audio`](/modules/audio)                          |
 | `PostUpdate`      | `tecs.EncodeAnimation`          | [`animation`](/modules/gfx/animation) plugin       |
 | `PostUpdate`      | `tecs.ReportAnimation`          | [`animation`](/modules/gfx/animation) plugin       |
-| `PostUpdate`      | `tecs.TextLayout`               | [`text`](/modules/text) plugin                     |
+| `PostUpdate`      | `tecs.TextLayout`               | [`text`](/modules/gfx/) plugin                     |
 | `PostUpdate`      | `tecs.ParticleEmitterSync`      | [`particles`](/modules/gfx/particles) plugin       |
 | `RenderFirst`     | `tecs.SyncRenderState`          | [`Renderer`](/modules/gfx/)                        |
 | `RenderLast`      | `RelativeTransformDirtySampler` | builtins, every world                              |
