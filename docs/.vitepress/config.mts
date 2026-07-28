@@ -129,7 +129,6 @@ export default defineConfig({
                     { text: "tecs.renderer", link: "/modules/renderer" },
                     { text: "tecs.sensors", link: "/modules/sensors" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
-                    { text: "tecs.sheet", link: "/modules/sheet" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.text", link: "/modules/text" },
                     { text: "tecs.watch", link: "/modules/watch" },

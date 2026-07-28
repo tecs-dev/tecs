@@ -93,6 +93,39 @@ local function withPlayback(gpu, body)
     end
 end
 
+describe("the surface a game reaches sheets through", function()
+    -- Nothing else in the suite names the surface key, so nothing else would
+    -- notice a re-export that named the wrong function or was left off.
+    it("answers with the same functions the module holds", function()
+        assert.are.equal(sheet.Sheet, tecs.animation.Sheet)
+        assert.are.equal(sheet.Pivot, tecs.animation.Pivot)
+        assert.are.equal(sheet.DEFAULT_DURATION, tecs.animation.DEFAULT_DURATION)
+        assert.are.equal(sheet.grid, tecs.animation.grid)
+        assert.are.equal(sheet.rects, tecs.animation.rects)
+        assert.are.equal(sheet.build, tecs.animation.build)
+        assert.are.equal(sheet.fromAseprite, tecs.animation.fromAseprite)
+        assert.are.equal(sheet.replace, tecs.animation.replace)
+    end)
+
+    it("renames the three whose subject the move made ambiguous", function()
+        -- `byName` on a module called animation reads as an animation lookup
+        -- and answers with a sheet, which is why these three carry the word.
+        assert.are.equal(sheet.byId, tecs.animation.sheetById)
+        assert.are.equal(sheet.byName, tecs.animation.sheetByName)
+        assert.are.equal(sheet.revision, tecs.animation.sheetRevision)
+        assert.is_nil(rawget(tecs.animation, "byId"))
+        assert.is_nil(rawget(tecs.animation, "byName"))
+        assert.is_nil(rawget(tecs.animation, "revision"))
+    end)
+
+    it("no longer answers to a module of its own", function()
+        -- Nil rather than an error, because the surface catches a name it does
+        -- not carry where it is written: Teal refuses `tecs.sheet` at compile
+        -- time, and a Lua spec is the one caller that gets this far.
+        assert.is_nil(tecs.sheet)
+    end)
+end)
+
 describe("tecs.gfx.sheet", function()
     describe("a uniform grid", function()
         it("cuts the cells left to right and then top to bottom", function()

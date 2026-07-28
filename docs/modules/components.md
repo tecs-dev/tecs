@@ -159,7 +159,7 @@ drawing the layer the old name resolved to.
 
 The UV rect selects a region, so an atlas is the same thing as a whole image with the rect set to the full
 range. A Sprite is normally not built by hand: [`Renderer`](/modules/renderer) hands one back when an image is
-registered, and [`sheet`](/modules/sheet) builds them per frame and per slice.
+registered, and [`animation`](/modules/animation) builds them per frame and per slice.
 
 **Pairs with:** `Renderable` and `Tint`, which the renderable query requires; `Animation` from
 [`animation`](/modules/animation), which drives playback by writing the UV lanes. When an animation resolves on
@@ -327,7 +327,7 @@ Subsystems register components of their own, and they are documented with the su
 
 | Component             | Module                                           | What it does                                          |
 | --------------------- | ------------------------------------------------ | ----------------------------------------------------- |
-| `Pivot`               | [`sheet`](/modules/sheet)                        | Hangs the quad off a point other than its middle.     |
+| `Pivot`               | [`animation`](/modules/animation)                | Hangs the quad off a point other than its middle.     |
 | `Animation`           | [`animation`](/modules/animation)                | Sprite-sheet playback, resolved in the vertex shader. |
 | `AnimationEvents`     | [`animation`](/modules/animation)                | Events derived from playback.                         |
 | `Text`                | [`text`](/modules/text)                          | A run of distance-field text.                         |

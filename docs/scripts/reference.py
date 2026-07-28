@@ -86,7 +86,6 @@ MODULES = [
     ("docs/modules/renderer.md", [("src/tecs/Renderer.tl", "tecs.renderer.Renderer")]),
     ("docs/modules/sensors.md", [("src/tecs/platform/sensors.tl", "tecs.sensors")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
-    ("docs/modules/sheet.md", [("src/tecs/gfx/sheet.tl", "tecs.sheet")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/text.md", [("src/tecs/gfx/text.tl", "tecs.text")]),
     ("docs/modules/watch.md", [("src/tecs/platform/watch.tl", "tecs.watch")]),

@@ -27,7 +27,7 @@ features:
     details: An <a href="/ecs/archetype">archetype-based ECS</a> with FFI components, contiguous columns, and a dirty model the GPU reads.
     icon: ⚡
   - title: Batteries included
-    details: <a href="/modules/physics">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/particles">particles</a>, <a href="/modules/text">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/sheet">sprite sheets</a> and hot reload ship in the box, sharing one data model.
+    details: <a href="/modules/physics">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/particles">particles</a>, <a href="/modules/text">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/animation">sprite sheets</a> and hot reload ship in the box, sharing one data model.
     icon: 🔋
   - title: Static typing
     details: Catch errors at compile time, not runtime. Tecs is designed from the ground up for static typing with <a href="https://github.com/teal-language/tl"><u>Teal</u></a>.
@@ -220,7 +220,7 @@ behind each one.
 
 <div class="module-columns">
 
-- [`tecs.animation`](/modules/animation) - sprite playback
+- [`tecs.animation`](/modules/animation) - sprite sheets, and the playback that reads them
 - [`tecs.application`](/modules/application) - the object an entry file returns, and what builds one
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
@@ -251,7 +251,6 @@ behind each one.
 - [`tecs.renderer`](/modules/renderer) - deferred and GPU-driven, with compute culling and one indirect draw
 - [`tecs.sensors`](/modules/sensors) - standalone accelerometers and gyroscopes
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
-- [`tecs.sheet`](/modules/sheet) - sprite sheets, frame tags, pivots
 - [`tecs.system`](/modules/system) - URLs, locales, power, messages, and native file and folder dialogs
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer
 - [`tecs.version`](/modules/) - the version of this build, as a string

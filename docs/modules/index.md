@@ -25,7 +25,7 @@ and checked against a fresh render so it cannot drift.
 
 | Module                                       | What it is                                                                |
 | -------------------------------------------- | ------------------------------------------------------------------------- |
-| [`tecs.animation`](/modules/animation)       | sprite playback                                                           |
+| [`tecs.animation`](/modules/animation)       | sprite sheets, and the playback that reads them                           |
 | [`tecs.application`](/modules/application)   | the object an entry file returns, and what builds one                     |
 | [`tecs.assets`](/modules/assets)             | loading content, cached and off the main thread                           |
 | [`tecs.audio`](/modules/audio)               | clips, voices, groups, limits, the `Sound` component, and devices         |
@@ -56,7 +56,6 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.renderer`](/modules/renderer)         | a world to a frame, through an extractor and a backend                    |
 | [`tecs.sensors`](/modules/sensors)           | standalone accelerometers and gyroscopes                                  |
 | [`tecs.sequence`](/modules/sequence)         | the sequencer, with the tween runtime inside it                           |
-| [`tecs.sheet`](/modules/sheet)               | sprite sheets: loading one, and what is in it                             |
 | [`tecs.system`](/modules/system)             | URLs, locales, power, messages, and native file and folder dialogs        |
 | [`tecs.text`](/modules/text)                 | distance-field text, drawn through an instance producer                   |
 | [`tecs.version`](/modules/)                  | the version of this build, as a string                                    |

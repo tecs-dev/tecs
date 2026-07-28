@@ -25,7 +25,6 @@ local type Future = require("tecs.Future")
 local type Renderer = require("tecs.Renderer")
 local type Audio = require("tecs.Audio")
 local type Camera = require("tecs.gfx.Camera")
-local type sheet = require("tecs.gfx.sheet")
 local type animation = require("tecs.gfx.animation")
 local type Window = require("tecs.platform.Window")
 local type Input = require("tecs.platform.Input")
@@ -229,7 +228,6 @@ local record tecs
     renderer: renderer
     sensors: sensors
     sequence: sequence
-    sheet: sheet
     system: system
     text: text
     watch: watch
@@ -249,7 +247,6 @@ tecs.ecs = ecs
 --- Listed rather than discovered, so `tecs.anmation` is an error where it is
 --- written instead of a nil where it is called.
 local ENGINE <const>: {string: string} = {
-    sheet = "tecs.gfx.sheet",
     animation = "tecs.gfx.animation",
     clock = "tecs.platform.clock",
     events = "tecs.platform.events",

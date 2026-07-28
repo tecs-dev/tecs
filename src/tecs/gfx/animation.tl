@@ -288,6 +288,98 @@ local record animation
 
     --- Whether playback resolves on the GPU.
     usesGPU: function(): boolean
+
+    --- Sheets, which live in `tecs.gfx.sheet` and are reached through here.
+    ---
+    --- Constructing a sheet and playing one are one subject, so a game asks one
+    --- module about both. The file stays its own because `frametable` reads it
+    --- and this module reads `frametable`, and a Teal cycle is a cycle even
+    --- through a type-only require.
+    ---
+    --- Three of the names change on the way through. `byId`, `byName` and
+    --- `revision` each leave their subject implicit, and the implicit subject
+    --- here would be an animation rather than a sheet; the other eight say what
+    --- they answer with in their return type and are unambiguous as they stand.
+
+    --- How a tag walks its span.
+    type Direction = sheet.Direction
+    --- One frame, as `rects` and the builder take it.
+    type Rect = sheet.Rect
+    --- A named span of frames, as the constructors take it.
+    type Tag = sheet.Tag
+    --- A named region that moves across the frames.
+    type Slice = sheet.Slice
+    --- Where a slice sits from one frame on.
+    type SliceKey = sheet.SliceKey
+    --- What `grid` takes.
+    type GridOptions = sheet.GridOptions
+    --- What `rects` takes.
+    type RectsOptions = sheet.RectsOptions
+    --- What `fromAseprite` takes.
+    type AsepriteOptions = sheet.AsepriteOptions
+    --- What `build` answers with.
+    type Builder = sheet.Builder
+
+    --- An image divided into frames.
+    Sheet: sheet.Sheet
+
+    --- Where an entity's quad turns and scales about.
+    Pivot: sheet.Pivot
+
+    --- Milliseconds a frame is held when nothing says otherwise.
+    DEFAULT_DURATION: number
+
+    --- A sheet whose frames are the cells of a uniform grid.
+    --- @param options Raises on a missing name, a non-positive image or frame
+    ---     size, a grid that fits no cells, or a `count` past what the grid
+    ---     holds. Frames come out in row-major order.
+    --- @return The finished sheet, already registered under its name and
+    ---     carrying an `id`.
+    grid: function(options: sheet.GridOptions): sheet.Sheet
+
+    --- A sheet whose frames are listed one rect at a time.
+    --- @param options Raises on a missing name, a non-positive image size, an
+    ---     empty frame list, or a frame with no positive size.
+    --- @return The finished sheet, already registered under its name and
+    ---     carrying an `id`.
+    rects: function(options: sheet.RectsOptions): sheet.Sheet
+
+    --- A builder, for a sheet no constructor above describes.
+    --- @param name Name to register the finished sheet under.
+    --- @param imageWidth Size of the image the frames are cut from, in pixels.
+    --- @param imageHeight The other size, in pixels.
+    --- @return A builder, which registers the sheet when `finish` is called.
+    build: function(name: string, imageWidth: number, imageHeight: number): sheet.Builder
+
+    --- A sheet from an Aseprite JSON export.
+    --- @param options Raises on a missing name or an export the reader cannot
+    ---     make a sheet out of.
+    --- @return The finished sheet, already registered.
+    fromAseprite: function(options: sheet.AsepriteOptions): sheet.Sheet
+
+    --- Folds a re-exported sheet into the one already registered under its
+    --- name, in place, so an entity playing the old id shows the new frames.
+    --- @param built A sheet from any constructor here, registered moments ago
+    ---     under a name something else already holds.
+    --- @return The live sheet, and nil, or nil and the reason it was refused.
+    replace: function(built: sheet.Sheet): sheet.Sheet, string
+
+    --- The sheet a process-wide id names.
+    --- @param id An id a constructor handed out.
+    --- @return The sheet, or nil when the id names none.
+    sheetById: function(id: integer): sheet.Sheet
+
+    --- The sheet a name was registered under.
+    --- @param name The name a constructor registered.
+    --- @return The sheet, or nil when the name names none.
+    sheetByName: function(name: string): sheet.Sheet
+
+    --- How many times any sheet's frames have changed.
+    ---
+    --- What a cache of anything derived from a sheet compares against, so a
+    --- sheet replaced or rebound under a running game invalidates it.
+    --- @return A number that only ever increases.
+    sheetRevision: function(): integer
 end
 
 ecs.newFFIComponent({
@@ -347,6 +439,21 @@ animation.Animation = Animation
 animation.Completed = Completed
 animation.Looped = Looped
 animation.AnimationEvents = AnimationEvents
+
+-- Sheets, reached through here rather than through a module of their own. The
+-- functions are the same objects rather than wrappers, so nothing is a call
+-- deeper for going through this name.
+animation.Sheet = sheet.Sheet
+animation.Pivot = sheet.Pivot
+animation.DEFAULT_DURATION = sheet.DEFAULT_DURATION
+animation.grid = sheet.grid
+animation.rects = sheet.rects
+animation.build = sheet.build
+animation.fromAseprite = sheet.fromAseprite
+animation.replace = sheet.replace
+animation.sheetById = sheet.byId
+animation.sheetByName = sheet.byName
+animation.sheetRevision = sheet.revision
 
 animation.Completed.init = function(event: Completed, entity: integer, source: Sheet, tag: string)
     event.entity, event.sheet, event.tag = entity, source, tag
