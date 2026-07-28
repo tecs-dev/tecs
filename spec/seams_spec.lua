@@ -249,6 +249,7 @@ local STORAGE = {
         symbols = {
             "SDL_LoadFile",
             "SDL_SaveFile",
+            "SDL_IOFromFile",
             "SDL_GetPathInfo",
             "SDL_GlobDirectory",
             "SDL_CreateDirectory",
@@ -258,7 +259,9 @@ local STORAGE = {
             "SDL_GetCurrentDirectory",
             "SDL_GetUserFolder",
         },
-        reason = "The seam's SDL implementation, and the one place these " .. "belong. Ten calls, one each.",
+        reason = "The seam's SDL implementation, and the one place these "
+            .. "belong. Ten path calls, one each, plus the open a streaming "
+            .. "read or write is built on.",
     },
     ["tecs/platform/adapter.lua"] = {
         bucket = "seam",

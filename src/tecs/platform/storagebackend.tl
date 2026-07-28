@@ -47,11 +47,15 @@
 ---
 --- ## What a port implements
 ---
---- Eight functions that take a path, and two that ask about the host. The eight
---- are required and are called without checking. The two are optional and
---- answer nil with a reason when the platform has no such notion, which is
---- already what SDL answers for a folder a desktop does not have, so a caller
---- that handled SDL's nil handles a port's.
+--- Eight functions that take a path, two that open one for streaming, and two
+--- that ask about the host. The eight are required and are called without
+--- checking. `currentDirectory` and `userFolder` are optional and answer nil
+--- with a reason when the platform has no such notion, which is already what
+--- SDL answers for a folder a desktop does not have, so a caller that handled
+--- SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
+--- different sense: `filesystem` builds both out of `write` and `read` when a
+--- backend leaves them out, so every caller has them and only the memory a
+--- large file costs differs.
 ---
 --- Nothing here validates its arguments. `filesystem` does that before it
 --- delegates, so a port inherits it rather than repeating it.
@@ -96,6 +100,31 @@ local enum UserFolder
     "videos"
 end
 
+--- A write that takes its bytes in pieces.
+---
+--- `write` answers the whole file at once, which is the right shape for state a
+--- game saves and the wrong one for bytes that arrive over time: a download
+--- that ends in a file has to become a Lua string first, and the string is as
+--- large as the download. This is the other spelling, and it is what
+--- `tecs.http`'s `into` writes through.
+local record Writer
+    --- Appends `bytes`. False and a reason when they did not land.
+    write: function(self: Writer, bytes: string): boolean, string
+    --- Finishes the file and releases the handle. Answers false and a reason
+    --- when the last bytes did not reach it, which is a failure a caller that
+    --- only checked each `write` would never see. Closing twice succeeds.
+    close: function(self: Writer): boolean, string
+end
+
+--- A read that hands over its bytes in pieces. The mirror of `Writer`.
+local record Reader
+    --- Up to `count` bytes, fewer at the end of the file and an empty string
+    --- once there are none left. Nil and a reason on a failure.
+    read: function(self: Reader, count: integer): string, string
+    --- Releases the handle. Closing twice is a no-op.
+    close: function(self: Reader)
+end
+
 --- How a pattern is matched.
 local record GlobOptions
     --- Match without regard to case. Defaults to false, which is a
@@ -116,6 +145,16 @@ local record Backend
     --- Writes `bytes` to `path`, replacing whatever was there. The parent is
     --- not created.
     write: function(path: string, bytes: string): boolean, string
+    --- Opens `path` for writing in pieces, replacing whatever was there.
+    ---
+    --- Optional. A platform that leaves it nil gets a writer `filesystem`
+    --- builds out of `write`, which holds the pieces and writes once, so the
+    --- interface is the same everywhere and only the memory differs.
+    openWrite: function(path: string): Writer, string
+    --- Opens `path` for reading in pieces.
+    ---
+    --- Optional, with the same fallback in terms of `read`.
+    openRead: function(path: string): Reader, string
     --- What is at `path`, or nil and the reason there is nothing to describe.
     info: function(path: string): Info, string
     --- Entries under `path` matching `pattern`, as paths relative to `path`.
@@ -160,6 +199,10 @@ local record storagebackend
     folders: {UserFolder: boolean}
     --- How `Backend.glob` matches.
     GlobOptions: GlobOptions
+    --- A write taking its bytes in pieces.
+    Writer: Writer
+    --- A read handing its bytes over in pieces.
+    Reader: Reader
     --- The seam a port implements.
     Backend: Backend
     --- The SDL backend, and the default everywhere.
@@ -216,6 +259,95 @@ local function take(pointer: loader.CValue): string
     return text
 end
 
+--- Bytes read in one call when a caller does not ask for a size.
+local READ_CHUNK <const> = 64 * 1024
+
+--- Opens an `SDL_IOStream` and wraps it as a `Writer`.
+---
+--- The stream is a closed-over local rather than a field, so a closed writer
+--- has nothing left to call SDL with and says so instead of handing a freed
+--- pointer back to the library.
+local function sdlWriter(path: string): Writer, string
+    local stream = C.SDL_IOFromFile(path, "wb") as loader.CPtr
+    if stream == nil then
+        return nil, sdl.error()
+    end
+
+    local writer <const>: Writer = {}
+    writer.write = function(_self: Writer, bytes: string): boolean, string
+        if stream == nil then
+            return false, "the writer is closed"
+        end
+        local length <const> = #bytes
+        if length == 0 then
+            return true
+        end
+        local written <const> = tonumber(C.SDL_WriteIO(stream, bytes, length)) as integer
+        if written < length then
+            return false, sdl.error()
+        end
+        return true
+    end
+    writer.close = function(_self: Writer): boolean, string
+        if stream == nil then
+            return true
+        end
+        local held <const> = stream
+        stream = nil
+        -- SDL flushes here, so a full disk is reported by this call and by
+        -- nothing before it.
+        if not C.SDL_CloseIO(held) then
+            return false, sdl.error()
+        end
+        return true
+    end
+    return writer
+end
+
+--- Opens an `SDL_IOStream` and wraps it as a `Reader`.
+local function sdlReader(path: string): Reader, string
+    local stream = C.SDL_IOFromFile(path, "rb") as loader.CPtr
+    if stream == nil then
+        return nil, sdl.error()
+    end
+
+    -- Grown to the largest read asked for and kept, so a reader driven in
+    -- equal chunks allocates once rather than once a chunk.
+    local buffer: loader.CArray = nil
+    local capacity = 0
+
+    local reader <const>: Reader = {}
+    reader.read = function(_self: Reader, count: integer): string, string
+        if stream == nil then
+            return nil, "the reader is closed"
+        end
+        local wanted <const> = count ~= nil and count > 0 and count or READ_CHUNK
+        if wanted > capacity then
+            buffer = loader.newArray("char[?]", wanted)
+            capacity = wanted
+        end
+        local got <const> = tonumber(C.SDL_ReadIO(stream, buffer, wanted)) as integer
+        if got <= 0 then
+            -- Zero is the end of the file or a failure, and only the status
+            -- tells them apart.
+            if tonumber(C.SDL_GetIOStatus(stream)) == tonumber(C.SDL_IO_STATUS_ERROR) then
+                return nil, sdl.error()
+            end
+            return ""
+        end
+        return loader.toBytes(buffer as loader.CValue, got)
+    end
+    reader.close = function(_self: Reader)
+        if stream == nil then
+            return
+        end
+        local held <const> = stream
+        stream = nil
+        C.SDL_CloseIO(held)
+    end
+    return reader
+end
+
 --- One SDL call each, and nothing composed out of several.
 ---
 --- A failure is SDL's failure, so the name of the call is what to read the
@@ -241,6 +373,9 @@ local sdlBackend <const>: Backend = {
         end
         return false, sdl.error()
     end,
+
+    openWrite = sdlWriter,
+    openRead = sdlReader,
 
     info = function(path: string): Info, string
         if not C.SDL_GetPathInfo(path, INFO) then

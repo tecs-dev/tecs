@@ -26,6 +26,8 @@
 ---  ───────────────────  ─────────────────  ─────────────────────
 ---  read                 read               SDL_LoadFile
 ---  write                write              SDL_SaveFile
+---  openRead             openRead           SDL_IOFromFile
+---  openWrite            openWrite          SDL_IOFromFile
 ---  info                 info               SDL_GetPathInfo
 ---  exists               info               SDL_GetPathInfo
 ---  isFile               info               SDL_GetPathInfo
@@ -194,11 +196,19 @@ local record filesystem
 
     --- How a pattern is matched.
     type GlobOptions = storagebackend.GlobOptions
+
+    --- A write that takes its bytes in pieces.
+    type Writer = storagebackend.Writer
+
+    --- A read that hands its bytes over in pieces.
+    type Reader = storagebackend.Reader
 end
 
 local type Info = filesystem.Info
 local type UserFolder = filesystem.UserFolder
 local type GlobOptions = filesystem.GlobOptions
+local type Writer = filesystem.Writer
+local type Reader = filesystem.Reader
 
 --- Every path read or decoded this process, by the kind it was read as.
 local opened <const>: {string: string} = {}
@@ -385,6 +395,54 @@ function filesystem.loaded(): {string: string}
     return opened
 end
 
+--- A `Writer` for a backend that has no streaming write.
+---
+--- Holds the pieces and writes them once on close, which is what `write`
+--- already does and costs what it already costs. It exists so a caller has one
+--- interface everywhere: a port that streams gets the memory back without the
+--- caller knowing, and a port that does not is no worse than it was.
+local function bufferedWriter(backend: storagebackend.Backend, path: string): Writer, string
+    local pieces: {string} = {}
+    local count = 0
+
+    local writer <const>: Writer = {}
+    writer.write = function(_self: Writer, bytes: string): boolean, string
+        if pieces == nil then
+            return false, "the writer is closed"
+        end
+        count = count + 1
+        pieces[count] = bytes
+        return true
+    end
+    writer.close = function(_self: Writer): boolean, string
+        if pieces == nil then
+            return true
+        end
+        local whole <const> = table.concat(pieces, "", 1, count)
+        pieces = nil
+        return backend.write(path, whole)
+    end
+    return writer
+end
+
+--- A `Reader` over bytes already in memory, for the same reason.
+local function slicingReader(bytes: string): Reader
+    local at = 1
+
+    local reader <const>: Reader = {}
+    reader.read = function(_self: Reader, count: integer): string, string
+        if at > #bytes then
+            return ""
+        end
+        local last <const> = math.min(#bytes, at + math.max(1, count) - 1)
+        local piece <const> = bytes:sub(at, last)
+        at = last + 1
+        return piece
+    end
+    reader.close = function(_self: Reader) at = #bytes + 1 end
+    return reader
+end
+
 --- Writes `bytes` to `path`, replacing whatever was there.
 ---
 --- Binary: the string's own length is what is written, so a NUL in the middle
@@ -398,6 +456,49 @@ function filesystem.write(path: string, bytes: string): boolean, string
         error("tecs: filesystem.write needs bytes to write", 2)
     end
     return adapter.storage().write(path, bytes)
+end
+
+--- Opens `path` for writing in pieces, replacing whatever was there.
+---
+--- What `write` cannot do: a body that arrives over time never becomes one
+--- string as large as itself. A download that ends in a file writes through
+--- this, and so does anything else assembled from parts.
+---
+--- Close it. The bytes are not guaranteed to be on disk until `close` answers,
+--- and it is the call a full disk is reported by.
+---
+---     local writer <const> = assert(tecs.filesystem.openWrite(path))
+---     writer:write(chunk)
+---     assert(writer:close())
+---
+--- @return The writer, or nil and the reason there is none.
+function filesystem.openWrite(path: string): Writer, string
+    required(path, "openWrite")
+    local backend <const> = adapter.storage()
+    if backend.openWrite ~= nil then
+        return backend.openWrite(path)
+    end
+    return bufferedWriter(backend, path)
+end
+
+--- Opens `path` for reading in pieces. The mirror of `openWrite`.
+---
+--- `read` is the right call for a file a program wants whole. This is for one
+--- it wants to hand over as it goes: an upload body is read through this, so
+--- the file being sent is never also in memory.
+---
+--- @return The reader, or nil and the reason there is none.
+function filesystem.openRead(path: string): Reader, string
+    required(path, "openRead")
+    local backend <const> = adapter.storage()
+    if backend.openRead ~= nil then
+        return backend.openRead(path)
+    end
+    local bytes <const> = backend.read(path)
+    if bytes == nil then
+        return nil, ("cannot read %s"):format(path)
+    end
+    return slicingReader(bytes)
 end
 
 --- The process working directory, with a trailing separator.
