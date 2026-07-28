@@ -10,6 +10,7 @@ local type System = types.System
 local type Pipeline = types.Pipeline
 local type Phase = types.Phase
 local type SystemConfig = types.SystemConfig
+local type FixedOverload = types.FixedOverload
 
 -- Pipeline-owned fields are kept off the public SystemConfig contract.
 local record RegisteredSystem is SystemConfig
@@ -34,7 +35,7 @@ end
 
 -- Internal pipeline factory.
 local record pipeline
-    new: function(fixedTimestep: number): Pipeline
+    new: function(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverload?: FixedOverload): Pipeline
 end
 
 -- Concrete state behind the public Pipeline interface.
@@ -56,6 +57,21 @@ local record PipelineImpl is Pipeline
     -- steps stays exact in a float far longer than a sum of them would.
     fixedStepCount: integer
 
+    fixedMaxSteps: integer
+
+    fixedOverload: FixedOverload
+
+    fixedTimeDropped: number
+
+    fixedStepsDropped: integer
+
+    -- The next total of `fixedStepsDropped` that warrants a log line, doubling
+    -- from one. A machine dropping on every frame has one problem and does not
+    -- need it named sixty times a second, but the first drop and every doubling
+    -- past it are worth saying out loud, because a counter nobody reads is the
+    -- same silence this replaces.
+    nextDropReport: integer
+
     count: integer
 
     beforeFixedGroup: FlatGroup
@@ -72,9 +88,23 @@ local record PipelineImpl is Pipeline
     anonymousSystemCount: integer
 end
 
--- The maximum number of iterations for the fixed update loop.
--- This is used to prevent infinite loops, death spirals, and to provide predictable performance.
-local MAX_ITERATIONS <const> = 10
+-- The most fixed steps one update runs before the overload policy decides what
+-- becomes of the rest. Bounds the work a single frame can be asked for, so a
+-- stall does not turn into a death spiral where every frame owes more than the
+-- last. Ten steps is a sixth of a second at 60Hz: long enough to absorb an
+-- ordinary hitch, short enough that a frame recovering from one still draws.
+local DEFAULT_MAX_STEPS <const> = 10
+
+-- What happens to the catch-up that did not fit. Dropping it is the safe
+-- default because it is the only one with a bound on it: `accumulate` is exact
+-- but hands an overloaded machine an accumulator that grows every frame, and a
+-- process that cannot draw cannot report what went wrong either. Dropping is a
+-- lie about how much time passed, so it is counted and said out loud rather
+-- than swallowed, and a simulation that would rather stall than lie asks for
+-- `accumulate`.
+local DEFAULT_OVERLOAD <const>: FixedOverload = "drop"
+
+local DEFAULT_TIMESTEP <const> = 1 / 60
 
 -- Empty flat group singleton for phases with no systems.
 local EMPTY_GROUP <const>: FlatGroup = {
@@ -91,14 +121,31 @@ local FIXED_PHASES <const> = phases.FixedUpdateGroup.children
 local AFTER_FIXED_PHASES <const> = {phases.Update, phases.PostUpdate, phases.RenderFirst,
     phases.PreRender, phases.Render, phases.PostRender, phases.RenderLast, phases.Last}
 
-function pipeline.new(fixedTimestep: number): Pipeline
+function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverload?: FixedOverload): Pipeline
+    -- Validated here rather than on the first overloaded frame, which may be
+    -- an hour in and on somebody else's machine.
+    if fixedTimestep ~= nil and (fixedTimestep <= 0 or fixedTimestep ~= fixedTimestep) then
+        error("tecs: timestep must be greater than zero, got " .. tostring(fixedTimestep), 2)
+    end
+    if fixedMaxSteps ~= nil and (fixedMaxSteps < 1 or fixedMaxSteps % 1 ~= 0) then
+        error("tecs: fixedMaxSteps must be a positive integer, got " .. tostring(fixedMaxSteps), 2)
+    end
+    if fixedOverload ~= nil and fixedOverload ~= "drop" and fixedOverload ~= "accumulate" then
+        error("tecs: fixedOverload must be 'drop' or 'accumulate', got " .. tostring(fixedOverload), 2)
+    end
+
     local result: PipelineImpl = setmetatable({
         dirty = true,
         systems = {},
         phaseStates = table_new(#phases.index, 0) as {boolean},
-        fixedTimestep = fixedTimestep or (1 / 60), -- Default to 60 FPS if not provided
+        fixedTimestep = fixedTimestep or DEFAULT_TIMESTEP,
         fixedAccumulator = 0,
         fixedStepCount = 0,
+        fixedMaxSteps = fixedMaxSteps or DEFAULT_MAX_STEPS,
+        fixedOverload = fixedOverload or DEFAULT_OVERLOAD,
+        fixedTimeDropped = 0,
+        fixedStepsDropped = 0,
+        nextDropReport = 1,
         count = 0,
         beforeFixedGroup = EMPTY_GROUP,
         fixedGroup = EMPTY_GROUP,
@@ -314,6 +361,46 @@ local function runGroup(group: FlatGroup, dt: number, world: World)
     end
 end
 
+-- Abandon the steps that did not fit, and say by how much.
+--
+-- Whole steps only. The sub-step remainder is what the interpolation alpha is
+-- computed from, so taking it as well would jolt every interpolated transform
+-- on a frame that was already late, and it is not a step's worth of simulation
+-- in any case.
+local function dropCatchUp(self: PipelineImpl, fixedTimestep: number)
+    local owed = self.fixedAccumulator
+    local dropped = owed - (owed % fixedTimestep)
+    if dropped <= 0 then return end
+
+    self.fixedAccumulator = owed - dropped
+    self.fixedTimeDropped = self.fixedTimeDropped + dropped
+    -- Rounded rather than floored: `dropped` is a multiple of the timestep up
+    -- to the error in one subtraction, and flooring that turns an exact three
+    -- into a two.
+    self.fixedStepsDropped = self.fixedStepsDropped + math.floor(dropped / fixedTimestep + 0.5)
+
+    if self.fixedStepsDropped < self.nextDropReport then return end
+    while self.nextDropReport <= self.fixedStepsDropped do
+        self.nextDropReport = self.nextDropReport * 2
+    end
+    -- Required here rather than at the top. Logging is SDL's, reached through
+    -- the FFI, and this module loads with the ECS: a tool that only wants
+    -- worlds and queries would be made to find SDL to build one. Overload is a
+    -- cold path by construction, so the lookup costs nothing that matters.
+    --
+    -- At error priority rather than warn, because warn is under where SDL
+    -- leaves a custom category: a game losing simulated time has to hear about
+    -- it without first knowing to turn the category up.
+    local log <const> = require("tecs.log")
+    log.get("tecs.pipeline"):error(
+        "Fixed step fell behind: %d step(s) dropped this update, %d and %.3fs "
+            .. "in total. The simulation is now that far behind wall time. "
+            .. "Raise fixedMaxSteps, lower the timestep cost, or set "
+            .. "fixedOverload to 'accumulate' to keep the time instead.",
+        math.floor(dropped / fixedTimestep + 0.5), self.fixedStepsDropped,
+        self.fixedTimeDropped)
+end
+
 -- Execute fixed timestep systems with death-spiral protection. This does
 -- not commit between iterations.
 local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
@@ -327,10 +414,11 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
 
     local fixedGroup = self.fixedGroup
     local hasWork = fixedGroup.count > 0
-    local iterations = 0
+    local maxSteps = self.fixedMaxSteps
+    local steps = 0
 
     repeat
-        iterations = iterations + 1
+        steps = steps + 1
         -- Counted whether or not any system runs, because it is a clock and not
         -- a measure of work: playback advances on a world with no fixed systems
         -- in it exactly as it does on one with many.
@@ -341,15 +429,16 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         end
         fixedtracking.finishStep(world)
         self.fixedAccumulator = self.fixedAccumulator - fixedTimestep
-        if self.fixedAccumulator < fixedTimestep or iterations >= MAX_ITERATIONS then
+        if self.fixedAccumulator < fixedTimestep or steps >= maxSteps then
             break
         end
     until false
 
-    -- clamp accumulator to prevent excessive buildup
-    -- while preserving some timing information for smoother recovery
-    if iterations >= MAX_ITERATIONS then
-        self.fixedAccumulator = math.min(self.fixedAccumulator, fixedTimestep * 2)
+    -- Still a whole step in hand means the loop stopped on the limit rather
+    -- than on the work running out, which is the only case a policy applies
+    -- to. `accumulate` leaves it there for the frames after this one.
+    if self.fixedAccumulator >= fixedTimestep and self.fixedOverload == "drop" then
+        dropCatchUp(self, fixedTimestep)
     end
 end
 

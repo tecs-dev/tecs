@@ -30,6 +30,7 @@ local record ecs
     type Plugin = types.Plugin
     type Query = types.Query
     type Archetype = types.Archetype
+    type FixedOverload = types.FixedOverload
 
     phases: phases
     builtins: builtins

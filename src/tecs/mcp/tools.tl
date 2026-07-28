@@ -130,6 +130,11 @@ local function worldContext(): {string: any}
         components = stats.components,
         declaredComponents = declared,
         systems = stats.systems,
+        -- Beside the counts because an agent looking at a world that is
+        -- behaving oddly needs to know whether its fixed step has been
+        -- silently losing time before it reads anything else here.
+        fixedTimeDropped = stats.fixedTimeDropped,
+        fixedStepsDropped = stats.fixedStepsDropped,
     }
 end
 

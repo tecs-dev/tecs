@@ -854,15 +854,36 @@ describe("WorldImpl", function()
             luassert.is_near(0.5, alpha, 1e-9)
         end)
 
-        it("clamps fixed interpolation alpha after catch-up limiting", function()
+        it("leaves under a step owing after dropping the catch-up it could not run", function()
+            -- Twenty steps owed, ten allowed, and the rest abandoned by the
+            -- default policy. What is left is the part of a step that had not
+            -- elapsed, so the alpha an interpolator reads carries on from
+            -- where it was rather than jumping.
             local w2 = tecs.newWorld({timestep = 0.1})
 
             w2:update(2)
 
             local timestep, accumulator, alpha = w2:getFixedTiming()
             luassert.is_near(0.1, timestep, 1e-9)
-            luassert.is_near(0.2, accumulator, 1e-9)
+            luassert.is_true(accumulator < timestep,
+                "nothing whole is still owing: " .. tostring(accumulator))
+            luassert.is_true(alpha >= 0 and alpha <= 1)
+            luassert.is_true(w2:getStats().fixedTimeDropped > 0,
+                "and the seconds that went are counted rather than swallowed")
+        end)
+
+        it("clamps fixed interpolation alpha while a backlog is being worked off", function()
+            -- The accumulate policy abandons nothing, so the accumulator can
+            -- hold whole steps between updates and the alpha has to stay in
+            -- range regardless.
+            local w2 = tecs.newWorld({timestep = 0.1, fixedOverload = "accumulate"})
+
+            w2:update(2)
+
+            local _, accumulator, alpha = w2:getFixedTiming()
+            luassert.is_true(accumulator >= 0.1, "the rest is still owed")
             luassert.is_near(1, alpha, 1e-9)
+            luassert.equals(0, w2:getStats().fixedTimeDropped)
         end)
 
         it("advances fixed timing while fixed phases are disabled", function()

@@ -268,6 +268,37 @@ _when_ it ran, not what it could see. A system that captured the application
 when the plugin registered it gets phase order, the fixed step, pause and state
 gating, and the guard, and reaches everything a callback did.
 
+### When the fixed step cannot keep up
+
+A frame hands the pipeline however long the last one took, and the fixed step
+runs whole timesteps out of it. A stall, an asset load or a breakpoint hands it
+seconds, and running every step that implies would take longer than the frame
+it is inside, so the next frame owes more than this one did and the process
+spirals. `fixedMaxSteps` bounds that: ten steps by default, a sixth of a second
+at 60Hz, long enough to absorb an ordinary hitch and short enough that the
+frame recovering from one still draws.
+
+What happens to the rest is `fixedOverload`, and both answers are wrong in
+different ways. `drop` abandons the steps that did not fit, so wall time and
+simulated time resynchronise immediately and the simulation is now behind by
+however much was abandoned. `accumulate` abandons nothing, so the simulation
+stays exact and a replay of the same steps reproduces, and on a machine that is
+genuinely too slow the accumulator grows every frame and the spiral is back.
+
+`drop` is the default because it is the one with a bound on it, and a process
+that cannot draw cannot report what went wrong either. It is still a lie about
+how much time passed, so it is counted rather than swallowed:
+`world:getStats()` carries `fixedTimeDropped` and `fixedStepsDropped`, the MCP
+`context` tool reports both, and the first drop and every doubling of the total
+after it are logged at error priority, which is where SDL leaves a category a
+game has not turned up. Whole steps only: the sub-step remainder is what the
+interpolation alpha is computed from, and taking that as well would jolt every
+interpolated transform on a frame that was already late.
+
+A simulation that would rather stall than lie asks for `accumulate`, on the
+world or through whatever configures it, and reads the same counters to confirm
+they stay at zero.
+
 ### Events are a type per kind
 
 Platform events reach a game through the world's message bus, at address zero,

@@ -197,7 +197,7 @@ describe("Pipeline", function()
         luassert.equals(3, test.fixedCounter, "Fixed system should run twice more with dt = 2.5x fixedTimestep")
     end)
 
-    it("should respect the MAX_ITERATIONS limit for fixed updates", function()
+    it("should respect the default catch-up limit for fixed updates", function()
         local fixedTimestep = 1 / 10
         test.pipeline = pipeline.new(fixedTimestep)
 
@@ -207,9 +207,10 @@ describe("Pipeline", function()
             name = "fixed_system"
         })
 
-        -- Run with a very large dt (should be limited to MAX_ITERATIONS)
+        -- Run with a very large dt, which the default fixedMaxSteps bounds.
         test.pipeline:update(fixedTimestep * 20, test.world)
-        luassert.equals(10, test.fixedCounter, "Fixed system should be limited to MAX_ITERATIONS runs")
+        luassert.equals(10, test.fixedCounter, "Fixed system should be limited to fixedMaxSteps runs")
+        luassert.equals(10, test.pipeline.fixedMaxSteps)
     end)
 
     it("should respect the runIf condition for systems", function()
@@ -477,5 +478,150 @@ describe("Pipeline", function()
         -- only on `other` must be tolerated.
         test.pipeline:update(FPS, test.world)
         luassert.equals(1, ran)
+    end)
+end)
+
+-- A frame that owes more fixed steps than it is allowed to run has to do
+-- something with the rest, and the thing it must not do is nothing. These use
+-- a timestep of 1/8, which is exact in binary, so the assertions are about the
+-- policy rather than about floating-point drift. The invariant that has to
+-- hold at any timestep is asserted separately, with a tolerance.
+describe("Pipeline fixed-step overload", function()
+    local world: tecs.World
+    local steps: integer
+
+    local function makeDummyWorld(): tecs.World
+        return { commit = function(_self: tecs.World) end } as tecs.World
+    end
+
+    local function counting(p: tecs.Pipeline): tecs.Pipeline
+        p:addSystem({
+            phase = tecs.phases.FixedUpdate,
+            name = "overloadStep",
+            run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
+        })
+        return p
+    end
+
+    local EXACT <const> = 1 / 8
+
+    before_each(function()
+        world = makeDummyWorld()
+        steps = 0
+    end)
+
+    it("reports the simulated time it drops rather than swallowing it", function()
+        local p = counting(pipeline.new(EXACT))
+
+        -- Twenty steps owed, ten allowed.
+        p:update(EXACT * 20, world)
+
+        luassert.equals(10, steps, "the frame runs what it is allowed")
+        luassert.equals(10, p.fixedStepsDropped, "and says how many it did not")
+        luassert.is_true(math.abs(p.fixedTimeDropped - EXACT * 10) < 1e-12,
+            "in seconds as well as in steps")
+        luassert.is_true(p.fixedAccumulator < EXACT,
+            "with nothing left owing, so the next frame starts level")
+    end)
+
+    it("drops nothing on a frame that keeps up", function()
+        local p = counting(pipeline.new(EXACT))
+
+        p:update(EXACT * 3, world)
+
+        luassert.equals(3, steps)
+        luassert.equals(0, p.fixedStepsDropped)
+        luassert.equals(0, p.fixedTimeDropped)
+    end)
+
+    it("keeps the sub-step remainder, so the interpolation alpha does not jump", function()
+        local p = counting(pipeline.new(EXACT))
+
+        -- Twenty whole steps plus a sixteenth, which is half a step.
+        p:update(EXACT * 20 + EXACT / 2, world)
+
+        luassert.equals(10, p.fixedStepsDropped, "whole steps only")
+        luassert.is_true(math.abs(p.fixedAccumulator - EXACT / 2) < 1e-12,
+            "the part of a step that had not elapsed is not a step to drop")
+    end)
+
+    it("takes a catch-up limit of its own", function()
+        local p = counting(pipeline.new(EXACT, 3))
+
+        p:update(EXACT * 20, world)
+
+        luassert.equals(3, p.fixedMaxSteps)
+        luassert.equals(3, steps, "three is the budget it was given")
+        luassert.equals(17, p.fixedStepsDropped, "and the other seventeen are counted")
+    end)
+
+    it("keeps every second under the accumulate policy", function()
+        local p = counting(pipeline.new(EXACT, 10, "accumulate"))
+
+        p:update(EXACT * 20, world)
+        luassert.equals(10, steps, "a frame is still bounded")
+        luassert.equals(0, p.fixedStepsDropped, "but nothing is abandoned")
+        luassert.equals(0, p.fixedTimeDropped)
+        luassert.is_true(p.fixedAccumulator >= EXACT * 10,
+            "the debt is still owed")
+
+        -- The frames after it work the debt off.
+        p:update(0, world)
+        luassert.equals(20, steps, "and the simulation catches up exactly")
+        luassert.equals(0, p.fixedStepsDropped)
+    end)
+
+    it("conserves time at a timestep that is not exact in binary", function()
+        local p = counting(pipeline.new(1 / 60))
+        local total = 1.0
+
+        p:update(total, world)
+
+        -- Every second handed in is either simulated, dropped and counted, or
+        -- still owed. There is no fourth destination, and the old clamp to
+        -- twice the timestep was one.
+        local accounted = steps * (1 / 60) + p.fixedTimeDropped + p.fixedAccumulator
+        luassert.is_true(math.abs(accounted - total) < 1e-9,
+            "time went somewhere unaccounted: " .. tostring(accounted))
+        luassert.is_true(p.fixedStepsDropped > 0, "and this frame did drop some")
+    end)
+
+    it("rejects a configuration that cannot work", function()
+        luassert.is_false(pcall(function() pipeline.new(0) end),
+            "a zero timestep is an infinite loop, not a fast one")
+        luassert.is_false(pcall(function() pipeline.new(-1 / 60) end))
+        luassert.is_false(pcall(function() pipeline.new(1 / 60, 0) end),
+            "a frame that may run no steps never advances")
+        luassert.is_false(pcall(function() pipeline.new(1 / 60, 2.5 as integer) end))
+        luassert.is_false(pcall(function()
+            pipeline.new(1 / 60, 10, "clamp" as tecs.FixedOverload)
+        end))
+    end)
+end)
+
+describe("World fixed-step configuration", function()
+    it("passes the policy through newWorld and reports the loss in getStats", function()
+        local world <const> = tecs.newWorld({ timestep = 1 / 8, fixedMaxSteps = 2 })
+        local steps = 0
+        world:addSystem({
+            phase = tecs.phases.FixedUpdate,
+            name = "worldOverloadStep",
+            run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
+        })
+
+        world:update(1.0)
+
+        luassert.equals(2, steps, "the world's own limit is the one that applied")
+        local stats <const> = world:getStats()
+        luassert.equals(6, stats.fixedStepsDropped, "eight steps were owed, two ran")
+        luassert.is_true(stats.fixedTimeDropped > 0,
+            "and getStats is where a game or a tool finds that out")
+    end)
+
+    it("drops nothing on a world that is keeping up", function()
+        local world <const> = tecs.newWorld()
+        world:update(1 / 60)
+        luassert.equals(0, world:getStats().fixedStepsDropped)
+        luassert.equals(0, world:getStats().fixedTimeDropped)
     end)
 end)

@@ -532,6 +532,26 @@ local record types
         children: {Phase}
     end
 
+    --- What a frame does when catching the fixed step up to wall time would
+    --- take more steps than it is allowed.
+    ---
+    --- `drop` bounds the work one frame can be asked for: the steps that do
+    --- not fit are abandoned and the simulated time they stood for is counted
+    --- as lost. Wall time and simulated time resynchronise immediately, at the
+    --- cost of a discontinuity anything integrating over the step can see.
+    ---
+    --- `accumulate` abandons nothing. The remainder stays in the accumulator
+    --- and is worked off by the frames that follow, so the simulation is exact
+    --- and a replay of the same steps is reproducible. On a machine that is
+    --- genuinely too slow the accumulator grows without bound and every frame
+    --- costs more than the last, which is the death spiral `drop` exists to
+    --- stop, so this is the deliberate choice of a simulation that would
+    --- rather stall than lie.
+    enum FixedOverload
+        "drop"
+        "accumulate"
+    end
+
     --- The pipeline that executes systems in phases.
     interface Pipeline
         --- The number of systems in the pipeline.
@@ -546,6 +566,28 @@ local record types
 
         --- Fixed steps run since the pipeline was made.
         fixedStepCount: integer
+
+        --- The most fixed steps one `update` will run before the overload
+        --- policy decides what happens to the rest. Defaults to 10.
+        fixedMaxSteps: integer
+
+        --- What happens to the time those steps would have consumed.
+        --- Defaults to `"drop"`.
+        fixedOverload: FixedOverload
+
+        --- Simulated seconds abandoned by the `"drop"` policy since the
+        --- pipeline was made. Stays at zero under `"accumulate"`, which
+        --- abandons nothing, and stays at zero on a machine that keeps up.
+        ---
+        --- Read it. A simulation, a replay or anything networked is wrong by
+        --- exactly this much, and nothing else in the world says so.
+        fixedTimeDropped: number
+
+        --- Fixed steps that were owed and never ran, on the same terms. Whole
+        --- steps only: `fixedTimeDropped` is this many timesteps, because a
+        --- drop leaves the sub-step remainder alone rather than resetting the
+        --- interpolation alpha along with it.
+        fixedStepsDropped: integer
 
         --- Update the pipeline.
         --- @param dt The delta time since the last update.
@@ -594,8 +636,16 @@ local record types
     interface World
         --- World configuration
         interface Config
+            --- Seconds one fixed step covers. Must be greater than zero.
+            --- Defaults to 1/60.
             timestep: number
-            pipelineFactory: function(number): Pipeline
+            --- The most fixed steps one update runs before the overload
+            --- policy applies. Must be a positive integer. Defaults to 10.
+            fixedMaxSteps: integer
+            --- What becomes of the catch-up that did not fit. Defaults to
+            --- `"drop"`, which bounds a frame's work and reports the loss.
+            fixedOverload: FixedOverload
+            pipelineFactory: function(number, integer, FixedOverload): Pipeline
             --- Maximum number of concurrent entity slots. Must be a positive integer,
             --- at most 2^22 - 1 (~4M; slot 0 is reserved by the packed-id format).
             --- Defaults to 2^20 (~1M). Arena memory is preallocated to accommodate this size.
@@ -1302,6 +1352,15 @@ local record types
 
             --- The number of systems.
             systems: integer
+
+            --- Simulated seconds the fixed step abandoned because catching up
+            --- would have cost more steps than one update is allowed. Zero on
+            --- a world that has kept up, and the only place a game or a tool
+            --- finds out that it has not.
+            fixedTimeDropped: number
+
+            --- Fixed steps that were owed and never ran, on the same terms.
+            fixedStepsDropped: integer
         end
     end
 

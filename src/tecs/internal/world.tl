@@ -157,7 +157,8 @@ function WorldImpl.new(config?: types.World.Config): World
 
     -- Create pipeline.
     config.pipelineFactory = config.pipelineFactory or pipeline.new
-    instance.pipeline = config.pipelineFactory(config.timestep)
+    instance.pipeline = config.pipelineFactory(config.timestep, config.fixedMaxSteps,
+        config.fixedOverload)
 
     -- Forward archetype creation into the world event bus.
     instance.archetypeIndex.onNewArchetype = function(archetype: Archetype)
@@ -1382,6 +1383,9 @@ function WorldImpl:getStats(fill?: types.World.Stats): types.World.Stats
     fill.archetypes = archetypeCount
     fill.components = componentCount
     fill.systems = self.pipeline.count
+    -- The one place a caller finds out the fixed step has been losing time.
+    fill.fixedTimeDropped = self.pipeline.fixedTimeDropped
+    fill.fixedStepsDropped = self.pipeline.fixedStepsDropped
     return fill
 end
 

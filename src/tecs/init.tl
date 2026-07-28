@@ -68,6 +68,7 @@ local record tecs
     type System = types.System
     type Plugin = types.Plugin
     type Pipeline = types.Pipeline
+    type FixedOverload = types.FixedOverload
     type Component = types.components.Component
     type ScalarComponent<T> = types.components.ScalarComponent<T>
     type ComponentOptions<C> = types.components.ComponentOptions<C>
