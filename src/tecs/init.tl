@@ -57,6 +57,7 @@ local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
 local type physics = require("tecs.physics")
+local type http = require("tecs.http")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type json = require("tecs.json")
@@ -131,6 +132,7 @@ local record tecs
     assets: assets
     workers: workers
     physics: physics
+    http: http
     log: log
     mcp: mcp
     --- Version of this build.
@@ -321,6 +323,7 @@ local ENGINE <const>: {string: string} = {
     assets = "tecs.assets",
     workers = "tecs.workers",
     physics = "tecs.physics",
+    http = "tecs.http",
     log = "tecs.log",
     mcp = "tecs.mcp",
     json = "tecs.json",
