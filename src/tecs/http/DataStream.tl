@@ -91,36 +91,91 @@ local record DataStream
     _writer: filesystem.Writer
 
     --- A stream over a string already in memory.
+    ---
+    --- @param text Held by reference, and Lua strings are immutable, so this is
+    ---     the one kind whose bytes cannot change under a transfer. Anything
+    ---     that is not a string raises.
+    --- @param contentType Optional. Nil sends no `Content-Type` rather than
+    ---     guessing one.
+    --- @return A source only. `length` is known here, so a request carrying it
+    ---     is sent with a `Content-Length`.
     ofString: function(text: string, contentType?: string): DataStream
+
     --- A stream over an FFI buffer, which the caller keeps alive for the send.
+    ---
+    --- @param pointer Borrowed, not copied and not pinned: nothing here keeps it
+    ---     from being collected, so the caller holds a reference until the
+    ---     transfer ends or the send reads freed memory. Nil raises.
+    --- @param length Bytes readable from the pointer. Nil or negative raises.
+    ---     Nothing checks it against the allocation, so an over-long length is
+    ---     a read past the end.
+    --- @param contentType Optional, as `ofString` takes it.
+    --- @return A source only.
     ofBytes: function(pointer: loader.CValue, length: integer, contentType?: string): DataStream
+
     --- A stream over a path, read and written through `tecs.filesystem`.
     ---
     --- The file is not opened here. A source is opened when the transfer
     --- starts and a destination when the first byte arrives, so naming one
     --- costs nothing until it is used and a request that never leaves the
     --- ground leaves no handle behind.
+    ---
+    --- @param path Empty or not a string raises. A path that does not exist is
+    ---     not an error here: that is what a destination looks like before it
+    ---     is written.
+    --- @param contentType Optional, as `ofString` takes it.
+    --- @return A source and a destination both. `length` is filled in only when
+    ---     the path already names a file, so a destination has none until it
+    ---     has been written, and a file that changes size afterwards leaves it
+    ---     stale.
     ofFile: function(path: string, contentType?: string): DataStream
+
     --- A stream over a handle the caller opened and still owns.
     ---
     --- Nothing here closes it: whoever opened it decides when it is done with,
     --- which is the whole difference between this and `ofFile`. Give `length`
     --- when it is known, or the request is sent chunked.
+    ---
+    --- @param handle An open file handle. Nil raises. Reading starts wherever it
+    ---     is positioned rather than at the beginning.
+    --- @param length Optional, and nothing verifies it. Left out, a request is
+    ---     sent chunked rather than with a `Content-Length`.
+    --- @param contentType Optional, as `ofString` takes it.
+    --- @return A source and a destination both, streaming on every platform
+    ---     because nothing between it and the bytes has an opinion.
     ofHandle: function(handle: FILE, length?: integer, contentType?: string): DataStream
 
     --- Whether `value` is one of these.
     ---
     --- For a caller reached from Lua, where a field typed as a string or a
     --- stream was checked by nothing.
+    ---
+    --- @param value Anything at all, nil included, which answers false rather
+    ---     than raising.
+    --- @return Whether it was built by one of the four constructors here. A
+    ---     table shaped like one but built elsewhere is false: the test is the
+    ---     metatable, not the fields.
     is: function(value: any): boolean
 
     --- The whole thing as a string.
     ---
     --- Free for a "string", a read for a "file", and the rest of a "handle",
     --- which it consumes. Nil and a reason when the bytes cannot be had.
+    ---
+    --- @return Every byte, in memory at once, so this is the call that undoes
+    ---     the point of streaming and is meant for bodies small enough not to
+    ---     care. A "handle" is read from wherever it sits and is left at its
+    ---     end, so a second call answers an empty string rather than the same
+    ---     bytes. Nil on failure.
+    --- @return The reason, when the first return is nil.
     text: function(self: DataStream): string, string
 
     --- Whether this can be written into. False for a "string" and a "bytes".
+    ---
+    --- @return Whether the kind can be a destination, which is a fact about the
+    ---     kind rather than about whether the path is writable: a "file" whose
+    ---     directory refuses it still answers true here and fails when the
+    ---     transfer opens it.
     writable: function(self: DataStream): boolean
 
     ---------------------------------------------------------------------------

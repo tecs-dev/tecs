@@ -380,6 +380,10 @@ local record proc
         --- A question about the answer rather than about whether there is one,
         --- which is why it is here and not a status: a result exists exactly
         --- when a child ran to completion, whatever it then reported.
+        ---
+        --- @return Whether the exit code was zero, which is the convention and
+        ---     not a guarantee: a program free to mean something else by it
+        ---     needs `exitCode` read directly.
         succeeded: function(self: Result): boolean
     end
 
@@ -387,6 +391,15 @@ local record proc
     ---
     --- Nothing here blocks. The future reads "pending" until `proc.update`, or
     --- a `wait` on it, takes the worker's answer.
+    ---
+    --- @param options Read here and sent to the worker, so a later edit to the
+    ---     same table does not reach the child. Starting the runner is part of
+    ---     this call when nothing has yet.
+    --- @return A future that settles "ready" with the result when the child
+    ---     ends, however it ended: a non-zero exit is still "ready", and
+    ---     `succeeded` is what distinguishes them. It settles "failed" only
+    ---     when the child could not be started, and "cancelled" when it was
+    ---     killed.
     run: function(options: Options): Future<Result>
 
     --- The record a run fills in, whatever became of it.
@@ -404,6 +417,11 @@ local record proc
     ---
     --- Nil for a run that never started, which has nothing to report, and for
     --- anything that is not a run from here.
+    ---
+    --- @param run A future `proc.run` handed out. Any other future answers nil
+    ---     rather than raising.
+    --- @return The runner's own record, not a copy, so it fills in as the child
+    ---     runs and the same table is what the future carries when it settles.
     result: function(run: Future<Result>): Result
 
     --- Asks the worker to end a child.
@@ -416,6 +434,11 @@ local record proc
     --- `run:cancel()` is the other spelling, and it counts holders: it ends the
     --- child only when the last consumer of the future has given it up. This
     --- one ends the child whoever else is watching.
+    ---
+    --- @param run A future `proc.run` handed out. One that has already settled
+    ---     is ignored, so this is safe to call on a race it lost.
+    --- @param force Sends the signal a child cannot handle. Defaults to false,
+    ---     which asks and may be refused.
     kill: function(run: Future<Result>, force?: boolean)
 
     --- Takes whatever the worker has answered. Call once per frame.
@@ -423,6 +446,9 @@ local record proc
     update: function(): integer
 
     --- Runs that have not answered yet.
+    ---
+    --- @return Every run in flight in this process, not one caller's, and
+    ---     counting a child that has been asked to die but has not yet.
     pending: function(): integer
 
     --- Starts the runner worker.
@@ -430,9 +456,17 @@ local record proc
     --- Called for you by the first `run`, so a process that never shells out
     --- never starts a thread. Call it directly to pay that cost up front, or to
     --- give the worker a module path other than this state's.
+    ---
+    --- @param luaPath Where the worker finds its modules. Defaults to this
+    ---     state's own, which is right whenever the two run from the same
+    ---     tree. Only read on the call that actually starts the worker, so
+    ---     passing it to a second call changes nothing.
     install: function(luaPath?: string)
 
     --- Whether the runner worker is running.
+    ---
+    --- @return A fact about the process rather than about any world. False
+    ---     costs nothing to act on: `run` starts the worker itself.
     installed: function(): boolean
 
     --- Ends every child still running and stops the worker.
