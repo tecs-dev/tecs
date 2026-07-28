@@ -80,11 +80,23 @@ local record types
 
         --- Scalar component container. Rows store scalar payloads directly.
         interface ScalarComponent<T> is Component
+            --- Which primitive the column holds. Fixed at registration and
+            --- never widened afterwards.
             scalarKind: ScalarKind
+
+            --- The value a row takes when the component is added without one.
+            --- Never nil: `newScalarComponent` fills an omitted `default` with
+            --- the zero of `kind` (`0`, `false` or `""`).
             scalarDefault: T
+
+            --- The primitives a scalar column may hold. Anything else, tables
+            --- and cdata included, is a table or FFI component instead.
             enum ScalarKind
+                --- Defaults to `0`.
                 "number"
+                --- Defaults to `false`.
                 "boolean"
+                --- Defaults to `""`, not nil.
                 "string"
             end
         end
@@ -169,6 +181,12 @@ local record types
             deserialize: function(world: World, data: {string: any}): C
         end
 
+        --- Options for creating a tag component: a component with no fields,
+        --- whose presence on an entity is the whole payload. Queries match a
+        --- tag by archetype rather than by scanning a column, so a tag is the
+        --- cheaper spelling of a flag that rarely changes. A flag that flips
+        --- often moves the entity between archetypes on every flip and is
+        --- better as a boolean field.
         interface TagComponentOptions is BasicComponentOptions<Component>
             --- Optional container to use for the tag component.
             container: Component
@@ -216,7 +234,12 @@ local record types
         --- `Health: types.components.ScalarComponent<number>`) and assigning the
         --- registration result to it.
         interface ScalarComponentOptions<T> is BasicComponentOptions<ScalarComponent<T>>
+            --- Required. One of `"number"`, `"boolean"` or `"string"`;
+            --- anything else errors at registration rather than at first use.
             kind: string
+
+            --- Optional. Omitting it takes the zero of `kind` (`0`, `false`
+            --- or `""`), so a scalar column never reads back nil.
             default: T
         end
 
@@ -392,7 +415,12 @@ local record types
     interface Query
         --- Whether a query drives simulation or presentation.
         enum Kind
+            --- `Paused` is added to the query's exclude set, so pausing a
+            --- state stops the systems that move, damage or think.
             "logic"
+            --- Records the opposite intent and changes no mask: paused
+            --- entities keep drawing. Identical in effect to omitting the
+            --- field, and worth writing anyway so the intent is on the page.
             "render"
         end
 
@@ -442,8 +470,17 @@ local record types
         --- Natural exhaustion closes the cursor automatically, and repeated
         --- `close()` calls are safe.
         interface Cursor
+            --- The step function `cursor:iter()` returns. Yields the
+            --- archetype, its live row count, and its entity id column; the
+            --- entity column is the archetype's own, not a copy.
             type IterFn = function(Cursor, any): (Archetype, integer, {integer})
+
+            --- The step function `cursor:groups()` returns. Yields group ids
+            --- in ascending order.
             type GroupsIterFn = function(Cursor, any): integer
+
+            --- The step function `cursor:group(id)` returns, with the same
+            --- three values as `IterFn` narrowed to one group.
             type GroupIterFn = function(Cursor, any): (Archetype, integer, {integer})
 
             --- Iterate over every active archetype matched by the query.
@@ -462,8 +499,18 @@ local record types
             close: function(self)
         end
 
+        --- The step function `query:iter()` returns. Yields the archetype,
+        --- its live row count, and its entity id column; the entity column is
+        --- the archetype's own, not a copy, and is only valid until the world
+        --- next commits.
         type IterFn = function(Query, any): (Archetype, integer, {integer})
+
+        --- The step function `query:groups()` returns. Yields group ids in
+        --- ascending order.
         type GroupsIterFn = function(Query, any): integer
+
+        --- The step function `query:group(id)` returns, with the same three
+        --- values as `IterFn` narrowed to one group.
         type GroupIterFn = function(Query, any): (Archetype, integer, {integer})
 
         --- The query descriptor used to create the query.
@@ -542,7 +589,11 @@ local record types
     --- stop, so this is the deliberate choice of a simulation that would
     --- rather stall than lie.
     enum FixedOverload
+        --- Abandon the steps that did not fit and count the simulated time
+        --- they stood for in `fixedTimeDropped`. The default.
         "drop"
+        --- Keep the remainder in the accumulator and work it off later,
+        --- abandoning nothing and reporting nothing dropped.
         "accumulate"
     end
 
@@ -618,11 +669,39 @@ local record types
 
     --- System configuration used when adding systems to the world
     interface SystemConfig
+        --- Optional, and unique across the whole pipeline: registering a
+        --- second system under a name already taken errors. Omitting it
+        --- assigns a synthetic `_anonymousSystemN`, so `removeSystem` always
+        --- has a handle, but the debugger, the MCP tools and profiles then
+        --- show that instead of anything readable. Name every persistent
+        --- system.
         name: string
+
+        --- Required, and must already be registered with the pipeline;
+        --- `addSystem` errors on an unregistered phase rather than creating
+        --- one.
         phase: Phase
+
+        --- Required. Receives `(dt, world)`, where `dt` is seconds and, in a
+        --- fixed phase, is the fixed timestep rather than frame time.
         run: System
+
+        --- Names of systems this one must run before. A name that no system
+        --- in the SAME phase carries is ignored silently: ordering is solved
+        --- per phase, so a constraint naming a system in another phase does
+        --- nothing. Mutual constraints across a group error as a cycle.
         before: {string}
+
+        --- Names of systems this one must run after, on the same terms as
+        --- `before`. Systems with no constraint between them keep
+        --- registration order.
         after: {string}
+
+        --- Optional gate evaluated immediately before each dispatch, so a
+        --- false answer skips this frame only and does not unregister
+        --- anything. Receives the same `dt` the system would have, plus the
+        --- system's name, which is what a self-removing predicate passes back
+        --- to `removeSystem`.
         runIf: function(dt: number, world: World, systemName: string): boolean
     end
 
@@ -639,6 +718,10 @@ local record types
             --- What becomes of the catch-up that did not fit. Defaults to
             --- `"drop"`, which bounds a frame's work and reports the loss.
             fixedOverload: FixedOverload
+            --- Replace the pipeline the world runs systems through. Called
+            --- once at world construction with the three fixed-step settings
+            --- above, already defaulted, and defaults to the built-in
+            --- pipeline. Only a custom scheduler needs this.
             pipelineFactory: function(number, integer, FixedOverload): Pipeline
             --- Maximum number of concurrent entity slots. Must be a positive integer,
             --- at most 2^22 - 1 (~4M; slot 0 is reserved by the packed-id format).
@@ -646,39 +729,102 @@ local record types
             maxEntities: integer
         end
 
+        --- One component the snapshot's archetypes refer to. Archetype
+        --- frames name components by 1-based index into the component table
+        --- rather than repeating the name per archetype.
         interface SnapshotComponentTableEntry
+            --- The component's registered `componentName`, which is how a
+            --- load resolves it against the components registered now.
             name: string
+
+            --- Canonical field-layout fingerprint, for FFI components only.
+            --- Binary output embeds it so a load can detect that the saved
+            --- struct layout differs from the current one and route those
+            --- rows through per-entity migration. nil for every non-FFI
+            --- component, and absent entirely from `"table"` output, whose
+            --- loads go through field-name-keyed `deserialize` and migrate
+            --- without it.
             fingerprint: string | nil
         end
 
+        --- The header of a snapshot, and what `loadSnapshot` answers with.
         interface SnapshotPrelude
+            --- Format version of the bytes, not of the game. A load asserts
+            --- on an exact match, so an older snapshot is rejected rather
+            --- than partially read.
             version: integer
+
+            --- The entity slot allocation resumes from. A load moves the
+            --- allocator forward to this when it is ahead of where the
+            --- allocator already is, and never backwards, so ids handed out
+            --- after a load cannot collide with restored ones.
             nextEntityId: integer
+
+            --- Optional. A writer that knows the count cheaply sets it; a
+            --- streaming writer with no total up front omits it.
             entityCount: integer
+
+            --- Optional, on the same terms as `entityCount`.
             archetypeCount: integer
+
+            --- Every component the snapshot's archetypes reference, in the
+            --- order the archetype frames index into.
             componentTable: {SnapshotComponentTableEntry}
         end
 
+        --- One archetype's worth of entities in a `"table"` snapshot.
         interface SnapshotArchetypeEntry
+            --- 1-based indices into `Snapshot.componentTable`, in the same
+            --- order the per-entity payloads appear.
             columnIndices: {integer}
+
+            --- One entry per entity, shaped `{id, data1, ..., dataN}`, where
+            --- `dataI` is whatever the component at `columnIndices[i]`
+            --- returned from `serialize`.
             entities: {{any}}
         end
 
+        --- One keyed value in a snapshot's data section.
         interface SnapshotDataEntry
+            --- The key a `SnapshotHandler` or `customData` entry wrote under.
+            --- Keys beginning `__tecs.` are the engine's own.
             key: string
+
+            --- Whatever was written. Must survive the chosen format: a
+            --- `"binary"` snapshot can carry anything the serializer accepts,
+            --- a `"table"` one anything a plain Lua table can hold.
             value: any
         end
 
+        --- A whole snapshot in plain-table form, which is what
+        --- `saveSnapshot` returns under `format = "table"`.
         interface Snapshot
+            --- Format version, on the same terms as `SnapshotPrelude.version`.
             version: integer
+
+            --- The slot allocation resumes from, as on `SnapshotPrelude`.
             nextEntityId: integer
+
+            --- The single source of truth for component references;
+            --- `SnapshotArchetypeEntry.columnIndices` points into it.
             componentTable: {SnapshotComponentTableEntry}
+
+            --- The archetypes, in save order.
             archetypes: {SnapshotArchetypeEntry}
+
+            --- Keyed values written after every archetype, in the order they
+            --- were added, from `opts.customData` and from `OnSnapshotSave`
+            --- listeners.
             data: {SnapshotDataEntry}
         end
 
+        --- Which of the two representations `saveSnapshot` produces.
         enum SnapshotFormat
+            --- A LuaJIT `string.buffer`. The default, and the only format
+            --- `opts.path` and FFI-layout migration apply to.
             "binary"
+            --- A plain Lua table, which JSON and hand inspection can reach
+            --- and which carries no FFI fingerprints.
             "table"
         end
 
@@ -688,11 +834,14 @@ local record types
             --- `"table"` returns a plain Lua snapshot table.
             format: SnapshotFormat
             --- Reuse this `string.buffer` instead of allocating a fresh one.
-            --- Only used for binary output.
+            --- It is reset before anything is written, so whatever it held is
+            --- gone. Binary output only: passing one with `format = "table"`
+            --- errors rather than being ignored.
             buffer: StringBuffer
-            --- Optional file path for binary output. When provided,
-            --- saveSnapshot writes the bytes to disk and still returns
-            --- the tagged buffer result.
+            --- Optional file path. When provided, saveSnapshot writes the
+            --- bytes to disk and still returns the tagged buffer result.
+            --- Binary output only: passing one with `format = "table"` errors
+            --- rather than being ignored.
             path: string
             --- Query descriptor whose include/includeAny/exclude set selects the
             --- archetypes that should be saved. Built into a temp query internally.
@@ -703,9 +852,22 @@ local record types
             customData: {string: any}
         end
 
+        --- What `saveSnapshot` answers with. Exactly one of `buffer` and
+        --- `snapshot` is set, and `format` says which; the other is nil.
+        --- `loadSnapshot` accepts this record whole, so a round trip needs no
+        --- unpacking.
         interface SnapshotOutput
+            --- Which of the two fields below carries the snapshot.
             format: SnapshotFormat
+
+            --- The bytes, under `format = "binary"`. This is `opts.buffer`
+            --- itself when one was passed, so a caller that reuses a buffer
+            --- gets the same object back and must read it before the next
+            --- save overwrites it.
             buffer: StringBuffer | nil
+
+            --- The snapshot table, under `format = "table"`. Freshly built
+            --- and the caller's to keep.
             snapshot: Snapshot | nil
         end
 
@@ -715,9 +877,24 @@ local record types
         --- returns non-nil. `load` receives that value after the ECS world has
         --- been restored. `finish` runs after every data callback has completed.
         interface SnapshotHandler
+            --- The key the value is stored under, and it must be non-empty
+            --- or registration errors. Namespace it with dots
+            --- (`"myGame.gameState"`); keys beginning `__tecs.` are the
+            --- engine's own.
             name: string
+
+            --- Optional. Returning nil writes no entry at all, which is how
+            --- a handler declines rather than storing an empty value.
             save: function(world: World): any | nil
+
+            --- Optional. Runs only when the snapshot being loaded carries
+            --- this handler's key, so a snapshot saved before the handler
+            --- existed simply does not call it.
             load: function(world: World, value: any) | nil
+
+            --- Optional. Runs after every data callback in the load has
+            --- completed, which is the place for work that depends on more
+            --- than one handler's value.
             finish: function(world: World, prelude: SnapshotPrelude) | nil
         end
 
@@ -1396,6 +1573,10 @@ local record types
     --- truncation. Opaque shape -- callers treat it like a 1-based
     --- integer array with length at `[0]`.
     interface DoubleArray is {integer}
+        --- Reads the count out of slot 0 rather than probing for a border, so
+        --- `#array` is exact even though slot 0 is occupied and would
+        --- otherwise make the array look empty to Lua's own length operator.
+        --- A macro, so it costs one load at the call site.
         metamethod __len: function(self) = macroexp(self: DoubleArray)
             return self[0]
         end

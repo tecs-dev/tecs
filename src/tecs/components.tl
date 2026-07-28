@@ -380,20 +380,88 @@ ecs.newComponent({
     container = Renderable,
 })
 
+--- The components a game spawns to put something on screen.
+---
+--- All but `Renderable` are FFI components, so their columns are contiguous C
+--- memory the sync walks row by row into mapped GPU staging. Writing one
+--- through `world:get` therefore needs an explicit
+--- `world:markComponentDirty(entity, Component)`; only `getMut` marks the
+--- column on its own.
 local record components
+    --- Position, rotation and scale, in world units, which are pixels with
+    --- the origin at the top left and y increasing downwards. Also carries
+    --- `z` and `layer`. This is the ECS builtin, so the hierarchy, the
+    --- tweens and the renderer all move the same transform.
     Transform: Transform
+
+    --- The transform as it stood before the current fixed step. Presence is
+    --- the opt-in to interpolation: an entity carrying it is drawn between
+    --- this and its current transform, so physics does not step visibly.
+    --- Carries `x`, `y` and `rotation` (radians) only, because scale and
+    --- layer change by assignment rather than by integration.
     PreviousTransform: PreviousTransform
+
+    --- Base colour and coverage, each channel 0 to 1, defaulting to opaque
+    --- white. The alpha decides which pass draws the entity: exactly 1 goes
+    --- through the G-buffer and is lit once for the whole scene, anything
+    --- below 1 goes through the forward pass instead, writes no depth, and
+    --- is dropped when the forward list is full. Say 1 exactly for anything
+    --- meant to be solid.
     Tint: Tint
+
+    --- Samples a texture instead of drawing flat colour. `image` is an
+    --- `imageId` index, and 0 means no image; `u0, v0, u1, v1` select the
+    --- region, defaulting to the whole of it, so an atlas entry and a whole
+    --- image are the same thing. `slot` is the texture-array layer the
+    --- renderer resolved `image` to, and a negative value means unresolved:
+    --- pointing a live Sprite at another image means writing a negative slot
+    --- along with the new `image`, or the row keeps drawing the old layer.
+    --- Only the image name survives a snapshot.
     Sprite: Sprite
+
+    --- Selects one of the materials found under `materials/`. Absent means
+    --- the default, which samples the image array over the whole quad, so an
+    --- entity with neither this nor a Sprite still draws. Take `id` from
+    --- `materials.id(name)` rather than writing a number: ids are positions
+    --- in sorted order and move when a material file is added. `param` is 0
+    --- to 1 and means whatever the material says it does.
     Material: Material
+
+    --- A light the deferred lighting pass resolves, positioned by the
+    --- entity's Transform and in the same world units. `height` is above the
+    --- surface plane and at 0 the light contributes nothing at all;
+    --- `radius` is its reach in world units; `r`, `g`, `b` and `intensity`
+    --- default to white at 1.
     PointLight: PointLight
+
+    --- Keeps a renderable's fragments inside one rectangle. `index` names a
+    --- region set with `Renderer:setClipRegion`, and 0, the default, means
+    --- no clipping. A region is a single rectangle, so nesting is the
+    --- caller's job: intersect the two and set that.
     Clip: Clip
+
+    --- Marks an entity as contributing geometry. A tag, so it costs a
+    --- column of nothing; without it a Transform is only a position, which
+    --- is what most entities in a world are.
     Renderable: Renderable
 
     --- Index of an image name, assigning one the first time it is seen.
+    ---
+    --- The name is normalised lexically first, so `"a/b.png"` and
+    --- `"a/./b.png"` are one image. Case, `..` and the asset root are
+    --- deliberately left alone, and nothing here touches the filesystem.
+    ---
+    --- @param name Must be non-empty; an empty or nil name errors rather
+    ---     than interning.
+    --- @return An index from 1 upwards, stable for the life of the process
+    ---     and meaningless outside it. 0 is never returned and is what a
+    ---     Sprite carries until something names an image.
     imageId: function(name: string): integer
 
-    --- Name an image index stands for, or nil when it names nothing.
+    --- Name an image index stands for.
+    ---
+    --- @param id An index previously handed out by `imageId`.
+    --- @return The normalised name, or nil when the index names nothing.
     imageName: function(id: integer): string
 end
 
