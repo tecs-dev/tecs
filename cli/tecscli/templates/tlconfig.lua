@@ -14,6 +14,18 @@ return {
     gen_compat = "off",
     include_dir = { "src/" },
 
+    -- Where the `tecs` global is declared, so a file can write
+    -- `tecs.newWorld()` with no require line.
+    --
+    -- Here rather than only on the command line, because the compiler is not
+    -- always run by tecs. An editor, a language server or a bare `tl` reads
+    -- this file and nothing else, and without this key every use of the global
+    -- in a fresh project is an unknown variable: 31 of them in the file next
+    -- door. `tecs check` passed anyway, because it passes the same setting as
+    -- an argument, and a check that is green only when tecs runs it is worse
+    -- than one that is red.
+    global_env_def = "tecs.global",
+
     cerulean = {
         indent_width = 4,
         max_line_width = 120,

@@ -210,19 +210,19 @@ mcp.register({
             after = 0
         end -- the file was truncated
         file:seek("set", after)
-        local text = file:read(WINDOW) or ""
+        local window = file:read(WINDOW) or ""
         file:close()
 
         -- Only whole lines, so a cursor never lands mid-record and the next
         -- read does not start with a fragment.
-        local lastBreak = text:find("\n[^\n]*$")
+        local lastBreak = window:find("\n[^\n]*$")
         if lastBreak ~= nil then
-            text = text:sub(1, lastBreak)
+            window = window:sub(1, lastBreak)
         end
 
         local contains = args.contains as string
         local lines: {string} = {}
-        for line in text:gmatch("[^\n]+") do
+        for line in window:gmatch("[^\n]+") do
             if contains == nil or line:find(contains, 1, true) then
                 lines[#lines + 1] = line
             end
@@ -230,7 +230,7 @@ mcp.register({
 
         return {
             path = path,
-            offset = after + #text,
+            offset = after + #window,
             lines = #lines > 0 and lines or cjson.empty_array,
         }
     end,

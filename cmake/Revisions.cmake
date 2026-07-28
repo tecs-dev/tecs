@@ -71,8 +71,20 @@ set(TECS_MBEDTLS_TAG "mbedtls-4.1.1" CACHE STRING "Mbed TLS revision, curl's TLS
 # what vanishes is only the implementation. A pinned formatter inside the
 # binary is the fix, and the pin is the feature.
 #
-# The Makefile reads both out of this file rather than declaring them again,
-# so `make dev-tools` installs what the build bakes in.
+# The Makefile reads all three out of this file rather than declaring them
+# again, so `make dev-tools` installs what the build bakes in.
+#
+# tealdoc renders docs/modules/surface.md, which is committed and diffed against
+# a fresh render, so an unpinned one would fail the diff on somebody else's
+# machine rather than on the change that moved the surface. It is not compiled
+# into the binary, because `tecs docs` was dropped: the users are game
+# developers, and a documentation mirror inside a binary is a second copy of the
+# site to keep in step.
+#
+# These three are the values this branch was written against. Whoever lands it
+# on a tree that has moved a tool forward takes that tree's value: the pin and
+# the formatted sources have to agree, and reformatting here to match a newer
+# Cerulean would duplicate a reformat that already happened elsewhere.
 set(TECS_TL_REF "1326d829790b92e23defe69fcf40460103b60d1d" CACHE STRING "Teal revision")
 set(TECS_CERULEAN_REF "ae9c61af4747d3db0a3fa99fde7157ed6c39bf65" CACHE STRING "Cerulean revision")
 set(TECS_TEALDOC_REF "d9f3a9ef820c7a2d5751cbae66e49f85c4c423a1" CACHE STRING "tealdoc revision")

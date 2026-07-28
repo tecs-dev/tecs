@@ -15,9 +15,13 @@ TL     := $(CURDIR)/vendor/bin/tl
 # commits. Teal and Cerulean both move ahead of releases that understand the
 # syntax used here, so floating development rocks are not reproducible.
 #
-# Read out of cmake/Revisions.cmake rather than declared here, because the same
-# two commits are compiled into the `tecs` binary and a tree formatted by one
+# Read out of cmake/Revisions.cmake rather than declared here, because Teal and
+# Cerulean are compiled into the `tecs` binary, and a tree formatted by one
 # version and checked by another is the failure this pin exists to prevent.
+# tealdoc is named there for company rather than because it is linked: it
+# renders docs/modules/surface.md, which is committed and diffed against a fresh
+# render, so an unpinned one would fail the diff on somebody else's machine
+# rather than on the change that moved the surface.
 #
 # Matched on the variable name alone and split on the quotes, because make
 # counts parentheses inside `$(shell ...)` and a regex holding one does not

@@ -737,9 +737,15 @@ if(TECS_BUILD_LUA)
     # single-file build generates it; every other configuration has the same
     # files in a directory beside the binary and compiles none of this.
     #
-    # The command depends on the targets rather than on their outputs, because
-    # what it packs is two whole directory trees and naming every file in them
-    # here would be a second description of what the build produces.
+    # It depends on the targets for ordering and on their *sources* for
+    # freshness, and it needs both. A target dependency says the trees are
+    # populated before this runs; it does not make this run again when one of
+    # them changes, because a custom command is rebuilt from file timestamps and
+    # a target has none. Depending only on the targets produced a build that
+    # relinked happily around a payload nobody had regenerated, and the only
+    # sign was a fix that had landed in `src/` still being absent from what the
+    # binary carried. The digest in `tecs info` was the giveaway: unchanged
+    # across a change.
     if(TECS_SINGLE_FILE)
         set(TECS_PAYLOAD_SOURCE "${CMAKE_BINARY_DIR}/generated/payload_data.c")
         add_custom_command(
@@ -749,6 +755,11 @@ if(TECS_BUILD_LUA)
                 "teal=${TECS_TEAL_OUT}" --root "notices=${CMAKE_BINARY_DIR}/notices" --out "${TECS_PAYLOAD_SOURCE}"
             DEPENDS
                 "${CMAKE_SOURCE_DIR}/scripts/genpayload.py"
+                "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+                ${TECS_TL}
+                ${TECS_CLI_TL}
+                ${TECS_CLI_TEMPLATES}
+                ${TECS_ASSET_FILES}
                 tecs_lua
                 tecs_assets
                 tecs_cli_lua
