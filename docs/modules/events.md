@@ -201,7 +201,7 @@ Touch positions are converted into window coordinates using the size
 
 SDL dispatches six of these from its event watcher rather than queueing them, and the instant they arrive is the
 only one a game gets on some platforms. The host therefore answers them where they arrive, by calling a hook on
-the [application](/modules/application), and queues the event as well, so a game can observe the change like any
+the [application](/modules/Application), and queues the event as well, so a game can observe the change like any
 other. The hook is where a game meets the platform's deadline; the stream is where it observes the change. These
 six carry no stamp from SDL, so `arrival` on them is where they were delivered, and
 [`isInput`](#isinput) excludes them.
@@ -309,7 +309,7 @@ asking to see: the round trip is the normalization, not the identity.
 
 ## Wiring the stream
 
-These three are how the loop and a replay driver reach the module. [`Application`](/modules/application) calls
+These three are how the loop and a replay driver reach the module. [`Application`](/modules/Application) calls
 the first two for you.
 
 ### setTouchScale

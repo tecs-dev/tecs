@@ -273,7 +273,7 @@ describe("rendering from a pack", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.create({ title = "pack", width = SIZE, height = SIZE })
+        window = Window.newWindow({ title = "pack", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
         screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
         assets.install()

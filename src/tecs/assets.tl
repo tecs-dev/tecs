@@ -631,7 +631,7 @@ end
 ---     the thread that drains the batch. Required; nil raises.
 --- @return An empty batch. Nothing registers it, so a batch nobody resolves simply holds
 ---     its handles.
-function assets.batch<T>(finished: function(key: T, handle: Handle)): Batch<T>
+function assets.newBatch<T>(finished: function(key: T, handle: Handle)): Batch<T>
     if finished == nil then
         error("tecs: a batch needs something to hand finished loads to", 2)
     end

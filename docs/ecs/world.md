@@ -34,7 +34,7 @@ local world = tecs.ecs.newWorld({
 
 ## World lifecycle
 
-An [`Application`](/modules/application) owns a world and drives it: it calls `world:startup` at the end of
+An [`Application`](/modules/Application) owns a world and drives it: it calls `world:startup` at the end of
 initialization, once the entry plugin has run, so everything the plugin spawned is resident before the first
 frame; `world:update(dt)` once per host iteration; and `world:shutdown` before anything is destroyed. A game
 does not call these itself. It reaches the world through the entry plugin `tecs.newApplication` takes; see
@@ -822,7 +822,7 @@ configuration, ordering, conditional execution, and removal rules.
 ## Plugins
 
 Use plugins to add systems, components, states, and more to a `World`. Tecs builds everything around plugins:
-a game itself is one, the `function(world, app)` an [`Application`](/modules/application) is configured with,
+a game itself is one, the `function(world, app)` an [`Application`](/modules/Application) is configured with,
 and a game with several modules calls `world:addPlugin` from inside it rather than growing a second composition
 mechanism. Engine features arrive the same way, for example `tecs.gfx.textPlugin({ renderer = app.renderer })`.
 

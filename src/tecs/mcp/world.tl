@@ -69,7 +69,7 @@ end
 --- carries is still nameable, because `spawn` and `set` are how it comes to
 --- be carried. Only a name nobody registered is refused.
 local function component(name: string): ecs.Component
-    local found = name ~= nil and ecs.componentByName(name) or nil
+    local found = name ~= nil and ecs.findComponentByName(name) or nil
     if found == nil then
         local names = sortedNames(ecs.declaredComponents())
         error(("no component named '%s'; known: %s"):format(tostring(name), table.concat(names, ", ")), 0)

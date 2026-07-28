@@ -10,7 +10,7 @@ it, seek it, pan it, put it in a group, cap how often it may start, stop it. It 
 entity that should make a noise carries a [`Sound`](#the-sound-component) component rather than a handle a game
 has to remember to release.
 
-A game does not usually construct one. [`Application`](/modules/application) creates the audio from its `audio`
+A game does not usually construct one. [`Application`](/modules/Application) creates the audio from its `audio`
 config, installs it into the world, calls `update` once per iteration and destroys it on shutdown, so
 `app.audio` is the object every example below is calling into.
 
@@ -49,12 +49,12 @@ enemies dying together from playing forty identical sounds.
 
 ## Lifecycle
 
-### create
+### newAudio
 
 Opens the platform's default output.
 
 ```teal
-function Audio.create(config?: Audio.Config): Audio
+function tecs.audio.newAudio(config?: Audio.Config): Audio
 ```
 
 **Parameters:**
@@ -132,7 +132,7 @@ function Audio:update(dt?: number): integer
 
 **Returns:** voices sounding after the sweep.
 
-Call it once per frame. [`Application`](/modules/application) already does.
+Call it once per frame. [`Application`](/modules/Application) already does.
 
 ### destroy
 
@@ -1000,7 +1000,7 @@ voice reads from the file for itself.
 <pre><code v-pre>record <a href="#tecs.audio.Audio.Config">tecs.audio.Audio.Config</a>
 </code></pre>
 
-What `create` takes. Every field is optional.
+What `newAudio` takes. Every field is optional.
 <a id="tecs.audio.Audio.Config.frequency"></a>
 
 ### tecs.audio.Audio.Config.frequency
@@ -1526,32 +1526,6 @@ should read it.
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>{Audio.Clip}</code> | A fresh list each call, holding the live clip records rather than copies, so their `status` moves under a caller that keeps one. |
 
-<a id="tecs.audio.Audio.create"></a>
-
-### tecs.audio.Audio.create
-
-<pre><code v-pre>function <a href="#tecs.audio.Audio.create">tecs.audio.Audio.create</a>(config: Audio.Config): Audio
-</code></pre>
-
-Opens the platform's default output.
-
-Never raises for want of hardware. A machine with no sound card gets an
-object whose calls all succeed and produce nothing, because a game that
-cannot be played without an audio device is rarer than a test machine
-without one.
-
-#### Parameters
-
-| Type                            | Name                      | Description                                                                                                                                                                |
-| ------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Audio.Config</code> | <code v-pre>config</code> | May be omitted for the defaults. `maxVoices` outside 1 to 65535 raises, which is the one thing here that does; every other field out of range is the platform's to refuse. |
-
-#### Returns
-
-| Type                     | Description                                                                                                                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Audio</code> | An instance the caller owns and has to `destroy`. Check `available` for whether an output actually opened; it is false on a machine with no sound, and every call still succeeds and is silent. |
-
 <a id="tecs.audio.Audio.decoders"></a>
 
 ### tecs.audio.Audio.decoders
@@ -1923,9 +1897,9 @@ Voices that may sound at once, as `maxVoices` configured it.
 
 #### Returns
 
-| Type                       | Description                                                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre>integer</code> | The ceiling `play` refuses at, fixed for the instance's life. Not a hardware limit: it is what `create` was given, defaulting to 32. |
+| Type                       | Description                                                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | The ceiling `play` refuses at, fixed for the instance's life. Not a hardware limit: it is what `newAudio` was given, defaulting to 32. |
 
 <a id="tecs.audio.Audio.muted"></a>
 
@@ -1947,6 +1921,32 @@ Whether a master mute is holding the output down.
 | Type                       | Description |
 | -------------------------- | ----------- |
 | <code v-pre>boolean</code> |             |
+
+<a id="tecs.audio.Audio.newAudio"></a>
+
+### tecs.audio.Audio.newAudio
+
+<pre><code v-pre>function <a href="#tecs.audio.Audio.newAudio">tecs.audio.Audio.newAudio</a>(config: Audio.Config): Audio
+</code></pre>
+
+Opens the platform's default output.
+
+Never raises for want of hardware. A machine with no sound card gets an
+object whose calls all succeed and produce nothing, because a game that
+cannot be played without an audio device is rarer than a test machine
+without one.
+
+#### Parameters
+
+| Type                            | Name                      | Description                                                                                                                                                                |
+| ------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Audio.Config</code> | <code v-pre>config</code> | May be omitted for the defaults. `maxVoices` outside 1 to 65535 raises, which is the one thing here that does; every other field out of range is the platform's to refuse. |
+
+#### Returns
+
+| Type                     | Description                                                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Audio</code> | An instance the caller owns and has to `destroy`. Check `available` for whether an output actually opened; it is false on a machine with no sound, and every call still succeeds and is silent. |
 
 <a id="tecs.audio.Audio.of"></a>
 

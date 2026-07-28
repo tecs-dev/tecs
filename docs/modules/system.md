@@ -283,7 +283,7 @@ out, and a game wants to do it between two frames rather than instead of them.
 
 Reading a child's output and waiting for it to exit both hold the calling thread for as long as the child runs,
 so neither happens on the main thread. A run goes out to a worker, the loop pumps, and a
-[`Future`](/modules/future) settles; that is the same shape [`assets`](/modules/assets) uses for a decode, for
+[`Future`](/modules/Future) settles; that is the same shape [`assets`](/modules/assets) uses for a decode, for
 the same reason.
 
 It is one of the few subsystems more useful without a window than with one. No SDL subsystem is initialized and
@@ -423,7 +423,7 @@ Takes whatever the worker has answered. Call once per frame.
 function updateProcesses(): integer
 ```
 
-**Returns:** how many runs finished. [`Application`](/modules/application) calls this for you each iteration.
+**Returns:** how many runs finished. [`Application`](/modules/Application) calls this for you each iteration.
 
 #### pendingProcesses
 

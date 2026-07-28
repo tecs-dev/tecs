@@ -26,7 +26,7 @@ describe("assets", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.create({ title = "assets", width = 64, height = 64 })
+        window = Window.newWindow({ title = "assets", width = 64, height = 64 })
         device = Device.create(window, { debug = true })
         assets.install()
     end)
@@ -272,7 +272,7 @@ describe("an asset batch", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.create({ title = "batch", width = 64, height = 64 })
+        window = Window.newWindow({ title = "batch", width = 64, height = 64 })
         device = Device.create(window, { debug = true })
         assets.install()
     end)
@@ -290,7 +290,7 @@ describe("an asset batch", function()
 
     it("counts what is outstanding and resolves it once", function()
         local resolved = {}
-        local batch = assets.batch(function(key, handle)
+        local batch = assets.newBatch(function(key, handle)
             resolved[#resolved + 1] = { key = key, status = handle.status }
             handle:release()
         end)
@@ -313,7 +313,7 @@ describe("an asset batch", function()
 
     it("keeps what is still in flight and its key with it", function()
         local resolved = {}
-        local batch = assets.batch(function(key, handle)
+        local batch = assets.newBatch(function(key, handle)
             resolved[#resolved + 1] = key
             handle:release()
         end)
@@ -351,7 +351,7 @@ describe("an asset batch", function()
 
     it("drains the worker itself", function()
         local resolved = 0
-        local batch = assets.batch(function(_, handle)
+        local batch = assets.newBatch(function(_, handle)
             resolved = resolved + 1
             handle:release()
         end)
@@ -370,7 +370,7 @@ describe("an asset batch", function()
 
     it("needs somewhere to hand a finished load", function()
         assert.has_error(function()
-            assets.batch(nil)
+            assets.newBatch(nil)
         end)
     end)
 end)

@@ -90,6 +90,17 @@ local record audio
     type Microphone = platformAudio.Microphone
     type MicrophoneConfig = platformAudio.MicrophoneConfig
 
+    --- Builds the mixer a game plays sound through.
+    ---
+    --- @param config Omitted opens the platform's default device at its own
+    ---     frequency and channel count. Nothing is opened here: the device is
+    ---     acquired by `install`, so a mixer built by a tool that never
+    ---     installs it touches no hardware.
+    --- @return The mixer, whose device and voices are the caller's to release
+    ---     through `destroy`. One per application; the application builds its
+    ---     own and a second is only for a test.
+    newAudio: function(config?: Audio.Config): Audio
+
     --- Physical playback devices attached now.
     playbackDevices: function(): {platformAudio.Device}, string
 
@@ -112,6 +123,20 @@ local record window
     type Theme = Window.Theme
     type Flash = Window.Flash
     type Progress = Window.Progress
+
+    --- Opens a window, and raises rather than answering nil.
+    ---
+    --- The one place in this module that raises: every reader here answers a
+    --- harmless default when the platform cannot say, but a window that could
+    --- not be created is not a question with a sensible answer.
+    ---
+    --- @param options Validated here, so a bad size or an unreadable icon
+    ---     fails now rather than on the first frame. Omitted fields take the
+    ---     defaults `Options` documents.
+    --- @return The window, whose closing is the caller's through `destroy`. An
+    ---     application creates its own from `Config.window` and hands it to
+    ---     the entry plugin, so a game rarely calls this.
+    newWindow: function(options: Window.Options): Window
 end
 
 --- What a player does, and the devices they do it with: gameplay input in
@@ -333,10 +358,14 @@ local record gfx
     --- The font the engine ships, loaded on first use.
     defaultFont: function(): text.Font
 
-    --- The font loaded under a metrics path, or nil for one nothing loaded.
-    --- Kept as it is rather than made a `findFoo`: the verb sweep is a later
-    --- pass, and `sheetByName` beside it reads the same way.
-    fontByName: function(name: string): text.Font
+    --- The font loaded under a metrics path.
+    ---
+    --- @param name The metrics path `loadFont` was given, not the family name
+    ---     inside the file.
+    --- @return The font, or nil when nothing has loaded that path. Nil is a
+    ---     question about this process rather than about the disk, so a font
+    ---     that exists and has not been loaded answers nil too.
+    findFont: function(name: string): text.Font
 
     --- Re-reads a loaded font's metrics in place, so every `Text` naming it
     --- keeps pointing at the same table.

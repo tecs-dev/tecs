@@ -19,7 +19,7 @@ window, display, clipboard and device-arrival events, none of which is gameplay 
 ## Input
 
 `tecs.input.Input` is gameplay input, in three tiers, behind a layer stack. A game does not construct one: the
-[application](/modules/application) does, and hands it over as `app.input`.
+[application](/modules/Application) does, and hands it over as `app.input`.
 
 SDL owns device mechanics; this owns gameplay semantics. That split is why there is no `tecs.keyboard` beside it
 and no supported way to reach raw SDL: a query answered by polling the device would bypass replay, layers, edge

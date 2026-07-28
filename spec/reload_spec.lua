@@ -364,7 +364,7 @@ describe("mcp reload_font", function()
         local ok, result, message = callTool({ path = path })
 
         assert.is_true(ok, message)
-        assert.are.equal(font, text.fontByName(path), "a re-read must keep the table every Text points at")
+        assert.are.equal(font, text.findFont(path), "a re-read must keep the table every Text points at")
         assert.are.equal(44, font.glyphs[72].xAdvance, "and the table must hold what was just read")
         assert.are.equal(2, result.glyphs)
         assert.are.equal(path, result.font)

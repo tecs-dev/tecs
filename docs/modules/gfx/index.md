@@ -575,7 +575,7 @@ Subsystems register components of their own, and they are documented with the su
 ## The renderer
 
 `tecs.gfx.Renderer` is the path from a world to the GPU. A game does not construct one: the
-[application](/modules/application) does, and hands it over as `app.renderer`.
+[application](/modules/Application) does, and hands it over as `app.renderer`.
 
 ```teal
 return tecs.newApplication({
@@ -750,7 +750,7 @@ modules that produce them have pages of their own:
 
 `dropped` is the one to watch. `capacity` is a ceiling rather than a hint, and rows past it are dropped rather
 than growing a buffer mid-frame; a scene that is missing something and reports a non-zero `dropped` needs a
-larger `capacity` in the [application config](/modules/application#the-world-and-the-renderer).
+larger `capacity` in the [application config](/modules/Application#the-world-and-the-renderer).
 
 `rewritten` being zero is the dirty model working. A frame in which nothing moved rewrites nothing.
 
@@ -905,12 +905,12 @@ function tecs.gfx.defaultFont(): Font
 
 Equivalent to `tecs.gfx.loadFont({ metrics = "fonts/jetbrainsmono-extrabold-msdf.json" })`.
 
-#### fontByName
+#### findFont
 
 A loaded font by the metrics path it was loaded from, or nil.
 
 ```teal
-function tecs.gfx.fontByName(name: string): Font
+function tecs.gfx.findFont(name: string): Font
 ```
 
 This is what a snapshot resolves a font name back through.
@@ -2197,11 +2197,11 @@ The font the engine ships, loaded on first use.
 | ---------------------------------------------------- | ------------------------------------------------------------------------------ |
 | <code v-pre><a href="#tecs.gfx.Font">Font</a></code> | The same font every call, since it goes through `loadFont` under a fixed path. |
 
-<a id="tecs.gfx.fontByName"></a>
+<a id="tecs.gfx.findFont"></a>
 
-### tecs.gfx.fontByName
+### tecs.gfx.findFont
 
-<pre><code v-pre>function <a href="#tecs.gfx.fontByName">tecs.gfx.fontByName</a>(name: string): <a href="#tecs.gfx.Font">Font</a>
+<pre><code v-pre>function <a href="#tecs.gfx.findFont">tecs.gfx.findFont</a>(name: string): <a href="#tecs.gfx.Font">Font</a>
 </code></pre>
 
 A loaded font by the metrics path it was loaded from, or nil.

@@ -12,7 +12,7 @@ Phases are not advice. They are how the engine composes itself: input latching, 
 animation, text layout, audio and render extraction are all systems the engine registers into named phases, and a
 game's systems interleave with them by declaring a phase rather than by being called from somewhere.
 
-[`Application`](/modules/application) drives all three groups. It runs the game's plugin, then `world:startup()`
+[`Application`](/modules/Application) drives all three groups. It runs the game's plugin, then `world:startup()`
 once, then `world:update(dt)` per iteration, then `world:shutdown()` at teardown. Nothing else calls back into a
 game per frame: a phase is where per-frame work is declared, and the three groups are the whole lifecycle.
 
@@ -74,14 +74,14 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | Phase             | System                          | Installed by                                       |
 | ----------------- | ------------------------------- | -------------------------------------------------- |
 | `First`           | `sequence.AdvanceFrame`         | [`sequence`](/modules/sequence), every application |
-| `FixedFirst`      | `tecs.EnterFixedInput`          | [`Application`](/modules/application)              |
+| `FixedFirst`      | `tecs.EnterFixedInput`          | [`Application`](/modules/Application)              |
 | `FixedFirst`      | `tecs.SnapshotTransforms`       | [`Renderer`](/modules/gfx/)                        |
 | `FixedFirst`      | `sequence.Advance`              | [`sequence`](/modules/sequence), every application |
 | `FixedUpdate`     | `ttl`                           | builtins, every world                              |
 | `FixedUpdate`     | `tecs.StepPhysics`              | [`box2d`](/modules/box2d) plugin                   |
 | `FixedPostUpdate` | `tecs.SyncBodyTransforms`       | [`box2d`](/modules/box2d) plugin                   |
 | `FixedPostUpdate` | `tecs.AdvanceAnimation`         | [`animation`](/modules/gfx/animation) plugin       |
-| `FixedLast`       | `tecs.ExitFixedInput`           | [`Application`](/modules/application)              |
+| `FixedLast`       | `tecs.ExitFixedInput`           | [`Application`](/modules/Application)              |
 | `Update`          | `sequence.AdvancePresentation`  | [`sequence`](/modules/sequence), every application |
 | `PostUpdate`      | `RelativeTransform`             | builtins, every world                              |
 | `PostUpdate`      | `tecs.PlaySounds`               | [`Audio`](/modules/audio)                          |

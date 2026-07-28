@@ -648,22 +648,22 @@ Meaningful after `bind`, since before it the sheet names no image and the quad h
 
 Every constructor registers the sheet it builds, under its name and under a fresh id.
 
-### sheetById
+### findSheetById
 
 The sheet a registration index stands for, or nil.
 
 ```teal
-function animation.sheetById(id: integer): Sheet
+function animation.findSheetById(id: integer): Sheet
 ```
 
 Ids are handed out in construction order, so one is only meaningful within a run.
 
-### sheetByName
+### findSheetByName
 
 The sheet registered under a name, or nil.
 
 ```teal
-function animation.sheetByName(name: string): Sheet
+function animation.findSheetByName(name: string): Sheet
 ```
 
 Building a second sheet under a name already taken replaces what this returns, so a reload points new
@@ -1234,6 +1234,48 @@ A builder, for a sheet no constructor above describes.
 | -------------------------------- | ------------------------------------------------------------- |
 | <code v-pre>sheet.Builder</code> | A builder, which registers the sheet when `finish` is called. |
 
+<a id="tecs.gfx.animation.findSheetById"></a>
+
+### tecs.gfx.animation.findSheetById
+
+<pre><code v-pre>function <a href="#tecs.gfx.animation.findSheetById">tecs.gfx.animation.findSheetById</a>(id: integer): sheet.Sheet
+</code></pre>
+
+The sheet a process-wide id names.
+
+#### Parameters
+
+| Type                       | Name                  | Description                     |
+| -------------------------- | --------------------- | ------------------------------- |
+| <code v-pre>integer</code> | <code v-pre>id</code> | An id a constructor handed out. |
+
+#### Returns
+
+| Type                           | Description                               |
+| ------------------------------ | ----------------------------------------- |
+| <code v-pre>sheet.Sheet</code> | The sheet, or nil when the id names none. |
+
+<a id="tecs.gfx.animation.findSheetByName"></a>
+
+### tecs.gfx.animation.findSheetByName
+
+<pre><code v-pre>function <a href="#tecs.gfx.animation.findSheetByName">tecs.gfx.animation.findSheetByName</a>(name: string): sheet.Sheet
+</code></pre>
+
+The sheet a name was registered under.
+
+#### Parameters
+
+| Type                      | Name                    | Description                        |
+| ------------------------- | ----------------------- | ---------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | The name a constructor registered. |
+
+#### Returns
+
+| Type                           | Description                                 |
+| ------------------------------ | ------------------------------------------- |
+| <code v-pre>sheet.Sheet</code> | The sheet, or nil when the name names none. |
+
 <a id="tecs.gfx.animation.frameOf"></a>
 
 ### tecs.gfx.animation.frameOf
@@ -1454,48 +1496,6 @@ not.
 | Type                       | Description                                                                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>boolean</code> | Whether there was an Animation to restart. False leaves the entity untouched, since there is nothing to say what it would play. |
-
-<a id="tecs.gfx.animation.sheetById"></a>
-
-### tecs.gfx.animation.sheetById
-
-<pre><code v-pre>function <a href="#tecs.gfx.animation.sheetById">tecs.gfx.animation.sheetById</a>(id: integer): sheet.Sheet
-</code></pre>
-
-The sheet a process-wide id names.
-
-#### Parameters
-
-| Type                       | Name                  | Description                     |
-| -------------------------- | --------------------- | ------------------------------- |
-| <code v-pre>integer</code> | <code v-pre>id</code> | An id a constructor handed out. |
-
-#### Returns
-
-| Type                           | Description                               |
-| ------------------------------ | ----------------------------------------- |
-| <code v-pre>sheet.Sheet</code> | The sheet, or nil when the id names none. |
-
-<a id="tecs.gfx.animation.sheetByName"></a>
-
-### tecs.gfx.animation.sheetByName
-
-<pre><code v-pre>function <a href="#tecs.gfx.animation.sheetByName">tecs.gfx.animation.sheetByName</a>(name: string): sheet.Sheet
-</code></pre>
-
-The sheet a name was registered under.
-
-#### Parameters
-
-| Type                      | Name                    | Description                        |
-| ------------------------- | ----------------------- | ---------------------------------- |
-| <code v-pre>string</code> | <code v-pre>name</code> | The name a constructor registered. |
-
-#### Returns
-
-| Type                           | Description                                 |
-| ------------------------------ | ------------------------------------------- |
-| <code v-pre>sheet.Sheet</code> | The sheet, or nil when the name names none. |
 
 <a id="tecs.gfx.animation.sheetRevision"></a>
 

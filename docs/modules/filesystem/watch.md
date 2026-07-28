@@ -24,7 +24,7 @@ frame the interval has not elapsed on costs a clock read and a compare.
 development build. A release polls nothing.
 :::
 
-[`Application`](/modules/application) starts the watcher when its config asks for one, and registers the
+[`Application`](/modules/Application) starts the watcher when its config asks for one, and registers the
 reloaders for `"shader"`, `"image"`, `"sound"` and `"font"` before it does, so a game that only wants the stock
 behavior writes no code here at all. Each of those four ends by asking the application to pick the loop back up
 after a crash, which is most of what the watcher is for: a file that broke the game is a file someone is about to

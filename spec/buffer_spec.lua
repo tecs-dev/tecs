@@ -35,7 +35,7 @@ describe("gpu.Buffer", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.create({ title = "buffer", width = SIZE, height = SIZE })
+        window = Window.newWindow({ title = "buffer", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
         target = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
 

@@ -597,7 +597,7 @@ function Application:_init(): boolean
         error(("tecs: this build links no shader compiler and there is no " .. "pack at %s"):format(packPath))
     end
 
-    self.window = Window.create(config.window or {} as Window.Options)
+    self.window = Window.newWindow(config.window or {} as Window.Options)
 
     self.device = Device.create(self.window, {debug = config.debug})
     if config.framesInFlight ~= nil then
@@ -635,7 +635,7 @@ function Application:_init(): boolean
     -- Opened before the game's load, so a game may load a clip there. A
     -- machine with no output still gets an object: nothing here fails over
     -- the absence of a sound card.
-    self.audio = Audio.create(config.audio)
+    self.audio = Audio.newAudio(config.audio)
     self.audio:install(self.world)
 
     -- Tweening and sequencing are one plugin, and it belongs to the engine

@@ -821,7 +821,7 @@ A playback that faults is retired in the `"faulted"` state, and the reason is on
 function sequence.plugin(world: World)
 ```
 
-[`Application`](/modules/application) installs the sequencer, so a game that builds one never calls this. A
+[`Application`](/modules/Application) installs the sequencer, so a game that builds one never calls this. A
 world built by hand, a test or a tool that scripts input installs it itself; a second install on the same world
 does nothing.
 

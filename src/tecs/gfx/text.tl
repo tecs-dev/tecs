@@ -264,7 +264,7 @@ local record text
 
     loadFont: function(options: FontOptions): Font
     defaultFont: function(): Font
-    fontByName: function(name: string): Font
+    findFont: function(name: string): Font
     reloadFont: function(path: string): Font
     measureText: function(item: Text): number, number
     textPlugin: function(options: TextOptions): function(World)
@@ -439,7 +439,7 @@ end
 ---     it resolves to.
 --- @return Nil when nothing has loaded that path, which is the non-raising way
 ---     to ask; `loadFont` would read it.
-function text.fontByName(name: string): Font
+function text.findFont(name: string): Font
     return fontsByName[name]
 end
 

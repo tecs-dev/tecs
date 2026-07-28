@@ -774,11 +774,54 @@ Positions everything a world holds: the hierarchy, physics, the
 sequencer and the renderer all move the same one. Not a drawing
 component, which is why it is here and not on `tecs.gfx`, and why a
 headless world has it.
-<a id="tecs.ecs.componentByName"></a>
+<a id="tecs.ecs.declaredComponents"></a>
 
-### tecs.ecs.componentByName
+### tecs.ecs.declaredComponents
 
-<pre><code v-pre>function <a href="#tecs.ecs.componentByName">tecs.ecs.componentByName</a>(name: string): <a href="#tecs.ecs.Component">Component</a>
+<pre><code v-pre>function <a href="#tecs.ecs.declaredComponents">tecs.ecs.declaredComponents</a>(): {string : <a href="#tecs.ecs.Component">Component</a>}
+</code></pre>
+
+Every component declared in this process, name to component.
+
+A fresh table per call, so the registry itself stays unwritable from
+outside registration.
+
+Dense relationship instances are left out. One is registered per target
+under a stamped `Rel->42` name, so a world with many edges has many of
+them, and none of them is a component anybody declared.
+
+#### Returns
+
+| Type                                                                      | Description                                                                                                                                                                                                |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{string : <a href="#tecs.ecs.Component">Component</a>}</code> | A fresh table each call, built by walking the whole registry, so this is for tooling rather than for a per-frame path. What is declared in the process, which is a superset of what any one world carries. |
+
+<a id="tecs.ecs.findComponentById"></a>
+
+### tecs.ecs.findComponentById
+
+<pre><code v-pre>function <a href="#tecs.ecs.findComponentById">tecs.ecs.findComponentById</a>(id: integer): <a href="#tecs.ecs.Component">Component</a>
+</code></pre>
+
+Look up a registered component by numeric ID.
+
+#### Parameters
+
+| Type                       | Name                  | Description                                                                                            |
+| -------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| <code v-pre>integer</code> | <code v-pre>id</code> | A component id, which is allocated once at registration and is the same in every world in the process. |
+
+#### Returns
+
+| Type                                                           | Description                                                                                                                                                                               |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> | The component, or nil for an id that was never allocated. Ids are not stable across runs: registration order decides them, so a saved id is only meaningful within the run that wrote it. |
+
+<a id="tecs.ecs.findComponentByName"></a>
+
+### tecs.ecs.findComponentByName
+
+<pre><code v-pre>function <a href="#tecs.ecs.findComponentByName">tecs.ecs.findComponentByName</a>(name: string): <a href="#tecs.ecs.Component">Component</a>
 </code></pre>
 
 The component registered under `name`, or nil.
@@ -801,28 +844,6 @@ Finds a dense relationship instance by its stamped name as well, which
 | Type                                                           | Description                                                                                                                                                                           |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre><a href="#tecs.ecs.Component">Component</a></code> | The component, or nil when nothing has registered that name yet. Nil is a question of whether the declaring module has been required, not of whether any world carries the component. |
-
-<a id="tecs.ecs.declaredComponents"></a>
-
-### tecs.ecs.declaredComponents
-
-<pre><code v-pre>function <a href="#tecs.ecs.declaredComponents">tecs.ecs.declaredComponents</a>(): {string : <a href="#tecs.ecs.Component">Component</a>}
-</code></pre>
-
-Every component declared in this process, name to component.
-
-A fresh table per call, so the registry itself stays unwritable from
-outside registration.
-
-Dense relationship instances are left out. One is registered per target
-under a stamped `Rel->42` name, so a world with many edges has many of
-them, and none of them is a component anybody declared.
-
-#### Returns
-
-| Type                                                                      | Description                                                                                                                                                                                                |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>{string : <a href="#tecs.ecs.Component">Component</a>}</code> | A fresh table each call, built by walking the whole registry, so this is for tooling rather than for a per-frame path. What is declared in the process, which is a superset of what any one world carries. |
 
 <a id="tecs.ecs.findKey"></a>
 
@@ -850,27 +871,6 @@ Find a named key created by `newKey`. Returns nil when unknown.
 | Type                                                               | Description                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre><a href="#tecs.ecs.Key">Key</a>&lt;T&gt; \| nil</code> | The existing key, so a value stored under it is readable without the module that created it. Nil when no key of that name has been created yet, which is a question of load order rather than of spelling: the key appears once its module has run. |
-
-<a id="tecs.ecs.getComponentById"></a>
-
-### tecs.ecs.getComponentById
-
-<pre><code v-pre>function <a href="#tecs.ecs.getComponentById">tecs.ecs.getComponentById</a>(id: integer): <a href="#tecs.ecs.Component">Component</a>
-</code></pre>
-
-Look up a registered component by numeric ID.
-
-#### Parameters
-
-| Type                       | Name                  | Description                                                                                            |
-| -------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
-| <code v-pre>integer</code> | <code v-pre>id</code> | A component id, which is allocated once at registration and is the same in every world in the process. |
-
-#### Returns
-
-| Type                                                           | Description                                                                                                                                                                               |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> | The component, or nil for an id that was never allocated. Ids are not stable across runs: registration order decides them, so a saved id is only meaningful within the run that wrote it. |
 
 <a id="tecs.ecs.listKeys"></a>
 

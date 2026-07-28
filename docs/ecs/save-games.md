@@ -62,7 +62,7 @@ anything living outside the world. Everything else is yours to carry through
   [World resources](#world-resources).
 - **Process-local runtime objects**: GPU buffers, device handles, physics bodies, audio voices, open files, and
   worker threads.
-- **Work in flight.** A [`Future`](/modules/future) holds listeners, a source and, through it, a native handle,
+- **Work in flight.** A [`Future`](/modules/Future) holds listeners, a source and, through it, a native handle,
   so no save carries one. A sequence cursor parked on a future is saved, as a provider name, an entity and a
   key: after a load nothing is tracked, `isPending` answers false, and the parked cursor resumes on the next
   fixed step. A game that wants the wait to still mean something re-issues the work and re-tracks it under the

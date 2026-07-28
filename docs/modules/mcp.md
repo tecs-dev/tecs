@@ -14,7 +14,7 @@ reads a world that is not mid-update and writes one that has not yet advanced, w
 and none of them queue anything. The cost is that a tool must not block: it runs during a frame someone is
 watching.
 
-The server also outlives the game. When a system raises, [`Application`](/modules/application) records the
+The server also outlives the game. When a system raises, [`Application`](/modules/Application) records the
 traceback here and keeps polling, so an agent that was debugging up to the moment it broke gets the reason
 rather than a refused connection.
 

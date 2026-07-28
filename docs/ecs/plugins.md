@@ -47,7 +47,7 @@ state gating and the crash guard along with it, which a callback would not have.
 
 The entry plugin runs before the startup phases, so anything it spawns is resident before the first frame is
 extracted. See [Getting started](/getting-started) for the entry file and
-[`Application`](/modules/application) for the rest of the config.
+[`Application`](/modules/Application) for the rest of the config.
 
 ## world:addPlugin
 

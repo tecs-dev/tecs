@@ -52,7 +52,7 @@ like that one. See [Plugins](/ecs/plugins) for how a game with several modules c
 
 ## Where a system runs in the frame
 
-Three calls drive the phases, and [`Application`](/modules/application) makes them:
+Three calls drive the phases, and [`Application`](/modules/Application) makes them:
 
 | Call             | Phases                                        | When                                                  |
 | ---------------- | --------------------------------------------- | ----------------------------------------------------- |
@@ -91,7 +91,7 @@ on screen is whatever the frame had drawn before it threw.
 That makes the line that failed inspectable rather than gone, which a lifecycle callback outside the world could
 not offer. It is not fault tolerance: the engine's invariants are restored, a game's are not, because a system
 that threw halfway through its query updated some entities and not others. A development build resumes with
-`app:clearCrash()`; a shipped build stays stopped. See [Crashes](/modules/application#crashes).
+`app:clearCrash()`; a shipped build stays stopped. See [Crashes](/modules/Application#crashes).
 
 ## World methods
 

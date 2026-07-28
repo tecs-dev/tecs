@@ -36,8 +36,8 @@ one and answers how many transfers settled. `tecs.net.http.openClients()` counts
 closed, which is how a leaked one shows up. A game calls neither.
 
 `onSettle` is handed the future rather than the value, which is what lets one continuation answer both outcomes.
-[`map`](/modules/future#map), [`flatMap`](/modules/future#flatmap) and [`recover`](/modules/future#recover) are
-the rest of it: everything a request returns is a [`Future`](/modules/future) and behaves like every other one.
+[`map`](/modules/Future#map), [`flatMap`](/modules/Future#flatmap) and [`recover`](/modules/Future#recover) are
+the rest of it: everything a request returns is a [`Future`](/modules/Future) and behaves like every other one.
 
 Reading `future.status` yourself is fine, and is what a system that wants to check without a callback does. It is
 not the shape to reach for first.

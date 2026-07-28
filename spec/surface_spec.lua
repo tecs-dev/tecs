@@ -341,8 +341,8 @@ describe("the public surface", function()
             -- there is nothing here to read either way. What can be checked is
             -- that the rest of the vocabulary did not gain a second home: a
             -- component registry lives on `tecs.ecs` and nowhere else.
-            assert.is_not_nil(require("tecs.ecs").componentByName)
-            assert.is_nil(rawget(tecs, "componentByName"))
+            assert.is_not_nil(require("tecs.ecs").findComponentByName)
+            assert.is_nil(rawget(tecs, "findComponentByName"))
         end)
     end)
 

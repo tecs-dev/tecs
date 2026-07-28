@@ -110,8 +110,8 @@ describe("the surface a game reaches sheets through", function()
     it("renames the three whose subject the move made ambiguous", function()
         -- `byName` on a module called animation reads as an animation lookup
         -- and answers with a sheet, which is why these three carry the word.
-        assert.are.equal(sheet.byId, tecs.gfx.animation.sheetById)
-        assert.are.equal(sheet.byName, tecs.gfx.animation.sheetByName)
+        assert.are.equal(sheet.byId, tecs.gfx.animation.findSheetById)
+        assert.are.equal(sheet.byName, tecs.gfx.animation.findSheetByName)
         assert.are.equal(sheet.revision, tecs.gfx.animation.sheetRevision)
         assert.is_nil(rawget(tecs.gfx.animation, "byId"))
         assert.is_nil(rawget(tecs.gfx.animation, "byName"))

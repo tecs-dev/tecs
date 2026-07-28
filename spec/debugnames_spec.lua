@@ -81,7 +81,7 @@ describe("gpu debug names", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.create({ title = "names", width = SIZE, height = SIZE })
+        window = Window.newWindow({ title = "names", width = SIZE, height = SIZE })
         -- Debug mode, since that is the only mode in which SDL keeps a name at
         -- all, and the only one in which a wrong call is complained about.
         device = Device.create(window, { debug = true })

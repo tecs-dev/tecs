@@ -89,7 +89,7 @@
 --- SDL leaves an out-parameter untouched on failure and a getter that returned
 --- it would report the size the window had before it was destroyed.
 ---
---- `create` is the exception and raises, since a window that could not be
+--- `newWindow` is the exception and raises, since a window that could not be
 --- created is not a question with a sensible answer.
 
 local bit <const> = require("bit")
@@ -164,7 +164,7 @@ local record Window
         _mode: loader.CPtr
     end
 
-    --- What `create` takes. Every field is optional.
+    --- What `newWindow` takes. Every field is optional.
     record Options
         --- Defaults to "tecs".
         title: string
@@ -260,7 +260,7 @@ end
 --- Whether there is a video subsystem to ask at all.
 ---
 --- False in a process that never brought it up, where every display and
---- screen-saver function here answers empty rather than failing. `create`
+--- screen-saver function here answers empty rather than failing. `newWindow`
 --- raises there instead, so this is what a caller checks before deciding
 --- whether to open a window.
 function Window.available(): boolean
@@ -318,7 +318,7 @@ end
 
 --- Decodes an image file and hands it to SDL as the window's icon.
 ---
---- Shared by `create` and `setIcon` rather than one calling the other, because
+--- Shared by `newWindow` and `setIcon` rather than one calling the other, because
 --- an option applied at construction and a setter called later are the same
 --- work and only one of them can be written first.
 local function applyIcon(handle: loader.CPtr, path: string): boolean
@@ -344,7 +344,7 @@ end
 --- here; everything else in `options` is applied straight afterwards, and has
 --- a setter of its own, so nothing is reachable at creation that is not
 --- reachable later.
-function Window.create(options: Window.Options): Window
+function Window.newWindow(options: Window.Options): Window
     local flags = 0
     if options.resizable ~= false then
         flags = flags + K.SDL_WINDOW_RESIZABLE

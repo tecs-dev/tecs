@@ -332,7 +332,7 @@ local record ecs
     --- @return The component, or nil for an id that was never allocated. Ids
     ---     are not stable across runs: registration order decides them, so a
     ---     saved id is only meaningful within the run that wrote it.
-    getComponentById: function(id: integer): Component
+    findComponentById: function(id: integer): Component
 
     --- The component registered under `name`, or nil.
     ---
@@ -348,7 +348,7 @@ local record ecs
     --- @return The component, or nil when nothing has registered that name yet.
     ---     Nil is a question of whether the declaring module has been required,
     ---     not of whether any world carries the component.
-    componentByName: function(name: string): Component
+    findComponentByName: function(name: string): Component
 
     --- Every component declared in this process, name to component.
     ---
@@ -388,11 +388,11 @@ ecs.newFFIRelationship = components.newFFIRelationship as function<R is types.co
 ): R
 ecs.newKey = Context.newKey as function<T>(name?: string, forType?: T): types.Context.Key<T>
 
-function ecs.getComponentById(id: integer): types.components.Component
+function ecs.findComponentById(id: integer): types.components.Component
     return components.componentsById[id]
 end
 
-function ecs.componentByName(name: string): types.components.Component
+function ecs.findComponentByName(name: string): types.components.Component
     return components.registeredComponents[name]
 end
 

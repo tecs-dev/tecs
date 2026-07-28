@@ -451,7 +451,7 @@ describe("render backend", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.create({ title = "packet", width = SIZE, height = SIZE })
+        window = Window.newWindow({ title = "packet", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
         screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
     end)

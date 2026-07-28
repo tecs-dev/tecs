@@ -395,7 +395,7 @@ end
 --- Nothing here is thread safe, and nothing here calls back. Everything runs on
 --- the thread that calls it.
 local record Audio
-    --- What `create` takes. Every field is optional.
+    --- What `newAudio` takes. Every field is optional.
     record Config
         --- Frames per second. Defaults to 48000.
         frequency: integer
@@ -577,7 +577,7 @@ local record Audio
     _params: audiobackend.PlayParams
 
     --- Private. Every voice slot, sounding or not, indexed from one. Its
-    --- length is `maxVoices` and never changes after `create`.
+    --- length is `maxVoices` and never changes after `newAudio`.
     _voices: {Voice}
 
     --- Private. Slots not in use, as a stack taken from the end, so the first
@@ -729,7 +729,7 @@ end
 --- @return An instance the caller owns and has to `destroy`. Check
 ---     `available` for whether an output actually opened; it is false on a
 ---     machine with no sound, and every call still succeeds and is silent.
-function Audio.create(config?: Audio.Config): Audio
+function Audio.newAudio(config?: Audio.Config): Audio
     local given = config or {} as Audio.Config
     local self = setmetatable({} as Audio, AudioMT)
 
@@ -780,7 +780,7 @@ function Audio.create(config?: Audio.Config): Audio
     self._limits = {}
     self._buckets = {}
     self._clips = {}
-    self._loads = assets.batch(settleClip)
+    self._loads = assets.newBatch(settleClip)
     self._random = random.new()
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
@@ -835,7 +835,7 @@ function Audio:destroy()
     -- A fresh batch rather than a drained one, so a load the wait above ran out
     -- of time on is dropped with the clips it was for rather than resolving
     -- into a mixer that has gone.
-    self._loads = assets.batch(settleClip)
+    self._loads = assets.newBatch(settleClip)
 
     if self._mixer ~= nil then
         self._backend.close(self._mixer)
@@ -1646,7 +1646,7 @@ end
 --- Voices that may sound at once, as `maxVoices` configured it.
 ---
 --- @return The ceiling `play` refuses at, fixed for the instance's life. Not
----     a hardware limit: it is what `create` was given, defaulting to 32.
+---     a hardware limit: it is what `newAudio` was given, defaulting to 32.
 function Audio:maxVoices(): integer
     return #self._voices
 end

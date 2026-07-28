@@ -11,7 +11,7 @@ Three kinds of target are checked:
   /ecs/queries/          docs/ecs/queries/index.md
   #a-heading             a heading, or an explicit {#id}, on the same page
 
-Anchors are checked across pages too, so `/modules/application#crashes` fails
+Anchors are checked across pages too, so `/modules/Application#crashes` fails
 when that section is renamed. Slugs follow GitHub's rule, which is what
 VitePress uses: lowercase, spaces to hyphens, punctuation dropped.
 

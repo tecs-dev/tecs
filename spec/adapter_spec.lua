@@ -433,7 +433,7 @@ describe("platform contract", function()
         platform.audio = fakeAudio()
         adapter.install(platform)
 
-        local audio = Audio.create({ frequency = 22050, channels = 1 })
+        local audio = Audio.newAudio({ frequency = 22050, channels = 1 })
         assert.is_true(audio.available)
         assert.are.equal(1, platform.audio.opens)
         assert.are.equal(22050, platform.audio.spec.frequency)

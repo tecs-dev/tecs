@@ -733,7 +733,7 @@ local level = tecs.data.decodeJSON(bytes)
 `read` answers nil for a path with no file, so an absent document is
 distinguishable from a malformed one, which the decoder raises on.
 
-Waiting on several handles at once is `assets.batch`. Sound holds a clip per
+Waiting on several handles at once is `assets.newBatch`. Sound holds a clip per
 handle and text holds an atlas per handle; each of them had grown the same list
 separately, and each wanted the same three things, which are how many are still
 in flight, one callback per load that finished with the caller's own value
@@ -1345,7 +1345,7 @@ were briefly two modules that differed only in the case of one letter, which is
 the worst spelling a distinction can have. The mixer and the device it opens
 are one subject at two levels: a game that wants a particular output names a
 device from `tecs.audio.playbackDevices` and passes its id to
-`tecs.audio.Audio.create`, and having to know which of two modules each half
+`tecs.audio.newAudio`, and having to know which of two modules each half
 came from bought nothing. `src/tecs/platform/audio.tl` is still its own file
 and still only reaches SDL, so it is what the namespace searches first and a
 game listing devices never loads a mixer.

@@ -374,12 +374,12 @@ local record animation
     --- The sheet a process-wide id names.
     --- @param id An id a constructor handed out.
     --- @return The sheet, or nil when the id names none.
-    sheetById: function(id: integer): sheet.Sheet
+    findSheetById: function(id: integer): sheet.Sheet
 
     --- The sheet a name was registered under.
     --- @param name The name a constructor registered.
     --- @return The sheet, or nil when the name names none.
-    sheetByName: function(name: string): sheet.Sheet
+    findSheetByName: function(name: string): sheet.Sheet
 
     --- How many times any sheet's frames have changed.
     ---
@@ -458,8 +458,8 @@ animation.rects = sheet.rects
 animation.build = sheet.build
 animation.fromAseprite = sheet.fromAseprite
 animation.replace = sheet.replace
-animation.sheetById = sheet.byId
-animation.sheetByName = sheet.byName
+animation.findSheetById = sheet.byId
+animation.findSheetByName = sheet.byName
 animation.sheetRevision = sheet.revision
 
 animation.Completed.init = function(event: Completed, entity: integer, source: Sheet, tag: string)

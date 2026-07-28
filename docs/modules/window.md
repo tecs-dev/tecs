@@ -12,8 +12,9 @@ through it, and enumerates the displays around it.
 The handle is owned by the platform layer and released by `destroy`, not by a finalizer. Tying GPU-adjacent
 lifetimes to Lua's collector makes hot reload either leak or double-free, depending on collection order.
 
-[`Application`](/modules/application) creates the window for you from the `Window.Options` its config carries,
-and holds it. A game that only wants a window of a certain size sets the options and never calls `Window.create`.
+[`Application`](/modules/Application) creates the window for you from the `Window.Options` its config carries,
+and holds it. A game that only wants a window of a certain size sets the options and never calls
+`tecs.window.newWindow`.
 
 ## Two coordinate systems, and no converter between them
 
@@ -65,12 +66,12 @@ What a caller checks before deciding whether to open a window.
 
 ## Creating a window
 
-### create
+### newWindow
 
 Creates a window.
 
 ```teal
-function Window.create(options: Window.Options): Window
+function tecs.window.newWindow(options: Window.Options): Window
 ```
 
 Requires SDL's video subsystem to have been initialized, and raises when the window could not be created.
@@ -100,7 +101,7 @@ reachable later.
 **Example:**
 
 ```teal
-local window <const> = tecs.window.Window.create({
+local window <const> = tecs.window.newWindow({
     title = "Starfarer",
     width = 1600, height = 900,
     minWidth = 640, minHeight = 360,
@@ -556,7 +557,7 @@ Keeps flashing until the window is focused.
 <pre><code v-pre>record <a href="#tecs.window.Window.Options">tecs.window.Window.Options</a>
 </code></pre>
 
-What `create` takes. Every field is optional.
+What `newWindow` takes. Every field is optional.
 <a id="tecs.window.Window.Options.title"></a>
 
 ### tecs.window.Window.Options.title
@@ -812,7 +813,7 @@ for a bound that is not set.
 Whether there is a video subsystem to ask at all.
 
 False in a process that never brought it up, where every display and
-screen-saver function here answers empty rather than failing. `create`
+screen-saver function here answers empty rather than failing. `newWindow`
 raises there instead, so this is what a caller checks before deciding
 whether to open a window.
 
@@ -925,32 +926,6 @@ record holds one `displayScale` and the two would be the same field.
 | Type                      | Description |
 | ------------------------- | ----------- |
 | <code v-pre>number</code> |             |
-
-<a id="tecs.window.Window.create"></a>
-
-### tecs.window.Window.create
-
-<pre><code v-pre>function <a href="#tecs.window.Window.create">tecs.window.Window.create</a>(options: Window.Options): Window
-</code></pre>
-
-Creates a window. Requires `SDL_Init(SDL_INIT_VIDEO)` to have run.
-
-Flags that SDL only accepts at creation are taken from `options` and set
-here; everything else in `options` is applied straight afterwards, and has
-a setter of its own, so nothing is reachable at creation that is not
-reachable later.
-
-#### Parameters
-
-| Type                              | Name                       | Description |
-| --------------------------------- | -------------------------- | ----------- |
-| <code v-pre>Window.Options</code> | <code v-pre>options</code> |             |
-
-#### Returns
-
-| Type                      | Description |
-| ------------------------- | ----------- |
-| <code v-pre>Window</code> |             |
 
 <a id="tecs.window.Window.currentMode"></a>
 
@@ -1737,6 +1712,32 @@ own content asks alongside `orientation`.
 | Type                                  | Description |
 | ------------------------------------- | ----------- |
 | <code v-pre>Window.Orientation</code> |             |
+
+<a id="tecs.window.Window.newWindow"></a>
+
+### tecs.window.Window.newWindow
+
+<pre><code v-pre>function <a href="#tecs.window.Window.newWindow">tecs.window.Window.newWindow</a>(options: Window.Options): Window
+</code></pre>
+
+Creates a window. Requires `SDL_Init(SDL_INIT_VIDEO)` to have run.
+
+Flags that SDL only accepts at creation are taken from `options` and set
+here; everything else in `options` is applied straight afterwards, and has
+a setter of its own, so nothing is reachable at creation that is not
+reachable later.
+
+#### Parameters
+
+| Type                              | Name                       | Description |
+| --------------------------------- | -------------------------- | ----------- |
+| <code v-pre>Window.Options</code> | <code v-pre>options</code> |             |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>Window</code> |             |
 
 <a id="tecs.window.Window.opacity"></a>
 

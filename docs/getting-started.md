@@ -94,7 +94,7 @@ return tecs.newApplication({
 
 There is one entry point rather than a list of callbacks. `Application.Config` carries `plugin`, a single
 `function(world, app)`, and nothing else a game supplies is called by the loop, because the ECS already answers
-every question a callback would have. See [`Application`](/modules/application) for the rest of the config.
+every question a callback would have. See [`Application`](/modules/Application) for the rest of the config.
 
 The four callbacks a loop-shaped engine would hand you map onto machinery that was already there:
 

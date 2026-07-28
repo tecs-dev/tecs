@@ -694,7 +694,7 @@ local function fieldsFrom(field: string | {string}): {string}
     return field as {string}
 end
 
-local function componentByName(name: string): Component
+local function findComponentByName(name: string): Component
     local component = internalComponents.registeredComponents[name]
     if not component then
         error("Unknown tween component " .. name)
@@ -704,7 +704,7 @@ end
 
 local function resolveTarget(t: TargetImpl): TargetImpl
     if not t.component and t.componentName then
-        t.component = componentByName(t.componentName)
+        t.component = findComponentByName(t.componentName)
     end
     return t
 end
@@ -939,7 +939,7 @@ function tweeneval.deserializeTarget(data: {string: any}): TargetImpl
         return builtin
     end
     return newTarget(
-        componentByName(data.component as string), data.fields as {string}, (data.mode as TargetMode) or "field", id
+        findComponentByName(data.component as string), data.fields as {string}, (data.mode as TargetMode) or "field", id
     )
 end
 
@@ -966,9 +966,9 @@ function tweeneval.deserializeSource(data: {string: any}): TrackSourceImpl
         kind = data.kind as TrackSourceKind,
         key = data.key as string,
         relationshipName = relName,
-        relationship = relName and componentByName(relName) or nil,
+        relationship = relName and findComponentByName(relName) or nil,
         componentName = data.component as string,
-        component = componentByName(data.component as string),
+        component = findComponentByName(data.component as string),
         fields = data.fields as {string},
     } as TrackSourceImpl
 end
@@ -1295,7 +1295,7 @@ function tweeneval.valuesFromSource(world: World, entity: integer, src: TrackSou
         return 0, 0, 0, 0
     end
     if not src.component and src.componentName then
-        src.component = componentByName(src.componentName)
+        src.component = findComponentByName(src.componentName)
     end
     local sourceEntity = entity
     if src.kind == "key" then
@@ -1314,7 +1314,7 @@ function tweeneval.valuesFromSource(world: World, entity: integer, src: TrackSou
         end
     elseif src.kind == "relationship" then
         if not src.relationship and src.relationshipName then
-            src.relationship = componentByName(src.relationshipName)
+            src.relationship = findComponentByName(src.relationshipName)
         end
         local rel = world:get(entity, src.relationship)
         if not rel then
