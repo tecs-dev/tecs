@@ -14,7 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local components = require("tecs.components")
 local builtins = require("tecs.ecs").builtins
-local physics = require("tecs.physics")
+local box2d = require("tecs.box2d")
 
 local Transform = builtins.Transform
 
@@ -25,7 +25,7 @@ local built = {}
 
 local function newWorld(options)
     local world = tecs.ecs.newWorld()
-    world:addPlugin(physics.plugin(options or { gravity = { 0, 980 } }))
+    world:addPlugin(box2d.plugin(options or { gravity = { 0, 980 } }))
     built[#built + 1] = world
     return world
 end
@@ -37,13 +37,13 @@ after_each(function()
     built = {}
 end)
 
-describe("ecs.physics declaration", function()
+describe("ecs.box2d declaration", function()
     it("records the body a game asked for", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, entity, { type = "kinematic", radius = 8, fixedRotation = true })
+        box2d.attach(world, entity, { type = "kinematic", radius = 8, fixedRotation = true })
 
-        local body = world:get(entity, physics.Body)
+        local body = world:get(entity, box2d.Body)
         assert.is_not_nil(body, "attach must leave the declaration in a column")
         -- 1 is b2_kinematicBody. The column holds the integer so a query over
         -- bodies never compares strings.
@@ -56,18 +56,18 @@ describe("ecs.physics declaration", function()
     it("records the collider a game asked for", function()
         local world = newWorld()
         local round = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, round, { type = "dynamic", radius = 8, density = 2, friction = 0.25 })
+        box2d.attach(world, round, { type = "dynamic", radius = 8, density = 2, friction = 0.25 })
 
-        local circle = world:get(round, physics.Collider)
+        local circle = world:get(round, box2d.Collider)
         assert.equal(1, circle.shape, "a radius selects the circle shape")
         assert.equal(8, circle.radius)
         assert.equal(2, circle.density)
         assert.is_true(math.abs(circle.friction - 0.25) < 1e-6)
 
         local square = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, square, { type = "static", halfWidth = 20, halfHeight = 3 })
+        box2d.attach(world, square, { type = "static", halfWidth = 20, halfHeight = 3 })
 
-        local box = world:get(square, physics.Collider)
+        local box = world:get(square, box2d.Collider)
         assert.equal(0, box.shape, "no radius leaves the box shape")
         assert.equal(20, box.halfWidth)
         assert.equal(3, box.halfHeight)
@@ -86,26 +86,26 @@ describe("ecs.physics declaration", function()
     it("carries the description through a snapshot", function()
         local first = newWorld()
         local entity = first:spawn(Transform(40, 60, 0, 1, 0, 16, 16))
-        physics.attach(first, entity, { type = "static", halfWidth = 12, halfHeight = 7, restitution = 0.5 })
+        box2d.attach(first, entity, { type = "static", halfWidth = 12, halfHeight = 7, restitution = 0.5 })
         local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
         local second = newWorld()
         second:loadSnapshot(snapshot)
 
         local restored
-        for _, length, entities in second:query({ include = { physics.Collider } }):iter() do
+        for _, length, entities in second:query({ include = { box2d.Collider } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
         end
         assert.is_not_nil(restored, "the collider column must come back")
 
-        local collider = second:get(restored, physics.Collider)
+        local collider = second:get(restored, box2d.Collider)
         assert.equal(0, collider.shape)
         assert.equal(12, collider.halfWidth)
         assert.equal(7, collider.halfHeight)
         assert.is_true(math.abs(collider.restitution - 0.5) < 1e-6)
-        assert.equal(0, second:get(restored, physics.Body).kind)
+        assert.equal(0, second:get(restored, box2d.Body).kind)
     end)
 
     -- A body with no pose has nothing to write back to, so it is not a legal
@@ -114,10 +114,10 @@ describe("ecs.physics declaration", function()
     it("gains a Transform and a Motion from Body alone", function()
         local world = newWorld()
         local entity = world:spawn()
-        world:set(entity, physics.Body())
+        world:set(entity, box2d.Body())
 
         assert.is_not_nil(world:get(entity, Transform), "Body requires Transform")
-        assert.is_not_nil(world:get(entity, physics.Motion), "Body requires Motion")
+        assert.is_not_nil(world:get(entity, box2d.Motion), "Body requires Motion")
         assert.equal(0, world:get(entity, Transform).x)
     end)
 
@@ -127,10 +127,10 @@ describe("ecs.physics declaration", function()
     it("attaches to an entity that had no Transform", function()
         local world = newWorld()
         local entity = world:spawn()
-        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         world:update(1 / 60)
-        assert.is_true(physics.hasBody(world, entity))
+        assert.is_true(box2d.hasBody(world, entity))
         for _ = 1, 30 do
             world:update(1 / 60)
         end
@@ -141,12 +141,12 @@ describe("ecs.physics declaration", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         assert.has_error(function()
-            physics.attach(world, entity, { type = "floaty" })
+            box2d.attach(world, entity, { type = "floaty" })
         end)
     end)
 end)
 
-describe("ecs.physics velocity", function()
+describe("ecs.box2d velocity", function()
     -- Every other number this module takes and returns is pixels: the extents
     -- and radius `attach` is given, the impulse components, the plugin's
     -- gravity. Metres was the outlier, and the difference is a factor of 32:
@@ -154,24 +154,24 @@ describe("ecs.physics velocity", function()
     it("reads a falling body's velocity in pixels", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         for _ = 1, 30 do
             world:update(1 / 60)
         end
 
-        local _, vy = physics.velocity(world, entity)
+        local _, vy = box2d.velocity(world, entity)
         assert.is_true(vy > 450 and vy < 530, ("expected about 490 px/s after half a second, got %.2f"):format(vy))
     end)
 
     it("sets a velocity in pixels and the body moves by it", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         world:update(1 / 60)
-        physics.setVelocity(world, entity, 320, 0)
-        local vx = physics.velocity(world, entity)
+        box2d.setVelocity(world, entity, 320, 0)
+        local vx = box2d.velocity(world, entity)
         assert.is_true(math.abs(vx - 320) < 1e-3, ("expected 320 px/s back, got %.4f"):format(vx))
 
         for _ = 1, 60 do
@@ -187,8 +187,8 @@ describe("ecs.physics velocity", function()
     it("leaves an entity with no body alone", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.setVelocity(world, entity, 100, 100)
-        local vx, vy = physics.velocity(world, entity)
+        box2d.setVelocity(world, entity, 100, 100)
+        local vx, vy = box2d.velocity(world, entity)
         assert.equal(0, vx)
         assert.equal(0, vy)
     end)

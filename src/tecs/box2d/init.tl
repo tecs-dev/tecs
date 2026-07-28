@@ -1,4 +1,12 @@
---- Physics as part of the world.
+--- Box2D 3 as part of the world.
+---
+--- Named for the library rather than for the subject, because Box2D's model is
+--- part of the contract: `Body`, `Collider`, the filter bits, the substep
+--- count and the solver's tolerances are all its vocabulary rather than a
+--- rigid-body vocabulary this module invented and could re-implement over
+--- something else. A game reading Box2D's own documentation is reading this
+--- module's documentation, and a name that hid that would be promising a
+--- portability nothing here intends to keep.
 ---
 --- A body is four components. `Body` and `Collider` are the declaration, what
 --- a game asked for; `Motion` is the one piece of simulation state that has to
@@ -26,22 +34,22 @@
 --- timestep and a variable one makes replay diverge, so the fixed phase is not
 --- a preference here, it is a requirement.
 ---
---- The simulation is per world, reached through `physics.of`. Two worlds each
+--- The simulation is per world, reached through `box2d.of`. Two worlds each
 --- installing the plugin get a Box2D world each and neither sees the other's
 --- bodies. The solver's thread pool goes the other way and is shared: threads
 --- are the machine, and worlds step serially on the game thread.
 
 local ecs <const> = require("tecs.ecs")
 local loader <const> = require("tecs.ffi.loader")
-local World <const> = require("tecs.physics.World")
-local box2d <const> = require("tecs.ffi.box2d")
+local World <const> = require("tecs.box2d.World")
+local binding <const> = require("tecs.ffi.box2d")
 local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
 local table_clear <const> = require("table.clear")
 
 local atan2 <const> = math.atan2
 
-local B <const> = box2d.C
+local B <const> = binding.C
 local Transform <const> = ecs.builtins.Transform
 
 local type Component = ecs.Component
@@ -132,7 +140,7 @@ local COLLIDER_SHAPES <const>: {string: integer} = {
 --- A store, not a mirror. It is written at two moments, a pause and a save,
 --- and read at two, a resume and a load. Nothing writes it per step, so
 --- reading it mid-frame gives whatever the last of those four events left
---- there. `physics.velocity` is the live read and stays the only way to ask
+--- there. `box2d.velocity` is the live read and stays the only way to ask
 --- what a body is doing right now.
 ---
 --- Mirroring it per step is the one large per-frame cost this design could
@@ -417,7 +425,7 @@ local record SensorEnd is ecs.Event
     visitor: integer
 end
 
---- What `physics.plugin` is built with. Every field is optional.
+--- What `box2d.plugin` is built with. Every field is optional.
 local record PhysicsOptions
     --- Gravity as x then y, in pixels per second squared, matching world
     --- units. Defaults to 980 downward, which is roughly Earth at this
@@ -437,7 +445,7 @@ local record PhysicsOptions
     workerCount: integer
 end
 
-local record physics
+local record box2d
     RigidBody: RigidBody
     Body: Body
     Collider: Collider
@@ -448,8 +456,13 @@ local record physics
     ContactHit: ContactHit
     SensorBegin: SensorBegin
     SensorEnd: SensorEnd
-    --- Pixels per simulated metre.
-    scale: number
+    --- Pixels per simulated metre, and the conversion every public number on
+    --- this module has already had applied to it. Multiply metres by it,
+    --- divide pixels by it. Named for the units rather than `scale`, which
+    --- says neither what is being converted nor which way round it goes, and
+    --- a caller guessing wrong is off by a factor of a thousand with nothing
+    --- to raise.
+    pixelsPerMetre: number
 
     --- The same as `applyImpulse`, given a `RigidBody` row already in hand.
     ---
@@ -467,17 +480,17 @@ local record physics
     applyImpulseTo: function(row: RigidBody, x: number, y: number)
 end
 
-physics.RigidBody = RigidBody
-physics.Body = Body
-physics.Collider = Collider
-physics.ColliderOf = ColliderOf
-physics.Motion = Motion
-physics.ContactBegin = ContactBegin
-physics.ContactEnd = ContactEnd
-physics.ContactHit = ContactHit
-physics.SensorBegin = SensorBegin
-physics.SensorEnd = SensorEnd
-physics.scale = PIXELS_PER_METRE
+box2d.RigidBody = RigidBody
+box2d.Body = Body
+box2d.Collider = Collider
+box2d.ColliderOf = ColliderOf
+box2d.Motion = Motion
+box2d.ContactBegin = ContactBegin
+box2d.ContactEnd = ContactEnd
+box2d.ContactHit = ContactHit
+box2d.SensorBegin = SensorBegin
+box2d.SensorEnd = SensorEnd
+box2d.pixelsPerMetre = PIXELS_PER_METRE
 
 ContactBegin.init = function(event: ContactBegin, a: integer, b: integer) event.entityA, event.entityB = a, b end
 ContactEnd.init = function(event: ContactEnd, a: integer, b: integer) event.entityA, event.entityB = a, b end
@@ -503,11 +516,14 @@ ecs.newEvent(SensorEnd)
 
 --- The simulation installed into a world, or nil when none has been.
 ---
---- Module-private, because `physics.of` is the door: an accessor reads better
+--- Module-private, because `box2d.of` is the door: an accessor reads better
 --- than a table index, and one door is what lets this module change how it
 --- stores the simulation later. What is published is the name, because
 --- `Context.listKeys` reverse-maps names to ids, so a debug tool can answer
 --- what is installed into a world without every module exporting its key.
+---
+--- That published name is what an agent asks by, so it stays as it is whatever
+--- this module is called. See `AGENTS.md` on externally typed strings.
 local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 
 --- The simulation installed into `world`, or nil when none has been.
@@ -522,7 +538,7 @@ local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 --- @return The world's own live simulation, not a copy, so stepping or
 ---     destroying what comes back acts on the one the plugin's systems drive.
 ---     Nil before the plugin is added and again after `Shutdown` has run.
-function physics.of(world: ecs.World): World
+function box2d.of(world: ecs.World): World
     return world.resources[simulationKey]
 end
 
@@ -568,7 +584,7 @@ end
 --- same path work for spawn, batch spawn, snapshots and debug tools, and no
 --- raw Box2D handle escapes the module.
 ---
---- @param world Raises when `physics.plugin` was never added to it, because a
+--- @param world Raises when `box2d.plugin` was never added to it, because a
 ---     body declared into a world with no simulation is components nothing
 ---     will ever read.
 --- @param entity Gains `Body` and `Collider`, and `Transform` and `Motion`
@@ -578,11 +594,11 @@ end
 ---     `Body` or `Collider`, which the fixed step reapplies to the live body.
 ---     An unrecognised `type` raises, and so does a `capsuleLength` without a
 ---     positive `radius`; both blame the caller's line rather than this one.
-function physics.attach(world: ecs.World, entity: integer, options: BodyOptions)
+function box2d.attach(world: ecs.World, entity: integer, options: BodyOptions)
     options = options or {}
 
-    if physics.of(world) == nil then
-        error("tecs: this world has no physics simulation; add physics.plugin to it first", 2)
+    if box2d.of(world) == nil then
+        error("tecs: this world has no physics simulation; add box2d.plugin to it first", 2)
     end
 
     local kind = BODY_KINDS[options.type or "dynamic"]
@@ -622,7 +638,7 @@ end
 --- @param options Only the shape, material, filter and offset fields are read.
 ---     `type`, damping, gravity and the sleep and bullet flags belong to the
 ---     body and are ignored here.
-function physics.attachCollider(world: ecs.World, entity: integer, body: integer, options: BodyOptions)
+function box2d.attachCollider(world: ecs.World, entity: integer, body: integer, options: BodyOptions)
     options = options or {}
     if world:get(body, Body) == nil then
         error("tecs: ColliderOf target has no Body", 2)
@@ -641,7 +657,7 @@ end
 --- @param entity Loses `Body` only. `Collider`, `Motion` and `Transform` stay,
 ---     so what the body was is still readable and `attach` can declare it
 ---     again. Not an error for an entity that never had a body.
-function physics.detach(world: ecs.World, entity: integer)
+function box2d.detach(world: ecs.World, entity: integer)
     world:remove(entity, Body)
 end
 
@@ -687,7 +703,7 @@ end
 ---     acts on it, so this is not a way to check a declaration landed. False
 ---     too for a handle whose world has since been destroyed, because the
 ---     check covers the generation and the world as well as the slot.
-function physics.hasBody(world: ecs.World, entity: integer): boolean
+function box2d.hasBody(world: ecs.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return false
@@ -713,15 +729,15 @@ end
 --- @param y The same along y, positive downward. Applied at the centre of
 ---     mass, so neither component imparts spin; `applyImpulseAt` is the one
 ---     that does.
-function physics.applyImpulse(world: ecs.World, entity: integer, x: number, y: number)
+function box2d.applyImpulse(world: ecs.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil then
         return
     end
-    physics.applyImpulseTo(row, x, y)
+    box2d.applyImpulseTo(row, x, y)
 end
 
-function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
+function box2d.applyImpulseTo(row: RigidBody, x: number, y: number)
     -- The null handle is what a snapshot load leaves behind, and Box2D
     -- indexes its body array from the slot without checking it, so passing
     -- one through would read off the front of that array.
@@ -748,7 +764,7 @@ end
 ---     the impulse becomes spin and the less becomes travel.
 --- @param pointY The same along y. A point at the centre of mass makes this
 ---     exactly `applyImpulse`.
-function physics.applyImpulseAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function box2d.applyImpulseAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -760,7 +776,7 @@ end
 ---
 --- Pixels, like every other number this module takes and returns: the extents
 --- and radius `attach` is given, the impulse components, and the plugin's
---- gravity. A caller that wants metres divides by `physics.scale`.
+--- gravity. A caller that wants metres divides by `box2d.pixelsPerMetre`.
 ---
 --- This rather than the `Motion` column is what a body is doing right now.
 --- `Motion` is a store written at a pause and a save, not a mirror.
@@ -771,8 +787,8 @@ end
 ---     rest; `hasBody` is what tells them apart.
 --- @return X in pixels per second, then y, positive downward. Linear only: a
 ---     body that is only spinning reads zero on both, and
----     `physics.angularVelocity` is where that shows.
-function physics.velocity(world: ecs.World, entity: integer): number, number
+---     `box2d.angularVelocity` is where that shows.
+function box2d.velocity(world: ecs.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0, 0.0
@@ -784,7 +800,7 @@ end
 --- Sets a body's velocity, in pixels per second, and wakes it.
 ---
 --- Does nothing for an entity with no live body, which is the same answer
---- `physics.velocity` gives for one: a null handle indexes Box2D's body array
+--- `box2d.velocity` gives for one: a null handle indexes Box2D's body array
 --- without being checked, so it never reaches Box2D.
 ---
 --- @param world The world holding the entity.
@@ -794,7 +810,7 @@ end
 --- @param vy The same along y, positive downward. Angular velocity is left
 ---     alone, and the `Motion` column is not written: it is a store for pauses
 ---     and saves, so it still holds whatever the last of those left.
-function physics.setVelocity(world: ecs.World, entity: integer, vx: number, vy: number)
+function box2d.setVelocity(world: ecs.World, entity: integer, vx: number, vy: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -813,7 +829,7 @@ end
 ---     kilograms gives the acceleration in pixels per second squared.
 --- @param y The same along y, positive downward. Applied at the centre of
 ---     mass, so neither component imparts spin.
-function physics.applyForce(world: ecs.World, entity: integer, x: number, y: number)
+function box2d.applyForce(world: ecs.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -833,7 +849,7 @@ end
 ---     the body's frame. Off the centre of mass it produces torque as well as
 ---     acceleration.
 --- @param pointY The same along y.
-function physics.applyForceAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function box2d.applyForceAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -849,10 +865,10 @@ end
 --- @param entity Does nothing for one with no live body.
 --- @param torque Newton-metres, in Box2D's own units. This is the one quantity
 ---     the module passes through unscaled, because a torque is a force times a
----     distance and so would need `physics.scale` squared rather than the
+---     distance and so would need `box2d.pixelsPerMetre` squared rather than the
 ---     single factor everything else takes. Positive raises the body's angular
 ---     velocity, and so the `Transform.rotation` the sync writes.
-function physics.applyTorque(world: ecs.World, entity: integer, torque: number)
+function box2d.applyTorque(world: ecs.World, entity: integer, torque: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -870,7 +886,7 @@ end
 ---     raising.
 --- @return Radians per second, in the direction a rising `Transform.rotation`
 ---     turns. Live from Box2D, not the `Motion` column.
-function physics.angularVelocity(world: ecs.World, entity: integer): number
+function box2d.angularVelocity(world: ecs.World, entity: integer): number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0
@@ -886,7 +902,7 @@ end
 ---     Discarded by Box2D for a static body and for one declared with
 ---     `fixedRotation`, so those two read back zero rather than the value just
 ---     written.
-function physics.setAngularVelocity(world: ecs.World, entity: integer, omega: number)
+function box2d.setAngularVelocity(world: ecs.World, entity: integer, omega: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -902,7 +918,7 @@ end
 --- @return Whether the body is still being solved. Bodies sleep as an island
 ---     rather than one at a time, so a body at rest touching a moving one
 ---     stays awake.
-function physics.isAwake(world: ecs.World, entity: integer): boolean
+function box2d.isAwake(world: ecs.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     return row ~= nil and row.index1 ~= 0 and World.isAwake(handleOf(row))
 end
@@ -914,7 +930,7 @@ end
 --- @param awake True wakes it. False puts it to sleep at once rather than
 ---     waiting for it to come to rest, so a body still moving stops where it
 ---     is until something touches it or it is woken again.
-function physics.setAwake(world: ecs.World, entity: integer, awake: boolean)
+function box2d.setAwake(world: ecs.World, entity: integer, awake: boolean)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -945,7 +961,7 @@ end
 ---     which is what makes this usable as a move that does not turn anything.
 ---     Nothing sweeps the gap: a body put across a wall is through it, and a
 ---     bullet body does not catch that.
-function physics.teleport(world: ecs.World, entity: integer, x: number, y: number, angle: number)
+function box2d.teleport(world: ecs.World, entity: integer, x: number, y: number, angle: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -972,10 +988,10 @@ end
 --- @return The nearest hit along the segment, or nil when the ray met nothing.
 ---     A fresh table each call, so it is the caller's to keep, and a cast in a
 ---     per-frame loop allocates one per call.
-function physics.raycast(
+function box2d.raycast(
     world: ecs.World, x1: number, y1: number, x2: number, y2: number, options: QueryOptions
 ): RaycastHit
-    local simulation = physics.of(world)
+    local simulation = box2d.of(world)
     if simulation == nil then
         return nil
     end
@@ -1006,7 +1022,7 @@ end
 ---     bodies; the solver's threads go the other way and are shared, so a
 ---     second world naming a `workerCount` the first did not raises rather
 ---     than resizing the pool.
-function physics.plugin(options: PhysicsOptions): function(ecs.World)
+function box2d.plugin(options: PhysicsOptions): function(ecs.World)
     options = options or {}
     local gravity = options.gravity or {0.0, 980.0}
 
@@ -1561,4 +1577,4 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
     end
 end
 
-return physics
+return box2d

@@ -86,7 +86,7 @@ end
             source = PRELUDE .. [[
 local loader = require("tecs.ffi.loader")
 local workers = require("tecs.workers")
-local World = require("tecs.physics.World")
+local World = require("tecs.box2d.World")
 local self = workers.current()
 
 while true do

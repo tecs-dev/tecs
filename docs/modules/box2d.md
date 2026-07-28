@@ -3,28 +3,36 @@ description: "Entity-first Box2D 3 rigid bodies, colliders, queries, contacts, a
 outline: deep
 ---
 
-# tecs.physics
+# tecs.box2d
 
-`tecs.physics` adds Box2D 3 rigid-body simulation to a world. Its public interface is entities and components:
+`tecs.box2d` adds Box2D 3 rigid-body simulation to a world. Its public interface is entities and components:
 native handles stay transient, solved poses are written to `Transform`, and snapshots carry the declaration needed
 to rebuild the simulation.
+
+The module is named for the library rather than for the subject, because Box2D's model is part of what this
+module promises. `Body`, `Collider`, the filter bits, the substep count and the solver's tolerances are its
+vocabulary, and reading [Box2D's own documentation](https://box2d.org/documentation/) is how to understand what
+they do. Swapping the solver underneath is not an intended abstraction, so the name says which one is there. The
+major version lives here rather than in the name: this is Box2D 3.
 
 ## Install
 
 ```teal
 local tecs <const> = require("tecs")
 local world = tecs.ecs.newWorld()
-world:addPlugin(tecs.physics.plugin({
+world:addPlugin(tecs.box2d.plugin({
     gravity = {0, 980},
     subStepCount = 4,
 }))
 ```
 
-The simulation is world-scoped and available as `tecs.physics.of(world)`. Solver threads are process-shared.
+The simulation is world-scoped and available as `tecs.box2d.of(world)`. Solver threads are process-shared.
 Conflicting `workerCount` values on two worlds raise.
 
 Public positions, extents, linear velocities, impulses, forces, gravity, and hit speeds use pixels. Angles and
-angular velocities use radians. `tecs.physics.scale` is the pixels-per-metre conversion.
+angular velocities use radians. `tecs.box2d.pixelsPerMetre` is the conversion the module has already applied to
+every number above: multiply metres by it, divide pixels by it. Box2D itself solves in metres, and simulating
+directly in pixels would put every body far outside the size range its solver tolerances were chosen for.
 
 ## Bodies
 
@@ -32,7 +40,7 @@ angular velocities use radians. `tecs.physics.scale` is the pixels-per-metre con
 
 ```teal
 local entity = world:spawn(tecs.ecs.builtins.Transform(100, 80))
-tecs.physics.attach(world, entity, {
+tecs.box2d.attach(world, entity, {
     type = "dynamic",
     radius = 12,
     density = 1,
@@ -72,7 +80,7 @@ Additional shapes are separate entities related to their body:
 
 ```teal
 local hurtbox = world:spawn()
-tecs.physics.attachCollider(world, hurtbox, player, {
+tecs.box2d.attachCollider(world, hurtbox, player, {
     radius = 18,
     offsetY = -6,
     isSensor = true,
@@ -89,17 +97,17 @@ not exposed.
 ## Motion and controls
 
 ```teal
-local vx, vy = tecs.physics.velocity(world, entity)
-tecs.physics.setVelocity(world, entity, 200, -100)
-local omega = tecs.physics.angularVelocity(world, entity)
-tecs.physics.setAngularVelocity(world, entity, 2)
-tecs.physics.applyImpulse(world, entity, 100, 0)
-tecs.physics.applyImpulseAt(world, entity, 100, 0, hitX, hitY)
-tecs.physics.applyForce(world, entity, 500, 0)
-tecs.physics.applyForceAt(world, entity, 500, 0, hitX, hitY)
-tecs.physics.applyTorque(world, entity, 4)
-tecs.physics.setAwake(world, entity, false)
-tecs.physics.teleport(world, entity, 320, 180, math.pi / 2)
+local vx, vy = tecs.box2d.velocity(world, entity)
+tecs.box2d.setVelocity(world, entity, 200, -100)
+local omega = tecs.box2d.angularVelocity(world, entity)
+tecs.box2d.setAngularVelocity(world, entity, 2)
+tecs.box2d.applyImpulse(world, entity, 100, 0)
+tecs.box2d.applyImpulseAt(world, entity, 100, 0, hitX, hitY)
+tecs.box2d.applyForce(world, entity, 500, 0)
+tecs.box2d.applyForceAt(world, entity, 500, 0, hitX, hitY)
+tecs.box2d.applyTorque(world, entity, 4)
+tecs.box2d.setAwake(world, entity, false)
+tecs.box2d.teleport(world, entity, 320, 180, math.pi / 2)
 ```
 
 Controls on an entity without a live body do nothing. Setters and applied forces wake sleeping bodies. `teleport`
@@ -114,7 +122,7 @@ enables the body again. Box2D does not preserve velocity across disable and enab
 `raycast` uses Box2D's callback-free closest-hit result:
 
 ```teal
-local hit = tecs.physics.raycast(world, x1, y1, x2, y2, {
+local hit = tecs.box2d.raycast(world, x1, y1, x2, y2, {
     categoryBits = 0x01,
     maskBits = 0x04,
 })
@@ -137,7 +145,7 @@ After each fixed step the plugin drains Box2D's buffers and emits these typed ev
 - `SensorEnd(sensor, visitor)`
 
 ```teal
-world:observe(0, tecs.physics.SensorBegin, function(event)
+world:observe(0, tecs.box2d.SensorBegin, function(event)
     print(event.sensor, event.visitor)
 end)
 ```

@@ -91,14 +91,14 @@ are the worked examples of why:
   starts.
 - **`tecs.gfx.Text`** saves the authored fields and the font by name. A font never loaded in this process
   leaves the restored text without one, which lays out nothing rather than failing the load.
-- **`tecs.physics.RigidBody`** serializes to nothing at all and restores as the null handle, because a Box2D
+- **`tecs.box2d.RigidBody`** serializes to nothing at all and restores as the null handle, because a Box2D
   handle is dense and reused, so a saved one would name whichever body the loading run happened to put in that
   slot, and the sync would write a stranger's pose into this entity's `Transform` with nothing to signal it.
   The null handle is inert rather than merely wrong: the write-back reads no movement for it, and the impulse
   and velocity calls refuse it instead of indexing off the front of Box2D's body array. So an entity that
   simulated before a load does not simulate after it until something attaches a body again. The description
   does survive, in the `Body` and `Collider` components, and `physics.hasBody` is how to tell an entity whose
-  body is gone from one that never had one. See [physics](/modules/physics).
+  body is gone from one that never had one. See [physics](/modules/box2d).
 
 The pattern behind all five: a name is durable and an index is not.
 

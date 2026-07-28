@@ -110,7 +110,7 @@ describe("tecs headless", function()
                 require("tecs")
                 local engine = {
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
-                    "tecs.assets", "tecs.physics", "tecs.mcp",
+                    "tecs.assets", "tecs.box2d", "tecs.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3", "tecs.ffi.box2d",
                     "tecs.data", "tecs.platform.system",
                     "tecs.platform.filesystem", "tecs.platform.watch",
@@ -219,12 +219,12 @@ describe("tecs headless", function()
                 [[
                 local tecs = require("tecs")
                 local world = tecs.ecs.newWorld()
-                world:addPlugin(tecs.physics.plugin({
+                world:addPlugin(tecs.box2d.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))
                 local Transform = tecs.ecs.builtins.Transform
                 local entity = world:spawn(Transform(0, 0, 0, 1, 0, 10, 10))
-                tecs.physics.attach(world, entity, {
+                tecs.box2d.attach(world, entity, {
                     type = "dynamic", halfWidth = 5, halfHeight = 5,
                     density = 1.0,
                 })

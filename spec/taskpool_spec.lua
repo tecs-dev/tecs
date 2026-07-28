@@ -12,8 +12,8 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local World = require("tecs.physics.World")
-local TaskPool = require("tecs.physics.TaskPool")
+local World = require("tecs.box2d.World")
+local TaskPool = require("tecs.box2d.TaskPool")
 
 -- A pile rather than a column of loose bodies: stacked contacts are what the
 -- solver spreads over graph colours, so this is the scene where the workers
@@ -64,7 +64,7 @@ local function simulate(workerCount, steps)
     return poses
 end
 
-describe("physics.TaskPool", function()
+describe("box2d.TaskPool", function()
     it("reports a worker count derived from the machine", function()
         local count = TaskPool.defaultWorkerCount()
         assert.is_true(count >= 1, ("expected at least one worker, got %d"):format(count))

@@ -22,7 +22,7 @@ end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
-local physics <const> = require("tecs.physics")
+local box2d <const> = require("tecs.box2d")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
@@ -94,7 +94,7 @@ local function buildContainer(world: tecs.World)
         local entity = world:spawn(
             Transform(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2), Tint(0.18, 0.18, 0.22, 1.0), Renderable()
         )
-        physics.attach(
+        box2d.attach(
             world,
             entity,
             {
@@ -135,7 +135,7 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
             round and Material(circleId, 0) or Material(0, 0),
             Renderable()
         )
-        physics.attach(
+        box2d.attach(
             world,
             entity,
             {
@@ -189,7 +189,7 @@ return tecs.application.create({
 
         -- The A/B knob for the solver's thread pool. One worker starts no
         -- threads and runs every task inline, which is the no-executor path.
-        world:addPlugin(physics.plugin({
+        world:addPlugin(box2d.plugin({
             gravity = {0.0, 900.0},
             workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
         }))
@@ -236,7 +236,7 @@ return tecs.application.create({
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
         local blown = world:query({
-            include = {Transform, physics.RigidBody},
+            include = {Transform, box2d.RigidBody},
         })
 
         world:addSystem({
@@ -254,7 +254,7 @@ return tecs.application.create({
                     -- physics sync. Taking it mutable here would mark the
                     -- column dirty every frame and defeat the gate.
                     local transforms = archetype:get(Transform)
-                    local bodies = archetype:get(physics.RigidBody)
+                    local bodies = archetype:get(box2d.RigidBody)
                     for row = 1, length do
                         local transform = transforms[row]
                         for index = 1, #blowers do
@@ -268,7 +268,7 @@ return tecs.application.create({
                                 -- snapped into it.
                                 local falloff = 1.0 - distanceSq / radiusSq
                                 local strength = push * falloff
-                                physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
+                                box2d.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
                                 break
                             end
                         end

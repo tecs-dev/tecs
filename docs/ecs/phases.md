@@ -78,8 +78,8 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | `FixedFirst`      | `tecs.SnapshotTransforms`       | [`Renderer`](/modules/gfx/)                        |
 | `FixedFirst`      | `sequence.Advance`              | [`sequence`](/modules/sequence), every application |
 | `FixedUpdate`     | `ttl`                           | builtins, every world                              |
-| `FixedUpdate`     | `tecs.StepPhysics`              | [`physics`](/modules/physics) plugin               |
-| `FixedPostUpdate` | `tecs.SyncBodyTransforms`       | [`physics`](/modules/physics) plugin               |
+| `FixedUpdate`     | `tecs.StepPhysics`              | [`box2d`](/modules/box2d) plugin                   |
+| `FixedPostUpdate` | `tecs.SyncBodyTransforms`       | [`box2d`](/modules/box2d) plugin                   |
 | `FixedPostUpdate` | `tecs.AdvanceAnimation`         | [`animation`](/modules/gfx/animation) plugin       |
 | `FixedLast`       | `tecs.ExitFixedInput`           | [`Application`](/modules/application)              |
 | `Update`          | `sequence.AdvancePresentation`  | [`sequence`](/modules/sequence), every application |

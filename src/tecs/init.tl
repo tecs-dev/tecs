@@ -41,7 +41,7 @@ local type particles = require("tecs.gfx.particles")
 local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
-local type physics = require("tecs.physics")
+local type box2d = require("tecs.box2d")
 local type http = require("tecs.http")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
@@ -442,6 +442,7 @@ local record tecs
     application: application
     assets: assets
     audio: audio
+    box2d: box2d
     data: data
     events: events
     filesystem: filesystem
@@ -452,7 +453,6 @@ local record tecs
     log: log
     mcp: mcp
     net: net
-    physics: physics
     sequence: sequence
     system: system
     time: time
@@ -513,6 +513,7 @@ local SURFACE <const>: {string: Namespace} = {
     application = {module = "tecs.Application", class = "Application"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
+    box2d = {module = "tecs.box2d"},
     data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
     filesystem = {
@@ -541,7 +542,6 @@ local SURFACE <const>: {string: Namespace} = {
     log = {module = "tecs.log"},
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net"},
-    physics = {module = "tecs.physics"},
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     time = {module = "tecs.platform.time"},

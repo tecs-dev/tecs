@@ -8,7 +8,7 @@
 local ffi <const> = require("ffi")
 local box2d <const> = require("tecs.ffi.box2d")
 local loader <const> = require("tecs.ffi.loader")
-local TaskPool <const> = require("tecs.physics.TaskPool")
+local TaskPool <const> = require("tecs.box2d.TaskPool")
 
 local C <const> = box2d.C
 
@@ -58,10 +58,10 @@ end
 
 --- One Box2D simulation, in Box2D's own units.
 ---
---- **Everything here is metres, radians and seconds**, unlike `tecs.physics`
+--- **Everything here is metres, radians and seconds**, unlike `tecs.box2d`
 --- above it, which takes and returns pixels and converts at its own boundary.
 --- A caller that reaches this directly is responsible for the conversion, and
---- `physics.scale` is the factor.
+--- `box2d.pixelsPerMetre` is the factor.
 ---
 --- Nothing here is thread safe. A world is created, stepped and destroyed from
 --- the game thread; the solver's own threads are inside `step` and are gone
@@ -161,7 +161,7 @@ end
 ---
 --- @param options May be nil, which takes Box2D's own world defaults for
 ---     everything but the substep count. Gravity is metres per second squared,
----     so a caller working in pixels divides by `physics.scale` first.
+---     so a caller working in pixels divides by `box2d.pixelsPerMetre` first.
 --- @return A world the caller owns and has to `destroy`. It takes a reference
 ---     on the process-wide thread pool, so dropping it without destroying it
 ---     keeps those threads alive for the rest of the run.

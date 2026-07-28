@@ -14,7 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local components = require("tecs.components")
 local builtins = require("tecs.ecs").builtins
-local physics = require("tecs.physics")
+local box2d = require("tecs.box2d")
 
 local Transform = builtins.Transform
 local Paused = tecs.ecs.builtins.Paused
@@ -27,7 +27,7 @@ local built = {}
 
 local function newWorld()
     local world = tecs.ecs.newWorld()
-    world:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
+    world:addPlugin(box2d.plugin({ gravity = { 0, 980 } }))
     built[#built + 1] = world
     return world
 end
@@ -39,7 +39,7 @@ after_each(function()
     built = {}
 end)
 
-describe("ecs.physics snapshots", function()
+describe("ecs.box2d snapshots", function()
     -- A handle is this run's numbering. Box2D hands out `index1` densely and
     -- reuses a slot the moment its body is gone, so a file that carried one
     -- would name whichever body the loading run happened to put there, and
@@ -48,18 +48,18 @@ describe("ecs.physics snapshots", function()
     it("does not follow a stranger's body after a load", function()
         local first = newWorld()
         local saved = first:spawn(Transform(100, 100, 0, 1, 0, 16, 16))
-        physics.attach(first, saved, { type = "static", halfWidth = 8, halfHeight = 8 })
+        box2d.attach(first, saved, { type = "static", halfWidth = 8, halfHeight = 8 })
         first:update(1 / 60)
-        assert.equal(1, first:get(saved, physics.RigidBody).index1)
+        assert.equal(1, first:get(saved, box2d.RigidBody).index1)
         local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
         -- A second world in the same process, whose first body takes the
         -- same slot the saved one had.
         local second = newWorld()
         local stranger = second:spawn(Transform(900, 50, 0, 1, 0, 16, 16))
-        physics.attach(second, stranger, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(second, stranger, { type = "dynamic", radius = 8, density = 1 })
         second:update(1 / 60)
-        assert.equal(1, second:get(stranger, physics.RigidBody).index1)
+        assert.equal(1, second:get(stranger, box2d.RigidBody).index1)
 
         second:loadSnapshot(snapshot)
         for _ = 1, 30 do
@@ -67,7 +67,7 @@ describe("ecs.physics snapshots", function()
         end
 
         local restored
-        for _, length, entities in second:query({ include = { Transform, physics.RigidBody } }):iter() do
+        for _, length, entities in second:query({ include = { Transform, box2d.RigidBody } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
@@ -87,23 +87,23 @@ describe("ecs.physics snapshots", function()
         for _, options in ipairs({ { format = "table" }, {} }) do
             local first = newWorld()
             local entity = first:spawn(Transform(40, 60, 0, 1, 0, 16, 16))
-            physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+            box2d.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
             first:update(1 / 60)
-            assert.is_true(physics.hasBody(first, entity))
+            assert.is_true(box2d.hasBody(first, entity))
 
             local written = first:saveSnapshot(options)
             local second = newWorld()
             second:loadSnapshot(written.snapshot or written.buffer)
 
             local restored
-            for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+            for _, length, entities in second:query({ include = { box2d.Body } }):iter() do
                 if length > 0 then
                     restored = entities[1]
                 end
             end
-            assert.is_nil(second:get(restored, physics.RigidBody))
+            assert.is_nil(second:get(restored, box2d.RigidBody))
             second:update(1 / 60)
-            assert.is_true(physics.hasBody(second, restored))
+            assert.is_true(box2d.hasBody(second, restored))
         end
     end)
 
@@ -113,78 +113,78 @@ describe("ecs.physics snapshots", function()
     it("reports no body for an entity restored from a snapshot", function()
         local first = newWorld()
         local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
-        assert.is_true(physics.hasBody(first, entity))
+        assert.is_true(box2d.hasBody(first, entity))
         local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
         local second = newWorld()
         second:loadSnapshot(snapshot)
 
         local restored
-        for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+        for _, length, entities in second:query({ include = { box2d.Body } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
         end
-        assert.is_false(physics.hasBody(second, restored))
-        assert.is_false(physics.hasBody(second, second:spawn(Transform(0, 0, 0, 1, 0, 16, 16))))
+        assert.is_false(box2d.hasBody(second, restored))
+        assert.is_false(box2d.hasBody(second, second:spawn(Transform(0, 0, 0, 1, 0, 16, 16))))
     end)
 
     it("rebuilds before body controls reach a restored entity", function()
         local first = newWorld()
         local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
         local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
         local second = newWorld()
         second:loadSnapshot(snapshot)
         local restored
-        for _, length, entities in second:query({ include = { physics.Body } }):iter() do
+        for _, length, entities in second:query({ include = { box2d.Body } }):iter() do
             for row = 1, length do
                 restored = entities[row]
             end
         end
 
-        assert.is_false(physics.hasBody(second, restored))
+        assert.is_false(box2d.hasBody(second, restored))
         second:update(1 / 60)
-        physics.applyImpulse(second, restored, 500, -500)
-        local vx, vy = physics.velocity(second, restored)
+        box2d.applyImpulse(second, restored, 500, -500)
+        local vx, vy = box2d.velocity(second, restored)
         assert.is_true(vx > 0)
         assert.is_true(vy < 0)
     end)
 end)
 
-describe("ecs.physics despawn", function()
+describe("ecs.box2d despawn", function()
     it("destroys the body when the entity goes", function()
         local world = newWorld()
-        local baseline = physics.of(world):bodyCount()
+        local baseline = box2d.of(world):bodyCount()
 
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
         world:update(1 / 60)
-        assert.equal(baseline + 1, physics.of(world):bodyCount())
+        assert.equal(baseline + 1, box2d.of(world):bodyCount())
 
         world:despawn(entity)
         world:update(1 / 60)
-        assert.equal(baseline, physics.of(world):bodyCount())
+        assert.equal(baseline, box2d.of(world):bodyCount())
     end)
 
     it("destroys every body a batch despawn takes", function()
         local world = newWorld()
-        local baseline = physics.of(world):bodyCount()
+        local baseline = box2d.of(world):bodyCount()
 
         for index = 1, 8 do
             local entity = world:spawn(Transform(index * 40, 0, 0, 1, 0, 16, 16))
-            physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+            box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
         end
         world:update(1 / 60)
-        assert.equal(baseline + 8, physics.of(world):bodyCount())
+        assert.equal(baseline + 8, box2d.of(world):bodyCount())
 
-        world:batchDespawn(world:query({ include = { physics.RigidBody } }))
+        world:batchDespawn(world:query({ include = { box2d.RigidBody } }))
         world:update(1 / 60)
-        assert.equal(baseline, physics.of(world):bodyCount())
+        assert.equal(baseline, box2d.of(world):bodyCount())
     end)
 
     -- A despawn inside a system runs against a deferred world, where the row
@@ -193,10 +193,10 @@ describe("ecs.physics despawn", function()
     -- way and only that way.
     it("destroys the body when a system despawns the entity", function()
         local world = newWorld()
-        local baseline = physics.of(world):bodyCount()
+        local baseline = box2d.of(world):bodyCount()
 
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         local killed = false
         world:addSystem({
@@ -213,22 +213,22 @@ describe("ecs.physics despawn", function()
 
         world:update(1 / 60)
         world:update(1 / 60)
-        assert.equal(baseline, physics.of(world):bodyCount())
+        assert.equal(baseline, box2d.of(world):bodyCount())
     end)
 
     it("keeps other bodies when one entity goes", function()
         local world = newWorld()
-        local baseline = physics.of(world):bodyCount()
+        local baseline = box2d.of(world):bodyCount()
 
         local kept = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         local gone = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, kept, { type = "dynamic", radius = 8, density = 1 })
-        physics.attach(world, gone, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, kept, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, gone, { type = "dynamic", radius = 8, density = 1 })
 
         world:despawn(gone)
         world:update(1 / 60)
-        assert.equal(baseline + 1, physics.of(world):bodyCount())
-        assert.is_true(physics.hasBody(world, kept))
+        assert.equal(baseline + 1, box2d.of(world):bodyCount())
+        assert.is_true(box2d.hasBody(world, kept))
 
         for _ = 1, 30 do
             world:update(1 / 60)
@@ -237,13 +237,13 @@ describe("ecs.physics despawn", function()
     end)
 end)
 
-describe("ecs.physics pausing", function()
+describe("ecs.box2d pausing", function()
     it("stops writing a paused entity's transform", function()
         local world = newWorld()
         local free = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         local held = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
-        physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
         world:set(held, Paused)
 
         for _ = 1, 30 do
@@ -258,8 +258,8 @@ describe("ecs.physics pausing", function()
         local world = newWorld()
         local free = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         local held = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
-        physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, free, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
         world:set(held, Paused)
 
         for _ = 1, 30 do
@@ -278,15 +278,15 @@ describe("ecs.physics pausing", function()
 
     it("still destroys a paused entity's body on despawn", function()
         local world = newWorld()
-        local baseline = physics.of(world):bodyCount()
+        local baseline = box2d.of(world):bodyCount()
 
         local held = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
+        box2d.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
         world:set(held, Paused)
         world:update(1 / 60)
 
         world:despawn(held)
         world:update(1 / 60)
-        assert.equal(baseline, physics.of(world):bodyCount())
+        assert.equal(baseline, box2d.of(world):bodyCount())
     end)
 end)

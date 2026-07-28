@@ -64,7 +64,7 @@ tecs/
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
 │   ├── gfx/               # Camera, layers, distance-field text
 │   ├── platform/          # Window, input, audio, events, time, files, the OS
-│   ├── physics/           # Box2D 3
+│   ├── box2d/             # Box2D 3
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── mcp/               # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
@@ -169,7 +169,7 @@ so at the top of its file. `native/logsink.c` takes SDL's log output function be
 threads it created, the audio device thread and the async IO pool among them. `native/worker.c`
 owns the thread entry point for the same reason, and `src/tecs/workers.tl` states the rule from the
 other side: raw thread creation is deliberately not exposed, because a thread entry written in Lua
-is precisely that mistake. `physics/TaskPool.tl` takes its two callbacks from C through
+is precisely that mistake. `box2d/TaskPool.tl` takes its two callbacks from C through
 `tecsTaskPoolEnqueueCallback` rather than casting Lua ones.
 
 So, in order of preference:

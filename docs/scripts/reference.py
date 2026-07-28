@@ -67,8 +67,8 @@ Every function and type this module carries, rendered from {sources}."""
 # public name `src/tecs/init.tl` types by that module's own record rather than
 # by a second copy of it.
 #
-# `tecs.version` is a string and has no source to render. `tecs.http` and
-# `tecs.physics` are left out on purpose: the first is being rewritten and the
+# `tecs.version` is a string and has no source to render. `tecs.net.http` and
+# `tecs.box2d` are left out on purpose: the first is being rewritten and the
 # second is a stub whose module is mid-replacement, so a rendered reference
 # would describe something that is about to move. Both come back here when they
 # settle.

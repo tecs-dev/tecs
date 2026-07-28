@@ -34,6 +34,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.application`](/modules/application)           | the object an entry file returns, and what builds one                      |
 | [`tecs.assets`](/modules/assets)                     | loading content, cached and off the main thread                            |
 | [`tecs.audio`](/modules/audio)                       | clips, voices, groups, limits, the `Sound` component, and devices          |
+| [`tecs.box2d`](/modules/box2d)                       | rigid-body simulation on Box2D 3                                           |
 | [`tecs.data`](/modules/data)                         | JSON, DEFLATE and hashes over byte strings                                 |
 | [`tecs.ecs`](/ecs/)                                  | worlds, components, queries, systems, events and resources                 |
 | [`tecs.events`](/modules/events)                     | platform events, typed once and routed                                     |
@@ -50,7 +51,6 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.log`](/modules/log)                           | SDL's logging, per platform, with a named logger as the unit of filtering  |
 | [`tecs.mcp`](/modules/mcp)                           | the debug server: transport, tools, sandbox                                |
 | [`tecs.net`](/modules/net)                           | nonblocking TCP streams and UDP datagrams                                  |
-| [`tecs.physics`](/modules/physics)                   | rigid-body simulation on Box2D 3                                           |
 | [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                            |
 | [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers  |
 | [`tecs.time`](/modules/time)                         | monotonic time                                                             |

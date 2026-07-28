@@ -8,9 +8,9 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local World = require("tecs.physics.World")
+local World = require("tecs.box2d.World")
 
-describe("physics.World", function()
+describe("box2d.World", function()
     local world
 
     before_each(function()

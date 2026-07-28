@@ -1272,7 +1272,7 @@ round: `SDL_SetClipboardData` takes no copy, retaining a callback it calls when
 some other application asks for the bytes, which may be long after the call
 returned and is a moment this process does not choose. In Lua that is an FFI
 callback pinned for the lifetime of the offer and entered from wherever SDL
-fulfils the request, and [`physics/TaskPool.tl`](src/tecs/physics/TaskPool.tl)
+fulfils the request, and [`box2d/TaskPool.tl`](src/tecs/box2d/TaskPool.tl)
 already records why this engine keeps its callbacks native rather than take
 that bet. Reading an arbitrary mime type carries none of it, so `mimeTypes`,
 `hasData` and `data` are here and the offer side is not.
@@ -3459,7 +3459,7 @@ src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
 src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
 src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/Audio.tl         clips, voices, groups, and the Sound component
-src/tecs/physics/         Box2D binding and its world plugin
+src/tecs/box2d/           Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
 src/tecs/mcp/             the debug server: transport, tools, sandbox
 src/tecs/assets.tl        images and clips, decoded on a worker

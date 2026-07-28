@@ -199,8 +199,8 @@ local REACH = {
             .. "this engine is built for, so there is no seam to be on the "
             .. "far side of.",
         modules = {
-            "tecs/physics/World.lua",
-            "tecs/physics/init.lua",
+            "tecs/box2d/World.lua",
+            "tecs/box2d/init.lua",
             "tecs/mcp/transport.lua",
             "tecs/net.lua",
         },

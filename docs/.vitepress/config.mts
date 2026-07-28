@@ -109,6 +109,7 @@ export default defineConfig({
                     { text: "tecs.application", link: "/modules/application" },
                     { text: "tecs.assets", link: "/modules/assets" },
                     { text: "tecs.audio", link: "/modules/audio" },
+                    { text: "tecs.box2d", link: "/modules/box2d" },
                     { text: "tecs.data", link: "/modules/data" },
                     { text: "tecs.events", link: "/modules/events" },
                     {
@@ -136,7 +137,6 @@ export default defineConfig({
                     { text: "tecs.log", link: "/modules/log" },
                     { text: "tecs.mcp", link: "/modules/mcp" },
                     { text: "tecs.net", link: "/modules/net" },
-                    { text: "tecs.physics", link: "/modules/physics" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.time", link: "/modules/time" },
