@@ -612,7 +612,7 @@ answer wins.
 <pre><code v-pre><a href="#tecs.Future.error">tecs.Future.error</a>: string
 </code></pre>
 
-Why it did not. Set on "failed" and on "cancelled".
+Why it did not. Set on "failed" and on "canceled".
 
 <a id="tecs.Future.fail"></a>
 
@@ -842,7 +842,7 @@ A future already carrying a value.
 <pre><code v-pre><a href="#tecs.Future.status">tecs.Future.status</a>: string
 </code></pre>
 
-"pending", "ready", "failed", or "cancelled".
+"pending", "ready", "failed", or "canceled".
 
 <a id="tecs.Future.track"></a>
 

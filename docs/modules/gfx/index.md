@@ -1283,7 +1283,7 @@ else changes what the camera reports about itself and not what it draws.
 
 Radians. Positive turns the scene counter-clockwise on screen, which is
 the camera itself turning the other way: at a quarter turn, a point at
-+X from the camera in the world is drawn above the centre of the window.
++X from the camera in the world is drawn above the center of the window.
 
 <a id="tecs.gfx.Camera.toScreen"></a>
 
@@ -1379,7 +1379,7 @@ geometry that should have drawn, which is why the error goes this way.
 <pre><code v-pre><a href="#tecs.gfx.Camera.x">tecs.gfx.Camera.x</a>: number
 </code></pre>
 
-Centre of the view, in world units.
+Center of the view, in world units.
 
 <a id="tecs.gfx.Camera.y"></a>
 

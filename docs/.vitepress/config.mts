@@ -118,9 +118,18 @@ export default defineConfig({
                 text: "Modules",
                 collapsed: false,
                 items: [
-                    { text: "Overview", link: "/modules/" },
-                    { text: "Generated signatures", link: "/modules/" },
-                    { text: "tecs.Application", link: "/modules/Application" },
+                    {
+                        // `Application` and `Future` are types on the root
+                        // rather than modules, so they sit under `tecs` rather
+                        // than beside `tecs.assets`. The group is the page.
+                        text: "tecs",
+                        link: "/modules/",
+                        collapsed: false,
+                        items: [
+                            { text: "tecs.Application", link: "/modules/Application" },
+                            { text: "tecs.Future", link: "/modules/Future" },
+                        ],
+                    },
                     { text: "tecs.assets", link: "/modules/assets" },
                     { text: "tecs.audio", link: "/modules/audio" },
                     { text: "tecs.box2d", link: "/modules/box2d" },
@@ -134,7 +143,6 @@ export default defineConfig({
                             { text: "tecs.filesystem.watch", link: "/modules/filesystem/watch" },
                         ],
                     },
-                    { text: "tecs.Future", link: "/modules/Future" },
                     {
                         text: "tecs.gfx",
                         collapsed: false,

@@ -220,7 +220,6 @@ behind each one.
 
 <div class="module-columns">
 
-- [`tecs.Application`](/modules/Application) - the object an entry file returns, and what the host drives
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.box2d`](/modules/box2d) - Box2D 3, solved across a shared thread pool
@@ -228,26 +227,33 @@ behind each one.
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
 - [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
-- [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
-- [`tecs.Future`](/modules/Future) - a value that settles once
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
-- [`tecs.gfx.animation`](/modules/gfx/animation) - sprite sheets, and the playback that reads them
-- [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behavior
-- [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
-- [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
-- [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
-- [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time
-- [`tecs.Transform`](/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
-- [`tecs.version`](/modules/) - the version of this build, as a string
 - [`tecs.window`](/modules/window) - the window, its size, its display and its mode
 - [`tecs.workers`](/modules/workers) - typed background jobs
+
+Inside one of those, one level and no deeper:
+
+- [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
+- [`tecs.gfx.animation`](/modules/gfx/animation) - sprite sheets, and the playback that reads them
+- [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behavior
+- [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
+- [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
+- [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
+
+On `tecs` itself, because no one module owns them:
+
+- [`tecs.Application`](/modules/Application) - the object an entry file returns, and what the host drives
+- [`tecs.Future`](/modules/Future) - a value that settles once
+- [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
+- [`tecs.Transform`](/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
+- [`tecs.version`](/modules/) - the version of this build, as a string
 
 </div>
 

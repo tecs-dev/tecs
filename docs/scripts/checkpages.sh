@@ -153,7 +153,58 @@ done < <(grep -rl '^::: warning This page is pending$' --include='*.md' docs/mod
 # Alphabetical ignoring case, ties broken by byte order. LC_ALL=C pins that,
 # since a locale that collates differently would make this pass on one machine
 # and fail on another.
-expected=$(printf '%s\n' $public | LC_ALL=C sort -f)
+# Fields of `record tecs` that are not modules: a function, a string, or a type
+# the root carries because it crosses subsystems. The discriminator is the one
+# already used for subordinate modules, and for the same reason: a module is
+# luacase and is declared as the type of its own name (`assets: assets`), while
+# `newApplication: function(...)`, `version: string` and `Transform:
+# ecs.Transform` are none of those things.
+rootnames=$(awk '
+    /^local record tecs$/ { intecs = 1; next }
+    intecs && /^end$/ { intecs = 0; next }
+    intecs && /^    [A-Za-z_][A-Za-z0-9_]*: / {
+        split($0, halves, ": ")
+        name = halves[1]
+        sub(/^ +/, "", name)
+        declared = halves[2]
+        for (i = 3; i <= length(halves); i++) { declared = declared ": " halves[i] }
+        if (name ~ /^[a-z]/ && declared == name) { next }
+        print name
+    }
+' "$init")
+
+# Three groups, in the order a listing presents them: the modules a game
+# reaches directly, then the modules that sit inside one of those, then the
+# types and functions on `tecs` itself. Grouping is what a reader wants from a
+# list of thirty names, and each group is still a total order, so a listing
+# that drops or reorders a name is still caught.
+#
+# A name with a dot in it is a subordinate module. A name whose last segment
+# starts with a capital, or which has a page-less entry, is neither a module
+# nor subordinate: it is something on the root.
+group() {
+    want=$1
+    printf '%s\n' $public | while IFS= read -r name; do
+        case "$name" in
+            *.*) kind=sub ;;
+            *)
+                if printf '%s\n' "$rootnames" | grep -qx "$name"; then
+                    kind=root
+                else
+                    kind=top
+                fi
+                ;;
+        esac
+        if [ "$kind" = "$want" ]; then
+            echo "$name"
+        fi
+    done | LC_ALL=C sort -f
+}
+expected=$(
+    group top
+    group sub
+    group root
+)
 
 # A name is written as ``- [`tecs.name`](link)`` or as a table row, since a page
 # may list either way. Both are matched at the start of a line, so a name

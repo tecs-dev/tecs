@@ -573,7 +573,7 @@ function system.openFolder(
 ): Future<system.DialogResult>
 ```
 
-These open native platform pickers and return [`Future`](/modules/future) values. `saveFile` returns at most one
+These open native platform pickers and return [`Future`](/modules/Future) values. `saveFile` returns at most one
 path. `openFile` and `openFolder` return one unless `multiple` is true.
 
 ```teal

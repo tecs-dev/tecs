@@ -1287,7 +1287,7 @@ be left composing for a window that is about to go away.
 
 Folds one typed event into the state.
 
-Unrecognised kinds are ignored, so this can be handed the whole stream.
+Unrecognized kinds are ignored, so this can be handed the whole stream.
 
 Nothing is retained: every field the state keeps is copied out here, so the
 caller is free to reuse the record, which the converter does.
@@ -1334,7 +1334,7 @@ so "space" and "left shift" work too.
 The name of a physical key, for showing a binding back to the player.
 
 The platform's own name for the position, which is not the character the
-player's layout produces there: the key `scancode("Q")` names is labelled Q
+player's layout produces there: the key `scancode("Q")` names is labeled Q
 whatever a French keyboard prints on it.
 
 #### Parameters

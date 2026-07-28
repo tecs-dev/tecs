@@ -24,13 +24,7 @@ uint32_t tecsImageWidth(const TecsImage *image);
 uint32_t tecsImageHeight(const TecsImage *image);
 void tecsImageDestroy(TecsImage *image);
 
-TecsBytes *tecsImageEncodePngRgbx(
-    const uint8_t *pixels,
-    size_t length,
-    uint32_t width,
-    uint32_t height,
-    size_t pitch
-);
+TecsBytes *tecsImageEncodePngRgbx(const uint8_t *pixels, size_t length, uint32_t width, uint32_t height, size_t pitch);
 const uint8_t *tecsBytesData(const TecsBytes *bytes);
 size_t tecsBytesLength(const TecsBytes *bytes);
 void tecsBytesDestroy(TecsBytes *bytes);

@@ -1431,7 +1431,7 @@ window is hidden and the frame is skipped whole rather than drawn nowhere.
 </code></pre>
 
 Whether the window is mapped. False for a window created `hidden` and one
-that `hide` was called on, and true for a minimised window, which is mapped
+that `hide` was called on, and true for a minimized window, which is mapped
 and not visible.
 
 #### Parameters
@@ -1478,7 +1478,7 @@ unless the user just did something that expects a window to come forward.
 <pre><code v-pre>function <a href="#tecs.window.Window.minimize">tecs.window.Window.minimize</a>(self: <a href="#tecs.window.Window">Window</a>): boolean
 </code></pre>
 
-Minimises the window to the taskbar or dock.
+Minimizes the window to the taskbar or dock.
 
 #### Parameters
 
@@ -1499,7 +1499,7 @@ Minimises the window to the taskbar or dock.
 <pre><code v-pre>function <a href="#tecs.window.Window.isMinimized">tecs.window.Window.isMinimized</a>(self: <a href="#tecs.window.Window">Window</a>): boolean
 </code></pre>
 
-Whether the window is minimised. `events.windowMinimized` reports that it
+Whether the window is minimized. `events.windowMinimized` reports that it
 became so; this is how the first frame after startup finds out.
 
 #### Parameters
@@ -1521,7 +1521,7 @@ became so; this is how the first frame after startup finds out.
 <pre><code v-pre>function <a href="#tecs.window.Window.maximize">tecs.window.Window.maximize</a>(self: <a href="#tecs.window.Window">Window</a>): boolean
 </code></pre>
 
-Maximises the window to fill the display's usable bounds.
+Maximizes the window to fill the display's usable bounds.
 
 #### Parameters
 
@@ -1542,7 +1542,7 @@ Maximises the window to fill the display's usable bounds.
 <pre><code v-pre>function <a href="#tecs.window.Window.isMaximized">tecs.window.Window.isMaximized</a>(self: <a href="#tecs.window.Window">Window</a>): boolean
 </code></pre>
 
-Whether the window is maximised.
+Whether the window is maximized.
 
 #### Parameters
 
@@ -1563,7 +1563,7 @@ Whether the window is maximised.
 <pre><code v-pre>function <a href="#tecs.window.Window.restore">tecs.window.Window.restore</a>(self: <a href="#tecs.window.Window">Window</a>): boolean
 </code></pre>
 
-Returns a minimised or maximised window to its previous size and position.
+Returns a minimized or maximized window to its previous size and position.
 
 #### Parameters
 
@@ -1587,8 +1587,8 @@ Returns a minimised or maximised window to its previous size and position.
 Whether something is covering the window entirely.
 
 A frame drawn now is not seen, which is worth knowing before an expensive
-one is built. Independent of minimisation: an occluded window is mapped and
-not minimised, and both stop the swapchain handing out a texture.
+one is built. Independent of minimization: an occluded window is mapped and
+not minimized, and both stop the swapchain handing out a texture.
 
 #### Parameters
 

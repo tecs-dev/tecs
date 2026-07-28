@@ -15,7 +15,7 @@ socket never links one.
 
 The surface follows the game loop rather than hiding one:
 
-- resolution and client connection return [`Future`](/modules/future) values;
+- resolution and client connection return [`Future`](/modules/Future) values;
 - `net.poll()` advances those futures without waiting;
 - accept, read, write, send and receive return immediately;
 - `wait` and `drain` are explicit, bounded calls for startup, tools, tests and background work.

@@ -434,7 +434,7 @@ Samples one compiled curve or gradient holds.
 <pre><code v-pre>type <a href="#tecs.gfx.particles.Color">tecs.gfx.particles.Color</a> = Color
 </code></pre>
 
-Accepted wherever a colour is asked for.
+Accepted wherever a color is asked for.
 
 <a id="tecs.gfx.particles.Curve"></a>
 
