@@ -1,4 +1,4 @@
---- Content hashes over byte strings.
+--- Content hashes over byte strings: the hashing part of `tecs.data`.
 ---
 --- What a hash is for decides what belongs here, and two callers ask for
 --- different things.
@@ -11,8 +11,8 @@
 --- a tree the person running it already controls.
 ---
 --- A compressed stream carries a checksum of what it decompresses to, and the
---- checksum is fixed by the format rather than chosen. `tecs.compress` hands
---- zlib whole streams, so the trailer is verified inside zlib and nothing here
+--- checksum is fixed by the format rather than chosen. The compressors beside
+--- this file hand zlib whole streams, so the trailer is verified inside zlib and nothing here
 --- sits on that path. Adler-32 lives here anyway, because it is a hash function
 --- and it is the one RFC 1950 names: a caller holding a stream it has not
 --- inflated, or bytes that came out of one by some other route, wants a way to

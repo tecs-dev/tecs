@@ -132,7 +132,7 @@ end
 
 --- Identity of a shader source, as sixteen hex digits.
 ---
---- The hash itself is `tecs.hash`, which is where an engine-wide facility
+--- The hash itself is `tecs.data`, which is where an engine-wide facility
 --- belongs. What stays here is the rule about *what* is hashed, because that
 --- rule is about shaders and nothing else: the text passed in must be a source
 --- with its includes already expanded. That is the whole reason expansion

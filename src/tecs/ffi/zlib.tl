@@ -8,7 +8,7 @@
 ---
 --- The surface is the whole library, because zlib is small enough that
 --- selecting from it would be more description than the thing described. What
---- the engine uses today is `adler32`, through `tecs.hash`.
+--- the engine uses today is `adler32`, through `tecs.data`.
 ---
 --- zlib names its functions after what they do rather than after itself, so
 --- `C.inflate` and `C.compress` are zlib's, not something generic. That is the

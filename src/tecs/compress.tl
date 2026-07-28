@@ -1,5 +1,5 @@
 --- DEFLATE compression and decompression: zlib streams, and the raw form
---- inside them.
+--- inside them. The compression part of `tecs.data`.
 ---
 --- Binary asset formats store their bulk payload compressed, and the engine has
 --- to read them. Games also write compressed save data, replays, caches and
@@ -44,7 +44,7 @@ local C <const> = zlib.C
 local K <const> = zlib.K
 
 --- The three entry points, typed. The bindings are open namespaces, so the
---- signature is declared here rather than inferred, the way `tecs.hash` does it.
+--- signature is declared here rather than inferred, the way `hash.tl` does it.
 local inflateInit2 <const> = C.inflateInit2_ as function(
     stream: loader.CValue, windowBits: integer, version: string, size: integer
 ): integer
