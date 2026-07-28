@@ -16,6 +16,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
+local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local net = require("tecs.ffi.sdl3net")
 local transport = require("tecs.mcp.transport")
@@ -568,6 +569,65 @@ describe("http.client", function()
             -- And the list turns without it rather than reaching a closed
             -- client, which is what a stale entry would look like.
             assert.are.equal(0, http.clients.pump())
+        end)
+    end)
+
+    -- A request as an entity. The world's client is on the same list the
+    -- frame turns, so this drives `clients.pump` and `world:update` and calls
+    -- nothing on a client at all.
+    describe("the plugin", function()
+        local world
+
+        after_each(function()
+            if world ~= nil then
+                http.plugin.close(world)
+                world = nil
+            end
+        end)
+
+        local function turn(entity, component, turns)
+            for count = 1, turns or 2000 do
+                http.clients.pump()
+                world:update(1 / 60)
+                server:poll(count * 0.05, function()
+                    server:respond(200, "OK", BODY, "text/plain")
+                end)
+                local found = world:get(entity, component)
+                if found ~= nil then
+                    return found
+                end
+                sdl.C.SDL_Delay(1)
+            end
+            return nil
+        end
+
+        it("replaces a spawned Request with a Response", function()
+            world = tecs.newWorld()
+            world:addPlugin(http.plugin.install)
+
+            local entity = world:spawn(http.plugin.Request({ url = url("/scores") }))
+            local response = turn(entity, http.plugin.Response)
+
+            assert.is_not_nil(response)
+            assert.are.equal(200, response.status)
+            assert.are.equal(BODY, response.body:text())
+            assert.is_nil(response.error)
+            -- The request is gone, so a system that reacts to one does not see
+            -- the same one twice.
+            assert.is_nil(world:get(entity, http.plugin.Request))
+        end)
+
+        it("answers a transfer that failed with a Response carrying why", function()
+            world = tecs.newWorld()
+            world:addPlugin(http.plugin.install)
+
+            -- Nothing on port 1, so the transfer fails rather than answering.
+            local entity = world:spawn(http.plugin.Request({ url = "http://127.0.0.1:1/" }))
+            local response = turn(entity, http.plugin.Response)
+
+            assert.is_not_nil(response)
+            assert.are.equal(0, response.status)
+            assert.is_string(response.error)
         end)
     end)
 end)

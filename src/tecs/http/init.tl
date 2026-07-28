@@ -13,20 +13,24 @@
 ---
 --- `tecs.http.client` is callable and is also where `Request`, `Response` and
 --- `Options` live. `tecs.http.DataStream` is what a body is, in either
---- direction. See `tecs.http.client` for the whole surface.
+--- direction. `tecs.http.plugin` is the same client with a request spawned as
+--- an entity instead. See `tecs.http.client` for the whole surface.
 
 local client <const> = require("tecs.http.client")
 local clients <const> = require("tecs.http.clients")
+local plugin <const> = require("tecs.http.plugin")
 local DataStream <const> = require("tecs.http.DataStream")
 
 local record http
     client: client
     clients: clients
+    plugin: plugin
     DataStream: DataStream
 end
 
 http.client = client
 http.clients = clients
+http.plugin = plugin
 http.DataStream = DataStream
 
 return http
