@@ -1476,14 +1476,16 @@ local record types
 
         --- Check if there are observers for an event at an address.
         ---
-        --- @param address The address to check.
-        --- @param event The event type to check.
-        --- @return true if there are observers, false otherwise.
+        --- @return Whether anything is listening, so a caller can skip building
+        ---     an event nobody receives. Counts observers registered right now:
+        ---     one added later in the same frame is not reflected.
         hasObservers: function<T is events.Event>(self, address: integer, event: T): boolean
 
         --- Clear all observers for an address (used on entity despawn).
         ---
-        --- @param address The address to clear.
+        --- @param address Every event type at this address is cleared, not one.
+        ---     Address zero is the world's own, so clearing it removes every
+        ---     broadcast observer the world has.
         clearObservers: function(self, address: integer)
 
         -------------------------------------------------------------------------------
@@ -1493,7 +1495,11 @@ local record types
         --- Get stats about the World.
         ---
         --- @param fill Optional stats table to fill instead of allocating a new one.
-        --- @return the stats.
+        ---     Passing one every frame is how this is read without adding a table
+        ---     per frame to the collector.
+        --- @return The same table `fill` named when one was given, so the caller
+        ---     already holds it. A fresh one otherwise, and either way a copy
+        ---     rather than a view: the numbers do not update on their own.
         getStats: function(self, fill?: World.Stats): World.Stats
 
         -------------------------------------------------------------------------------
@@ -1505,6 +1511,14 @@ local record types
         --- Binary is the default. Set `opts.format = "table"` for a
         --- plain Lua snapshot table. `opts.path` is supported only for
         --- binary output.
+        ---
+        --- @param opts May be nil, which writes binary and returns it rather
+        ---     than writing a file. Components registered `transient` are left
+        ---     out whatever this says, so a snapshot never carries a live
+        ---     handle.
+        --- @return The snapshot, in whichever form was asked for. Taken from the
+        ---     world as it stands, so this is a point-in-time copy and later
+        ---     changes do not reach it.
         saveSnapshot: function(self, opts?: SnapshotOptions): SnapshotOutput
 
         --- Restore the world from either binary or table form.
@@ -1512,6 +1526,14 @@ local record types
         --- `source` may be a Lua string, a LuaJIT `string.buffer`, or
         --- a snapshot table previously returned by `saveSnapshot` with
         --- `format = "table"` (or parsed from JSON).
+        ---
+        --- @param source One of the three forms above. Every entity already in
+        ---     the world is despawned before the first one is restored, so this
+        ---     replaces a world rather than merging into one.
+        --- @return What the snapshot said about itself. The prelude is read
+        ---     first but handed back last, so a caller that meant to reject an
+        ---     unwanted version reads it after the world has already been
+        ---     replaced.
         loadSnapshot: function(self, source: any): SnapshotPrelude
 
         --- Register named save/load callbacks for custom snapshot data.
@@ -1520,6 +1542,10 @@ local record types
         --- `StartSnapshotLoad`, and `FinishSnapshotLoad`. Use the raw
         --- snapshot events when you need lower-level behavior such as
         --- excluding derived entities.
+        ---
+        --- @param handler Its `name` keys the data in the snapshot, so it has to
+        ---     be stable across builds: a renamed handler no longer finds what
+        ---     an older save wrote under the old name.
         addSnapshotHandler: function(self, handler: SnapshotHandler)
 
         -------------------------------------------------------------------------------
