@@ -552,9 +552,11 @@ end
 --- Close it. The bytes are not guaranteed to be on disk until `close` answers,
 --- and it is the call a full disk is reported by.
 ---
----     local writer <const> = assert(tecs.filesystem.openWrite(path))
----     writer:write(chunk)
----     assert(writer:close())
+--- ```teal
+--- local writer <const> = assert(tecs.filesystem.openWrite(path))
+--- writer:write(chunk)
+--- assert(writer:close())
+--- ```
 ---
 --- @return The writer, or nil and the reason there is none.
 function filesystem.openWrite(path: string): Writer, string

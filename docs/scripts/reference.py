@@ -224,6 +224,68 @@ def compose(page: pathlib.Path, sources: list[tuple[str, str]], scratch: pathlib
     )
 
 
+# The HTML a page is allowed to contain. Everything the generator emits is in
+# here, plus what a hand-written page uses.
+HTML = {
+    "a",
+    "b",
+    "br",
+    "code",
+    "div",
+    "em",
+    "hr",
+    "i",
+    "img",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "script",
+    "span",
+    "strong",
+    "style",
+    "sub",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+}
+
+TAG_PATTERN = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9_]*)")
+CODE_SPAN = re.compile(r"`[^`]*`")
+
+
+def strayTags(text: str) -> list[tuple[int, str, str]]:
+    """Angle-bracket words Vue would read as an element that is never closed.
+
+    A page is compiled as a Vue template, so `<const>` in plain prose is an
+    opening tag and the build fails with "Element is missing end tag" pointing
+    at wherever the parser gave up, which is not where the tag is. The way one
+    gets into a page is worth knowing: tealdoc dedents a docblock, so an
+    example indented four spaces stops being a code block and becomes prose.
+    Fence examples in docblocks and this cannot happen.
+
+    Fenced and indented code are skipped, and so is anything between backticks,
+    since markdown escapes those before Vue sees them.
+    """
+    found = []
+    fenced = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced or line.startswith("    "):
+            continue
+        for _, name in TAG_PATTERN.findall(CODE_SPAN.sub("", line)):
+            if name.lower() not in HTML:
+                found.append((number, name, line.strip()))
+    return found
+
+
 def prettify(path: pathlib.Path) -> None:
     subprocess.run(
         ["prettier", "--write", "--log-level", "warn", "--config", str(REPO / ".prettierrc"), str(path)],
@@ -257,6 +319,26 @@ def main() -> int:
                 page.write_text(composed)
                 prettify(page)
 
+    # Every page, not only the generated ones: a hand-written page can write
+    # the same thing, and the build failure it causes names the wrong line.
+    stray = []
+    for page in sorted((REPO / "docs").rglob("*.md")):
+        if "node_modules" in page.parts:
+            continue
+        for number, name, line in strayTags(page.read_text()):
+            stray.append((page.relative_to(REPO), number, name, line))
+
+    if stray:
+        print("Pages Vue will read as having an unclosed element: %d" % len(stray), file=sys.stderr)
+        for relative, number, name, line in stray:
+            print("  %s:%d  <%s>  %s" % (relative, number, name, line), file=sys.stderr)
+        print(file=sys.stderr)
+        print("A page compiles as a Vue template, so an angle-bracket word in", file=sys.stderr)
+        print("prose is an opening tag. Put it in backticks, or fence the", file=sys.stderr)
+        print("example it came from: tealdoc dedents an indented docblock", file=sys.stderr)
+        print("example until it stops being code.", file=sys.stderr)
+        return 1
+
     if args.check:
         if stale:
             print("Module pages are stale against their sources:", file=sys.stderr)
@@ -264,7 +346,7 @@ def main() -> int:
                 print("  " + relative, file=sys.stderr)
             print("\nRun docs/scripts/reference.py to regenerate them.", file=sys.stderr)
             return 1
-        print("OK: every module page matches a fresh render")
+        print("OK: every module page matches a fresh render, and none has a stray tag")
         return 0
 
     print("wrote the reference section of %d pages" % len(MODULES))

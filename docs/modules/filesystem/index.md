@@ -884,9 +884,11 @@ this, and so does anything else assembled from parts.
 Close it. The bytes are not guaranteed to be on disk until `close` answers,
 and it is the call a full disk is reported by.
 
+```teal
 local writer <const> = assert(tecs.filesystem.openWrite(path))
 writer:write(chunk)
 assert(writer:close())
+```
 
 #### Parameters
 
