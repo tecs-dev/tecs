@@ -13,13 +13,57 @@
 
 local cjson <const> = require("cjson")
 
+--- The environment `run_lua` compiles into, and the formatter its results come
+--- back through.
+---
+--- One environment, shared by every chunk compiled since the last `reset`, so
+--- a global written by one call is readable by the next. The filtering is a
+--- guard rail rather than a security boundary: `require` and `ffi` are both in
+--- scope, so anything the engine can reach, code compiled here can reach.
 local record sandbox
     --- Compiles `code` as a function body with `world` in scope. Returns nil
     --- and a diagnostic when it does not compile.
+    ---
+    --- Tried first as a statement block and then, if that fails to parse, as
+    --- a bare expression with `return` in front. The diagnostic reported when
+    --- both fail is the statement form's, so an expression with a typo in it
+    --- is described in terms of the wrapping this applied rather than the
+    --- wrapping that would have suited it.
+    ---
+    --- @param code Lua, not Teal, and compiled by LuaJIT, so 5.1 syntax. It
+    ---     is not sandboxed at the syntax level; the environment is the only
+    ---     thing limiting it. An empty string compiles and does nothing.
+    --- @return The chunk, taking the world as its one argument, or nil when
+    ---     `code` did not compile. It closes over the environment as it was at
+    ---     compile time, so a later `reset` does not affect it.
+    --- @return The compiler's message when the first return is nil, and nil
+    ---     otherwise. Exactly one of the two is ever set.
     compile: function(code: string): function(any): any..., string
     --- Forgets everything a previous call stashed.
+    ---
+    --- The next `compile` builds a fresh environment. Chunks already compiled
+    --- keep the old one and go on seeing the values it held, so a reset makes
+    --- a clean slate for new code rather than for code already in flight.
     reset: function()
     --- Converts a value into something JSON can carry.
+    ---
+    --- Necessary because encoding raises on a function, a coroutine or cdata,
+    --- and an agent that returned one by accident should get a description of
+    --- it rather than a failed call.
+    ---
+    --- Cycles are not detected. The depth cap is the only thing that stops a
+    --- self-referential table, and it stops it by summarising, not by failing.
+    ---
+    --- @param value Anything at all, cdata and coroutines included.
+    --- @param depth Recursion depth already spent, for the recursive calls
+    ---     this makes. A caller passes nothing, which starts at 0.
+    --- @return Always encodable. nil becomes JSON null; a number, string or
+    ---     boolean passes through; anything else that is not a table becomes a
+    ---     `"<kind: address>"` string. A table nested past 6 levels becomes
+    ---     `"<table: address>"`, and one past 256 entries stops there and
+    ---     carries a `"<truncated>"` key. A table whose keys are 1..n encodes
+    ---     as an array, an empty one as an empty array rather than an object,
+    ---     and a mixed one as an object with the numeric keys stringified.
     describe: function(value: any, depth?: integer): any
 end
 
@@ -125,11 +169,6 @@ end
 local MAX_DEPTH <const> = 6
 local MAX_ENTRIES <const> = 256
 
---- Converts a value into something `cjson` will encode.
----
---- Necessary because encoding raises on a function, a coroutine or cdata, and
---- an agent that returned one by accident should get a description of it
---- rather than a failed call.
 function sandbox.describe(value: any, depth?: integer): any
     depth = depth or 0
     local kind = type(value)

@@ -24,11 +24,38 @@ local text <const> = require("tecs.gfx.text")
 
 local C <const> = sdl.C
 
+--- The built-in tools, and the bindings the application supplies them with.
+---
+--- Requiring this module registers its tools as a side effect; there is no
+--- install step. What is on the surface besides that is the two binders and
+--- the four reloads, which the tools are thin wrappers over, so that an agent
+--- asking and the file watcher noticing a saved file are refused on identical
+--- terms rather than through two descriptions that can drift apart.
+---
+--- Every handler runs on the game thread inside the frame. Nothing is bound
+--- until the application starts, so a tool called before then fails with a
+--- message naming what is missing rather than with an opaque error.
 local record tools
     --- Set by the application so the frame-facing tools have something to
     --- look at. Absent means those tools report why rather than failing.
+    ---
+    --- @param renderer Passing nil unbinds, and the frame-facing tools then
+    ---     report that the application has not started.
+    --- @param world Bound in the same call as the renderer, so the two cannot
+    ---     be replaced independently.
     bind: function(renderer: Renderer, world: ecs.World)
     --- Supplies what rebuilds the pipelines after a shader reload.
+    ---
+    --- Separate from `bind` because it is the device's half of the operation
+    --- and the source half is all this module can do on its own. Swapping a
+    --- pipeline object means destroying live GPU handles and creating new ones
+    --- against the formats the device claimed, which is knowledge the
+    --- renderer's backend has and nothing here does.
+    ---
+    --- @param rebuild Runs with the device idle and outside any pass, and
+    ---     raising from it is reported as the tool failing. Passing nil
+    ---     unregisters, after which `reloadShaders` refuses outright rather
+    ---     than re-reading the sources to no visible effect.
     bindReload: function(rebuild: function())
 
     --- The four reloads, as the functions the tools below are wrappers over.
@@ -54,14 +81,6 @@ function tools.bind(renderer: Renderer, world: ecs.World)
     boundWorld = world
 end
 
---- Supplies what rebuilds the pipelines after a shader reload.
----
---- Separate from `bind` because it is the device's half of the operation and
---- the source half is all this module can do on its own. Swapping a pipeline
---- object means destroying live GPU handles and creating new ones against the
---- formats the device claimed, which is knowledge the renderer's backend has
---- and nothing here does. `rebuild` runs with the device idle and outside any
---- pass, and raising from it is reported as the tool failing.
 function tools.bindReload(rebuild: function())
     boundReload = rebuild
 end
@@ -521,6 +540,12 @@ mcp.register({
 --- The pipeline objects a frame binds are read through the backend every
 --- frame, so replacing them is picked up by the next frame with no graph
 --- rebuild and nothing in the world touched.
+---
+--- @return Every material name the sources now define, which is what they say
+---     after the reload rather than before it, so a material that was removed
+---     is gone from this list. Raises instead of returning when the build
+---     links no compiler, when no rebuild has been registered, or when the
+---     sources themselves were refused.
 function tools.reloadShaders(): {string}
     -- A pack decides the shader format the device claimed at creation, so a
     -- build without a compiler has nothing to put in its place and no way to
@@ -552,7 +577,13 @@ end
 --- its rect, so every sprite naming it goes on naming the right texels and the
 --- next frame draws the new pixels with nothing in the world touched. A file
 --- that changed size cannot do that, so it is refused rather than half applied.
---- @return The layer the image occupies, and its width and height.
+---
+--- @param path The path the image was already registered under, not a new file
+---     to add. Nil or empty raises, as does a path nothing was registered for.
+--- @return The layer of the atlas the image occupies, unchanged by the reload.
+--- @return Its width in pixels, necessarily the width it had before.
+--- @return Its height in pixels, likewise unchanged: a file whose size moved
+---     is refused rather than reported back with new numbers.
 function tools.reloadImage(path: string): integer, integer, integer
     if path == nil or path == "" then
         error("path is required", 0)
@@ -581,8 +612,13 @@ end
 --- The mixer's half is `Audio:reload`, which is where the difference between a
 --- resident clip and a streamed one lives. This is the part that finds the
 --- mixer and turns a refusal into a raise.
+---
+--- @param path The path the clip was loaded from, which is also its identity,
+---     so the edited file comes back under the index every `Sound` row already
+---     carries. Nil or empty raises.
 --- @return Whether the clip is held in memory, which is what was replaced. A
----     streamed clip holds nothing and had nothing to replace.
+---     streamed clip holds nothing and had nothing to replace, so false here
+---     is a successful call and not a refusal.
 function tools.reloadSound(path: string): boolean
     if path == nil or path == "" then
         error("path is required", 0)
@@ -603,7 +639,15 @@ end
 --- laying out again exactly the texts that draw this font. What is here is
 --- turning a path into a refusal an agent can read and reporting what came
 --- back.
---- @return The name the font is loaded under, and how many glyphs it carries.
+---
+--- @param path Path to the metrics file, which must be one a font is already
+---     loaded from. Nil, empty, or a path nothing was loaded from raises, as
+---     does a file whose atlas size moved, since the glyphs already laid out
+---     could not be put right against a different atlas.
+--- @return The name the font is loaded under. Carried over from the original
+---     load rather than re-read, so a reload never changes it, and it is what
+---     the path is resolved from rather than being the path.
+--- @return How many glyphs it carries, counted after the reload.
 function tools.reloadFont(path: string): string, integer
     if path == nil or path == "" then
         error("path is required", 0)

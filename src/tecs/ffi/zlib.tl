@@ -20,13 +20,21 @@ loader.declare("zlib")
 
 local namespace <const>, libraryPath <const> = loader.library("z", "zlib", "TECS_ZLIB_PATH", "zlib")
 
+--- The zlib library, reached through the generated cdef.
+---
+--- Resolution runs at require time, so requiring this module raises when zlib
+--- cannot be found rather than answering a module whose calls fail later. No
+--- version is enforced: `version` reports what loaded, and the caller decides
+--- whether that is enough for the entry points it means to use.
 local record zlib
     --- Functions and enum constants, resolved through the loaded library.
     C: loader.CNamespace
     --- Integer `#define` constants, which the preprocessor strips before the
     --- cdef sees them and so cannot be reached through `C`.
     K: {string: integer}
-    --- Absolute path of the library that satisfied the load.
+    --- What satisfied the load: an absolute path, or the bare soname when the
+    --- dynamic linker resolved it itself, or `"(registry)"` when the host
+    --- linked the symbols in. Diagnostic, and not always openable.
     path: string
 end
 
@@ -39,6 +47,10 @@ zlib.path = libraryPath
 --- Worth asking rather than assuming: a development preset resolves zlib from
 --- the system and a packaged one builds the pinned revision, so the two do not
 --- have to agree and a bug report needs to say which was in the process.
+---
+--- @return The runtime library's own answer, so it reflects what is mapped
+---     rather than what the cdef was generated from. Compares as a string
+---     only: "1.3.10" sorts below "1.3.2" and is the newer of the two.
 function zlib.version(): string
     return loader.toString(zlib.C.zlibVersion())
 end

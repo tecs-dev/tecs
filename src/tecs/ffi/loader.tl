@@ -71,12 +71,26 @@ void *dlopen(const char *path, int mode);
 local RTLD_NOW <const> = 0x2
 local RTLD_NODELETE <const> = 0x80
 
+--- Resolves native libraries, installs their generated cdefs, and names the
+--- types a value crosses the FFI boundary as.
+---
+--- A resolved library is cached under its registry name, so the second call for
+--- it hands back the first call's namespace and loads nothing. Failure is
+--- always a raise: no function here answers nil to mean "not found", and the
+--- two that take a possibly-NULL pointer, `toString` and `toBytes`, answer the
+--- empty string for it rather than nil.
 local record loader
     --- A value that crossed the FFI boundary: a function, an enum constant,
     --- a pointer, or a struct. Readable, callable, and comparable, because
     --- cdata is all of those depending on what the header declared.
     record CValue
+        --- Reads a field, or resolves a symbol. Naming something the
+        --- declaration does not have raises rather than answering nil, so a
+        --- speculative lookup has to go through `pcall`.
         metamethod __index: function(self: CValue, key: string): CValue
+        --- Calls the value as a C function. Typed to answer `CValue` because
+        --- the boundary is open; what arrives is whatever the FFI converts the
+        --- declared return type to, and nothing at all for a `void` function.
         metamethod __call: function(self: CValue, ...: any): CValue
     end
 
@@ -95,18 +109,31 @@ local record loader
     --- A byte pointer that supports arithmetic, so a producer can be handed
     --- the exact address to write at.
     record BytePointer
+        --- Advances by whole bytes. The result aliases the same memory and
+        --- carries no length, so an offset past the end of the allocation is
+        --- not detected here or anywhere later.
         metamethod __add: function(self: BytePointer, offset: integer): BytePointer
+        --- Reads one byte, 0-based as C pointer indexing is: index 0 is the
+        --- byte the pointer itself addresses. Unchecked in both directions.
         metamethod __index: function(self: BytePointer, index: integer): integer
     end
 
     --- A loaded library's symbol table. Resolution happens in the FFI at
     --- call time, so the namespace is open rather than enumerated.
     record CNamespace
+        --- Resolves a symbol and remembers it, so a name costs a lookup once
+        --- and a table read on every call after. A name the library does not
+        --- export raises at this access, not at load.
         metamethod __index: function(self: CNamespace, key: string): CValue
     end
 
     --- Directories searched for a library when the dynamic linker cannot
     --- resolve its plain soname. Homebrew installs outside the default path.
+    ---
+    --- Ordered, and searched in order: `$TECS_LIB`, then every `lib` directory
+    --- beside this file or above it, then the system prefixes. Each entry ends
+    --- in a separator, and a `%s` in one is replaced with the formula name
+    --- `library` was given.
     searchPaths: {string}
 end
 
@@ -240,6 +267,12 @@ local function registryNamespace(functions: loader.CValue): loader.CNamespace
 end
 
 --- Whether a library is reachable without dynamic loading.
+---
+--- @param name The registry key, which is the `registryName` given to
+---     `library` rather than the soname.
+--- @return True when the host installed a function-pointer table for it, so
+---     `library` answers without touching the filesystem. False under a plain
+---     `luajit`, where nothing installed a registry at all.
 function loader.isStatic(name: string): boolean
     return registryTable(name) ~= nil
 end
@@ -250,10 +283,22 @@ end
 --- plain soname so the dynamic linker's own search applies, then each known
 --- prefix. Returns the namespace and what satisfied it.
 ---
+--- Raises when every candidate fails, with the full list of what was tried;
+--- there is no nil return to test for. A library that resolved once is cached,
+--- and the cache is per Lua state, so a worker resolves it again.
+---
 --- @param soname Library name without the `lib` prefix or extension.
---- @param formula Package name used to expand per-package prefixes.
---- @param envVar Environment variable holding an absolute override path.
---- @param registryName Key the host registered this library under.
+--- @param formula Package name used to expand per-package prefixes, that is,
+---     the `%s` in a `searchPaths` entry.
+--- @param envVar Environment variable holding an absolute override path. An
+---     unset or empty value is skipped rather than treated as a failure.
+--- @param registryName Key the host registered this library under, and the
+---     cache key. Defaults to `soname`. Several registered APIs can share one
+---     library, so this is what separates them.
+--- @return The library's symbol table.
+--- @return What satisfied the load: an absolute path, or `"(registry)"` when
+---     the host had it, or `"(cached)"` when an earlier call did. Only the
+---     first is a path a caller can open.
 function loader.library(
     soname: string, formula: string, envVar: string, registryName?: string
 ): loader.CNamespace, string
@@ -330,7 +375,13 @@ local declared <const>: {string: boolean} = {}
 ---
 --- Also installs the function-pointer table's declaration when the host
 --- registered one, since that is what `library` casts through.
---- @param name Module basename, e.g. "sdl3" for `tecs.ffi.sdl3cdef`.
+---
+--- The record of what has already been declared is per Lua state, so a worker
+--- state declares the same cdef again rather than inheriting it. Raises when
+--- the generated module is absent, which means the build has not run.
+---
+--- @param name Module basename, e.g. "sdl3" for `tecs.ffi.sdl3cdef`. The same
+---     name `constants` and `textConstants` take, and the registry key.
 function loader.declare(name: string)
     if declared[name] then
         return
@@ -357,6 +408,11 @@ end
 --- The cast is the narrow, deliberate kind: `ffi.string` is declared over a
 --- CData union that cannot name an open FFI value, so it lives here once
 --- instead of at every call site.
+---
+--- @param value NULL is allowed and answers the empty string, so a C getter
+---     that reports absence that way needs no guard at the call site.
+--- @return The bytes up to the first NUL, copied. Nothing afterwards refers to
+---     the C memory, so it is free to be reused or freed.
 function loader.toString(value: loader.CValue): string
     if value == nil then
         return ""
@@ -368,6 +424,11 @@ end
 ---
 --- Unlike `toString` this does not stop at a NUL, so it is what reads a binary
 --- blob such as SPIR-V or a packed shader artifact.
+---
+--- @param value NULL answers the empty string whatever `length` says.
+--- @param length Bytes, exactly: not an upper bound, and not checked against
+---     the size of the allocation. Too large a value reads past it.
+--- @return A copy, embedded NULs included, so `#` on it is `length`.
 function loader.toBytes(value: loader.CValue, length: integer): string
     if value == nil then
         return ""
@@ -382,11 +443,24 @@ end
 --- does not keep its parent alive: if nothing else holds the array, the
 --- collector frees it while the reference still points inside, and the next
 --- write through that reference corrupts the heap.
+---
+--- @param declaration A struct type the cdef already declared, e.g.
+---     `"SDL_Event"`. Naming one it did not raises.
+--- @return Zero-filled, and owned by the collector: it lives exactly as long
+---     as something holds this value, and no longer.
 function loader.newStruct(declaration: string): loader.CValue
     return ffi.new(declaration) as loader.CValue
 end
 
 --- Allocates a C array and types it for integer indexing.
+---
+--- @param declaration An array type. Use the `[?]` form when `count` is given,
+---     and a fixed length such as `"int[1]"` when it is not.
+--- @param count Element count for a `[?]` declaration, not a byte count. Omit
+---     it for a fixed-length one, where the FFI reads a second argument as an
+---     initialiser for element 0 instead of as a length.
+--- @return Zero-filled, and indexed from 0 rather than 1. The FFI does not
+---     bound-check the index in either direction.
 function loader.newArray(declaration: string, count?: integer): loader.CArray
     if count ~= nil then
         return ffi.new(declaration, count) as loader.CArray
@@ -395,29 +469,57 @@ function loader.newArray(declaration: string, count?: integer): loader.CArray
 end
 
 --- Views a pointer as bytes, so callers can offset into it.
+---
+--- @param base The caller keeps this alive. A cast borrows the address without
+---     referencing the allocation, so a `base` that nothing else holds is
+---     collected while the returned pointer still addresses it.
+--- @return A view of the same memory rather than a copy: writes through it are
+---     writes to `base`.
 function loader.bytePointer(base: loader.CValue): loader.BytePointer
     return ffi.cast("uint8_t *", base) as loader.BytePointer
 end
 
 --- Reinterprets a pointer as another type, for writing struct fields directly
 --- into mapped memory instead of memcpying a staging array.
+---
+--- @param declaration A pointer type, e.g. `"float *"` or `"MyVertex *"`.
+---     Alignment is the caller's to establish; the FFI does not check that
+---     `base` is aligned for the type being read through it.
+--- @param base The caller keeps this alive, as with `bytePointer`.
+--- @return Indexed from 0 and unchecked, aliasing `base` rather than copying.
 function loader.castPointer(declaration: string, base: loader.CValue): loader.CArray
     return ffi.cast(declaration, base) as loader.CArray
 end
 
 --- Copies `size` bytes between FFI buffers.
+---
+--- @param destination Must already have room for `size` bytes. Nothing here
+---     knows how large it is, so an overrun is a silent heap write.
+--- @param source Read for `size` bytes from its own address, whatever its
+---     declared type says its length is.
+--- @param size Bytes, not elements. Zero is allowed and copies nothing.
 function loader.copyBytes(destination: loader.CArray, source: loader.CValue, size: integer)
     ffi.copy(destination as string, source as string, size)
 end
 
 --- Copies `size` bytes to a byte pointer, which may be an offset into a
 --- mapped region.
+---
+--- @param destination Carries no length, so the room for `size` bytes past it
+---     is entirely the caller's to have established.
+--- @param source Read for `size` bytes from its own address.
+--- @param size Bytes. Zero is allowed and copies nothing.
 function loader.copyTo(destination: loader.BytePointer, source: loader.CValue, size: integer)
     ffi.copy(destination as string, source as string, size)
 end
 
 --- Copies a Lua string into an FFI buffer, including its NUL terminator.
 --- The destination must have room for `#source + 1` bytes.
+---
+--- @param destination Unchecked, as everything on this boundary is.
+--- @param source Copied whole, embedded NULs and all, and then terminated.
+---     Anything reading the destination back as a C string therefore stops at
+---     the first embedded NUL rather than at `#source`.
 function loader.copyString(destination: loader.CArray, source: string)
     ffi.copy(destination as string, source)
 end
@@ -426,6 +528,12 @@ end
 ---
 --- No terminator, so this is what carries a blob whose length is known and
 --- whose content may contain NULs, such as SPIR-V.
+---
+--- @param source Copied, so the buffer does not alias the Lua string and
+---     outlives it. An empty string yields a zero-length allocation.
+--- @return The bytes, indexed from 0, owned by the collector.
+--- @return `#source`, which has to travel with the buffer: nothing in it marks
+---     where the content ends.
 function loader.fromString(source: string): loader.CArray, integer
     local bytes = ffi.new("uint8_t[?]", #source) as loader.CArray
     ffi.copy(bytes as string, source, #source)
@@ -447,6 +555,12 @@ end
 ---
 --- Numbers only. The same table holds the string constants, which
 --- `loader.textConstants` reads under the type they actually have.
+---
+--- @param name Binding basename, the same one `declare` takes.
+--- @return The generated table itself, not a copy, and the same table on every
+---     call: mutating it changes what every other caller sees. A name this
+---     library does not define reads nil. Raises when the build has not
+---     produced the table at all.
 function loader.constants(name: string): {string: integer}
     return constantTable(name) as {string: integer}
 end
@@ -457,6 +571,11 @@ end
 --- is the argument the API reading it takes, so they are recovered alongside
 --- the numbers rather than left out. Two views because one table cannot be
 --- typed as both, and a caller knows which kind it is asking for.
+---
+--- @param name Binding basename, the same one `declare` takes.
+--- @return The very table `loader.constants` answers with, retyped. Nothing
+---     filters it, so reading a numeric constant through this view hands back
+---     a number wearing a string type and the mistake surfaces downstream.
 function loader.textConstants(name: string): {string: string}
     return constantTable(name) as {string: string}
 end

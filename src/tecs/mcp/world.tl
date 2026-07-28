@@ -19,8 +19,22 @@ local cjson <const> = require("cjson")
 local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 
+--- Registers the world-facing tools, and names the world they act on.
+---
+--- Requiring this module registers its tools as a side effect; there is no
+--- install step, and the only thing on the surface is `bind`. One world at a
+--- time, held in a module-level slot rather than passed per call, because the
+--- protocol has nowhere to carry it.
+---
+--- Every handler here runs on the game thread inside the frame, before the
+--- world is stepped, so a write lands before the update that reads it. While
+--- the application is suspended nothing is polled, so no tool answers at all.
 local record world
     --- Makes `w` the world these tools act on.
+    ---
+    --- @param w Replaces whatever was bound before. Passing nil unbinds, after
+    ---     which every tool that touches the world fails with a message saying
+    ---     so; `components_info` still answers, reporting `bound` as false.
     bind: function(w: ecs.World)
 end
 
