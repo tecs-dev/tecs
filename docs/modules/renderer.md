@@ -250,6 +250,10 @@ Clip regions cull fragments rather than geometry. Fragments of an instance carry
 they land inside the rectangle and thrown away where they do not. Region zero is not a region and cannot be set:
 it is what an instance says when it wants no clipping at all.
 
+Fragments rather than geometry is the whole of it: an instance entirely outside its region is still extracted,
+still culled against the view, and still drawn, and the region only decides what survives rasterisation. A list
+long enough for that to matter is cheaper spawned to the rows it shows than clipped to them.
+
 `rebuildPipelines` is the device's half of a shader reload — whoever asked for one has already re-read the
 sources, and this is what makes the next frame draw from them. A source that no longer compiles raises and
 changes nothing. It must not be called from inside a pass: it waits for the device to go idle and releases

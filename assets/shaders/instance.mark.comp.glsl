@@ -90,12 +90,21 @@ void main() {
                        box.y - extent.y > cull.view.w + margin;
             keep.z = far ? 0u : CAST_FANOUT;
         }
-        // An instance entirely outside its clip region is drawn and thrown
-        // away a fragment at a time, which is correct and wasteful. Rejecting
-        // it belongs here, as a second test against the region's rectangle
-        // projected into the same space this one works in, and it needs the
-        // region table and the instance's clip index reaching this pass. That
-        // is a separate change and nothing here does it today.
+        // A clip region is not tested here, and the fragment stage is where an
+        // instance outside its region is thrown away. The test would need the
+        // region table, which is a uniform and cheap, and the instance's clip
+        // index, which is not: it rides in the 64-byte instance, and this pass
+        // reads the 16-byte bound for every entity in the world every frame,
+        // drawn or not. The bound's two signs are already the role, so there is
+        // nowhere in it to put eight bits of region.
+        //
+        // The payoff is on the other side of the same wall. A panel with a
+        // scrollable list is what clips, and it sits on a layer the view does
+        // not describe, which writes an UNBOUNDED extent so no view rejects it;
+        // an unbounded box overlaps every rectangle, so a region test keeps it
+        // too. What is left is world content inside the view and outside its
+        // region, which is the narrow half of the case, bought with a gather
+        // for every entity in the world.
     }
 
     // Inclusive scan across the workgroup, once per lane. Each survivor learns

@@ -2631,9 +2631,34 @@ leaving through the `discard` that was there for distance fields rather than
 adding one.
 
 The cull knows nothing about regions. An instance entirely outside its region is
-drawn and thrown away a fragment at a time, which is correct and wasteful;
-rejecting it belongs in `instance.mark.comp.glsl` beside the view test, and is
-not built.
+drawn and thrown away a fragment at a time, which is correct and wasteful, and
+rejecting it in the mark pass beside the view test costs more than it saves.
+
+Two things stop it. The pass reads a sixteen byte bound for every instance in
+the world every frame, drawn or not, and never touches the sixty-four byte
+instance, which is the whole reason the bound is a separate buffer; the clip
+index is in the instance, packed into `origin.z`, and there is nowhere in the
+bound to move it to, because both half extents' signs are already the role and a
+region index is eight bits rather than one. A parallel buffer of indices would
+avoid the gather and still add a quarter to the traffic of the one pass that
+reads every entity, to serve the few that clip.
+
+The second is that the case which would pay for it is the case the test cannot
+reject. Clipping is what a panel with a scrollable list inside it uses, and a
+panel sits on a screen-space or virtual-coordinate layer, which writes an
+`UNBOUNDED` extent precisely so that a world rectangle cannot cull what is on
+screen. An unbounded box overlaps every rectangle there is, so a region test in
+world units keeps every one of those instances. What is left over is world
+content that is inside the view and outside its region, bought at a per-entity
+cost across a four million entity scale bar.
+
+What would change the answer is a pass dispatched over the clipped runs alone,
+which extraction already knows the extents of, rewriting each of their bounds
+from the instance it is entitled to read because that row clips. It charges
+nothing to a row that does not, and what it costs instead is a second copy of
+extraction's bound and placement arithmetic living on the GPU, where it can
+drift from the one that produced the rows. That is a larger change than the one
+it replaces, and it is not built either.
 
 ## Shapes are materials
 
