@@ -555,7 +555,11 @@ function builtins.plugin(w: types.World)
 
         local wImpl <const> = w as internal.WorldImpl
         local function hierarchyStateDirty(): boolean
-            for arch in wImpl:dirtyArchetypes() do
+            -- The set is walked directly rather than through
+            -- `world:dirtyArchetypes`, which builds an iterator closure over
+            -- its own upvalues per call. This runs twice a frame on every
+            -- world, and `pairs` over the set costs nothing.
+            for arch in pairs(wImpl._dirtyArchetypes) do
                 local cols = arch.columns
                 if cols[Transform] or cols[RelativeTransform] or cols[ChildOf] then
                     return true

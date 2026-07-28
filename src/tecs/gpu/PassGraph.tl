@@ -54,6 +54,24 @@ local record PassContext
     height: integer
 end
 
+--- What a declared pass needs per frame, allocated once when it is declared.
+---
+--- Every field is rewritten before the pass runs and read only while it does,
+--- so the graph builds none of it per frame. The consequence is that a pass
+--- body may not hold on to what it was handed: the context it received, and
+--- the pass inside it, describe the next frame's pass by the time that frame
+--- runs.
+local record Prepared
+    --- Colour attachments, one record per output, or one for the swapchain.
+    attachments: {RenderPass.Attachment}
+    --- Fragment sampler bindings, or nil for a pass that reads nothing.
+    textures: {loader.CValue}
+    --- Handed to `execute`.
+    context: PassContext
+    --- The pass object, begun again each frame. Nil until the first one.
+    pass: RenderPass
+end
+
 --- How one pass uses the graph's depth attachment.
 ---
 --- Declared per pass rather than per graph, because whether depth is attached
@@ -108,6 +126,8 @@ local record PassGraph
     _textures: {string: Texture}
     _order: {string}
     _passes: {PassSpec}
+    --- Per-frame storage for the pass at the same index in `_passes`.
+    _prepared: {Prepared}
     _sampler: Sampler
     _depth: Texture
     _depthAttachment: RenderPass.DepthAttachment
@@ -129,6 +149,7 @@ function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGr
     self._textures = {}
     self._order = {}
     self._passes = {}
+    self._prepared = {}
     self._sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
     self.depthFormat = Texture.depthFormat(device)
     self._needsDepth = false
@@ -198,7 +219,30 @@ function PassGraph:pass(spec: PassSpec): PassGraph
         self._needsDepth = true
     end
 
+    -- One colour attachment per output, or the single swapchain one a pass
+    -- with no outputs renders into. Built here so `execute` only ever writes
+    -- fields; a pass is run far too often to build its arguments per frame.
+    local outputs <const> = spec.outputs or {}
+    local attachments: {RenderPass.Attachment} = {}
+    for index = 1, math.max(#outputs, 1) do
+        attachments[index] = { texture = nil, clear = nil }
+    end
+
+    -- Filled on the first execute, since a texture handle only exists once the
+    -- graph has been sized, and reused unchanged after that.
+    local textures: {loader.CValue} = nil
+    if #(spec.inputs or {}) > 0 then textures = {} end
+
     self._passes[#self._passes + 1] = spec
+    self._prepared[#self._passes] = {
+        attachments = attachments,
+        textures = textures,
+        context = {
+            pass = nil, frame = nil, commandBuffer = nil,
+            width = 0, height = 0,
+        },
+        pass = nil,
+    }
     return self
 end
 
@@ -298,6 +342,11 @@ end
 
 --- Runs every enabled pass against `frame`.
 ---
+--- Everything a pass is run out of was allocated when it was declared and is
+--- rewritten here, so a frame's worth of passes allocates nothing. See
+--- `Prepared` for what that costs a pass body: what it is handed is the
+--- graph's, and describes this frame only.
+---
 --- A pass body that throws takes the whole frame with it, and the pass it was
 --- inside is left open. Nothing here catches that: the pass is on the frame's
 --- open list from the moment it began, and `Frame:abandon` is what ends it, so
@@ -307,25 +356,27 @@ function PassGraph:execute(frame: Frame)
     local frameHeight = frame.height
     resize(self, frameWidth, frameHeight)
 
-    for _, spec in ipairs(self._passes) do
+    local passes <const> = self._passes
+    for index = 1, #passes do
+        local spec <const> = passes[index]
         local enabled = spec.enabled == nil or spec.enabled()
         if enabled then
-            local outputs = spec.outputs or {}
-            local attachments: {RenderPass.Attachment} = {}
+            local prepared <const> = self._prepared[index]
+            local attachments <const> = prepared.attachments
+            local outputs <const> = spec.outputs
             local width, height = frameWidth, frameHeight
 
-            if #outputs == 0 then
-                attachments[1] = {
-                    texture = frame.swapchainTexture,
-                    clear = nil,
-                }
+            if outputs == nil or #outputs == 0 then
+                local attachment <const> = attachments[1]
+                attachment.texture = frame.swapchainTexture
+                attachment.clear = nil
             else
-                for index, name in ipairs(outputs) do
-                    local texture = self._textures[name]
-                    attachments[index] = {
-                        texture = texture.handle,
-                        clear = self._targets[name].clear,
-                    }
+                for slot = 1, #outputs do
+                    local name <const> = outputs[slot]
+                    local texture <const> = self._textures[name]
+                    local attachment <const> = attachments[slot]
+                    attachment.texture = texture.handle
+                    attachment.clear = self._targets[name].clear
                     width, height = texture.width, texture.height
                 end
             end
@@ -338,24 +389,25 @@ function PassGraph:execute(frame: Frame)
             end
 
             local pass = RenderPass.begin(frame.commandBuffer, attachments,
-                depth)
+                depth, prepared.pass)
+            prepared.pass = pass
 
-            local inputs = spec.inputs or {}
-            if #inputs > 0 then
-                local textures: {loader.CValue} = {}
-                for index, name in ipairs(inputs) do
-                    textures[index] = self._textures[name].handle
+            local textures <const> = prepared.textures
+            if textures ~= nil then
+                local inputs <const> = spec.inputs
+                for slot = 1, #inputs do
+                    textures[slot] = self._textures[inputs[slot]].handle
                 end
                 pass:bindTextures(0, textures, self._sampler.handle)
             end
 
-            spec.execute({
-                pass = pass,
-                frame = frame,
-                commandBuffer = frame.commandBuffer,
-                width = width,
-                height = height,
-            })
+            local context <const> = prepared.context
+            context.pass = pass
+            context.frame = frame
+            context.commandBuffer = frame.commandBuffer
+            context.width = width
+            context.height = height
+            spec.execute(context)
 
             pass:finish()
         end

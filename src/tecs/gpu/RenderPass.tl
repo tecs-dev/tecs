@@ -11,6 +11,11 @@
 --- staging struct that a concurrent `begin` would overwrite. `finish` is what
 --- releases both.
 ---
+--- The same goes for every `bind`: each fills a module-level array that SDL
+--- copies out of during the call and never reads again, so two threads binding
+--- at once would overwrite each other's arguments. That is what buys a bind
+--- that allocates nothing, on a path that runs several times a frame.
+---
 --- A begun pass is also recorded in `passscope` against its command buffer and
 --- taken off there by `finish`. That is the one thing the call site cannot do
 --- for itself: a body that throws skips the `finish` written after it, and the
@@ -31,6 +36,14 @@ local C <const> = sdl.C
 --- and one depth texture per pass. A pass begun with five to eight is rejected
 --- by SDL rather than by the check here.
 local MAX_COLOR_TARGETS <const> = 8
+
+--- Sampled textures, and storage buffers, one `bind` call may carry.
+---
+--- SDL's own per-stage ceilings: sixteen sampled textures and eight storage
+--- buffers. A call over the limit is refused here rather than by SDL, which
+--- would otherwise read past the end of the staging array below.
+local MAX_TEXTURE_BINDINGS <const> = 16
+local MAX_BUFFER_BINDINGS <const> = 8
 
 local record RenderPass
     record ClearColor
@@ -106,11 +119,17 @@ local record RenderPass
     ---     the fragment shader's output location order and the order the bound
     ---     pipeline's `colorFormats` were given in.
     --- @param depth Omit for a pass with no depth attachment.
+    --- @param reuse A finished pass whose object is begun again, or nil for a
+    ---     fresh one. This is for the frame path, which begins the same passes
+    ---     every frame: a pass object per pass per frame is a table per pass
+    ---     per frame, and reusing one costs nothing. What it costs the caller
+    ---     is that the object describes one pass at a time, so a pass handed to
+    ---     anything that might keep it must not be a reused one.
     --- @return The open pass, which the caller must `finish` before beginning
     ---     another or submitting the frame.
     begin: function(
         commandBuffer: loader.CValue, attachments: {RenderPass.Attachment},
-        depth?: RenderPass.DepthAttachment
+        depth?: RenderPass.DepthAttachment, reuse?: RenderPass
     ): RenderPass
 
     --- Binds a pipeline. All subsequent draws in this pass use its baked state.
@@ -226,25 +245,38 @@ end
 
 local RenderPassMT <const>: metatable<RenderPass> = { __index = RenderPass }
 
--- Reused across passes; a pass is begun far too often to allocate for it. SDL
--- copies out of these during the begin call, so they only have to hold still
--- for its duration, and only one begin may be in flight over them.
+-- Reused across passes; a pass is begun and bound far too often to allocate
+-- for either. SDL copies out of these during the call it is given them in, so
+-- they only have to hold still for its duration, and only one call may be in
+-- flight over each of them. `bindings` and `handles` are separate because
+-- their element types are, and `handles` serves both storage-buffer stages:
+-- the two are bound in separate calls and neither reads the array afterwards.
 local targets <const> = loader.newArray("SDL_GPUColorTargetInfo[?]", MAX_COLOR_TARGETS)
 local depthTarget <const> = loader.newArray("SDL_GPUDepthStencilTargetInfo[1]")
+local bindings <const> = loader.newArray("SDL_GPUTextureSamplerBinding[?]",
+    MAX_TEXTURE_BINDINGS)
+local handles <const> = loader.newArray("SDL_GPUBuffer*[?]", MAX_BUFFER_BINDINGS)
+local indexBinding <const> = loader.newArray("SDL_GPUBufferBinding[1]")
+
+--- Fills `pass` in and records it as open. Shared by `wrap` and `begin`.
+local function open(pass: RenderPass, handle: loader.CPtr,
+                    commandBuffer: loader.CValue, targetCount: integer): RenderPass
+    pass.handle = handle
+    pass.commandBuffer = commandBuffer
+    pass.targetCount = targetCount
+    pass._finished = false
+    passscope.opened(commandBuffer, pass as passscope.Pass)
+    return pass
+end
 
 function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue, targetCount?: integer): RenderPass
-    local self = setmetatable({} as RenderPass, RenderPassMT)
-    self.handle = handle
-    self.commandBuffer = commandBuffer
-    self.targetCount = targetCount or 1
-    self._finished = false
-    passscope.opened(commandBuffer, self as passscope.Pass)
-    return self
+    return open(setmetatable({} as RenderPass, RenderPassMT), handle,
+        commandBuffer, targetCount or 1)
 end
 
 function RenderPass.begin(
     commandBuffer: loader.CValue, attachments: {RenderPass.Attachment},
-    depth?: RenderPass.DepthAttachment
+    depth?: RenderPass.DepthAttachment, reuse?: RenderPass
 ): RenderPass
     local count = #attachments
     if count == 0 then
@@ -306,37 +338,49 @@ function RenderPass.begin(
     local handle = C.SDL_BeginGPURenderPass(commandBuffer, targets, count,
         depthInfo)
     if handle == nil then sdl.fail("SDL_BeginGPURenderPass") end
-    return RenderPass.wrap(handle, commandBuffer, count)
+    return open(reuse or setmetatable({} as RenderPass, RenderPassMT), handle,
+        commandBuffer, count)
 end
 
 function RenderPass:bindPipeline(pipeline: loader.CValue)
     C.SDL_BindGPUGraphicsPipeline(self.handle, pipeline)
 end
 
+--- Fills the shared handle array, and answers how many it holds.
+local function stageBuffers(buffers: {loader.CValue}): integer
+    local count <const> = #buffers
+    if count > MAX_BUFFER_BINDINGS then
+        error(("tecs: %d storage buffers exceeds the limit of %d")
+            :format(count, MAX_BUFFER_BINDINGS), 3)
+    end
+    for index = 1, count do
+        handles[index - 1] = buffers[index]
+    end
+    return count
+end
+
 function RenderPass:bindTextures(firstSlot: integer, textures: {loader.CValue}, sampler: loader.CValue)
-    local bindings = loader.newArray("SDL_GPUTextureSamplerBinding[?]", #textures)
-    for index, texture in ipairs(textures) do
+    local count <const> = #textures
+    if count > MAX_TEXTURE_BINDINGS then
+        error(("tecs: %d sampled textures exceeds the limit of %d")
+            :format(count, MAX_TEXTURE_BINDINGS), 2)
+    end
+    for index = 1, count do
         local binding = bindings[index - 1] as loader.CStruct
-        binding.texture = texture
+        binding.texture = textures[index]
         binding.sampler = sampler
     end
-    C.SDL_BindGPUFragmentSamplers(self.handle, firstSlot, bindings, #textures)
+    C.SDL_BindGPUFragmentSamplers(self.handle, firstSlot, bindings, count)
 end
 
 function RenderPass:bindVertexStorageBuffers(firstSlot: integer, buffers: {loader.CValue})
-    local handles = loader.newArray("SDL_GPUBuffer*[?]", #buffers)
-    for index, buffer in ipairs(buffers) do
-        handles[index - 1] = buffer
-    end
-    C.SDL_BindGPUVertexStorageBuffers(self.handle, firstSlot, handles, #buffers)
+    local count <const> = stageBuffers(buffers)
+    C.SDL_BindGPUVertexStorageBuffers(self.handle, firstSlot, handles, count)
 end
 
 function RenderPass:bindFragmentStorageBuffers(firstSlot: integer, buffers: {loader.CValue})
-    local handles = loader.newArray("SDL_GPUBuffer*[?]", #buffers)
-    for index, buffer in ipairs(buffers) do
-        handles[index - 1] = buffer
-    end
-    C.SDL_BindGPUFragmentStorageBuffers(self.handle, firstSlot, handles, #buffers)
+    local count <const> = stageBuffers(buffers)
+    C.SDL_BindGPUFragmentStorageBuffers(self.handle, firstSlot, handles, count)
 end
 
 function RenderPass:pushVertexUniform(slot: integer, data: loader.CArray, byteCount: integer)
@@ -357,11 +401,10 @@ function RenderPass:drawIndirect(buffer: loader.CValue, offset: integer, drawCou
 end
 
 function RenderPass:bindIndexBuffer(buffer: loader.CValue, offset?: integer)
-    local binding = loader.newArray("SDL_GPUBufferBinding[1]")
-    local slot = binding[0] as loader.CStruct
+    local slot = indexBinding[0] as loader.CStruct
     slot.buffer = buffer
     slot.offset = offset or 0
-    C.SDL_BindGPUIndexBuffer(self.handle, binding,
+    C.SDL_BindGPUIndexBuffer(self.handle, indexBinding,
         C.SDL_GPU_INDEXELEMENTSIZE_16BIT)
 end
 

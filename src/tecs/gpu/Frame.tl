@@ -66,9 +66,15 @@ local FrameMT <const>: metatable<Frame> = { __index = Frame }
 ---
 --- A nil `swapchainTexture` is a command buffer that acquired nothing, which is
 --- the only kind that may still be cancelled.
+--- @param reuse A resolved frame whose object is filled in again, or nil for a
+---     fresh one. One frame is acquired per iteration and the device holds the
+---     object between them, so reusing it is what keeps acquisition from
+---     costing a table. What it costs: the object describes the frame being
+---     recorded now, so nothing may keep one and expect it to still describe
+---     the frame it was handed.
 function Frame.wrap(commandBuffer: loader.CPtr, swapchainTexture: loader.CPtr,
-                    width: integer, height: integer): Frame
-    local self = setmetatable({} as Frame, FrameMT)
+                    width: integer, height: integer, reuse?: Frame): Frame
+    local self = reuse or setmetatable({} as Frame, FrameMT)
     self.commandBuffer = commandBuffer
     self.swapchainTexture = swapchainTexture
     self.width = width

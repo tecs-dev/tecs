@@ -157,6 +157,7 @@ local record Application
     _config: Application.Config
     _simulate: function(self: Application, dt: number)
     _recover: function(self: Application)
+    _receive: function(self: Application, event: events.Event)
     --- The frame this iteration acquired, held so that recovery can resolve one
     --- the throw left open. It survives into the next iteration and is
     --- harmless there: a frame that submitted or cancelled is already
@@ -250,6 +251,15 @@ end
 --- The body of a guarded emit, as one function rather than one per event.
 local function deliver()
     emitting.world:emit(0, emittingEvent)
+end
+
+--- What the drain below delivers to, held here for the reason `emitting` is:
+--- an iteration should not allocate a closure to be able to receive an event,
+--- and it allocates one whether or not the queue turned out to hold any.
+local receiving: Application = nil
+
+local function receive(event: events.Event)
+    receiving:_receive(event)
 end
 
 --- Builds an application. Return the result from the entry chunk.
@@ -512,9 +522,8 @@ function Application:_iterate(queue: loader.CValue, count: integer,
     -- this iteration's step. Holding a batch back for a later step would cost
     -- an event a frame, which is what the latency stages are there to catch.
     self.input:beginFrame()
-    events.drain(queue, count, function(event: events.Event)
-        self:_receive(event)
-    end, arrivals)
+    receiving = self
+    events.drain(queue, count, receive, arrivals)
 
     if self.quitRequested then return false end
 

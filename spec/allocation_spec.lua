@@ -32,20 +32,25 @@
 -- each of its allocation, and there are far too many of them to discard.
 --
 -- That last one is what decides the shape of this spec. A frame under `busted`
--- reads between 8 and 12 KB against a true cost of about 5.6 KB, and no
+-- reads thousands of bytes against a true cost of a few hundred, and no
 -- arrangement of probes separates the two. So:
 --
 --  * The frame assertion is a **ceiling**, set well above the true figure, and
 --    a check that the figure does not **grow with the world**, which is the
 --    part a per-row allocation cannot hide from: a byte a row would be 3.5 KB
 --    a frame at the larger count and a hundred times that for a table.
---  * Extraction is measured on its own, by running its phase several thousand
---    times between two heap reads. The compiler's contribution is a fixed
---    amount of work spread over all of them, so it averages down to a few
---    bytes a call while a real per-call allocation does not.
+--  * Each piece of the frame path is then measured **on its own**, over enough
+--    runs that the compiler's roughly fixed contribution to the window divides
+--    away while a per-call allocation survives division unchanged. Extraction
+--    and the hierarchy dirty sampler run several thousand times a reading; a
+--    two-pass render graph and a compute pass are heavier and run sixty times,
+--    with the smallest of four readings kept.
 --  * The buffer assertions are exact, because a single call can be read
 --    exactly and a one-off recording can be dropped by taking the smallest of
 --    three readings.
+--  * Three things are **counted rather than weighed**, because each is a
+--    single object a frame and would sit under the compiler's noise: the query
+--    cursor, the frame object, and the closure the event drain is handed.
 --
 -- What this deliberately does *not* do is turn the compiler off, which would
 -- make every reading here exact. On a process that has already run a device
@@ -65,8 +70,12 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local Application = require("tecs.Application")
 local Buffer = require("tecs.gpu.Buffer")
+local ComputePass = require("tecs.gpu.ComputePass")
+local Frame = require("tecs.gpu.Frame")
+local PassGraph = require("tecs.gpu.PassGraph")
 local clock = require("tecs.platform.clock")
 local components = require("tecs.components")
+local events = require("tecs.platform.events")
 local sdl = require("tecs.ffi.sdl3")
 
 local C = sdl.C
@@ -88,11 +97,22 @@ local EXTRA = 3584
 -- only add rows to a loop this is not measuring.
 local MOVERS = 1
 
--- Frames each window warms for and then measures over. Short, because a longer
--- window buys nothing against noise the compiler creates in bursts, and leaves
--- more driver residency behind for the specs that watch the process size.
-local WARMUP = 60
+-- Frames the reading warms for and then measures over per window. The warmup
+-- is long because this file runs after nineteen hundred other specs have
+-- filled the trace cache, and the frame path has to be compiled and to stay
+-- compiled before a window means anything.
+local WARMUP = 150
 local FRAMES = 90
+
+-- Windows the frame reading takes, keeping the smallest.
+--
+-- A trace-cache flush lands wholly inside whichever window it happened in and
+-- carries several kilobytes with it, so a single window reads anywhere between
+-- the true figure and thirty times it. An allocation the frame makes is in
+-- every window and survives the minimum unchanged. Six is what makes a clean
+-- window reliable rather than likely, and it is what lets the ceiling above be
+-- a number about the engine rather than about the compiler.
+local WINDOWS = 6
 
 -- Times extraction's phase is run per reading. Large, because this is what
 -- averages the compiler down: its work in a window is roughly fixed, so
@@ -102,27 +122,37 @@ local EXTRACTIONS = 4000
 
 -- Bytes a whole frame may allocate.
 --
--- The engine's own figure is about 5.6 KB, of which almost nothing is the
--- engine's to give back today: the deferred pass graph builds about two
--- kilobytes of tables per frame, `RenderPass` and `ComputePass` allocate a
--- handle object and an argument array per pass, and the device's frame
--- acquisition boxes its own pointers. Those live in files this change does not
--- own, and the numbers are in `make bench-alloc`.
+-- The engine's own figure is 312 to 336 bytes for a still scene, and exactly
+-- 144 more for a moving one. Almost none of it is the engine's to give back:
+-- SDL hands back nine pointers a frame that have to be held in Lua, and LuaJIT
+-- boxes each into 24 bytes of cdata, sinking one or another of them depending
+-- on what it has compiled. The 144 is the two staging flushes, which the bar
+-- below this one covers exactly. The numbers are in `make bench-alloc`.
 --
--- Under `busted` the same frame reads between 8 and 12 KB, the difference
--- being the compiler, for the reason in the header. Sixteen kibibytes is above
--- everything observed and below anything a regression would produce: another
--- pass in the graph, a table built per frame in a hot loop, or an FFI
--- allocation per buffer are all thousands of bytes.
-local FRAME_BAR = 16384
+-- Under `busted` the same frame reads between 320 bytes and 4 KB as the
+-- smallest of `WINDOWS` windows, the difference being the compiler, for the
+-- reason in the header. Eight kibibytes is twice the largest reading observed
+-- there and below the 9 KB the frame read before the removals this file now
+-- covers one at a time. It is not tighter than that because it cannot be: a
+-- single window still reads thirty times the truth when a trace-cache flush
+-- lands in it, and that is why the assertions after this one measure the frame
+-- path a piece at a time rather than leaning on this.
+local FRAME_BAR = 8192
 
--- How much larger the frame is allowed to be at eight times the entities.
+-- How much larger the frame is allowed to be at eight times the entities, and
+-- the reading the ratio is taken against when the smaller one comes in below
+-- it.
 --
--- Nothing on the frame path is per-row, so the true answer is one, and the
--- observed spread is 0.82 to 1.27 in either direction. Two is loose enough
--- never to fire on that and tight enough to catch anything that walks rows: a
--- single boxed value per row is a factor of ten.
+-- Nothing on the frame path is per-row, so the true answer is one. What stops
+-- that being asserted is that both readings are now hundreds of bytes of frame
+-- under a few kilobytes of compiler, and the compiler's share does not scale
+-- with the world: two readings of 861 and 3223 are the same frame measured
+-- twice. So the ratio is taken against a floor rather than against a number
+-- that small, which leaves it able to catch what it is for. Anything that
+-- walks rows walks 4097 of them at the larger count, and a boxed value on each
+-- is a hundred kilobytes.
 local LOAD_FACTOR = 2.0
+local LOAD_FLOOR = 4096
 
 -- Bytes extraction may allocate per run.
 --
@@ -132,6 +162,35 @@ local LOAD_FACTOR = 2.0
 -- that could regress it. The query cursor this loop used to allocate every
 -- frame reads as 160 here.
 local EXTRACT_BAR = 64
+
+-- Bytes the hierarchy dirty sampler may allocate per run.
+--
+-- `RenderLast` holds one system, the sampler that decides whether relative
+-- transforms have to be recomposed. It walks the world's dirty set, and it
+-- walks it directly: the iterator `world:dirtyArchetypes` hands out is a
+-- closure over three upvalues, built per call, and reads as 208 here. Nothing
+-- else in the phase allocates, so the bar is a margin below that rather than a
+-- budget.
+local SAMPLE_BAR = 64
+
+-- Bytes one execution of a two-pass graph may allocate.
+--
+-- The floor is three boxed pointers: the command buffer SDL hands back and one
+-- handle per begun pass, at 24 bytes each. Everything else a pass is run out of
+-- is allocated when the pass is declared. Building it per frame instead is the
+-- attachment array, an attachment record per output, the context table, the
+-- sampler binding array and the pass object, which for two passes reads as
+-- about 700.
+local GRAPH_BAR = 192
+
+-- Bytes beginning and ending one compute pass may allocate.
+--
+-- The floor is two boxed pointers, the command buffer and the pass handle, and
+-- it reads as 48. The read-write binding array and the pass object are held
+-- rather than allocated, and allocating them instead reads as about 250. The
+-- bar sits between the two rather than close to the floor, because a recording
+-- that lands in a window this short is worth tens of bytes on its own.
+local COMPUTE_BAR = 160
 
 -- Bytes a staging flush may allocate.
 --
@@ -249,13 +308,22 @@ describe("allocation", function()
     end)
 
     it("holds a steady-state frame under the ceiling, whatever the world holds", function()
+        local function iterate()
+            app:_iterate(nil, 0, nil)
+        end
+
         local function frameBytes()
             for _ = 1, WARMUP do
-                app:_iterate(nil, 0, nil)
+                iterate()
             end
-            return perRun(FRAMES, function()
-                app:_iterate(nil, 0, nil)
-            end)
+            local least
+            for _ = 1, WINDOWS do
+                local window = perRun(FRAMES, iterate)
+                if least == nil or window < least then
+                    least = window
+                end
+            end
+            return least
         end
 
         local small = frameBytes()
@@ -276,7 +344,7 @@ describe("allocation", function()
         )
 
         assert.is_true(
-            large <= small * LOAD_FACTOR,
+            large <= math.max(small, LOAD_FLOOR) * LOAD_FACTOR,
             (
                 "allocation per frame grew with the world: %d entities cost %.0f bytes a frame "
                 .. "and %d cost %.0f. Something on the frame path allocates per row."
@@ -359,6 +427,79 @@ describe("allocation", function()
         )
     end)
 
+    it("samples hierarchy dirtiness without allocating", function()
+        -- The whole of `RenderLast`, which is the sampler and nothing else, so
+        -- this is the system the frame runs rather than a reconstruction of it.
+        -- Averaged over thousands of runs for the reason extraction is: the
+        -- compiler's work in the window is roughly fixed and divides away,
+        -- while a closure built per call does not.
+        local world = app.world
+        for _ = 1, 200 do
+            world:runPhase(tecs.phases.RenderLast, clock.nominal)
+        end
+        local cost = perRun(EXTRACTIONS, function()
+            world:runPhase(tecs.phases.RenderLast, clock.nominal)
+        end)
+
+        if os.getenv("TECS_ALLOCATION_REPORT") ~= nil then
+            print(("\nsample %.2f"):format(cost))
+        end
+
+        assert.is_true(
+            cost <= SAMPLE_BAR,
+            (
+                "the hierarchy dirty sampler allocates %.1f bytes a run, over the %d "
+                .. "byte bar. It runs twice a frame on every world."
+            ):format(cost, SAMPLE_BAR)
+        )
+    end)
+
+    -- The two below are counted rather than weighed, for the reason the cursor
+    -- test above is: each is a single object a frame, small enough to sit under
+    -- the compiler's own noise here and just as real for it. Each is one object
+    -- reused, so two iterations have to be handed the same one.
+
+    it("acquires one frame object for every iteration", function()
+        local frames = {}
+        local recorded = app.renderer.render
+        app.renderer.render = function(renderer, frame)
+            frames[#frames + 1] = frame
+            return recorded(renderer, frame)
+        end
+        finally(function()
+            app.renderer.render = recorded
+        end)
+
+        for _ = 1, 3 do
+            app:_iterate(nil, 0, nil)
+        end
+
+        assert.is_true(#frames >= 2, "the iterations drew no frames")
+        assert.is_true(rawequal(frames[1], frames[#frames]), "the device allocated a frame object per acquisition")
+    end)
+
+    it("drains events through one handler for every iteration", function()
+        local handlers = {}
+        local drain = events.drain
+        events.drain = function(queue, count, handler, arrivals)
+            handlers[#handlers + 1] = handler
+            return drain(queue, count, handler, arrivals)
+        end
+        finally(function()
+            events.drain = drain
+        end)
+
+        for _ = 1, 3 do
+            app:_iterate(nil, 0, nil)
+        end
+
+        assert.is_true(#handlers >= 2, "the iterations drained no events")
+        assert.is_true(
+            rawequal(handlers[1], handlers[#handlers]),
+            "the loop allocated a closure per iteration to receive events with"
+        )
+    end)
+
     it("hands back the same staging view when the slot has not moved", function()
         local buffer = Buffer.create(app.renderer:device(), { size = 4096 })
         finally(function()
@@ -425,6 +566,104 @@ describe("allocation", function()
         assert.is_true(
             flushed <= FLUSH_BAR,
             ("a staging flush allocated %.0f bytes, over the %d byte bar"):format(flushed, FLUSH_BAR)
+        )
+    end)
+
+    -- Last, because both build their own device resources and record hundreds
+    -- of command buffers, and the readings above are quieter for not having
+    -- that behind them.
+
+    it("runs a pass graph without allocating per pass", function()
+        -- A graph of its own rather than the renderer's, because the
+        -- renderer's last pass writes the swapchain and acquiring one per run
+        -- would measure the presenter's wait rather than the graph. Two passes
+        -- over graph-owned targets exercise everything `execute` builds:
+        -- attachments for one output and for two, a declared input bound as a
+        -- fragment sampler, and a context per pass.
+        local device = app.renderer:device()
+        local graph = PassGraph.create(device, app.device:getSwapchainFormat())
+        finally(function()
+            graph:destroy()
+        end)
+
+        graph:target({ name = "first", clear = { r = 0, g = 0, b = 0, a = 1 } })
+        graph:target({ name = "second" })
+        graph:pass({ name = "one", outputs = { "first" }, execute = function() end })
+        graph:pass({
+            name = "two",
+            inputs = { "first" },
+            outputs = { "second" },
+            execute = function() end,
+        })
+
+        -- Wrapped once and refilled per run, so the frame object is not what is
+        -- being measured. No swapchain texture: neither pass writes one.
+        local frame = Frame.wrap(nil, nil, 64, 64)
+        local function execute()
+            frame.commandBuffer = C.SDL_AcquireGPUCommandBuffer(device)
+            frame.state = "recording"
+            graph:execute(frame)
+            frame:submit()
+        end
+
+        for _ = 1, 20 do
+            execute()
+        end
+        -- The smallest of four, for the reason the flush reading above is read
+        -- that way: a recording that happens once lands wholly in whichever
+        -- window it happened in, and a real allocation lands in all of them.
+        local cost = math.min(perRun(60, execute), perRun(60, execute), perRun(60, execute), perRun(60, execute))
+
+        if os.getenv("TECS_ALLOCATION_REPORT") ~= nil then
+            print(("\ngraph %.0f"):format(cost))
+        end
+
+        assert.is_true(
+            cost <= GRAPH_BAR,
+            (
+                "a two-pass graph allocated %.0f bytes an execution, over the %d byte "
+                .. "bar. Something in PassGraph is built per frame rather than per "
+                .. "declaration."
+            ):format(cost, GRAPH_BAR)
+        )
+    end)
+
+    it("begins a compute pass without allocating its arguments", function()
+        local device = app.renderer:device()
+        local buffer = Buffer.create(device, {
+            usage = { "storage", "computeWrite" },
+            size = 256,
+        })
+        finally(function()
+            buffer:destroy()
+        end)
+
+        -- Held rather than built per run, so what is measured is the pass and
+        -- not this spec's own argument list.
+        local writes = { buffer.handle }
+        local pass
+        local function record()
+            local commands = C.SDL_AcquireGPUCommandBuffer(device)
+            pass = ComputePass.begin(commands, writes, pass)
+            pass:finish()
+            C.SDL_SubmitGPUCommandBuffer(commands)
+        end
+
+        for _ = 1, 20 do
+            record()
+        end
+        local cost = math.min(perRun(60, record), perRun(60, record), perRun(60, record), perRun(60, record))
+
+        if os.getenv("TECS_ALLOCATION_REPORT") ~= nil then
+            print(("\ncompute %.0f"):format(cost))
+        end
+
+        assert.is_true(
+            cost <= COMPUTE_BAR,
+            (
+                "beginning a compute pass allocated %.0f bytes, over the %d byte bar. "
+                .. "Its binding array or its pass object is being allocated per call."
+            ):format(cost, COMPUTE_BAR)
         )
     end)
 end)

@@ -123,6 +123,16 @@ local record Deferred
     --- frame that is still reading it.
     _tileCounts: Buffer
     _tileLights: Buffer
+    --- The buffer lists the binning pass and the lighting pass hand the pass
+    --- API, one per call site and each of a fixed length. Held rather than
+    --- built per frame, and rewritten at every use, since a buffer that grew
+    --- has a new handle.
+    _binWrites: {loader.CValue}
+    _binReads: {loader.CValue}
+    _lightingBuffers: {loader.CValue}
+    --- The binning pass, begun again each frame rather than allocated per
+    --- frame; see `ComputePass.begin` for what that asks of a caller.
+    _binPass: ComputePass
     _binPipeline: ComputePipeline
     --- Eight floats pushed to the binning dispatch: the world rectangle the
     --- grid covers, then the light count.
@@ -237,6 +247,12 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
     self._binPipeline = ComputePipeline.load(device, "deferred.lightbin.comp",
         {})
 
+    -- Seeded with what the buffers hold now, which gives each list its length.
+    self._binWrites = { self._tileCounts.handle, self._tileLights.handle }
+    self._binReads = { self._lightBuffer.handle }
+    self._lightingBuffers = { self._lightBuffer.handle, self._tileCounts.handle,
+        self._tileLights.handle }
+
     local graph = PassGraph.create(device, swapchainFormat)
     graph:target({
         name = "albedo",
@@ -311,11 +327,13 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
             scene[14] = self._boundsMaxX
             scene[15] = self._boundsMaxY
 
+            local buffers <const> = self._lightingBuffers
+            buffers[1] = self._lightBuffer.handle
+            buffers[2] = self._tileCounts.handle
+            buffers[3] = self._tileLights.handle
+
             context.pass:bindPipeline(self._lightingPipeline.handle)
-            context.pass:bindFragmentStorageBuffers(0, {
-                self._lightBuffer.handle, self._tileCounts.handle,
-                self._tileLights.handle,
-            })
+            context.pass:bindFragmentStorageBuffers(0, buffers)
             C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, 64)
             context.pass:draw(3)
         end,
@@ -479,10 +497,17 @@ function Deferred:render(frame: Frame)
     bin[6] = 0.0
     bin[7] = 0.0
 
-    local pass <const> = ComputePass.begin(frame.commandBuffer,
-        { self._tileCounts.handle, self._tileLights.handle })
+    local writes <const> = self._binWrites
+    writes[1] = self._tileCounts.handle
+    writes[2] = self._tileLights.handle
+    local reads <const> = self._binReads
+    reads[1] = self._lightBuffer.handle
+
+    local pass <const> = ComputePass.begin(frame.commandBuffer, writes,
+        self._binPass)
+    self._binPass = pass
     pass:bindPipeline(self._binPipeline.handle)
-    pass:bindStorageBuffers(0, { self._lightBuffer.handle })
+    pass:bindStorageBuffers(0, reads)
     C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, bin, 32)
     pass:dispatch(math.ceil(TILE_COUNT / BIN_GROUP))
     pass:finish()

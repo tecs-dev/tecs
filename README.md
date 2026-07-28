@@ -1290,9 +1290,9 @@ collection inside the window eats the delta and more work can measure as less:
 the collector is stopped for every window. `collectgarbage` is not compiled by
 LuaJIT, so a probe inside the frame aborts every trace that would have covered
 the frame and the compiler then spends the run recording and recompiling, which
-is heap traffic charged to the frame; on this engine four probes a frame move a
-5.6 KB frame to between 8 and 11 KB and make two runs of one binary differ by
-40%. And the compiler removes allocations that do not escape a trace, so the
+is heap traffic charged to the frame; four probes a frame are enough to double
+a reading and to make two runs of one binary differ by 40%. And the compiler
+removes allocations that do not escape a trace, so the
 same source measures differently depending on what happens to be compiled.
 
 The bench answers all three. Each regime is measured twice: once with no probe
@@ -1307,22 +1307,40 @@ Busted the engine runs on a plain `luajit`, which does not reserve the
 machine-code arena `native/mcodearena.c` reserves at startup, so LuaJIT cannot
 place mcode near the interpreter, flushes its whole trace cache every few dozen
 frames, and starts again: three flushes in a hundred and twenty frames, and a
-frame that reads 5.6 KB under the engine's own binary reading between 8 and 12
-KB there. Turning the compiler off would make the reading exact and is worse
-than the imprecision, because `jit.off()` followed by `jit.flush()` on a
-process that has already run a device leaves LuaJIT reporting `jit.status()`
-true and unable to compile anything afterwards, which costs a later spec a 780x
-slowdown and fails the two specs that watch the process size.
+frame the engine's own binary reads in hundreds of bytes reading thousands
+there. Turning the compiler off would make the reading exact and is worse than
+the imprecision, because `jit.off()` followed by `jit.flush()` on a process
+that has already run a device leaves LuaJIT reporting `jit.status()` true and
+unable to compile anything afterwards, which costs a later spec a 780x slowdown
+and fails the two specs that watch the process size.
 
 So the spec holds what can be held without touching the compiler: a ceiling on
 the frame well above the true figure; that the figure does not grow with the
-size of the world, which is what a per-row allocation cannot hide from;
-extraction measured on its own over several thousand runs, where the compiler's
-fixed contribution averages away and a per-call allocation does not; and the
-staging buffer's two properties read exactly, since a single call can be. One
-of them is not a measurement at all: a cursor does not escape the loop that
-opens it, so LuaJIT removes the allocation once it has compiled the traversal
-and no reading can see it, and the spec counts the calls instead.
+size of the world, which is what a per-row allocation cannot hide from; and
+then each piece of the frame path measured on its own, where the compiler's
+contribution to a window is roughly fixed and divides away while a per-call
+allocation does not. Extraction, the hierarchy dirty sampler, a two-pass render
+graph and a compute pass are each read that way, and the staging buffer's two
+properties are read exactly, since a single call can be. Two of the assertions
+are not measurements at all: a cursor does not escape the loop that opens it,
+so LuaJIT removes the allocation once it has compiled the traversal and no
+reading can see it, and the frame object and the event handler are one object
+each per iteration, which is too small to see past the compiler's noise and
+just as real. All three are counted rather than weighed.
+
+What a steady-state frame costs today is a little over 300 bytes for a still
+scene and exactly 144 more for a moving one, and nearly all of it is not the
+engine's to give back: SDL hands nine pointers a frame back into Lua, and
+LuaJIT boxes each into 24 bytes of cdata that has to be held for the rest of
+the frame. The 144 is the two staging flushes. Everything above that has been
+taken
+out: the pass graph builds each pass's attachments, sampler bindings and
+context when the pass is declared and rewrites them per frame; `RenderPass` and
+`ComputePass` stage their SDL argument arrays in module-level scratch, on the
+same one-call-at-a-time terms `begin` already had; the pass objects, the frame
+object and the buffer lists the call sites hand them are held and filled in
+again; and the world's dirty set is walked directly rather than through the
+iterator closure `world:dirtyArchetypes` builds per call.
 
 ## Input
 

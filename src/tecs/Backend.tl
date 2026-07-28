@@ -197,6 +197,23 @@ local record Backend
     --- they were added. Empty on a world that installed nothing that writes
     --- instances with compute, which is what makes that world pay nothing.
     _stages: {ComputeStage}
+    --- The buffer and texture lists the frame path hands the pass API, one per
+    --- call site and each of a fixed length. Held rather than built per frame,
+    --- and rewritten at every use rather than filled once: a buffer that grew
+    --- has a new handle, and a list holding the old one binds freed memory.
+    _geometryBuffers: {loader.CValue}
+    _geometryTextures: {loader.CValue}
+    _markWrites: {loader.CValue}
+    _markReads: {loader.CValue}
+    _scanWrites: {loader.CValue}
+    _compactWrites: {loader.CValue}
+    _compactReads: {loader.CValue}
+    --- The three cull passes, begun again each frame rather than allocated
+    --- per frame; see `ComputePass.begin` for what that asks of a caller.
+    --- Nil until the first frame that culls anything.
+    _markPass: ComputePass
+    _scanPass: ComputePass
+    _compactPass: ComputePass
     _device: loader.CPtr
     _destroyed: boolean
 end
@@ -387,6 +404,17 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
     self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
     self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
 
+    -- Seeded with what the buffers hold now, which gives each list its length,
+    -- and rewritten wherever it is used.
+    self._geometryBuffers = { self.instances.handle, self._visible.handle,
+        self._playbacks.handle }
+    self._geometryTextures = { self.images.handle }
+    self._markWrites = { self._slots.handle, self._blocks.handle }
+    self._markReads = { self._bounds.handle }
+    self._scanWrites = { self._blocks.handle, self._drawArgs.handle }
+    self._compactWrites = { self._visible.handle }
+    self._compactReads = { self._slots.handle, self._blocks.handle }
+
     self.deferred = Deferred.create(device, swapchainFormat, {
         ambient = options.ambient,
         geometry = function(context: Deferred.PassContext)
@@ -400,10 +428,15 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
             -- Once for the whole scene, and only the fragments of an instance
             -- that named a region ever read it.
             context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
-            context.pass:bindVertexStorageBuffers(0,
-                { self.instances.handle, self._visible.handle,
-                    self._playbacks.handle })
-            context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
+            local buffers <const> = self._geometryBuffers
+            buffers[1] = self.instances.handle
+            buffers[2] = self._visible.handle
+            buffers[3] = self._playbacks.handle
+            context.pass:bindVertexStorageBuffers(0, buffers)
+
+            local textures <const> = self._geometryTextures
+            textures[1] = self.images.handle
+            context.pass:bindTextures(0, textures, self.sampler.handle)
             context.pass:bindIndexBuffer(self._indices.handle)
             -- One draw for the scene, with its instance count decided by the
             -- cull rather than by anything here.
@@ -642,29 +675,49 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._cullUniform[5] = groups
 
         -- Mark, scan, compact. Each pass reads what the one before it wrote,
-        -- and SDL orders them because each declares what it writes.
-        local mark = ComputePass.begin(frame.commandBuffer,
-            { self._slots.handle, self._blocks.handle })
+        -- and SDL orders them because each declares what it writes. The five
+        -- buffer lists are the backend's own, rewritten here because a buffer
+        -- that grew since the last frame has a new handle.
+        local markWrites <const> = self._markWrites
+        markWrites[1] = self._slots.handle
+        markWrites[2] = self._blocks.handle
+        local markReads <const> = self._markReads
+        markReads[1] = self._bounds.handle
+
+        local mark = ComputePass.begin(frame.commandBuffer, markWrites,
+            self._markPass)
+        self._markPass = mark
         mark:bindPipeline(self._mark.handle)
-        mark:bindStorageBuffers(0, { self._bounds.handle })
+        mark:bindStorageBuffers(0, markReads)
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
             self._cullUniform, 32)
         mark:dispatch(groups)
         mark:finish()
 
-        local scan = ComputePass.begin(frame.commandBuffer,
-            { self._blocks.handle, self._drawArgs.handle })
+        local scanWrites <const> = self._scanWrites
+        scanWrites[1] = self._blocks.handle
+        scanWrites[2] = self._drawArgs.handle
+
+        local scan = ComputePass.begin(frame.commandBuffer, scanWrites,
+            self._scanPass)
+        self._scanPass = scan
         scan:bindPipeline(self._scan.handle)
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
             self._cullUniform, 32)
         scan:dispatch(1)
         scan:finish()
 
-        local compact = ComputePass.begin(frame.commandBuffer,
-            { self._visible.handle })
+        local compactWrites <const> = self._compactWrites
+        compactWrites[1] = self._visible.handle
+        local compactReads <const> = self._compactReads
+        compactReads[1] = self._slots.handle
+        compactReads[2] = self._blocks.handle
+
+        local compact = ComputePass.begin(frame.commandBuffer, compactWrites,
+            self._compactPass)
+        self._compactPass = compact
         compact:bindPipeline(self._compact.handle)
-        compact:bindStorageBuffers(0,
-            { self._slots.handle, self._blocks.handle })
+        compact:bindStorageBuffers(0, compactReads)
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
             self._cullUniform, 32)
         compact:dispatch(groups)

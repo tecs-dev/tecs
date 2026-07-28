@@ -10,12 +10,22 @@
 --- what an earlier one wrote belongs in a second pass: finish this one and
 --- begin another. That is also the only sequencing available, since no other
 --- pass of any kind may begin on the command buffer until this one finishes.
+---
+--- `begin` and `bindStorageBuffers` each fill a module-level array that SDL
+--- copies out of during the call and never reads again, so one of each may be
+--- in flight at a time. That is the same constraint SDL's own one-pass rule
+--- already imposes, and it is what makes both allocation free.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local passscope <const> = require("tecs.gpu.passscope")
 
 local C <const> = sdl.C
+
+--- Read-write and read-only storage buffers one call may carry, which is SDL's
+--- per-stage ceiling. Over it is refused here rather than read past the end of
+--- the arrays below.
+local MAX_BUFFER_BINDINGS <const> = 8
 
 local record ComputePass
     --- The `SDL_GPUComputePass`. Nil once `finish` has run, and valid only
@@ -57,9 +67,15 @@ local record ComputePass
     --- @param readWriteBuffers Device buffer handles, not `Buffer` objects,
     ---     each created with the compute-storage-write usage bit. An empty list
     ---     or nil is a pass that only reads.
+    --- @param reuse A finished pass whose object is begun again, or nil for a
+    ---     fresh one. This is for the frame path, which begins the same passes
+    ---     every frame: a pass object per pass per frame is a table per pass
+    ---     per frame, and reusing one costs nothing. What it costs the caller
+    ---     is that the object describes one pass at a time, so a pass handed to
+    ---     anything that might keep it must not be a reused one.
     --- @return The open pass, which the caller must `finish` before beginning
     ---     another or submitting the frame.
-    begin: function(commandBuffer: loader.CValue, readWriteBuffers: {loader.CValue}): ComputePass
+    begin: function(commandBuffer: loader.CValue, readWriteBuffers: {loader.CValue}, reuse?: ComputePass): ComputePass
 
     --- Binds the pipeline whose shader this pass dispatches.
     --- @param pipeline An `SDL_GPUComputePipeline` whose reflected read-write
@@ -103,37 +119,51 @@ end
 
 local ComputePassMT <const>: metatable<ComputePass> = { __index = ComputePass }
 
-function ComputePass.wrap(handle: loader.CPtr,
-                          commandBuffer?: loader.CValue): ComputePass
-    local self = setmetatable({} as ComputePass, ComputePassMT)
-    self.handle = handle
-    self.commandBuffer = commandBuffer
-    self._finished = false
+-- Reused across passes, for the reason in the header.
+local readWrite <const> = loader.newArray(
+    "SDL_GPUStorageBufferReadWriteBinding[?]", MAX_BUFFER_BINDINGS)
+local handles <const> = loader.newArray("SDL_GPUBuffer*[?]", MAX_BUFFER_BINDINGS)
+
+--- Fills `pass` in and records it as open. Shared by `wrap` and `begin`.
+local function open(pass: ComputePass, handle: loader.CPtr,
+                    commandBuffer: loader.CValue): ComputePass
+    pass.handle = handle
+    pass.commandBuffer = commandBuffer
+    pass._finished = false
     if commandBuffer ~= nil then
-        passscope.opened(commandBuffer, self as passscope.Pass)
+        passscope.opened(commandBuffer, pass as passscope.Pass)
     end
-    return self
+    return pass
 end
 
-function ComputePass.begin(commandBuffer: loader.CValue, readWriteBuffers: {loader.CValue}): ComputePass
-    readWriteBuffers = readWriteBuffers or {}
+function ComputePass.wrap(handle: loader.CPtr,
+                          commandBuffer?: loader.CValue): ComputePass
+    return open(setmetatable({} as ComputePass, ComputePassMT), handle,
+        commandBuffer)
+end
 
-    -- At least one element, because a zero-length VLA is not a thing to
-    -- allocate. SDL is told the real count and never reads the slot.
-    local bindings = loader.newArray("SDL_GPUStorageBufferReadWriteBinding[?]",
-        math.max(#readWriteBuffers, 1))
-    for index, buffer in ipairs(readWriteBuffers) do
-        local binding = bindings[index - 1] as loader.CStruct
-        binding.buffer = buffer
-        -- Not cycling: the pass overwrites contents it is about to have read
-        -- back, so there is no prior data worth preserving.
-        binding.cycle = false
+function ComputePass.begin(commandBuffer: loader.CValue, readWriteBuffers: {loader.CValue}, reuse?: ComputePass): ComputePass
+    local count = 0
+    if readWriteBuffers ~= nil then
+        count = #readWriteBuffers
+        if count > MAX_BUFFER_BINDINGS then
+            error(("tecs: %d read-write buffers exceeds the limit of %d")
+                :format(count, MAX_BUFFER_BINDINGS), 2)
+        end
+        for index = 1, count do
+            local binding = readWrite[index - 1] as loader.CStruct
+            binding.buffer = readWriteBuffers[index]
+            -- Not cycling: the pass overwrites contents it is about to have
+            -- read back, so there is no prior data worth preserving.
+            binding.cycle = false
+        end
     end
 
     local handle = C.SDL_BeginGPUComputePass(commandBuffer,
-        nil, 0, bindings, #readWriteBuffers)
+        nil, 0, readWrite, count)
     if handle == nil then sdl.fail("SDL_BeginGPUComputePass") end
-    return ComputePass.wrap(handle, commandBuffer)
+    return open(reuse or setmetatable({} as ComputePass, ComputePassMT),
+        handle, commandBuffer)
 end
 
 function ComputePass:bindPipeline(pipeline: loader.CValue)
@@ -141,11 +171,15 @@ function ComputePass:bindPipeline(pipeline: loader.CValue)
 end
 
 function ComputePass:bindStorageBuffers(firstSlot: integer, buffers: {loader.CValue})
-    local handles = loader.newArray("SDL_GPUBuffer*[?]", #buffers)
-    for index, buffer in ipairs(buffers) do
-        handles[index - 1] = buffer
+    local count <const> = #buffers
+    if count > MAX_BUFFER_BINDINGS then
+        error(("tecs: %d storage buffers exceeds the limit of %d")
+            :format(count, MAX_BUFFER_BINDINGS), 2)
     end
-    C.SDL_BindGPUComputeStorageBuffers(self.handle, firstSlot, handles, #buffers)
+    for index = 1, count do
+        handles[index - 1] = buffers[index]
+    end
+    C.SDL_BindGPUComputeStorageBuffers(self.handle, firstSlot, handles, count)
 end
 
 function ComputePass:dispatch(x: integer, y?: integer, z?: integer)

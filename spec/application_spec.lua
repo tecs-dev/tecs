@@ -366,9 +366,17 @@ describe("Application", function()
             assert.is_nil(crashedFrame.commandBuffer)
             assert.are.equal(open, passscope.openCount())
 
-            app.renderer.render = recorded
+            -- The device holds one frame object and fills it in again per
+            -- acquisition, so the next frame is this same table. What must not
+            -- carry over is its state: the next iteration has to find it
+            -- recording a command buffer of its own rather than still resolved.
+            local recording
+            app.renderer.render = function(renderer, frame)
+                recording = frame.state
+                return recorded(renderer, frame)
+            end
             app:_simulate(1 / 60)
-            assert.is_false(rawequal(crashedFrame, app._frame), "the next frame reused the broken one")
+            assert.are.equal("recording", recording, "the next frame was handed the resolved one")
             assert.are.equal("submitted", app._frame.state)
             app:_shutdown()
         end)

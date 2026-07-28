@@ -38,6 +38,10 @@ local record Device
     _swapchainOut: loader.CArray
     _widthOut: loader.CArray
     _heightOut: loader.CArray
+    --- The frame object `beginFrame` fills in, for the same reason. One frame
+    --- is recorded at a time on this device, so the one object serves all of
+    --- them; see `Frame.wrap` for what that asks of a caller.
+    _frame: Frame
     _destroyed: boolean
 end
 
@@ -176,8 +180,10 @@ function Device:beginFrame(): Frame
         return nil
     end
 
-    return Frame.wrap(commandBuffer, texture as loader.CPtr,
-        self._widthOut[0] as integer, self._heightOut[0] as integer)
+    self._frame = Frame.wrap(commandBuffer, texture as loader.CPtr,
+        self._widthOut[0] as integer, self._heightOut[0] as integer,
+        self._frame)
+    return self._frame
 end
 
 --- Returns the swapchain's texture format, which pipelines writing to it must
