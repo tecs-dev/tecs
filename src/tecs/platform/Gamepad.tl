@@ -231,6 +231,13 @@ function Gamepad:_exitFixedPhase()
     self._buttons:exitFixed()
 end
 
+--- Drops the pending edges when capture moves to another layer. Held buttons
+--- and axis positions survive, because those are states the pad is still
+--- reporting rather than things that happened on one side of a boundary.
+function Gamepad:_clearEdges()
+    self._buttons:clearEdges()
+end
+
 -------------------------------------------------------------------------------
 -- Queries
 -------------------------------------------------------------------------------

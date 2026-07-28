@@ -169,10 +169,12 @@ end
 describe("platform.Input", function()
     local input
     local SPACE
+    local F
 
     before_each(function()
         input = Input.create()
         SPACE = input:scancode("space")
+        F = input:scancode("f")
     end)
 
     it("resolves key names case-insensitively", function()
@@ -254,6 +256,91 @@ describe("platform.Input", function()
         local overlay = input:pushLayer("debug", false)
         assert.is_true(input:keyDown("space", overlay))
         assert.is_true(input:keyDown("space"), "a passthrough layer must not suppress what is under it")
+    end)
+
+    it("drops pending edges when a blocking layer takes capture", function()
+        -- The layer did not exist when the key went down, so the press is not
+        -- its business. Held state is, since the key is still physically down.
+        input:beginFrame()
+        input:handleEvent(keyEvent(SPACE, true))
+
+        local menu = input:pushLayer("menu")
+        assert.is_false(input:keyPressed("space", menu), "an edge older than the layer is not the layer's")
+        assert.is_true(input:keyDown("space", menu), "holding is a state, not an edge")
+    end)
+
+    it("drops pending edges when a blocking layer gives capture back", function()
+        -- The symptom, named: an "f" typed into a debug overlay toggling the
+        -- game's fullscreen the instant the overlay closes.
+        input:beginFrame()
+        local overlay = input:pushLayer("debug")
+        input:handleEvent(keyEvent(F, true))
+        assert.is_true(input:keyPressed("f", overlay), "the overlay reads what was typed into it")
+        assert.is_false(input:keyPressed("f"), "gameplay is gated out while it is up")
+
+        input:popLayer()
+        assert.is_false(input:keyPressed("f"), "and does not receive it on the way out either")
+        assert.is_true(input:keyDown("f"), "the key is still down, so it still reads as down")
+    end)
+
+    it("drops the latched edges at the boundary too", function()
+        -- Latched edges outlive the frame, so without this the fixed step
+        -- receives a press the frame sets had already been cleaned of.
+        input:beginFrame()
+        local overlay = input:pushLayer("debug")
+        input:handleEvent(keyEvent(F, true))
+        input:handleEvent(keyEvent(F, false))
+        input:popLayer()
+
+        input:beginFrame()
+        input:enterFixedPhase()
+        assert.is_false(input:keyPressed("f"), "a step after the boundary starts clean")
+        assert.is_false(input:keyReleased("f"))
+        input:exitFixedPhase()
+    end)
+
+    it("drops the accumulated text, wheel and motion at the boundary", function()
+        input:beginFrame()
+        input:pushLayer("menu")
+        input:handleEvent({ kind = "textInput", text = "quit" })
+        input:handleEvent({
+            kind = "mouseWheel",
+            which = 1,
+            wheelX = 0,
+            wheelY = 3,
+            wheelTicksX = 0,
+            wheelTicksY = 3,
+        })
+        input:handleEvent({ kind = "mouseMotion", which = 1, x = 90, y = 40, dx = 90, dy = 40 })
+        input:popLayer()
+
+        assert.are.equal("", input.text, "text typed into a menu is not the game's to append")
+        assert.are.equal(0, input.wheelY)
+        assert.are.equal(0, input.wheelTicksY)
+        assert.are.equal(0, input.mouseDeltaY, "a camera must not jump by the motion made inside a menu")
+        assert.are.equal(90, input.mouseX, "the position is a state and survives")
+    end)
+
+    it("does not treat a non-blocking overlay as a capture boundary", function()
+        -- An overlay that consumes nothing shares the stream rather than
+        -- taking it, so clearing here would rob the layers underneath.
+        input:beginFrame()
+        input:handleEvent(keyEvent(SPACE, true))
+
+        local overlay = input:pushLayer("hud", false)
+        assert.is_true(input:keyPressed("space"), "the layers beneath keep their edge")
+        assert.is_true(input:keyPressed("space", overlay))
+
+        input:popLayer()
+        assert.is_true(input:keyPressed("space"), "and keep it when the overlay goes away")
+    end)
+
+    it("does not clear edges when an unbalanced pop changes nothing", function()
+        input:beginFrame()
+        input:handleEvent(keyEvent(SPACE, true))
+
+        assert.is_nil(input:popLayer(), "the base layer is never removed")
+        assert.is_true(input:keyPressed("space"), "and nothing crossed a boundary, so nothing is dropped")
     end)
 
     it("tracks mouse buttons on the same three tiers", function()
@@ -603,6 +690,27 @@ describe("platform.Input gamepads", function()
         local menu = input:pushLayer("menu")
         assert.is_true(pad:buttonDown("south", menu))
         assert.is_false(pad:buttonDown("south"), "a pad is gated by the same stack as the keyboard")
+    end)
+
+    it("drops a pad's pending edges at a capture boundary", function()
+        -- A pad is on the same stack as the keyboard, so it is on the same
+        -- boundary: a button pressed to dismiss a menu must not also fire in
+        -- the gameplay the menu was covering.
+        local input = withPads(backend, 11)
+        local pad = input:gamepad(1)
+
+        input:beginFrame()
+        local menu = input:pushLayer("menu")
+        input:handleEvent({ kind = "gamepadButtonDown", which = 11, button = 0 })
+        assert.is_true(pad:buttonPressed("south", menu))
+
+        input:popLayer()
+        assert.is_false(pad:buttonPressed("south"), "the press belonged to the menu")
+        assert.is_true(pad:buttonDown("south"), "and the button is still held")
+
+        input:enterFixedPhase()
+        assert.is_false(pad:buttonPressed("south"), "the latched tier goes with it")
+        input:exitFixedPhase()
     end)
 
     it("connects and disconnects on the platform's own events", function()

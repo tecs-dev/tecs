@@ -263,24 +263,58 @@ end
 -- Layers
 -------------------------------------------------------------------------------
 
+--- Drops every pending edge, on every device, in both tiers.
+---
+--- What a capture boundary needs. An edge belongs to whoever could read input
+--- at the moment it happened, and a layer on the far side of a boundary has no
+--- claim on it: an `f` typed into a debug overlay must not toggle the game's
+--- fullscreen the instant the overlay closes, and a menu opening mid-frame
+--- must not act on a key pressed before it existed.
+---
+--- The accumulated quantities go with them, because a frame's text, wheel and
+--- mouse motion are edges measured over an interval rather than states: a
+--- camera handed the motion made inside a menu jumps the frame the menu
+--- closes. Held buttons, pointer positions, the modifier mask, fingers down
+--- and the pen all survive, because those are states and the platform is still
+--- reporting them.
+local function clearEdges(self: Input)
+    self._keys:clearEdges()
+    self._mouse:clearEdges()
+    for index = 1, #self._padList do
+        self._padList[index]:_clearEdges()
+    end
+    self.text = ""
+    self.mouseDeltaX, self.mouseDeltaY = 0.0, 0.0
+    self.wheelX, self.wheelY = 0.0, 0.0
+    self.wheelTicksX, self.wheelTicksY = 0, 0
+end
+
 --- Pushes a layer and returns it.
 ---
 --- A blocking layer hides input from everything beneath. Pass
 --- `blocking = false` for an overlay that observes without consuming.
+---
+--- A layer that blocks moves capture, so the pending edges are dropped: what
+--- was pressed before the layer existed is not the layer's to act on. An
+--- overlay that consumes nothing moves no capture and drops nothing.
 function Input:pushLayer(name: string, blocking?: boolean): Layer
-    return self._gate:push(name, blocking)
+    local layer, captureMoved = self._gate:push(name, blocking)
+    if captureMoved then clearEdges(self) end
+    return layer
 end
 
 --- Removes the topmost layer. The base layer is never removed.
 ---
 --- A text-input session started by that layer stops with it, because a menu
 --- that closed and left the on-screen keyboard up is a bug the game would have
---- to remember to avoid.
+--- to remember to avoid. The pending edges go the same way when the layer was
+--- blocking, so what was typed into it stays in it.
 function Input:popLayer(): Layer
-    local layer = self._gate:pop()
+    local layer, captureMoved = self._gate:pop()
     if layer ~= nil and layer == self._textLayer then
         self:stopTextInput()
     end
+    if captureMoved then clearEdges(self) end
     return layer
 end
 

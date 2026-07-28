@@ -123,6 +123,21 @@ function Buttons:exitFixed()
     clear(self.latchedReleased)
 end
 
+--- Drops every edge in both tiers, leaving held state alone.
+---
+--- What a capture boundary needs. An edge belongs to whoever could read input
+--- when it happened, and a layer that gains or loses capture partway through a
+--- frame would otherwise be answered from the other side of the boundary: a
+--- key typed into a menu fires in gameplay the instant the menu pops. Held
+--- state is not an edge and survives, so a key still physically down is still
+--- down on both sides.
+function Buttons:clearEdges()
+    clear(self.pressed)
+    clear(self.released)
+    clear(self.latchedPressed)
+    clear(self.latchedReleased)
+end
+
 --- Releases everything held, reporting each as an edge.
 ---
 --- What focus loss and device removal need: a button whose release the
@@ -164,44 +179,53 @@ function Gate.create(): Gate
     } as Gate, GateMT)
 end
 
---- Pushes a layer and returns it.
----
---- A blocking layer hides input from everything beneath. Pass
---- `blocking = false` for an overlay that observes without consuming.
-function Gate:push(name: string, blocking?: boolean): Layer
-    local layer: Layer = {
-        name = name,
-        blocking = blocking ~= false,
-        index = #self.layers + 1,
-    }
-    self.layers[layer.index] = layer
-    return layer
-end
-
---- Removes the topmost layer and returns it.
----
---- The base layer is never removed, so popping an empty stack returns nil
---- rather than raising: an unbalanced pop leaves the stack in the state
---- everything already reads correctly.
-function Gate:pop(): Layer
-    local count = #self.layers
-    if count <= 1 then return nil end
-    local layer = self.layers[count]
-    self.layers[count] = nil
-    return layer
-end
-
---- The layer currently on top.
-function Gate:top(): Layer
-    return self.layers[#self.layers]
-end
-
 --- The lowest layer index still allowed to read.
 local function readableFrom(self: Gate): integer
     for index = #self.layers, 1, -1 do
         if self.layers[index].blocking then return index end
     end
     return 1
+end
+
+--- Pushes a layer and returns it, plus whether capture moved.
+---
+--- A blocking layer hides input from everything beneath. Pass
+--- `blocking = false` for an overlay that observes without consuming.
+---
+--- Capture moves when the lowest readable index does, which is to say when the
+--- layer blocks. An overlay that consumes nothing is not a boundary: the
+--- layers beneath keep reading the same stream they were reading a moment ago,
+--- and taking their pending edges away to hand the overlay a clean slate would
+--- be the same defect pointing the other way.
+function Gate:push(name: string, blocking?: boolean): Layer, boolean
+    local before = readableFrom(self)
+    local layer: Layer = {
+        name = name,
+        blocking = blocking ~= false,
+        index = #self.layers + 1,
+    }
+    self.layers[layer.index] = layer
+    return layer, readableFrom(self) ~= before
+end
+
+--- Removes the topmost layer and returns it, plus whether capture moved.
+---
+--- The base layer is never removed, so popping an empty stack returns nil
+--- rather than raising: an unbalanced pop leaves the stack in the state
+--- everything already reads correctly, and reports no boundary because none
+--- was crossed.
+function Gate:pop(): Layer, boolean
+    local count = #self.layers
+    if count <= 1 then return nil, false end
+    local before = readableFrom(self)
+    local layer = self.layers[count]
+    self.layers[count] = nil
+    return layer, readableFrom(self) ~= before
+end
+
+--- The layer currently on top.
+function Gate:top(): Layer
+    return self.layers[#self.layers]
 end
 
 --- Whether `layer` may read input. Omitting a layer means the base layer,

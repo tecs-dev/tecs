@@ -1373,6 +1373,20 @@ everything beneath it, so a menu suppresses gameplay without gameplay code
 knowing a menu exists. Code that names no layer reads the base layer, which is
 the safe default: it goes quiet when anything is pushed over it.
 
+Pushing or popping a blocking layer drops every pending edge, on every device,
+in both tiers. An edge belongs to whoever could read input at the moment it
+happened, and a layer on the far side of that boundary has no claim on it: an
+`f` typed into a debug overlay must not toggle the game's fullscreen the
+instant the overlay closes, and a menu opening mid-frame must not act on a key
+pressed before it existed. The frame's accumulated text, wheel and mouse motion
+go with them, because those are measured over an interval rather than held, and
+a camera handed the motion made inside a menu jumps the frame it closes. Held
+buttons, pointer positions, the modifier mask, fingers and the pen all survive,
+because the platform is still reporting them and a key still down is still
+down. A non-blocking overlay is not a boundary: it consumes nothing, so the
+layers beneath keep reading the stream they were already reading, and clearing
+there would be the same defect pointing the other way.
+
 A gamepad is not part of that state. It has identity, a lifetime shorter than
 the process, metadata, capabilities that differ between devices, and outputs, so
 it is an object reached through `input:gamepads()` and it answers for itself.
