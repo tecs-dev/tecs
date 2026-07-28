@@ -123,8 +123,11 @@ format-check: ## Report unformatted sources, writing nothing
 # tree, and a page's `description:` is what labels it in both, so a page without
 # one is invisible in the index rather than merely undocumented. Checked here
 # because it needs no build, like the two above it.
-docs-check: ## Verify every docs page has a description
+docs-check: ## Verify the documentation against the surface it describes
 	@bash scripts/check-docs-descriptions.sh
+	@bash docs/scripts/checkpages.sh
+	@python3 docs/scripts/checklinks.py
+	@bash docs/scripts/surface.sh --check
 
 # The site's own tooling, which needs node rather than anything this build
 # owns. Kept here so the commands sit beside the rest rather than being
