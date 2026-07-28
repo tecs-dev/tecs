@@ -12,13 +12,11 @@ local Position = tecs.newFFIComponent({
 
 local function findArchetype(world: tecs.World): tecs.Archetype
     local match: tecs.Archetype = nil
-    world:forEachArchetype(
-        function(arch: tecs.Archetype)
-            if arch:get(Position) ~= nil and ((arch as {string: any}).entities as {integer})[0] > 0 then
-                match = arch
-            end
+    world:forEachArchetype(function(arch: tecs.Archetype)
+        if arch:get(Position) ~= nil and ((arch as {string: any}).entities as {integer})[0] > 0 then
+            match = arch
         end
-    )
+    end)
     return match
 end
 

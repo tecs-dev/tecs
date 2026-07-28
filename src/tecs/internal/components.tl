@@ -763,15 +763,13 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
 
     local isSparse = cfg.sparse or false
 
-    local ffiStorage = storage.newFFIStorage(
-        {
-            name = name .. "_FFIRelationship",
-            bindingName = name,
-            fields = allFields,
-            metatable = cfg.metatable,
-            perEntityComponent = not isSparse, -- sparse relationships don't need per-instance IDs
-        }
-    )
+    local ffiStorage = storage.newFFIStorage({
+        name = name .. "_FFIRelationship",
+        bindingName = name,
+        fields = allFields,
+        metatable = cfg.metatable,
+        perEntityComponent = not isSparse, -- sparse relationships don't need per-instance IDs
+    })
 
     -- Convert FFI field tuples to plain names so newRelationship can
     -- codegen `.new` (unpack-by-name into positional args for the ctor).

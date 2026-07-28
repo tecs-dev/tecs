@@ -241,45 +241,43 @@ return tecs.application({
             include = {Transform, physics.RigidBody},
         })
 
-        world:addSystem(
-            {
-                name = "bench.Blowers",
-                -- Beside the step rather than beside the frame, so a body takes
-                -- the same impulse per step of simulated time however the frames
-                -- fall.
-                phase = tecs.phases.FixedUpdate,
-                run = function()
-                    -- The physics step is fixed, so the push is too.
-                    local push = BLOWER_FORCE / 60.0
-                    for archetype, length in blown:iter() do
-                        -- Read rather than getMut: the blowers change velocity
-                        -- through Box2D, and the transform is written back by the
-                        -- physics sync. Taking it mutable here would mark the
-                        -- column dirty every frame and defeat the gate.
-                        local transforms = archetype:get(Transform)
-                        local bodies = archetype:get(physics.RigidBody)
-                        for row = 1, length do
-                            local transform = transforms[row]
-                            for index = 1, #blowers do
-                                local blower = blowers[index]
-                                local dx = transform.x - blower[1]
-                                local dy = transform.y - blower[2]
-                                local distanceSq = dx * dx + dy * dy
-                                if distanceSq < radiusSq then
-                                    -- Falls off with distance, so a body at the
-                                    -- edge of the stream drifts rather than being
-                                    -- snapped into it.
-                                    local falloff = 1.0 - distanceSq / radiusSq
-                                    local strength = push * falloff
-                                    physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
-                                    break
-                                end
+        world:addSystem({
+            name = "bench.Blowers",
+            -- Beside the step rather than beside the frame, so a body takes
+            -- the same impulse per step of simulated time however the frames
+            -- fall.
+            phase = tecs.phases.FixedUpdate,
+            run = function()
+                -- The physics step is fixed, so the push is too.
+                local push = BLOWER_FORCE / 60.0
+                for archetype, length in blown:iter() do
+                    -- Read rather than getMut: the blowers change velocity
+                    -- through Box2D, and the transform is written back by the
+                    -- physics sync. Taking it mutable here would mark the
+                    -- column dirty every frame and defeat the gate.
+                    local transforms = archetype:get(Transform)
+                    local bodies = archetype:get(physics.RigidBody)
+                    for row = 1, length do
+                        local transform = transforms[row]
+                        for index = 1, #blowers do
+                            local blower = blowers[index]
+                            local dx = transform.x - blower[1]
+                            local dy = transform.y - blower[2]
+                            local distanceSq = dx * dx + dy * dy
+                            if distanceSq < radiusSq then
+                                -- Falls off with distance, so a body at the
+                                -- edge of the stream drifts rather than being
+                                -- snapped into it.
+                                local falloff = 1.0 - distanceSq / radiusSq
+                                local strength = push * falloff
+                                physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
+                                break
                             end
                         end
                     end
-                end,
-            }
-        )
+                end
+            end,
+        })
 
         world:addSystem({
             name = "bench.Sample",

@@ -11,6 +11,6 @@ return {
         indent_width = 4,
         max_line_width = 120,
         sort_requires = false,
-        hug_table_arguments = true,
+        hug_single_argument = true,
     },
 }

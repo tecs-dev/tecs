@@ -274,12 +274,10 @@ function loader.library(
             -- Pinned before anything can start a thread inside it. A failure
             -- here is not fatal: the library is already loaded and usable, and
             -- only an orderly shutdown that beats its own threads is at risk.
-            pcall(
-                function()
-                    local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
-                    dlopen(path, RTLD_NOW + RTLD_NODELETE)
-                end
-            )
+            pcall(function()
+                local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
+                dlopen(path, RTLD_NOW + RTLD_NODELETE)
+            end)
             loaded[key] = namespace
             return namespace, path
         end

@@ -282,13 +282,11 @@ describe(
                 it(
                     "rejects an unknown clock",
                     function()
-                        luassert.has_error(
-                            function()
-                                sequence.define(
-                                    uniqueName(), {sequence.waitSteps(1)}, {clock = "wallclock" as sequence.ClockId}
-                                )
-                            end
-                        )
+                        luassert.has_error(function()
+                            sequence.define(
+                                uniqueName(), {sequence.waitSteps(1)}, {clock = "wallclock" as sequence.ClockId}
+                            )
+                        end)
                     end
                 )
             end
@@ -1090,32 +1088,30 @@ describe(
                 local calls: integer
                 local spawned: {integer}
 
-                before_each(
-                    function()
-                        calls = 0
-                        spawned = {}
-                        sequence.registerQuery(world, "spec.adds", {include = {Add}})
-                        sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
-                        sequence.registerAction(
-                            world,
-                            "spec.spawnAdd",
-                            function(w) spawned[#spawned + 1] = w:spawn(Add(1) as tecs.Component) end
-                        )
-                        sequence.registerAction(
-                            world,
-                            "spec.clearAdds",
-                            function(w) for i = 1, #spawned do w:despawn(spawned[i]) end; spawned = {} end
-                        )
-                    end
-                )
+                before_each(function()
+                    calls = 0
+                    spawned = {}
+                    sequence.registerQuery(world, "spec.adds", {include = {Add}})
+                    sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
+                    sequence.registerAction(
+                        world,
+                        "spec.spawnAdd",
+                        function(w) spawned[#spawned + 1] = w:spawn(Add(1) as tecs.Component) end
+                    )
+                    sequence.registerAction(
+                        world,
+                        "spec.clearAdds",
+                        function(w) for i = 1, #spawned do w:despawn(spawned[i]) end; spawned = {} end
+                    )
+                end)
 
                 it(
                     "rejects a malformed wait",
                     function()
                         luassert.has_error(function() sequence.waitQuery("", "any") end)
-                        luassert.has_error(
-                            function() sequence.waitQuery("spec.adds", "sometimes" as sequence.QueryCondition) end
-                        )
+                        luassert.has_error(function()
+                            sequence.waitQuery("spec.adds", "sometimes" as sequence.QueryCondition)
+                        end)
                     end
                 )
 
@@ -1454,28 +1450,26 @@ describe(
                 local slide: string
                 local channelled: string
 
-                before_each(
-                    function()
-                        calls = 0
-                        actor = world:spawn(Transform(0, 0))
-                        world:commit()
-                        sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
-                        slide = uniqueName()
-                        sequence.timeline(
-                            slide,
-                            {
-                                sequence.tweenTo(0.5, "linear", "transform.x", 100),
-                            }
-                        )
-                        channelled = uniqueName()
-                        sequence.timeline(
-                            channelled,
-                            {
-                                sequence.tweenTo(0.5, "linear", "transform.y", 100),
-                            }
-                        )
-                    end
-                )
+                before_each(function()
+                    calls = 0
+                    actor = world:spawn(Transform(0, 0))
+                    world:commit()
+                    sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
+                    slide = uniqueName()
+                    sequence.timeline(
+                        slide,
+                        {
+                            sequence.tweenTo(0.5, "linear", "transform.x", 100),
+                        }
+                    )
+                    channelled = uniqueName()
+                    sequence.timeline(
+                        channelled,
+                        {
+                            sequence.tweenTo(0.5, "linear", "transform.y", 100),
+                        }
+                    )
+                end)
 
                 local function playAndWait(timeline: string, options?: {string: any}): sequence.Handle
                     local prog = sequence.define(
@@ -2575,17 +2569,15 @@ describe(
                 it(
                     "rejects a clock a timeline cannot run on",
                     function()
-                        luassert.has_error(
-                            function()
-                                sequence.timeline(
-                                    uniqueName(),
-                                    {
-                                        sequence.tweenTo(0.1, "linear", "transform.x", 1),
-                                    },
-                                    {clock = "frame"}
-                                )
-                            end
-                        )
+                        luassert.has_error(function()
+                            sequence.timeline(
+                                uniqueName(),
+                                {
+                                    sequence.tweenTo(0.1, "linear", "transform.x", 1),
+                                },
+                                {clock = "frame"}
+                            )
+                        end)
                     end
                 )
             end
@@ -2598,19 +2590,17 @@ describe(
             function()
                 local pending: {integer: boolean}
 
-                before_each(
-                    function()
-                        pending = {}
-                        sequence.registerAwaitable(
-                            "spec.work",
-                            {
-                                isPending = function(_w: tecs.World, entity: integer, _key: string): boolean
-                                    return pending[entity] == true
-                                end,
-                            }
-                        )
-                    end
-                )
+                before_each(function()
+                    pending = {}
+                    sequence.registerAwaitable(
+                        "spec.work",
+                        {
+                            isPending = function(_w: tecs.World, entity: integer, _key: string): boolean
+                                return pending[entity] == true
+                            end,
+                        }
+                    )
+                end)
 
                 it(
                     "parks until the provider says the work is done",
@@ -2920,14 +2910,12 @@ describe(
             function()
                 local order: {string}
 
-                before_each(
-                    function()
-                        order = {}
-                        sequence.registerAction(
-                            world, "spec.mark", function(_w, ctx) order[#order + 1] = tostring(ctx.args[1]) end
-                        )
-                    end
-                )
+                before_each(function()
+                    order = {}
+                    sequence.registerAction(
+                        world, "spec.mark", function(_w, ctx) order[#order + 1] = tostring(ctx.args[1]) end
+                    )
+                end)
 
                 it(
                     "builds the same program a node list would",

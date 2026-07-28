@@ -110,149 +110,147 @@ local function spawnLights(world: tecs.World, width: number, height: number)
     end
 end
 
-return tecs.application(
-    {
-        window = {
-            title = "tecs",
-            width = math.floor(tonumber(os.getenv("TECS_WIDTH")) or 1280),
-            height = math.floor(tonumber(os.getenv("TECS_HEIGHT")) or 720),
-        },
-        framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
-        debug = true,
-        ambientLight = {0.05, 0.05, 0.08},
-        -- Headroom over the field for the lights and for a glyph per character of
-        -- the caption, since a glyph is an entity and an instance like any other.
-        capacity = COUNT + 256,
-        maxEntities = COUNT + 512,
-        debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
-        presentMode = os.getenv("TECS_PRESENT"),
-        mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
+return tecs.application({
+    window = {
+        title = "tecs",
+        width = math.floor(tonumber(os.getenv("TECS_WIDTH")) or 1280),
+        height = math.floor(tonumber(os.getenv("TECS_HEIGHT")) or 720),
+    },
+    framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
+    debug = true,
+    ambientLight = {0.05, 0.05, 0.08},
+    -- Headroom over the field for the lights and for a glyph per character of
+    -- the caption, since a glyph is an entity and an instance like any other.
+    capacity = COUNT + 256,
+    maxEntities = COUNT + 512,
+    debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
+    presentMode = os.getenv("TECS_PRESENT"),
+    mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 
-        plugin = function(world: tecs.World, app: tecs.Application)
-            local width, height = app.window:getPixelSize()
-            print(("tecs %s"):format(tecs.version))
-            print(("  driver: %s"):format(app.device.driver))
-            print(("  window: %dx%d px"):format(width, height))
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local width, height = app.window:getPixelSize()
+        print(("tecs %s"):format(tecs.version))
+        print(("  driver: %s"):format(app.device.driver))
+        print(("  window: %dx%d px"):format(width, height))
 
-            -- Which of the two shader paths ran. Worth saying out loud: a packaged
-            -- build and a compiling one produce the same frame, so nothing else
-            -- distinguishes them.
-            local pack = shadercompiler.pack()
-            if pack ~= nil then
-                local count = 0
-                for _ in pairs(pack.shaders) do
-                    count = count + 1
-                end
-                print(
-                    ("  shaders: %d from a %s pack built for %s"):format(
-                        count, shaderpack.formatName(pack.format), pack.target
-                    )
+        -- Which of the two shader paths ran. Worth saying out loud: a packaged
+        -- build and a compiling one produce the same frame, so nothing else
+        -- distinguishes them.
+        local pack = shadercompiler.pack()
+        if pack ~= nil then
+            local count = 0
+            for _ in pairs(pack.shaders) do
+                count = count + 1
+            end
+            print(
+                ("  shaders: %d from a %s pack built for %s"):format(
+                    count, shaderpack.formatName(pack.format), pack.target
                 )
-            else
-                print("  shaders: compiled from source")
-            end
-
-            local t0 = tecs.clock.now()
-            spawnField(world, width, height)
-            local t1 = tecs.clock.now()
-            spawnLights(world, width, height)
-            print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
-
-            -- Text is entities too. The plugin lays the string out into one child
-            -- entity per glyph, and each of those is an ordinary renderable that
-            -- the same cull and the same draw pick up.
-            world:addPlugin(tecs.text.plugin({renderer = app.renderer}))
-            world:spawn(
-                Transform(24, 24, 0, 1),
-                Tint(0.92, 0.96, 1.0, 1.0),
-                tecs.text.Text.new({
-                    text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                    font = tecs.text.defaultFont(),
-                    size = 28,
-                })
             )
+        else
+            print("  shaders: compiled from source")
+        end
 
-            local elapsed = 0.0
+        local t0 = tecs.clock.now()
+        spawnField(world, width, height)
+        local t1 = tecs.clock.now()
+        spawnLights(world, width, height)
+        print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
 
-            -- Rotation is a write, so the column is taken with getMut. Reads use
-            -- get: taking getMut to read would mark the component dirty on every
-            -- archetype every frame and defeat every dirty-gated consumer.
-            local static = os.getenv("TECS_STATIC") ~= nil
-            local spinning = world:query({include = {Transform, Renderable}})
-            if not static then
-                world:addSystem({
-                    name = "demo.Spin",
-                    phase = tecs.phases.Update,
-                    run = function(dt: number)
-                        elapsed = elapsed + dt
-                        for archetype, length in spinning:iter() do
-                            local transforms = archetype:getMut(Transform)
-                            for row = 1, length do
-                                transforms[row].rotation = transforms[row].rotation + dt * 1.5
-                            end
-                        end
-                    end,
-                })
-            end
+        -- Text is entities too. The plugin lays the string out into one child
+        -- entity per glyph, and each of those is an ordinary renderable that
+        -- the same cull and the same draw pick up.
+        world:addPlugin(tecs.text.plugin({renderer = app.renderer}))
+        world:spawn(
+            Transform(24, 24, 0, 1),
+            Tint(0.92, 0.96, 1.0, 1.0),
+            tecs.text.Text.new({
+                text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
+                font = tecs.text.defaultFont(),
+                size = 28,
+            })
+        )
 
-            local orbiting = world:query({include = {Transform, PointLight}})
+        local elapsed = 0.0
+
+        -- Rotation is a write, so the column is taken with getMut. Reads use
+        -- get: taking getMut to read would mark the component dirty on every
+        -- archetype every frame and defeat every dirty-gated consumer.
+        local static = os.getenv("TECS_STATIC") ~= nil
+        local spinning = world:query({include = {Transform, Renderable}})
+        if not static then
             world:addSystem({
-                name = "demo.OrbitLights",
+                name = "demo.Spin",
                 phase = tecs.phases.Update,
-                run = function()
-                    local index = 0
-                    for archetype, length in orbiting:iter() do
+                run = function(dt: number)
+                    elapsed = elapsed + dt
+                    for archetype, length in spinning:iter() do
                         local transforms = archetype:getMut(Transform)
                         for row = 1, length do
-                            local angle = elapsed * 0.6 + index * 2.094
-                            transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
-                            transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
-                            index = index + 1
+                            transforms[row].rotation = transforms[row].rotation + dt * 1.5
                         end
                     end
                 end,
             })
+        end
 
-            local input = app.input
-            world:addSystem({
-                name = "demo.Quit",
-                phase = tecs.phases.Update,
-                run = function()
-                    -- Reads the base layer, so this stops responding on its own if
-                    -- a menu layer is ever pushed over it.
-                    if input:keyPressed("escape") then
-                        app.quitRequested = true
+        local orbiting = world:query({include = {Transform, PointLight}})
+        world:addSystem({
+            name = "demo.OrbitLights",
+            phase = tecs.phases.Update,
+            run = function()
+                local index = 0
+                for archetype, length in orbiting:iter() do
+                    local transforms = archetype:getMut(Transform)
+                    for row = 1, length do
+                        local angle = elapsed * 0.6 + index * 2.094
+                        transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))
+                        transforms[row].y = height * (0.5 + 0.3 * math.sin(angle))
+                        index = index + 1
                     end
-                end,
-            })
+                end
+            end,
+        })
 
-            -- One kind, one handler. A game that also cared about drops would ask
-            -- for `events.on.dropFile` beside this and be called for drops only,
-            -- rather than for every event with a branch at the top.
-            world:observe(
-                0, tecs.events.on.appWillEnterBackground, function() print("  backgrounded, simulation suspended") end
-            )
+        local input = app.input
+        world:addSystem({
+            name = "demo.Quit",
+            phase = tecs.phases.Update,
+            run = function()
+                -- Reads the base layer, so this stops responding on its own if
+                -- a menu layer is ever pushed over it.
+                if input:keyPressed("escape") then
+                    app.quitRequested = true
+                end
+            end,
+        })
 
-            -- Teardown is a phase like any other, so the summary is a system in it
-            -- rather than a callback the loop has to remember to call.
-            world:addSystem({
-                name = "demo.Report",
-                phase = tecs.phases.Shutdown,
-                run = function()
-                    print(
-                        ("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, " .. "%d resynced)"):format(
-                            app.frame,
-                            app.elapsed,
-                            app.elapsed / math.max(app.frame, 1) * 1000,
-                            app.renderer.count,
-                            app.renderer.rewritten
-                        )
+        -- One kind, one handler. A game that also cared about drops would ask
+        -- for `events.on.dropFile` beside this and be called for drops only,
+        -- rather than for every event with a branch at the top.
+        world:observe(
+            0, tecs.events.on.appWillEnterBackground, function() print("  backgrounded, simulation suspended") end
+        )
+
+        -- Teardown is a phase like any other, so the summary is a system in it
+        -- rather than a callback the loop has to remember to call.
+        world:addSystem({
+            name = "demo.Report",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                print(
+                    ("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, " .. "%d resynced)"):format(
+                        app.frame,
+                        app.elapsed,
+                        app.elapsed / math.max(app.frame, 1) * 1000,
+                        app.renderer.count,
+                        app.renderer.rewritten
                     )
-                end,
-            })
+                )
+            end,
+        })
 
-            print(("  %d renderable entities, %d light entities"):format(COUNT, LIGHTS))
-            print("  escape or close the window to quit")
-        end,
-    }
-)
+        print(("  %d renderable entities, %d light entities"):format(COUNT, LIGHTS))
+        print("  escape or close the window to quit")
+    end,
+})

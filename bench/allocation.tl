@@ -185,282 +185,280 @@ clock.provider = function(_real: number): number return 1.0 / 60.0 end
 local plainWindows: {Window} = {}
 local probedWindows: {Window} = {}
 
-return tecs.application(
-    {
-        window = {title = "allocation", width = WIDTH, height = HEIGHT},
-        presentMode = "immediate",
-        ambientLight = {1.0, 1.0, 1.0},
-        capacity = COUNT + 64,
-        maxEntities = COUNT + 1024,
-        -- Two windows per regime, and one frame after each to close the last
-        -- measured frame's `submit` bracket.
-        debugMaxFrames = #REGIMES * 2 * (WARMUP + FRAMES + 1) + 1,
+return tecs.application({
+    window = {title = "allocation", width = WIDTH, height = HEIGHT},
+    presentMode = "immediate",
+    ambientLight = {1.0, 1.0, 1.0},
+    capacity = COUNT + 64,
+    maxEntities = COUNT + 1024,
+    -- Two windows per regime, and one frame after each to close the last
+    -- measured frame's `submit` bracket.
+    debugMaxFrames = #REGIMES * 2 * (WARMUP + FRAMES + 1) + 1,
 
-        plugin = function(world: tecs.World, _app: tecs.Application)
-            spawnField(world)
+    plugin = function(world: tecs.World, _app: tecs.Application)
+        spawnField(world)
 
-            local moving = world:query({
-                name = "bench.AllocMoving",
-                include = {Transform, Renderable},
+        local moving = world:query({
+            name = "bench.AllocMoving",
+            include = {Transform, Renderable},
+        })
+
+        -- One body per regime, built once, so installing a regime is a lookup
+        -- and never a closure a measured window would have to pay for.
+        local bodies <const>: {string: function(number)} = {
+            empty = function(_dt: number) end,
+            query = function(_dt: number)
+                local total = 0.0
+                for archetype, length in moving:iter() do
+                    local transforms = archetype:get(Transform)
+                    for row = 1, length do
+                        total = total + transforms[row].x
+                    end
+                end
+                -- Kept so the loop cannot be optimised away entirely.
+                if total ~= total then
+                    error("unreachable")
+                end
+            end,
+            moving = function(dt: number)
+                local step = dt * 40.0
+                for archetype, length in moving:iter() do
+                    local transforms = archetype:getMut(Transform)
+                    for row = 1, length do
+                        local transform = transforms[row]
+                        local x = transform.x + step
+                        if x > WIDTH then
+                            x = x - WIDTH
+                        end
+                        transform.x = x
+                    end
+                end
+            end,
+        }
+
+        local regime = 0
+        local installed: string = nil
+        local frame = 0
+        local window: Window = nil
+        --- True in the window that carries the phase probes, false in the one
+        --- that carries only the pair bracketing the whole window.
+        local probing = false
+        local measuring = false
+        local closing = false
+        local windowBase = 0.0
+
+        -- The four probe readings, carried between phases of one frame.
+        local atFirst = 0.0
+        local atPostUpdate = 0.0
+        local atPreRender = 0.0
+        local atLast = 0.0
+
+        local function install(name: string)
+            if installed ~= nil then
+                world:removeSystem(SYSTEM)
+                installed = nil
+            end
+            local body = bodies[name]
+            if body == nil then
+                return
+            end
+            world:addSystem({
+                name = SYSTEM,
+                phase = tecs.phases.Update,
+                run = body,
             })
+            installed = name
+        end
 
-            -- One body per regime, built once, so installing a regime is a lookup
-            -- and never a closure a measured window would have to pay for.
-            local bodies <const>: {string: function(number)} = {
-                empty = function(_dt: number) end,
-                query = function(_dt: number)
-                    local total = 0.0
-                    for archetype, length in moving:iter() do
-                        local transforms = archetype:get(Transform)
-                        for row = 1, length do
-                            total = total + transforms[row].x
-                        end
-                    end
-                    -- Kept so the loop cannot be optimised away entirely.
-                    if total ~= total then
-                        error("unreachable")
-                    end
-                end,
-                moving = function(dt: number)
-                    local step = dt * 40.0
-                    for archetype, length in moving:iter() do
-                        local transforms = archetype:getMut(Transform)
-                        for row = 1, length do
-                            local transform = transforms[row]
-                            local x = transform.x + step
-                            if x > WIDTH then
-                                x = x - WIDTH
-                            end
-                            transform.x = x
-                        end
-                    end
-                end,
+        --- Starts the next window, or answers false when there are none left.
+        ---
+        --- Each regime gets two: the probe-free one that reports `total`, then
+        --- the probed one that reports the breakdown.
+        local function advance(): boolean
+            if window == nil or probing then
+                regime = regime + 1
+                if regime > #REGIMES then
+                    return false
+                end
+                install(REGIMES[regime])
+                probing = false
+            else
+                probing = true
+            end
+            window = {
+                name = REGIMES[regime],
+                frames = 0,
+                quiet = 0,
+                total = 0.0,
+                sim = 0.0,
+                extract = 0.0,
+                render = 0.0,
+                submit = 0.0,
             }
-
-            local regime = 0
-            local installed: string = nil
-            local frame = 0
-            local window: Window = nil
-            --- True in the window that carries the phase probes, false in the one
-            --- that carries only the pair bracketing the whole window.
-            local probing = false
-            local measuring = false
-            local closing = false
-            local windowBase = 0.0
-
-            -- The four probe readings, carried between phases of one frame.
-            local atFirst = 0.0
-            local atPostUpdate = 0.0
-            local atPreRender = 0.0
-            local atLast = 0.0
-
-            local function install(name: string)
-                if installed ~= nil then
-                    world:removeSystem(SYSTEM)
-                    installed = nil
-                end
-                local body = bodies[name]
-                if body == nil then
-                    return
-                end
-                world:addSystem({
-                    name = SYSTEM,
-                    phase = tecs.phases.Update,
-                    run = body,
-                })
-                installed = name
+            if probing then
+                probedWindows[regime] = window
+            else
+                plainWindows[regime] = window
             end
+            frame = 0
+            measuring = false
+            closing = false
+            return true
+        end
 
-            --- Starts the next window, or answers false when there are none left.
-            ---
-            --- Each regime gets two: the probe-free one that reports `total`, then
-            --- the probed one that reports the breakdown.
-            local function advance(): boolean
-                if window == nil or probing then
-                    regime = regime + 1
-                    if regime > #REGIMES then
-                        return false
-                    end
-                    install(REGIMES[regime])
-                    probing = false
-                else
-                    probing = true
-                end
-                window = {
-                    name = REGIMES[regime],
-                    frames = 0,
-                    quiet = 0,
-                    total = 0.0,
-                    sim = 0.0,
-                    extract = 0.0,
-                    render = 0.0,
-                    submit = 0.0,
-                }
-                if probing then
-                    probedWindows[regime] = window
-                else
-                    plainWindows[regime] = window
-                end
-                frame = 0
-                measuring = false
-                closing = false
-                return true
-            end
+        advance()
 
-            advance()
+        -- First, and registered first among this file's own systems so the
+        -- three below are inside the bracket it opens.
+        world:addSystem({
+            name = "bench.AllocFirst",
+            phase = tecs.phases.First,
+            run = function()
+                local now = probing and heapBytes() or 0.0
+                local touched <const> = traceEvents > 0
+                traceEvents = 0
 
-            -- First, and registered first among this file's own systems so the
-            -- three below are inside the bracket it opens.
-            world:addSystem({
-                name = "bench.AllocFirst",
-                phase = tecs.phases.First,
-                run = function()
-                    local now = probing and heapBytes() or 0.0
-                    local touched <const> = traceEvents > 0
-                    traceEvents = 0
-
-                    if measuring then
-                        window.frames = window.frames + 1
-                        if not touched then
-                            window.quiet = window.quiet + 1
-                            if probing then
-                                window.sim = window.sim + (atPostUpdate - atFirst)
-                                window.extract = window.extract + (atPreRender - atPostUpdate)
-                                window.render = window.render + (atLast - atPreRender)
-                                window.submit = window.submit + (now - atLast)
-                            end
-                        end
-
-                        if closing then
-                            if not probing then
-                                -- One reading for the whole window, divided by the
-                                -- frames it held. The compiler-touched frames are
-                                -- in it, so this and the sum of the brackets agree
-                                -- only when it left the window alone; the counts
-                                -- printed beside them say how much to trust each.
-                                window.total = heapBytes() - windowBase
-                            end
-                            collectgarbage("restart")
-                            collectgarbage("collect")
-                            measuring = false
-                            if not advance() then
-                                return
-                            end
-                            now = probing and heapBytes() or 0.0
+                if measuring then
+                    window.frames = window.frames + 1
+                    if not touched then
+                        window.quiet = window.quiet + 1
+                        if probing then
+                            window.sim = window.sim + (atPostUpdate - atFirst)
+                            window.extract = window.extract + (atPreRender - atPostUpdate)
+                            window.render = window.render + (atLast - atPreRender)
+                            window.submit = window.submit + (now - atLast)
                         end
                     end
 
-                    frame = frame + 1
-                    if frame == WARMUP then
-                        -- Everything this regime will compile has compiled. Clear
-                        -- the heap, stop the collector, and measure a window in
-                        -- which nothing can be freed.
+                    if closing then
+                        if not probing then
+                            -- One reading for the whole window, divided by the
+                            -- frames it held. The compiler-touched frames are
+                            -- in it, so this and the sum of the brackets agree
+                            -- only when it left the window alone; the counts
+                            -- printed beside them say how much to trust each.
+                            window.total = heapBytes() - windowBase
+                        end
+                        collectgarbage("restart")
                         collectgarbage("collect")
-                        collectgarbage("stop")
-                        measuring = true
-                        windowBase = heapBytes()
-                        now = probing and windowBase or 0.0
-                    elseif measuring and frame == WARMUP + FRAMES - 1 then
-                        -- Measured frames are complete after this one, whose
-                        -- `submit` bracket the next `First` closes. The window is
-                        -- the frames from `WARMUP` to here inclusive, which is
-                        -- `FRAMES` of them.
-                        closing = true
-                    end
-
-                    atFirst = now
-                end,
-            })
-
-            world:addSystem({
-                name = "bench.AllocPostUpdate",
-                phase = tecs.phases.PostUpdate,
-                run = function()
-                    if probing then
-                        atPostUpdate = heapBytes()
-                    end
-                end,
-            })
-
-            world:addSystem({
-                name = "bench.AllocPreRender",
-                phase = tecs.phases.PreRender,
-                run = function()
-                    if probing then
-                        atPreRender = heapBytes()
-                    end
-                end,
-            })
-
-            world:addSystem({
-                name = "bench.AllocLast",
-                phase = tecs.phases.Last,
-                run = function()
-                    if probing then
-                        atLast = heapBytes()
-                    end
-                end,
-            })
-
-            world:addSystem({
-                name = "bench.AllocReport",
-                phase = tecs.phases.Shutdown,
-                run = function()
-                    collectgarbage("restart")
-                    print(
-                        ("%-8s %9s %9s %9s %9s %9s %9s %11s"):format(
-                            "regime", "sim", "extract", "render", "submit", "sum", "total", "quiet/frames"
-                        )
-                    )
-                    print(
-                        ("%s %s %s %s %s %s %s %s"):format(
-                            ("-"):rep(8),
-                            ("-"):rep(9),
-                            ("-"):rep(9),
-                            ("-"):rep(9),
-                            ("-"):rep(9),
-                            ("-"):rep(9),
-                            ("-"):rep(9),
-                            ("-"):rep(11)
-                        )
-                    )
-                    for index = 1, #REGIMES do
-                        local plain = plainWindows[index]
-                        local probed = probedWindows[index]
-                        if plain ~= nil and probed ~= nil and probed.quiet > 0 then
-                            local n <const> = probed.quiet
-                            local sum <const> = probed.sim + probed.extract + probed.render + probed.submit
-                            print(
-                                ("%-8s %9.0f %9.0f %9.0f %9.0f %9.0f %9.0f %5d/%-5d"):format(
-                                    plain.name,
-                                    probed.sim / n,
-                                    probed.extract / n,
-                                    probed.render / n,
-                                    probed.submit / n,
-                                    sum / n,
-                                    plain.total / plain.frames,
-                                    plain.quiet,
-                                    plain.frames
-                                )
-                            )
+                        measuring = false
+                        if not advance() then
+                            return
                         end
+                        now = probing and heapBytes() or 0.0
                     end
-                    print(
-                        "\nsum is the four brackets, measured on the frames the "
-                            .. "compiler left alone.\ntotal is a probe-free window, "
-                            .. "every frame in it. They agree when quiet is close\nto "
-                            .. "frames; where they do not, total is carrying the "
-                            .. "compiler's own allocation."
-                    )
-                end,
-            })
+                end
 
-            print(
-                (
-                    "allocation: %d entities, %d warmup + %d measured frames per "
-                    .. "window, two windows per regime, bytes per frame"
-                ):format(COUNT, WARMUP, FRAMES)
-            )
-        end,
-    }
-)
+                frame = frame + 1
+                if frame == WARMUP then
+                    -- Everything this regime will compile has compiled. Clear
+                    -- the heap, stop the collector, and measure a window in
+                    -- which nothing can be freed.
+                    collectgarbage("collect")
+                    collectgarbage("stop")
+                    measuring = true
+                    windowBase = heapBytes()
+                    now = probing and windowBase or 0.0
+                elseif measuring and frame == WARMUP + FRAMES - 1 then
+                    -- Measured frames are complete after this one, whose
+                    -- `submit` bracket the next `First` closes. The window is
+                    -- the frames from `WARMUP` to here inclusive, which is
+                    -- `FRAMES` of them.
+                    closing = true
+                end
+
+                atFirst = now
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.AllocPostUpdate",
+            phase = tecs.phases.PostUpdate,
+            run = function()
+                if probing then
+                    atPostUpdate = heapBytes()
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.AllocPreRender",
+            phase = tecs.phases.PreRender,
+            run = function()
+                if probing then
+                    atPreRender = heapBytes()
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.AllocLast",
+            phase = tecs.phases.Last,
+            run = function()
+                if probing then
+                    atLast = heapBytes()
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "bench.AllocReport",
+            phase = tecs.phases.Shutdown,
+            run = function()
+                collectgarbage("restart")
+                print(
+                    ("%-8s %9s %9s %9s %9s %9s %9s %11s"):format(
+                        "regime", "sim", "extract", "render", "submit", "sum", "total", "quiet/frames"
+                    )
+                )
+                print(
+                    ("%s %s %s %s %s %s %s %s"):format(
+                        ("-"):rep(8),
+                        ("-"):rep(9),
+                        ("-"):rep(9),
+                        ("-"):rep(9),
+                        ("-"):rep(9),
+                        ("-"):rep(9),
+                        ("-"):rep(9),
+                        ("-"):rep(11)
+                    )
+                )
+                for index = 1, #REGIMES do
+                    local plain = plainWindows[index]
+                    local probed = probedWindows[index]
+                    if plain ~= nil and probed ~= nil and probed.quiet > 0 then
+                        local n <const> = probed.quiet
+                        local sum <const> = probed.sim + probed.extract + probed.render + probed.submit
+                        print(
+                            ("%-8s %9.0f %9.0f %9.0f %9.0f %9.0f %9.0f %5d/%-5d"):format(
+                                plain.name,
+                                probed.sim / n,
+                                probed.extract / n,
+                                probed.render / n,
+                                probed.submit / n,
+                                sum / n,
+                                plain.total / plain.frames,
+                                plain.quiet,
+                                plain.frames
+                            )
+                        )
+                    end
+                end
+                print(
+                    "\nsum is the four brackets, measured on the frames the "
+                        .. "compiler left alone.\ntotal is a probe-free window, "
+                        .. "every frame in it. They agree when quiet is close\nto "
+                        .. "frames; where they do not, total is carrying the "
+                        .. "compiler's own allocation."
+                )
+            end,
+        })
+
+        print(
+            (
+                "allocation: %d entities, %d warmup + %d measured frames per "
+                .. "window, two windows per regime, bytes per frame"
+            ):format(COUNT, WARMUP, FRAMES)
+        )
+    end,
+})

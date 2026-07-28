@@ -20,27 +20,25 @@ describe(
         local Transform: TestHelpers.Transform
         local testId = 0
 
-        before_each(
-            function()
-                world = tecs.newWorld()
-                testId = testId + 1
+        before_each(function()
+            world = tecs.newWorld()
+            testId = testId + 1
 
-                -- Create fresh components for each test to avoid conflicts
-                local provider = TestHelpers.createComponentProvider("queries_", testId)
-                Position = provider.PosComponent
-                Velocity = provider.VelComponent
-                Health = provider.HealthComponent
-                Sprite = provider.SpriteComponent
-                Transform = provider.TransformComponent
+            -- Create fresh components for each test to avoid conflicts
+            local provider = TestHelpers.createComponentProvider("queries_", testId)
+            Position = provider.PosComponent
+            Velocity = provider.VelComponent
+            Health = provider.HealthComponent
+            Sprite = provider.SpriteComponent
+            Transform = provider.TransformComponent
 
-                -- Verify components are set up correctly
-                assert(Position.componentType == Position, "Position componentType should point to itself")
-                assert(Position.componentName, "Position should have a name")
-                local posInstance = Position(5, 10)
-                assert(posInstance, "Position constructor should create an instance")
-                assert(posInstance.componentType == Position, "Instance should have componentType via metatable")
-            end
-        )
+            -- Verify components are set up correctly
+            assert(Position.componentType == Position, "Position componentType should point to itself")
+            assert(Position.componentName, "Position should have a name")
+            local posInstance = Position(5, 10)
+            assert(posInstance, "Position constructor should create an instance")
+            assert(posInstance.componentType == Position, "Instance should have componentType via metatable")
+        end)
 
         describe(
             "Query creation and iteration",
@@ -1077,13 +1075,11 @@ describe(
                     return count
                 end
 
-                before_each(
-                    function()
-                        world:spawn(Position(1, 1), Velocity(10, 10))
-                        world:spawn(Position(2, 2), Velocity(20, 20), tecs.builtins.Paused)
-                        world:update(0)
-                    end
-                )
+                before_each(function()
+                    world:spawn(Position(1, 1), Velocity(10, 10))
+                    world:spawn(Position(2, 2), Velocity(20, 20), tecs.builtins.Paused)
+                    world:update(0)
+                end)
 
                 it(
                     "excludes paused entities from logic queries",
@@ -1133,14 +1129,12 @@ describe(
                 it(
                     "rejects an unknown type",
                     function()
-                        luassert.has_error(
-                            function()
-                                world:query({
-                                    include = {Position},
-                                    type = "gameplay" as tecs.Query.Kind,
-                                })
-                            end
-                        )
+                        luassert.has_error(function()
+                            world:query({
+                                include = {Position},
+                                type = "gameplay" as tecs.Query.Kind,
+                            })
+                        end)
                     end
                 )
             end
@@ -1153,16 +1147,14 @@ describe(
                 local GroupB: tecs.Component
                 local GroupC: tecs.Component
 
-                before_each(
-                    function()
-                        local containerA: tecs.Component = {}
-                        local containerB: tecs.Component = {}
-                        local containerC: tecs.Component = {}
-                        GroupA = tecs.newComponent({name = "GroupA_" .. testId, container = containerA})
-                        GroupB = tecs.newComponent({name = "GroupB_" .. testId, container = containerB})
-                        GroupC = tecs.newComponent({name = "GroupC_" .. testId, container = containerC})
-                    end
-                )
+                before_each(function()
+                    local containerA: tecs.Component = {}
+                    local containerB: tecs.Component = {}
+                    local containerC: tecs.Component = {}
+                    GroupA = tecs.newComponent({name = "GroupA_" .. testId, container = containerA})
+                    GroupB = tecs.newComponent({name = "GroupB_" .. testId, container = containerB})
+                    GroupC = tecs.newComponent({name = "GroupC_" .. testId, container = containerC})
+                end)
 
                 it(
                     "groups archetypes by the groupBy function result",
@@ -1688,15 +1680,13 @@ describe(
                 it(
                     "rejects onEntitiesAdded on a temp query",
                     function()
-                        local ok = pcall(
-                            function()
-                                world:query({
-                                    include = {Position},
-                                    temp = true,
-                                    onEntitiesAdded = function() end,
-                                })
-                            end
-                        )
+                        local ok = pcall(function()
+                            world:query({
+                                include = {Position},
+                                temp = true,
+                                onEntitiesAdded = function() end,
+                            })
+                        end)
                         luassert.is_false(ok)
                     end
                 )

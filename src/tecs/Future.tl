@@ -854,16 +854,14 @@ function Future.track<U>(world: World, entity: integer, key: string, future: Fut
     end
 
     byEntity[key] = watched
-    watched:onSettle(
-        function()
-            -- Only if this is still the future under that key: tracking a second
-            -- one replaces the first, and the first settling afterwards must not
-            -- erase its successor.
-            if byEntity[key] == watched then
-                byEntity[key] = nil
-            end
+    watched:onSettle(function()
+        -- Only if this is still the future under that key: tracking a second
+        -- one replaces the first, and the first settling afterwards must not
+        -- erase its successor.
+        if byEntity[key] == watched then
+            byEntity[key] = nil
         end
-    )
+    end)
 end
 
 seqawaitables.register(

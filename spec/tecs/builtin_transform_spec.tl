@@ -12,22 +12,20 @@ describe(
         local TestTag: tecs.Component
         local TestColor: tecs.Component
 
-        before_each(
-            function()
-                local testId = math.random(1, 1000000)
+        before_each(function()
+            local testId = math.random(1, 1000000)
 
-                local tagContainer: tecs.Component = {}
-                TestTag = tecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
+            local tagContainer: tecs.Component = {}
+            TestTag = tecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
 
-                local colorContainer: tecs.Component = {}
-                TestColor = tecs.newFFIComponent({
-                    name = "BuiltinTest_Color" .. testId,
-                    container = colorContainer,
-                    fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
-                    defaults = {1, 1, 1},
-                })
-            end
-        )
+            local colorContainer: tecs.Component = {}
+            TestColor = tecs.newFFIComponent({
+                name = "BuiltinTest_Color" .. testId,
+                container = colorContainer,
+                fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
+                defaults = {1, 1, 1},
+            })
+        end)
 
         it(
             "preserves Transform values after spawn/despawn cycles using builtin Transform",

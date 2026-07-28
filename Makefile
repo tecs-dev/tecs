@@ -15,7 +15,7 @@ TL     := $(CURDIR)/vendor/bin/tl
 # commits. Teal and Cerulean both move ahead of releases that understand the
 # syntax used here, so floating development rocks are not reproducible.
 TL_REF        ?= 1326d829790b92e23defe69fcf40460103b60d1d
-CERULEAN_REF  ?= 94dcc5f178163d759674836fffc9558eccf692cd
+CERULEAN_REF  ?= a10502a5ea788ee7edbb8fa0acd4695d69e1635e
 
 # The build system owns these locations, so it passes them rather than having
 # the engine guess where its own output went.

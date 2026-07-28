@@ -394,28 +394,26 @@ builtins.Disabled = components.newTagComponent({name = "Disabled"})
 
 builtins.Paused = components.newTagComponent({name = "Paused"})
 
-components.newFFIComponent(
-    {
-        name = "RelativeTransform",
-        container = builtins.RelativeTransform,
-        fields = {
-            {"x", "float"},
-            {"y", "float"},
-            {"z", "float"},
-            {"rotation", "float"},
-            {"scaleX", "float"},
-            {"scaleY", "float"},
-            {"originX", "float"},
-            {"originY", "float"},
-        },
-        defaults = {0, 0, 0, 0, 1, 1, 0, 0},
-        -- RelativeTransform auto-adds Transform via the declarative
-        -- `requires` trait. ChildOf is required by convention (the
-        -- composition system errors downstream if absent); users should
-        -- add it explicitly alongside RelativeTransform.
-        requires = {builtins.Transform},
-    }
-)
+components.newFFIComponent({
+    name = "RelativeTransform",
+    container = builtins.RelativeTransform,
+    fields = {
+        {"x", "float"},
+        {"y", "float"},
+        {"z", "float"},
+        {"rotation", "float"},
+        {"scaleX", "float"},
+        {"scaleY", "float"},
+        {"originX", "float"},
+        {"originY", "float"},
+    },
+    defaults = {0, 0, 0, 0, 1, 1, 0, 0},
+    -- RelativeTransform auto-adds Transform via the declarative
+    -- `requires` trait. ChildOf is required by convention (the
+    -- composition system errors downstream if absent); users should
+    -- add it explicitly alongside RelativeTransform.
+    requires = {builtins.Transform},
+})
 
 -------------------------------------------------------------------------------
 --- Plugin implementation

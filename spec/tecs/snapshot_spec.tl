@@ -43,23 +43,21 @@ describe(
         local PositionComp: Position
         local HealthComp: Health
 
-        before_each(
-            function()
-                local testId = math.random(1, 1000000)
-                local posContainer: Position = {}
-                PositionComp = tecs.newComponent({
-                    name = "SnapPosition" .. testId,
-                    container = posContainer,
-                    fields = {"x", "y"},
-                })
-                local hpContainer: Health = {}
-                HealthComp = tecs.newComponent({
-                    name = "SnapHealth" .. testId,
-                    container = hpContainer,
-                    fields = {"hp"},
-                })
-            end
-        )
+        before_each(function()
+            local testId = math.random(1, 1000000)
+            local posContainer: Position = {}
+            PositionComp = tecs.newComponent({
+                name = "SnapPosition" .. testId,
+                container = posContainer,
+                fields = {"x", "y"},
+            })
+            local hpContainer: Health = {}
+            HealthComp = tecs.newComponent({
+                name = "SnapHealth" .. testId,
+                container = hpContainer,
+                fields = {"hp"},
+            })
+        end)
 
         it(
             "round-trips components with preserved entity IDs",
@@ -470,16 +468,14 @@ describe(
                     a: number
                     metamethod __call: function(self, a: number): HalfCustom
                 end
-                local HalfCustomComp: HalfCustom = tecs.newFFIComponent(
-                    {
-                        name = "SnapHalfCustom" .. testId,
-                        container = {} as HalfCustom,
-                        fields = {{"a", "float"}},
-                        -- Custom serialize only: the raw byte codec must disengage in
-                        -- BOTH directions or the binary stream desyncs.
-                        serialize = function(value: HalfCustom): {string: any} return {a = value.a} end,
-                    }
-                )
+                local HalfCustomComp: HalfCustom = tecs.newFFIComponent({
+                    name = "SnapHalfCustom" .. testId,
+                    container = {} as HalfCustom,
+                    fields = {{"a", "float"}},
+                    -- Custom serialize only: the raw byte codec must disengage in
+                    -- BOTH directions or the binary stream desyncs.
+                    serialize = function(value: HalfCustom): {string: any} return {a = value.a} end,
+                })
                 local record PlainFFI is tecs.Component
                     b: number
                     metamethod __call: function(self, b: number): PlainFFI
@@ -951,17 +947,15 @@ describe(
                     metamethod __call: function(self, value: integer): BadTable
                 end
 
-                local okTable = pcall(
-                    function()
-                        tecs.newComponent({
-                            name = "BadTransientTable" .. testId,
-                            container = {} as BadTable,
-                            fields = {"value"},
-                            transient = true,
-                            serialize = function(_inst: BadTable): {string: any} return {value = 1} end,
-                        })
-                    end
-                )
+                local okTable = pcall(function()
+                    tecs.newComponent({
+                        name = "BadTransientTable" .. testId,
+                        container = {} as BadTable,
+                        fields = {"value"},
+                        transient = true,
+                        serialize = function(_inst: BadTable): {string: any} return {value = 1} end,
+                    })
+                end)
                 luassert.is_false(okTable)
 
                 local record BadFFI is tecs.Component
@@ -969,17 +963,15 @@ describe(
                     metamethod __call: function(self, value: integer): BadFFI
                 end
 
-                local okFFI = pcall(
-                    function()
-                        tecs.newFFIComponent({
-                            name = "BadTransientFFI" .. testId,
-                            container = {} as BadFFI,
-                            fields = {{"value", "int32_t"}},
-                            transient = true,
-                            serialize = function(_inst: BadFFI): {string: any} return {value = 1} end,
-                        })
-                    end
-                )
+                local okFFI = pcall(function()
+                    tecs.newFFIComponent({
+                        name = "BadTransientFFI" .. testId,
+                        container = {} as BadFFI,
+                        fields = {{"value", "int32_t"}},
+                        transient = true,
+                        serialize = function(_inst: BadFFI): {string: any} return {value = 1} end,
+                    })
+                end)
                 luassert.is_false(okFFI)
 
                 local record BadRel is tecs.Relationship
@@ -987,17 +979,15 @@ describe(
                     metamethod __call: function(self, target: integer, value: integer): BadRel
                 end
 
-                local okRel = pcall(
-                    function()
-                        tecs.newRelationship({
-                            name = "BadTransientRel" .. testId,
-                            container = {} as BadRel,
-                            fields = {"value"},
-                            transient = true,
-                            serialize = function(_inst: BadRel): {string: any} return {value = 1} end,
-                        })
-                    end
-                )
+                local okRel = pcall(function()
+                    tecs.newRelationship({
+                        name = "BadTransientRel" .. testId,
+                        container = {} as BadRel,
+                        fields = {"value"},
+                        transient = true,
+                        serialize = function(_inst: BadRel): {string: any} return {value = 1} end,
+                    })
+                end)
                 luassert.is_false(okRel)
             end
         )

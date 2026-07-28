@@ -546,14 +546,12 @@ function Backend:rebuildPipelines()
     local mark: ComputePipeline = nil
     local scan: ComputePipeline = nil
     local compact: ComputePipeline = nil
-    local built, reason = pcall(
-        function(): string
-            pipeline = buildGeometry(self)
-            mark = ComputePipeline.load(device, "instance.mark.comp", {})
-            scan = ComputePipeline.load(device, "instance.scan.comp", {})
-            compact = ComputePipeline.load(device, "instance.compact.comp", {})
-        end
-    )
+    local built, reason = pcall(function(): string
+        pipeline = buildGeometry(self)
+        mark = ComputePipeline.load(device, "instance.mark.comp", {})
+        scan = ComputePipeline.load(device, "instance.scan.comp", {})
+        compact = ComputePipeline.load(device, "instance.compact.comp", {})
+    end)
     if not built then
         if pipeline ~= nil then
             pipeline:destroy()

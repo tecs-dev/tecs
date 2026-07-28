@@ -221,94 +221,87 @@ local function canonicalState(
     w: tecs.World, skipTransient?: boolean, keep?: function(tecs.World, integer): boolean
 ): string
     local lines: {string} = {}
-    w:forEachArchetype(
-        function(arch: tecs.Archetype)
-            local entities = arch.entities
-            for row = 1, entities[0] as integer do
-                local id = entities[row] as integer
-                if keep == nil or keep(w, id) then
-                    local piece: {string} = {tostring(id)}
-                    for c = 1, #readComps do
-                        local comp = readComps[c]
-                        if w:has(id, comp) then
-                            if comp == FzTag then
-                                piece[#piece + 1] = "Tag"
-                            elseif comp == FzNum or comp == FzBool then
-                                -- Scalar columns hold raw values.
-                                piece[#piece + 1] = (comp as {string: any}).componentName as string
-                                    .. "="
-                                    .. tostring(w:get(id, comp))
-                            else
-                                local inst = w:get(id, comp) as {string: any}
-                                piece[#piece + 1] = (comp as {string: any}).componentName as string
-                                    .. "="
-                                    .. tostring(inst.v)
-                            end
+    w:forEachArchetype(function(arch: tecs.Archetype)
+        local entities = arch.entities
+        for row = 1, entities[0] as integer do
+            local id = entities[row] as integer
+            if keep == nil or keep(w, id) then
+                local piece: {string} = {tostring(id)}
+                for c = 1, #readComps do
+                    local comp = readComps[c]
+                    if w:has(id, comp) then
+                        if comp == FzTag then
+                            piece[#piece + 1] = "Tag"
+                        elseif comp == FzNum or comp == FzBool then
+                            -- Scalar columns hold raw values.
+                            piece[#piece + 1] = (comp as {string: any}).componentName as string
+                                .. "="
+                                .. tostring(w:get(id, comp))
+                        else
+                            local inst = w:get(id, comp) as {string: any}
+                            piece[#piece + 1] = (comp as {string: any}).componentName as string
+                                .. "="
+                                .. tostring(inst.v)
                         end
                     end
-                    if w:has(id, Key) then
-                        piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
-                    end
-                    local tr = w:get(id, Transform) as {string: any}
-                    if tr then
-                        piece[#piece + 1] = "T=" .. tostring(tr.x) .. ";" .. tostring(tr.y) .. ";" .. tostring(tr.layer)
-                    end
-                    -- Sparse targets read from the store; `has` reads the
-                    -- archetype's container marker. Encode both so a
-                    -- marker-vs-store divergence is visible at its origin.
-                    if w:has(id, ChildOf) then
-                        piece[#piece + 1] = "ChildOfMark"
-                    end
-                    local parent = w:getFirstRelationship(id, ChildOf)
-                    if parent then
-                        piece[#piece + 1] = "ChildOf=" .. tostring(parent.target)
-                    end
-                    if w:has(id, FzLink) then
-                        piece[#piece + 1] = "LinkMark"
-                    end
-                    local link = w:getFirstRelationship(id, FzLink)
-                    if link then
-                        piece[#piece + 1] = "Link=" .. tostring(link.target)
-                    end
-                    if w:has(id, FzRope) then
-                        piece[#piece + 1] = "RopeMark"
-                    end
-                    local rope = w:getFirstRelationship(id, FzRope)
-                    if rope then
-                        piece[#piece + 1] = "Rope="
-                            .. tostring(rope.target)
-                            .. ":"
-                            .. tostring((rope as {string: any}).w)
-                    end
-                    if not skipTransient then
-                        if w:has(id, FzMark) then
-                            piece[#piece + 1] = "MarkMark"
-                        end
-                        local markSources: {string} = {}
-                        w:targets(
-                            id,
-                            FzMark,
-                            function(sourceId: integer, _ctx: nil)
-                                markSources[#markSources + 1] = tostring(sourceId)
-                            end,
-                            nil
-                        )
-                        if #markSources > 0 then
-                            table.sort(markSources)
-                            piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
-                        end
-                    end
-                    if w:has(id, TTL) then
-                        piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
-                    end
-                    if w:has(id, FzState) then
-                        piece[#piece + 1] = "St"
-                    end
-                    lines[#lines + 1] = table.concat(piece, ",")
                 end
+                if w:has(id, Key) then
+                    piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
+                end
+                local tr = w:get(id, Transform) as {string: any}
+                if tr then
+                    piece[#piece + 1] = "T=" .. tostring(tr.x) .. ";" .. tostring(tr.y) .. ";" .. tostring(tr.layer)
+                end
+                -- Sparse targets read from the store; `has` reads the
+                -- archetype's container marker. Encode both so a
+                -- marker-vs-store divergence is visible at its origin.
+                if w:has(id, ChildOf) then
+                    piece[#piece + 1] = "ChildOfMark"
+                end
+                local parent = w:getFirstRelationship(id, ChildOf)
+                if parent then
+                    piece[#piece + 1] = "ChildOf=" .. tostring(parent.target)
+                end
+                if w:has(id, FzLink) then
+                    piece[#piece + 1] = "LinkMark"
+                end
+                local link = w:getFirstRelationship(id, FzLink)
+                if link then
+                    piece[#piece + 1] = "Link=" .. tostring(link.target)
+                end
+                if w:has(id, FzRope) then
+                    piece[#piece + 1] = "RopeMark"
+                end
+                local rope = w:getFirstRelationship(id, FzRope)
+                if rope then
+                    piece[#piece + 1] = "Rope=" .. tostring(rope.target) .. ":" .. tostring((rope as {string: any}).w)
+                end
+                if not skipTransient then
+                    if w:has(id, FzMark) then
+                        piece[#piece + 1] = "MarkMark"
+                    end
+                    local markSources: {string} = {}
+                    w:targets(
+                        id,
+                        FzMark,
+                        function(sourceId: integer, _ctx: nil) markSources[#markSources + 1] = tostring(sourceId) end,
+                        nil
+                    )
+                    if #markSources > 0 then
+                        table.sort(markSources)
+                        piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+                    end
+                end
+                if w:has(id, TTL) then
+                    piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
+                end
+                if w:has(id, FzState) then
+                    piece[#piece + 1] = "St"
+                end
+                lines[#lines + 1] = table.concat(piece, ",")
             end
         end
-    )
+    end)
     table.sort(lines)
     return table.concat(lines, "\n")
 end

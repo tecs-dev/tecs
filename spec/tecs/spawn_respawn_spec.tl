@@ -32,31 +32,29 @@ describe(
         local ColorComp: TestColor
         local TagComp: TestTag
 
-        before_each(
-            function()
-                -- Create unique FFI components for each test
-                local testId = math.random(1, 1000000)
+        before_each(function()
+            -- Create unique FFI components for each test
+            local testId = math.random(1, 1000000)
 
-                local transformContainer: TestTransform = {}
-                TransformComp = tecs.newFFIComponent({
-                    name = "SpawnTest_Transform" .. testId,
-                    container = transformContainer,
-                    fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
-                    defaults = {0, 0, 0},
-                })
+            local transformContainer: TestTransform = {}
+            TransformComp = tecs.newFFIComponent({
+                name = "SpawnTest_Transform" .. testId,
+                container = transformContainer,
+                fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
+                defaults = {0, 0, 0},
+            })
 
-                local colorContainer: TestColor = {}
-                ColorComp = tecs.newFFIComponent({
-                    name = "SpawnTest_Color" .. testId,
-                    container = colorContainer,
-                    fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
-                    defaults = {1, 1, 1},
-                })
+            local colorContainer: TestColor = {}
+            ColorComp = tecs.newFFIComponent({
+                name = "SpawnTest_Color" .. testId,
+                container = colorContainer,
+                fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
+                defaults = {1, 1, 1},
+            })
 
-                local tagContainer: TestTag = {}
-                TagComp = tecs.newTagComponent({name = "SpawnTest_Tag" .. testId, container = tagContainer})
-            end
-        )
+            local tagContainer: TestTag = {}
+            TagComp = tecs.newTagComponent({name = "SpawnTest_Tag" .. testId, container = tagContainer})
+        end)
 
         it(
             "preserves component values after spawn/despawn/respawn cycle",

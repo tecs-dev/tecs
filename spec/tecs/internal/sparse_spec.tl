@@ -573,17 +573,11 @@ describe(
                         local c = world:spawn(ChildOf(b) as tecs.Component)
                         world:update(0)
 
-                        luassert.has_error(
-                            function()
-                                world:walkUp(
-                                    c,
-                                    ChildOf,
-                                    function(_a: integer, _d: integer, _c: any): boolean return true end,
-                                    nil,
-                                    2
-                                )
-                            end
-                        )
+                        luassert.has_error(function()
+                            world:walkUp(
+                                c, ChildOf, function(_a: integer, _d: integer, _c: any): boolean return true end, nil, 2
+                            )
+                        end)
                     end
                 )
             end

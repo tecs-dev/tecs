@@ -52,20 +52,18 @@ describe(
     function()
         local test: Test
 
-        before_each(
-            function()
-                test = {
-                    world = makeDummyWorld(),
-                    pipeline = nil,
-                    counter = 0,
-                    fixedCounter = 0,
-                    updateCounter = 0,
-                    beforeCounter = 0,
-                    afterCounter = 0,
-                }
-                test.pipeline = pipeline.new(FPS)
-            end
-        )
+        before_each(function()
+            test = {
+                world = makeDummyWorld(),
+                pipeline = nil,
+                counter = 0,
+                fixedCounter = 0,
+                updateCounter = 0,
+                beforeCounter = 0,
+                afterCounter = 0,
+            }
+            test.pipeline = pipeline.new(FPS)
+        end)
 
         it(
             "exposes concrete phase positions through the public Phase type",

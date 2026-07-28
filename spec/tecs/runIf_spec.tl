@@ -220,13 +220,13 @@ describe(
                     "should allow systems without names",
                     function()
                         -- Should not error when adding unnamed systems
-                        local success1 = pcall(
-                            function() world:addSystem({phase = tecs.phases.Update, run = function() end}) end
-                        )
+                        local success1 = pcall(function()
+                            world:addSystem({phase = tecs.phases.Update, run = function() end})
+                        end)
 
-                        local success2 = pcall(
-                            function() world:addSystem({phase = tecs.phases.Update, run = function() end}) end
-                        )
+                        local success2 = pcall(function()
+                            world:addSystem({phase = tecs.phases.Update, run = function() end})
+                        end)
 
                         -- Both systems should be added successfully without error
                         luassert.is_true(success1, "First unnamed system should be added without error")

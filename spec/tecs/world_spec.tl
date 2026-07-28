@@ -23,18 +23,16 @@ describe(
             return firstId as integer
         end
 
-        before_each(
-            function()
-                w = WorldImpl.new() as WorldImpl
-                testId = testId + 1
+        before_each(function()
+            w = WorldImpl.new() as WorldImpl
+            testId = testId + 1
 
-                -- Use the test helper provider
-                provider = TestHelpers.createComponentProvider("WorldTest", testId)
-                PosComponent = provider.PosComponent
-                VelComponent = provider.VelComponent
-                DeadComponent = provider.DeadComponent
-            end
-        )
+            -- Use the test helper provider
+            provider = TestHelpers.createComponentProvider("WorldTest", testId)
+            PosComponent = provider.PosComponent
+            VelComponent = provider.VelComponent
+            DeadComponent = provider.DeadComponent
+        end)
 
         describe(
             "basic world functionality",
@@ -1106,11 +1104,9 @@ describe(
                         local totalDt: number = 0
 
                         -- Create world with fixed timestep
-                        local w2 = WorldImpl.new(
-                            {
-                                timestep = 0.01, -- 10ms fixed timestep
-                            }
-                        ) as WorldImpl
+                        local w2 = WorldImpl.new({
+                            timestep = 0.01, -- 10ms fixed timestep
+                        }) as WorldImpl
 
                         w2:addSystem({
                             phase = phases.FixedUpdate,
@@ -1763,11 +1759,9 @@ describe(
                 it(
                     "rejects batch spawning entities with builtin Key",
                     function()
-                        local ok = pcall(
-                            function()
-                                w:batchSpawn(2, {tecs.builtins.Key}, function(_arch, _first, _last, _count) end)
-                            end
-                        )
+                        local ok = pcall(function()
+                            w:batchSpawn(2, {tecs.builtins.Key}, function(_arch, _first, _last, _count) end)
+                        end)
                         luassert.is_false(ok)
                     end
                 )

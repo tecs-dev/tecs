@@ -35,22 +35,20 @@ local function findArchetype(world: tecs.World, components: {tecs.Component}): t
     -- forEachArchetype to avoid leaking a query scope (see
     -- project_query_iter_scope_trap memory).
     local match: tecs.Archetype = nil
-    world:forEachArchetype(
-        function(arch: tecs.Archetype)
-            if match ~= nil then
-                return
-            end
-            if ((arch as {string: any}).entities as {integer})[0] == 0 then
-                return
-            end
-            for i = 1, #components do
-                if (arch as {string: any}):get(components[i]) == nil then
-                    return
-                end
-            end
-            match = arch
+    world:forEachArchetype(function(arch: tecs.Archetype)
+        if match ~= nil then
+            return
         end
-    )
+        if ((arch as {string: any}).entities as {integer})[0] == 0 then
+            return
+        end
+        for i = 1, #components do
+            if (arch as {string: any}):get(components[i]) == nil then
+                return
+            end
+        end
+        match = arch
+    end)
     return match
 end
 

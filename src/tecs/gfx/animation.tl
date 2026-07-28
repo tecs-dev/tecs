@@ -284,55 +284,53 @@ local record animation
     usesGPU: function(): boolean
 end
 
-ecs.newFFIComponent(
-    {
-        name = "Animation",
-        container = Animation,
-        fields = {
-            {"sheet", "int32_t"},
-            {"tag", "int32_t"},
-            {"speed", "float"},
-            {"time", "float"},
-            {"frame", "int32_t"},
-            {"loop", "bool"},
-            {"playing", "bool"},
-        },
-        defaults = {0, 0, DEFAULT_SPEED, 0, 0, true, true},
-        -- A sheet id and a tag id are this process's answers, decided by the
-        -- order sheets were built in. What crosses a save is the pair of names,
-        -- resolved again on the way back in. The frame is deliberately dropped:
-        -- zero makes the first step rewrite the Sprite's region, so a restored
-        -- entity does not depend on the region its Sprite was saved holding.
-        serialize = function(instance: Animation): {string: any}
-            local source = sheet.byId(instance.sheet as integer)
-            local name: string = nil
-            local tag: string = nil
-            if source ~= nil then
-                name = source.name
-                tag = source:tagName(instance.tag as integer)
-            end
-            return {
-                sheet = name,
-                tag = tag,
-                speed = instance.speed,
-                time = instance.time,
-                loop = instance.loop,
-                playing = instance.playing,
-            }
-        end,
-        deserialize = function(_world: World, data: {string: any}): Animation
-            local source = sheet.byName(data.sheet as string)
-            local id, tag = 0, 0
-            if source ~= nil then
-                id = source.id
-                tag = source:tagId(data.tag as string)
-            end
-            return Animation(
-                id, tag, data.speed as number, data.time as number, 0, data.loop as boolean, data.playing as boolean
-            )
-        end,
-    }
-)
+ecs.newFFIComponent({
+    name = "Animation",
+    container = Animation,
+    fields = {
+        {"sheet", "int32_t"},
+        {"tag", "int32_t"},
+        {"speed", "float"},
+        {"time", "float"},
+        {"frame", "int32_t"},
+        {"loop", "bool"},
+        {"playing", "bool"},
+    },
+    defaults = {0, 0, DEFAULT_SPEED, 0, 0, true, true},
+    -- A sheet id and a tag id are this process's answers, decided by the
+    -- order sheets were built in. What crosses a save is the pair of names,
+    -- resolved again on the way back in. The frame is deliberately dropped:
+    -- zero makes the first step rewrite the Sprite's region, so a restored
+    -- entity does not depend on the region its Sprite was saved holding.
+    serialize = function(instance: Animation): {string: any}
+        local source = sheet.byId(instance.sheet as integer)
+        local name: string = nil
+        local tag: string = nil
+        if source ~= nil then
+            name = source.name
+            tag = source:tagName(instance.tag as integer)
+        end
+        return {
+            sheet = name,
+            tag = tag,
+            speed = instance.speed,
+            time = instance.time,
+            loop = instance.loop,
+            playing = instance.playing,
+        }
+    end,
+    deserialize = function(_world: World, data: {string: any}): Animation
+        local source = sheet.byName(data.sheet as string)
+        local id, tag = 0, 0
+        if source ~= nil then
+            id = source.id
+            tag = source:tagId(data.tag as string)
+        end
+        return Animation(
+            id, tag, data.speed as number, data.time as number, 0, data.loop as boolean, data.playing as boolean
+        )
+    end,
+})
 
 ecs.newComponent({
     name = "AnimationEvents",

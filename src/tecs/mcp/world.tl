@@ -106,9 +106,9 @@ end
 --- Serializes an instance, or returns nil for a component that carries no
 --- data. A tag is presence, so it has nothing to show.
 local function valueOf(kind: ecs.Component, instance: any): {string: any}
-    local ok, serialized = pcall(
-        function(): {string: any} return (kind.serialize as function(any): {string: any})(instance) end
-    )
+    local ok, serialized = pcall(function(): {string: any}
+        return (kind.serialize as function(any): {string: any})(instance)
+    end)
     if not ok or serialized == nil then
         return nil
     end
@@ -177,17 +177,15 @@ local function presentIn(w: ecs.World): {ecs.Component: boolean}
     if w == nil then
         return present
     end
-    w:forEachArchetype(
-        function(archetype: ecs.Archetype)
-            if archetype.entities[0] == 0 then
-                return
-            end
-            local list = archetype.componentList
-            for index = 1, #list do
-                present[list[index]] = true
-            end
+    w:forEachArchetype(function(archetype: ecs.Archetype)
+        if archetype.entities[0] == 0 then
+            return
         end
-    )
+        local list = archetype.componentList
+        for index = 1, #list do
+            present[list[index]] = true
+        end
+    end)
     return present
 end
 

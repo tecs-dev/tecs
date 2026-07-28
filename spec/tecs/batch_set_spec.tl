@@ -416,19 +416,17 @@ describe(
                 world:spawn(Tag, Position(1, 1))
                 world:commit()
                 local q = world:query({include = {Tag}})
-                luassert.has_error(
-                    function()
-                        -- Mistake: instance as arg2 when also passing a callback.
-                        -- Must be the container (Position), not an instance.
-                        world:batchSet(
-                            q,
-                            Position(0, 0),
-                            function(_a, _f, _l, _c)
-                                -- body irrelevant, the precondition check fires first
-                            end
-                        )
-                    end
-                )
+                luassert.has_error(function()
+                    -- Mistake: instance as arg2 when also passing a callback.
+                    -- Must be the container (Position), not an instance.
+                    world:batchSet(
+                        q,
+                        Position(0, 0),
+                        function(_a, _f, _l, _c)
+                            -- body irrelevant, the precondition check fires first
+                        end
+                    )
+                end)
             end
         )
 
@@ -444,11 +442,9 @@ describe(
                 world:commit()
 
                 local q = world:query({include = {Tag}})
-                luassert.has_error(
-                    function()
-                        world:batchSet(q, ParentOf as tecs.Component, function(_arch, _first, _last, _count) end)
-                    end
-                )
+                luassert.has_error(function()
+                    world:batchSet(q, ParentOf as tecs.Component, function(_arch, _first, _last, _count) end)
+                end)
             end
         )
     end

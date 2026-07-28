@@ -1439,23 +1439,21 @@ end
 function WorldImpl:_rebuildKeyIndex()
     local nextIndex: {string: integer} = {}
     local Key <const> = builtins.Key
-    self:forEachArchetype(
-        function(arch: Archetype)
-            local col = arch.columns[Key] as {string}
-            if col then
-                local entities = arch.entities as {integer}
-                for row = 1, entities[0] do
-                    local key = col[row]
-                    validateKey(key)
-                    local owner = nextIndex[key]
-                    if owner ~= nil and owner ~= entities[row] then
-                        error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
-                    end
-                    nextIndex[key] = entities[row]
+    self:forEachArchetype(function(arch: Archetype)
+        local col = arch.columns[Key] as {string}
+        if col then
+            local entities = arch.entities as {integer}
+            for row = 1, entities[0] do
+                local key = col[row]
+                validateKey(key)
+                local owner = nextIndex[key]
+                if owner ~= nil and owner ~= entities[row] then
+                    error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
                 end
+                nextIndex[key] = entities[row]
             end
         end
-    )
+    end)
     table_clear(self._keyIndex)
     for key, id in pairs(nextIndex) do
         self._keyIndex[key] = id

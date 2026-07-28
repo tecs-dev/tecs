@@ -1516,73 +1516,71 @@ end
 -- The component
 -------------------------------------------------------------------------------
 
-text.Text = ecs.newComponent(
-    {
-        name = "Text",
-        container = Text,
-        -- A text is a position and a string. Requiring the position means one is
-        -- never accidentally left off, which would make the text quietly not
-        -- appear rather than fail.
-        requires = {Transform},
-        fields = {
-            "text",
-            "font",
-            "size",
-            "align",
-            "lineSpacing",
-            "tracking",
-        },
-        init = function(item: Text)
-            if item.text == nil then
-                item.text = ""
-            end
-            if item.size == nil then
-                item.size = 16
-            end
-            if item.align == nil then
-                item.align = "left"
-            end
-            if item.lineSpacing == nil then
-                item.lineSpacing = 1.0
-            end
-            if item.tracking == nil then
-                item.tracking = 0.0
-            end
-            if ALIGNMENTS[item.align] == nil then
-                error(("tecs: '%s' is not an alignment; use left, centre or right"):format(tostring(item.align)), 3)
-            end
-            item.width = 0.0
-            item.height = 0.0
-            item._span = 0
-            item._spanCount = 0
-        end,
-        serialize = function(item: Text): {string: any}
-            -- The authored fields and the font by name. The span is one process's
-            -- answer and the font is a shared table; neither belongs in a save.
-            return {
-                text = item.text,
-                font = item.font ~= nil and item.font.name or nil,
-                size = item.size,
-                align = item.align,
-                lineSpacing = item.lineSpacing,
-                tracking = item.tracking,
-            }
-        end,
-        deserialize = function(_world: World, data: {string: any}): Text
-            -- A font that was never loaded in this process leaves the text
-            -- without one, which lays out nothing rather than failing a load.
-            local name = data.font as string
-            local font = name ~= nil and fontsByName[name] or nil
-            return text.Text(
-                data.text as string,
-                font,
-                data.size as number,
-                data.align as string,
-                data.lineSpacing as number,
-                data.tracking as number
-            )
-        end,
-    }
-)
+text.Text = ecs.newComponent({
+    name = "Text",
+    container = Text,
+    -- A text is a position and a string. Requiring the position means one is
+    -- never accidentally left off, which would make the text quietly not
+    -- appear rather than fail.
+    requires = {Transform},
+    fields = {
+        "text",
+        "font",
+        "size",
+        "align",
+        "lineSpacing",
+        "tracking",
+    },
+    init = function(item: Text)
+        if item.text == nil then
+            item.text = ""
+        end
+        if item.size == nil then
+            item.size = 16
+        end
+        if item.align == nil then
+            item.align = "left"
+        end
+        if item.lineSpacing == nil then
+            item.lineSpacing = 1.0
+        end
+        if item.tracking == nil then
+            item.tracking = 0.0
+        end
+        if ALIGNMENTS[item.align] == nil then
+            error(("tecs: '%s' is not an alignment; use left, centre or right"):format(tostring(item.align)), 3)
+        end
+        item.width = 0.0
+        item.height = 0.0
+        item._span = 0
+        item._spanCount = 0
+    end,
+    serialize = function(item: Text): {string: any}
+        -- The authored fields and the font by name. The span is one process's
+        -- answer and the font is a shared table; neither belongs in a save.
+        return {
+            text = item.text,
+            font = item.font ~= nil and item.font.name or nil,
+            size = item.size,
+            align = item.align,
+            lineSpacing = item.lineSpacing,
+            tracking = item.tracking,
+        }
+    end,
+    deserialize = function(_world: World, data: {string: any}): Text
+        -- A font that was never loaded in this process leaves the text
+        -- without one, which lays out nothing rather than failing a load.
+        local name = data.font as string
+        local font = name ~= nil and fontsByName[name] or nil
+        return text.Text(
+            data.text as string,
+            font,
+            data.size as number,
+            data.align as string,
+            data.lineSpacing as number,
+            data.tracking as number
+        )
+    end,
+})
 
 return text

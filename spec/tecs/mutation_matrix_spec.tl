@@ -345,9 +345,9 @@ describe(
                 luassert.equals(id, w:byKey("matrixHero"))
                 luassert.equals(3, w:get(id, MatPos).x)
 
-                local ok = pcall(
-                    function() w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(4)) end
-                )
+                local ok = pcall(function()
+                    w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(4))
+                end)
                 luassert.is_false(ok, "duplicate live key must error")
 
                 -- Despawn releases the key for reclaiming.

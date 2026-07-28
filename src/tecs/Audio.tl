@@ -1911,15 +1911,13 @@ function Audio:install(world: ecs.World)
         include = {Sound, ecs.builtins.Disabled},
     })
 
-    world:addSystem(
-        {
-            name = "tecs.PlaySounds",
-            -- After gameplay has decided what exists and before anything renders,
-            -- so a sound spawned this frame starts this frame.
-            phase = ecs.phases.PostUpdate,
-            run = function() reconcile(self, sounds, hushed) end,
-        }
-    )
+    world:addSystem({
+        name = "tecs.PlaySounds",
+        -- After gameplay has decided what exists and before anything renders,
+        -- so a sound spawned this frame starts this frame.
+        phase = ecs.phases.PostUpdate,
+        run = function() reconcile(self, sounds, hushed) end,
+    })
 
     world:addSnapshotHandler({
         name = "tecs.audio",

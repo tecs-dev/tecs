@@ -292,59 +292,53 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         format = RGBA8,
         clear = {r = 0, g = 0, b = 0, a = 0},
     })
-    graph:target(
-        {
-            name = "normal",
-            format = RGBA8,
-            -- The alpha is what carries here. Zero marks a pixel as unlit, so
-            -- anything nothing drew over composites as the albedo clear instead of
-            -- picking up ambient over a normal it never wrote. The rgb encodes a
-            -- surface facing the viewer, which is what geometry writes, so the
-            -- attachment reads consistently either way.
-            clear = {r = 0.5, g = 0.5, b = 1.0, a = 0},
-        }
-    )
+    graph:target({
+        name = "normal",
+        format = RGBA8,
+        -- The alpha is what carries here. Zero marks a pixel as unlit, so
+        -- anything nothing drew over composites as the albedo clear instead of
+        -- picking up ambient over a normal it never wrote. The rgb encodes a
+        -- surface facing the viewer, which is what geometry writes, so the
+        -- attachment reads consistently either way.
+        clear = {r = 0.5, g = 0.5, b = 1.0, a = 0},
+    })
     graph:target({
         name = "lit",
         format = RGBA8,
         clear = {r = 0, g = 0, b = 0, a = 1},
     })
-    graph:target(
-        {
-            -- No clear: this is what anything running between composite and
-            -- present writes into, and a clear here would be applied by each of
-            -- those passes in turn. Composite covers every pixel and goes first,
-            -- so there is nothing undefined for a later pass to load.
-            name = "scene",
-            format = RGBA8,
-        }
-    )
+    graph:target({
+        -- No clear: this is what anything running between composite and
+        -- present writes into, and a clear here would be applied by each of
+        -- those passes in turn. Composite covers every pixel and goes first,
+        -- so there is nothing undefined for a later pass to load.
+        name = "scene",
+        format = RGBA8,
+    })
 
     self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
     self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
     self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present")
 
-    graph:pass(
-        {
-            name = "geometry",
-            outputs = {"albedo", "normal"},
-            -- Cleared to the far plane every frame, and "lessOrEqual" rather than
-            -- "less" so equal depths still resolve to whatever drew last. Draw
-            -- order is deterministic and means something here, so depth decides
-            -- between instances that differ and leaves the rest alone.
-            depth = {
-                test = true,
-                write = true,
-                compare = "lessOrEqual",
-                clear = 1.0,
-            },
-            execute = function(context: PassGraph.PassContext)
-                if options.geometry ~= nil then
-                    options.geometry(context)
-                end
-            end,
-        }
-    )
+    graph:pass({
+        name = "geometry",
+        outputs = {"albedo", "normal"},
+        -- Cleared to the far plane every frame, and "lessOrEqual" rather than
+        -- "less" so equal depths still resolve to whatever drew last. Draw
+        -- order is deterministic and means something here, so depth decides
+        -- between instances that differ and leaves the rest alone.
+        depth = {
+            test = true,
+            write = true,
+            compare = "lessOrEqual",
+            clear = 1.0,
+        },
+        execute = function(context: PassGraph.PassContext)
+            if options.geometry ~= nil then
+                options.geometry(context)
+            end
+        end,
+    })
 
     graph:pass({
         name = "lighting",
@@ -397,20 +391,18 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end,
     })
 
-    graph:pass(
-        {
-            -- Declared last and executed last, since the graph runs passes in
-            -- declaration order and this is the one that writes the swapchain.
-            -- Anything added to the seam is declared above this, not after it.
-            name = "present",
-            inputs = {"scene"},
-            outputs = {},
-            execute = function(context: PassGraph.PassContext)
-                context.pass:bindPipeline(self._presentPipeline.handle)
-                context.pass:draw(3)
-            end,
-        }
-    )
+    graph:pass({
+        -- Declared last and executed last, since the graph runs passes in
+        -- declaration order and this is the one that writes the swapchain.
+        -- Anything added to the seam is declared above this, not after it.
+        name = "present",
+        inputs = {"scene"},
+        outputs = {},
+        execute = function(context: PassGraph.PassContext)
+            context.pass:bindPipeline(self._presentPipeline.handle)
+            context.pass:draw(3)
+        end,
+    })
 
     self.graph = graph
     return self
@@ -597,14 +589,12 @@ function Deferred:rebuildPipelines()
     local composite: GraphicsPipeline = nil
     local present: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
-    local built, reason = pcall(
-        function(): string
-            lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
-            composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
-            present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present")
-            bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
-        end
-    )
+    local built, reason = pcall(function(): string
+        lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
+        composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
+        present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present")
+        bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
+    end)
     if not built then
         if lighting ~= nil then
             lighting:destroy()
