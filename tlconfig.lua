@@ -13,4 +13,13 @@ return {
         sort_requires = false,
         hug_first_argument = true,
     },
+    tealdoc = {
+        markdown = {
+            type_links = {
+                ["tecs.platform.system"] = "/modules/system#tecs.system",
+                ["tecs.Future"] = "/modules/future#tecs.future.Future",
+                ["tecs.platform.Window"] = "/modules/window#tecs.window.Window",
+            },
+        },
+    },
 }

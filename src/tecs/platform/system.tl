@@ -5,6 +5,7 @@
 --- window or on `Application`.
 
 local Future <const> = require("tecs.Future")
+local type Window = require("tecs.platform.Window")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 
@@ -13,10 +14,6 @@ loader.declare("dialogs")
 local C <const> = sdl.C
 local K <const> = sdl.K
 local D <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "dialogs")
-
-local record WindowLike
-    handle: loader.CPtr
-end
 
 local record Locale
     --- ISO 639 language code, such as `"en"`.
@@ -44,7 +41,7 @@ local record DialogFilter
 end
 
 local record DialogOptions
-    window: WindowLike
+    window: Window
     filters: {DialogFilter}
     defaultLocation: string
     multiple: boolean
@@ -129,7 +126,7 @@ function system.power(): Power
 end
 
 --- Shows a native informational, warning or error dialog.
-function system.messageBox(kind: string, title: string, message: string, window?: WindowLike): boolean, string
+function system.messageBox(kind: string, title: string, message: string, window?: Window): boolean, string
     local flags = MESSAGE_FLAGS[kind]
     if flags == nil then
         return false, ("unknown message-box kind %q"):format(tostring(kind))

@@ -150,19 +150,19 @@ Every function and type this module carries, rendered from `src/tecs/platform/sy
 
 ### tecs.system.messageBox
 
-<pre><code v-pre>function <a href="#tecs.system.messageBox">tecs.system.messageBox</a>(kind: string, title: string, message: string, window: WindowLike): boolean, string
+<pre><code v-pre>function <a href="#tecs.system.messageBox">tecs.system.messageBox</a>(kind: string, title: string, message: string, window: Window): boolean, string
 </code></pre>
 
 Shows a native informational, warning or error dialog.
 
 #### Parameters
 
-| Type                          | Name                       | Description |
-| ----------------------------- | -------------------------- | ----------- |
-| <code v-pre>string</code>     | <code v-pre>kind</code>    |             |
-| <code v-pre>string</code>     | <code v-pre>title</code>   |             |
-| <code v-pre>string</code>     | <code v-pre>message</code> |             |
-| <code v-pre>WindowLike</code> | <code v-pre>window</code>  |             |
+| Type                      | Name                       | Description |
+| ------------------------- | -------------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>kind</code>    |             |
+| <code v-pre>string</code> | <code v-pre>title</code>   |             |
+| <code v-pre>string</code> | <code v-pre>message</code> |             |
+| <code v-pre>Window</code> | <code v-pre>window</code>  |             |
 
 #### Returns
 
