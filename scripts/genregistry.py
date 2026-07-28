@@ -139,7 +139,13 @@ static const {struct} api = {{
 }};
 
 /* Returned untyped so the registry stays one shape regardless of which
- * libraries a target links. Lua casts it back using the cdef beside it. */
+ * libraries a target links. Lua casts it back using the cdef beside it.
+ *
+ * Declared before it is defined because registry.c declares it too, and a
+ * definition that agrees with nothing is a signature free to drift from the
+ * one the caller was given. */
+const void *tecs_{args.name}_api(void);
+
 const void *tecs_{args.name}_api(void)
 {{
     return &api;

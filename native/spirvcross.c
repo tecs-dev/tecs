@@ -8,8 +8,8 @@
 
 #include <spirv_cross_c.h>
 
-/* Reports the SPIRV-Cross C API version this object was built against, so a
- * mismatch is discoverable rather than a surprising crash. */
+#include "spirvcross.h"
+
 unsigned tecsSpirvCrossVersion(void)
 {
     unsigned major = 0, minor = 0, patch = 0;

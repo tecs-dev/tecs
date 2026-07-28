@@ -159,5 +159,8 @@ uint64_t tecsHttpResponseBodyConsume(TecsHttpResponseBuffer *buffer, uint64_t co
 
 int tecsHttpResponseBufferError(const TecsHttpResponseBuffer *buffer)
 {
-    return buffer == NULL ? TECS_HTTP_BUFFER_OOM : buffer->error;
+    /* Answered as `int` rather than as the enum, because the FFI reads a plain
+     * integer and an enum's underlying type is the compiler's to choose. Every
+     * enumerator is small and non-negative, so the narrowing is exact. */
+    return buffer == NULL ? TECS_HTTP_BUFFER_OOM : (int)buffer->error;
 }

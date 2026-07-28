@@ -17,6 +17,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "logsink.h"
+
 static SDL_LogOutputFunction previousFunction = NULL;
 static void *previousUserdata = NULL;
 static SDL_Mutex *sinkLock = NULL;
@@ -101,6 +103,10 @@ static size_t writeEscaped(char *out, size_t limit, const char *text)
 
 static void SDLCALL sink(void *userdata, int category, SDL_LogPriority priority, const char *message)
 {
+    /* This sink keeps nothing of its own; the previous function's userdata is
+     * held beside the pointer to it. */
+    (void)userdata;
+
     /* The platform destination first, so a crash between here and the file
      * still leaves the message somewhere. */
     if (previousFunction) {

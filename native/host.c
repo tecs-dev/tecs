@@ -67,8 +67,13 @@ typedef struct TecsHost TecsHost;
  * rather less, so this sits well inside both. It is not there to enforce the
  * platform's deadline, which the host cannot do; it is there to catch the one
  * mistake this path cannot afford, which is a game walking its world inside the
- * callback instead of flushing a checkpoint it prepared during a frame. */
-#define TECS_BACKGROUND_BUDGET_NS (250 * SDL_NS_PER_MS)
+ * callback instead of flushing a checkpoint it prepared during a frame.
+ *
+ * The count is written as `Uint64` because the product is nanoseconds and the
+ * multiplication would otherwise be done in `int`. A quarter of a second fits;
+ * anything above about two seconds does not, and would wrap into a budget
+ * nobody could exceed rather than failing to compile. */
+#define TECS_BACKGROUND_BUDGET_NS ((Uint64)250 * SDL_NS_PER_MS)
 
 /* One iteration's worth of events, and everything they point at.
  *
