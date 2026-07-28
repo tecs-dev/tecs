@@ -179,17 +179,15 @@ describe(
 
                         local moves = 0
                         local arch = (w as WorldImpl):currentArchetype(e1)
-                        arch:addEntityObserver(
-                            {
-                                onEntityMove = function(
-                                    _self: any, _arch: any, entity: integer, _from: integer, to: integer
-                                )
-                                    moves = moves + 1
-                                    luassert.equals(e2, entity, "the swapped-in entity is reported")
-                                    luassert.equals(0, to, "e2 moves into e1's row")
-                                end,
-                            } as any
-                        )
+                        arch:addEntityObserver({
+                            onEntityMove = function(
+                                _self: any, _arch: any, entity: integer, _from: integer, to: integer
+                            )
+                                moves = moves + 1
+                                luassert.equals(e2, entity, "the swapped-in entity is reported")
+                                luassert.equals(0, to, "e2 moves into e1's row")
+                            end,
+                        } as any)
 
                         -- Despawning e1 swap-pops e2 into its row.
                         w:despawn(e1)

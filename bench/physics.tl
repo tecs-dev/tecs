@@ -189,12 +189,10 @@ return tecs.application({
 
         -- The A/B knob for the solver's thread pool. One worker starts no
         -- threads and runs every task inline, which is the no-executor path.
-        world:addPlugin(
-            physics.plugin({
-                gravity = {0.0, 900.0},
-                workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
-            })
-        )
+        world:addPlugin(physics.plugin({
+            gravity = {0.0, 900.0},
+            workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
+        }))
         buildContainer(world)
 
         -- Seeded, so every run drops the same bodies in the same order and two

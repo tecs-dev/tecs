@@ -133,13 +133,11 @@ return tecs.application({
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer
-        world:addPlugin(
-            particles.plugin({
-                renderer = renderer,
-                capacity = POOL,
-                maxEmitters = EMITTERS + 8,
-            })
-        )
+        world:addPlugin(particles.plugin({
+            renderer = renderer,
+            capacity = POOL,
+            maxEmitters = EMITTERS + 8,
+        }))
         spawnEmitters(world)
 
         -- In `First`, so the sample is taken ahead of the systems it covers.

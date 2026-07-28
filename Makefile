@@ -15,7 +15,7 @@ TL     := $(CURDIR)/vendor/bin/tl
 # commits. Teal and Cerulean both move ahead of releases that understand the
 # syntax used here, so floating development rocks are not reproducible.
 TL_REF        ?= 1326d829790b92e23defe69fcf40460103b60d1d
-CERULEAN_REF  ?= a10502a5ea788ee7edbb8fa0acd4695d69e1635e
+CERULEAN_REF  ?= eb7e179a395e41a6fdb919a25b829c2dcd9f5ce5
 
 # The build system owns these locations, so it passes them rather than having
 # the engine guess where its own output went.
@@ -72,7 +72,8 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
         bench-sprites bench-text bench-particles bench-latency bench-alloc \
         bench-ecs \
         bench-json \
-        bench-snapshot bench-bitset format format-check docs-check
+        bench-snapshot bench-bitset format format-check docs-check \
+        docs-dev docs-build
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -120,6 +121,18 @@ format-check: ## Report unformatted sources, writing nothing
 # because it needs no build, like the two above it.
 docs-check: ## Verify every docs page has a description
 	@bash scripts/check-docs-descriptions.sh
+
+# The site's own tooling, which needs node rather than anything this build
+# owns. Kept here so the commands sit beside the rest rather than being
+# something you have to know to look for in docs/package.json. The install runs
+# only when there is nothing to run from, so an ordinary serve costs nothing.
+docs-dev: ## Serve the documentation site with hot reload
+	@cd docs && [ -d node_modules ] || npm install
+	@cd docs && npm run docs:dev
+
+docs-build: ## Build the documentation site into docs/.vitepress/dist
+	@cd docs && [ -d node_modules ] || npm install
+	@cd docs && npm run docs:build
 
 # Two runs, because the headless specs fork. `io.popen` forks this process, and
 # by the time the rest of the suite has run there are live threads in it: the

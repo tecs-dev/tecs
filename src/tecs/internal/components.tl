@@ -850,16 +850,14 @@ function components.newScalarComponent<T>(options: ScalarComponentOptions<T>): t
 
     -- `newComponent` provides scalar-specific callFn, `.new`, serialize, and
     -- deserialize for storageType=="scalar" -- no need to forward them here.
-    local component = (
-        (components.newComponent as function(any): any)({
-            name = assert(opts.name, "Missing scalar component name"),
-            container = container,
-            storage = storage.newScalarStorage(kind, defaultValue),
-            __internalStorageToken = INTERNAL_STORAGE_TOKEN,
-            requires = opts.requires,
-            transient = opts.transient,
-        })
-    ) as types.components.ScalarComponent<T>
+    local component = ((components.newComponent as function(any): any)({
+        name = assert(opts.name, "Missing scalar component name"),
+        container = container,
+        storage = storage.newScalarStorage(kind, defaultValue),
+        __internalStorageToken = INTERNAL_STORAGE_TOKEN,
+        requires = opts.requires,
+        transient = opts.transient,
+    })) as types.components.ScalarComponent<T>
 
     local cAny = component as {string: any}
     cAny.scalarKind = kind
