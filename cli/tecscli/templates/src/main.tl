@@ -1,108 +1,75 @@
---- {{name}}.
+--- {{name}}: a line of text that drifts up and down.
 ---
---- Returns an application rather than blocking. SDL owns the loop, so the host
---- drives this from its callbacks and nothing here is a `while true`.
+--- Small on purpose. It is four things every game starts from, and nothing
+--- else: an entity, some text, a tween, and a system.
 ---
---- Entities are the interface: everything on screen is a spawned entity with a
---- Transform, and systems move them. Nothing here touches a buffer, a pass or a
---- command buffer.
+--- Two things about this file that are not obvious. It returns an application
+--- instead of running one, because the host owns the loop and calls into this
+--- a frame at a time; there is no `while true` to write. And `tecs` is a
+--- global, already loaded before your first line, so nothing here requires it.
 
-local COUNT <const> = 240
-
---- Seeds a ring of renderable quads.
----
---- `batchSpawn` rather than a spawn each, because one call resolves the
---- archetype once and the callback writes columns in place. It skips FFI
---- defaults, so every field is written here.
-local function spawnRing(world: tecs.World, width: number, height: number)
-    local Transform <const> = tecs.components.Transform
-    local Tint <const> = tecs.components.Tint
-    local Renderable <const> = tecs.components.Renderable
-
-    local centreX <const> = width * 0.5
-    local centreY <const> = height * 0.5
-    local radius <const> = math.min(width, height) * 0.32
-
-    world:batchSpawn(
-        COUNT,
-        {Transform, Tint, Renderable},
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
-            local transforms = archetype:getMut(Transform)
-            local tints = archetype:getMut(Tint)
-            for row = firstRow, lastRow do
-                local index = row - firstRow
-                local angle = index / COUNT * math.pi * 2
-                local transform = transforms[row]
-                transform.x = centreX + math.cos(angle) * radius
-                transform.y = centreY + math.sin(angle) * radius
-                transform.rotation = angle
-                transform.scaleX = 14
-                transform.scaleY = 14
-
-                local hue = index / COUNT
-                local tint = tints[row]
-                tint.r = 0.5 + 0.5 * math.cos(6.28318 * hue)
-                tint.g = 0.5 + 0.5 * math.cos(6.28318 * (hue + 0.33))
-                tint.b = 0.5 + 0.5 * math.cos(6.28318 * (hue + 0.67))
-                tint.a = 1.0
-            end
-        end
-    )
-end
+--- How far the greeting travels from where it rests, in pixels, and how many
+--- seconds one sweep of that takes.
+local TRAVEL <const> = 60.0
+local SWEEP <const> = 1.2
 
 return tecs.application({
     window = {title = "{{title}}", width = 1280, height = 720},
-    ambientLight = {0.06, 0.06, 0.09},
-    capacity = COUNT + 64,
 
-    -- The game is a plugin, which is the only way in. It is handed the world
-    -- and the application, and it registers what should happen rather than
-    -- being called by the loop directly.
+    -- Your game is a plugin: handed the world, which holds everything that
+    -- exists, and the application, which holds everything that does not. It
+    -- registers what should happen and returns.
     plugin = function(world: tecs.World, app: tecs.Application)
+        print(("{{name}} on tecs %s, drawing through %s"):format(tecs.version, app.device.driver))
+
+        -- Drawing text is opt-in, because a font atlas is uploaded into one
+        -- particular renderer. This is what teaches the world to draw strings.
+        world:addPlugin(tecs.text.plugin({renderer = app.renderer}))
+
+        -- Measuring first is how the greeting ends up centred. It reads the
+        -- font and touches no entity.
+        local greeting <const> = tecs.text.Text.new({
+            text = "Hello Tecs",
+            font = tecs.text.defaultFont(),
+            size = 96,
+        })
+        local textWidth <const>, textHeight <const> = tecs.text.measure(greeting)
         local width <const>, height <const> = app.window:getPixelSize()
+        local restY <const> = (height - textHeight) * 0.5
 
-        -- What came up, said once at startup. Worth keeping: the driver and
-        -- the pixel size are the two things that differ between machines, and
-        -- the first question about a window that looks wrong is which of them
-        -- is not what you expected.
-        print(("%s on %s, %dx%d px"):format(tecs.version, app.device.driver, width, height))
-
-        spawnRing(world, width, height)
-
-        world:spawn(
-            tecs.components.Transform(width * 0.5, height * 0.5, 0, 1),
-            tecs.components.PointLight(200.0, math.min(width, height) * 0.8, 1.0, 0.92, 0.8, 3.0)
+        -- An entity is an id and the components on it, and that is the whole
+        -- model: where it is, what colour it is, what it says. There is no
+        -- sprite object to make and no draw call to issue.
+        local label <const> = world:spawn(
+            tecs.components.Transform((width - textWidth) * 0.5, restY),
+            tecs.components.Tint(0.93, 0.96, 1.0, 1.0),
+            greeting
         )
 
-        local elapsed = 0.0
-        local spinning <const> = world:query({include = {tecs.components.Transform, tecs.components.Renderable}})
+        -- The motion, which this file never computes. A timeline is compiled
+        -- once under a name and played on the entity that owns it. "pingPong"
+        -- runs the sweep out and back forever, and "sineInOut" is the curve
+        -- that makes the turn at either end a sine rather than a bounce.
+        local bob <const> = tecs.sequence.timeline(
+            "{{name}}.bob",
+            {
+                tecs.sequence.tweenTo(SWEEP, "sineInOut", "transform.y", restY - TRAVEL),
+            }
+        )
+        tecs.sequence.play(world, bob, {owner = label, params = {mode = "pingPong"}})
 
-        -- Rotation is a write, so the column is taken with getMut. Reads use
-        -- get: taking getMut to read marks the component dirty on every
-        -- archetype every frame and defeats every dirty-gated consumer.
-        world:addSystem({
-            name = "{{name}}.Spin",
-            phase = tecs.phases.Update,
-            run = function(dt: number)
-                elapsed = elapsed + dt
-                for archetype, length in spinning:iter() do
-                    local transforms = archetype:getMut(tecs.components.Transform)
-                    for row = 1, length do
-                        transforms[row].rotation = transforms[row].rotation + dt
-                    end
-                end
-            end,
-        })
-
-        local input <const> = app.input
+        -- Work that happens every frame is a system, and a system names the
+        -- phase it belongs to rather than a place in a list.
         world:addSystem({
             name = "{{name}}.Quit",
             phase = tecs.phases.Update,
             run = function()
-                if input:keyPressed("escape") then
+                if app.input:keyPressed("escape") then
                     app.quitRequested = true
                 end
             end,
         })
+
+        print("  escape or close the window to quit")
     end,
 })

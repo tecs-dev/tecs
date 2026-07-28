@@ -144,12 +144,29 @@ describe("a scaffolded project", function()
     -- Nothing of ours in a user's output. A warning from the engine's own
     -- sources reads as a warning about the game, and the person who sees it
     -- cannot act on it.
-    it("reports nothing from the engine's own sources", function()
+    --
+    -- Silence rather than an absence of the word, because everything a clean
+    -- check could say is something a user cannot act on either: the compiler's
+    -- own sign-off offers `tl run` and `tl gen`, and there is no `tl` on their
+    -- machine.
+    it("says nothing when it is happy", function()
         local checked = tecs({ "check" }, project)
-        assert.is_falsy(
-            checked.output:find("warning", 1, true),
-            "a user's type-check carries a warning that is not theirs:\n" .. checked.output
-        )
+        assert.are.equal("", checked.output, "a clean type-check is not silent:\n" .. checked.output)
+    end)
+
+    -- The scaffold draws text, and text needs a font nobody installs. It comes
+    -- out of the content root, which is also what a single-file build's
+    -- payload is packed from, so a template that draws a string works on a
+    -- machine with no assets of its own only while these are in there.
+    it("carries the font the template draws with", function()
+        for _, name in ipairs({
+            "fonts/jetbrainsmono-extrabold-msdf.json",
+            "fonts/jetbrainsmono-extrabold-msdf.png",
+        }) do
+            local handle = io.open(root .. "/" .. name, "r")
+            assert.is_not_nil(handle, "the content root carries no " .. name)
+            handle:close()
+        end
     end)
 
     it("builds", function()

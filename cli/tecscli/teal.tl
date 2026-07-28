@@ -63,6 +63,11 @@ function teal.check(paths: layout, cwd: string, projectSource: string, sources: 
     for _, argument in ipairs(includes(paths, projectSource)) do
         args[#args + 1] = argument
     end
+    -- Quiet, so a clean check says nothing. Without it the compiler signs off
+    -- with a banner offering `tl run` and `tl gen`, and there is no `tl` on a
+    -- user's machine to take it up. Errors are unaffected: `-q` suppresses the
+    -- success notice and nothing else.
+    args[#args + 1] = "-q"
     args[#args + 1] = "check"
     for _, source in ipairs(sources) do
         args[#args + 1] = source
