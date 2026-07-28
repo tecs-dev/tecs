@@ -63,7 +63,7 @@ tecs/
 │   ├── ffi/               # Generated bindings: SDL3, SDL3_mixer, Box2D, shaderc, SPIRV-Cross
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
 │   ├── gfx/               # Camera, layers, distance-field text
-│   ├── platform/          # Window, input, audio, events, clock, paths, capabilities
+│   ├── platform/          # Window, input, audio, events, time, files, the OS
 │   ├── physics/           # Box2D 3
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── mcp/               # Debug server: transport, tools, sandbox
@@ -97,11 +97,17 @@ deeper, so `tecs.gfx.layers.configure` is also a public name and nothing goes pa
 before a game's first line, so a game writes no require; a headless tool or a spec writes `require("tecs")`
 and gets the same table.
 
-`src/tecs/init.tl` says that twice and the two are checked against each other. The records are the
-declaration a game is type-checked against; `SURFACE` beneath them is what a name resolves through, one
-descriptor per name at either level. `spec/surface_spec.lua` walks the first and holds the second to it,
+`SURFACE` in `src/tecs/init.tl` is what a name resolves through, one descriptor per name at either level.
+A descriptor with one principal module answers with that module's own table, so the record that types the
+public name is the module's own and the names one level down are hung off it on first read. A namespace
+assembled from several modules at one level cannot be typed by any of them, so `init.tl` declares a record
+for it, and that record is a second copy of signatures and docblocks the modules already carry: prefer
+one module per public name. `spec/surface_spec.lua` walks the declaration and holds the resolver to it,
 and `spec/headless_spec.lua` holds the laziness that makes the resolver worth having: naming a namespace
 loads nothing, and reading one module under it loads no sibling.
+
+A subordinate module cannot require its parent. The parent names the subordinate's type, and Teal refuses
+a require cycle even through a type-only require, so anything both of them need lives below both.
 
 Engine modules require `tecs.ecs` rather than `tecs`, because `tecs` is the aggregator that pulls every engine
 module in and a module `tecs` exports cannot also depend on `tecs` without making a cycle, which Teal rejects

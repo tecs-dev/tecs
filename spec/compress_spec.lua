@@ -33,7 +33,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
-local compress = require("tecs.compress")
+local data = require("tecs.data")
 local zlib = require("tecs.ffi.zlib")
 
 -- Streams are carried as hex so this file stays text and diffs like text.
@@ -146,12 +146,12 @@ local function mixture(size)
     return table.concat(pieces):sub(1, size)
 end
 
-describe("compress.inflate", function()
+describe("data.inflate", function()
     it("reads a zlib stream this tree did not produce", function()
         local stream = idatOf("spec/fixtures/split.png")
         assert.is_not_nil(stream, "the fixture has an IDAT chunk")
 
-        local pixels = compress.inflate(stream)
+        local pixels = data.inflate(stream)
 
         assert.are.equal(4 * (1 + 4 * 4), #pixels)
         -- Every row of that image carries filter type zero, which is the byte
@@ -162,11 +162,11 @@ describe("compress.inflate", function()
     end)
 
     it("reads a stored block", function()
-        assert.are.equal(STORED_TEXT, compress.inflate(STORED))
+        assert.are.equal(STORED_TEXT, data.inflate(STORED))
     end)
 
     it("reads a dynamic block", function()
-        assert.are.equal(DYNAMIC_TEXT, compress.inflate(DYNAMIC))
+        assert.are.equal(DYNAMIC_TEXT, data.inflate(DYNAMIC))
     end)
 
     it("grows its output rather than truncating it", function()
@@ -176,7 +176,7 @@ describe("compress.inflate", function()
         end
         local expected = string.rep(table.concat(unit), 512)
         assert.are.equal(32768, #expected)
-        assert.are.equal(expected, compress.inflate(GROW))
+        assert.are.equal(expected, data.inflate(GROW))
     end)
 
     it("returns the original bytes at every size around its buffer", function()
@@ -187,7 +187,7 @@ describe("compress.inflate", function()
         for _, size in ipairs({ 0, 1, 2, 4095, 4096, 4097, 8192, 100000 }) do
             local text = mixture(size)
             assert.are.equal(size, #text)
-            assert.are.equal(text, compress.inflate(deflated(text, 6)))
+            assert.are.equal(text, data.inflate(deflated(text, 6)))
         end
     end)
 
@@ -208,7 +208,7 @@ describe("compress.inflate", function()
             string.rep(DYNAMIC_TEXT, 40),
         }) do
             for _, level in ipairs({ 0, 1, 6, 9 }) do
-                assert.are.equal(text, compress.inflate(deflated(text, level)))
+                assert.are.equal(text, data.inflate(deflated(text, level)))
             end
         end
     end)
@@ -216,18 +216,18 @@ describe("compress.inflate", function()
     it("gets the same answer whatever the size hint says", function()
         -- The hint is an allocation and never a limit: too small still grows,
         -- and too large still stops where the stream does.
-        assert.are.equal(STORED_TEXT, compress.inflate(STORED, 1))
-        assert.are.equal(STORED_TEXT, compress.inflate(STORED, #STORED_TEXT))
-        assert.are.equal(STORED_TEXT, compress.inflate(STORED, 1000000))
+        assert.are.equal(STORED_TEXT, data.inflate(STORED, 1))
+        assert.are.equal(STORED_TEXT, data.inflate(STORED, #STORED_TEXT))
+        assert.are.equal(STORED_TEXT, data.inflate(STORED, 1000000))
 
         -- And the same at a size that fills the hint exactly rather than
         -- stopping inside it, which is the case an exact hint gets wrong by
         -- deciding the stream ended when only the buffer did.
         local text = mixture(9000)
         local stream = deflated(text, 6)
-        assert.are.equal(text, compress.inflate(stream, #text))
-        assert.are.equal(text, compress.inflate(stream, #text - 1))
-        assert.are.equal(text, compress.inflate(stream, #text + 1))
+        assert.are.equal(text, data.inflate(stream, #text))
+        assert.are.equal(text, data.inflate(stream, #text - 1))
+        assert.are.equal(text, data.inflate(stream, #text + 1))
     end)
 
     it("refuses a stored block whose two lengths disagree", function()
@@ -236,29 +236,29 @@ describe("compress.inflate", function()
         -- the inverted copy is a corrupt block that would otherwise be copied
         -- out at whatever length the first copy claimed.
         local broken = STORED:sub(1, 5) .. "\214" .. STORED:sub(7)
-        assert.is_false(pcall(compress.inflate, broken))
+        assert.is_false(pcall(data.inflate, broken))
     end)
 
     it("refuses bytes that are not a zlib stream", function()
-        assert.is_false(pcall(compress.inflate, "not compressed at all"))
+        assert.is_false(pcall(data.inflate, "not compressed at all"))
     end)
 
     it("refuses a stream too short to be one", function()
-        assert.is_false(pcall(compress.inflate, "\1\2\3"))
-        assert.is_false(pcall(compress.inflate, ""))
+        assert.is_false(pcall(data.inflate, "\1\2\3"))
+        assert.is_false(pcall(data.inflate, ""))
     end)
 
     it("refuses a header whose check word does not add up", function()
         -- Compression method still 8, flag byte adjusted so the two together
         -- are no longer a multiple of thirty-one.
-        assert.is_false(pcall(compress.inflate, "\120\2" .. STORED:sub(3)))
+        assert.is_false(pcall(data.inflate, "\120\2" .. STORED:sub(3)))
     end)
 
     it("does not return output the checksum disagrees with", function()
         -- The last four bytes are the Adler-32 of what was compressed. A
         -- stream that decodes cleanly but came from different bytes is what
         -- the trailer exists to catch, so a mismatch must not return.
-        assert.is_false(pcall(compress.inflate, STORED:sub(1, #STORED - 1) .. "\0"))
+        assert.is_false(pcall(data.inflate, STORED:sub(1, #STORED - 1) .. "\0"))
     end)
 
     it("refuses a preset dictionary rather than decoding without it", function()
@@ -266,46 +266,46 @@ describe("compress.inflate", function()
         -- anyway produces wrong output that looks like output.
         local stream = withPresetDictionary()
         assert.is_not_nil(stream, "a valid header with FDICT set exists")
-        assert.is_false(pcall(compress.inflate, stream))
+        assert.is_false(pcall(data.inflate, stream))
     end)
 
     it("stops on a truncated stream instead of returning what it has", function()
-        assert.is_false(pcall(compress.inflate, DYNAMIC:sub(1, 40)))
+        assert.is_false(pcall(data.inflate, DYNAMIC:sub(1, 40)))
         -- And at the other end: a whole stream missing only its trailer, which
         -- is the truncation a decoder is likeliest to accept by accident.
-        assert.is_false(pcall(compress.inflate, STORED:sub(1, #STORED - 4)))
+        assert.is_false(pcall(data.inflate, STORED:sub(1, #STORED - 4)))
     end)
 end)
 
-describe("compress.deflate", function()
+describe("data.deflate", function()
     it("round trips zlib and raw streams", function()
         local text = mixture(32768)
-        assert.are.equal(text, compress.inflate(compress.deflate(text)))
-        assert.are.equal(text, compress.inflateRaw(compress.deflateRaw(text)))
+        assert.are.equal(text, data.inflate(data.deflate(text)))
+        assert.are.equal(text, data.inflateRaw(data.deflateRaw(text)))
     end)
 
     it("writes a valid empty stream", function()
-        assert.are.equal("", compress.inflate(compress.deflate("")))
-        assert.are.equal("", compress.inflateRaw(compress.deflateRaw("")))
+        assert.are.equal("", data.inflate(data.deflate("")))
+        assert.are.equal("", data.inflateRaw(data.deflateRaw("")))
     end)
 
     it("accepts every compression level and rejects invalid ones", function()
         local text = string.rep("compress me", 100)
         for level = 0, 9 do
-            assert.are.equal(text, compress.inflate(compress.deflate(text, level)))
+            assert.are.equal(text, data.inflate(data.deflate(text, level)))
         end
         assert.has_error(function()
-            compress.deflate(text, 10)
+            data.deflate(text, 10)
         end)
         assert.has_error(function()
-            compress.deflate(text, 1.5)
+            data.deflate(text, 1.5)
         end)
     end)
 end)
 
-describe("compress.inflateRaw", function()
+describe("data.inflateRaw", function()
     it("reads a stream with no wrapper", function()
-        assert.are.equal(RAW_TEXT, compress.inflateRaw(RAW))
+        assert.are.equal(RAW_TEXT, data.inflateRaw(RAW))
     end)
 
     it("reads the DEFLATE inside a zlib stream", function()
@@ -316,15 +316,15 @@ describe("compress.inflateRaw", function()
             local text = mixture(size)
             local stream = deflated(text, 6)
             local raw = stream:sub(3, #stream - 4)
-            assert.are.equal(text, compress.inflateRaw(raw))
-            assert.are.equal(text, compress.inflateRaw(raw, #text))
+            assert.are.equal(text, data.inflateRaw(raw))
+            assert.are.equal(text, data.inflateRaw(raw, #text))
         end
     end)
 
     it("does not read a wrapped stream as a raw one", function()
         -- The two header bytes are not a block header, so this fails inside
         -- the first block rather than producing something.
-        assert.is_false(pcall(compress.inflateRaw, STORED))
+        assert.is_false(pcall(data.inflateRaw, STORED))
     end)
 
     it("refuses a code table with more codes than it has room for", function()
@@ -333,14 +333,14 @@ describe("compress.inflateRaw", function()
         -- distance counts, and a code-length alphabet declaring four one-bit
         -- codes, which is two more than one bit can distinguish. Decoding
         -- against it would return whichever symbol the walk reached first.
-        assert.is_false(pcall(compress.inflateRaw, "\5\0\146\4"))
+        assert.is_false(pcall(data.inflateRaw, "\5\0\146\4"))
     end)
 
     it("refuses a copy reaching before the start of the output", function()
-        assert.is_false(pcall(compress.inflateRaw, TOO_FAR))
+        assert.is_false(pcall(data.inflateRaw, TOO_FAR))
     end)
 
     it("refuses an empty string", function()
-        assert.is_false(pcall(compress.inflateRaw, ""))
+        assert.is_false(pcall(data.inflateRaw, ""))
     end)
 end)

@@ -9,7 +9,7 @@
 --- by builds that link no compiler at all.
 
 local sdl <const> = require("tecs.ffi.sdl3")
-local filesystem <const> = require("tecs.platform.filesystem")
+local content <const> = require("tecs.platform.content")
 
 local K <const> = sdl.K
 local buffer <const> = require("string.buffer")
@@ -192,7 +192,7 @@ end
 
 --- Reads a pack from `path`, or nil if there is no file there.
 function shaderpack.read(path: string): shaderpack.Pack
-    local bytes = filesystem.read(path)
+    local bytes = content.read(path)
     if bytes == nil then
         return nil
     end

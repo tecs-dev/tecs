@@ -45,7 +45,7 @@ Every function and type this module carries, rendered from {sources}."""
 #
 # A class module renders under the class as well as the module, because that is
 # how a game reaches it: `tecs.camera.Camera.create`, never `tecs.camera.create`.
-# `tecs.audio` and `tecs.data` are the pages with several sources, because each
+# `tecs.audio` and `tecs.input` are the pages with several sources, because each
 # is one module to a game and several files here.
 #
 # A module that sits inside another module has its own page in a directory
@@ -57,8 +57,11 @@ Every function and type this module carries, rendered from {sources}."""
 # game writes it as, with nothing to disambiguate.
 #
 # A page whose module is several modules at one level names them all, in the
-# order its prose reads: `tecs.data` is JSON, compression and hashing, and its
-# reference section runs the same way.
+# order its prose reads: `tecs.input` is gameplay input, gamepads and sensors,
+# and its reference section runs the same way. One source is the better shape
+# and the one to move towards, since a public name backed by one module is a
+# public name `src/tecs/init.tl` types by that module's own record rather than
+# by a second copy of it.
 #
 # `tecs.version` is a string and has no source to render, and neither has a
 # namespace that carries only other modules: `docs/modules/gfx/index.md` is
@@ -77,22 +80,9 @@ MODULES = [
     ),
     ("docs/modules/camera.md", [("src/tecs/gfx/Camera.tl", "tecs.camera.Camera")]),
     ("docs/modules/components.md", [("src/tecs/components.tl", "tecs.components")]),
-    (
-        "docs/modules/data.md",
-        [
-            ("src/tecs/data.tl", "tecs.data"),
-            ("src/tecs/compress.tl", "tecs.data"),
-            ("src/tecs/hash.tl", "tecs.data"),
-        ],
-    ),
+    ("docs/modules/data.md", [("src/tecs/data.tl", "tecs.data")]),
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
-    (
-        "docs/modules/filesystem/index.md",
-        [
-            ("src/tecs/platform/paths.tl", "tecs.filesystem"),
-            ("src/tecs/platform/filesystem.tl", "tecs.filesystem"),
-        ],
-    ),
+    ("docs/modules/filesystem/index.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
     ("docs/modules/filesystem/watch.md", [("src/tecs/platform/watch.tl", "tecs.filesystem.watch")]),
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
     ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),
@@ -111,15 +101,7 @@ MODULES = [
     ("docs/modules/particles.md", [("src/tecs/gfx/particles.tl", "tecs.particles")]),
     ("docs/modules/renderer.md", [("src/tecs/Renderer.tl", "tecs.renderer.Renderer")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
-    (
-        "docs/modules/system.md",
-        [
-            ("src/tecs/platform/capabilities.tl", "tecs.system"),
-            ("src/tecs/platform/clipboard.tl", "tecs.system"),
-            ("src/tecs/platform/proc.tl", "tecs.system"),
-            ("src/tecs/platform/system.tl", "tecs.system"),
-        ],
-    ),
+    ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/text.md", [("src/tecs/gfx/text.tl", "tecs.text")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),
     ("docs/modules/window.md", [("src/tecs/platform/Window.tl", "tecs.window.Window")]),

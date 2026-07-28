@@ -425,15 +425,14 @@ describe("mcp reload_font", function()
         -- file it stat'd, which is that resolved against the content root. Both
         -- spellings have to reach the one font or an edit picked up by the
         -- watcher is refused as a font nothing loaded.
-        local paths = require("tecs.platform.paths")
-        local contentRoot = paths.assetRoot()
-        paths.setAssetRoot(dir)
+        local contentRoot = filesystem.assetRoot()
+        filesystem.setAssetRoot(dir)
         write(dir .. "relative.json", metrics(256, 30))
         local relative = text.loadFont({ metrics = "relative.json", atlas = dir .. "specfont.png" })
 
         write(dir .. "relative.json", metrics(256, 51))
         local ok, _, message = callTool({ path = dir .. "relative.json" })
-        paths.setAssetRoot(contentRoot)
+        filesystem.setAssetRoot(contentRoot)
 
         assert.is_true(ok, message)
         assert.are.equal(51, relative.glyphs[72].xAdvance)
@@ -459,7 +458,6 @@ describe("mcp watch", function()
         return result.isError ~= true, result.structuredContent, text
     end
 
-    local paths = require("tecs.platform.paths")
     local dir, contentRoot
 
     -- The tool takes no root, so it watches the content root. Pointing that at
@@ -468,13 +466,13 @@ describe("mcp watch", function()
     -- into every later spec.
     before_each(function()
         dir = tempDir()
-        contentRoot = paths.assetRoot()
-        paths.setAssetRoot(dir)
+        contentRoot = filesystem.assetRoot()
+        filesystem.setAssetRoot(dir)
         watch.uninstall()
     end)
 
     after_each(function()
-        paths.setAssetRoot(contentRoot)
+        filesystem.setAssetRoot(contentRoot)
         watch.uninstall()
         watch.on("shader", nil)
         os.execute("rm -rf '" .. dir .. "'")

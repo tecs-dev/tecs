@@ -14,7 +14,6 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
 local filesystem = require("tecs.platform.filesystem")
-local paths = require("tecs.platform.paths")
 local assets = require("tecs.assets")
 local workers = require("tecs.workers")
 
@@ -116,26 +115,26 @@ describe("platform.filesystem on the public surface", function()
         assert.is_not_nil(rawget(tecs, "filesystem"), "and the resolved namespace is kept, not rebuilt")
     end)
 
-    it("carries the path half beside the operations", function()
-        -- Two modules under one name, which is the point of the merge: a path
-        -- is resolved and then acted on without naming a second module.
+    it("is the module itself, not a table standing in front of it", function()
+        -- The path half and the operations are one file under one name, so
+        -- the public name needs nothing built for it: `tecs.filesystem` is the
+        -- table `require` answers with, and everything on it is reached
+        -- directly rather than through a proxy that has to restate it.
         local tecs = require("tecs")
-        assert.are.equal(paths.assetPath, tecs.filesystem.assetPath)
-        assert.are.equal(paths.writablePath, tecs.filesystem.writablePath)
-        assert.are.equal(paths.basePath, tecs.filesystem.basePath)
+        assert.is_true(rawequal(filesystem, tecs.filesystem))
     end)
 
-    it("sends a write to the module that answers the name", function()
+    it("takes a write on the value that reads it back", function()
         -- `organisation` is a value a game assigns and `preferencePath` reads
-        -- back, so a write parked on the namespace would be a write nothing
-        -- sees. The name is looked up the way a read looks it up.
+        -- back. Being the module is what makes that plain: the write lands
+        -- where the read looks, with nothing in between to route it.
         local tecs = require("tecs")
-        local previous = paths.organisation
+        local previous = filesystem.organisation
         tecs.filesystem.organisation = "Ex Nihilo"
-        assert.are.equal("Ex Nihilo", paths.organisation)
+        assert.are.equal("Ex Nihilo", filesystem.organisation)
         assert.are.equal("Ex Nihilo", tecs.filesystem.organisation)
         tecs.filesystem.organisation = previous
-        assert.are.equal(previous, paths.organisation)
+        assert.are.equal(previous, filesystem.organisation)
     end)
 
     it("reaches the watcher one level down", function()
@@ -434,7 +433,7 @@ describe("platform.filesystem", function()
         it("answers the working directory with a trailing separator", function()
             local cwd = filesystem.currentDirectory()
             assert.is_string(cwd)
-            assert.are.equal("/", cwd:sub(-1), "SDL answers with a trailing separator, as paths.basePath does")
+            assert.are.equal("/", cwd:sub(-1), "SDL answers with a trailing separator, as filesystem.basePath does")
             assert.are.equal("/", cwd:sub(1, 1), "and an absolute path")
         end)
 
@@ -582,7 +581,6 @@ describe("platform.filesystem", function()
                 source = [==[
                     local workers = require("tecs.workers")
                     local filesystem = require("tecs.platform.filesystem")
-local paths = require("tecs.platform.paths")
                     local self = workers.current()
                     local job = self:receive(5000)
                     local entries = filesystem.glob(job.root)

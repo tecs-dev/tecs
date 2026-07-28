@@ -1,13 +1,29 @@
---- Doing things to paths: reading, writing, listing, creating, removing,
---- renaming, copying, and asking what is there.
+--- Files: where they are, what is in them, and when one changed.
 ---
---- The path half of `tecs.filesystem` is `paths` beside this file, which
---- answers *where*; this answers *what to do once you have one*. There is
---- deliberately no second way to resolve a path here: every function takes the
---- string the platform takes, so `paths.writablePath("slot1")`,
---- a path a user typed and an absolute path from somewhere else all work and
---- none of them is rewritten on the way through. No virtual filesystem, no
---- mount table, no invented scheme.
+--- Where and what are one module because they were never two questions. Every
+--- path a game touches is resolved and then acted on in the same breath, and a
+--- caller holding one half had to name the other to do anything with it.
+---
+--- ## Where a path comes from
+---
+--- Never the process working directory. On desktop that happens to work when
+--- launched from a project root and breaks the moment someone double-clicks; on
+--- mobile there is no meaningful working directory at all, and writing next to
+--- the executable is not permitted. So the platform is asked, through
+--- `adapter`, which is the seam a licensed port replaces. Assets sit beside the
+--- executable, or wherever the bundle put them; writable state goes where the
+--- platform keeps it for this application and nowhere else.
+---
+--- There is deliberately no second way to resolve a path: every function here
+--- takes the string the platform takes, so `writablePath("slot1")`, a path a
+--- user typed and an absolute path from somewhere else all work and none of
+--- them is rewritten on the way through. No virtual filesystem, no mount table,
+--- no invented scheme.
+---
+--- Watching is the one thing below rather than beside, under
+--- `tecs.filesystem.watch`. It is a running poller with a lifecycle of its own
+--- rather than a call that answers, and its vocabulary, an interval, a settle
+--- count and a set of kinds, means nothing to the rest of this.
 ---
 --- ## Nothing here reaches the operating system
 ---
@@ -183,8 +199,23 @@
 
 local adapter <const> = require("tecs.platform.adapter")
 local storagebackend <const> = require("tecs.platform.storagebackend")
+local content <const> = require("tecs.platform.content")
+
+-- Type-only, so nothing loads here: the field below declares the name and
+-- `tecs.init` fills it in on the first read of it. `watch` reaches content
+-- through `platform.content` rather than through this module, which is what
+-- keeps naming its type from being a require cycle.
+local type watch = require("tecs.platform.watch")
 
 local record filesystem
+    --- Polling for changed files, and dispatching what changed.
+    watch: watch
+
+    --- Organisation and application names, used to name the writable
+    --- directory. Set before anything asks for `preferencePath`.
+    organisation: string
+    application: string
+
     --- What a path is. Symbolic links are followed, so a link never reports as
     --- one: "other" is a socket, a fifo or a device.
     type PathType = storagebackend.PathType
@@ -211,9 +242,6 @@ local type GlobOptions = filesystem.GlobOptions
 local type Writer = filesystem.Writer
 local type Reader = filesystem.Reader
 
---- Every path read or decoded this process, by the kind it was read as.
-local opened <const>: {string: string} = {}
-
 --- Raises when a required string argument is missing.
 ---
 --- LuaJIT passes a Lua nil to a `const char *` parameter as a null pointer, so
@@ -226,6 +254,70 @@ local function required(value: string, what: string)
     if value == nil then
         error(("tecs: filesystem.%s needs a path"):format(what), 3)
     end
+end
+
+filesystem.organisation = "tecs"
+filesystem.application = "tecs"
+
+--- Directory the executable was loaded from, with a trailing separator.
+---
+--- @return The directory. Empty rather than nil when the platform declines to
+---     say, which is the case on some targets and is not an error: a caller
+---     falls back to a relative path.
+function filesystem.basePath(): string
+    return content.basePath()
+end
+
+--- Writable directory for this application, created if absent.
+---
+--- @return The directory, with a trailing separator, named from `organisation`
+---     and `application`. The only place a build may write: everything else is
+---     read-only on at least one target, and finding that out at run time on a
+---     device is expensive.
+function filesystem.preferencePath(): string
+    return content.prefPath(filesystem.organisation, filesystem.application)
+end
+
+--- Root the engine reads content from, with a trailing separator.
+---
+--- @return `TECS_ASSETS` if it is set, then what the host was told at build
+---     time, then `basePath`. Cached until the platform changes.
+function filesystem.assetRoot(): string
+    return content.assetRoot()
+end
+
+--- Resolves `relative` against the asset root.
+---
+--- @param relative A path under the content root, with `/` separators. Joined,
+---     not validated: nothing here asks whether the file is there.
+--- @return The absolute path.
+function filesystem.assetPath(relative: string): string
+    return content.assetPath(relative)
+end
+
+--- Resolves `relative` against the writable root.
+---
+--- @param relative A path under the preference directory.
+--- @return The absolute path.
+function filesystem.writablePath(relative: string): string
+    return filesystem.preferencePath() .. relative
+end
+
+--- Overrides the asset root, for a test or a tool.
+---
+--- @param root The directory to read content from. A trailing separator is
+---     added when it is missing rather than doubled when it is not.
+function filesystem.setAssetRoot(root: string)
+    content.setAssetRoot(root)
+end
+
+--- Forgets the cached roots.
+---
+--- A platform change is noticed without this, so this is for a test that moved
+--- something under the process. Named for what it forgets rather than as a bare
+--- `reset`, which on this module would read as resetting the filesystem.
+function filesystem.resetPaths()
+    content.reset()
 end
 
 --- What is at `path`, or nil when there is nothing there.
@@ -352,10 +444,7 @@ end
 --- Decoding happens elsewhere, on a worker, so `assets` records what it opened
 --- through here rather than keeping a second list nothing else can see.
 function filesystem.note(path: string, kind: string)
-    local held <const> = opened[path]
-    if held == nil or (held == "document" and kind ~= "document") then
-        opened[path] = kind
-    end
+    content.note(path, kind)
 end
 
 --- Reads a whole file and returns its bytes, or nil when there is none there.
@@ -368,7 +457,7 @@ end
 --- Synchronous, which is what makes it usable while a world is being built.
 --- This is for the documents a game or the engine reads once; a decode a frame
 --- should not wait on goes through `assets.loadImage` or `assets.loadSound`.
---- @param path An absolute path, or one `paths.assetPath` has resolved.
+--- @param path An absolute path, or one `assetPath` has resolved.
 --- @param kind What the bytes were read as, for anything watching what this
 ---     process has opened. Bytes are bytes, so nothing here can tell a font's
 ---     metrics from a level; whatever asked can, and this is where it says so.
@@ -376,12 +465,7 @@ end
 --- @return The bytes, or nil when the file could not be read.
 function filesystem.read(path: string, kind?: string): string
     required(path, "read")
-    local bytes <const> = adapter.storage().read(path)
-    if bytes == nil then
-        return nil
-    end
-    filesystem.note(path, kind or "document")
-    return bytes
+    return content.read(path, kind)
 end
 
 --- Every path this process has read or decoded, by the kind it was read as:
@@ -393,7 +477,7 @@ end
 ---     copy it. Shared, so a caller that means to keep it does not also mean to
 ---     edit it.
 function filesystem.loaded(): {string: string}
-    return opened
+    return content.loaded()
 end
 
 --- A `Writer` for a backend that has no streaming write.
@@ -506,7 +590,7 @@ end
 ---
 --- Here because a command line tool is given relative paths by whoever ran it
 --- and has to resolve them against something. It is emphatically not where a
---- game reads content from or writes state to: `paths.assetRoot` and `paths.preferencePath`
+--- game reads content from or writes state to: `assetRoot` and `preferencePath`
 --- answer that, and say why. A platform with no working directory answers nil,
 --- which is most of the ones that are not a desktop.
 --- @return The directory, or nil and the reason.
@@ -524,7 +608,7 @@ end
 --- so rather than inventing a path: macOS has no saved-games, screenshots or
 --- templates folder and answers nil for all three, and a platform that is not a
 --- desktop may have none of them. Treat every one of these as absent until it
---- is not, and never as a place a build may write; `paths.preferencePath` is the only
+--- is not, and never as a place a build may write; `preferencePath` is the only
 --- such place.
 --- @return The folder, or nil and the reason.
 function filesystem.userFolder(which: UserFolder): string, string

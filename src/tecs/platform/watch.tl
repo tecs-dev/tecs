@@ -51,9 +51,8 @@
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local filesystem <const> = require("tecs.platform.filesystem")
-local paths <const> = require("tecs.platform.paths")
-local capabilities <const> = require("tecs.platform.capabilities")
+local content <const> = require("tecs.platform.content")
+local system <const> = require("tecs.platform.system")
 local log <const> = require("tecs.log")
 
 local C <const> = sdl.C
@@ -185,7 +184,7 @@ end
 --- A release links no shader compiler, which is what tells it apart from a
 --- development build, and it is the same bit `reload_shaders` refuses on.
 function watch.available(): boolean
-    return capabilities.capabilities().runtimeShaders
+    return system.capabilities().runtimeShaders
 end
 
 --- Starts watching, and refuses on a build that should not.
@@ -206,7 +205,7 @@ function watch.install(config?: watch.Config)
     if settleCount < 0 then
         error("tecs: settle counts polls, so it cannot be negative", 2)
     end
-    root = given.root or paths.assetRoot()
+    root = given.root or content.assetRoot()
     entries = {}
     running = true
     dispatched = 0
@@ -289,7 +288,7 @@ end
 --- A path is accepted as it reads the first time it is seen, so a run that
 --- loads an image on frame ten does not reload it on frame eleven.
 local function adopt()
-    local loaded = filesystem.loaded()
+    local loaded = content.loaded()
     for path, loadedAs in pairs(loaded) do
         if entries[path] == nil and path:sub(1, #root) == root then
             local size, stamp = look(path)

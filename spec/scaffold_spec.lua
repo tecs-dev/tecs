@@ -18,7 +18,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local proc = require("tecs.platform.proc")
+local system = require("tecs.platform.system")
 local filesystem = require("tecs.platform.filesystem")
 
 -- Absolute, because every child below is given a working directory of its own
@@ -70,7 +70,7 @@ local function tecs(args, cwd)
         argv[#argv + 1] = argument
     end
 
-    local run = proc.runProcess({
+    local run = system.runProcess({
         args = argv,
         cwd = cwd,
         env = {
@@ -85,7 +85,7 @@ local function tecs(args, cwd)
     -- Both streams, because a compiler splits itself between them: the
     -- diagnostics that matter here land on one and the summary on the other,
     -- and a spec that read only one would report an empty string as a failure.
-    local result = proc.processResult(run)
+    local result = system.processResult(run)
     if result ~= nil then
         result.output = (result.output or "") .. (result.errorOutput or "")
     end

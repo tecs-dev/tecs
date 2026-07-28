@@ -59,13 +59,17 @@ local function recordsIn(path)
     return found
 end
 
---- The names SURFACE describes, which is what the resolver reads.
+--- The names SURFACE describes, which is what the resolver reads: every
+--- top-level name, each carrying the names its `within` puts one level down.
 ---
---- Matched on indentation. A name one level down sits inside the line of the
---- name that carries it, so it is not mistaken for a name of its own here; the
---- record is what declares those, and they are checked through it.
+--- Scanned by brace depth rather than by indentation, because a descriptor is
+--- written on one line while it fits and wraps when it does not, and the
+--- nesting is what says which name is under which. An identifier followed by
+--- `=` and then `{` opens a table: at depth one that is a public name, and at
+--- depth three under a `within` it is a public name one level down. Nothing in
+--- the table holds a brace inside a string, so no quoting is tracked.
 local function surfaceNames(path)
-    local found = {}
+    local text = {}
     local inside = false
     for line in assert(io.lines(path)) do
         if line:match("^local SURFACE") then
@@ -73,9 +77,33 @@ local function surfaceNames(path)
         elseif inside and line == "}" then
             inside = false
         elseif inside then
-            local name = line:match("^    ([%a_][%w_]*) = {")
-            if name then
-                found[name] = true
+            text[#text + 1] = line
+        end
+    end
+
+    local found = {}
+    local names = {}
+    local token, last, key = "", "", ""
+    local depth = 0
+    for character in table.concat(text):gmatch(".") do
+        if character:match("[%w_]") then
+            token = token .. character
+        else
+            if token ~= "" then
+                last, token = token, ""
+            end
+            if character == "=" then
+                key, last = last, ""
+            elseif character == "{" then
+                depth = depth + 1
+                names[depth], key, last = key, "", ""
+                if depth == 1 then
+                    found[names[1]] = {}
+                elseif depth == 3 and names[2] == "within" then
+                    found[names[1]][names[3]] = true
+                end
+            elseif character == "}" then
+                depth, key, last = depth - 1, "", ""
             end
         end
     end
@@ -112,6 +140,7 @@ end
 
 local records = recordsIn(INIT)
 local top = records.tecs
+local described = surfaceNames(INIT)
 
 --- The two names on `tecs` that no descriptor answers, and why each is direct.
 --- `ecs` reaches nothing below Lua, so it is assigned as the module returns
@@ -136,7 +165,6 @@ describe("the public surface", function()
     end)
 
     it("declares every name the resolver answers, and no more", function()
-        local described = surfaceNames(INIT)
         assert.is_true(next(described) ~= nil, "no descriptors were parsed from " .. INIT)
 
         local declared = {}
@@ -148,7 +176,7 @@ describe("the public surface", function()
             assert.is_true(declared[name], "SURFACE describes `" .. name .. "`, which `record tecs` does not declare")
         end
         for _, field in ipairs(top) do
-            local answered = described[field.name] or DIRECT[field.name]
+            local answered = described[field.name] ~= nil or DIRECT[field.name] == true
             assert.is_true(answered, "`record tecs` declares `" .. field.name .. "`, which no descriptor answers")
         end
     end)
@@ -175,6 +203,18 @@ describe("the public surface", function()
             local paths = pathsOf(value)
             if #paths > 0 then
                 assert.is_true(endsIn(paths, name), "tecs." .. name .. " is the module " .. table.concat(paths, ", "))
+                -- A module answering a public name carries the names below it
+                -- as fields of its own, hung there by the resolver. Nothing
+                -- else declares them, so this is where they are held: the
+                -- record that types the module is the module's own.
+                for member in pairs(described[name] or {}) do
+                    local held = value[member]
+                    assert.is_not_nil(held, "tecs." .. name .. "." .. member .. " resolves to nil")
+                    assert.is_true(
+                        endsIn(pathsOf(held), member),
+                        "tecs." .. name .. "." .. member .. " is not the module it names"
+                    )
+                end
                 return
             end
 
@@ -199,7 +239,7 @@ describe("the public surface", function()
         end)
     end
 
-    describe("a module inside a module", function()
+    describe("a module inside a namespace", function()
         it("is the module itself and not a copy of it", function()
             assert.is_true(rawequal(tecs.gfx.layers, require("tecs.gfx.layers")))
         end)
@@ -209,8 +249,8 @@ describe("the public surface", function()
             -- Held beside the namespace rather than on it. The table a caller
             -- holds stays empty so that both metamethods keep being consulted;
             -- a member written onto it would stop `__index` firing, and with it
-            -- the write-through that sends `tecs.filesystem.organisation` to
-            -- the module that reads it back.
+            -- the write-through that sends a write to whichever of the modules
+            -- below reads it back.
             assert.is_nil(rawget(tecs.gfx, "layers"))
         end)
 
@@ -223,6 +263,37 @@ describe("the public surface", function()
         it("answers nil for a name it does not carry", function()
             assert.is_nil(tecs.gfx.nosuchthing)
             assert.is_nil(tecs.gfx.Camera)
+        end)
+    end)
+
+    describe("a module inside a module", function()
+        it("answers with the parent module rather than a table in front of it", function()
+            -- The whole point of the shape: `tecs.filesystem` is the module,
+            -- so a game writing `tecs.filesystem.read` reaches the same
+            -- function `require` answers with, and `init.tl` needs no second
+            -- copy of the module's signatures to type it by.
+            assert.is_true(rawequal(tecs.filesystem, require("tecs.platform.filesystem")))
+        end)
+
+        it("hangs the name below it on the parent, once", function()
+            assert.is_true(rawequal(tecs.filesystem.watch, require("tecs.platform.watch")))
+            -- Written onto the module after the first read, which a namespace
+            -- cannot do: there the table has to stay empty so `__index` keeps
+            -- firing. A module owns every name it answers, so there is nothing
+            -- to route and nothing to keep consulting.
+            assert.is_true(rawequal(rawget(tecs.filesystem, "watch"), require("tecs.platform.watch")))
+        end)
+
+        it("takes a write on the module that reads it back", function()
+            local filesystem = require("tecs.platform.filesystem")
+            local previous = filesystem.organisation
+            tecs.filesystem.organisation = "Ex Nihilo"
+            assert.are.equal("Ex Nihilo", filesystem.organisation)
+            tecs.filesystem.organisation = previous
+        end)
+
+        it("answers nil for a name neither it nor the names below it carry", function()
+            assert.is_nil(tecs.filesystem.nosuchthing)
         end)
     end)
 end)

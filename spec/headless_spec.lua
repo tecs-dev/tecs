@@ -112,7 +112,8 @@ describe("tecs headless", function()
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
                     "tecs.assets", "tecs.physics", "tecs.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3", "tecs.ffi.box2d",
-                    "tecs.data", "tecs.hash", "tecs.compress",
+                    "tecs.data", "tecs.platform.system",
+                    "tecs.platform.filesystem", "tecs.platform.watch",
                 }
                 local loaded = {}
                 for _, name in ipairs(engine) do
@@ -166,6 +167,32 @@ describe("tecs headless", function()
             -- that member and answers with the module itself, and no sibling
             -- came with it.
             assert.are.equal("table false true none\n", output)
+        end)
+
+        -- And the same property where the parent is a module rather than a
+        -- table built for the name. `tecs.filesystem` is the module itself, so
+        -- naming it loads that module and nothing else: the watcher below it
+        -- polls on a timer and reaches SDL, and a program that reads a file has
+        -- not asked for one.
+        it("hangs a module under a module without loading it", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local filesystem = tecs.filesystem
+                local eager = package.loaded["tecs.platform.watch"] ~= nil
+                local watch = tecs.filesystem.watch
+
+                print(("%s %s %s %s"):format(
+                    tostring(rawequal(filesystem, require("tecs.platform.filesystem"))),
+                    tostring(eager),
+                    tostring(rawequal(watch, require("tecs.platform.watch"))),
+                    tostring(tecs.filesystem.nosuchthing)))
+            ]],
+                false
+            )
+            -- The name is the module, the watcher did not come with it, and
+            -- reading it answers with the module rather than a copy.
+            assert.are.equal("true false true nil\n", output)
         end)
 
         it("reports a mistyped engine name as nil", function()

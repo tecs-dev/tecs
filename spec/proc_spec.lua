@@ -10,7 +10,7 @@
 -- caller can still end a child it cannot touch, and that teardown does not
 -- leave one behind.
 --
--- A run is a Future<proc.Result>, so the four words for how it ended are the
+-- A run is a Future<system.Result>, so the four words for how it ended are the
 -- ones every other asynchronous thing in the tree uses. The one worth reading
 -- twice is that an exit code is not a failure: a child that ran and exited 3
 -- settles "ready" carrying a result that says 3, because the code is the
@@ -22,7 +22,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local Application = require("tecs.Application")
-local proc = require("tecs.platform.proc")
+local system = require("tecs.platform.system")
 local Future = require("tecs.Future")
 local sdl = require("tecs.ffi.sdl3")
 
@@ -40,7 +40,7 @@ end
 local function shell(script, options)
     local settings = options or {}
     settings.args = { "/bin/sh", "-c", script }
-    return proc.runProcess(settings):wait(20000)
+    return system.runProcess(settings):wait(20000)
 end
 
 --- Drops a trailing newline, which every one of these fixtures adds.
@@ -52,19 +52,19 @@ end
 --- land on rather than a task still queued.
 local function untilStarted(run)
     local deadline = now() + 20000
-    while proc.processResult(run).pid == 0 and now() < deadline do
-        proc.updateProcesses()
+    while system.processResult(run).pid == 0 and now() < deadline do
+        system.updateProcesses()
     end
-    assert.is_true(proc.processResult(run).pid > 0, "the child never started")
+    assert.is_true(system.processResult(run).pid > 0, "the child never started")
 end
 
 describe("proc", function()
     teardown(function()
-        proc.shutdownProcesses()
+        system.shutdownProcesses()
     end)
 
     it("runs a program and answers its output and exit code", function()
-        local run = proc.runProcess({ args = { "/bin/echo", "hello", "child" } })
+        local run = system.runProcess({ args = { "/bin/echo", "hello", "child" } })
         assert.are.equal("pending", run.status)
 
         run:wait(20000)
@@ -77,7 +77,7 @@ describe("proc", function()
         assert.is_true(result:succeeded())
         assert.is_true(result.pid > 0, "a started child reports its process id")
         assert.are.same({ "/bin/echo", "hello", "child" }, result.args)
-        assert.are.equal(result, proc.processResult(run), "the future carries the record it filled in")
+        assert.are.equal(result, system.processResult(run), "the future carries the record it filled in")
     end)
 
     -- The distinction the four states exist to make. A tool whose exit code is
@@ -100,7 +100,7 @@ describe("proc", function()
     end)
 
     it("reports a program it cannot start as a status, not a raise", function()
-        local run = proc.runProcess({ args = { "/no/such/tecs-program" } })
+        local run = system.runProcess({ args = { "/no/such/tecs-program" } })
         run:wait(20000)
         assert.are.equal("failed", run.status, "a child that never started is the failure case")
         assert.is_string(run.error)
@@ -136,16 +136,18 @@ describe("proc", function()
     it("feeds bytes to the child and closes its input", function()
         -- cat reads to end of input, so this only returns if the input pipe
         -- was closed once the bytes were through.
-        local run = proc.runProcess({
-            args = { "/bin/cat" },
-            input = "fed through a pipe\n",
-        }):wait(20000)
+        local run = system
+            .runProcess({
+                args = { "/bin/cat" },
+                input = "fed through a pipe\n",
+            })
+            :wait(20000)
         assert.are.equal("ready", run.status)
         assert.are.equal("fed through a pipe", trimmed(run.value.output))
     end)
 
     it("does not hold the caller while the child runs", function()
-        local slow = proc.runProcess({ args = { "/bin/sh", "-c", "sleep 1; echo late" } })
+        local slow = system.runProcess({ args = { "/bin/sh", "-c", "sleep 1; echo late" } })
 
         -- A frame's worth of polling, over and over, while the child sleeps.
         -- Every pass has to come straight back: the blocking wait and the
@@ -153,7 +155,7 @@ describe("proc", function()
         local polls = 0
         local pollStart = now()
         while now() - pollStart < 200 do
-            proc.updateProcesses()
+            system.updateProcesses()
             polls = polls + 1
         end
         assert.are.equal("pending", slow.status, "the child is still going")
@@ -170,7 +172,7 @@ describe("proc", function()
         -- happens to start them.
         local runs = {}
         for index = 1, 4 do
-            runs[index] = proc.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+            runs[index] = system.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
         end
 
         -- A child reports its process id as soon as it is started, so four ids
@@ -179,10 +181,10 @@ describe("proc", function()
         local deadline = now() + 20000
         local live
         repeat
-            proc.updateProcesses()
+            system.updateProcesses()
             live = 0
             for index = 1, 4 do
-                if proc.processResult(runs[index]).pid > 0 and runs[index].status == "pending" then
+                if system.processResult(runs[index]).pid > 0 and runs[index].status == "pending" then
                     live = live + 1
                 end
             end
@@ -191,10 +193,10 @@ describe("proc", function()
 
         local seen = {}
         for index = 1, 4 do
-            local pid = proc.processResult(runs[index]).pid
+            local pid = system.processResult(runs[index]).pid
             assert.is_nil(seen[pid], "each child is its own process")
             seen[pid] = true
-            proc.killProcess(runs[index], true)
+            system.killProcess(runs[index], true)
         end
 
         for index = 1, 4 do
@@ -207,21 +209,22 @@ describe("proc", function()
     -- other subsystem uses, keeping input order whatever order they finish in.
     it("waits for several runs through one join", function()
         local runs = {
-            proc.runProcess({ args = { "/bin/sh", "-c", "sleep 0.3; echo first" } }),
-            proc.runProcess({ args = { "/bin/echo", "second" } }),
-            proc.runProcess({ args = { "/bin/echo", "third" } }),
+            system.runProcess({ args = { "/bin/sh", "-c", "sleep 0.3; echo first" } }),
+            system.runProcess({ args = { "/bin/echo", "second" } }),
+            system.runProcess({ args = { "/bin/echo", "third" } }),
         }
         local joined = Future.all(runs):wait(20000)
 
         assert.are.equal("ready", joined.status)
-        assert.are.equal(0, proc.pendingProcesses())
+        assert.are.equal(0, system.pendingProcesses())
         assert.are.equal("first", trimmed(joined.value[1].output))
         assert.are.equal("second", trimmed(joined.value[2].output))
         assert.are.equal("third", trimmed(joined.value[3].output))
     end)
 
     it("composes a run into what the caller actually wanted", function()
-        local text = proc.runProcess({ args = { "/bin/echo", "composed" } })
+        local text = system
+            .runProcess({ args = { "/bin/echo", "composed" } })
             :map(function(result)
                 return trimmed(result.output)
             end)
@@ -232,11 +235,11 @@ describe("proc", function()
     end)
 
     it("kills a child on request", function()
-        local run = proc.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        local run = system.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
         -- The kill is a message to the worker, so the child has to exist
         -- before it lands; the worker starts it before it reads the next
         -- message, so ordering is the channel's rather than a sleep's.
-        proc.killProcess(run, true)
+        system.killProcess(run, true)
         run:wait(20000)
         assert.are.equal("cancelled", run.status, "this process ended it")
         assert.are.equal("killed", run.error)
@@ -245,7 +248,7 @@ describe("proc", function()
     -- The other spelling, and the one that counts holders. A run nothing else
     -- is watching ends when its last consumer gives it up.
     it("ends a child when the last holder of its future cancels", function()
-        local run = proc.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
+        local run = system.runProcess({ args = { "/bin/sh", "-c", "sleep 30" } })
         untilStarted(run)
 
         run:cancel()
@@ -253,14 +256,14 @@ describe("proc", function()
 
         -- And the kill really went out: the worker stops holding the child.
         local deadline = now() + 20000
-        while proc.pendingProcesses() > 0 and now() < deadline do
-            proc.updateProcesses()
+        while system.pendingProcesses() > 0 and now() < deadline do
+            system.updateProcesses()
         end
-        assert.are.equal(0, proc.pendingProcesses(), "the runner is still holding the child")
+        assert.are.equal(0, system.pendingProcesses(), "the runner is still holding the child")
     end)
 
     it("keeps the child for another holder when one gives up", function()
-        local run = proc.runProcess({ args = { "/bin/echo", "shared" } })
+        local run = system.runProcess({ args = { "/bin/echo", "shared" } })
         run._watchers = run._watchers + 1
 
         run:cancel()
@@ -273,10 +276,12 @@ describe("proc", function()
 
     it("kills a child that outruns its timeout", function()
         local started = now()
-        local run = proc.runProcess({
-            args = { "/bin/sh", "-c", "sleep 30" },
-            timeoutMs = 200,
-        }):wait(20000)
+        local run = system
+            .runProcess({
+                args = { "/bin/sh", "-c", "sleep 30" },
+                timeoutMs = 200,
+            })
+            :wait(20000)
         assert.are.equal("cancelled", run.status)
         assert.are.equal("timed out", run.error)
         assert.is_true(now() - started < 5000, "the timeout is what ended it")
@@ -286,13 +291,15 @@ describe("proc", function()
     -- question it was asked. What it managed to say before it was stopped is
     -- still worth having, and it is on the record the run filled in.
     it("keeps what a child wrote before it was killed", function()
-        local run = proc.runProcess({
-            args = { "/bin/sh", "-c", "echo spoke; sleep 30" },
-            timeoutMs = 500,
-        }):wait(20000)
+        local run = system
+            .runProcess({
+                args = { "/bin/sh", "-c", "echo spoke; sleep 30" },
+                timeoutMs = 500,
+            })
+            :wait(20000)
         assert.are.equal("cancelled", run.status)
         assert.is_nil(run.value)
-        assert.are.equal("spoke", trimmed(proc.processResult(run).output))
+        assert.are.equal("spoke", trimmed(system.processResult(run).output))
     end)
 
     it("reads more than a pipe will hold without deadlocking", function()
@@ -305,27 +312,27 @@ describe("proc", function()
 
     it("refuses a run with nothing to run", function()
         assert.has_error(function()
-            proc.runProcess({ args = {} })
+            system.runProcess({ args = {} })
         end)
         assert.has_error(function()
-            proc.runProcess({ args = { "/bin/echo", 7 } })
+            system.runProcess({ args = { "/bin/echo", 7 } })
         end)
     end)
 
     it("kills a child that is still running at shutdown, and returns", function()
-        local run = proc.runProcess({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
+        local run = system.runProcess({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
         untilStarted(run)
 
         local started = now()
-        proc.shutdownProcesses()
+        system.shutdownProcesses()
         local elapsed = now() - started
 
         assert.are.equal("cancelled", run.status, "teardown ends a child, it does not detach it")
-        assert.is_false(proc.processRunnerInstalled(), "the worker is joined")
+        assert.is_false(system.processRunnerInstalled(), "the worker is joined")
         assert.is_true(elapsed < 5000, "teardown is bounded: " .. elapsed .. "ms")
 
         -- And the module still works afterwards: the next run installs again.
-        local after = proc.runProcess({ args = { "/bin/echo", "again" } }):wait(20000)
+        local after = system.runProcess({ args = { "/bin/echo", "again" } }):wait(20000)
         assert.are.equal("again", trimmed(after.value.output))
     end)
 
@@ -337,13 +344,13 @@ describe("proc", function()
     it("leaves nothing pending after shutdown", function()
         local runs = {}
         for index = 1, 3 do
-            runs[index] = proc.runProcess({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
+            runs[index] = system.runProcess({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
         end
         untilStarted(runs[3])
 
-        proc.shutdownProcesses()
+        system.shutdownProcesses()
 
-        assert.are.equal(0, proc.pendingProcesses())
+        assert.are.equal(0, system.pendingProcesses())
         for index = 1, 3 do
             assert.are.equal(
                 "cancelled",
@@ -373,7 +380,7 @@ describe("proc", function()
         ]]):format(root, root))
         file:close()
 
-        local run = proc.runProcess({ args = { "luajit", script } }):wait(30000)
+        local run = system.runProcess({ args = { "luajit", script } }):wait(30000)
         os.remove(script)
 
         assert.are.equal("ready", run.status, run.error)
@@ -392,7 +399,7 @@ describe("proc", function()
             local run
             local app = build({
                 plugin = function()
-                    run = proc.runProcess({ args = { "/bin/echo", "framed" } })
+                    run = system.runProcess({ args = { "/bin/echo", "framed" } })
                 end,
             })
             assert.is_true(app:_init())
@@ -416,7 +423,7 @@ describe("proc", function()
             local run
             local app = build({
                 plugin = function()
-                    run = proc.runProcess({ args = { "/bin/sh", "-c", "sleep 60" } })
+                    run = system.runProcess({ args = { "/bin/sh", "-c", "sleep 60" } })
                 end,
             })
             assert.is_true(app:_init())
@@ -424,7 +431,7 @@ describe("proc", function()
 
             assert.is_true(app:_shutdown())
             assert.are.equal("cancelled", run.status, "the child outlived the application")
-            assert.is_false(proc.processRunnerInstalled(), "the runner thread outlived the application")
+            assert.is_false(system.processRunnerInstalled(), "the runner thread outlived the application")
         end)
     end)
 end)

@@ -12,14 +12,13 @@
 # in an annotation rather than looked up in an index.
 #
 # A module may sit inside another, one level and no deeper, and is written the
-# way a game writes it: `tecs.gfx.layers`. Those come from the record the parent
-# field names, and a field there is one of them when it is luacase and declared
-# as the type of the same name, which is how a module field is written: the
-# binding mirrors the module, so `layers: layers` and `watch: watch`. Both
-# halves are needed. A PascalCase field is a type and belongs on its owner's
-# page, and a luacase field declared as something else is a value the namespace
-# carries rather than a module under it: `null: data.Sentinel` and
-# `version: string` are values, and neither has a page nor wants one.
+# way a game writes it: `tecs.gfx.layers`. Those come from `SURFACE`, which is
+# where the nesting is declared: a `within` key is a name one level down. The
+# records cannot answer this, because a namespace with one principal module
+# resolves to that module and is typed by the module's own record rather than by
+# one written here. A `within` key that is PascalCase is a class reached through
+# its namespace, `tecs.input.Gamepad`, and belongs on its owner's page rather
+# than having one of its own; only a luacase one is a module wanting a page.
 #
 # Set equality both ways, because one direction is not enough. Checking only
 # that a name has a page lets pages for things that no longer exist pile up,
@@ -54,26 +53,45 @@ fi
 
 # Value fields of `record tecs`, then the subordinate modules of each. A
 # `type X = ...` line starts with "type" and is skipped; a doc comment starts
-# with "---". Every top-level record is read, since a field of `record tecs` may
-# name one of them and the modules below it are that record's own fields.
+# with "---". The nesting is read out of `SURFACE` beneath the records, by brace
+# depth: a descriptor is written on one line while it fits and wraps when it does
+# not, so indentation says nothing and the braces say everything. An identifier
+# followed by `=` and then `{` opens a table, and one opened at depth three
+# inside a `within` is a name one level down. No string in that table holds a
+# brace, so no quoting is tracked.
 public=$(awk '
-    /^local record [A-Za-z_][A-Za-z0-9_]*$/ { record = $3; next }
-    record != "" && /^end$/ { record = ""; next }
-    record != "" && /^    [A-Za-z_][A-Za-z0-9_]*: / {
+    /^local record tecs$/ { intecs = 1; next }
+    intecs && /^end$/ { intecs = 0; next }
+    intecs && /^    [A-Za-z_][A-Za-z0-9_]*: / {
         split($1, parts, ":")
-        fields[record] = fields[record] " " parts[1]
-        declared[record "." parts[1]] = $2
+        order[++count] = parts[1]
+        next
     }
+    /^local SURFACE/ { insurface = 1; next }
+    insurface && /^}$/ { insurface = 0; next }
+    insurface { text = text $0 }
     END {
-        count = split(fields["tecs"], top, " ")
+        token = ""; last = ""; key = ""; depth = 0
+        for (at = 1; at <= length(text); at++) {
+            character = substr(text, at, 1)
+            if (character ~ /[A-Za-z0-9_]/) { token = token character; continue }
+            if (token != "") { last = token; token = "" }
+            if (character == "=") { key = last; last = "" }
+            else if (character == "{") {
+                nesting[++depth] = key; key = ""; last = ""
+                if (depth == 3 && nesting[2] == "within") {
+                    below[nesting[1]] = below[nesting[1]] " " nesting[3]
+                }
+            }
+            else if (character == "}") { depth--; key = ""; last = "" }
+        }
         for (i = 1; i <= count; i++) {
-            name = top[i]
+            name = order[i]
             print name
-            below = split(fields[name], members, " ")
-            for (j = 1; j <= below; j++) {
-                member = members[j]
-                if (member ~ /^[a-z]/ && declared[name "." member] == member) {
-                    print name "." member
+            found = split(below[name], members, " ")
+            for (j = 1; j <= found; j++) {
+                if (members[j] ~ /^[a-z]/) {
+                    print name "." members[j]
                 }
             }
         }

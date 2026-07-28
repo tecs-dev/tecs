@@ -17,10 +17,9 @@
 ---   shaders/include/depth.glsl        included, never compiled alone
 
 local sdl <const> = require("tecs.ffi.sdl3")
-local filesystem <const> = require("tecs.platform.filesystem")
-local hash <const> = require("tecs.hash")
+local content <const> = require("tecs.platform.content")
+local data <const> = require("tecs.data")
 local loader <const> = require("tecs.ffi.loader")
-local paths <const> = require("tecs.platform.paths")
 
 local C <const> = sdl.C
 
@@ -86,7 +85,7 @@ local roots: {string} = nil
 
 local function searchRoots(): {string}
     if roots == nil then
-        roots = {paths.assetPath("shaders/")}
+        roots = {content.assetPath("shaders/")}
     end
     return roots
 end
@@ -122,7 +121,7 @@ local function find(relative: string): string
         return generated
     end
     for _, root in ipairs(searchRoots()) do
-        local text = filesystem.read(root .. relative)
+        local text = content.read(root .. relative)
         if text ~= nil then
             return text
         end
@@ -144,7 +143,7 @@ end
 --- construction, so the invariant is carried by the type rather than
 --- remembered at each call.
 function shaders.hash(text: string): string
-    return hash.fnv1a64(text)
+    return data.fnv1a64(text)
 end
 
 --- Expands `#include "name"` against the include directory.

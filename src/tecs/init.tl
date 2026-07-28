@@ -31,11 +31,8 @@ local type Input = require("tecs.platform.Input")
 local type Gamepad = require("tecs.platform.Gamepad")
 local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
-local type proc = require("tecs.platform.proc")
 local type net = require("tecs.net")
-local type capabilities = require("tecs.platform.capabilities")
-local type filesystemModule = require("tecs.platform.filesystem")
-local type watch = require("tecs.platform.watch")
+local type filesystem = require("tecs.platform.filesystem")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
 local type components = require("tecs.components")
@@ -48,11 +45,23 @@ local type physics = require("tecs.physics")
 local type http = require("tecs.http")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
-local type datajson = require("tecs.data")
-local type systemModule = require("tecs.platform.system")
+local type data = require("tecs.data")
+local type system = require("tecs.platform.system")
 local type sensors = require("tecs.platform.sensors")
 local type platformAudio = require("tecs.platform.audio")
 
+-- A record below is written for one reason: a public name that no single module
+-- answers. A namespace assembled from a class and the records beside it, or
+-- from nothing but the modules one level down, has no module whose own record
+-- types it, so one is written here.
+--
+-- A public name that one module answers needs none of this, and has none. It
+-- resolves to that module, is typed by the record the module declares, and
+-- carries the names one level down as fields of its own: `tecs.filesystem` is
+-- `src/tecs/platform/filesystem.tl`, `watch` included. That is the shape to
+-- reach for, because a record here restates every signature and every docblock
+-- the module already carries and nothing checks the two against each other.
+--
 -- A class gets a module of its own, lowercase, and the class sits inside it
 -- under its own name: `tecs.camera.Camera`. One name is the namespace and the
 -- other is the type, so no name is both at once. The satellite records each
@@ -60,9 +69,9 @@ local type platformAudio = require("tecs.platform.audio")
 -- without going through `Window` first.
 --
 -- A module may also sit inside another module, one level and no deeper:
--- `tecs.gfx.layers`. A record here is what declares that, and its lowercase
--- fields are the modules under it while its capitalised ones are the types the
--- parent owns.
+-- `tecs.gfx.layers`, `tecs.filesystem.watch`. `SURFACE` is what declares that,
+-- through `within`, and a lowercase field of a record here is one of them only
+-- where the parent has no module of its own.
 
 --- The object an entry file returns, and what builds one.
 local record application
@@ -201,722 +210,10 @@ local record input
     openSensor: function(id: number): sensors.Sensor, string
 end
 
---- Files: where they are, what is in them, and when one changed.
----
---- Where and what were two modules and are one, because they were never two
---- questions. Every path a game touches is resolved and then acted on in the
---- same breath, and a caller holding one half had to name the other module to
---- do anything with it. There is still deliberately no second way to resolve a
---- path: every operation takes the string the platform takes, so a path from
---- here, a path a user typed and an absolute path from somewhere else all work
---- and none is rewritten on the way through.
----
---- Watching is the one thing below rather than beside, under
---- `tecs.filesystem.watch`. It is a running poller with a lifecycle of its own
---- rather than a call that answers, and its vocabulary, an interval, a settle
---- count and a set of kinds, means nothing to the rest of this.
-local record filesystem
-    --- Polling for changed files, and dispatching what changed.
-    watch: watch
-
-    --- What a path is. Symbolic links are followed, so a link never reports as
-    --- one: "other" is a socket, a fifo or a device.
-    type PathType = filesystemModule.PathType
-
-    --- What the backend answered about one path.
-    type Info = filesystemModule.Info
-
-    --- Which of the platform's well-known folders to ask for.
-    type UserFolder = filesystemModule.UserFolder
-
-    --- How a pattern is matched.
-    type GlobOptions = filesystemModule.GlobOptions
-
-    --- A write that takes its bytes in pieces.
-    type Writer = filesystemModule.Writer
-
-    --- A read that hands its bytes over in pieces.
-    type Reader = filesystemModule.Reader
-
-    --- Organisation and application names, used to name the writable
-    --- directory. Set before anything asks for `preferencePath`.
-    organisation: string
-    application: string
-
-    --- Directory the executable was loaded from, with a trailing separator.
-    ---
-    --- @return The directory. Empty rather than nil when the platform declines
-    ---     to say, which is the case on some targets and is not an error.
-    basePath: function(): string
-
-    --- Writable directory for this application, created if absent.
-    ---
-    --- @return The directory, with a trailing separator, named from
-    ---     `organisation` and `application`. The only place a build may write:
-    ---     everything else is read-only on at least one target.
-    preferencePath: function(): string
-
-    --- Root the engine reads content from, with a trailing separator.
-    ---
-    --- @return `TECS_ASSETS` if it is set, then what the host was told at build
-    ---     time, then `basePath`. Cached until the platform changes.
-    assetRoot: function(): string
-
-    --- Resolves `relative` against the asset root.
-    ---
-    --- @param relative A path under the content root, with `/` separators.
-    ---     Joined, not validated: nothing here asks whether the file is there.
-    --- @return The absolute path.
-    assetPath: function(relative: string): string
-
-    --- Resolves `relative` against the writable root.
-    ---
-    --- @param relative A path under the preference directory.
-    --- @return The absolute path.
-    writablePath: function(relative: string): string
-
-    --- Overrides the asset root, for a test or a tool.
-    ---
-    --- @param root The directory to read content from. A trailing separator is
-    ---     added when it is missing rather than doubled when it is not.
-    setAssetRoot: function(root: string)
-
-    --- Forgets the cached roots. A platform change is noticed without this, so
-    --- this is for a test that moved something under the process.
-    resetPaths: function()
-
-    --- What is at `path`, or nil when there is nothing there.
-    ---
-    --- @param path Any path the platform takes.
-    --- @return The info, or nil for a path that does not exist, a broken
-    ---     symbolic link, or a directory that cannot be searched.
-    --- @return The reason, which is what separates those cases.
-    info: function(path: string): filesystemModule.Info, string
-
-    --- Whether anything is at `path`.
-    ---
-    --- @param path Any path the platform takes.
-    --- @return Whether it is there. One syscall, as are `isFile` and
-    ---     `isDirectory`, so ask `info` once when more than one bit is wanted.
-    exists: function(path: string): boolean
-
-    --- Whether `path` is a regular file, following symbolic links.
-    ---
-    --- @param path Any path the platform takes.
-    --- @return Whether it is a file. False for a path that is not there.
-    isFile: function(path: string): boolean
-
-    --- Whether `path` is a directory, following symbolic links.
-    ---
-    --- @param path Any path the platform takes.
-    --- @return Whether it is a directory. False for a path that is not there.
-    isDirectory: function(path: string): boolean
-
-    --- Entries under `path` matching `pattern`, as paths relative to `path`.
-    ---
-    --- @param path The directory to walk.
-    --- @param pattern `*` and `?` wildcards, neither of which matches a
-    ---     separator, or nil for the whole tree below `path`.
-    --- @param options How the pattern is matched.
-    --- @return The entries, joined with `/` whatever the platform's separator
-    ---     is, in the platform's own order and not sorted. Directories are
-    ---     among them and are not marked. Nil when `path` could not be
-    ---     enumerated, which an empty list does not mean.
-    --- @return The reason, when the first return is nil.
-    glob: function(path: string, pattern?: string, options?: filesystemModule.GlobOptions): {string}, string
-
-    --- Names directly inside `path`, not recursively.
-    ---
-    --- @param path The directory to read.
-    --- @return The names, not paths: join them to `path` yourself, which is
-    ---     what keeps this from being a second path resolver.
-    --- @return The reason, when the first return is nil.
-    list: function(path: string): {string}, string
-
-    --- Creates `path`, and any parents it needs.
-    ---
-    --- @param path The directory to create.
-    --- @return Whether it is there afterwards, which includes a directory that
-    ---     already existed. SDL's backend leaves an error string set even on
-    ---     success, so do not read `SDL_GetError` after this.
-    --- @return The reason, when it failed.
-    createDirectory: function(path: string): boolean, string
-
-    --- Removes a file, or an empty directory.
-    ---
-    --- @param path What to remove. A directory with anything in it fails; this
-    ---     does not recurse.
-    --- @return Whether the path is gone, which is true when there was nothing
-    ---     there to start with. Ask `exists` first if the difference matters.
-    --- @return The reason, when it failed.
-    remove: function(path: string): boolean, string
-
-    --- Moves `from` to `to`, replacing whatever was at `to`.
-    ---
-    --- @param from A file or a directory.
-    --- @param to The destination, overwritten with no warning and nothing to
-    ---     undo it.
-    --- @return Whether it moved. Whether this works across filesystems is the
-    ---     platform's business.
-    --- @return The reason, when it failed.
-    rename: function(from: string, to: string): boolean, string
-
-    --- Copies the file at `from` to `to`, replacing whatever was at `to`.
-    ---
-    --- @param from A file. A directory is refused.
-    --- @param to The destination, whose parent must already exist.
-    --- @return Whether it copied.
-    --- @return The reason, when it failed.
-    copy: function(from: string, to: string): boolean, string
-
-    --- Records a path under the kind it was first read as.
-    ---
-    --- @param path The path that was opened.
-    --- @param kind What the bytes are: "image", "sound", "font", or
-    ---     "document". A named kind supersedes "document" whichever order the
-    ---     two arrive in, since `read` answers bytes and cannot know what asked
-    ---     for them.
-    note: function(path: string, kind: string)
-
-    --- Reads a whole file and returns its bytes.
-    ---
-    --- Synchronous, which is what makes it usable while a world is being built.
-    --- A decode a frame should not wait on goes through `assets` instead.
-    ---
-    --- @param path An absolute path, or one `assetPath` has resolved.
-    --- @param kind What the bytes were read as, for anything watching what this
-    ---     process has opened. Omitted records the path as a document.
-    --- @return The bytes, which carry their own length so a NUL in the middle
-    ---     is a byte like any other. Nil when the file could not be read.
-    read: function(path: string, kind?: string): string
-
-    --- Every path this process has read or decoded, by the kind it was read as.
-    ---
-    --- @return The live table, so something consulting it periodically does not
-    ---     copy it, and shared, so a caller that means to keep it does not also
-    ---     mean to edit it. A path that failed to load is in it too, and is
-    ---     exactly the one worth noticing a change to.
-    loaded: function(): {string: string}
-
-    --- Writes `bytes` to `path`, replacing whatever was there.
-    ---
-    --- @param path The file to write. Its parent directory must already exist.
-    --- @param bytes What to write. The string's own length is written, so an
-    ---     empty string makes an empty file.
-    --- @return Whether it was written.
-    --- @return The reason, when it failed.
-    write: function(path: string, bytes: string): boolean, string
-
-    --- Opens `path` for writing in pieces, replacing whatever was there.
-    ---
-    --- @param path The file to write.
-    --- @return The writer, which must be closed: the bytes are not guaranteed
-    ---     to be on disk until `close` answers, and that is the call a full
-    ---     disk is reported by. Nil when there is none.
-    --- @return The reason, when the first return is nil.
-    openWrite: function(path: string): filesystemModule.Writer, string
-
-    --- Opens `path` for reading in pieces. The mirror of `openWrite`.
-    ---
-    --- @param path The file to read.
-    --- @return The reader, for a file to be handed over as it goes rather than
-    ---     held whole. Nil when there is none.
-    --- @return The reason, when the first return is nil.
-    openRead: function(path: string): filesystemModule.Reader, string
-
-    --- The process working directory, with a trailing separator.
-    ---
-    --- Where a command line tool resolves the relative paths it was given.
-    --- Emphatically not where a game reads content or writes state:
-    --- `assetRoot` and `preferencePath` answer that.
-    ---
-    --- @return The directory, or nil on a platform that has none, which is most
-    ---     that are not a desktop.
-    --- @return The reason, when the first return is nil.
-    currentDirectory: function(): string, string
-
-    --- One of the platform's well-known folders, with a trailing separator.
-    ---
-    --- @param which Which folder. A name the backend does not know raises.
-    --- @return The folder, or nil, which is legitimate and common: macOS has no
-    ---     saved-games, screenshots or templates folder, and a platform that is
-    ---     not a desktop may have none of them. Never a place a build may
-    ---     write; `preferencePath` is the only one.
-    --- @return The reason, when the first return is nil.
-    userFolder: function(which: filesystemModule.UserFolder): string, string
-end
-
---- The operating system, asked directly: what this build can do here, the
---- clipboard, another program, and the services a desktop offers.
----
---- One module because none of these is a subsystem a game builds on. Each is a
---- few calls a game makes when a player asks for something, and each was too
---- small to be a name of its own: a game copying a path to the clipboard and
---- then opening a folder in the file manager was naming three modules to do one
---- thing. There is deliberately no `tecs.platform`, since that is where this
---- tree keeps an implementation category rather than a task a game performs.
----
---- Names are qualified by what they act on, because a merged module makes a
---- bare `text`, `data`, `clear`, `run` or `update` mean nothing on its own.
-local record system
-    --- What this build of the engine can do on this target.
-    type Capabilities = capabilities.Capabilities
-
-    --- One language the user prefers, in order of preference.
-    type Locale = systemModule.Locale
-
-    --- What the machine is running on, and how much of it is left.
-    type Power = systemModule.Power
-
-    --- One entry in a dialog's file-type filter.
-    type DialogFilter = systemModule.DialogFilter
-
-    --- What a dialog is opened with.
-    type DialogOptions = systemModule.DialogOptions
-
-    --- What the user chose, or that they chose nothing.
-    type DialogResult = systemModule.DialogResult
-
-    --- What to run as a child process, and what it inherits.
-    type ProcessOptions = proc.Options
-
-    --- What a child that ran leaves behind.
-    type ProcessResult = proc.Result
-
-    --- Reads the capabilities of the running build.
-    ---
-    --- @return The same table on every call until the platform changes, and
-    ---     shared, so a caller that means to keep it does not also mean to edit
-    ---     it. Read rather than inferred: selecting behaviour from the
-    ---     operating system's name cannot tell a build that linked a shader
-    ---     compiler from one that did not.
-    capabilities: function(): capabilities.Capabilities
-
-    --- Forgets the cached capabilities. A platform change is noticed without
-    --- this, so this is for a test that changed the build under the process.
-    resetCapabilities: function()
-
-    --- Whether there is a clipboard to read at all.
-    ---
-    --- @return False in a process that never brought up video, where every
-    ---     other clipboard call answers empty or false. This is what tells that
-    ---     apart from a clipboard that is simply empty.
-    clipboardAvailable: function(): boolean
-
-    --- The clipboard's text.
-    ---
-    --- @return The text, or an empty string when the clipboard holds none,
-    ---     holds something that is not text, or there is no video. Ask
-    ---     `hasClipboardText` to tell those from text that is genuinely empty.
-    clipboardText: function(): string
-
-    --- Puts `text` on the clipboard, replacing whatever was there.
-    ---
-    --- @param text Copied by SDL, so the string is not retained. A nil raises
-    ---     rather than clearing the clipboard, which is what SDL would do.
-    --- @return Whether the platform took it. False includes having no video.
-    setClipboardText: function(text: string): boolean
-
-    --- Whether the clipboard holds text.
-    ---
-    --- @return Whether there is text. Cheaper than reading it: no allocation
-    ---     crosses the boundary, and on a platform where a read negotiates with
-    ---     the owning application, no negotiation happens.
-    hasClipboardText: function(): boolean
-
-    --- Withdraws what this application put on the clipboard.
-    ---
-    --- @return Whether it was withdrawn. The clipboard is left empty rather
-    ---     than restored to what preceded the write, because nothing anywhere
-    ---     remembers what that was.
-    clearClipboard: function(): boolean
-
-    --- Mime types the clipboard currently offers.
-    ---
-    --- @return The types, in the order SDL reports them, and a fresh list the
-    ---     caller owns. The same list a `clipboardUpdate` event carries, for a
-    ---     caller that wants to ask rather than wait to be told.
-    clipboardMimeTypes: function(): {string}
-
-    --- Whether the clipboard offers `mimeType`.
-    ---
-    --- @param mimeType A type as the platform spells it. A nil raises.
-    --- @return Whether it is offered.
-    hasClipboardData: function(mimeType: string): boolean
-
-    --- The clipboard's bytes for `mimeType`.
-    ---
-    --- @param mimeType A type as the platform spells it. A nil raises.
-    --- @return The bytes, or nil when the clipboard offers none. Nil rather
-    ---     than an empty string, because a type can be offered with no bytes
-    ---     behind it and that is not the same as not being offered.
-    clipboardData: function(mimeType: string): string
-
-    --- The primary selection's text, which is the X11 middle-click buffer.
-    ---
-    --- @return The text, or an empty string when it holds none.
-    primarySelection: function(): string
-
-    --- Puts `text` in the primary selection.
-    ---
-    --- @param text The selection's new contents. A nil raises.
-    --- @return Whether it was set. True on a platform with no primary
-    ---     selection, where SDL keeps the value for this process alone.
-    setPrimarySelection: function(text: string): boolean
-
-    --- Whether the primary selection holds text.
-    ---
-    --- @return Whether there is text in it.
-    hasPrimarySelection: function(): boolean
-
-    --- Runs a program and answers a future for it, immediately.
-    ---
-    --- @param options Read here and sent to the worker, so a later edit to the
-    ---     same table does not reach the child. Starting the runner is part of
-    ---     this call when nothing has yet.
-    --- @return A future that settles "ready" when the child ends however it
-    ---     ended, so a non-zero exit is still "ready" and `succeeded` is what
-    ---     distinguishes them. "failed" only when the child could not be
-    ---     started, and "cancelled" when it was killed.
-    runProcess: function(options: proc.Options): Future<proc.Result>
-
-    --- The record a run fills in, whatever became of it.
-    ---
-    --- @param run A future `runProcess` handed out. Any other future answers
-    ---     nil.
-    --- @return The result, reachable before the child ends so `pid` can be read
-    ---     as soon as it started, and after a kill, which settles "cancelled"
-    ---     with no value but does not throw away what the child said first. Nil
-    ---     for a run that never started.
-    processResult: function(run: Future<proc.Result>): proc.Result
-
-    --- Ends a running child.
-    ---
-    --- @param run A future `runProcess` handed out. One that has already
-    ---     settled is left alone.
-    --- @param force Skip the polite signal. Omitted asks first.
-    killProcess: function(run: Future<proc.Result>, force?: boolean)
-
-    --- Takes whatever the runner has finished, without blocking.
-    ---
-    --- @return How many runs settled on this call. The application calls this
-    ---     once a frame, so a game only needs it when it is driving the loop
-    ---     itself.
-    updateProcesses: function(): integer
-
-    --- How many children are still running.
-    ---
-    --- @return The count, which is what a shutdown path waits on.
-    pendingProcesses: function(): integer
-
-    --- Starts the worker children are run on.
-    ---
-    --- Part of `runProcess` when nothing has started it, so this is for a
-    --- program that wants the cost paid at a moment it chose.
-    ---
-    --- @param luaPath Where the worker finds this tree, for a host that has put
-    ---     it somewhere the default search does not reach.
-    installProcessRunner: function(luaPath?: string)
-
-    --- Whether the runner worker is up.
-    ---
-    --- @return Whether it is running, which is not whether anything is.
-    processRunnerInstalled: function(): boolean
-
-    --- Kills every running child and stops the runner.
-    ---
-    --- @param graceMs How long to let a child finish after being asked,
-    ---     in milliseconds. Omitted uses the runner's own grace.
-    shutdownProcesses: function(graceMs?: number)
-
-    --- Opens a URL with the operating system's preferred handler.
-    ---
-    --- @param url An absolute URL. Empty or nil is refused rather than passed
-    ---     on.
-    --- @return Whether the platform took it, which is not whether anything
-    ---     opened: the handler runs in another process and reports nothing
-    ---     back.
-    --- @return The reason, when it was refused.
-    openURL: function(url: string): boolean, string
-
-    --- Languages the user prefers, most preferred first.
-    ---
-    --- @return The locales, a fresh list the caller owns. Empty when the
-    ---     platform declines to say, which is not the same as English.
-    preferredLocales: function(): {systemModule.Locale}
-
-    --- The power state now.
-    ---
-    --- @return A reading taken at the call rather than a live view, so it is
-    ---     re-read rather than kept. Seconds and percent are -1 where the
-    ---     platform will not say.
-    power: function(): systemModule.Power
-
-    --- Shows a modal message box and waits for it to be dismissed.
-    ---
-    --- Blocking, and the only blocking call here. It is for the failure a game
-    --- cannot draw its way out of.
-    ---
-    --- @param kind `"error"`, `"warning"` or `"info"`.
-    --- @param title The window's title.
-    --- @param message The body.
-    --- @param window The window to sit over. Omitted is a free-floating box.
-    --- @return Whether it was shown.
-    --- @return The reason, when it was not.
-    messageBox: function(kind: string, title: string, message: string, window?: Window): boolean, string
-
-    --- Asks the user to choose a file to open.
-    ---
-    --- @param options Filters, a starting location, whether several may be
-    ---     chosen, and the window to sit over.
-    --- @return A future settling with what was chosen. Cancelling is a result
-    ---     with `cancelled` true rather than a failure.
-    openFile: function(options?: systemModule.DialogOptions): Future<systemModule.DialogResult>
-
-    --- Asks the user to choose where to save a file.
-    ---
-    --- @param options As `openFile` takes them; `multiple` means nothing here.
-    --- @return A future settling with the chosen path, or with `cancelled`.
-    saveFile: function(options?: systemModule.DialogOptions): Future<systemModule.DialogResult>
-
-    --- Asks the user to choose a folder.
-    ---
-    --- @param options As `openFile` takes them; filters mean nothing here.
-    --- @return A future settling with the chosen folder, or with `cancelled`.
-    openFolder: function(options?: systemModule.DialogOptions): Future<systemModule.DialogResult>
-
-    --- Takes whatever a dialog has answered, without blocking.
-    ---
-    --- @return How many dialogs settled on this call. The application calls
-    ---     this once a frame.
-    updateDialogs: function(): integer
-end
-
 --- A value that settles once.
 local record future
     Future: Future
     type Source = Future.Source
-end
-
---- Turning bytes into other bytes: JSON in both directions, DEFLATE in both
---- directions, and a hash over either.
----
---- One module because each of these is a few functions over a byte string with
---- no state to carry, and a game reaching for one is nearly always about to
---- reach for another: a save is encoded, compressed and stamped, and a cache
---- entry is checked the other way round. Three modules of three functions each
---- would put that one job in three places.
----
---- The transformations name their format, because a merged module makes a bare
---- verb ambiguous and because a value produced here outlives the process. There
---- is no `encode`, and `fnv1a64` says which hash it is so that changing what it
---- computes is a rename every caller is rechecked against.
-local record data
-    --- An independent JSON table with its own settings, as `newJSON` answers
-    --- with.
-    type JSON = datajson
-
-    --- What `null` and `empty_array` are: a value standing for something a Lua
-    --- table cannot express, opaque and compared by identity.
-    type Sentinel = datajson.Sentinel
-
-    --- Encodes a Lua value as JSON text.
-    ---
-    --- @param value Any value JSON has a form for. A function, a coroutine, a
-    ---     cdata or a non-finite number raises rather than going missing.
-    --- @return The document, compact unless `encode_indent` says otherwise.
-    encodeJSON: function(value: any): string
-
-    --- Decodes JSON text into a Lua value.
-    ---
-    --- @param text A whole document. A JSON null answers as `null`, which is
-    ---     not `nil`, so an absent key and a null one stay apart.
-    --- @return The value. Malformed input raises rather than returning nil.
-    decodeJSON: function(text: string): any
-
-    --- JSON `null`, which is not `nil`. lua-cjson's own value, so it compares
-    --- equal to the one `require("cjson")` answers with.
-    null: datajson.Sentinel
-
-    --- A value that encodes as `[]`, which an empty Lua table cannot.
-    empty_array: datajson.Sentinel
-
-    --- Metatable marking a table as an array whatever it holds.
-    array_mt: metatable<{any}>
-
-    --- Metatable turning an otherwise empty table into `[]`.
-    empty_array_mt: metatable<{any}>
-
-    --- Whether `{}` encodes as an object rather than as `[]`. On by default.
-    ---
-    --- Every setting reads the same way: called with no argument it answers the
-    --- current value, called with one it sets it and answers the new one. They
-    --- are process-wide, which is what `newJSON` exists to escape.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call.
-    encode_empty_table_as_object: function(setting?: boolean | string): boolean
-
-    --- Whether a decoded array carries `array_mt`. Off by default.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call.
-    decode_array_with_array_mt: function(setting?: boolean | string): boolean
-
-    --- Whether `/* ... */` and `// ...` are tolerated in input. Off by default.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call.
-    decode_allow_comment: function(setting?: boolean | string): boolean
-
-    --- Whether a sparse array is converted to an object rather than raising,
-    --- and when an array counts as sparse.
-    ---
-    --- @param convert Omitted only reads, and reads all three.
-    --- @param ratio The multiple of the entry count the largest index may reach
-    ---     before the array is called sparse. 2 by default.
-    --- @param safe A largest index below which an array never counts as sparse.
-    ---     10 by default.
-    --- @return Whether conversion is on, off by default.
-    --- @return The ratio after the call.
-    --- @return The safe bound after the call.
-    encode_sparse_array: function(
-        convert?: boolean | string, ratio?: integer, safe?: integer
-    ): boolean, integer, integer
-
-    --- Nesting the encoder accepts before raising. 1000 by default.
-    ---
-    --- @param depth Omitted only reads.
-    --- @return The depth after the call.
-    encode_max_depth: function(depth?: integer): integer
-
-    --- Nesting the decoder accepts before raising. 1000 by default, and what
-    --- keeps a hostile document from exhausting the C stack.
-    ---
-    --- @param depth Omitted only reads.
-    --- @return The depth after the call.
-    decode_max_depth: function(depth?: integer): integer
-
-    --- Significant digits written for a number. 14 by default, which is what
-    --- keeps an entity id exact rather than writing it back as `1.0`.
-    ---
-    --- @param precision Omitted only reads. 1 to 14.
-    --- @return The precision after the call.
-    encode_number_precision: function(precision?: integer): integer
-
-    --- Whether the encode buffer is kept between calls rather than freed. On by
-    --- default.
-    ---
-    --- @param keep Omitted only reads.
-    --- @return The setting after the call.
-    encode_keep_buffer: function(keep?: boolean | string): boolean
-
-    --- What NaN and infinity encode as. Off by default, which raises.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call, which is `"null"` rather than a
-    ---     boolean when that is what is in force.
-    encode_invalid_numbers: function(setting?: boolean | string): boolean | string
-
-    --- Whether `nan` and `inf` are accepted in input. On by default.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call.
-    decode_invalid_numbers: function(setting?: boolean | string): boolean
-
-    --- Whether `/` is written as `\/`. On by default.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call.
-    encode_escape_forward_slash: function(setting?: boolean | string): boolean
-
-    --- Whether a value JSON has no form for is skipped rather than raising. Off
-    --- by default, and worth leaving off.
-    ---
-    --- @param setting Omitted only reads.
-    --- @return The setting after the call.
-    encode_skip_unsupported_value_types: function(setting?: boolean | string): boolean
-
-    --- Indent string for pretty output. Unset, and by default, the encoder
-    --- writes compact JSON.
-    ---
-    --- @param indent Omitted only reads. Whitespace, one level's worth.
-    --- @return The indent after the call.
-    encode_indent: function(indent?: string): string
-
-    --- An independent JSON table with its own settings.
-    ---
-    --- @return A table carrying the JSON names here and none of the compression
-    ---     or hashing ones, since those have nothing to configure. The
-    ---     sentinels are shared with every copy.
-    newJSON: function(): JSON
-
-    --- lua-cjson's own name for itself, `"cjson"`, and its version.
-    _NAME: string
-    _VERSION: string
-
-    --- Compresses bytes as an RFC 1950 zlib stream, header and Adler-32
-    --- trailer included.
-    ---
-    --- @param bytes The whole input, which may be empty.
-    --- @param level Minus one or omitted uses zlib's default. Zero stores
-    ---     without compression; one through nine trade time for size.
-    --- @return The stream. Never nil: a failure raises.
-    deflate: function(bytes: string, level?: integer): string
-
-    --- Compresses bytes as a raw RFC 1951 DEFLATE stream, with no header and no
-    --- checksum.
-    ---
-    --- @param bytes The whole input, which may be empty.
-    --- @param level As `deflate` takes it.
-    --- @return The stream. Never nil: a failure raises.
-    deflateRaw: function(bytes: string, level?: integer): string
-
-    --- Decompresses a zlib stream, the form RFC 1950 defines.
-    ---
-    --- @param bytes The whole stream, trailer included. An empty string raises,
-    ---     since it is not one.
-    --- @param sizeHint The decompressed size, when the caller's format records
-    ---     it. Only an allocation hint: a wrong one costs a copy, never an
-    ---     error.
-    --- @return The decompressed bytes, which may be empty. A bad header, a
-    ---     corrupt block, a truncated stream and a trailer that disagrees all
-    ---     raise.
-    inflate: function(bytes: string, sizeHint?: integer): string
-
-    --- Decompresses a raw DEFLATE stream, the form RFC 1951 defines.
-    ---
-    --- @param bytes The whole stream. An empty string raises.
-    --- @param sizeHint As `inflate` takes it.
-    --- @return The decompressed bytes. There is no checksum in this form, so a
-    ---     container carrying one of its own should check it.
-    inflateRaw: function(bytes: string, sizeHint?: integer): string
-
-    --- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex
-    --- digits.
-    ---
-    --- Not an integrity primitive: sixty-four bits puts a deliberate collision
-    --- within reach of anyone who wants one.
-    ---
-    --- @param text Any string. NUL and bytes above 127 hash like any other.
-    --- @return Sixteen hex digits, high half first, so two hashes compare as
-    ---     strings the way their values compare.
-    fnv1a64: function(text: string): string
-
-    --- CRC-32 over the bytes of `text`, as a number in [0, 2^32).
-    ---
-    --- @param text Any string.
-    --- @return The checksum PNG, gzip and ZIP put beside compressed bytes. An
-    ---     error-detecting checksum and not a digest.
-    crc32: function(text: string): integer
-
-    --- Adler-32 over the bytes of `text`, as a number in [0, 2^32).
-    ---
-    --- @param text Any string.
-    --- @return The checksum RFC 1950 puts in a zlib stream's trailer, seeded
-    ---     with 1 as that document specifies. A poor content hash; use
-    ---     `fnv1a64` for identity.
-    adler32: function(text: string): integer
 end
 
 --- Drawing, and the vocabularies a scene is described in.
@@ -1008,10 +305,17 @@ tecs.ecs = ecs
 
 --- How one public name resolves, at whatever depth it is written.
 ---
---- A descriptor naming only `module` answers with that module's own table, so
---- `tecs.gfx.layers` and `require("tecs.gfx.layers")` are one value rather than
---- a copy of one. A descriptor naming anything else answers with a table built
---- here, which fills a member at a time.
+--- A descriptor with one principal `module` answers with that module's own
+--- table, so `tecs.filesystem` and `require("tecs.platform.filesystem")` are
+--- one value rather than a copy of one. Names one level down are hung off it
+--- lazily, so a `within` costs nothing until one of them is read.
+---
+--- A descriptor with no principal module, or with several modules at one
+--- level, answers with a table built here instead, which fills a member at a
+--- time. That table cannot be typed by any one module, so `init.tl` declares a
+--- record for it, and that record is a second copy of every signature and every
+--- docblock the module already carries. Prefer the merge: two files that are
+--- one public name should be one file.
 local record Namespace
     --- The module a member comes off when nothing above it answered.
     module: string
@@ -1037,9 +341,10 @@ end
 --- Listed rather than discovered, so `tecs.anmation` is an error where it is
 --- written instead of a nil where it is called.
 ---
---- `audio` is the one namespace reading two modules at one level. The mixer and
---- the device it opens are one subject at two levels, and a game asking about
---- sound should find one module rather than pick between two.
+--- `audio` and `input` are the two namespaces reading more than one module at
+--- one level, and both are a class with satellites rather than a merge. Every
+--- other name here answers with one module, which is what lets the module's own
+--- record type it.
 local SURFACE <const>: {string: Namespace} = {
     animation = {module = "tecs.gfx.animation"},
     application = {module = "tecs.Application", class = "Application"},
@@ -1047,11 +352,10 @@ local SURFACE <const>: {string: Namespace} = {
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
     camera = {module = "tecs.gfx.Camera", class = "Camera"},
     components = {module = "tecs.components"},
-    data = {module = "tecs.data", beside = {"tecs.compress", "tecs.hash"}},
+    data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
     filesystem = {
         module = "tecs.platform.filesystem",
-        beside = {"tecs.platform.paths"},
         within = {watch = {module = "tecs.platform.watch"}},
     },
     future = {module = "tecs.Future", class = "Future"},
@@ -1071,14 +375,7 @@ local SURFACE <const>: {string: Namespace} = {
     physics = {module = "tecs.physics"},
     renderer = {module = "tecs.Renderer", class = "Renderer"},
     sequence = {module = "tecs.sequence"},
-    system = {
-        module = "tecs.platform.system",
-        beside = {
-            "tecs.platform.capabilities",
-            "tecs.platform.clipboard",
-            "tecs.platform.proc",
-        },
-    },
+    system = {module = "tecs.platform.system"},
     text = {module = "tecs.gfx.text"},
     time = {module = "tecs.platform.time"},
     window = {module = "tecs.platform.Window", class = "Window"},
@@ -1090,9 +387,10 @@ local SURFACE <const>: {string: Namespace} = {
 --- namespace resolves the descriptors under it, and each of those is a
 --- descriptor like any other.
 ---
---- @param spec What the name resolves through. A descriptor naming only a
----     module answers with that module and loads it now; anything else answers
----     with a table that loads nothing until a member is read.
+--- @param spec What the name resolves through. A descriptor with one principal
+---     module answers with that module and loads it now, with the names below
+---     it hung off it unloaded; anything else answers with a table that loads
+---     nothing until a member is read.
 --- @return The module or the namespace, which is what the name is from here on:
 ---     the caller memoizes it, so this runs once per name.
 local resolve: function(spec: Namespace): any
@@ -1144,12 +442,16 @@ local function namespace(spec: Namespace): {string: any}
 
         --- Sends a write to whichever module answers the name.
         ---
-        --- A namespace stands in front of several modules, and some of what
-        --- they carry is assigned rather than called:
-        --- `tecs.filesystem.organisation` is read back by
-        --- `preferencePath`, so a write parked on this table would be a
-        --- write nothing sees. Ownership is decided the way a read decides
-        --- it, and a name no module below answers is the namespace's own.
+        --- A namespace stands in front of several modules, and a module
+        --- value can be assigned rather than called: a write parked on
+        --- this table would then be a write the module that reads the
+        --- name back never sees, with nothing to raise. Ownership is
+        --- decided the way a read decides it, and a name no module below
+        --- answers is the namespace's own.
+        ---
+        --- Only a namespace needs this. A name backed by one module
+        --- answers with the module, so a write to it is a write on the
+        --- table that owns the name and there is nothing to route.
         ---
         --- What was resolved earlier is dropped rather than replaced, so
         --- the next read asks the owner again instead of trusting a copy
@@ -1181,12 +483,47 @@ local function namespace(spec: Namespace): {string: any}
     })
 end
 
+--- Hangs the names one level down off the module that carries them.
+---
+--- The module table is what the public name answers with, so a subordinate
+--- module has to be reachable through it without being loaded with it. A
+--- metatable does both: the name misses, this resolves it once, and it is
+--- written on so every later read is an ordinary field.
+---
+--- Writing it on is safe here in a way it is not on a namespace built by
+--- `namespace`. The module owns every name it answers, so there is no other
+--- table a write could belong on and nothing to route.
+---
+--- @param module The table `require` answered with, which is edited in place:
+---     `require("tecs.platform.filesystem").watch` is the same name reached the
+---     other way, and one table means one answer.
+--- @param within The names below it, each a descriptor like any other.
+local function hang(module: {string: any}, within: {string: Namespace})
+    setmetatable(
+        module,
+        {
+            __index = function(self: {string: any}, name: string): any
+                local spec = within[name]
+                if spec == nil then
+                    return nil
+                end
+                local member = resolve(spec)
+                rawset(self, name, member)
+                return member
+            end,
+        }
+    )
+end
+
 resolve = function(spec: Namespace): any
-    local plain = spec.class == nil and spec.beside == nil and spec.within == nil
-    if plain then
-        return require(spec.module)
+    if spec.class ~= nil or spec.beside ~= nil or spec.module == nil then
+        return namespace(spec)
     end
-    return namespace(spec)
+    local module = require(spec.module) as {string: any}
+    if spec.within ~= nil then
+        hang(module, spec.within)
+    end
+    return module
 end
 
 setmetatable(

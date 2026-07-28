@@ -24,11 +24,10 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
-local paths = require("tecs.platform.paths")
 local filesystem = require("tecs.platform.filesystem")
 local events = require("tecs.platform.events")
 local Input = require("tecs.platform.Input")
-local capabilities = require("tecs.platform.capabilities")
+local system = require("tecs.platform.system")
 local shadercompiler = require("tecs.gpu.shadercompiler")
 local shaderpack = require("tecs.gpu.shaderpack")
 local Audio = require("tecs.Audio")
@@ -173,12 +172,12 @@ describe("platform contract", function()
 
     before_each(function()
         adapter.reset()
-        paths.resetPaths()
+        filesystem.resetPaths()
     end)
 
     teardown(function()
         adapter.reset()
-        paths.resetPaths()
+        filesystem.resetPaths()
         shadercompiler.usePack(nil)
         C.SDL_Quit()
     end)
@@ -222,29 +221,29 @@ describe("platform contract", function()
 
     it("resolves content and state through the installed platform", function()
         adapter.install(fakePlatform())
-        paths.resetPaths()
+        filesystem.resetPaths()
 
-        assert.are.equal("/dev/content/", paths.basePath())
-        assert.are.equal("/dev/save/tecs/tecs/", paths.preferencePath())
-        assert.are.equal("/dev/save/tecs/tecs/save.json", paths.writablePath("save.json"))
+        assert.are.equal("/dev/content/", filesystem.basePath())
+        assert.are.equal("/dev/save/tecs/tecs/", filesystem.preferencePath())
+        assert.are.equal("/dev/save/tecs/tecs/save.json", filesystem.writablePath("save.json"))
 
         -- A development run has TECS_ASSETS set and it outranks everything,
         -- so content is checked against the platform only where nothing has
         -- overridden it.
-        paths.setAssetRoot(paths.basePath())
-        assert.are.equal("/dev/content/art/hero.png", paths.assetPath("art/hero.png"))
+        filesystem.setAssetRoot(filesystem.basePath())
+        assert.are.equal("/dev/content/art/hero.png", filesystem.assetPath("art/hero.png"))
     end)
 
     it("lets the environment still override the asset root", function()
         -- A development run reads out of a build tree whatever the platform is,
         -- because the platform's answer is where a shipped build put content.
         adapter.install(fakePlatform())
-        paths.resetPaths()
-        paths.setAssetRoot("/tmp/staging")
-        assert.are.equal("/tmp/staging/", paths.assetRoot())
+        filesystem.resetPaths()
+        filesystem.setAssetRoot("/tmp/staging")
+        assert.are.equal("/tmp/staging/", filesystem.assetRoot())
         assert.are.equal(
             "/dev/save/tecs/tecs/",
-            paths.preferencePath(),
+            filesystem.preferencePath(),
             "the writable root is the platform's and is not overridable"
         )
     end)
@@ -257,16 +256,16 @@ describe("platform contract", function()
         local platform = fakePlatform()
         platform.storage = fakeStorage()
         adapter.install(platform)
-        paths.resetPaths()
+        filesystem.resetPaths()
         -- A development run has TECS_ASSETS set and it outranks the platform,
         -- so content is pointed back at the platform's own base here.
-        paths.setAssetRoot(paths.basePath())
+        filesystem.setAssetRoot(filesystem.basePath())
 
-        local level = paths.assetPath("levels/1.json")
+        local level = filesystem.assetPath("levels/1.json")
         assert.are.equal("/dev/content/levels/1.json", level)
         assert.are.equal('{"room":"hold"}', filesystem.read(level))
 
-        local save = paths.writablePath("slot1.json")
+        local save = filesystem.writablePath("slot1.json")
         assert.is_true(filesystem.write(save, '{"score":41}'))
         assert.are.equal('{"score":41}', filesystem.read(save))
 
@@ -276,7 +275,7 @@ describe("platform contract", function()
         assert.is_false(filesystem.isDirectory(level))
         assert.is_false(filesystem.exists("/dev/content/absent"))
 
-        assert.are.same({ "levels", "levels/1.json" }, filesystem.list(paths.basePath()))
+        assert.are.same({ "levels", "levels/1.json" }, filesystem.list(filesystem.basePath()))
         assert.is_true(filesystem.createDirectory("/dev/save/tecs/tecs/shots"))
         assert.is_true(filesystem.copy(level, "/dev/content/levels/2.json"))
         assert.is_true(filesystem.rename("/dev/content/levels/2.json", "/dev/content/levels/3.json"))
@@ -309,10 +308,10 @@ describe("platform contract", function()
         local platform = fakePlatform()
         platform.storage = fakeStorage()
         adapter.install(platform)
-        paths.resetPaths()
-        paths.setAssetRoot(paths.basePath())
+        filesystem.resetPaths()
+        filesystem.setAssetRoot(filesystem.basePath())
 
-        filesystem.read(paths.assetPath("levels/1.json"), "level")
+        filesystem.read(filesystem.assetPath("levels/1.json"), "level")
         assert.are.equal("level", filesystem.loaded()["/dev/content/levels/1.json"])
         assert.is_nil(filesystem.loaded()["/dev/content/absent"])
         assert.is_nil(filesystem.read("/dev/content/absent"))
@@ -352,10 +351,10 @@ describe("platform contract", function()
             return os.getenv("TMPDIR") or "/tmp/"
         end
         adapter.install(platform)
-        paths.resetPaths()
+        filesystem.resetPaths()
 
         assert.are.equal("sdl", adapter.storage().name)
-        local save = paths.writablePath("tecs-adapter-spec.txt")
+        local save = filesystem.writablePath("tecs-adapter-spec.txt")
         assert.is_true(filesystem.write(save, "on the host"))
         assert.are.equal("on the host", filesystem.read(save))
         assert.is_string(filesystem.currentDirectory())
@@ -412,7 +411,7 @@ describe("platform contract", function()
         -- cannot load a library by name and has its own bytecode format has to
         -- show up as itself and not as the host that happens to be running.
         adapter.install(fakePlatform())
-        local caps = capabilities.capabilities()
+        local caps = system.capabilities()
 
         assert.are.equal("spec.console", caps.target)
         assert.is_false(caps.dynamicLibraries)
@@ -421,7 +420,7 @@ describe("platform contract", function()
         adapter.reset()
         assert.are_not.equal(
             "spec.console",
-            capabilities.capabilities().target,
+            system.capabilities().target,
             "removing the platform must be reflected too"
         )
     end)
@@ -445,10 +444,10 @@ describe("platform contract", function()
     it("returns to SDL when a platform is removed", function()
         adapter.install(fakePlatform({ { kind = "quit" } }))
         adapter.reset()
-        paths.resetPaths()
+        filesystem.resetPaths()
 
         assert.are.equal("sdl", adapter.current().name)
         assert.is_nil(events.source, "the event hook must be cleared with the platform")
-        assert.are_not.equal("/dev/content/", paths.basePath())
+        assert.are_not.equal("/dev/content/", filesystem.basePath())
     end)
 end)

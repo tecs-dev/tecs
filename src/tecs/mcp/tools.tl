@@ -6,8 +6,8 @@
 
 local data <const> = require("tecs.data")
 local sdl <const> = require("tecs.ffi.sdl3")
-local capabilities <const> = require("tecs.platform.capabilities")
-local paths <const> = require("tecs.platform.paths")
+local system <const> = require("tecs.platform.system")
+local filesystem <const> = require("tecs.platform.filesystem")
 local log <const> = require("tecs.log")
 local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
@@ -167,7 +167,7 @@ mcp.register({
     whenCrashed = true,
     inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
-        local caps = capabilities.capabilities()
+        local caps = system.capabilities()
         return {
             world = worldContext() or data.null,
             target = caps.target,
@@ -178,8 +178,8 @@ mcp.register({
             packagedShaders = caps.packagedShaders,
             shaderFormats = caps.shaderFormats,
             cores = caps.cores,
-            assets = paths.assetRoot(),
-            writable = paths.preferencePath(),
+            assets = filesystem.assetRoot(),
+            writable = filesystem.preferencePath(),
             logFile = log.filePath() or data.null,
             loggers = log.loggers(),
         }
@@ -279,7 +279,7 @@ mcp.register({
         local width, height = texture.width, texture.height
 
         local name = (args.name as string) or "screenshot.png"
-        local path = paths.writablePath(name)
+        local path = filesystem.writablePath(name)
         local saved, reason = activeRenderer:saveScreenshot(path)
         if not saved then
             error(reason, 0)

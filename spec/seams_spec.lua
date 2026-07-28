@@ -165,7 +165,6 @@ local REACH = {
             .. "that SDL does not already answer differently.",
         modules = {
             "tecs/gpu/shaderbuild.lua",
-            "tecs/platform/capabilities.lua",
             "tecs/platform/time.lua",
             "tecs/log.lua",
         },
@@ -173,7 +172,8 @@ local REACH = {
     {
         bucket = "direct",
         reason = "Optional operating-system facilities SDL already presents "
-            .. "as one portable contract: native dialogs, locales, power, "
+            .. "as one portable contract: what this build can do here, the "
+            .. "clipboard, child processes, native dialogs, locales, power, "
             .. "standalone sensors and physical audio devices. None is part "
             .. "of the engine lifecycle or required for a game to run.",
         modules = {
@@ -184,15 +184,13 @@ local REACH = {
     },
     {
         bucket = "direct",
-        reason = "The window, the process lifecycle and the desktop's "
-            .. "clipboard. SDL owns the loop on every target it covers, and a "
-            .. "port owns its own loop and calls the same four entry points, "
-            .. "which is the lifecycle seam and needs no code here.",
+        reason = "The window and the application lifecycle. SDL owns the "
+            .. "loop on every target it covers, and a port owns its own loop "
+            .. "and calls the same four entry points, which is the lifecycle "
+            .. "seam and needs no code here.",
         modules = {
             "tecs/Application.lua",
             "tecs/platform/Window.lua",
-            "tecs/platform/clipboard.lua",
-            "tecs/platform/proc.lua",
         },
     },
     {

@@ -18,7 +18,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local assets = require("tecs.assets")
 local filesystem = require("tecs.platform.filesystem")
 local watch = require("tecs.platform.watch")
-local capabilities = require("tecs.platform.capabilities")
+local system = require("tecs.platform.system")
 
 local FIRST = "#version 450\n// FIRST\n"
 local SECOND = "#version 450\n// SECOND, and longer than the first\n"
@@ -325,14 +325,14 @@ describe("the file watcher", function()
     end)
 
     it("refuses a build that links no shader compiler", function()
-        local real = capabilities.capabilities
-        capabilities.capabilities = function()
+        local real = system.capabilities
+        system.capabilities = function()
             local answered = real()
             return setmetatable({ runtimeShaders = false }, { __index = answered })
         end
 
         local ok, failure = pcall(watch.install, { root = dir })
-        capabilities.capabilities = real
+        system.capabilities = real
 
         assert.is_false(ok)
         assert.is_truthy(

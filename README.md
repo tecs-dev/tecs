@@ -245,14 +245,40 @@ copy of it, so `tecs.gfx.layers` and `require("tecs.gfx.layers")` are one
 table. That is not a detail: `layers.maxY` and `layers.maxZ` are assigned by a
 game, and two tables would mean a write through one that nothing reads.
 
+**A namespace with one principal module is that module.** `tecs.filesystem` is
+the table `require("tecs.platform.filesystem")` answers with, and `watch` is
+hung off it on the first read of that name. The alternative was a table built
+for the name, standing in front of the module and filling a member at a time,
+and it cost two things. Teal has to type what a game writes, and no module
+types a table like that, so `init.tl` had to declare a record restating every
+member's signature and every member's docblock: `init.tl` reached twelve hundred
+lines, two thirds of which were a second copy of documentation that already
+existed on the declaration it described, and nothing checked the copies against
+each other. And a write to a name on it had to be routed to whichever module
+below owned the name, because `tecs.filesystem.organisation` is assigned by a
+game and read back by `preferencePath`. Being the module answers both: the
+record that types it is the module's own, checked against the implementation by
+the compiler, and a write lands where the read looks.
+
+What that costs is a direction in the module graph. The parent has to name the
+type of every name below it, and Teal refuses a require cycle even when one side
+of it is erased at codegen, so a subordinate module cannot require its parent.
+`watch` polls what the process has opened, under the root the filesystem
+resolves, and the shader and material loaders read content through the same
+two. So those live in `platform/content.tl`, below both, and `tecs.filesystem`
+is what a game writes. A namespace assembled from several modules with no
+principal one keeps the table built for the name, and keeps the record with it:
+`tecs.audio` and `tecs.input` are the two left, and both are a class and its
+satellites rather than a merge.
+
 `spec/surface_spec.lua` walks the whole of it. The record in `init.tl` is what
 a game is type-checked against and the descriptor table beneath it is what a
 name resolves through, nothing in Teal connects the two, and a descriptor
 pointing at the wrong module resolves to a table full of functions that are not
 the ones promised. So the spec reads the record, resolves every name it
 declares, and holds each to the module whose path ends in the name it was
-reached by. It found six declarations claiming a value that was never assigned
-the first time it ran.
+reached by, along with every name the descriptor puts one level down. It found
+six declarations claiming a value that was never assigned the first time it ran.
 
 ## One way in
 
@@ -1215,7 +1241,7 @@ only invalidation there is.
 Every read hands back an allocation the caller frees, and a failed read hands
 back an empty string rather than nothing, so the free is owed on that case too.
 `loader.toString` copies and does not free, which makes it the right converter
-and half the job; the pairing lives in one place in `platform/clipboard.tl`
+and half the job; the pairing lives in one place in `platform/system.tl`
 rather than at each call site, because a read that forgot would leak once per
 paste and nothing about a process that grows while a text field is pasted into
 points back at the clipboard.
@@ -1300,12 +1326,13 @@ of making game code run at device-thread cadence.
 ## Touching the filesystem
 
 `tecs.filesystem` answers both halves: where a path is, and what to do once
-you have one. They were two modules, `paths` and `filesystem`, and are one,
-because they were never two questions. Every path a game touches is resolved
-and then acted on in the same breath, and a caller holding one half had to name
-the other module to do anything with it. `paths.tl` is still its own file and
-the surface reads it beside `filesystem.tl`, so neither loads for the other. It is one backend call per function and nothing composed out of
-several, and on SDL each of those is the obvious call: `SDL_GetPathInfo` behind
+you have one. They are one module because they were never two questions. Every
+path a game touches is resolved and then acted on in the same breath, and a
+caller holding one half had to name the other module to do anything with it.
+`platform/content.tl` sits under it and holds the part the shader loader, the
+material loader and the watcher read, which is what keeps those three from
+requiring the module that names the watcher's type. It is one backend call per
+function and nothing composed out of several, and on SDL each of those is the obvious call: `SDL_GetPathInfo` behind
 `info`, `exists`, `isFile` and `isDirectory`, `SDL_GlobDirectory` behind `list`
 and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,
 `rename`, `copy`, `write`, `currentDirectory` and `userFolder`. No virtual
@@ -3422,8 +3449,7 @@ src/tecs/Future.tl        the value everything asynchronous settles into
 src/tecs/http/            requests, and the clients the loop turns
 src/tecs/net.tl           nonblocking TCP and UDP transport
 src/tecs/random.tl        seeded streams and Perlin noise
-src/tecs/hash.tl          FNV-1a, Adler-32 and CRC-32 over byte strings
-src/tecs/compress.tl      zlib and raw DEFLATE in both directions
+src/tecs/data.tl          JSON, zlib and raw DEFLATE, and three hashes
 assets/                   shaders, materials and fonts, globbed at build time
 spec/                     busted suite
 bench/                    where the numbers in this file come from

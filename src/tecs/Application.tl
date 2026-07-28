@@ -68,8 +68,6 @@ local Audio <const> = require("tecs.Audio")
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local filesystem <const> = require("tecs.platform.filesystem")
-local paths <const> = require("tecs.platform.paths")
-local proc <const> = require("tecs.platform.proc")
 local system <const> = require("tecs.platform.system")
 local httpClients <const> = require("tecs.http.clients")
 local watch <const> = require("tecs.platform.watch")
@@ -568,20 +566,20 @@ function Application:_init(): boolean
         logFile = "log.jsonl"
     end
     if logFile ~= nil then
-        log.openFile(paths.writablePath(logFile))
+        log.openFile(filesystem.writablePath(logFile))
     end
 
     -- Resolved before the game's plugin runs, so a game can read what the last
     -- run left while it is building the world it is going to put back.
     if config.checkpoint ~= nil then
-        self._checkpointPath = paths.writablePath(config.checkpoint)
+        self._checkpointPath = filesystem.writablePath(config.checkpoint)
     end
 
     -- Before the device, because the pack decides which shader format the
     -- device may claim, and that decides which backend SDL selects. The name
     -- is fixed rather than configurable: the build produces the pack and the
     -- engine finds it, and there is no version of that a game decides.
-    local packPath = paths.assetPath("shaders.tsp")
+    local packPath = filesystem.assetPath("shaders.tsp")
     local pack = shaderpack.read(packPath)
     if pack ~= nil then
         shadercompiler.usePack(pack)
@@ -872,7 +870,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- exited, and a game that shelled out and did nothing else would otherwise
     -- hold a handle that never leaves "running". Costs a nil check on a
     -- process that has never started a child.
-    proc.updateProcesses()
+    system.updateProcesses()
     system.updateDialogs()
 
     -- And again for every open HTTP client. A transfer that completed while
@@ -1202,7 +1200,7 @@ function Application:_shutdown(): boolean
     -- A child outlives the process that started it unless something ends it,
     -- and the worker waiting on one would be a thread inside a library about
     -- to be unmapped. So teardown kills: gently, then forcibly, then joins.
-    proc.shutdownProcesses()
+    system.shutdownProcesses()
     log.closeFile()
 
     if self.device ~= nil then

@@ -57,7 +57,6 @@ local components <const> = require("tecs.components")
 local materials <const> = require("tecs.gpu.materials")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 local layersModule <const> = require("tecs.gfx.layers")
-local paths <const> = require("tecs.platform.paths")
 local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
 
@@ -280,7 +279,7 @@ local function resolve(path: string): string
     if path:sub(1, 1) == "/" then
         return path
     end
-    return paths.assetPath(path)
+    return filesystem.assetPath(path)
 end
 
 --- Everything up to and including the final separator, or the empty string.

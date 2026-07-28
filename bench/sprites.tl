@@ -47,7 +47,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local assets <const> = require("tecs.assets")
-local paths <const> = require("tecs.platform.paths")
+local filesystem <const> = require("tecs.platform.filesystem")
 local sheet <const> = require("tecs.gfx.sheet")
 local animation <const> = require("tecs.gfx.animation")
 local timing <const> = require("tecs.timing")
@@ -243,7 +243,7 @@ return tecs.application.create({
         if not assets.installed() then
             assets.install()
         end
-        local handle <const> = assets.loadImage(paths.assetPath(ATLAS))
+        local handle <const> = assets.loadImage(filesystem.assetPath(ATLAS))
         assets.waitAll()
         if handle.status ~= "ready" then
             error(("tecs: cannot load '%s': %s"):format(ATLAS, handle.error or handle.status))

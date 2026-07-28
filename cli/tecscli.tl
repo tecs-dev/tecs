@@ -16,7 +16,7 @@
 --- A `package.loaders` entry over the payload would answer `require` without
 --- touching the disk, and would answer only half the question. The engine
 --- resolves an asset as a path and opens it through
---- `src/tecs/platform/paths.tl`, so shaders, materials and fonts would still
+--- `src/tecs/platform/filesystem.tl`, so shaders, materials and fonts would still
 --- need a directory. Serving Lua from memory and assets from a directory is two
 --- mechanisms where the tree has one, so this writes both out and points the
 --- ordinary one at the result.
@@ -25,7 +25,7 @@
 --- after a digest of the payload. What it keeps is that the binary is one file
 --- to install, copy and put on a PATH, and that a cold machine needs no network.
 ---
---- The engine change that would remove it is a seam in `paths.tl` for opening
+--- The engine change that would remove it is a seam in `filesystem.tl` for opening
 --- an asset, so a port can answer from memory rather than from a path. That is
 --- a change to `src/tecs`, and it is named here rather than made.
 
