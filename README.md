@@ -2504,6 +2504,56 @@ It runs every frame, including a frame with no lights at all, because it is the
 only thing that writes the counts and a frame that skipped it would leave the
 last frame's lists standing.
 
+### Two shadows, because one of them cannot reach ambient
+
+An occluder puts its silhouette into a mask, and every light marches that same
+mask, so blocking light costs one drawing of a caster rather than one per light.
+A drop shadow throws a stretched copy of a caster along the ground and darkens
+what it lands on. They look like one feature at two strengths and they are not:
+the mask is read inside the light loop, so the most it can take away is a
+light's own contribution, while the drop shadow multiplies the sum the loop
+produced and so reaches the ambient term, which the mask has no output at all
+against. A black light over full ambient is the case that separates them, and it
+is a pixel test in `spec/shadow_spec.lua`.
+
+They are exclusive per entity, which is also a decision rather than a
+limitation. A crowd of light-blocking silhouettes merges under the mask's max
+blend into one flat mat of darkness, so the thing that wants a contact shadow is
+exactly the thing that must not be an occluder.
+
+That exclusivity is what let the role fit in the bound. A half extent is a
+length, so neither of its two signs carried anything, and two signs name exactly
+four states: opaque, blended, occluder, drop-shadow caster. A row therefore says
+what it casts in bytes the cull already reads, and the mark pass scans a third
+lane as a `uvec3` add under the barriers it was already taking, over the one
+bound read it already paid for. It never touches the 64-byte instance to find
+out. The caster's height rides above the clip region in the float that carries
+its texture-array layer, which had room for a third field and no more.
+
+The lane's predicate is its own rather than the view's: a rectangle wider than
+the view by a shadow margin, so a wall just off the left edge still casts across
+the pixels that can see it. A fan-out living inside the ordinary cull inherits
+that cull's viewport and cannot express this.
+
+Overlap resolves by `min` and `max` rather than by an accumulate, and both
+commute, so what a pixel holds is a function of the set of fragments that
+covered it and not of their order; on an unsigned normalised target that is bit
+exact. Nothing in the subsystem uses an atomic, for the same reason nothing else
+here does. The one cap that binds, four lights per caster, is applied by
+descending weight in a fixed comparison network rather than by buffer order: a
+cap that binds by buffer order drops whichever shadow sits later in the buffer,
+which can be the brightest, and makes shadows move when an unrelated light is
+spawned and the slots shift.
+
+Off, which is the default, the whole of it costs one more count in a scan that
+was already running. On, it costs three targets, four passes, three pipelines,
+two dispatches and a list, on every frame whether or not anything casts. That is
+a setting rather than a count taken off the frame because the alternative is a
+pass graph whose shape depends on what a world happens to hold this frame and a
+lighting pipeline rebuilt the first time something casts. The per-pixel cost is
+bounded the other way instead: the march's step count is adaptive, clamped down
+by the light's own attenuation to four, and skipped entirely below a twentieth.
+
 ## Layers
 
 A `Transform` carries a layer, and a layer is a band of that depth range.

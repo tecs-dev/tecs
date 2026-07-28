@@ -370,6 +370,56 @@ ecs.newFFIComponent({
     defaults = {0},
 })
 
+--- Stands between a light and what is behind it.
+---
+--- The silhouette goes into the occluder mask every light marches against, so
+--- one entity blocks every light at the cost of one drawing of itself rather
+--- than one per light. What is blocked is a light's own contribution, and
+--- never the ambient term, because a mask inside the light loop has no way to
+--- reach a term that is not in it. `DropShadow` is the other half of that.
+---
+--- Coverage is the silhouette, so a circle, a rounded box or a glyph casts the
+--- shape it draws with no threshold of its own to set. A translucent entity
+--- casts nothing: it is drawn forward over the composited image and never
+--- reaches the G-buffer, so a hard silhouette of it would be a lie.
+local record Occluder is Component
+    height: number
+end
+
+ecs.newFFIComponent({
+    name = "Occluder",
+    container = Occluder,
+    fields = {
+        {"height", "float"},
+    },
+    defaults = {1.0},
+})
+
+--- Throws a stretched copy of itself along the ground, away from the light.
+---
+--- What this darkens is everything a light left, ambient included, which is
+--- what `Occluder` cannot do and the reason both exist. It blocks no light in
+--- return: a crowd of light-blocking silhouettes merges under the mask into
+--- one flat mat of darkness, so the thing that wants a contact shadow is
+--- exactly the thing that must not be an occluder. An entity carrying both is
+--- an occluder, because dropping that half would silently unblock a light.
+---
+--- The copy is thrown by the nearest few lights by weight rather than by every
+--- light, so adding a light somewhere else in the world does not move a shadow
+--- that was already settled.
+local record DropShadow is Component
+    height: number
+end
+
+ecs.newFFIComponent({
+    name = "DropShadow",
+    container = DropShadow,
+    fields = {
+        {"height", "float"},
+    },
+    defaults = {1.0},
+})
+
 --- Marks an entity as contributing geometry. Without it a Transform is just
 --- a position, which is what most entities in a world actually are.
 local record Renderable is Component
@@ -440,6 +490,19 @@ local record components
     --- caller's job: intersect the two and set that.
     Clip: Clip
 
+    --- Blocks every light with the shape the entity draws. `height` is 0 to
+    --- 1 of the world height `Deferred.shadowHeight` sets, so 1 is a full
+    --- wall and 0 is something lying flat that blocks nothing. Needs
+    --- `shadows` on the renderer; without it the entity draws and casts
+    --- nothing.
+    Occluder: Occluder
+
+    --- Darkens the ground away from each of the nearest lights, ambient
+    --- included, and blocks no light. `height` is 0 to 1 and decides how far
+    --- the copy is thrown, under the same reading as `Occluder.height`. An
+    --- entity carrying both is an occluder.
+    DropShadow: DropShadow
+
     --- Marks an entity as contributing geometry. A tag, so it costs a
     --- column of nothing; without it a Transform is only a position, which
     --- is what most entities in a world are.
@@ -472,6 +535,8 @@ components.Sprite = Sprite
 components.Material = Material
 components.PointLight = PointLight
 components.Clip = Clip
+components.Occluder = Occluder
+components.DropShadow = DropShadow
 components.Renderable = Renderable
 components.imageId = imageId
 components.imageName = imageName

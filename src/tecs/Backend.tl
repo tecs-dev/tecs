@@ -190,15 +190,16 @@ local record BackendOptions
     layers: integer
     --- Fit many images into each layer rather than one. Defaults to false.
     packImages: boolean
-    --- Build the occluder mask and the drop-shadow target, and the shadow lane
-    --- that fills them. Defaults to false, and off costs three targets, four
-    --- passes, three pipelines, two compute dispatches and a list.
+    --- Build the occluder mask and the drop-shadow target, the shadow lane that
+    --- fills them, and tune all three. Nil, the default, spends none of the
+    --- three targets, four passes, three pipelines, two compute dispatches and
+    --- one list they cost.
     ---
     --- What it does not gate is the lane's share of the mark pass, which is one
     --- more count in a scan that is already running and no more memory traffic
     --- than the two lanes beside it. A world that never casts pays for that and
     --- for nothing else.
-    shadows: boolean
+    shadows: Deferred.ShadowOptions
 end
 
 --- The device half of the renderer, as one object.
@@ -657,7 +658,7 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     self.castCapacity = math.min(self.capacity, MAX_CAST) * CAST_FANOUT
     self._blendGroups = math.ceil(self.blendCapacity / CULL_GROUP)
     self._blending = false
-    local shadows <const> = options.shadows == true
+    local shadows <const> = options.shadows ~= nil
     self.count = 0
     self._destroyed = false
 
@@ -941,7 +942,7 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
         swapchainFormat,
         {
             ambient = options.ambient,
-            shadows = shadows,
+            shadows = options.shadows,
             occluders = function(context: Deferred.PassContext)
                 if self.count == 0 then
                     return

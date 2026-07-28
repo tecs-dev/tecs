@@ -1,5 +1,5 @@
 ---
-description: "The engine's render components: Transform, PreviousTransform, Tint, Sprite, Material, PointLight, Clip and Renderable"
+description: "The engine's render components: Transform, PreviousTransform, Tint, Sprite, Material, PointLight, Clip, Occluder, DropShadow and Renderable"
 outline: deep
 ---
 
@@ -37,6 +37,8 @@ local entity <const> = world:spawn(
 | `Material`          | FFI               | `id` `param`                                     | extraction, into the material dispatch        |
 | `PointLight`        | FFI               | `height` `radius` `r` `g` `b` `intensity`        | extraction, into the frame's light list       |
 | `Clip`              | FFI               | `index`                                          | extraction, then the fragment shader          |
+| `Occluder`          | FFI               | `height`                                         | extraction, into the occluder mask            |
+| `DropShadow`        | FFI               | `height`                                         | extraction, into the drop-shadow target       |
 | `Renderable`        | table, no fields  | none                                             | the extractor's renderable query              |
 
 Everything except `Renderable` is an FFI component on purpose. Their columns are contiguous C memory, which is
@@ -44,11 +46,11 @@ what lets the sync walk rows and write straight into mapped GPU staging instead 
 a time through a table.
 
 ::: warning Dirty bits decide whether a frame resyncs
-Extraction rewrites an archetype's run only when one of `Transform`, `Tint`, `Sprite`, `Material`, `Clip` or
-`Pivot` is dirty on it, or when the archetype carries `PreviousTransform` and the frame is interpolating. A
-write through `world:getMut` marks the column; a cdata write reached through `world:get` does not, and needs
-`world:markComponentDirty(entity, Component)` after it or the GPU keeps drawing the old value. `world:batchSpawn`
-skips FFI defaults, so a callback has to set every field it cares about.
+Extraction rewrites an archetype's run only when one of `Transform`, `Tint`, `Sprite`, `Material`, `Clip`,
+`Pivot`, `Occluder` or `DropShadow` is dirty on it, or when the archetype carries `PreviousTransform` and the
+frame is interpolating. A write through `world:getMut` marks the column; a cdata write reached through
+`world:get` does not, and needs `world:markComponentDirty(entity, Component)` after it or the GPU keeps drawing
+the old value. `world:batchSpawn` skips FFI defaults, so a callback has to set every field it cares about.
 :::
 
 ## Transform
@@ -224,6 +226,54 @@ the two rather than as two regions an instance sits in at once. The rectangle it
 [`Renderer`](/modules/renderer), and clearing one puts it back to clipping nothing, so an index handed out and
 taken back leaves the instances still pointing at it drawing whole rather than silently gone.
 
+## Occluder
+
+Stands between a light and what is behind it.
+
+| Field    | Type    | Default | Description                                                                    |
+| -------- | ------- | ------- | ------------------------------------------------------------------------------ |
+| `height` | `float` | `1.0`   | How tall the entity stands, 0 to 1 of the world height `shadows.height` names. |
+
+The silhouette goes into one mask that every light marches against, so an entity blocks every light in the
+scene at the cost of one drawing of itself rather than one drawing per light. What it takes away is a light's
+own contribution and never the ambient term, because a mask read inside the light loop has no way to reach a
+term that is not in it. `DropShadow` is the other half of that.
+
+Coverage is the silhouette, so a circle, a rounded box or a glyph casts the shape it draws and there is no
+alpha threshold to set: the material dispatch already decided which fragments the entity covers.
+
+The height reads against `shadows.height` on the renderer, which defaults to 64, the same as a `PointLight`'s
+default height. So an occluder at `1.0` under a default light is level with it and its shadow runs to the
+horizon; at `0.5` the light clears it and the shadow ends.
+
+**Pairs with:** `Transform`, `Tint`, `Renderable`, and shadows turned on. Without
+[`shadows`](/modules/renderer#shadows) on the renderer the entity draws exactly as it would without this
+component. A translucent entity casts nothing whatever it carries: it is drawn forward over the composited
+image and never reaches the G-buffer, so a hard silhouette of it would be a lie.
+
+## DropShadow
+
+Throws a stretched copy of the entity along the ground, away from the light.
+
+| Field    | Type    | Default | Description                                                         |
+| -------- | ------- | ------- | ------------------------------------------------------------------- |
+| `height` | `float` | `1.0`   | How far off the ground the copy is thrown from, on the same 0 to 1. |
+
+What this darkens is everything a light left, ambient included, which is exactly what `Occluder` cannot do and
+the reason both exist. Under a black light and full ambient an occluder has nothing to take away and this still
+throws a shadow.
+
+It blocks no light in return, and that is the design rather than a limitation: a crowd of light-blocking
+silhouettes merges under the mask into one flat mat of darkness, so the thing that wants a contact shadow is
+exactly the thing that must not be an occluder. An entity carrying both components is an occluder, because
+dropping that half would unblock a light without saying so.
+
+The copy is thrown by the nearest few lights by weight rather than by every light, so a light spawned elsewhere
+in the world does not move a shadow that had already settled. How dark it is and how long it may run are
+`shadows.dropOpacity` and `shadows.dropLength` on the renderer.
+
+**Pairs with:** the same as `Occluder`, under the same conditions.
+
 ## Renderable
 
 Marks an entity as contributing geometry. Without it a `Transform` is just a position, which is what most
@@ -303,6 +353,17 @@ Keeps a renderable's fragments inside one rectangle. `index` names a
 region set with `Renderer:setClipRegion`, and 0, the default, means
 no clipping. A region is a single rectangle, so nesting is the
 caller's job: intersect the two and set that.
+<a id="tecs.components.DropShadow"></a>
+
+### tecs.components.DropShadow
+
+<pre><code v-pre><a href="#tecs.components.DropShadow">tecs.components.DropShadow</a>: DropShadow
+</code></pre>
+
+Darkens the ground away from each of the nearest lights, ambient
+included, and blocks no light. `height` is 0 to 1 and decides how far
+the copy is thrown, under the same reading as `Occluder.height`. An
+entity carrying both is an occluder.
 <a id="tecs.components.Material"></a>
 
 ### tecs.components.Material
@@ -316,6 +377,18 @@ entity with neither this nor a Sprite still draws. Take `id` from
 `materials.id(name)` rather than writing a number: ids are positions
 in sorted order and move when a material file is added. `param` is 0
 to 1 and means whatever the material says it does.
+<a id="tecs.components.Occluder"></a>
+
+### tecs.components.Occluder
+
+<pre><code v-pre><a href="#tecs.components.Occluder">tecs.components.Occluder</a>: Occluder
+</code></pre>
+
+Blocks every light with the shape the entity draws. `height` is 0 to
+1 of the world height `Deferred.shadowHeight` sets, so 1 is a full
+wall and 0 is something lying flat that blocks nothing. Needs
+`shadows` on the renderer; without it the entity draws and casts
+nothing.
 <a id="tecs.components.PointLight"></a>
 
 ### tecs.components.PointLight

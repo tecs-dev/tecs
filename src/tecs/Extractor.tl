@@ -52,6 +52,8 @@ local HIDDEN <const> = instancelayout.HIDDEN
 local HIDDEN_DEPTH <const> = instancelayout.HIDDEN_DEPTH
 local extentOf <const> = instancelayout.extentOf
 local packSlot <const> = instancelayout.packSlot
+--- Largest cast height a slot holds, which a 0 to 1 height is quantised onto.
+local TOP_STEP <const> = instancelayout.HEIGHTS - 1
 
 local Pivot <const> = sheet.Pivot
 
@@ -372,6 +374,24 @@ local function writeRun(
     -- Absent on every archetype that turns about its middle, which is most of
     -- them: the rows below then draw the quad centred on the entity.
     local pivots = archetype:get(Pivot)
+    -- Which of the two casting roles this archetype is, decided once for the
+    -- run because the columns are per archetype: an entity either carries the
+    -- component or it is in a different archetype. Only the height and whether
+    -- a row is blended are left per row.
+    --
+    -- An occluder before a drop-shadow caster, because an entity carrying both
+    -- has asked for the one that changes what a light does, and taking the
+    -- other would unblock the light without saying so.
+    local casts = archetype:get(components.Occluder)
+    local castSignX = 1.0
+    if casts == nil then
+        -- Read as the other column because the only field either carries is
+        -- the same height at the same offset, and the rows below want one
+        -- name for it rather than a branch per row over which of the two the
+        -- run turned out to be.
+        casts = archetype:get(components.DropShadow) as {components.Occluder}
+        castSignX = -1.0
+    end
     -- Loop invariant: an archetype either carries the previous transform or it
     -- does not, so an entity that is not interpolated costs one test per run
     -- rather than anything per row.
@@ -416,12 +436,32 @@ local function writeRun(
             u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
         end
 
-        -- The clip region rides above the layer in one float. Region zero
-        -- packs to the layer unchanged, so an archetype with no Clip column
-        -- writes exactly what it wrote before there were regions.
-        local packedSlot = layer
+        -- Blending wins over casting, so a translucent row in a caster's
+        -- archetype is drawn forward and casts nothing. The two are exclusive
+        -- in the bound's signs, and a silhouette of something the G-buffer
+        -- never saw is the half of the pair that would be a lie.
+        local blend <const> = tint.a < 1.0
+        local casting <const> = casts ~= nil and not blend
+
+        -- The clip region rides above the layer in one float, and a caster's
+        -- height above that. Region zero and height zero pack to the layer
+        -- unchanged, so an archetype with neither column writes exactly what
+        -- it wrote before either existed.
+        local clip = 0
         if clips ~= nil then
-            packedSlot = packSlot(clips[row].index as integer, layer)
+            clip = clips[row].index as integer
+        end
+        local packedSlot = layer
+        if casting then
+            local height = casts[row].height
+            if height < 0.0 then
+                height = 0.0
+            elseif height > 1.0 then
+                height = 1.0
+            end
+            packedSlot = packSlot(clip, layer, floor(height * TOP_STEP + 0.5))
+        elseif clip ~= 0 then
+            packedSlot = packSlot(clip, layer)
         end
 
         -- Material and parameter share one float: the integer part selects and
@@ -571,19 +611,23 @@ local function writeRun(
         local bound = (offset + row - 1) * BOUND_FLOATS
         bounds[bound] = centreX
         bounds[bound + 1] = centreY
-        -- A half extent is a length and its sign carries nothing, so the sign
-        -- is what tells the cull which lane a row belongs in. Negative is
-        -- blended, and the cull takes the magnitude for the view test and the
-        -- sign for the lane, so the lane costs no fetch of its own: the mark
+        -- A half extent is a length and its sign carries nothing, so the two
+        -- signs together are what tell the cull which of the four lanes a row
+        -- belongs in. The cull takes the magnitudes for the view test and the
+        -- signs for the lane, so a lane costs no fetch of its own: the mark
         -- pass already reads this bound and deliberately never touches the
         -- 64-byte instance.
-        if tint.a < 1.0 then
+        if blend then
             bounds[bound + 2] = -ex
+            bounds[bound + 3] = ey
             blended = blended + 1
+        elseif casting then
+            bounds[bound + 2] = ex * castSignX
+            bounds[bound + 3] = -ey
         else
             bounds[bound + 2] = ex
+            bounds[bound + 3] = ey
         end
-        bounds[bound + 3] = ey
     end
 
     packet.blendCount = packet.blendCount + blended
@@ -968,6 +1012,11 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         if pending > length then
             pending = length
         end
+        -- Every component a row's instance is written from, so a change to any
+        -- of them rewrites the run and one to nothing else leaves it standing.
+        -- The two casting components are last because the chain short circuits:
+        -- on an archetype something else already moved they are never asked,
+        -- and a run being rewritten anyway carries the new height with it.
         local dirty = relayout
             or run.moved
             or run.length ~= pending
@@ -977,6 +1026,8 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             or archetype:isComponentDirty(components.Material)
             or archetype:isComponentDirty(components.Clip)
             or archetype:isComponentDirty(Pivot)
+            or archetype:isComponentDirty(components.Occluder)
+            or archetype:isComponentDirty(components.DropShadow)
             or (interpolating and archetype:get(components.PreviousTransform) ~= nil)
 
         if dirty then

@@ -74,6 +74,11 @@ local record RendererOptions
     --- area rather than its layer count, and a small image costs its own size
     --- rather than a whole cell.
     packImages: boolean
+    --- Let entities cast shadows, and tune what they cost. Nil, the default,
+    --- means an `Occluder` or a `DropShadow` on an entity draws the entity and
+    --- casts nothing, because the targets that would hold a shadow are never
+    --- built. An empty table turns them on with every default.
+    shadows: Deferred.ShadowOptions
 end
 
 --- The renderer a game holds, and the only object that sees both halves.
@@ -167,6 +172,7 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer, options:
             cell = options.cell,
             layers = options.layers,
             packImages = options.packImages,
+            shadows = options.shadows,
         }
     )
     self._backend = backend

@@ -147,6 +147,47 @@ local record Light
     intensity: number
 end
 
+--- What a pipeline that casts shadows tunes them with.
+---
+--- Every field has a default, so an empty table is the whole of what a scene
+--- that wants shadows and no opinion about them passes. One record rather than
+--- seven fields spread through the option records above it, because these are
+--- forwarded twice on the way down and a second listing of them is a second
+--- thing to keep in step.
+local record ShadowOptions
+    --- Size of the occluder mask relative to the frame. Defaults to one.
+    --- Halving it quarters two full targets and costs a shadow its crisp edge,
+    --- since the mask is sampled at the resolution it was written.
+    maskScale: number
+    --- Samples a shadow march takes at full attenuation, and the ceiling the
+    --- adaptive count is clamped to. Defaults to 24.
+    steps: number
+    --- How far outside the view, in world units, a caster is still kept.
+    --- Defaults to 200. A wall just off the left edge throws a shadow that
+    --- falls on screen, and this is what stops the cull dropping it. It also
+    --- widens the mask's projection by the same amount, so what is kept lands
+    --- inside the mask rather than off its edge.
+    margin: number
+    --- World height a caster at `height` one stands, which is the one number
+    --- that puts a light's height and a caster's zero-to-one height in the
+    --- same space. Defaults to 64, which is `PointLight`'s own default height,
+    --- so an occluder at height one and a light at its default are level and
+    --- the shadow runs to the horizon.
+    height: number
+    --- Size of the drop-shadow target relative to the frame. Defaults to a
+    --- half: it holds one soft channel, so the resolution it is read at is not
+    --- the resolution it has to be drawn at.
+    dropScale: number
+    --- How dark a drop shadow is where the light throwing it is at full
+    --- strength. Defaults to 0.4.
+    dropOpacity: number
+    --- Longest a drop shadow may be, in world units. Defaults to 512. The
+    --- projection that places the tip divides by the light's height above the
+    --- caster's, so a light barely clearing a tall caster throws a shadow to
+    --- the horizon, and this is what bounds it.
+    dropLength: number
+end
+
 local record DeferredOptions
     --- Draws into the G-buffer. Writes location 0 for albedo and location 1
     --- for a normal biased into unsigned range.
@@ -169,18 +210,19 @@ local record DeferredOptions
     --- receive it, and neither does a pixel nothing drew over.
     ambient: {number}
 
-    --- Whether to build the occluder mask and the drop-shadow target at all.
+    --- Build the occluder mask and the drop-shadow target, and tune them.
     ---
-    --- Defaults to false, and off it costs a pipeline nothing: three targets go
+    --- Nil, which is the default, costs a pipeline nothing: three targets go
     --- unallocated, four passes go undeclared, and the resolve is built from
-    --- the variant of its shader that samples neither. On it, a scene that
+    --- the variant of its shader that samples neither. Present, a scene that
     --- casts nothing still pays the four passes, which draw no instances over
-    --- targets that clear to "no occluder" and "nothing shadowed".
+    --- targets that clear to "no occluder" and "nothing shadowed". An empty
+    --- table turns shadows on with every default.
     ---
-    --- A knob rather than a count taken off a frame, because the alternative is
-    --- a pass graph whose shape depends on what a world happens to hold this
+    --- A setting rather than a count taken off a frame, because the alternative
+    --- is a pass graph whose shape depends on what a world happens to hold this
     --- frame, and a resolve pipeline rebuilt the first time something casts.
-    shadows: boolean
+    shadows: ShadowOptions
     --- Draws the shadow lane's list into the occluder mask, at the mask's own
     --- widened projection. Called with the pass begun; `castUniform` is what
     --- says where to put a caster. Ignored unless `shadows` is set.
@@ -190,38 +232,6 @@ local record DeferredOptions
     --- what puts a caster back on top of the shadow it threw across its own
     --- feet. Ignored unless `shadows` is set.
     dropShadows: function(context: PassGraph.PassContext)
-    --- Size of the occluder mask relative to the frame. Defaults to one.
-    --- Halving it quarters two full targets and costs a shadow its crisp edge,
-    --- since the mask is sampled at the resolution it was written.
-    shadowMaskScale: number
-    --- Samples a shadow march takes at full attenuation, and the ceiling the
-    --- adaptive count is clamped to. Defaults to 24, which is the number the
-    --- previous engine settled on.
-    shadowSteps: number
-    --- How far outside the view, in world units, a caster is still kept.
-    --- Defaults to 200. A wall just off the left edge throws a shadow that
-    --- falls on screen, and this is what stops the cull dropping it. It also
-    --- widens the mask's projection by the same amount, so what is kept lands
-    --- inside the mask rather than off its edge.
-    shadowMargin: number
-    --- World height a full-height occluder stands, which is the one number
-    --- that puts a light's height and a mask's zero-to-one height in the same
-    --- space. Defaults to 64, which is `PointLight`'s own default height, so an
-    --- occluder at height one and a light at its default are level and the
-    --- shadow runs to the horizon.
-    shadowHeight: number
-    --- Size of the drop-shadow target relative to the frame. Defaults to a
-    --- half: it holds one soft channel, so the resolution it is read at is not
-    --- the resolution it has to be drawn at.
-    dropShadowScale: number
-    --- How dark a drop shadow is where the light throwing it is at full
-    --- strength. Defaults to 0.4, which is the previous engine's own default.
-    dropShadowOpacity: number
-    --- Longest a drop shadow may be, in world units. Defaults to 512. The
-    --- projection that places the tip divides by the light's height above the
-    --- caster's, so a light barely clearing a tall caster throws a shadow to
-    --- the horizon, and this is what bounds it.
-    dropShadowLength: number
 end
 
 --- The deferred pipeline: its pass graph, the pipelines it binds, and the
@@ -234,6 +244,8 @@ end
 local record Deferred
     --- One light, as `setLights` takes them.
     Light: Light
+    --- What turns shadows on, and the only place their numbers are described.
+    ShadowOptions: ShadowOptions
     --- The occluder mask draw, which puts a caster's own silhouette into the
     --- mask every light marches against.
     MASK: integer
@@ -502,14 +514,18 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self.ambient = options.ambient or {0.08, 0.08, 0.10}
     self._destroyed = false
 
-    local shadows <const> = options.shadows == true
+    -- Read whether or not shadows are on, so the numbers a caller can ask back
+    -- for are the numbers this would use, rather than nil until something
+    -- turns the feature on.
+    local tuning <const> = options.shadows or {}
+    local shadows <const> = options.shadows ~= nil
     self._shadows = shadows
-    self._shadowMaskScale = options.shadowMaskScale or 1.0
-    self._shadowSteps = options.shadowSteps or 24
-    self._shadowMargin = options.shadowMargin or 200.0
-    self._shadowHeight = options.shadowHeight or 64.0
-    self._dropShadowOpacity = options.dropShadowOpacity or 0.4
-    self._dropShadowLength = options.dropShadowLength or 512.0
+    self._shadowMaskScale = tuning.maskScale or 1.0
+    self._shadowSteps = tuning.steps or 24
+    self._shadowMargin = tuning.margin or 200.0
+    self._shadowHeight = tuning.height or 64.0
+    self._dropShadowOpacity = tuning.dropOpacity or 0.4
+    self._dropShadowLength = tuning.dropLength or 512.0
     self._maskZoom = 1.0
     self._stepClock = 0.0
     self._blurUniform = loader.newArray("float[4]")
@@ -629,7 +645,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
             -- half sized because it holds nothing sharp.
             name = "dropShadowAO",
             format = R8,
-            scale = options.dropShadowScale or 0.5,
+            scale = tuning.dropScale or 0.5,
             clear = {r = 1, g = 1, b = 1, a = 1},
         })
     end

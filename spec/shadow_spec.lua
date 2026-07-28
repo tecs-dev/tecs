@@ -61,7 +61,7 @@ describe("shadows", function()
         return Backend.create(device.handle, FORMAT, {
             ambient = options.ambient or { 0.0, 0.0, 0.0 },
             capacity = 16,
-            shadows = options.shadows ~= false,
+            shadows = options.shadows ~= false and {} or nil,
         })
     end
 
@@ -341,10 +341,7 @@ describe("shadows", function()
         backend:destroy()
 
         assert.are.equal(255, towards.r, "a black light leaves ambient as the whole of the image")
-        assert.is_true(
-            away.r < 220,
-            ("ambient must be darkened where a drop shadow lands, got %d"):format(away.r)
-        )
+        assert.is_true(away.r < 220, ("ambient must be darkened where a drop shadow lands, got %d"):format(away.r))
     end)
 
     it("renders the same scene as a pipeline with no shadows at all", function()

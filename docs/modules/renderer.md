@@ -94,11 +94,54 @@ device with no picture at all over a sort many scenes never use. The log line na
 world units collapse onto one depth value, and says that dividing `layers.maxY` and `layers.maxZ` by that factor
 resolves the sort again.
 
+## Shadows
+
+Off by default. Pass `shadows` to `Renderer.create` to turn them on, and an empty table is the whole of what a
+scene with no opinion about them passes:
+
+```teal
+local renderer <const> = tecs.renderer.Renderer.create(device, format, {shadows = {}})
+```
+
+On, an entity carrying [`Occluder`](/modules/components#occluder) blocks light, and one carrying
+[`DropShadow`](/modules/components#dropshadow) darkens the ground away from it. Off, both components draw the
+entity and cast nothing, so a scene can carry them before it can afford them.
+
+The two are different things rather than one thing at two strengths. An occluder's silhouette goes into a mask
+read inside the light loop, so it can only take away a light's own contribution. A drop shadow multiplies what
+the whole loop produced, so it reaches the ambient term as well: under a black light and full ambient, the mask
+has nothing to take away and the drop shadow still lands.
+
+Neither costs a pass per light. One mask serves every light in the scene, and a caster throws its copies by the
+nearest few lights by weight rather than by all of them, so the cost is a function of what casts rather than of
+what lights it.
+
+| Field         | Default | What it decides                                                                                       |
+| ------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `maskScale`   | `1`     | Size of the occluder mask relative to the frame. Halving it quarters two targets and softens an edge. |
+| `steps`       | `24`    | Samples a shadow march takes at full attenuation, and the ceiling the adaptive count clamps to.       |
+| `margin`      | `200`   | How far outside the view, in world units, a caster is still kept so its shadow reaches the screen.    |
+| `height`      | `64`    | World height a caster at `height` one stands, which is what puts casters and lights in one space.     |
+| `dropScale`   | `0.5`   | Size of the drop-shadow target relative to the frame. It holds one soft channel.                      |
+| `dropOpacity` | `0.4`   | How dark a drop shadow is where the light throwing it is at full strength.                            |
+| `dropLength`  | `512`   | Longest a drop shadow may run, in world units.                                                        |
+
+::: warning What turning them on costs
+Three targets, four passes, three pipelines, two compute dispatches and one list, whether or not the scene casts
+anything this frame. That is a setting rather than something taken off each frame on purpose: the alternative is
+a pass graph whose shape depends on what a world happens to hold, and a lighting pipeline rebuilt the first time
+something casts.
+
+What it does not gate is the cull's share, which is one more count in a scan that is already running. A world
+that never casts pays for that and for nothing else.
+:::
+
 ## What feeds it
 
 Everything the renderer draws is an entity in a world. The components it reads are on
 [`tecs.components`](/modules/components) — `Transform`, `PreviousTransform`, `Tint`, `Sprite`, `Material`,
-`PointLight`, `Clip` and `Renderable` — and the modules that produce them have their own pages:
+`PointLight`, `Clip`, `Occluder`, `DropShadow` and `Renderable` — and the modules that produce them have their
+own pages:
 
 - [`tecs.camera.Camera`](/modules/camera), the view it draws from
 - [`tecs.layers`](/modules/layers), z-ordering and per-layer behaviour
