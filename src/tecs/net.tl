@@ -220,11 +220,7 @@ end
 
 local function validTimeout(timeoutMs: integer, level: integer): integer
     local timeout <const> = timeoutMs or 0
-    if type(timeout) ~= "number"
-        or timeout ~= math.floor(timeout)
-        or timeout < 0
-        or timeout > MAX_TIMEOUT_MS
-    then
+    if type(timeout) ~= "number" or timeout ~= math.floor(timeout) or timeout < 0 or timeout > MAX_TIMEOUT_MS then
         error(("tecs: timeout must be an integer from 0 to %d milliseconds"):format(MAX_TIMEOUT_MS), level)
     end
     return timeout
@@ -497,14 +493,11 @@ function net.DatagramSocket:receive(): net.Packet, string
     end
     local text = C.NET_GetAddressString(source)
     local host <const> = text ~= nil and loader.toString(text) or ""
-    local packet <const> = setmetatable(
-        {
-            address = addressFrom(source, host),
-            port = tonumber(fields.port) as integer,
-            bytes = loader.toBytes(fields.buf as loader.CValue, tonumber(fields.buflen) as integer),
-        } as net.Packet,
-        PacketMT
-    )
+    local packet <const> = setmetatable({
+        address = addressFrom(source, host),
+        port = tonumber(fields.port) as integer,
+        bytes = loader.toBytes(fields.buf as loader.CValue, tonumber(fields.buflen) as integer),
+    } as net.Packet, PacketMT)
     C.NET_DestroyDatagram(datagram)
     return packet
 end

@@ -228,6 +228,7 @@ name is looked up. [Modules](/modules/) carries the same list, and
 - [`tecs.application`](/modules/Application) - builds that object
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.Audio`](/modules/Audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming
+- [`tecs.audio`](/modules/Audio#physical-devices-and-microphone-capture) - physical audio devices and microphone capture
 - [`tecs.builtins`](/ecs/builtins) - names, transforms, hierarchy, TTL, pause, disable, state events
 - [`tecs.Camera`](/modules/Camera) - the view a frame is drawn from
 - [`tecs.capabilities`](/modules/capabilities) - what this machine and this build can do
@@ -237,6 +238,7 @@ name is looked up. [Modules](/modules/) carries the same list, and
 - [`tecs.components`](/modules/components) - the components the renderer reads
 - [`tecs.compress`](/modules/compress) - compression and decompression
 - [`tecs.DEFAULT_MAX_ENTITIES`](/ecs/world) - the default `maxEntities`, `2^20`
+- [`tecs.dialogs`](/modules/dialogs) - asynchronous native file and folder pickers
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
 - [`tecs.filesystem`](/modules/filesystem) - touching the filesystem
 - [`tecs.findKey`](/ecs/world) - the key a name was created with, or nil
@@ -274,8 +276,10 @@ name is looked up. [Modules](/modules/) carries the same list, and
 - [`tecs.random`](/modules/random) - seeded random numbers
 - [`tecs.Renderer`](/modules/Renderer) - deferred and GPU-driven, with compute culling and one indirect draw
 - [`tecs.runif`](/ecs/systems) - composable run conditions
+- [`tecs.sensors`](/modules/sensors) - standalone accelerometers and gyroscopes
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.sheet`](/modules/sheet) - sprite sheets, frame tags, pivots
+- [`tecs.system`](/modules/system) - URLs, locales, power, and simple native messages
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer
 - [`tecs.version`](/modules/surface) - the version of this build, as a string
 - [`tecs.watch`](/modules/watch) - watching files for change

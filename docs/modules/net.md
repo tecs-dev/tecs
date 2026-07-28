@@ -119,10 +119,10 @@ owned `Address`.
 
 ### Address
 
-| Field  | Type     | Description                                                                      |
-| ------ | -------- | -------------------------------------------------------------------------------- |
-| `host` | `string` | The hostname passed to `resolve`, or the numeric source obtained from a socket.  |
-| `text` | `string` | SDL3_net's printable numeric representation of the resolved address.             |
+| Field  | Type     | Description                                                                     |
+| ------ | -------- | ------------------------------------------------------------------------------- |
+| `host` | `string` | The hostname passed to `resolve`, or the numeric source obtained from a socket. |
+| `text` | `string` | SDL3_net's printable numeric representation of the resolved address.            |
 
 ```teal
 function Address:isClosed(): boolean
@@ -160,9 +160,9 @@ name one.
 
 ### Server
 
-| Field  | Type      | Description                               |
-| ------ | --------- | ----------------------------------------- |
-| `port` | `integer` | The port passed to `listen`.              |
+| Field  | Type      | Description                  |
+| ------ | --------- | ---------------------------- |
+| `port` | `integer` | The port passed to `listen`. |
 
 ```teal
 function Server:accept(): Stream, string
@@ -249,11 +249,11 @@ congestion behaviour belong to the game protocol rather than this transport wrap
 
 ### Packet
 
-| Field     | Type      | Description                                             |
-| --------- | --------- | ------------------------------------------------------- |
-| `address` | `Address` | Owned source address; the caller closes it.             |
-| `port`    | `integer` | Source port.                                            |
-| `bytes`   | `string`  | One complete datagram.                                  |
+| Field     | Type      | Description                                 |
+| --------- | --------- | ------------------------------------------- |
+| `address` | `Address` | Owned source address; the caller closes it. |
+| `port`    | `integer` | Source port.                                |
+| `bytes`   | `string`  | One complete datagram.                      |
 
 ```teal
 function Packet:close()

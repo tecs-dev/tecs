@@ -23,70 +23,70 @@ checked against a fresh render so it cannot drift.
 
 ## Engine and ECS
 
-| Module                                                         | What it is                                                                |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`tecs.animation`](/modules/animation)                         | sprite playback                                                           |
-| [`tecs.Application`](/modules/Application)                     | the object an entry file returns and the host drives                      |
-| [`tecs.application`](/modules/Application)                     | builds that object                                                        |
-| [`tecs.assets`](/modules/assets)                               | loading content, cached and off the main thread                           |
-| [`tecs.audio`](/modules/Audio#physical-devices-and-microphone-capture) | physical audio devices and microphone capture                    |
-| [`tecs.Audio`](/modules/Audio)                                 | clips, voices, groups, limits, and the `Sound` component                  |
-| [`tecs.builtins`](/ecs/builtins)                               | `Transform`, `ChildOf`, `TTL`, `Paused`, `Disabled` and the rest          |
-| [`tecs.Camera`](/modules/Camera)                               | the view a frame is drawn from                                            |
-| [`tecs.capabilities`](/modules/capabilities)                   | what this machine and this build can do                                   |
-| [`tecs.clipboard`](/modules/clipboard)                         | reading and writing the system clipboard                                  |
-| [`tecs.clock`](/modules/clock)                                 | monotonic time                                                            |
-| [`tecs.componentByName`](/ecs/components/)                     | the component a name names                                                |
-| [`tecs.components`](/modules/components)                       | the engine's own components, the ones the renderer reads                  |
-| [`tecs.compress`](/modules/compress)                           | compression and decompression                                             |
-| [`tecs.DEFAULT_MAX_ENTITIES`](/ecs/world)                      | the default `maxEntities` when a world names none, `2^20`                 |
-| [`tecs.dialogs`](/modules/dialogs)                             | asynchronous native file and folder pickers                               |
-| [`tecs.events`](/modules/events)                               | platform events, typed once and routed                                    |
-| [`tecs.filesystem`](/modules/filesystem)                       | touching the filesystem                                                   |
-| [`tecs.findKey`](/ecs/world)                                   | the key a name was created with, or nil                                   |
-| [`tecs.Future`](/modules/Future)                               | a value that settles once                                                 |
-| [`tecs.Gamepad`](/modules/Gamepad)                             | a pad's identity, lifetime, metadata and outputs                          |
-| [`tecs.getComponentById`](/ecs/components/)                    | the component a numeric id names                                          |
-| [`tecs.hash`](/modules/hash)                                   | hashing                                                                   |
-| [`tecs.http`](/modules/http)                                   | fetching over HTTP without stopping the frame                             |
-| [`tecs.Input`](/modules/Input)                                 | gameplay input in three tiers, behind a layer stack                       |
-| [`tecs.json`](/modules/json)                                   | JSON, with the build's own copy of the C parser found                     |
-| [`tecs.layers`](/modules/layers)                               | z-ordering and per-layer behaviour                                        |
-| [`tecs.listKeys`](/ecs/world)                                  | every named key, as name to id                                            |
-| [`tecs.log`](/modules/log)                                     | SDL's logging, per platform, with a named logger as the unit of filtering |
-| [`tecs.materials`](/modules/materials)                         | the material a draw dispatches to                                         |
-| [`tecs.MAX_ENTITIES`](/ecs/world)                              | the ceiling on a world's `maxEntities`, `2^22 - 1` usable slots           |
-| [`tecs.mcp`](/modules/mcp)                                     | the debug server: transport, tools, sandbox                               |
-| [`tecs.net`](/modules/net)                                     | nonblocking TCP streams and UDP datagrams                                 |
-| [`tecs.newComponent`](/ecs/components/table-components)        | a table component                                                         |
-| [`tecs.newContext`](/ecs/world)                                | a resource container outside a world                                      |
-| [`tecs.newEvent`](/ecs/events)                                 | give an event record its constructor                                      |
-| [`tecs.newFFIComponent`](/ecs/components/ffi)                  | a component backed by an FFI struct                                       |
-| [`tecs.newFFIEvent`](/ecs/events)                              | the same for an FFI-backed event                                          |
-| [`tecs.newFFIRelationship`](/ecs/relationships/ffi)            | a relationship carrying data in an FFI struct                             |
-| [`tecs.newKey`](/ecs/world)                                    | a typed key for a resource                                                |
-| [`tecs.newMessageBus`](/ecs/events)                            | an address-based bus, outside any world                                   |
-| [`tecs.newRelationship`](/ecs/relationships/)                  | a link from one entity to another                                         |
-| [`tecs.newScalarComponent`](/ecs/components/scalar-components) | a component that is one value                                             |
-| [`tecs.newTagComponent`](/ecs/components/tag-components)       | a component with no data, in bitset storage                               |
-| [`tecs.newWorld`](/ecs/world)                                  | create a world                                                            |
-| [`tecs.particles`](/modules/particles)                         | emitters                                                                  |
-| [`tecs.paths`](/modules/paths)                                 | where a game may read from and write to                                   |
-| [`tecs.phases`](/ecs/phases)                                   | the phases a system can be scheduled into                                 |
-| [`tecs.physics`](/modules/physics)                             | rigid-body simulation on Box2D 3                                          |
-| [`tecs.proc`](/modules/proc)                                   | shelling out                                                              |
-| [`tecs.random`](/modules/random)                               | seeded random numbers                                                     |
-| [`tecs.Renderer`](/modules/Renderer)                           | a world to a frame, through an extractor and a backend                    |
-| [`tecs.runif`](/ecs/systems)                                   | composable run conditions                                                 |
-| [`tecs.sensors`](/modules/sensors)                             | standalone accelerometers and gyroscopes                                  |
-| [`tecs.sequence`](/modules/sequence)                           | the sequencer, with the tween runtime inside it                           |
-| [`tecs.sheet`](/modules/sheet)                                 | sprite sheets: loading one, and what is in it                             |
-| [`tecs.system`](/modules/system)                               | URLs, locales, power, and simple native messages                          |
-| [`tecs.text`](/modules/text)                                   | distance-field text, drawn through an instance producer                   |
-| [`tecs.version`](/modules/surface)                             | the version of this build, as a string                                    |
-| [`tecs.watch`](/modules/watch)                                 | watching files for change                                                 |
-| [`tecs.Window`](/modules/Window)                               | the window, its size, its display and its mode                            |
-| [`tecs.workers`](/modules/workers)                             | typed background jobs                                                     |
+| Module                                                                 | What it is                                                                |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`tecs.animation`](/modules/animation)                                 | sprite playback                                                           |
+| [`tecs.Application`](/modules/Application)                             | the object an entry file returns and the host drives                      |
+| [`tecs.application`](/modules/Application)                             | builds that object                                                        |
+| [`tecs.assets`](/modules/assets)                                       | loading content, cached and off the main thread                           |
+| [`tecs.Audio`](/modules/Audio)                                         | clips, voices, groups, limits, and the `Sound` component                  |
+| [`tecs.audio`](/modules/Audio#physical-devices-and-microphone-capture) | physical audio devices and microphone capture                             |
+| [`tecs.builtins`](/ecs/builtins)                                       | `Transform`, `ChildOf`, `TTL`, `Paused`, `Disabled` and the rest          |
+| [`tecs.Camera`](/modules/Camera)                                       | the view a frame is drawn from                                            |
+| [`tecs.capabilities`](/modules/capabilities)                           | what this machine and this build can do                                   |
+| [`tecs.clipboard`](/modules/clipboard)                                 | reading and writing the system clipboard                                  |
+| [`tecs.clock`](/modules/clock)                                         | monotonic time                                                            |
+| [`tecs.componentByName`](/ecs/components/)                             | the component a name names                                                |
+| [`tecs.components`](/modules/components)                               | the engine's own components, the ones the renderer reads                  |
+| [`tecs.compress`](/modules/compress)                                   | compression and decompression                                             |
+| [`tecs.DEFAULT_MAX_ENTITIES`](/ecs/world)                              | the default `maxEntities` when a world names none, `2^20`                 |
+| [`tecs.dialogs`](/modules/dialogs)                                     | asynchronous native file and folder pickers                               |
+| [`tecs.events`](/modules/events)                                       | platform events, typed once and routed                                    |
+| [`tecs.filesystem`](/modules/filesystem)                               | touching the filesystem                                                   |
+| [`tecs.findKey`](/ecs/world)                                           | the key a name was created with, or nil                                   |
+| [`tecs.Future`](/modules/Future)                                       | a value that settles once                                                 |
+| [`tecs.Gamepad`](/modules/Gamepad)                                     | a pad's identity, lifetime, metadata and outputs                          |
+| [`tecs.getComponentById`](/ecs/components/)                            | the component a numeric id names                                          |
+| [`tecs.hash`](/modules/hash)                                           | hashing                                                                   |
+| [`tecs.http`](/modules/http)                                           | fetching over HTTP without stopping the frame                             |
+| [`tecs.Input`](/modules/Input)                                         | gameplay input in three tiers, behind a layer stack                       |
+| [`tecs.json`](/modules/json)                                           | JSON, with the build's own copy of the C parser found                     |
+| [`tecs.layers`](/modules/layers)                                       | z-ordering and per-layer behaviour                                        |
+| [`tecs.listKeys`](/ecs/world)                                          | every named key, as name to id                                            |
+| [`tecs.log`](/modules/log)                                             | SDL's logging, per platform, with a named logger as the unit of filtering |
+| [`tecs.materials`](/modules/materials)                                 | the material a draw dispatches to                                         |
+| [`tecs.MAX_ENTITIES`](/ecs/world)                                      | the ceiling on a world's `maxEntities`, `2^22 - 1` usable slots           |
+| [`tecs.mcp`](/modules/mcp)                                             | the debug server: transport, tools, sandbox                               |
+| [`tecs.net`](/modules/net)                                             | nonblocking TCP streams and UDP datagrams                                 |
+| [`tecs.newComponent`](/ecs/components/table-components)                | a table component                                                         |
+| [`tecs.newContext`](/ecs/world)                                        | a resource container outside a world                                      |
+| [`tecs.newEvent`](/ecs/events)                                         | give an event record its constructor                                      |
+| [`tecs.newFFIComponent`](/ecs/components/ffi)                          | a component backed by an FFI struct                                       |
+| [`tecs.newFFIEvent`](/ecs/events)                                      | the same for an FFI-backed event                                          |
+| [`tecs.newFFIRelationship`](/ecs/relationships/ffi)                    | a relationship carrying data in an FFI struct                             |
+| [`tecs.newKey`](/ecs/world)                                            | a typed key for a resource                                                |
+| [`tecs.newMessageBus`](/ecs/events)                                    | an address-based bus, outside any world                                   |
+| [`tecs.newRelationship`](/ecs/relationships/)                          | a link from one entity to another                                         |
+| [`tecs.newScalarComponent`](/ecs/components/scalar-components)         | a component that is one value                                             |
+| [`tecs.newTagComponent`](/ecs/components/tag-components)               | a component with no data, in bitset storage                               |
+| [`tecs.newWorld`](/ecs/world)                                          | create a world                                                            |
+| [`tecs.particles`](/modules/particles)                                 | emitters                                                                  |
+| [`tecs.paths`](/modules/paths)                                         | where a game may read from and write to                                   |
+| [`tecs.phases`](/ecs/phases)                                           | the phases a system can be scheduled into                                 |
+| [`tecs.physics`](/modules/physics)                                     | rigid-body simulation on Box2D 3                                          |
+| [`tecs.proc`](/modules/proc)                                           | shelling out                                                              |
+| [`tecs.random`](/modules/random)                                       | seeded random numbers                                                     |
+| [`tecs.Renderer`](/modules/Renderer)                                   | a world to a frame, through an extractor and a backend                    |
+| [`tecs.runif`](/ecs/systems)                                           | composable run conditions                                                 |
+| [`tecs.sensors`](/modules/sensors)                                     | standalone accelerometers and gyroscopes                                  |
+| [`tecs.sequence`](/modules/sequence)                                   | the sequencer, with the tween runtime inside it                           |
+| [`tecs.sheet`](/modules/sheet)                                         | sprite sheets: loading one, and what is in it                             |
+| [`tecs.system`](/modules/system)                                       | URLs, locales, power, and simple native messages                          |
+| [`tecs.text`](/modules/text)                                           | distance-field text, drawn through an instance producer                   |
+| [`tecs.version`](/modules/surface)                                     | the version of this build, as a string                                    |
+| [`tecs.watch`](/modules/watch)                                         | watching files for change                                                 |
+| [`tecs.Window`](/modules/Window)                                       | the window, its size, its display and its mode                            |
+| [`tecs.workers`](/modules/workers)                                     | typed background jobs                                                     |
 
 ## tecs.ecs
 

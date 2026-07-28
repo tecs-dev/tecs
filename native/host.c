@@ -592,8 +592,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         lua_getfield(L, -1, "path");
         const char *had = lua_tostring(L, -1);
         char *path = NULL;
-        SDL_asprintf(&path, "%s/?.lua;%s/?/init.lua;%s", root, root,
-                     had ? had : "");
+        SDL_asprintf(&path, "%s/?.lua;%s/?/init.lua;%s", root, root, had ? had : "");
         lua_pop(L, 1);
         lua_pushstring(L, path);
         lua_setfield(L, -2, "path");
