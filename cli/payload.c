@@ -55,8 +55,7 @@ static size_t archiveSize = 0;
 
 static unsigned int readU32(const unsigned char *at)
 {
-    return (unsigned int)at[0] | ((unsigned int)at[1] << 8) | ((unsigned int)at[2] << 16) |
-           ((unsigned int)at[3] << 24);
+    return (unsigned int)at[0] | ((unsigned int)at[1] << 8) | ((unsigned int)at[2] << 16) | ((unsigned int)at[3] << 24);
 }
 
 static unsigned int readU16(const unsigned char *at)

@@ -16,9 +16,40 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local proc = require("tecs.platform.proc")
 
---- Where the build put everything, taken from the tree the suite was pointed
---- at rather than guessed, so a packaged run tests the packaged host.
-local out = (root:gsub("/lua/?$", ""))
+--- The host binary, found by walking up from the tree the suite was pointed at.
+---
+--- Walked rather than computed, because the depth differs and only one of the
+--- two layouts was ever computed correctly. A build tree has the Lua at
+--- `out/<preset>/lua` and the binary at `out/<preset>/bin`, so stripping `/lua`
+--- and appending `/bin/tecs` finds it. An installed tree has the Lua at
+--- `<prefix>/share/tecs/lua` and the binary at `<prefix>/bin`, which is two
+--- levels further up, so the same arithmetic produced
+--- `<prefix>/share/tecs/bin/tecs` and a child that never started. What that
+--- looked like was the fixture reporting nothing at all, which reads as a
+--- program that ran and printed nothing rather than as one that is not there.
+---
+--- This is the same walk `src/tecs/ffi/loader.tl` does for a sibling library,
+--- for the same reason: neither layout is written down here, and a tree that is
+--- neither answers nil rather than a path that happens to exist.
+local function findHost()
+    local directory = (root:gsub("/$", ""))
+    for _ = 1, 6 do
+        local candidate = directory .. "/bin/tecs"
+        local handle = io.open(candidate, "r")
+        if handle ~= nil then
+            handle:close()
+            return directory
+        end
+        local parent = directory:match("^(.*)/[^/]+$")
+        if parent == nil or parent == "" or parent == directory then
+            break
+        end
+        directory = parent
+    end
+    return nil
+end
+
+local out = findHost()
 
 --- Runs the fixture to completion and answers what it printed, as a table of
 --- the `key=value` lines it ends with.
@@ -27,6 +58,7 @@ local out = (root:gsub("/lua/?$", ""))
 --- the same tree this process was pointed at, and saying so is what makes the
 --- spec independent of how the suite was launched.
 local function observations()
+    assert.is_not_nil(out, "no bin/tecs above " .. root)
     local run = proc.run({
         args = { out .. "/bin/tecs", "--entry", "spec/fixtures/hostlifecycle.lua" },
         env = {

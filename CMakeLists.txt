@@ -205,7 +205,14 @@ else()
     set(TECS_LIBRARY_KIND SHARED)
 endif()
 
-add_library(tecs_worker ${TECS_LIBRARY_KIND} native/worker.c native/logsink.c native/taskpool.c native/luamods.c)
+add_library(
+    tecs_worker
+    ${TECS_LIBRARY_KIND}
+    native/worker.c
+    native/logsink.c
+    native/taskpool.c
+    native/luamods.c
+)
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit)
 # Box2D's headers, for the task callback types the pool is declared with. No
@@ -676,7 +683,10 @@ if(TECS_BUILD_LUA)
         NO_DEFAULT_PATH
     )
     if(NOT TECS_LUAJIT_JIT_DIR)
-        message(FATAL_ERROR "tecs: LuaJIT's jit/*.lua were not found. Set TECS_LUAJIT_JIT_DIR to the directory holding jit/vmdef.lua.")
+        message(
+            FATAL_ERROR
+            "tecs: LuaJIT's jit/*.lua were not found. Set TECS_LUAJIT_JIT_DIR to the directory holding jit/vmdef.lua."
+        )
     endif()
     add_custom_target(
         tecs_jitlib
@@ -819,7 +829,9 @@ file(
     "system=${CMAKE_SYSTEM_NAME}\n"
     "arch=${CMAKE_SYSTEM_PROCESSOR}\n"
 )
-install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs COMPONENT tecs)
+if(NOT TECS_SINGLE_FILE)
+    install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs COMPONENT tecs)
+endif()
 
 # The notices ship with the binaries they describe. Almost everything linked
 # here is permissive, and permissive still means the copyright notice travels

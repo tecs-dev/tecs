@@ -606,6 +606,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     for (int i = 1; i + 1 < argc; i++) {
         if (strcmp(argv[i], "--entry") == 0) entry = argv[i + 1];
     }
+
+    /* What to ask a payload for, kept before the path below is built. A payload
+     * is keyed by relative name and `entry` becomes an absolute path resolved
+     * against the executable, which would match nothing. */
+    const char *carried = entry ? entry : TECS_ENTRY;
+
     if (!entry) {
         if (content) SDL_asprintf(&resolved, "%s%s", content, TECS_ENTRY);
         entry = resolved ? resolved : TECS_ENTRY;
@@ -618,7 +624,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
      * have been compiled in. */
     int compiled = -1;
 #ifdef TECS_PAYLOAD
-    compiled = tecsPayloadLoadChunk(L, entry);
+    compiled = tecsPayloadLoadChunk(L, carried);
+#else
+    (void)carried;
 #endif
     if (compiled < 0) compiled = luaL_loadfile(L, entry);
 

@@ -60,6 +60,13 @@ return tecs.application({
     -- being called by the loop directly.
     plugin = function(world: tecs.World, app: tecs.Application)
         local width <const>, height <const> = app.window:getPixelSize()
+
+        -- What came up, said once at startup. Worth keeping: the driver and
+        -- the pixel size are the two things that differ between machines, and
+        -- the first question about a window that looks wrong is which of them
+        -- is not what you expected.
+        print(("%s on %s, %dx%d px"):format(tecs.version, app.device.driver, width, height))
+
         spawnRing(world, width, height)
 
         world:spawn(

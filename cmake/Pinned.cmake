@@ -636,11 +636,22 @@ set(TECS_SHADERC_INCLUDE_DIRS "${shaderc_SOURCE_DIR}/libshaderc/include")
 # Wrapped rather than aliased, because most of what these name is itself an
 # alias its project publishes and CMake will not alias one of those again.
 # Several of these publish one name for a shared build and another for a static
-# one, so each is given both and the first that exists is taken. Asking which
-# kind of build this is at every call site would be the same test written eight
-# times, and would be wrong the day one of these projects renamed a target.
+# one, so each is given both, shared first, and the first that exists is taken.
+# Asking which kind of build this is at every call site would be the same test
+# written eight times, and would be wrong the day one of these projects renamed
+# a target.
+#
+# The order is reversed for a static build, and that is not tidiness. Several of
+# these define *both* targets whatever they were asked for: shaderc builds
+# `shaderc` as an archive and `shaderc_shared` as a library every time, so
+# taking the first that exists linked a dylib into what was supposed to be one
+# file, and the only sign was one `@rpath` entry in `otool -L`.
 function(tecs_pinned_library name)
-    foreach(candidate IN LISTS ARGN)
+    set(candidates ${ARGN})
+    if(TECS_DEPS_STATIC)
+        list(REVERSE candidates)
+    endif()
+    foreach(candidate IN LISTS candidates)
         if(TARGET ${candidate})
             add_library(tecs_${name} INTERFACE)
             target_link_libraries(tecs_${name} INTERFACE ${candidate})

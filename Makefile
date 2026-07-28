@@ -83,7 +83,7 @@ CLI_TL    := $(shell find cli -name '*.tl' -not -path 'cli/tecscli/templates/*' 
 # tl searches include paths last-first, so ours come last and win.
 TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl -I $(CURDIR)/cli
 
-.PHONY: help all configure build check test test-package abi-check run clean \
+.PHONY: help all configure build check test test-package abi-check run clean single \
         rebuild deps dev-tools package check-package presets shaders \
         bench bench-physics \
         bench-sprites bench-text bench-particles bench-latency bench-alloc \
@@ -229,6 +229,23 @@ run: build $(LUA)/main.lua ## Run the demo
 
 package: build shaders $(LUA)/main.lua ## Install a tree into out/package
 	@cmake --install $(OUT) --prefix $(PACKAGE) --component tecs
+
+# The command line tool as one executable, which is its own preset rather than
+# a flag on the packaged one: every dependency is linked in, so a spec under a
+# plain interpreter has nothing to load and `make test` would be testing a
+# configuration nobody ships.
+#
+# Not a `package` variant either, because that target builds a shader pack
+# first, and building one runs the engine under a plain `luajit`. A single-file
+# build carries a shader compiler and compiles at run time, so there is no pack
+# to build and no interpreter to build it with.
+SINGLE     := macos-arm64-single
+SINGLE_OUT := out/single
+single: ## Build the one-file command line tool into out/single/bin/tecs
+	@test -d out/$(SINGLE) || cmake --preset $(SINGLE)
+	@cmake --build --preset $(SINGLE) --parallel
+	@cmake --install out/$(SINGLE) --prefix $(CURDIR)/$(SINGLE_OUT) --component tecs
+	@ls -l $(SINGLE_OUT)/bin/tecs
 
 # The suite against an installed tree. `make test` runs against a build tree,
 # which on a development preset means against the machine's own SDL, Box2D and
