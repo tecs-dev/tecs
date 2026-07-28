@@ -388,6 +388,15 @@ function Application:_recover()
         end
     end
 
+    -- A throw between `FixedFirst` and `FixedLast` leaves the fixed-phase gate
+    -- latched, so every later query would answer from the latched sets rather
+    -- than the frame's. The engine enters and leaves that phase twice a frame
+    -- through the same call, so this is the ordinary way out taken late.
+    local input = self.input
+    if input ~= nil then
+        input:exitFixedPhase()
+    end
+
     timing.abandonInput()
 end
 
@@ -971,8 +980,11 @@ end
 --- Two gates, and they are different kinds of thing.
 ---
 --- The first is whether this build is a development one at all, which is
---- `debug` or `mcpPort` in the config. A shipped build has neither, latches on
---- the first crash and stays latched, which is the right shipped behaviour:
+--- `debug`, `mcpPort` or `watch` in the config. A watcher counts because it is
+--- the configuration that most wants this: a game running one is being edited,
+--- and reloading the file that threw is exactly the way back. A shipped build
+--- has none of the three, latches on the first crash and stays latched, which
+--- is the right shipped behaviour:
 --- there is nobody there to read the frame, and carrying on with a world that
 --- is provably inconsistent is how one bug becomes a corrupted save.
 ---
@@ -987,22 +999,16 @@ end
 --- watcher's reloads. Both mean the same thing: something about the run has
 --- changed, try it again.
 ---
---- One thing beyond the world is known to survive a resume unchanged, and it
---- is recorded here rather than left to be rediscovered: `Input`'s fixed-phase
---- gate latches on if the throw landed between `FixedFirst` and `FixedLast`,
---- so every input query afterwards answers from the latched sets. Clearing it
---- is a call to `input:exitFixedPhase`, and it belongs in `_recover` beside
---- the rest of what a throw was holding. Physics resumability is a separate
---- and open question: a solver stepped out of is not obviously a solver that
---- can be stepped again.
+--- Physics resumability is a separate and open question: a solver stepped out
+--- of is not obviously a solver that can be stepped again.
 --- @return Whether the loop resumed, and why it did not.
 function Application:clearCrash(): boolean, string
     if self._crashed == nil then return true end
 
     local config <const> = self._config
-    if not config.debug and config.mcpPort == nil then
-        return false, "this build sets neither debug nor mcpPort, so it does "
-            .. "not resume after a crash"
+    if not config.debug and config.mcpPort == nil and config.watch == nil then
+        return false, "this build sets none of debug, mcpPort or watch, so it "
+            .. "does not resume after a crash"
     end
     if self._forcedRecovery ~= nil then
         return false, "recovery was not clean, so the device is not in the "

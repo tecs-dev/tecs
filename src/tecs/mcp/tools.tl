@@ -616,6 +616,7 @@ end
 
 mcp.register({
     name = "reload_shaders",
+    whenCrashed = true,
     description = "Re-reads shaders and materials from their files and "
         .. "rebuilds the pipelines. Refuses where a reload would change what "
         .. "already-drawn entities mean.",
@@ -628,6 +629,7 @@ mcp.register({
 
 mcp.register({
     name = "reload_image",
+    whenCrashed = true,
     description = "Re-reads an image file and uploads it over the one already "
         .. "registered under that path. Refuses a file whose size changed.",
     destructive = true,
@@ -657,6 +659,7 @@ mcp.register({
 --- the file for itself.
 mcp.register({
     name = "reload_sound",
+    whenCrashed = true,
     description = "Re-reads a sound file over the clip already loaded from "
         .. "that path. A streamed clip holds nothing, so it reports that "
         .. "rather than replacing anything.",
@@ -688,6 +691,7 @@ mcp.register({
 --- about its text. So this is also what lays those glyphs out again.
 mcp.register({
     name = "reload_font",
+    whenCrashed = true,
     description = "Re-reads a font's metrics over the font already loaded "
         .. "from that path, and lays out every text drawing it again. Refuses "
         .. "metrics that name an atlas of a different size.",
@@ -717,6 +721,7 @@ mcp.register({
 --- written a file wait for the effect rather than for the interval.
 mcp.register({
     name = "watch",
+    whenCrashed = true,
     description = "Reports, starts, stops or steps the content file watcher, "
         .. "which reloads shaders, images, sounds and fonts when their files "
         .. "change.",

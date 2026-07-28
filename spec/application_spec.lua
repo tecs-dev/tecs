@@ -511,7 +511,7 @@ describe("Application", function()
 
             local resumed, reason = app:clearCrash()
             assert.is_false(resumed, "a shipped build resumed after a crash")
-            assert.is_truthy(reason:find("neither debug nor mcpPort", 1, true))
+            assert.is_truthy(reason:find("none of debug, mcpPort or watch", 1, true))
             assert.is_truthy(app:crashed(), "the traceback was cleared anyway")
 
             -- And it stays stopped, which is the behaviour the gate exists for.
@@ -576,6 +576,24 @@ describe("Application", function()
             assert.is_false(resumed, "resumed onto a device recovery had to force")
             assert.is_truthy(reason:find("force-ended", 1, true))
             assert.is_truthy(app:crashed())
+            app:_shutdown()
+        end)
+
+        -- A watcher is the configuration that most wants to resume: a game
+        -- running one is being edited, and reloading the file that threw is
+        -- exactly the way back. It counted for neither gate until it did.
+        it("resumes a build that only runs the file watcher", function()
+            local app, ran, stop = crashing({ watch = { interval = 0 } })
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+            assert.is_truthy(app:crashed():match("gameplay boom"))
+
+            stop()
+            assert.is_true(app:clearCrash(),
+                "a build running only the watcher refused to carry on")
+            app:_iterate(nil, 0, nil)
+            assert.is_true(ran() > 0, "the loop did not simulate again")
             app:_shutdown()
         end)
 
