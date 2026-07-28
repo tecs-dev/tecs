@@ -212,8 +212,9 @@ function log.openFile(path: string): boolean
 
 **Returns:** whether the file was opened.
 
-The sink holds one file. Calling this while a file is already open leaves the first one in place, so close
-before opening another.
+The sink holds one file. Calling this while another is open moves to `path`: the previous file is closed and
+every later line goes to the new one, between lines rather than inside one. A path that cannot be opened
+returns false and changes nothing, so the file already open keeps receiving lines.
 
 ### filePath
 
@@ -619,17 +620,22 @@ log queryable after the fact: seek to an offset, read to the end.
 Lines are written from whichever thread logged, including threads the VM never created,
 so ordering follows the calls and not any Lua-side sequence.
 
+Called while another file is open, this moves to `path`: the previous file is closed and
+every later line goes to the new one, so the path this accepts is the path being written
+to and `filePath` never names a file the sink has left behind. The move happens between
+lines rather than inside one.
+
 #### Parameters
 
-| Type                      | Name                    | Description                                                               |
-| ------------------------- | ----------------------- | ------------------------------------------------------------------------- |
-| <code v-pre>string</code> | <code v-pre>path</code> | Truncated if it exists, created if it does not. Directories are not made. |
+| Type                      | Name                    | Description                                                                                                                                                 |
+| ------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>path</code> | Truncated if it exists, created if it does not, including when it is the file already open, so this is not a way to check one is. Directories are not made. |
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | False when the file could not be opened, in which case nothing else changed. True when a file is already open, where the call is a no-op and the earlier file keeps receiving lines; `closeFile` first to move to another path. |
+| Type                       | Description                                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | False when the file could not be opened, in which case nothing else changed and a file already open keeps receiving lines. |
 
 <a id="tecs.log.setLevel"></a>
 

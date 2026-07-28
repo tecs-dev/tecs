@@ -602,7 +602,7 @@ describe("http.client", function()
         end
 
         it("replaces a spawned Request with a Response", function()
-            world = tecs.newWorld()
+            world = tecs.ecs.newWorld()
             world:addPlugin(http.plugin.install)
 
             local entity = world:spawn(http.plugin.Request({ url = url("/scores") }))
@@ -618,7 +618,7 @@ describe("http.client", function()
         end)
 
         it("answers a transfer that failed with a Response carrying why", function()
-            world = tecs.newWorld()
+            world = tecs.ecs.newWorld()
             world:addPlugin(http.plugin.install)
 
             -- Nothing on port 1, so the transfer fails rather than answering.

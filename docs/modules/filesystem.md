@@ -339,6 +339,14 @@ What the backend answered about one path.
 
 What a path is. Symbolic links are followed, so a link never reports as
 one: "other" is a socket, a fifo or a device.
+<a id="tecs.filesystem.Reader"></a>
+
+### tecs.filesystem.Reader
+
+<pre><code v-pre>type <a href="#tecs.filesystem.Reader">tecs.filesystem.Reader</a> = storagebackend.Reader
+</code></pre>
+
+A read that hands its bytes over in pieces.
 <a id="tecs.filesystem.UserFolder"></a>
 
 ### tecs.filesystem.UserFolder
@@ -347,6 +355,14 @@ one: "other" is a socket, a fifo or a device.
 </code></pre>
 
 Which of the platform's well-known folders to ask for.
+<a id="tecs.filesystem.Writer"></a>
+
+### tecs.filesystem.Writer
+
+<pre><code v-pre>type <a href="#tecs.filesystem.Writer">tecs.filesystem.Writer</a> = storagebackend.Writer
+</code></pre>
+
+A write that takes its bytes in pieces.
 <a id="tecs.filesystem.copy"></a>
 
 ### tecs.filesystem.copy
@@ -613,6 +629,65 @@ through here rather than keeping a second list nothing else can see.
 | ------------------------- | ----------------------- | ----------- |
 | <code v-pre>string</code> | <code v-pre>path</code> |             |
 | <code v-pre>string</code> | <code v-pre>kind</code> |             |
+
+<a id="tecs.filesystem.openRead"></a>
+
+### tecs.filesystem.openRead
+
+<pre><code v-pre>function <a href="#tecs.filesystem.openRead">tecs.filesystem.openRead</a>(path: string): <a href="#tecs.filesystem.Reader">Reader</a>, string
+</code></pre>
+
+Opens `path` for reading in pieces. The mirror of `openWrite`.
+
+`read` is the right call for a file a program wants whole. This is for one
+it wants to hand over as it goes: an upload body is read through this, so
+the file being sent is never also in memory.
+
+#### Parameters
+
+| Type                      | Name                    | Description |
+| ------------------------- | ----------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>path</code> |             |
+
+#### Returns
+
+| Type                                                            | Description                                      |
+| --------------------------------------------------------------- | ------------------------------------------------ |
+| <code v-pre><a href="#tecs.filesystem.Reader">Reader</a></code> | The reader, or nil and the reason there is none. |
+| <code v-pre>string</code>                                       |                                                  |
+
+<a id="tecs.filesystem.openWrite"></a>
+
+### tecs.filesystem.openWrite
+
+<pre><code v-pre>function <a href="#tecs.filesystem.openWrite">tecs.filesystem.openWrite</a>(path: string): <a href="#tecs.filesystem.Writer">Writer</a>, string
+</code></pre>
+
+Opens `path` for writing in pieces, replacing whatever was there.
+
+What `write` cannot do: a body that arrives over time never becomes one
+string as large as itself. A download that ends in a file writes through
+this, and so does anything else assembled from parts.
+
+Close it. The bytes are not guaranteed to be on disk until `close` answers,
+and it is the call a full disk is reported by.
+
+local writer <const> = assert(tecs.filesystem.openWrite(path))
+writer:write(chunk)
+assert(writer:close())
+
+#### Parameters
+
+| Type                      | Name                    | Description |
+| ------------------------- | ----------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>path</code> |             |
+
+#### Returns
+
+| Type                                                            | Description                                      |
+| --------------------------------------------------------------- | ------------------------------------------------ |
+| <code v-pre><a href="#tecs.filesystem.Writer">Writer</a></code> | The writer, or nil and the reason there is none. |
+| <code v-pre>string</code>                                       |                                                  |
 
 <a id="tecs.filesystem.read"></a>
 

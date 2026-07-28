@@ -27,8 +27,8 @@ There is no line missing from that. A client is driven by the application from t
 way [`assets`](/modules/assets) and [`proc`](/modules/proc) are, so a request started anywhere settles on its own.
 
 `onSettle` is handed the future rather than the value, which is what lets one continuation answer both outcomes.
-[`map`](/modules/Future#map), [`flatMap`](/modules/Future#flatmap) and [`recover`](/modules/Future#recover) are
-the rest of it: everything a request returns is a [`Future`](/modules/Future) and behaves like every other one.
+[`map`](/modules/future#map), [`flatMap`](/modules/future#flatmap) and [`recover`](/modules/future#recover) are
+the rest of it: everything a request returns is a [`Future`](/modules/future) and behaves like every other one.
 
 Reading `future.status` yourself is fine, and is what a system that wants to check without a callback does. It is
 not the shape to reach for first.
