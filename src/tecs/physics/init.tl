@@ -927,6 +927,12 @@ end
 --- A move rather than a push: velocity is left exactly as it was, so a falling
 --- body carries on falling from wherever it lands.
 ---
+--- `PreviousTransform` is not moved with it. That column is snapshotted in
+--- `FixedFirst` and the renderer interpolates from it, so a teleport in any
+--- phase after that is drawn as one frame of travel between the two positions
+--- rather than as a jump. Teleporting before `FixedFirst`, or accepting the
+--- one frame, are the two ways round it.
+---
 --- @param world The world holding the entity.
 --- @param entity Does nothing at all for one with no live body, `Transform`
 ---     included, so this is not a way to move an entity physics is not
