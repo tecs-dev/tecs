@@ -1,12 +1,12 @@
 -- lua-cjson, declared so the one module that reaches it by name type-checks.
 --
--- `src/tecs/json.tl` ends `return require("cjson")`, and Teal has to know what
--- that is. This lived only in an ignored vendor directory until now, produced
--- by nothing in the tree, so `make check` passed on the machine that happened
--- to have it and failed everywhere else.
+-- `src/tecs/data.tl` requires it and presents it under `tecs.data`, and Teal
+-- has to know what it is. This lived only in an ignored vendor directory until
+-- now, produced by nothing in the tree, so `make check` passed on the machine
+-- that happened to have it and failed everywhere else.
 --
--- Everything else reaches this through `tecs.json`, which `src/tecs/json.d.tl`
--- describes and which is the same table.
+-- Nothing else reaches the library by this name: `tecs.data` is where the
+-- engine and a game both read JSON, and it declares what it carries.
 
 local record cjson
     --- Sentinel that encodes as `[]` rather than `{}`.

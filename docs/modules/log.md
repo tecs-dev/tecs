@@ -138,7 +138,7 @@ level methods already guard themselves, so wrapping an ordinary call in it buys 
 
 ```teal
 if LOGGER:enabled(tecs.log.DEBUG) then
-    LOGGER:debug("packet: %s", tecs.json.encode(packet))
+    LOGGER:debug("packet: %s", tecs.data.encodeJSON(packet))
 end
 ```
 

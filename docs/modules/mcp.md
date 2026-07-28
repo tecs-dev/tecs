@@ -471,7 +471,7 @@ end
 - `name`: the tool name, which is what `tools/call` dispatches on.
 - `description`: sent in the tool list.
 - `inputSchema`: JSON Schema for the arguments, sent verbatim. A tool with no arguments uses
-  `{ type = "object", properties = tecs.json.empty_array }`, because an empty Lua table encodes as an object
+  `{ type = "object", properties = tecs.data.empty_array }`, because an empty Lua table encodes as an object
   and a client parsing the list strictly would reject it.
 - `handler`: the function. Arguments arrive decoded; the table it returns is encoded as the structured
   content.

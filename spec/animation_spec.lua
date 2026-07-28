@@ -812,10 +812,10 @@ describe("tecs.gfx.sheet", function()
         end)
 
         it("reads the export as text as well as as a table", function()
-            local json = require("tecs.json")
+            local data = require("tecs.data")
             local s = sheet.fromAseprite({
                 name = uniqueName("text"),
-                json = json.encode(EXPORT),
+                json = data.encodeJSON(EXPORT),
             })
             assert.equal(3, s.count)
             near(s:duration(2), 0.3, "the held frame survived the round trip")

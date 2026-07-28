@@ -228,7 +228,7 @@ behind each one.
 - [`tecs.capabilities`](/modules/capabilities) - what this machine and this build can do
 - [`tecs.clipboard`](/modules/clipboard) - the system clipboard
 - [`tecs.components`](/modules/components) - the components the renderer reads
-- [`tecs.compress`](/modules/compress) - compression and decompression
+- [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
 - [`tecs.filesystem`](/modules/filesystem) - touching the filesystem
@@ -236,10 +236,8 @@ behind each one.
 - [`tecs.gamepad`](/modules/gamepad) - identity, lifetime, metadata and outputs
 - [`tecs.gfx`](/modules/gfx/) - drawing, and the modules a scene is described in
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
-- [`tecs.hash`](/modules/hash) - hashing
 - [`tecs.http`](/modules/http) - fetching over HTTP without stopping the frame
 - [`tecs.input`](/modules/input) - three tiers behind a layer stack
-- [`tecs.json`](/modules/json) - JSON, with the build's own copy of the C parser found
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
 - [`tecs.materials`](/modules/materials) - one fragment shader, compiled from the material set
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through

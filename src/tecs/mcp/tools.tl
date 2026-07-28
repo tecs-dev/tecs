@@ -4,7 +4,7 @@
 --- ones that are true of any build and that an agent reaches for before it
 --- knows anything else: is it alive, what is it, and what has it been saying.
 
-local cjson <const> = require("tecs.json")
+local data <const> = require("tecs.data")
 local sdl <const> = require("tecs.ffi.sdl3")
 local capabilities <const> = require("tecs.platform.capabilities")
 local paths <const> = require("tecs.platform.paths")
@@ -118,12 +118,12 @@ mcp.register({
         .. "crash rather than refusing to answer after one.",
     readOnly = true,
     whenCrashed = true,
-    inputSchema = {type = "object", properties = cjson.empty_array},
+    inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
         local crash = mcp.crashed()
         return {
             ok = crash == nil,
-            crashed = crash or cjson.null,
+            crashed = crash or data.null,
             ticks = tonumber(C.SDL_GetTicks()) as number,
         }
     end,
@@ -165,11 +165,11 @@ mcp.register({
     description = "What this build is, what it can do, and what the world it " .. "is running holds.",
     readOnly = true,
     whenCrashed = true,
-    inputSchema = {type = "object", properties = cjson.empty_array},
+    inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
         local caps = capabilities.get()
         return {
-            world = worldContext() or cjson.null,
+            world = worldContext() or data.null,
             target = caps.target,
             architecture = caps.architecture,
             jit = caps.jit,
@@ -180,7 +180,7 @@ mcp.register({
             cores = caps.cores,
             assets = paths.assets(),
             writable = paths.pref(),
-            logFile = log.filePath() or cjson.null,
+            logFile = log.filePath() or data.null,
             loggers = log.loggers(),
         }
     end,
@@ -211,7 +211,7 @@ mcp.register({
     handler = function(args: {string: any}): {string: any}
         local path = log.filePath()
         if path == nil then
-            return {lines = cjson.empty_array, offset = 0, path = cjson.null}
+            return {lines = data.empty_array, offset = 0, path = data.null}
         end
 
         -- The path is returned so an agent sharing a filesystem with the game
@@ -219,7 +219,7 @@ mcp.register({
         -- what cmd_screenshot already does with artifacts.
         local file = io.open(path, "rb")
         if file == nil then
-            return {lines = cjson.empty_array, offset = 0, path = path}
+            return {lines = data.empty_array, offset = 0, path = path}
         end
 
         local after = math.floor(tonumber(args.after) or 0) as integer
@@ -249,7 +249,7 @@ mcp.register({
         return {
             path = path,
             offset = after + #window,
-            lines = #lines > 0 and lines or cjson.empty_array,
+            lines = #lines > 0 and lines or data.empty_array,
         }
     end,
 })
@@ -449,7 +449,7 @@ mcp.register({
     description = "Sound output: the clips loaded, the voices sounding, and "
         .. "the gains, mutes and pauses over them.",
     readOnly = true,
-    inputSchema = {type = "object", properties = cjson.empty_array},
+    inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
         local sound = audio()
         -- What this build linked rather than what it asked for, which is the
@@ -464,7 +464,7 @@ mcp.register({
                 status = clip.status,
                 duration = clip.duration,
                 resident = clip.resident,
-                error = clip.error or cjson.null,
+                error = clip.error or data.null,
             }
         end
 
@@ -476,12 +476,12 @@ mcp.register({
             end
             voices[#voices + 1] = {
                 handle = voice.handle,
-                clip = voice.clip or cjson.null,
+                clip = voice.clip or data.null,
                 gain = voice.gain,
                 applied = voice.applied,
                 pitch = voice.pitch,
-                group = voice.group or cjson.null,
-                key = voice.key or cjson.null,
+                group = voice.group or data.null,
+                key = voice.key or data.null,
                 paused = voice.paused,
                 stopping = voice.stopping,
                 owned = voice.owned,
@@ -511,8 +511,8 @@ mcp.register({
             keys[#keys + 1] = {
                 key = key,
                 count = sound:keyCount(key),
-                voices = limit ~= nil and limit.voices or cjson.null,
-                cooldown = limit ~= nil and limit.cooldown or cjson.null,
+                voices = limit ~= nil and limit.voices or data.null,
+                cooldown = limit ~= nil and limit.cooldown or data.null,
             }
         end
 
@@ -523,11 +523,11 @@ mcp.register({
             sounding = sound:sounding(),
             maxVoices = sound:maxVoices(),
             loading = sound:loading(),
-            decoders = #decoders > 0 and decoders or cjson.empty_array,
-            clips = #clips > 0 and clips or cjson.empty_array,
-            groups = #groups > 0 and groups or cjson.empty_array,
-            keys = #keys > 0 and keys or cjson.empty_array,
-            voices = #voices > 0 and voices or cjson.empty_array,
+            decoders = #decoders > 0 and decoders or data.empty_array,
+            clips = #clips > 0 and clips or data.empty_array,
+            groups = #groups > 0 and groups or data.empty_array,
+            keys = #keys > 0 and keys or data.empty_array,
+            voices = #voices > 0 and voices or data.empty_array,
         }
     end,
 })
@@ -667,7 +667,7 @@ mcp.register({
         .. "rebuilds the pipelines. Refuses where a reload would change what "
         .. "already-drawn entities mean.",
     destructive = true,
-    inputSchema = {type = "object", properties = cjson.empty_array},
+    inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any} return {materials = tools.reloadShaders()} end,
 })
 
@@ -810,11 +810,11 @@ mcp.register({
         return {
             watching = watch.installed(),
             files = #watching,
-            paths = #watching > 0 and watching or cjson.empty_array,
+            paths = #watching > 0 and watching or data.empty_array,
             -- Files seen changing and not acted on yet, which is what a save
             -- still being written looks like from here.
-            unsettled = #unsettled > 0 and unsettled or cjson.empty_array,
-            kinds = #kinds > 0 and kinds or cjson.empty_array,
+            unsettled = #unsettled > 0 and unsettled or data.empty_array,
+            kinds = #kinds > 0 and kinds or data.empty_array,
             dispatched = watch.dispatched(),
             reloaded = fired,
         }
@@ -873,7 +873,7 @@ mcp.register({
         local count, values = collect(pcall(chunk, world()))
         return {
             returned = count,
-            values = count > 0 and values or cjson.empty_array,
+            values = count > 0 and values or data.empty_array,
         }
     end,
 })

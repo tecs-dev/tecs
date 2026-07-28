@@ -50,9 +50,7 @@ local type physics = require("tecs.physics")
 local type http = require("tecs.http")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
-local type json = require("tecs.json")
-local type hash = require("tecs.hash")
-local type compress = require("tecs.compress")
+local type datajson = require("tecs.data")
 local type system = require("tecs.platform.system")
 local type sensors = require("tecs.platform.sensors")
 local type platformAudio = require("tecs.platform.audio")
@@ -166,6 +164,227 @@ local record future
     type Source = Future.Source
 end
 
+--- Turning bytes into other bytes: JSON in both directions, DEFLATE in both
+--- directions, and a hash over either.
+---
+--- One module because each of these is a few functions over a byte string with
+--- no state to carry, and a game reaching for one is nearly always about to
+--- reach for another: a save is encoded, compressed and stamped, and a cache
+--- entry is checked the other way round. Three modules of three functions each
+--- would put that one job in three places.
+---
+--- The transformations name their format, because a merged module makes a bare
+--- verb ambiguous and because a value produced here outlives the process. There
+--- is no `encode`, and `fnv1a64` says which hash it is so that changing what it
+--- computes is a rename every caller is rechecked against.
+local record data
+    --- An independent JSON table with its own settings, as `newJSON` answers
+    --- with.
+    type JSON = datajson
+
+    --- What `null` and `empty_array` are: a value standing for something a Lua
+    --- table cannot express, opaque and compared by identity.
+    type Sentinel = datajson.Sentinel
+
+    --- Encodes a Lua value as JSON text.
+    ---
+    --- @param value Any value JSON has a form for. A function, a coroutine, a
+    ---     cdata or a non-finite number raises rather than going missing.
+    --- @return The document, compact unless `encode_indent` says otherwise.
+    encodeJSON: function(value: any): string
+
+    --- Decodes JSON text into a Lua value.
+    ---
+    --- @param text A whole document. A JSON null answers as `null`, which is
+    ---     not `nil`, so an absent key and a null one stay apart.
+    --- @return The value. Malformed input raises rather than returning nil.
+    decodeJSON: function(text: string): any
+
+    --- JSON `null`, which is not `nil`. lua-cjson's own value, so it compares
+    --- equal to the one `require("cjson")` answers with.
+    null: datajson.Sentinel
+
+    --- A value that encodes as `[]`, which an empty Lua table cannot.
+    empty_array: datajson.Sentinel
+
+    --- Metatable marking a table as an array whatever it holds.
+    array_mt: metatable<{any}>
+
+    --- Metatable turning an otherwise empty table into `[]`.
+    empty_array_mt: metatable<{any}>
+
+    --- Whether `{}` encodes as an object rather than as `[]`. On by default.
+    ---
+    --- Every setting reads the same way: called with no argument it answers the
+    --- current value, called with one it sets it and answers the new one. They
+    --- are process-wide, which is what `newJSON` exists to escape.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call.
+    encode_empty_table_as_object: function(setting?: boolean | string): boolean
+
+    --- Whether a decoded array carries `array_mt`. Off by default.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call.
+    decode_array_with_array_mt: function(setting?: boolean | string): boolean
+
+    --- Whether `/* ... */` and `// ...` are tolerated in input. Off by default.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call.
+    decode_allow_comment: function(setting?: boolean | string): boolean
+
+    --- Whether a sparse array is converted to an object rather than raising,
+    --- and when an array counts as sparse.
+    ---
+    --- @param convert Omitted only reads, and reads all three.
+    --- @param ratio The multiple of the entry count the largest index may reach
+    ---     before the array is called sparse. 2 by default.
+    --- @param safe A largest index below which an array never counts as sparse.
+    ---     10 by default.
+    --- @return Whether conversion is on, off by default.
+    --- @return The ratio after the call.
+    --- @return The safe bound after the call.
+    encode_sparse_array: function(
+        convert?: boolean | string, ratio?: integer, safe?: integer
+    ): boolean, integer, integer
+
+    --- Nesting the encoder accepts before raising. 1000 by default.
+    ---
+    --- @param depth Omitted only reads.
+    --- @return The depth after the call.
+    encode_max_depth: function(depth?: integer): integer
+
+    --- Nesting the decoder accepts before raising. 1000 by default, and what
+    --- keeps a hostile document from exhausting the C stack.
+    ---
+    --- @param depth Omitted only reads.
+    --- @return The depth after the call.
+    decode_max_depth: function(depth?: integer): integer
+
+    --- Significant digits written for a number. 14 by default, which is what
+    --- keeps an entity id exact rather than writing it back as `1.0`.
+    ---
+    --- @param precision Omitted only reads. 1 to 14.
+    --- @return The precision after the call.
+    encode_number_precision: function(precision?: integer): integer
+
+    --- Whether the encode buffer is kept between calls rather than freed. On by
+    --- default.
+    ---
+    --- @param keep Omitted only reads.
+    --- @return The setting after the call.
+    encode_keep_buffer: function(keep?: boolean | string): boolean
+
+    --- What NaN and infinity encode as. Off by default, which raises.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call, which is `"null"` rather than a
+    ---     boolean when that is what is in force.
+    encode_invalid_numbers: function(setting?: boolean | string): boolean | string
+
+    --- Whether `nan` and `inf` are accepted in input. On by default.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call.
+    decode_invalid_numbers: function(setting?: boolean | string): boolean
+
+    --- Whether `/` is written as `\/`. On by default.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call.
+    encode_escape_forward_slash: function(setting?: boolean | string): boolean
+
+    --- Whether a value JSON has no form for is skipped rather than raising. Off
+    --- by default, and worth leaving off.
+    ---
+    --- @param setting Omitted only reads.
+    --- @return The setting after the call.
+    encode_skip_unsupported_value_types: function(setting?: boolean | string): boolean
+
+    --- Indent string for pretty output. Unset, and by default, the encoder
+    --- writes compact JSON.
+    ---
+    --- @param indent Omitted only reads. Whitespace, one level's worth.
+    --- @return The indent after the call.
+    encode_indent: function(indent?: string): string
+
+    --- An independent JSON table with its own settings.
+    ---
+    --- @return A table carrying the JSON names here and none of the compression
+    ---     or hashing ones, since those have nothing to configure. The
+    ---     sentinels are shared with every copy.
+    newJSON: function(): JSON
+
+    --- lua-cjson's own name for itself, `"cjson"`, and its version.
+    _NAME: string
+    _VERSION: string
+
+    --- Compresses bytes as an RFC 1950 zlib stream, header and Adler-32
+    --- trailer included.
+    ---
+    --- @param bytes The whole input, which may be empty.
+    --- @param level Minus one or omitted uses zlib's default. Zero stores
+    ---     without compression; one through nine trade time for size.
+    --- @return The stream. Never nil: a failure raises.
+    deflate: function(bytes: string, level?: integer): string
+
+    --- Compresses bytes as a raw RFC 1951 DEFLATE stream, with no header and no
+    --- checksum.
+    ---
+    --- @param bytes The whole input, which may be empty.
+    --- @param level As `deflate` takes it.
+    --- @return The stream. Never nil: a failure raises.
+    deflateRaw: function(bytes: string, level?: integer): string
+
+    --- Decompresses a zlib stream, the form RFC 1950 defines.
+    ---
+    --- @param bytes The whole stream, trailer included. An empty string raises,
+    ---     since it is not one.
+    --- @param sizeHint The decompressed size, when the caller's format records
+    ---     it. Only an allocation hint: a wrong one costs a copy, never an
+    ---     error.
+    --- @return The decompressed bytes, which may be empty. A bad header, a
+    ---     corrupt block, a truncated stream and a trailer that disagrees all
+    ---     raise.
+    inflate: function(bytes: string, sizeHint?: integer): string
+
+    --- Decompresses a raw DEFLATE stream, the form RFC 1951 defines.
+    ---
+    --- @param bytes The whole stream. An empty string raises.
+    --- @param sizeHint As `inflate` takes it.
+    --- @return The decompressed bytes. There is no checksum in this form, so a
+    ---     container carrying one of its own should check it.
+    inflateRaw: function(bytes: string, sizeHint?: integer): string
+
+    --- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex
+    --- digits.
+    ---
+    --- Not an integrity primitive: sixty-four bits puts a deliberate collision
+    --- within reach of anyone who wants one.
+    ---
+    --- @param text Any string. NUL and bytes above 127 hash like any other.
+    --- @return Sixteen hex digits, high half first, so two hashes compare as
+    ---     strings the way their values compare.
+    fnv1a64: function(text: string): string
+
+    --- CRC-32 over the bytes of `text`, as a number in [0, 2^32).
+    ---
+    --- @param text Any string.
+    --- @return The checksum PNG, gzip and ZIP put beside compressed bytes. An
+    ---     error-detecting checksum and not a digest.
+    crc32: function(text: string): integer
+
+    --- Adler-32 over the bytes of `text`, as a number in [0, 2^32).
+    ---
+    --- @param text Any string.
+    --- @return The checksum RFC 1950 puts in a zlib stream's trailer, seeded
+    ---     with 1 as that document specifies. A poor content hash; use
+    ---     `fnv1a64` for identity.
+    adler32: function(text: string): integer
+end
+
 --- Drawing, and the vocabularies a scene is described in.
 ---
 --- Each of those is its own module a level down rather than a section of this
@@ -228,16 +447,14 @@ local record tecs
     capabilities: capabilities
     clipboard: clipboard
     components: components
-    compress: compress
+    data: data
     events: events
     filesystem: filesystem
     future: future
     gamepad: gamepad
     gfx: gfx
-    hash: hash
     http: http
     input: input
-    json: json
     log: log
     materials: materials
     mcp: mcp
@@ -305,16 +522,14 @@ local SURFACE <const>: {string: Namespace} = {
     capabilities = {module = "tecs.platform.capabilities"},
     clipboard = {module = "tecs.platform.clipboard"},
     components = {module = "tecs.components"},
-    compress = {module = "tecs.compress"},
+    data = {module = "tecs.data", beside = {"tecs.compress", "tecs.hash"}},
     events = {module = "tecs.platform.events"},
     filesystem = {module = "tecs.platform.filesystem"},
     future = {module = "tecs.Future", class = "Future"},
     gamepad = {module = "tecs.platform.Gamepad", class = "Gamepad"},
     gfx = {within = {layers = {module = "tecs.gfx.layers"}}},
-    hash = {module = "tecs.hash"},
     http = {module = "tecs.http"},
     input = {module = "tecs.platform.Input", class = "Input"},
-    json = {module = "tecs.json"},
     log = {module = "tecs.log"},
     materials = {module = "tecs.gpu.materials"},
     mcp = {module = "tecs.mcp"},

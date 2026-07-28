@@ -58,7 +58,7 @@ local materials <const> = require("tecs.gpu.materials")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 local layersModule <const> = require("tecs.gfx.layers")
 local paths <const> = require("tecs.platform.paths")
-local json <const> = require("tecs.json")
+local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
 
 local type Renderer = require("tecs.Renderer")
@@ -299,7 +299,7 @@ end
 --- can act on, so the raise is caught and replaced. Level zero because the
 --- message locates itself and the frame that called this does not.
 local function decodeMetrics(document: string, name: string): {string: any}
-    local ok, root = pcall(json.decode, document)
+    local ok, root = pcall(data.decodeJSON, document)
     if not ok or type(root) ~= "table" then
         error(("tecs: '%s' is not a font metrics document"):format(name), 0)
     end
@@ -1618,18 +1618,18 @@ text.Text = ecs.newComponent({
             tracking = item.tracking,
         }
     end,
-    deserialize = function(_world: World, data: {string: any}): Text
+    deserialize = function(_world: World, stored: {string: any}): Text
         -- A font that was never loaded in this process leaves the text
         -- without one, which lays out nothing rather than failing a load.
-        local name = data.font as string
+        local name = stored.font as string
         local font = name ~= nil and fontsByName[name] or nil
         return text.Text(
-            data.text as string,
+            stored.text as string,
             font,
-            data.size as number,
-            data.align as string,
-            data.lineSpacing as number,
-            data.tracking as number
+            stored.size as number,
+            stored.align as string,
+            stored.lineSpacing as number,
+            stored.tracking as number
         )
     end,
 })

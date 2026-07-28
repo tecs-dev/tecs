@@ -45,8 +45,8 @@ Every function and type this module carries, rendered from {sources}."""
 #
 # A class module renders under the class as well as the module, because that is
 # how a game reaches it: `tecs.camera.Camera.create`, never `tecs.camera.create`.
-# `tecs.audio` is the one page with two sources, the mixer and the devices it
-# opens, because they are one module to a game and two files here.
+# `tecs.audio` and `tecs.data` are the pages with several sources, because each
+# is one module to a game and several files here.
 #
 # A module that sits inside another module has its own page in a directory
 # named for the parent, rather than a section of the parent's page. One page per
@@ -55,6 +55,10 @@ Every function and type this module carries, rendered from {sources}."""
 # several of those would produce a page nobody scrolls through. It also keeps
 # one source per page, so the name each member is rendered under is the name a
 # game writes it as, with nothing to disambiguate.
+#
+# A page whose module is several modules at one level names them all, in the
+# order its prose reads: `tecs.data` is JSON, compression and hashing, and its
+# reference section runs the same way.
 #
 # `tecs.version` is a string and has no source to render, and neither has a
 # namespace that carries only other modules: `docs/modules/gfx/index.md` is
@@ -75,15 +79,20 @@ MODULES = [
     ("docs/modules/capabilities.md", [("src/tecs/platform/capabilities.tl", "tecs.capabilities")]),
     ("docs/modules/clipboard.md", [("src/tecs/platform/clipboard.tl", "tecs.clipboard")]),
     ("docs/modules/components.md", [("src/tecs/components.tl", "tecs.components")]),
-    ("docs/modules/compress.md", [("src/tecs/compress.tl", "tecs.compress")]),
+    (
+        "docs/modules/data.md",
+        [
+            ("src/tecs/data.tl", "tecs.data"),
+            ("src/tecs/compress.tl", "tecs.data"),
+            ("src/tecs/hash.tl", "tecs.data"),
+        ],
+    ),
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
     ("docs/modules/filesystem.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
     ("docs/modules/gamepad.md", [("src/tecs/platform/Gamepad.tl", "tecs.gamepad.Gamepad")]),
     ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),
-    ("docs/modules/hash.md", [("src/tecs/hash.tl", "tecs.hash")]),
     ("docs/modules/input.md", [("src/tecs/platform/Input.tl", "tecs.input.Input")]),
-    ("docs/modules/json.md", [("src/tecs/json.tl", "tecs.json")]),
     ("docs/modules/log.md", [("src/tecs/log.tl", "tecs.log")]),
     ("docs/modules/materials.md", [("src/tecs/gpu/materials.tl", "tecs.materials")]),
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),

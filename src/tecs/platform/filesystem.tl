@@ -56,7 +56,7 @@
 ---
 ---     local tecs <const> = require("tecs")
 ---     local save <const> = tecs.paths.writable("slot1.json")
----     tecs.filesystem.write(save, tecs.json.encode(state))
+---     tecs.filesystem.write(save, tecs.data.encodeJSON(state))
 ---     local bytes <const> = tecs.filesystem.read(save)
 ---
 --- ## Path info is one answer, asked four ways

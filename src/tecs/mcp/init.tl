@@ -11,7 +11,7 @@
 --- the middle of it. The cost is that a tool must not block: it is running
 --- during a frame someone is watching.
 
-local cjson <const> = require("tecs.json")
+local data <const> = require("tecs.data")
 local time <const> = require("tecs.platform.time")
 local log <const> = require("tecs.log")
 local transport <const> = require("tecs.mcp.transport")
@@ -149,7 +149,7 @@ local function describe(): {any}
         list[#list + 1] = {
             name = tool.name,
             description = tool.description or "",
-            inputSchema = tool.inputSchema or {type = "object", properties = cjson.empty_array},
+            inputSchema = tool.inputSchema or {type = "object", properties = data.empty_array},
             annotations = {
                 readOnlyHint = tool.readOnly == true,
                 destructiveHint = tool.destructive == true,
@@ -162,17 +162,17 @@ local function describe(): {any}
     -- An empty list has to say so, or it encodes as an object and a client
     -- parsing it strictly rejects the response.
     if #list == 0 then
-        return cjson.empty_array as {any}
+        return data.empty_array as {any}
     end
     return list
 end
 
 local function reply(id: any, result: {string: any}): string
-    return cjson.encode({jsonrpc = "2.0", id = id, result = result})
+    return data.encodeJSON({jsonrpc = "2.0", id = id, result = result})
 end
 
 local function fail(id: any, code: integer, message: string): string
-    return cjson.encode({
+    return data.encodeJSON({
         jsonrpc = "2.0",
         id = id,
         error = {code = code, message = message},
@@ -199,9 +199,9 @@ end
 ---     bad input is reported in-band. A request that carried no `id` is still
 ---     answered, with the `id` field absent from the response.
 function mcp.dispatch(text: string): string
-    local ok, decoded = pcall(cjson.decode, text)
+    local ok, decoded = pcall(data.decodeJSON, text)
     if not ok then
-        return fail(cjson.null, PARSE_ERROR, "invalid JSON")
+        return fail(data.null, PARSE_ERROR, "invalid JSON")
     end
 
     local request = decoded as {string: any}
@@ -261,7 +261,7 @@ function mcp.dispatch(text: string): string
             id,
             {
                 structuredContent = structured,
-                content = {{type = "text", text = cjson.encode(structured)}},
+                content = {{type = "text", text = data.encodeJSON(structured)}},
             }
         )
     end
@@ -305,7 +305,7 @@ function mcp.Server:poll(): boolean
             if not ok then
                 LOGGER:error("dispatch failed: %s", tostring(response))
                 self._transport:respond(
-                    500, "Internal Server Error", fail(cjson.null, INTERNAL_ERROR, tostring(response))
+                    500, "Internal Server Error", fail(data.null, INTERNAL_ERROR, tostring(response))
                 )
                 return
             end

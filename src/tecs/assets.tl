@@ -39,7 +39,7 @@
 ---
 ---     local tecs <const> = require("tecs")
 ---     local bytes <const> = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
----     local level <const> = tecs.json.decode(bytes)
+---     local level <const> = tecs.data.decodeJSON(bytes)
 ---
 --- `paths.asset` resolves against the content root and `read` answers nil for
 --- a path with no file, so a game distinguishes an absent document from a

@@ -108,7 +108,7 @@ function paths.writable(relative: string): string
 
 ```teal
 local save <const> = tecs.paths.writable("slot1.json")
-tecs.filesystem.write(save, tecs.json.encode(state))
+tecs.filesystem.write(save, tecs.data.encodeJSON(state))
 
 local sheet <const> = tecs.paths.asset("sprites/hero.png")
 ```

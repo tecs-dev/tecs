@@ -1353,7 +1353,7 @@ end
 function sheet.fromAseprite(options: AsepriteOptions): Sheet
     local source = options.json
     if source is string then
-        source = (require("tecs.json") as {string: function(string): any}).decode(source)
+        source = (require("tecs.data") as {string: function(string): any}).decodeJSON(source)
     end
     local export = source as {string: any}
     if export == nil then

@@ -661,7 +661,7 @@ it, with nothing in between:
 
 ```lua
 local bytes = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
-local level = tecs.json.decode(bytes)
+local level = tecs.data.decodeJSON(bytes)
 ```
 
 `read` answers nil for a path with no file, so an absent document is
@@ -684,15 +684,26 @@ walking the content tree. The two loads call `filesystem.note` rather than
 keeping a list of their own, because the decode they are recording happens on a
 worker and a second list is a second answer to the same question.
 
-## Hashing and decompression
+## Encoding, hashing and decompression
 
-`tecs.hash` and `tecs.compress` are two modules rather than one, because
-"operations over bytes" is a category and not a concern: a tool that wants a
-shader's identity has no reason to load a decompressor. They share no code, no
-state and, since zlib checks a stream's trailer itself, no dependency on each
-other either. Both resolve lazily off the surface, the way `json` and `log` do.
+Encoding, hashing and decompression are one public module, `tecs.data`, and
+three files behind it. An earlier reading had them separate on the grounds that
+"operations over bytes" is a category rather than a concern, and that a tool
+wanting a shader's identity has no reason to load a decompressor. The second
+half of that still holds and is why the files stayed apart: the surface
+descriptor reads the members off three modules in order, so asking for a hash
+loads the hash module and neither of the others. What did not hold is the
+first half. A save is encoded, compressed and stamped in one place, and a
+caller doing that had to know three module names to do one job.
 
-`hash.fnv1a64` is what identifies content: the shader pack carries one per
+The merge is also what qualifies the verbs. `encode` on a module that also
+compresses names two things at once, so JSON is `encodeJSON` and `decodeJSON`
+while the compressors keep `deflate` and `inflate`, which already say their
+format. lua-cjson's own names come through unchanged, sentinels and settings
+alike, for the reason `STYLE.md` gives: renaming them would leave that
+library's documentation describing names that do not exist here.
+
+`data.fnv1a64` is what identifies content: the shader pack carries one per
 source so a pack built before an edit is detected rather than trusted. It is
 not an integrity primitive and is not offered as one. Sixty-four bits puts an
 accidental collision out of reach and a deliberate one within it, and
@@ -700,9 +711,9 @@ establishing that an asset is the asset that was published is a different
 question with a different answer. The algorithm is in the name because the
 values are written into files that outlive the process, so changing it has to
 be a rename that every caller is rechecked against rather than a silent change
-of meaning. `hash.adler32` is there for the format that specifies it.
+of meaning. `data.adler32` is there for the format that specifies it.
 
-`compress.inflate` reads zlib streams and `compress.inflateRaw` reads the
+`data.inflate` reads zlib streams and `data.inflateRaw` reads the
 DEFLATE inside them. zlib decodes both: it is pinned, bound, carried through the
 ABI check and already in the process because libcurl needs it to answer a
 `Content-Encoding`, so a decoder written in Lua beside it would be a second
@@ -713,11 +724,11 @@ failure while `sizeHint` is a hint whose whole contract is that being wrong
 costs a copy, and because `inflateInit2_` takes the window size, so negating it
 selects the raw form and one loop answers both.
 
-Writing uses the same whole-buffer shape. `compress.deflate` produces a zlib
-stream and `compress.deflateRaw` the RFC 1951 bytes inside one, both from a
+Writing uses the same whole-buffer shape. `data.deflate` produces a zlib
+stream and `data.deflateRaw` the RFC 1951 bytes inside one, both from a
 single output allocation sized by `deflateBound`. The optional level is zlib's
 own `-1` through 9 rather than a second vocabulary the engine would have to
-translate and document. CRC-32 joins Adler-32 in `hash`, for the formats such as
+translate and document. CRC-32 joins Adler-32 there, for the formats such as
 PNG, gzip and ZIP that specify it; neither checksum is presented as content
 identity or integrity.
 
@@ -725,7 +736,7 @@ A malformed stream raises rather than returning: an over-subscribed code table,
 a copy reaching before the start of the output, a stored block whose length
 disagrees with its complement, a truncated stream, and a trailer that does not
 match what came out. zlib decides all of those but the truncation, which
-`compress` decides by handing over the whole input at once and reading a call
+the engine decides by handing over the whole input at once and reading a call
 that stopped with output room to spare as a stream that ended early. The
 messages are zlib's own, so `spec/compress_spec.lua` asserts that each of those
 raises and never which sentence it raised; pinning a suite to one

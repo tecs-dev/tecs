@@ -26,7 +26,7 @@ code; migrate old code opportunistically.
   or prevent ambiguity: `local C <const> = require("ffi")`, or
   distinguishing a public module from an internal one with the same name.
 - Package roots use `init.tl`; public leaf modules may be named `.tl` files
-  (`tecs.log`, `tecs.json`, `tecs.utils.pool`). Internal helpers
+  (`tecs.log`, `tecs.data`, `tecs.utils.pool`). Internal helpers
   live under `internal/` and are not part of the supported surface.
 
 ## Layout, which the formatter owns
@@ -143,7 +143,7 @@ the string is a compatibility surface.
   MCP data) are namespaced with dots: `"myGame.gameState"`.
 
 The camelCase rule is about identifiers this tree declares, and a vendored
-library's own names are not among them. `tecs.json` passes lua-cjson's
+library's own names are not among them. `tecs.data` passes lua-cjson's
 `encode_escape_forward_slash` through spelled the way lua-cjson spells it, for
 the same reason `tecs.physics` does not rename Box2D's concepts: a renamed key
 is a name that matches nothing the library's own documentation says.

@@ -20,7 +20,7 @@ that are one backend call answered differently.
 
 ```teal
 local save <const> = tecs.paths.writable("slot1.json")
-tecs.filesystem.write(save, tecs.json.encode(state))
+tecs.filesystem.write(save, tecs.data.encodeJSON(state))
 local bytes <const> = tecs.filesystem.read(save)
 ```
 

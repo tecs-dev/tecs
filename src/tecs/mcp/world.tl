@@ -15,7 +15,7 @@
 --- tools can name anything anybody registered, including a game's own, and
 --- nothing has to be told about a component twice.
 
-local cjson <const> = require("tecs.json")
+local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 
@@ -158,14 +158,14 @@ local function describe(w: ecs.World, entity: integer, declared: {string: ecs.Co
             -- has no data, so it reports as present rather than as an empty
             -- object a client would have to special-case.
             local ok, instance = pcall(function(): any return w:get(entity, kind) end)
-            local data = ok and valueOf(kind, instance) or nil
-            values[name] = data ~= nil and data or true
+            local contents = ok and valueOf(kind, instance) or nil
+            values[name] = contents ~= nil and contents or true
             count = count + 1
         end
     end
     return {
         entity = entity,
-        name = nameOf(w, entity) or cjson.null,
+        name = nameOf(w, entity) or data.null,
         components = values,
         count = count,
     }
@@ -208,7 +208,7 @@ mcp.register({
     description = "Lists the components these tools can name, with the fields "
         .. "each carries and whether the bound world carries any.",
     readOnly = true,
-    inputSchema = {type = "object", properties = cjson.empty_array},
+    inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
         local declared = ecs.declaredComponents()
         local names = sortedNames(declared)
@@ -221,9 +221,9 @@ mcp.register({
             -- again here, so this cannot describe a component incorrectly.
             local fields: {string} = {}
             local built, sample = pcall(function(): any return (kind as function(): any)() end)
-            local data = built and valueOf(kind, sample) or nil
-            if data ~= nil then
-                for field in pairs(data) do
+            local contents = built and valueOf(kind, sample) or nil
+            if contents ~= nil then
+                for field in pairs(contents) do
                     fields[#fields + 1] = field
                 end
                 table.sort(fields)
@@ -235,7 +235,7 @@ mcp.register({
                 -- meaning, which is worth saying rather than leaving inferred
                 -- from an empty list.
                 tag = #fields == 0,
-                fields = #fields > 0 and fields or cjson.empty_array,
+                fields = #fields > 0 and fields or data.empty_array,
                 -- Declared here and carried by nothing is a real state, so it
                 -- reads as absent rather than as a name that does not exist.
                 present = present[kind] == true,
@@ -297,7 +297,7 @@ mcp.register({
                     else
                         rows[#rows + 1] = {
                             entity = entity,
-                            name = nameOf(w, entity) or cjson.null,
+                            name = nameOf(w, entity) or data.null,
                         }
                     end
                 end
@@ -308,7 +308,7 @@ mcp.register({
         return {
             matched = total,
             returned = #rows,
-            entities = #rows > 0 and rows or cjson.empty_array,
+            entities = #rows > 0 and rows or data.empty_array,
         }
     end,
 })

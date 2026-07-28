@@ -25,7 +25,7 @@ Two formats ship in the box.
 | Format | API                                                                 | Description                                                                                                                                                    |
 | ------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Binary | `world:saveSnapshot()`, `world:loadSnapshot(...)`                   | [LuaJIT `string.buffer`](https://luajit.org/ext_buffer.html#serialize) serialization with bulk FFI memcpy for dense columns. The default, and the one to ship. |
-| Table  | `world:saveSnapshot({format = "table"})`, `world:loadSnapshot(...)` | A plain Lua table for programmatic inspection, in-memory round-trips, and custom tooling such as JSON through `tecs.json`.                                     |
+| Table  | `world:saveSnapshot({format = "table"})`, `world:loadSnapshot(...)` | A plain Lua table for programmatic inspection, in-memory round-trips, and custom tooling such as JSON through `tecs.data`.                                     |
 
 ## What is and isn't saved by default
 
@@ -298,13 +298,13 @@ world:loadSnapshot(snap)
 ```
 
 It accepts the same [options](#snapshotoptions) as a binary save minus `buffer` and `path`. The table is
-JSON-friendly, so `tecs.json` gives you a human-readable save:
+JSON-friendly, so `tecs.data` gives you a human-readable save:
 
 ```teal
-tecs.filesystem.write(tecs.paths.writable("save.json"), tecs.json.encode(snap))
+tecs.filesystem.write(tecs.paths.writable("save.json"), tecs.data.encodeJSON(snap))
 
 local payload = tecs.filesystem.read(tecs.paths.writable("save.json"))
-world:loadSnapshot(tecs.json.decode(payload))
+world:loadSnapshot(tecs.data.decodeJSON(payload))
 ```
 
 ::: tip Table snapshots are slower

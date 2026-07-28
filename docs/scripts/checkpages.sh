@@ -13,9 +13,13 @@
 #
 # A module may sit inside another, one level and no deeper, and is written the
 # way a game writes it: `tecs.gfx.layers`. Those come from the record the parent
-# field names, and only its lowercase non-function fields, which is the split
-# the tree already keeps: a module is luacase and gets a page of its own, a type
-# is PascalCase and belongs on its owner's page, and a function is neither.
+# field names, and a field there is one of them when it is luacase and declared
+# as the type of the same name, which is how a module field is written: the
+# binding mirrors the module, so `layers: layers` and `watch: watch`. Both
+# halves are needed. A PascalCase field is a type and belongs on its owner's
+# page, and a luacase field declared as something else is a value the namespace
+# carries rather than a module under it: `null: data.Sentinel` and
+# `version: string` are values, and neither has a page nor wants one.
 #
 # Set equality both ways, because one direction is not enough. Checking only
 # that a name has a page lets pages for things that no longer exist pile up,
@@ -68,7 +72,7 @@ public=$(awk '
             below = split(fields[name], members, " ")
             for (j = 1; j <= below; j++) {
                 member = members[j]
-                if (member ~ /^[a-z]/ && declared[name "." member] !~ /^function/) {
+                if (member ~ /^[a-z]/ && declared[name "." member] == member) {
                     print name "." member
                 }
             }

@@ -39,7 +39,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.capabilities`](/modules/capabilities) | what this machine and this build can do                                   |
 | [`tecs.clipboard`](/modules/clipboard)       | reading and writing the system clipboard                                  |
 | [`tecs.components`](/modules/components)     | the engine's own components, the ones the renderer reads                  |
-| [`tecs.compress`](/modules/compress)         | compression and decompression                                             |
+| [`tecs.data`](/modules/data)                 | JSON, DEFLATE and hashes over byte strings                                |
 | [`tecs.ecs`](/ecs/)                          | worlds, components, queries, systems, events and resources                |
 | [`tecs.events`](/modules/events)             | platform events, typed once and routed                                    |
 | [`tecs.filesystem`](/modules/filesystem)     | touching the filesystem                                                   |
@@ -47,10 +47,8 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.gamepad`](/modules/gamepad)           | a pad's identity, lifetime, metadata and outputs                          |
 | [`tecs.gfx`](/modules/gfx/)                  | drawing, and the modules a scene is described in                          |
 | [`tecs.gfx.layers`](/modules/gfx/layers)     | z-ordering and per-layer behaviour                                        |
-| [`tecs.hash`](/modules/hash)                 | hashing                                                                   |
 | [`tecs.http`](/modules/http)                 | fetching over HTTP without stopping the frame                             |
 | [`tecs.input`](/modules/input)               | gameplay input in three tiers, behind a layer stack                       |
-| [`tecs.json`](/modules/json)                 | JSON, with the build's own copy of the C parser found                     |
 | [`tecs.log`](/modules/log)                   | SDL's logging, per platform, with a named logger as the unit of filtering |
 | [`tecs.materials`](/modules/materials)       | the material a draw dispatches to                                         |
 | [`tecs.mcp`](/modules/mcp)                   | the debug server: transport, tools, sandbox                               |

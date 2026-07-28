@@ -11,7 +11,7 @@
 --- machine rather than the game, because an agent exploring a world should not
 --- be able to delete a file by mistyping a table name.
 
-local cjson <const> = require("tecs.json")
+local data <const> = require("tecs.data")
 
 --- The environment `run_lua` compiles into, and the formatter its results come
 --- back through.
@@ -174,7 +174,7 @@ function sandbox.describe(value: any, depth?: integer): any
     local kind = type(value)
 
     if value == nil then
-        return cjson.null
+        return data.null
     elseif kind == "number" or kind == "string" or kind == "boolean" then
         return value
     elseif kind ~= "table" then
@@ -208,7 +208,7 @@ function sandbox.describe(value: any, depth?: integer): any
 
     if isArray then
         if #list == 0 then
-            return cjson.empty_array
+            return data.empty_array
         end
         return list
     end

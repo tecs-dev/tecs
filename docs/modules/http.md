@@ -12,7 +12,7 @@ request, attach a continuation. Nothing else is yours to do.
 tecs.http.client({ userAgent = "mygame/1.0" })
     :send({ url = "https://example.com/manifest.json" })
     :map(function(response: tecs.http.client.Response): Manifest
-        return tecs.json.decode(response.body:text()) as Manifest
+        return tecs.data.decodeJSON(response.body:text()) as Manifest
     end)
     :onSettle(function(manifest: tecs.Future<Manifest>)
         if manifest.status == "ready" then
