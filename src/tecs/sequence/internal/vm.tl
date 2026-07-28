@@ -7,7 +7,7 @@
 --- rather than a tick later.
 
 local ecs <const> = require("tecs.ecs")
-local platformclock <const> = require("tecs.platform.clock")
+local platformtime <const> = require("tecs.platform.time")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
 local seqevaluators <const> = require("tecs.sequence.internal.evaluators")
@@ -88,12 +88,12 @@ end
 -- Seconds are authored; a clock counts ticks. The fixed clock converts with
 -- the world's timestep, the frame clock with the loop's nominal frame dt, so
 -- the same program waits the same wall-clock time on either. The nominal dt is
--- the platform clock's to own, including what it is before the loop sets it.
+-- the platform timer's to own, including what it is before the loop sets it.
 local function secondsToSteps(world: World, clockId: seqtypes.ClockId, seconds: number): integer
     if seconds <= 0 then
         return 0
     end
-    local timestep = clockId == "frame" and platformclock.nominal or world:getFixedTiming()
+    local timestep = clockId == "frame" and platformtime.nominal or world:getFixedTiming()
     if not timestep or timestep <= 0 then
         return 1
     end

@@ -38,7 +38,6 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.camera`](/modules/camera)             | the view a frame is drawn from                                            |
 | [`tecs.capabilities`](/modules/capabilities) | what this machine and this build can do                                   |
 | [`tecs.clipboard`](/modules/clipboard)       | reading and writing the system clipboard                                  |
-| [`tecs.clock`](/modules/clock)               | monotonic time                                                            |
 | [`tecs.components`](/modules/components)     | the engine's own components, the ones the renderer reads                  |
 | [`tecs.compress`](/modules/compress)         | compression and decompression                                             |
 | [`tecs.ecs`](/ecs/)                          | worlds, components, queries, systems, events and resources                |
@@ -65,6 +64,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.sequence`](/modules/sequence)         | the sequencer, with the tween runtime inside it                           |
 | [`tecs.system`](/modules/system)             | URLs, locales, power, messages, and native file and folder dialogs        |
 | [`tecs.text`](/modules/text)                 | distance-field text, drawn through an instance producer                   |
+| [`tecs.time`](/modules/time)                 | monotonic time                                                            |
 | [`tecs.version`](/modules/)                  | the version of this build, as a string                                    |
 | [`tecs.watch`](/modules/watch)               | watching files for change                                                 |
 | [`tecs.window`](/modules/window)             | the window, its size, its display and its mode                            |

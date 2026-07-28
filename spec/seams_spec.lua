@@ -166,7 +166,7 @@ local REACH = {
         modules = {
             "tecs/gpu/shaderbuild.lua",
             "tecs/platform/capabilities.lua",
-            "tecs/platform/clock.lua",
+            "tecs/platform/time.lua",
             "tecs/log.lua",
         },
     },

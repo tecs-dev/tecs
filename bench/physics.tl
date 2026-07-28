@@ -25,7 +25,7 @@ local tecs <const> = require("tecs")
 local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local Material <const> = tecs.components.Material
@@ -180,12 +180,12 @@ return tecs.application.create({
         -- produces. Cheap physics makes frames fast, fast frames accumulate
         -- fewer steps, fewer steps means less jet impulse, the pile settles,
         -- and the cost oscillates between runs by more than any change being
-        -- measured. `clock.provider` exists for exactly this: frames are the
+        -- measured. `time.provider` exists for exactly this: frames are the
         -- coordinate system and dt is data.
         -- The real dt is recorded here rather than in a system, which sees the
         -- pinned value: a stage fed the fiction would report the fiction. This
         -- is the one place that sees both.
-        clock.provider = function(realDt: number): number timing.mark(DELTA, realDt); return clock.nominal end
+        time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return time.nominal end
 
         -- The A/B knob for the solver's thread pool. One worker starts no
         -- threads and runs every task inline, which is the no-executor path.

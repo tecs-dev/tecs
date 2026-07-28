@@ -22,7 +22,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local events = require("tecs.platform.events")
-local clock = require("tecs.platform.clock")
+local time = require("tecs.platform.time")
 
 -- An upper bound, not the length of the run: pushing `terminating` is what ends
 -- it, and that happens well before this.
@@ -36,8 +36,8 @@ local STALL = 0.060
 --- Busy, not asleep. The point is a main thread that is not pumping, which is
 --- what a long update or a blocked swapchain acquire looks like from outside.
 local function stall()
-    local until_ = clock.now() + STALL
-    while clock.now() < until_ do
+    local until_ = time.now() + STALL
+    while time.now() < until_ do
     end
 end
 
@@ -123,7 +123,7 @@ return tecs.application.create({
                     -- The press, then a frame that does not pump. An arrival
                     -- stamped where the next pump found the event charges the
                     -- press for the stall; the event's own stamp does not.
-                    pushedAt = clock.now()
+                    pushedAt = time.now()
                     events.push("keyDown", { scancode = 44 })
                     stall()
                 elseif frame == 5 then

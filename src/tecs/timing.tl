@@ -16,7 +16,7 @@
 --- opposite directions often enough that they have to be read together.
 
 local ffi <const> = require("ffi")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 
 --- Per-stage frame timing, for judging a change to the frame's structure.
 ---
@@ -161,7 +161,7 @@ function timing.begin(): number
     if not timing.enabled then
         return 0.0
     end
-    return clock.now()
+    return time.now()
 end
 
 --- Ends a span opened by `begin`, records it, and returns its seconds.
@@ -176,7 +176,7 @@ function timing.finish(stage: timing.Stage, started: number): number
     if not timing.enabled then
         return 0.0
     end
-    local elapsed = clock.now() - started
+    local elapsed = time.now() - started
     timing.mark(stage, elapsed)
     return elapsed
 end
@@ -209,7 +209,7 @@ local pendingArrival: number = nil
 local takenArrival: number = nil
 local consumedAt = 0.0
 
---- Records an input event arriving, in `clock.now` seconds.
+--- Records an input event arriving, in `time.now` seconds.
 ---
 --- Stamped where the platform handed the event over, not where a step picked
 --- it up: the interval between those two is what the measurement exists for.

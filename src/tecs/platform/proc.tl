@@ -92,7 +92,7 @@
 --- plain interpreter with no video, no device and no host.
 
 local workers <const> = require("tecs.workers")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local Future <const> = require("tecs.Future")
 
 --- Runs on the worker. Creates children, polls them, answers when they end.
@@ -753,9 +753,9 @@ end
 --- message arrives, so subtracting the slice size for it would make a "5000 ms"
 --- wait into "at most 625 messages".
 local function drainFor(ms: number)
-    local deadline = clock.now() * 1000.0 + ms
+    local deadline = time.now() * 1000.0 + ms
     while pendingCount > 0 do
-        local remaining = deadline - clock.now() * 1000.0
+        local remaining = deadline - time.now() * 1000.0
         if remaining <= 0 then
             break
         end

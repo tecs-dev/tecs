@@ -27,7 +27,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local Application = require("tecs.Application")
 local phases = require("tecs.internal.phases")
-local clock = require("tecs.platform.clock")
+local time = require("tecs.platform.time")
 
 -- Enough iterations that the fixed phases are reached whatever the frame rate,
 -- with dt pinned below so they are reached by arithmetic rather than by luck.
@@ -58,13 +58,13 @@ describe("phases", function()
         -- of frames faster than the step would report FixedFirst through
         -- FixedLast as dead and be wrong about it. Pinning dt to two steps
         -- makes that arithmetic rather than a race with the machine.
-        local previous = clock.provider
-        clock.provider = function()
-            return clock.nominal * 2.0
+        local previous = time.provider
+        time.provider = function()
+            return time.nominal * 2.0
         end
 
         finally(function()
-            clock.provider = previous
+            time.provider = previous
         end)
 
         assert.is_true(app:_init())

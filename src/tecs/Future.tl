@@ -56,7 +56,7 @@
 --- under the same key.
 
 local log <const> = require("tecs.log")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local ecs <const> = require("tecs.ecs")
 local Context <const> = require("tecs.internal.Context")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
@@ -67,11 +67,11 @@ local LOGGER <const> = log.get("tecs.future")
 
 --- Reads the monotonic counter, in milliseconds.
 ---
---- Through `clock.now` rather than the binding, because a wait's budget is
---- wall time and `clock.now` is documented as the one reading a replay
+--- Through `time.now` rather than the binding, because a wait's budget is
+--- wall time and `time.now` is documented as the one reading a replay
 --- provider does not reach. A recorded run must not shorten or lengthen how
 --- long a decode is waited for.
-local now <const> = function(): number return clock.now() * 1000.0 end
+local now <const> = function(): number return time.now() * 1000.0 end
 
 --- Milliseconds a wait spends when neither the caller nor the source says.
 local DEFAULT_WAIT_MS <const> = 5000

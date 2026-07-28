@@ -10,7 +10,7 @@ local sdl <const> = require("tecs.ffi.sdl3")
 
 local C <const> = sdl.C
 
-local record clock
+local record time
     --- Installed by a replay driver. Consulted once per frame with the
     --- measured dt; returning a number replaces it, nil keeps the measurement.
     provider: function(realDt: number): number
@@ -24,14 +24,14 @@ local record clock
     maxDelta: number
 end
 
-clock.nominal = 1.0 / 60.0
-clock.maxDelta = 0.25
+time.nominal = 1.0 / 60.0
+time.maxDelta = 0.25
 
 local frequency: number = 0.0
 local last: number = 0.0
 
 --- Reads the monotonic counter in seconds. Not affected by the provider.
-function clock.now(): number
+function time.now(): number
     if frequency == 0.0 then
         frequency = tonumber(C.SDL_GetPerformanceFrequency()) as number
     end
@@ -40,26 +40,26 @@ end
 
 --- Resets the baseline so the next `step` measures from now. Called after
 --- startup so the first frame's dt excludes load time.
-function clock.reset()
-    last = clock.now()
+function time.reset()
+    last = time.now()
 end
 
 --- Advances one frame and returns the dt the world should receive.
 ---
 --- Clamps to `maxDelta`, then offers the value to `provider`.
-function clock.step(): number
-    local now = clock.now()
+function time.step(): number
+    local now = time.now()
     if last == 0.0 then
         last = now
     end
     local dt = now - last
     last = now
 
-    if dt > clock.maxDelta then
-        dt = clock.maxDelta
+    if dt > time.maxDelta then
+        dt = time.maxDelta
     end
 
-    local p = clock.provider
+    local p = time.provider
     if p ~= nil then
         local override = p(dt)
         if override ~= nil then
@@ -69,4 +69,4 @@ function clock.step(): number
     return dt
 end
 
-return clock
+return time

@@ -56,7 +56,7 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local filesystem <const> = require("tecs.platform.filesystem")
 
 local C <const> = sdl.C
@@ -596,9 +596,9 @@ local DEFAULT_WAIT_MS <const> = 5000
 --- "wait 5000 ms" into "wait for at most 312 messages", and against a worker
 --- with a queue of answers ready that is a wait that gives up almost at once.
 local function spend(ms: number, waiting: function(): boolean)
-    local deadline = clock.now() * 1000.0 + ms
+    local deadline = time.now() * 1000.0 + ms
     while waiting() do
-        local remaining = deadline - clock.now() * 1000.0
+        local remaining = deadline - time.now() * 1000.0
         if remaining <= 0 then
             break
         end

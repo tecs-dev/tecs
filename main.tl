@@ -151,9 +151,9 @@ return tecs.application.create({
             print("  shaders: compiled from source")
         end
 
-        local t0 = tecs.clock.now()
+        local t0 = tecs.time.now()
         spawnField(world, width, height)
-        local t1 = tecs.clock.now()
+        local t1 = tecs.time.now()
         spawnLights(world, width, height)
         print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
 

@@ -16,7 +16,7 @@ local phases = require("tecs.internal.phases")
 local components = require("tecs.components")
 local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
-local clock = require("tecs.platform.clock")
+local time = require("tecs.platform.time")
 local filesystem = require("tecs.platform.filesystem")
 local paths = require("tecs.platform.paths")
 local log = require("tecs.log")
@@ -790,12 +790,12 @@ describe("Application", function()
             -- for by a stall. Without the reset the first step afterwards
             -- carries the whole of it.
             app:_willEnterBackground()
-            local until_ = clock.now() + 0.05
-            while clock.now() < until_ do
+            local until_ = time.now() + 0.05
+            while time.now() < until_ do
             end
             app:_didEnterForeground()
 
-            local dt = clock.step()
+            local dt = time.step()
             assert.is_true(dt < 0.02, ("the gap was integrated: dt was %.3f s"):format(dt))
             app:_shutdown()
         end)

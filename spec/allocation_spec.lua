@@ -73,7 +73,7 @@ local Buffer = require("tecs.gpu.Buffer")
 local ComputePass = require("tecs.gpu.ComputePass")
 local Frame = require("tecs.gpu.Frame")
 local PassGraph = require("tecs.gpu.PassGraph")
-local clock = require("tecs.platform.clock")
+local time = require("tecs.platform.time")
 local components = require("tecs.components")
 local events = require("tecs.platform.events")
 local sdl = require("tecs.ffi.sdl3")
@@ -290,16 +290,16 @@ describe("allocation", function()
         -- Pinned, so every frame runs exactly one fixed step. Left to the real
         -- clock the step count per frame would vary with the machine and so
         -- would the work, which is a difference none of this can see past.
-        previousProvider = clock.provider
-        clock.provider = function()
-            return clock.nominal
+        previousProvider = time.provider
+        time.provider = function()
+            return time.nominal
         end
 
         assert.is_true(app:_init())
     end)
 
     teardown(function()
-        clock.provider = previousProvider
+        time.provider = previousProvider
         collectgarbage("restart")
         if app then
             app:_shutdown()
@@ -404,10 +404,10 @@ describe("allocation", function()
         local world = app.world
         local function extractBytes()
             for _ = 1, 200 do
-                world:runPhase(tecs.ecs.phases.RenderFirst, clock.nominal)
+                world:runPhase(tecs.ecs.phases.RenderFirst, time.nominal)
             end
             return perRun(EXTRACTIONS, function()
-                world:runPhase(tecs.ecs.phases.RenderFirst, clock.nominal)
+                world:runPhase(tecs.ecs.phases.RenderFirst, time.nominal)
             end)
         end
 
@@ -434,10 +434,10 @@ describe("allocation", function()
         -- while a closure built per call does not.
         local world = app.world
         for _ = 1, 200 do
-            world:runPhase(tecs.ecs.phases.RenderLast, clock.nominal)
+            world:runPhase(tecs.ecs.phases.RenderLast, time.nominal)
         end
         local cost = perRun(EXTRACTIONS, function()
-            world:runPhase(tecs.ecs.phases.RenderLast, clock.nominal)
+            world:runPhase(tecs.ecs.phases.RenderLast, time.nominal)
         end)
 
         if os.getenv("TECS_ALLOCATION_REPORT") ~= nil then

@@ -55,7 +55,7 @@ local cjson <const> = require("tecs.json")
 local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local events <const> = require("tecs.platform.events")
 local Input <const> = require("tecs.platform.Input")
 local Window <const> = require("tecs.platform.Window")
@@ -759,7 +759,7 @@ function Application:_init(): boolean
     end
 
     -- Startup cost must not land in the first iteration's dt.
-    clock.reset()
+    time.reset()
     return true
 end
 
@@ -846,7 +846,7 @@ end
 --- `arrivals` is the host's parallel array of arrival stamps, one per queued
 --- event.
 function Application:_iterate(queue: loader.CValue, count: integer, arrivals: loader.CValue): boolean
-    local dt = clock.step()
+    local dt = time.step()
     local frameStart = timing.begin()
 
     -- Everything SDL delivered since the previous iteration, taken whole by
@@ -1138,7 +1138,7 @@ end
 --- the last moment before the frame a player sees.
 function Application:_didEnterForeground()
     self.suspended = false
-    clock.reset()
+    time.reset()
 end
 
 --- The process is being ended by the platform.

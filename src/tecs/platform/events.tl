@@ -43,10 +43,10 @@ local record Event is ecs.Event
     --- What happened. Determines which other fields mean anything.
     kind: string
     --- Nanoseconds since SDL started, as SDL reported it. That is the
-    --- `SDL_GetTicksNS` epoch, which is not the clock `clock.now` reads, so it
+    --- `SDL_GetTicksNS` epoch, which is not the clock `time.now` reads, so it
     --- orders events against each other and against nothing else.
     timestamp: number
-    --- Monotonic seconds on the clock `clock.now` reads, converted by the host
+    --- Monotonic seconds on the clock `time.now` reads, converted by the host
     --- from the stamp SDL put on the event when it produced it. Nil for an
     --- event that did not come through the host's queue, such as a replayed
     --- one.
@@ -854,7 +854,7 @@ end
 --- `arrivals` is the host's parallel array of performance counter readings,
 --- one per event, converted there from the stamp SDL put on each event as it
 --- was produced. Given it, every converted event carries `arrival` in the
---- units `clock.now` reports.
+--- units `time.now` reports.
 function events.drain(queue: loader.CValue, count: integer, handler: function(Event), arrivals?: loader.CValue)
     local replay = events.source
     if replay ~= nil then

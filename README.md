@@ -1060,7 +1060,7 @@ game anyway. An engine that consumed events would leave a game unable to tell
 an event it never received from one it mishandled.
 
 Every event that came through the host's queue carries an `arrival`, in the
-units `clock.now` reports: SDL's own nanosecond stamp for the event, converted
+units `time.now` reports: SDL's own nanosecond stamp for the event, converted
 onto the performance counter. An event that did not, a replayed one above all,
 has none rather than a made-up one, because a synthesised arrival would be a
 latency measurement of the replay driver. The two clocks are the same clock in

@@ -76,7 +76,7 @@ end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local Renderable <const> = tecs.components.Renderable
@@ -179,7 +179,7 @@ end
 --- The accumulator takes the step back out by subtracting the same value it
 --- added, so this is exact rather than nearly exact and no frame runs two
 --- steps or none.
-clock.provider = function(_real: number): number return 1.0 / 60.0 end
+time.provider = function(_real: number): number return 1.0 / 60.0 end
 
 --- Per regime, the probe-free window and the probed one.
 local plainWindows: {Window} = {}

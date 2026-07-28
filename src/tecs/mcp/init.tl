@@ -12,7 +12,7 @@
 --- during a frame someone is watching.
 
 local cjson <const> = require("tecs.json")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local log <const> = require("tecs.log")
 local transport <const> = require("tecs.mcp.transport")
 
@@ -295,7 +295,7 @@ function mcp.Server:poll(): boolean
         return false
     end
     return self._transport:poll(
-        clock.now(),
+        time.now(),
         function(request: transport.Request)
             if request.method ~= "POST" then
                 self._transport:respond(405, "Method Not Allowed", '{"error":"POST only"}')

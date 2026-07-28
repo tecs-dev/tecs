@@ -30,7 +30,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local timing <const> = require("tecs.timing")
-local clock <const> = require("tecs.platform.clock")
+local time <const> = require("tecs.platform.time")
 local text <const> = require("tecs.gfx.text")
 local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
@@ -98,14 +98,14 @@ return tecs.application.create({
         -- Real time, recorded where both values are visible. The world's dt is
         -- whatever the loop measured, and this is that same measurement kept
         -- for the report.
-        clock.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
+        time.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
 
         world:addPlugin(text.plugin({renderer = renderer}))
         local font = text.defaultFont()
         transientFont = font
 
         math.randomseed(42)
-        local spawnStart <const> = clock.now()
+        local spawnStart <const> = time.now()
         local columns <const> = math.max(1, math.floor(WIDTH / (LENGTH * SIZE * 0.62)))
         for index = 1, TEXTS do
             local column = (index - 1) % columns
@@ -121,7 +121,7 @@ return tecs.application.create({
             )
         end
 
-        local spawnMs <const> = (clock.now() - spawnStart) * 1000.0
+        local spawnMs <const> = (time.now() - spawnStart) * 1000.0
         print(
             ("text: spawned %d texts (%d glyphs) in %.1f ms, %.3f ms each"):format(
                 TEXTS, TEXTS * LENGTH, spawnMs, spawnMs / TEXTS

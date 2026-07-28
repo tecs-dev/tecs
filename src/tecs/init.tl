@@ -29,7 +29,7 @@ local type animation = require("tecs.gfx.animation")
 local type Window = require("tecs.platform.Window")
 local type Input = require("tecs.platform.Input")
 local type Gamepad = require("tecs.platform.Gamepad")
-local type clock = require("tecs.platform.clock")
+local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
 local type clipboard = require("tecs.platform.clipboard")
 local type proc = require("tecs.platform.proc")
@@ -227,7 +227,6 @@ local record tecs
     camera: camera
     capabilities: capabilities
     clipboard: clipboard
-    clock: clock
     components: components
     compress: compress
     events: events
@@ -252,6 +251,7 @@ local record tecs
     sequence: sequence
     system: system
     text: text
+    time: time
     watch: watch
     window: window
     workers: workers
@@ -304,7 +304,6 @@ local SURFACE <const>: {string: Namespace} = {
     camera = {module = "tecs.gfx.Camera", class = "Camera"},
     capabilities = {module = "tecs.platform.capabilities"},
     clipboard = {module = "tecs.platform.clipboard"},
-    clock = {module = "tecs.platform.clock"},
     components = {module = "tecs.components"},
     compress = {module = "tecs.compress"},
     events = {module = "tecs.platform.events"},
@@ -329,6 +328,7 @@ local SURFACE <const>: {string: Namespace} = {
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     text = {module = "tecs.gfx.text"},
+    time = {module = "tecs.platform.time"},
     watch = {module = "tecs.platform.watch"},
     window = {module = "tecs.platform.Window", class = "Window"},
     workers = {module = "tecs.workers"},
