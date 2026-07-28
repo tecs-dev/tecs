@@ -506,6 +506,29 @@ Not named for debugging, unlike `debugMaxFrames` below, because it
 is not a debugging setting: it is a tuning one, measured at 15.4x
 on a mixed-archetype spawner scene. A name with `debug` in it would
 warn off exactly the shipped games that should turn it on.
+<a id="tecs.application.Application.Config.packImages"></a>
+
+### tecs.application.Application.Config.packImages
+
+<pre><code v-pre><a href="#tecs.application.Application.Config.packImages">tecs.application.Application.Config.packImages</a>: boolean
+</code></pre>
+
+Fit many images into each layer of the renderer's image array
+rather than one. Defaults to false, where the ceiling on distinct
+images is the array's layer count and a small image costs a whole
+cell. On, the ceiling is the array's area instead.
+<a id="tecs.application.Application.Config.shadows"></a>
+
+### tecs.application.Application.Config.shadows
+
+<pre><code v-pre><a href="#tecs.application.Application.Config.shadows">tecs.application.Application.Config.shadows</a>: Deferred.ShadowOptions
+</code></pre>
+
+Let entities cast shadows, and tune what they cost. Nil, the
+default, means an `Occluder` or a `DropShadow` on an entity draws
+the entity and casts nothing, because the targets that would hold a
+shadow are never built. An empty table turns them on with every
+default; see `Deferred.ShadowOptions` for the seven numbers.
 <a id="tecs.application.Application.Config.debugMaxFrames"></a>
 
 ### tecs.application.Application.Config.debugMaxFrames

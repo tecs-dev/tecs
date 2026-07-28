@@ -192,7 +192,7 @@ local record BackendOptions
     packImages: boolean
     --- Build the occluder mask and the drop-shadow target, the shadow lane that
     --- fills them, and tune all three. Nil, the default, spends none of the
-    --- three targets, four passes, three pipelines, two compute dispatches and
+    --- three targets, four passes, four pipelines, two compute dispatches and
     --- one list they cost.
     ---
     --- What it does not gate is the lane's share of the mark pass, which is one
@@ -562,7 +562,9 @@ local function buildGeometry(self: Backend): GraphicsPipeline
     return pipeline
 end
 
---- Builds one of the three pipelines a shadow draw binds.
+--- Builds one of the three pipelines a shadow draw binds. The fourth a scene
+--- with shadows on builds is the mask blur, which draws no instances and so is
+--- the deferred pipeline's rather than this half's.
 ---
 --- One vertex shader and one fragment shader for all three, because all three
 --- place a quad from the same instance against the same list and read the same

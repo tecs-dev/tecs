@@ -63,6 +63,7 @@ local Device <const> = require("tecs.gpu.Device")
 local Frame <const> = require("tecs.gpu.Frame")
 local passscope <const> = require("tecs.gpu.passscope")
 local Renderer <const> = require("tecs.Renderer")
+local type Deferred = require("tecs.gpu.Deferred")
 local Audio <const> = require("tecs.Audio")
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
@@ -211,6 +212,17 @@ local record Application
         --- on a mixed-archetype spawner scene. A name with `debug` in it would
         --- warn off exactly the shipped games that should turn it on.
         reserveRuns: boolean
+        --- Fit many images into each layer of the renderer's image array
+        --- rather than one. Defaults to false, where the ceiling on distinct
+        --- images is the array's layer count and a small image costs a whole
+        --- cell. On, the ceiling is the array's area instead.
+        packImages: boolean
+        --- Let entities cast shadows, and tune what they cost. Nil, the
+        --- default, means an `Occluder` or a `DropShadow` on an entity draws
+        --- the entity and casts nothing, because the targets that would hold a
+        --- shadow are never built. An empty table turns them on with every
+        --- default; see `Deferred.ShadowOptions` for the seven numbers.
+        shadows: Deferred.ShadowOptions
         --- Stops after this many iterations. Lets an automated run drive a
         --- real window to completion without a human closing it.
         debugMaxFrames: integer
@@ -606,6 +618,8 @@ function Application:_init(): boolean
             ambient = config.ambientLight,
             capacity = config.capacity,
             reserveRuns = config.reserveRuns,
+            packImages = config.packImages,
+            shadows = config.shadows,
         }
     )
     self.renderer:install(self.world)

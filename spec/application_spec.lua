@@ -35,6 +35,36 @@ local function build(config)
 end
 
 describe("Application", function()
+    -- The two renderer options a game can only reach through this config. A
+    -- field declared on Config and not forwarded type-checks, documents itself
+    -- and does nothing, which is the failure these catch. The renderer is
+    -- built here and never handed to a game before it exists, so there is no
+    -- second way in.
+    it("turns shadows and image packing on when its config asks", function()
+        local app = build({
+            capacity = 32,
+            packImages = true,
+            shadows = { maskScale = 0.5 },
+        })
+        assert.is_true(app:_init())
+
+        assert.are.equal(32, app.renderer.capacity)
+        assert.is_true(app.renderer.images.packed)
+        assert.is_true(app.renderer.deferred:castsShadows())
+
+        app:_shutdown()
+    end)
+
+    it("builds neither when its config says nothing", function()
+        local app = build({})
+        assert.is_true(app:_init())
+
+        assert.is_false(app.renderer.deferred:castsShadows())
+        assert.is_false(app.renderer.images.packed)
+
+        app:_shutdown()
+    end)
+
     it("resolves asset handles without the game pumping them", function()
         local handle
         local app = build({

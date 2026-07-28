@@ -2576,7 +2576,7 @@ which can be the brightest, and makes shadows move when an unrelated light is
 spawned and the slots shift.
 
 Off, which is the default, the whole of it costs one more count in a scan that
-was already running. On, it costs three targets, four passes, three pipelines,
+was already running. On, it costs three targets, four passes, four pipelines,
 two dispatches and a list, on every frame whether or not anything casts. That is
 a setting rather than a count taken off the frame because the alternative is a
 pass graph whose shape depends on what a world happens to hold this frame and a

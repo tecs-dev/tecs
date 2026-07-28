@@ -144,7 +144,7 @@ what lights it.
 | `dropLength`  | `512`   | Longest a drop shadow may run, in world units.                                                        |
 
 ::: warning What turning them on costs
-Three targets, four passes, three pipelines, two compute dispatches and one list, whether or not the scene casts
+Three targets, four passes, four pipelines, two compute dispatches and one list, whether or not the scene casts
 anything this frame. That is a setting rather than something taken off each frame on purpose: the alternative is
 a pass graph whose shape depends on what a world happens to hold, and a lighting pipeline rebuilt the first time
 something casts.
