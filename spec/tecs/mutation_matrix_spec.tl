@@ -90,8 +90,8 @@ local modes: {Mode} = {
             local ran = false
             w:observe(
                 0,
-                tecs.ecs.builtins.OnSpawn,
-                function(_ev: tecs.ecs.builtins.OnSpawn)
+                tecs.ecs.OnSpawn,
+                function(_ev: tecs.ecs.OnSpawn)
                     if not ran then
                         ran = true
                         ops(w)
@@ -345,21 +345,21 @@ describe(
             "claims Key and rejects duplicate live keys",
             function()
                 local w = tecs.ecs.newWorld()
-                w:newBundle("matrixKeyed", {required = {tecs.ecs.builtins.Key, MatPos}})
+                w:newBundle("matrixKeyed", {required = {tecs.ecs.EntityKey, MatPos}})
 
-                local id = w:spawnBundle("matrixKeyed", tecs.ecs.builtins.Key("matrixHero"), MatPos(3))
+                local id = w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(3))
                 luassert.equals(id, w:byKey("matrixHero"))
                 luassert.equals(3, w:get(id, MatPos).x)
 
                 local ok = pcall(function()
-                    w:spawnBundle("matrixKeyed", tecs.ecs.builtins.Key("matrixHero"), MatPos(4))
+                    w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(4))
                 end)
                 luassert.is_false(ok, "duplicate live key must error")
 
                 -- Despawn releases the key for reclaiming.
                 w:despawn(id)
                 luassert.is_nil(w:byKey("matrixHero"))
-                local id2 = w:spawnBundle("matrixKeyed", tecs.ecs.builtins.Key("matrixHero"), MatPos(5))
+                local id2 = w:spawnBundle("matrixKeyed", tecs.ecs.EntityKey("matrixHero"), MatPos(5))
                 luassert.equals(id2, w:byKey("matrixHero"))
                 validate(w)
             end
@@ -375,8 +375,8 @@ describe(
                 local aliveDuring: boolean = true
                 w:observe(
                     0,
-                    tecs.ecs.builtins.OnSpawn,
-                    function(ev: tecs.ecs.builtins.OnSpawn)
+                    tecs.ecs.OnSpawn,
+                    function(ev: tecs.ecs.OnSpawn)
                         seen[#seen + 1] = ev.entity
                         aliveDuring = w:isAlive(ev.entity)
                         -- Observer mutations stage against the pending entity.
@@ -402,7 +402,7 @@ describe(
                 w:newBundle("matrixPlain2", {required = {MatPos}})
 
                 local seen = 0
-                w:observe(0, tecs.ecs.builtins.OnSpawn, function(_ev: tecs.ecs.builtins.OnSpawn) seen = seen + 1 end)
+                w:observe(0, tecs.ecs.OnSpawn, function(_ev: tecs.ecs.OnSpawn) seen = seen + 1 end)
 
                 w:defer()
                 local id = w:spawnBundle("matrixPlain2", MatPos(2))
@@ -448,21 +448,19 @@ describe(
                 local w = tecs.ecs.newWorld()
                 local parent = w:spawn(MatPos(1))
                 local child = w:spawn(MatPos(2))
-                w:set(child, tecs.ecs.builtins.ChildOf(parent))
+                w:set(child, tecs.ecs.ChildOf(parent))
 
                 -- The child is a source, not a target: its despawn takes the
                 -- instant path and must still drop its store entry and
                 -- reverse-index link.
                 w:despawn(child)
                 local sources = 0
-                w:targets(
-                    parent, tecs.ecs.builtins.ChildOf, function(_id: integer, _ctx: nil) sources = sources + 1 end, nil
-                )
+                w:targets(parent, tecs.ecs.ChildOf, function(_id: integer, _ctx: nil) sources = sources + 1 end, nil)
                 luassert.equals(0, sources, "reverse index cleaned")
 
                 -- The recycled slot must not inherit the phantom relationship.
                 local recycled = w:spawn(MatPos(3))
-                luassert.is_nil(w:getFirstRelationship(recycled, tecs.ecs.builtins.ChildOf))
+                luassert.is_nil(w:getFirstRelationship(recycled, tecs.ecs.ChildOf))
                 validate(w)
             end
         )
@@ -497,22 +495,22 @@ describe(
                 local w = tecs.ecs.newWorld()
                 local parent = w:spawn(MatPos(1))
                 local e = w:spawn(MatPos(2))
-                w:set(e, tecs.ecs.builtins.ChildOf(parent))
-                w:set(e, tecs.ecs.builtins.Key("matrixRowMajor"))
+                w:set(e, tecs.ecs.ChildOf(parent))
+                w:set(e, tecs.ecs.EntityKey("matrixRowMajor"))
 
                 -- Binary form (crashed before the writer fix).
                 local out = w:saveSnapshot()
                 w:loadSnapshot(out.buffer)
-                luassert.equals("matrixRowMajor", w:get(e, tecs.ecs.builtins.Key))
+                luassert.equals("matrixRowMajor", w:get(e, tecs.ecs.EntityKey))
                 luassert.equals(e, w:byKey("matrixRowMajor"))
-                luassert.equals(parent, w:getFirstRelationship(e, tecs.ecs.builtins.ChildOf).target)
+                luassert.equals(parent, w:getFirstRelationship(e, tecs.ecs.ChildOf).target)
 
                 -- Table form (silently dropped the Key before the fix).
                 local out2 = w:saveSnapshot({format = "table"})
                 w:loadSnapshot(out2.snapshot)
-                luassert.equals("matrixRowMajor", w:get(e, tecs.ecs.builtins.Key))
+                luassert.equals("matrixRowMajor", w:get(e, tecs.ecs.EntityKey))
                 luassert.equals(e, w:byKey("matrixRowMajor"))
-                luassert.equals(parent, w:getFirstRelationship(e, tecs.ecs.builtins.ChildOf).target)
+                luassert.equals(parent, w:getFirstRelationship(e, tecs.ecs.ChildOf).target)
                 validate(w)
             end
         )

@@ -2260,7 +2260,7 @@ function Audio:install(world: ecs.World)
     -- their own, so it matches nothing until something is disabled.
     local hushed = world:query({
         name = "tecs.DisabledSounds",
-        include = {Sound, ecs.builtins.Disabled},
+        include = {Sound, ecs.Disabled},
     })
 
     world:addSystem({

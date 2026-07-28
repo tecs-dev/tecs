@@ -793,7 +793,7 @@ component write rather than a new timeline.
 ```teal
 local chase <const> = sequence.timeline("game.chase", {
     sequence.tweenTrack(0.5, "sineInOut", "transform.xy",
-        sequence.source.tracking(tecs.ecs.builtins.Transform, {"x", "y"})),
+        sequence.source.tracking(tecs.Transform, {"x", "y"})),
 })
 ```
 

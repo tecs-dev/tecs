@@ -867,7 +867,7 @@ function source.related(relationship: Component, component: Component, field: st
     return newSource("relationship", component, field, nil, relationship)
 end
 
-local Transform <const> = ecs.builtins.Transform
+local Transform <const> = ecs.Transform
 targets.translateX = newTarget(Transform, {"x"}, "field", "transform.x")
 targets.translateY = newTarget(Transform, {"y"}, "field", "transform.y")
 targets.translateXY = newTarget(Transform, {"x", "y"}, "field2", "transform.xy")

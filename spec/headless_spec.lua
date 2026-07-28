@@ -58,7 +58,7 @@ describe("tecs headless", function()
                 local tecs = require("tecs")
                 local world = tecs.ecs.newWorld()
                 local Tag = tecs.ecs.newTagComponent({ name = "Headless" })
-                local Transform = tecs.ecs.builtins.Transform
+                local Transform = tecs.Transform
                 local entity = world:spawn(Transform(10, 20), Tag)
                 world:update(1 / 60)
 
@@ -231,7 +231,7 @@ describe("tecs headless", function()
                 world:addPlugin(tecs.box2d.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))
-                local Transform = tecs.ecs.builtins.Transform
+                local Transform = tecs.Transform
                 local entity = world:spawn(Transform(0, 0, 0, 1, 0, 10, 10))
                 tecs.box2d.attach(world, entity, {
                     type = "dynamic", halfWidth = 5, halfHeight = 5,

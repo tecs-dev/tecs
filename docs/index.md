@@ -72,7 +72,7 @@ Anything that renders or updates per frame is an entity in a world. SDL owns the
 application and a C host drives it, so nothing in a game blocks and nothing drives frames itself.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 return tecs.application.create({
     plugin = function(world: tecs.World, app: tecs.application.Application)
@@ -149,23 +149,23 @@ world:spawn(Position(100, 100), Velocity(10, 0))
 
 ```teal [Relationships]
 local world = tecs.ecs.newWorld()
-local ChildOf = tecs.ecs.builtins.ChildOf
+local ChildOf = tecs.ecs.ChildOf
 
 -- Create a parent entity
 local parent: integer = world:spawn(
-    tecs.ecs.builtins.Name("parent"),
-    tecs.ecs.builtins.Transform(100, 100)
+    tecs.ecs.Name("parent"),
+    tecs.Transform(100, 100)
 )
 
 -- ChildOf has cascadeDelete; despawning parent despawns children too.
 local child1: integer = world:spawn(
     ChildOf(parent),
-    tecs.ecs.builtins.RelativeTransform(20, 0)
+    tecs.ecs.RelativeTransform(20, 0)
 )
 
 local child2: integer = world:spawn(
     ChildOf(parent),
-    tecs.ecs.builtins.RelativeTransform(-20, 0)
+    tecs.ecs.RelativeTransform(-20, 0)
 )
 
 -- Walk children of a specific parent
@@ -243,6 +243,7 @@ behind each one.
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time
+- [`tecs.Transform`](/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
 - [`tecs.version`](/modules/) - the version of this build, as a string
 - [`tecs.window`](/modules/window) - the window, its size, its display and its mode
 - [`tecs.workers`](/modules/workers) - typed background jobs

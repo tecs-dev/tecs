@@ -154,8 +154,8 @@ round-trip. For singleton or authored entities that runtime code needs to redisc
 
 ```teal
 world:spawn(
-    tecs.ecs.builtins.Key("player"),
-    tecs.ecs.builtins.Name("Player ship")
+    tecs.ecs.EntityKey("player"),
+    tecs.ecs.Name("Player ship")
 )
 
 local player = world:requireKey("player")
@@ -204,26 +204,26 @@ local id = world:spawn()
 -- A renderable entity: a transform, a colour, and the marker that says it
 -- contributes geometry.
 local playerId = world:spawn(
-    tecs.ecs.builtins.Transform(100, 100),
+    tecs.Transform(100, 100),
     gfx.Tint(1, 1, 1, 1),
     gfx.Renderable,
-    tecs.ecs.builtins.Name("Player")
+    tecs.ecs.Name("Player")
 )
 
 -- A light is an entity too.
 local lightId = world:spawn(
-    tecs.ecs.builtins.Transform(640, 360),
+    tecs.Transform(640, 360),
     gfx.PointLight(120, 512, 1, 0.9, 0.8, 3)
 )
 
 -- Get notified when any entity spawns (world-level observer).
-world:observe(0, tecs.ecs.builtins.OnSpawn, function(event: tecs.ecs.builtins.OnSpawn)
+world:observe(0, tecs.ecs.OnSpawn, function(event: tecs.ecs.OnSpawn)
     print("Entity created with id: " .. event.entity)
 end)
 ```
 
 `Transform` is an ECS builtin rather than a graphics component, so it is written
-`tecs.ecs.builtins.Transform`: the hierarchy, the authoring systems, physics and the renderer all move the
+`tecs.Transform`: the hierarchy, the authoring systems, physics and the renderer all move the
 same one.
 
 ### spawnAt
@@ -272,12 +272,12 @@ function World:batchSpawn(
 
 ```teal
 local gfx <const> = tecs.gfx
-local signature <const> = { tecs.ecs.builtins.Transform, gfx.Tint, gfx.Renderable }
+local signature <const> = { tecs.Transform, gfx.Tint, gfx.Renderable }
 
 -- Seed a field of renderable quads in one batch.
 local firstId, ids = world:batchSpawn(1000, signature, function(arch, firstRow, lastRow)
     -- getMut marks the written columns dirty, which is what extraction reads.
-    local transforms = arch:getMut(tecs.ecs.builtins.Transform)
+    local transforms = arch:getMut(tecs.Transform)
     local tints = arch:getMut(gfx.Tint)
     -- No constructors run for these rows: write every field the frame reads.
     for row = firstRow, lastRow do
@@ -316,7 +316,7 @@ end
   operation drains.
 - Component constructors do not run for the placed rows. Only `requires`-supplied defaults are written before
   the callback, so set every field you depend on inside it.
-- `batchSpawn` does not support `tecs.ecs.builtins.Key`; keys must be claimed per entity before the entity becomes
+- `batchSpawn` does not support `tecs.ecs.EntityKey`; keys must be claimed per entity before the entity becomes
   visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
 - `batchSpawn` does not emit `OnSpawn` per entity; write initial data in the `callback` or react with a query's
   [`onEntitiesAdded`](/ecs/queries/callbacks).
@@ -330,8 +330,8 @@ columns are row-indexed read proxies that raise on write. Attach targets with
 placement.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
-local ChildOf <const> = tecs.ecs.builtins.ChildOf
+local Transform <const> = tecs.Transform
+local ChildOf <const> = tecs.ecs.ChildOf
 
 local firstId, ids = world:batchSpawn(5, {Transform, ChildOf},
     function(arch, firstRow, lastRow, _count)
@@ -385,7 +385,7 @@ how the ids are ordered.
 **Notes:**
 
 - This is a [deferred operation](#deferred-operations).
-- `batchSpawnAt` does not support `tecs.ecs.builtins.Key`; keys must be claimed per entity before the entity
+- `batchSpawnAt` does not support `tecs.ecs.EntityKey`; keys must be claimed per entity before the entity
   becomes visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
 - Like `batchSpawn`, `batchSpawnAt` does not emit `OnSpawn` per entity.
 
@@ -421,7 +421,7 @@ includes that component.
 
 ```teal
 -- Listen for despawn events
-world:observe(entity, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
+world:observe(entity, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
     print("Entity " .. e.entity .. " is being despawned")
 end)
 
@@ -631,7 +631,7 @@ function World:clearEntities()
 ```teal
 -- In a test or bench, reset the state between iterations without
 -- rebuilding the pipeline or re-registering queries.
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local q = world:query({ include = { Transform } })
 for _ = 1, iterations do
     world:clearEntities()
@@ -791,7 +791,7 @@ function World:commit()
 
 ```teal
 -- Force pending changes to be applied.
-local id: integer = world:spawn(tecs.ecs.builtins.Transform(10, 20))
+local id: integer = world:spawn(tecs.Transform(10, 20))
 world:commit()
 ```
 
@@ -841,7 +841,7 @@ function World:addPlugin(plugin: function(world: World))
 **Example:**
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Renderable <const> = tecs.gfx.Renderable
 
 local SPIN: tecs.Key<number> = tecs.ecs.newKey("game.spinRate")

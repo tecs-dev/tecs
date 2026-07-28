@@ -20,10 +20,10 @@ local loader = require("tecs.ffi.loader")
 local Extractor = require("tecs.Extractor")
 local FramePacket = require("tecs.FramePacket")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local instancelayout = require("tecs.gpu.instancelayout")
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 local Tint = components.Tint
 local Renderable = components.Renderable
 local Clip = components.Clip

@@ -151,8 +151,8 @@ describe(
                         local despawnEventEmitted = false
                         w2:observe(
                             entity,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(e: tecs.ecs.builtins.OnDespawn)
+                            tecs.ecs.OnDespawn,
+                            function(e: tecs.ecs.OnDespawn)
                                 despawnEventEmitted = true
                                 luassert.equals(entity, e.entity, "OnDespawn event should contain correct entity ID")
                             end
@@ -175,8 +175,8 @@ describe(
                         local eventId: integer = 0
                         w2:observe(
                             0,
-                            tecs.ecs.builtins.OnSpawn,
-                            function(e: tecs.ecs.builtins.OnSpawn)
+                            tecs.ecs.OnSpawn,
+                            function(e: tecs.ecs.OnSpawn)
                                 fired = fired + 1
                                 eventId = e.entity
                                 aliveDuring = w2:isAlive(e.entity)
@@ -204,9 +204,7 @@ describe(
                     function()
                         local w2 = tecs.ecs.newWorld()
                         w2:observe(
-                            0,
-                            tecs.ecs.builtins.OnSpawn,
-                            function(e: tecs.ecs.builtins.OnSpawn) w2:set(e.entity, VelComponent(7, 6)) end
+                            0, tecs.ecs.OnSpawn, function(e: tecs.ecs.OnSpawn) w2:set(e.entity, VelComponent(7, 6)) end
                         )
 
                         w2:defer()
@@ -232,11 +230,7 @@ describe(
                         w2:commit()
 
                         local fired = 0
-                        w2:observe(
-                            0,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(_e: tecs.ecs.builtins.OnDespawn) fired = fired + 1 end
-                        )
+                        w2:observe(0, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) fired = fired + 1 end)
 
                         w2:despawn(id)
                         w2:commit()
@@ -263,16 +257,8 @@ describe(
 
                         local spawnSeen: number = 0
                         local despawnSeen: number = 0
-                        w2:observe(
-                            0,
-                            tecs.ecs.builtins.OnSpawn,
-                            function(e: tecs.ecs.builtins.OnSpawn) spawnSeen = e.entity end
-                        )
-                        w2:observe(
-                            0,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(e: tecs.ecs.builtins.OnDespawn) despawnSeen = e.entity end
-                        )
+                        w2:observe(0, tecs.ecs.OnSpawn, function(e: tecs.ecs.OnSpawn) spawnSeen = e.entity end)
+                        w2:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn) despawnSeen = e.entity end)
 
                         local id = w2:spawn()
                         luassert.is_true(id > 2147483647, "setup must drive the id past int32")
@@ -385,8 +371,8 @@ describe(
                         local despawnEventEmitted = false
                         w2:observe(
                             entity,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(e: tecs.ecs.builtins.OnDespawn)
+                            tecs.ecs.OnDespawn,
+                            function(e: tecs.ecs.OnDespawn)
                                 despawnEventEmitted = true
                                 luassert.equals(entity, e.entity, "OnDespawn event should contain correct entity ID")
                             end
@@ -626,19 +612,17 @@ describe(
                     function()
                         local w2 = tecs.ecs.newWorld()
 
-                        local entity = w2:spawn(tecs.ecs.builtins.Name("TestEntity"))
+                        local entity = w2:spawn(tecs.ecs.Name("TestEntity"))
 
                         -- Force the world to update so batched changes are applied.
                         w2:update(1 / 60)
 
-                        local component = w2:get(entity, tecs.ecs.builtins.Name)
+                        local component = w2:get(entity, tecs.ecs.Name)
                         luassert.is_not_nil(component, "Component should be added to entity")
                         luassert.equals("TestEntity", component, "Component should have the correct value")
 
                         -- Get a non-existent component
-                        luassert.is_nil(
-                            w2:get(entity, tecs.ecs.builtins.Transform), "Non-existent component should return nil"
-                        )
+                        luassert.is_nil(w2:get(entity, tecs.Transform), "Non-existent component should return nil")
                     end
                 )
 
@@ -648,7 +632,7 @@ describe(
                         local w2 = tecs.ecs.newWorld()
 
                         luassert.error_matches(function()
-                            w2:set(12345, tecs.ecs.builtins.Name("TestEntity"))
+                            w2:set(12345, tecs.ecs.Name("TestEntity"))
                         end, "Entity ID not found: 12345",
                         "Should fail when adding component to an unknown entity")
                     end
@@ -675,26 +659,22 @@ describe(
                     "removes components using public API",
                     function()
                         local w2 = tecs.ecs.newWorld()
-                        local entity = w2:spawn(tecs.ecs.builtins.Name("TestEntity"))
+                        local entity = w2:spawn(tecs.ecs.Name("TestEntity"))
 
                         -- Force the world to update so batched changes are applied.
                         w2:update(1 / 60)
 
                         -- Verify component was added
-                        luassert.is_not_nil(
-                            w2:get(entity, tecs.ecs.builtins.Name), "Component should be added initially"
-                        )
+                        luassert.is_not_nil(w2:get(entity, tecs.ecs.Name), "Component should be added initially")
 
                         -- Remove the component
-                        w2:remove(entity, tecs.ecs.builtins.Name)
+                        w2:remove(entity, tecs.ecs.Name)
 
                         -- Force the world to update so batched changes are applied.
                         w2:update(1 / 60)
 
                         -- Verify component was removed
-                        luassert.is_nil(
-                            w2:get(entity, tecs.ecs.builtins.Name), "Component should be removed from entity"
-                        )
+                        luassert.is_nil(w2:get(entity, tecs.ecs.Name), "Component should be removed from entity")
                     end
                 )
 
@@ -709,9 +689,7 @@ describe(
 
                         local eventReceived = false
                         w2:observe(
-                            entity,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(_e: tecs.ecs.builtins.OnDespawn) eventReceived = true end
+                            entity, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) eventReceived = true end
                         )
 
                         w2:despawn(entity)
@@ -728,15 +706,12 @@ describe(
                         local entity = w2:spawn()
                         w2:update(1 / 60)
 
-                        luassert.is_false(
-                            w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn), "No observers initially"
-                        )
+                        luassert.is_false(w2:hasObservers(entity, tecs.ecs.OnDespawn), "No observers initially")
 
-                        w2:observe(entity, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
+                        w2:observe(entity, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) end)
 
                         luassert.is_true(
-                            w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn),
-                            "Should have observers after registering"
+                            w2:hasObservers(entity, tecs.ecs.OnDespawn), "Should have observers after registering"
                         )
                     end
                 )
@@ -748,15 +723,13 @@ describe(
                         local entity = w2:spawn()
                         w2:update(1 / 60)
 
-                        w2:observe(entity, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
-                        luassert.is_true(w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn), "Should have observers")
+                        w2:observe(entity, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) end)
+                        luassert.is_true(w2:hasObservers(entity, tecs.ecs.OnDespawn), "Should have observers")
 
                         w2:despawn(entity)
                         w2:update(1 / 60)
 
-                        luassert.is_false(
-                            w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn), "Observers should be cleared"
-                        )
+                        luassert.is_false(w2:hasObservers(entity, tecs.ecs.OnDespawn), "Observers should be cleared")
                     end
                 )
             end
@@ -1148,8 +1121,8 @@ describe(
 
                         w:observe(
                             entity,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(event: tecs.ecs.builtins.OnDespawn)
+                            tecs.ecs.OnDespawn,
+                            function(event: tecs.ecs.OnDespawn)
                                 entityIdInEvent = event.entity
                                 wasAliveInEvent = w:isAlive(event.entity)
                             end
@@ -1215,8 +1188,8 @@ describe(
 
                         w:observe(
                             entity,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(event: tecs.ecs.builtins.OnDespawn)
+                            tecs.ecs.OnDespawn,
+                            function(event: tecs.ecs.OnDespawn)
                                 wasAlive = w:isAlive(event.entity)
                                 local comp = w:get(event.entity, TestComponent)
                                 if comp then
@@ -1609,7 +1582,7 @@ describe(
                     "emits global OnDespawn for every entity on the fast path",
                     function()
                         local observed: {integer} = {}
-                        w:observe(0, tecs.ecs.builtins.OnDespawn, function(ev) observed[#observed + 1] = ev.entity end)
+                        w:observe(0, tecs.ecs.OnDespawn, function(ev) observed[#observed + 1] = ev.entity end)
 
                         local ids: {integer} = {}
                         for i = 1, 5 do
@@ -1640,9 +1613,7 @@ describe(
                         w:commit()
 
                         local perEntityFires = 0
-                        w:observe(
-                            id, tecs.ecs.builtins.OnDespawn, function(_ev) perEntityFires = perEntityFires + 1 end
-                        )
+                        w:observe(id, tecs.ecs.OnDespawn, function(_ev) perEntityFires = perEntityFires + 1 end)
 
                         local q = w:query({include = {PosComponent}})
                         w:batchDespawn(q)
@@ -1650,7 +1621,7 @@ describe(
 
                         luassert.equals(1, perEntityFires, "per-entity OnDespawn should fire once")
                         luassert.is_false(
-                            w:hasObservers(id, tecs.ecs.builtins.OnDespawn),
+                            w:hasObservers(id, tecs.ecs.OnDespawn),
                             "per-entity observers should be cleared after despawn"
                         )
                     end
@@ -1684,13 +1655,13 @@ describe(
                 it(
                     "indexes builtin Key and rejects duplicate live keys",
                     function()
-                        local a = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(1, 2))
+                        local a = w:spawn(tecs.ecs.EntityKey("player"), PosComponent(1, 2))
                         w:commit()
 
                         luassert.equals(a, w:byKey("player"))
                         luassert.equals(a, w:requireKey("player"))
 
-                        local ok = pcall(function() w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(3, 4)) end)
+                        local ok = pcall(function() w:spawn(tecs.ecs.EntityKey("player"), PosComponent(3, 4)) end)
                         luassert.is_false(ok)
                     end
                 )
@@ -1698,14 +1669,14 @@ describe(
                 it(
                     "reaps builtin Key when an entity despawns",
                     function()
-                        local a = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(1, 2))
+                        local a = w:spawn(tecs.ecs.EntityKey("player"), PosComponent(1, 2))
                         w:commit()
 
                         w:despawn(a)
                         w:commit()
 
                         luassert.is_nil(w:byKey("player"))
-                        local b = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(3, 4))
+                        local b = w:spawn(tecs.ecs.EntityKey("player"), PosComponent(3, 4))
                         w:commit()
                         luassert.equals(b, w:byKey("player"))
                     end
@@ -1717,16 +1688,16 @@ describe(
                         local a = w:spawn(PosComponent(1, 2))
                         w:commit()
 
-                        w:set(a, tecs.ecs.builtins.Key("first"))
+                        w:set(a, tecs.ecs.EntityKey("first"))
                         w:commit()
                         luassert.equals(a, w:byKey("first"))
 
-                        w:set(a, tecs.ecs.builtins.Key("second"))
+                        w:set(a, tecs.ecs.EntityKey("second"))
                         w:commit()
                         luassert.is_nil(w:byKey("first"))
                         luassert.equals(a, w:byKey("second"))
 
-                        w:remove(a, tecs.ecs.builtins.Key)
+                        w:remove(a, tecs.ecs.EntityKey)
                         w:commit()
                         luassert.is_nil(w:byKey("second"))
                     end
@@ -1739,15 +1710,15 @@ describe(
                         w:commit()
 
                         local q = w:query({include = {PosComponent}})
-                        w:batchSet(q, tecs.ecs.builtins.Key("player"))
+                        w:batchSet(q, tecs.ecs.EntityKey("player"))
                         w:commit()
                         luassert.equals(a, w:byKey("player"))
 
-                        w:batchRemove(q, tecs.ecs.builtins.Key)
+                        w:batchRemove(q, tecs.ecs.EntityKey)
                         w:commit()
                         luassert.is_nil(w:byKey("player"))
 
-                        local b = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(3, 4))
+                        local b = w:spawn(tecs.ecs.EntityKey("player"), PosComponent(3, 4))
                         w:commit()
                         luassert.equals(b, w:byKey("player"))
                     end
@@ -1761,7 +1732,7 @@ describe(
                         w:commit()
 
                         local q = w:query({include = {PosComponent}})
-                        local ok = pcall(function() w:batchSet(q, tecs.ecs.builtins.Key("player")) end)
+                        local ok = pcall(function() w:batchSet(q, tecs.ecs.EntityKey("player")) end)
                         luassert.is_false(ok)
                     end
                 )
@@ -1770,7 +1741,7 @@ describe(
                     "rejects batch spawning entities with builtin Key",
                     function()
                         local ok = pcall(function()
-                            w:batchSpawn(2, {tecs.ecs.builtins.Key}, function(_arch, _first, _last, _count) end)
+                            w:batchSpawn(2, {tecs.ecs.EntityKey}, function(_arch, _first, _last, _count) end)
                         end)
                         luassert.is_false(ok)
                     end
@@ -1784,9 +1755,9 @@ describe(
                         wImpl:batchSpawnAtRaw(
                             ids,
                             1,
-                            {tecs.ecs.builtins.Key, PosComponent},
+                            {tecs.ecs.EntityKey, PosComponent},
                             function(arch, rowStart, _rowEnd, _count)
-                                (arch.columns[tecs.ecs.builtins.Key] as {string})[rowStart] = "player"
+                                (arch.columns[tecs.ecs.EntityKey] as {string})[rowStart] = "player"
                                 (arch.columns[PosComponent] as {PosComponent})[rowStart] = PosComponent(1, 2)
                             end
                         )

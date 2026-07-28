@@ -123,8 +123,9 @@ for `tecs.types`, which sits below both.
 
 - Worlds own entities, components, systems, plugins, resources, queries and the state stack.
 - Queries iterate through archetypes with `query:iter()`.
-- Builtins are registered automatically: `ChildOf`, `Transform`, `TTL`, `Paused`, `Disabled`, and the state
-  transition events.
+- Builtins are registered automatically and sit directly on `tecs.ecs`: `ChildOf`, `TTL`, `Paused`, `Disabled`,
+  `EntityKey` and the state transition events. `Transform` is the exception and sits at the root, as
+  `tecs.Transform`, because every subsystem moves the same one.
 - The state model is a stack: `world:createState`, `world:pushState`, `world:popState`, `world:peekState`.
 
 ### Rendering

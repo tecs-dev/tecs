@@ -225,8 +225,8 @@ function plugin.install(world: World, options?: Options)
     -- stops the transfer only if nothing else is waiting on the same future.
     world:observe(
         0,
-        ecs.builtins.OnDespawn,
-        function(event: ecs.builtins.OnDespawn)
+        ecs.OnDespawn,
+        function(event: ecs.OnDespawn)
             local waitingOn <const> = world:get(event.entity, plugin.Pending) as Pending
             if waitingOn ~= nil then
                 waitingOn.future:cancel()

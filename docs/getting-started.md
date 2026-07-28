@@ -98,7 +98,7 @@ The entry plugin is handed the world and the application, in that order. The wor
 plugin the world takes is `function(world)`, so the entry reads as that shape with one more thing.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 return tecs.application.create({
     plugin = function(world: tecs.World, app: tecs.application.Application)

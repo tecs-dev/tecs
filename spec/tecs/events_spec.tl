@@ -555,7 +555,7 @@ describe(
                         local world = tecs.ecs.newWorld()
                         -- A global OnDespawn observer makes despawn clear the entity's
                         -- observer address inline.
-                        world:observe(0, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
+                        world:observe(0, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) end)
 
                         local e = world:spawn()
                         world:commit()
@@ -581,7 +581,7 @@ describe(
                     "supports fresh observers at a cleared address after the emit",
                     function()
                         local world = tecs.ecs.newWorld()
-                        world:observe(0, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
+                        world:observe(0, tecs.ecs.OnDespawn, function(_e: tecs.ecs.OnDespawn) end)
 
                         local e = world:spawn()
                         world:commit()

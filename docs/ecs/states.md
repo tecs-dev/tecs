@@ -170,7 +170,7 @@ Entities spawned while a state is on top automatically receive that state's tag 
 the spawn path itself, on the instant, deferred and batch paths alike, so nothing has to remember to add it.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 local Renderable <const> = tecs.gfx.Renderable
 
@@ -191,19 +191,19 @@ The stack emits four builtin events at address `0`. See [Events](/ecs/events) fo
 [Builtins](/ecs/builtins#events) for the event records.
 
 ```teal
-world:observe(0, tecs.ecs.builtins.StateEnter, function(e: tecs.ecs.builtins.StateEnter)
+world:observe(0, tecs.ecs.StateEnter, function(e: tecs.ecs.StateEnter)
     print("Entered state:", e.state)
 end)
 
-world:observe(0, tecs.ecs.builtins.StateExit, function(e: tecs.ecs.builtins.StateExit)
+world:observe(0, tecs.ecs.StateExit, function(e: tecs.ecs.StateExit)
     print("Exited state:", e.state)
 end)
 
-world:observe(0, tecs.ecs.builtins.StateBlur, function(e: tecs.ecs.builtins.StateBlur)
+world:observe(0, tecs.ecs.StateBlur, function(e: tecs.ecs.StateBlur)
     print(e.state, "lost focus, pushed:", e.pushed)
 end)
 
-world:observe(0, tecs.ecs.builtins.StateFocus, function(e: tecs.ecs.builtins.StateFocus)
+world:observe(0, tecs.ecs.StateFocus, function(e: tecs.ecs.StateFocus)
     print(e.state, "regained focus, popped:", e.popped)
 end)
 ```
@@ -251,14 +251,15 @@ during plugin setup, before a load can happen, so the states a snapshot names al
 attached when it arrives.
 
 Local variables and runtime indexes have to be rebuilt after a load rather than restored. Query the state tag
-for whole groups, and reserve [`Key`](/ecs/builtins#key) for the few anchors you need to rediscover directly,
+for whole groups, and reserve [`EntityKey`](/ecs/builtins#entitykey) for the few anchors you need to rediscover
+directly,
 such as the player or the active camera.
 
 ```teal
 local GameState <const> = world:createState("game")
 local enemies <const> = world:query({include = {GameState, Enemy}})
 
-world:observe(0, tecs.ecs.builtins.FinishSnapshotLoad, function()
+world:observe(0, tecs.ecs.FinishSnapshotLoad, function()
     playerId = world:requireKey("player")
     rebuildEnemyIndex(enemies)
 end)

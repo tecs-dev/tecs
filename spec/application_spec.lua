@@ -14,7 +14,8 @@ local assets = require("tecs.assets")
 local events = require("tecs.platform.events")
 local phases = require("tecs.internal.phases")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local tecs = require("tecs")
+local ecs = require("tecs.ecs")
 local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
 local time = require("tecs.platform.time")
@@ -333,11 +334,7 @@ describe("Application", function()
         -- One entity, so extraction has something to write and the frame does
         -- real work rather than returning early.
         local function scene(world)
-            world:spawn(
-                builtins.Transform(32, 32, 0, 1, 0, 16, 16),
-                components.Tint(1, 0, 0, 1),
-                components.Renderable()
-            )
+            world:spawn(tecs.Transform(32, 32, 0, 1, 0, 16, 16), components.Tint(1, 0, 0, 1), components.Renderable())
         end
 
         it("unwinds the scope a system threw out of", function()
@@ -579,7 +576,7 @@ describe("Application", function()
                 debug = true,
                 plugin = function(world, self)
                     world:spawn(
-                        builtins.Transform(32, 32, 0, 1, 0, 16, 16),
+                        tecs.Transform(32, 32, 0, 1, 0, 16, 16),
                         components.Tint(1, 0, 0, 1),
                         components.Renderable()
                     )
@@ -821,7 +818,7 @@ describe("Application", function()
             local app = build({
                 plugin = function(world)
                     world:spawn(
-                        builtins.Transform(32, 32, 0, 1, 0, 16, 16),
+                        tecs.Transform(32, 32, 0, 1, 0, 16, 16),
                         components.Tint(1, 0, 0, 1),
                         components.Renderable()
                     )

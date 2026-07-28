@@ -20,7 +20,7 @@ where queries are built once and the systems that use them are declared:
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 local Renderable <const> = tecs.gfx.Renderable
 

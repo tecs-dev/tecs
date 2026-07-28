@@ -439,7 +439,7 @@ ecs.newComponent({
 ---
 --- `Transform` is not among them. It positions everything a world holds, not
 --- only what draws, so it is the ECS builtin and is reached as
---- `tecs.ecs.builtins.Transform`; a second spelling here would say the
+--- `tecs.Transform`, at the root; a second spelling here would say the
 --- hierarchy, physics and the tweens were moving a graphics component.
 local record components
     --- The transform as it stood before the current fixed step. Presence is

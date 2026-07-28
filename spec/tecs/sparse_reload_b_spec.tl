@@ -1,7 +1,7 @@
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
-local ChildOf <const> = tecs.ecs.builtins.ChildOf
-local Name <const> = tecs.ecs.builtins.Name
+local ChildOf <const> = tecs.ecs.ChildOf
+local Name <const> = tecs.ecs.Name
 
 describe(
     "sparse relationship module reload",

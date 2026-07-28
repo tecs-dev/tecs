@@ -12,10 +12,10 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local box2d = require("tecs.box2d")
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 
 -- Every world built here, so teardown can shut all of them down. The
 -- simulation is per world now, so a world nobody shuts down keeps its Box2D

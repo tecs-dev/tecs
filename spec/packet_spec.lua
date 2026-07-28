@@ -21,14 +21,14 @@ local Extractor = require("tecs.Extractor")
 local Backend = require("tecs.Backend")
 local FramePacket = require("tecs.FramePacket")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local instancelayout = require("tecs.gpu.instancelayout")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 local Tint = components.Tint
 local Clip = components.Clip
 local Renderable = components.Renderable

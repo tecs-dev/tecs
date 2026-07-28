@@ -3,11 +3,11 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local box2d = require("tecs.box2d")
 
-local Transform = builtins.Transform
-local Paused = tecs.ecs.builtins.Paused
+local Transform = tecs.Transform
+local Paused = tecs.ecs.Paused
 
 local built = {}
 
@@ -233,14 +233,14 @@ describe("box2d body controls", function()
         assert.is_true(math.abs(select(2, box2d.velocity(world, entity))) < 0.1)
 
         local y = world:get(entity, Transform).y
-        world:set(entity, tecs.ecs.builtins.Disabled)
+        world:set(entity, tecs.ecs.Disabled)
         step(world)
         assert.is_nil(box2d.raycast(world, -20, y, 20, y))
-        world:remove(entity, tecs.ecs.builtins.Disabled)
+        world:remove(entity, tecs.ecs.Disabled)
         step(world)
         assert.equal(entity, box2d.raycast(world, -20, y, 20, y).entity)
 
-        world:set(entity, tecs.ecs.builtins.Disabled)
+        world:set(entity, tecs.ecs.Disabled)
         step(world)
         box2d.detach(world, entity)
         step(world)

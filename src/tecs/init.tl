@@ -255,7 +255,7 @@ local record gfx
     --
     -- `Transform` is not among them. It positions everything a world holds
     -- rather than only what draws, so it is the ECS builtin and is reached as
-    -- `tecs.ecs.builtins.Transform`.
+    -- `tecs.Transform`, at the root.
 
     --- The transform as it stood before the current fixed step. Presence is
     --- the opt-in to interpolation: an entity carrying it is drawn between
@@ -438,6 +438,27 @@ local record tecs
     --- resolved on demand.
     ecs: ecs
 
+    --- Where an entity is: `x`, `y`, `z`, `layer`, `rotation`, `scaleX` and
+    --- `scaleY`, in world units and radians.
+    ---
+    --- At the root because it is the one component every subsystem moves. The
+    --- hierarchy composes it, physics writes it back from the solver, the
+    --- sequencer tweens it, animation drives it and the extractor reads it, so
+    --- filing it under any one of those would tell the other four they are
+    --- reaching into somebody else's module. It is the only component here:
+    --- everything else a game spawns belongs to whichever module owns what it
+    --- does, and `tecs.gfx.Sprite` says which one that is.
+    ---
+    --- Not on `tecs.gfx`, and that is the load-bearing half. The ECS registers
+    --- it for every world whether a renderer exists or not, while reading a
+    --- name on `tecs.gfx` resolves SDL through the FFI: a headless tool that
+    --- positions an entity would be made to find a graphics stack to do it.
+    ---
+    --- Published here off `tecs.ecs`, the way `World`, `Query` and the rest of
+    --- the ECS vocabulary already are, so this costs nothing that naming it
+    --- one level down would not: `ecs` is loaded by the time `tecs` is.
+    Transform: ecs.Transform
+
     application: application
     assets: assets
     audio: audio
@@ -462,6 +483,10 @@ local record tecs
 end
 
 tecs.ecs = ecs
+
+-- Assigned rather than resolved, for the same reason `ecs` is: the module it
+-- comes off is already loaded here, so there is nothing to defer.
+tecs.Transform = ecs.Transform
 
 --- How one public name resolves, at whatever depth it is written.
 ---

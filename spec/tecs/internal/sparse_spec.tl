@@ -737,7 +737,7 @@ describe(
                             reverseIndex = true,
                         })
 
-                        local Transform = tecs.ecs.builtins.Transform
+                        local Transform = tecs.Transform
 
                         -- Create many parents
                         local parents: {integer} = {}

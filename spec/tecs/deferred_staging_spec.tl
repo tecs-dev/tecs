@@ -236,11 +236,7 @@ describe(
                         end
                         w:commit()
 
-                        w:observe(
-                            0,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(e: tecs.ecs.builtins.OnDespawn) w:despawn(e.entity) end
-                        )
+                        w:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn) w:despawn(e.entity) end)
 
                         w:defer()
                         w:despawn(ids[2])
@@ -262,11 +258,7 @@ describe(
                         local c = w:spawn(Shared(3))
                         w:commit()
 
-                        w:observe(
-                            0,
-                            tecs.ecs.builtins.OnDespawn,
-                            function(e: tecs.ecs.builtins.OnDespawn) w:despawn(e.entity) end
-                        )
+                        w:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn) w:despawn(e.entity) end)
 
                         w:despawn(a)
 

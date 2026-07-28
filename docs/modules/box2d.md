@@ -39,7 +39,7 @@ directly in pixels would put every body far outside the size range its solver to
 `attach` declares a body; Box2D creation happens at the next fixed step:
 
 ```teal
-local entity = world:spawn(tecs.ecs.builtins.Transform(100, 80))
+local entity = world:spawn(tecs.Transform(100, 80))
 tecs.box2d.attach(world, entity, {
     type = "dynamic",
     radius = 12,

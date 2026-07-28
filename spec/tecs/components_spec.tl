@@ -766,7 +766,7 @@ describe(
                         it(
                             "should default layer to 1 when not provided",
                             function()
-                                local transform = tecs.ecs.builtins.Transform()
+                                local transform = tecs.Transform()
                                 luassert.is_equal(transform.layer, 1, "Transform should default layer to 1")
                             end
                         )
@@ -775,7 +775,7 @@ describe(
                             "should reject layer 0 as invalid",
                             function()
                                 luassert.has_error(function()
-                                    tecs.ecs.builtins.Transform(10, 20, 30, 0)
+                                    tecs.Transform(10, 20, 30, 0)
                                 end, "Transform layer must be greater than 0, got: 0")
                             end
                         )
@@ -783,7 +783,7 @@ describe(
                         it(
                             "should preserve valid layer values",
                             function()
-                                local transform = tecs.ecs.builtins.Transform(5, 10, 15, 3)
+                                local transform = tecs.Transform(5, 10, 15, 3)
                                 luassert.is_equal(transform.layer, 3, "Transform should preserve valid layer")
                                 luassert.is_equal(transform.x, 5, "Transform should preserve x value")
                                 luassert.is_equal(transform.y, 10, "Transform should preserve y value")
@@ -795,7 +795,7 @@ describe(
                             "should reject negative layer values",
                             function()
                                 luassert.has_error(function()
-                                    tecs.ecs.builtins.Transform(0, 0, 0, -1)
+                                    tecs.Transform(0, 0, 0, -1)
                                 end, "Transform layer must be greater than 0, got: -1")
                             end
                         )
@@ -804,7 +804,7 @@ describe(
                             "should reject negative layer values with table argument",
                             function()
                                 luassert.has_error(function()
-                                    tecs.ecs.builtins.Transform.new({x = 0, y = 0, z = 0, layer = -5})
+                                    tecs.Transform.new({x = 0, y = 0, z = 0, layer = -5})
                                 end, "Transform layer must be greater than 0, got: -5")
                             end
                         )
@@ -812,7 +812,7 @@ describe(
                         it(
                             "should default layer to 1 with table argument when layer is nil",
                             function()
-                                local transform = tecs.ecs.builtins.Transform.new({x = 100, y = 200, z = 300})
+                                local transform = tecs.Transform.new({x = 100, y = 200, z = 300})
                                 luassert.is_equal(
                                     transform.layer, 1, "Transform should default layer to 1 with table argument"
                                 )
@@ -826,7 +826,7 @@ describe(
                             "should reject layer 0 with table argument",
                             function()
                                 luassert.has_error(function()
-                                    tecs.ecs.builtins.Transform.new({x = 50, y = 60, z = 70, layer = 0})
+                                    tecs.Transform.new({x = 50, y = 60, z = 70, layer = 0})
                                 end, "Transform layer must be greater than 0, got: 0")
                             end
                         )
@@ -834,7 +834,7 @@ describe(
                         it(
                             "should default coordinates to 0 when not provided",
                             function()
-                                local transform = tecs.ecs.builtins.Transform()
+                                local transform = tecs.Transform()
                                 luassert.is_equal(transform.x, 0, "Transform should default x to 0")
                                 luassert.is_equal(transform.y, 0, "Transform should default y to 0")
                                 luassert.is_equal(transform.z, 0, "Transform should default z to 0")
@@ -845,7 +845,7 @@ describe(
                         it(
                             "should default rotation to 0",
                             function()
-                                local transform = tecs.ecs.builtins.Transform()
+                                local transform = tecs.Transform()
                                 luassert.is_equal(transform.rotation, 0, "Transform should default rotation to 0")
                             end
                         )
@@ -853,7 +853,7 @@ describe(
                         it(
                             "should default scale to 1",
                             function()
-                                local transform = tecs.ecs.builtins.Transform()
+                                local transform = tecs.Transform()
                                 luassert.is_equal(transform.scaleX, 1, "Transform should default scaleX to 1")
                                 luassert.is_equal(transform.scaleY, 1, "Transform should default scaleY to 1")
                             end
@@ -862,7 +862,7 @@ describe(
                         it(
                             "should preserve rotation when set",
                             function()
-                                local transform = tecs.ecs.builtins.Transform()
+                                local transform = tecs.Transform()
                                 transform.rotation = math.pi / 4
                                 luassert.is_true(
                                     math.abs(transform.rotation - math.pi / 4) < 0.0001,
@@ -874,7 +874,7 @@ describe(
                         it(
                             "should preserve scale when set",
                             function()
-                                local transform = tecs.ecs.builtins.Transform()
+                                local transform = tecs.Transform()
                                 transform.scaleX = 2.5
                                 transform.scaleY = 0.5
                                 luassert.is_equal(transform.scaleX, 2.5, "Transform should preserve scaleX")
@@ -885,7 +885,7 @@ describe(
                         it(
                             "should support rotation with position and layer",
                             function()
-                                local transform = tecs.ecs.builtins.Transform(10, 20, 30, 2)
+                                local transform = tecs.Transform(10, 20, 30, 2)
                                 transform.rotation = math.pi / 2
                                 luassert.is_equal(transform.x, 10, "Transform should preserve x")
                                 luassert.is_equal(transform.y, 20, "Transform should preserve y")
@@ -899,7 +899,7 @@ describe(
                         it(
                             "should support scale with position and layer",
                             function()
-                                local transform = tecs.ecs.builtins.Transform(5, 15, 25, 3)
+                                local transform = tecs.Transform(5, 15, 25, 3)
                                 transform.scaleX = 3
                                 transform.scaleY = 3
                                 luassert.is_equal(transform.x, 5, "Transform should preserve x")

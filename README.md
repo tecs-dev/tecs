@@ -148,7 +148,7 @@ local Velocity = tecs.ecs.newComponent({
     fields = { "x", "y" },
     defaults = { 0, 0 },
 })
-world:spawn(tecs.ecs.builtins.Transform(0, 0), Velocity(1, 0))
+world:spawn(tecs.Transform(0, 0), Velocity(1, 0))
 ```
 
 `require("tecs")` is equally supported and returns exactly the same table, so a
@@ -286,9 +286,10 @@ What `tecs.gfx` does not carry is `Transform`. Grouping by the task a game is
 doing puts a name where it is used, and a transform is used by the hierarchy,
 by physics, by the sequencer and by the extractor, so filing it under drawing
 would tell three of those four that they were moving a graphics component. It
-is the ECS builtin and is written `tecs.ecs.builtins.Transform`, once; the
-component module used to re-export it, which was a second spelling of one
-thing, and a second spelling is the alias this tree does not keep.
+is written `tecs.Transform`, at the root, because it is the one component
+every subsystem moves and so belongs to none of them; the component module
+used to re-export it, which was a second spelling of one thing, and a second
+spelling is the alias this tree does not keep.
 
 `spec/surface_spec.lua` walks the whole of it. The record in `init.tl` is what
 a game is type-checked against and the descriptor table beneath it is what a

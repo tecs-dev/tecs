@@ -317,8 +317,8 @@ describe(
                 -- Transform. Entities without a Transform (singletons, config)
                 -- are never touched by the layer allow-list.
                 local world = tecs.ecs.newWorld()
-                local onLayer2 = world:spawn(tecs.ecs.builtins.Transform(0, 0, 0, 2))
-                local onLayer5 = world:spawn(tecs.ecs.builtins.Transform(0, 0, 0, 5))
+                local onLayer2 = world:spawn(tecs.Transform(0, 0, 0, 2))
+                local onLayer5 = world:spawn(tecs.Transform(0, 0, 0, 5))
                 local noTransform = world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -364,9 +364,7 @@ describe(
                 world:commit()
 
                 world:observe(
-                    0,
-                    tecs.ecs.builtins.OnSnapshotSave,
-                    function(ev: tecs.ecs.builtins.OnSnapshotSave) ev:exclude(HealthComp) end
+                    0, tecs.ecs.OnSnapshotSave, function(ev: tecs.ecs.OnSnapshotSave) ev:exclude(HealthComp) end
                 )
 
                 local descriptor: tecs.Query.Descriptor = {
@@ -393,9 +391,7 @@ describe(
                 world:commit()
 
                 world:observe(
-                    0,
-                    tecs.ecs.builtins.OnSnapshotSave,
-                    function(ev: tecs.ecs.builtins.OnSnapshotSave) ev:exclude(HealthComp) end
+                    0, tecs.ecs.OnSnapshotSave, function(ev: tecs.ecs.OnSnapshotSave) ev:exclude(HealthComp) end
                 )
 
                 local descriptor: tecs.Query.Descriptor = {
@@ -673,8 +669,8 @@ describe(
                 local seen: {string: any} = {}
                 world:observe(
                     0,
-                    tecs.ecs.builtins.StartSnapshotLoad,
-                    function(ev: tecs.ecs.builtins.StartSnapshotLoad)
+                    tecs.ecs.StartSnapshotLoad,
+                    function(ev: tecs.ecs.StartSnapshotLoad)
                         ev:onData("build", function(v: any) seen.build = v end)
                         ev:onData("score", function(v: any) seen.score = v end)
                         ev:onData("checkpoint", function(v: any) seen.checkpoint = v end)
@@ -697,8 +693,8 @@ describe(
 
                 world:observe(
                     0,
-                    tecs.ecs.builtins.OnSnapshotSave,
-                    function(ev: tecs.ecs.builtins.OnSnapshotSave)
+                    tecs.ecs.OnSnapshotSave,
+                    function(ev: tecs.ecs.OnSnapshotSave)
                         ev:addData("plugin.physics", "snapshot-bytes")
                         ev:addData("plugin.extra", {a = 1, b = 2})
                     end
@@ -709,8 +705,8 @@ describe(
                 local seen: {string: any} = {}
                 world:observe(
                     0,
-                    tecs.ecs.builtins.StartSnapshotLoad,
-                    function(ev: tecs.ecs.builtins.StartSnapshotLoad)
+                    tecs.ecs.StartSnapshotLoad,
+                    function(ev: tecs.ecs.StartSnapshotLoad)
                         ev:onData("plugin.physics", function(v: any) seen["plugin.physics"] = v end)
                         ev:onData("plugin.extra", function(v: any) seen["plugin.extra"] = v end)
                     end
@@ -1054,7 +1050,7 @@ describe(
             "rebuilds runtime entity handles from Key after loading a snapshot",
             function()
                 local world = tecs.ecs.newWorld()
-                local player = world:spawn(tecs.ecs.builtins.Key("player"), PositionComp(1, 1))
+                local player = world:spawn(tecs.ecs.EntityKey("player"), PositionComp(1, 1))
                 world:commit()
 
                 local snap = saveTableSnapshot(world)
@@ -1066,8 +1062,8 @@ describe(
                 local finishSawPlayer = false
                 world:observe(
                     0,
-                    tecs.ecs.builtins.FinishSnapshotLoad,
-                    function(_ev: tecs.ecs.builtins.FinishSnapshotLoad)
+                    tecs.ecs.FinishSnapshotLoad,
+                    function(_ev: tecs.ecs.FinishSnapshotLoad)
                         playerHandle = world:requireKey("player")
                         finishSawPlayer = playerHandle == player
                     end
@@ -1085,7 +1081,7 @@ describe(
             "rebuilds the Key index after binary snapshot load",
             function()
                 local world = tecs.ecs.newWorld()
-                local player = world:spawn(tecs.ecs.builtins.Key("player"), PositionComp(1, 1))
+                local player = world:spawn(tecs.ecs.EntityKey("player"), PositionComp(1, 1))
                 world:commit()
 
                 local bytes = tostring(saveBinarySnapshot(world))
@@ -1112,8 +1108,8 @@ describe(
                 local seenPrelude: any
                 world:observe(
                     0,
-                    tecs.ecs.builtins.FinishSnapshotLoad,
-                    function(ev: tecs.ecs.builtins.FinishSnapshotLoad) fired = fired + 1; seenPrelude = ev.prelude end
+                    tecs.ecs.FinishSnapshotLoad,
+                    function(ev: tecs.ecs.FinishSnapshotLoad) fired = fired + 1; seenPrelude = ev.prelude end
                 )
 
                 world:loadSnapshot(buf)
@@ -1135,8 +1131,8 @@ describe(
                 local fired = 0
                 world:observe(
                     0,
-                    tecs.ecs.builtins.StartSnapshotLoad,
-                    function(ev: tecs.ecs.builtins.StartSnapshotLoad)
+                    tecs.ecs.StartSnapshotLoad,
+                    function(ev: tecs.ecs.StartSnapshotLoad)
                         ev:onData("anything", function(_v: any) fired = fired + 1 end)
                     end
                 )

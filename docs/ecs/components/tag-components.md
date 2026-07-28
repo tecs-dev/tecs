@@ -118,9 +118,9 @@ Two performance properties worth knowing:
 
 Tecs ships a few tag components you'll interact with directly:
 
-- `tecs.ecs.builtins.Disabled`: auto-excluded from every query unless the query's `include` list names it
+- `tecs.ecs.Disabled`: auto-excluded from every query unless the query's `include` list names it
   explicitly.
-- `tecs.ecs.builtins.Paused`: not auto-excluded, because paused entities keep rendering. A query declared
+- `tecs.ecs.Paused`: not auto-excluded, because paused entities keep rendering. A query declared
   `type = "logic"` skips them; `exclude = {Paused}` does the same explicitly.
 
 See [Builtins](/ecs/builtins) for the full set.

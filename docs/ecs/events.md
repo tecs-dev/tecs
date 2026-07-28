@@ -36,11 +36,11 @@ next to its systems, so both are on the world and both run inside the crash guar
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 return tecs.application.create({
     plugin = function(world: tecs.World, app: tecs.application.Application)
-        world:observe(0, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
+        world:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
             -- Still readable: the row is removed at commit, not here.
             local transform <const> = world:get(e.entity, Transform)
             if transform then
@@ -87,7 +87,7 @@ slot.
 ```teal
 local entityId <const>: integer = world:spawn()
 
-world:observe(entityId, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
+world:observe(entityId, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
     print("Entity " .. e.entity .. " was despawned")
 end)
 ```
@@ -131,7 +131,7 @@ world:observe(0, MyCustomEvent, function(e: MyCustomEvent)
     print("Got MyCustomEvent")
 end)
 
-world:observe(entityId, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
+world:observe(entityId, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
     print("Entity despawned: " .. e.entity)
 end)
 ```
@@ -204,7 +204,7 @@ until the dispatch unwinds, so an observer can unsubscribe itself from inside it
 
 ```teal
 world:stopObserving(0, MyEvent, myCallback)
-world:stopObserving(entityId, tecs.ecs.builtins.OnDespawn, "cleanup-handler")
+world:stopObserving(entityId, tecs.ecs.OnDespawn, "cleanup-handler")
 ```
 
 ### world:clearObservers {#world-clear-observers}

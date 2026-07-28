@@ -56,10 +56,10 @@ An entity is a unique id standing for an object in the world. Entities carry no 
 own; the components attached to them are what they are.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 local entity = world:spawn(
-    tecs.ecs.builtins.Name("cactus"),
+    tecs.ecs.Name("cactus"),
     Transform(100, 100)
 )
 ```
@@ -77,15 +77,18 @@ Components describe traits: a position, a colour, a tint, a sound. They are the 
 Reading one back is typed, because you pass the component's type rather than a string:
 
 ```teal
-local name = world:get(entity, tecs.ecs.builtins.Name)
+local name = world:get(entity, tecs.ecs.Name)
 print(name)
 ```
 
 Three sets of components are already registered and ready to use.
 
-**Builtins**, on `tecs.ecs.builtins`, are the ECS's own: `Transform`, `Name`, `Key`, `TTL`, `ChildOf`,
-`RelativeTransform`, `Paused` and `Disabled`. `Transform` carries `x`, `y`, `z`, `layer`, `rotation`, `scaleX`
-and `scaleY`, and is what the hierarchy, the tweens and the renderer all read.
+**Builtins**, directly on `tecs.ecs`, are the ECS's own: `Name`, `EntityKey`, `TTL`, `ChildOf`,
+`RelativeTransform`, `Paused` and `Disabled`.
+
+**`tecs.Transform`** is at the root rather than on either, and it is the only component that is. It carries
+`x`, `y`, `z`, `layer`, `rotation`, `scaleX` and `scaleY`, and the hierarchy, physics, the sequencer, animation
+and the renderer all move the same one, so filing it under any of them would be wrong for the other four.
 
 **Engine components**, on `tecs.gfx`, are what the renderer consumes. They are FFI components on purpose:
 their columns are contiguous C memory, which is what lets the extractor walk rows straight into mapped GPU
@@ -95,7 +98,7 @@ staging instead of reading fields one entity at a time.
 local gfx <const> = tecs.gfx
 
 world:spawn(
-    tecs.ecs.builtins.Transform(100, 100),
+    tecs.Transform(100, 100),
     gfx.Sprite(gfx.imageId("sprites/cactus.png"), 0.0, 0.0, 1.0, 1.0),
     gfx.Tint(1, 1, 1, 1),
     gfx.Renderable()
@@ -107,7 +110,7 @@ position, which is what most entities in a world actually are. A light is an ent
 
 ```teal
 world:spawn(
-    tecs.ecs.builtins.Transform(640, 360),
+    tecs.Transform(640, 360),
     gfx.PointLight(120.0, 500.0, 1.0, 0.42, 0.35, 3.0)
 )
 ```
@@ -184,7 +187,7 @@ A system is useful once it can find entities. Create queries during plugin setup
 them for the world's lifetime; never build one inside `run`.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Health <const> = ... -- registered above
 
 local function healthPlugin(world: tecs.World)
@@ -316,6 +319,14 @@ Every function and type this module carries, rendered from `src/tecs/ecs.tl`.
 <pre><code v-pre>type <a href="#tecs.ecs.Archetype">tecs.ecs.Archetype</a> = types.Archetype
 </code></pre>
 
+<a id="tecs.ecs.ArchetypeCreated"></a>
+
+### tecs.ecs.ArchetypeCreated
+
+<pre><code v-pre><a href="#tecs.ecs.ArchetypeCreated">tecs.ecs.ArchetypeCreated</a>: builtins.ArchetypeCreated
+</code></pre>
+
+Emitted at entity 0 when a new archetype is created.
 <a id="tecs.ecs.ArchetypeEntityObserver"></a>
 
 ### tecs.ecs.ArchetypeEntityObserver
@@ -337,6 +348,15 @@ Every function and type this module carries, rendered from `src/tecs/ecs.tl`.
 <pre><code v-pre>type <a href="#tecs.ecs.BundleDef">tecs.ecs.BundleDef</a> = types.Bundle.Definition
 </code></pre>
 
+<a id="tecs.ecs.ChildOf"></a>
+
+### tecs.ecs.ChildOf
+
+<pre><code v-pre><a href="#tecs.ecs.ChildOf">tecs.ecs.ChildOf</a>: <a href="#tecs.ecs.Relationship">Relationship</a>
+</code></pre>
+
+Parent and child. Sparse, so adding one does not split archetypes, and
+cascade-deleting, so despawning a parent takes its children.
 <a id="tecs.ecs.Component"></a>
 
 ### tecs.ecs.Component
@@ -372,6 +392,14 @@ Every function and type this module carries, rendered from `src/tecs/ecs.tl`.
 </code></pre>
 
 Default `World.Config.maxEntities` when none is given (2^20).
+<a id="tecs.ecs.Disabled"></a>
+
+### tecs.ecs.Disabled
+
+<pre><code v-pre><a href="#tecs.ecs.Disabled">tecs.ecs.Disabled</a>: <a href="#tecs.ecs.Component">Component</a>
+</code></pre>
+
+Excluded from every query that does not ask for it.
 <a id="tecs.ecs.DoubleArray"></a>
 
 ### tecs.ecs.DoubleArray
@@ -379,6 +407,21 @@ Default `World.Config.maxEntities` when none is given (2^20).
 <pre><code v-pre>type <a href="#tecs.ecs.DoubleArray">tecs.ecs.DoubleArray</a> = types.DoubleArray
 </code></pre>
 
+<a id="tecs.ecs.EntityKey"></a>
+
+### tecs.ecs.EntityKey
+
+<pre><code v-pre><a href="#tecs.ecs.EntityKey">tecs.ecs.EntityKey</a>: <a href="#tecs.ecs.ScalarComponent">ScalarComponent</a>&lt;string&gt;
+</code></pre>
+
+A durable, unique lookup key, read back with `world:byKey`. For hot
+reload, authored references, tooling and save-compatible lookup, where
+an entity id is meaningless across runs.
+
+Spelled `EntityKey` here and registered as `"Key"`, because `Key` on
+this module is the typed `world.resources` key `newKey` hands out, and
+Teal refuses the second declaration outright. The registered name is a
+save format and does not move; this one is the surface.
 <a id="tecs.ecs.Event"></a>
 
 ### tecs.ecs.Event
@@ -426,6 +469,15 @@ Default `World.Config.maxEntities` when none is given (2^20).
 | -------------------- | -------------------------------------------------------------------- | ----------- |
 | <code v-pre>R</code> | <code v-pre><a href="#tecs.ecs.Relationship">Relationship</a></code> |             |
 
+<a id="tecs.ecs.FinishSnapshotLoad"></a>
+
+### tecs.ecs.FinishSnapshotLoad
+
+<pre><code v-pre><a href="#tecs.ecs.FinishSnapshotLoad">tecs.ecs.FinishSnapshotLoad</a>: builtins.FinishSnapshotLoad
+</code></pre>
+
+Emitted at entity 0 once every entity is restored and every data
+callback has run.
 <a id="tecs.ecs.FixedOverload"></a>
 
 ### tecs.ecs.FixedOverload
@@ -462,6 +514,49 @@ slots; slot 0 is reserved by the entity-id format).
 <pre><code v-pre>type <a href="#tecs.ecs.MessageBus">tecs.ecs.MessageBus</a> = types.events.MessageBus
 </code></pre>
 
+<a id="tecs.ecs.Name"></a>
+
+### tecs.ecs.Name
+
+<pre><code v-pre><a href="#tecs.ecs.Name">tecs.ecs.Name</a>: <a href="#tecs.ecs.ScalarComponent">ScalarComponent</a>&lt;string&gt;
+</code></pre>
+
+A label for an entity, stored as the raw string. Not unique: use
+`EntityKey` where something has to find one entity again.
+<a id="tecs.ecs.OnDespawn"></a>
+
+### tecs.ecs.OnDespawn
+
+<pre><code v-pre><a href="#tecs.ecs.OnDespawn">tecs.ecs.OnDespawn</a>: builtins.OnDespawn
+</code></pre>
+
+Emitted at the entity when it is despawned.
+<a id="tecs.ecs.OnSnapshotSave"></a>
+
+### tecs.ecs.OnSnapshotSave
+
+<pre><code v-pre><a href="#tecs.ecs.OnSnapshotSave">tecs.ecs.OnSnapshotSave</a>: builtins.OnSnapshotSave
+</code></pre>
+
+Emitted at entity 0 before a snapshot's archetypes are written, which
+is where a plugin attaches keyed data or excludes what it re-derives.
+<a id="tecs.ecs.OnSpawn"></a>
+
+### tecs.ecs.OnSpawn
+
+<pre><code v-pre><a href="#tecs.ecs.OnSpawn">tecs.ecs.OnSpawn</a>: builtins.OnSpawn
+</code></pre>
+
+Emitted at the entity when it is spawned.
+<a id="tecs.ecs.Paused"></a>
+
+### tecs.ecs.Paused
+
+<pre><code v-pre><a href="#tecs.ecs.Paused">tecs.ecs.Paused</a>: <a href="#tecs.ecs.Component">Component</a>
+</code></pre>
+
+Excluded from logic queries and still drawn, which is the difference
+from `Disabled`: a paused world is one that renders and does not think.
 <a id="tecs.ecs.Phase"></a>
 
 ### tecs.ecs.Phase
@@ -524,6 +619,16 @@ slots; slot 0 is reserved by the entity-id format).
 | -------------------- | -------------------------------------------------------------------- | ----------- |
 | <code v-pre>R</code> | <code v-pre><a href="#tecs.ecs.Relationship">Relationship</a></code> |             |
 
+<a id="tecs.ecs.RelativeTransform"></a>
+
+### tecs.ecs.RelativeTransform
+
+<pre><code v-pre><a href="#tecs.ecs.RelativeTransform">tecs.ecs.RelativeTransform</a>: builtins.RelativeTransform
+</code></pre>
+
+A transform expressed relative to a `ChildOf` parent. The builtin
+hierarchy system composes it with the parent's `Transform` into the
+child's world-space one, so a game writes this and reads `Transform`.
 <a id="tecs.ecs.ScalarComponent"></a>
 
 ### tecs.ecs.ScalarComponent
@@ -592,6 +697,48 @@ slots; slot 0 is reserved by the entity-id format).
 <pre><code v-pre>type <a href="#tecs.ecs.SnapshotPrelude">tecs.ecs.SnapshotPrelude</a> = types.World.SnapshotPrelude
 </code></pre>
 
+<a id="tecs.ecs.StartSnapshotLoad"></a>
+
+### tecs.ecs.StartSnapshotLoad
+
+<pre><code v-pre><a href="#tecs.ecs.StartSnapshotLoad">tecs.ecs.StartSnapshotLoad</a>: builtins.StartSnapshotLoad
+</code></pre>
+
+Emitted at entity 0 after a snapshot's world is restored and before its
+data section is dispatched, which is where a plugin registers what to
+do with each key it wrote.
+<a id="tecs.ecs.StateBlur"></a>
+
+### tecs.ecs.StateBlur
+
+<pre><code v-pre><a href="#tecs.ecs.StateBlur">tecs.ecs.StateBlur</a>: builtins.StateBlur
+</code></pre>
+
+Emitted at the state losing focus when another is pushed above it.
+<a id="tecs.ecs.StateEnter"></a>
+
+### tecs.ecs.StateEnter
+
+<pre><code v-pre><a href="#tecs.ecs.StateEnter">tecs.ecs.StateEnter</a>: builtins.StateEnter
+</code></pre>
+
+Emitted when a state is pushed onto the stack.
+<a id="tecs.ecs.StateExit"></a>
+
+### tecs.ecs.StateExit
+
+<pre><code v-pre><a href="#tecs.ecs.StateExit">tecs.ecs.StateExit</a>: builtins.StateExit
+</code></pre>
+
+Emitted when a state is popped off it.
+<a id="tecs.ecs.StateFocus"></a>
+
+### tecs.ecs.StateFocus
+
+<pre><code v-pre><a href="#tecs.ecs.StateFocus">tecs.ecs.StateFocus</a>: builtins.StateFocus
+</code></pre>
+
+Emitted at the state regaining focus when the one above it is popped.
 <a id="tecs.ecs.StatePolicy"></a>
 
 ### tecs.ecs.StatePolicy
@@ -620,6 +767,16 @@ slots; slot 0 is reserved by the entity-id format).
 <pre><code v-pre>type <a href="#tecs.ecs.SystemConfig">tecs.ecs.SystemConfig</a> = types.SystemConfig
 </code></pre>
 
+<a id="tecs.ecs.TTL"></a>
+
+### tecs.ecs.TTL
+
+<pre><code v-pre><a href="#tecs.ecs.TTL">tecs.ecs.TTL</a>: builtins.TTL
+</code></pre>
+
+Despawns an entity once its time to live reaches zero, counted down in
+`FixedUpdate` by a query declared `type = "logic"`, so a `Paused`
+entity does not burn through it.
 <a id="tecs.ecs.TagComponentOptions"></a>
 
 ### tecs.ecs.TagComponentOptions
@@ -627,6 +784,17 @@ slots; slot 0 is reserved by the entity-id format).
 <pre><code v-pre>type <a href="#tecs.ecs.TagComponentOptions">tecs.ecs.TagComponentOptions</a> = types.components.TagComponentOptions
 </code></pre>
 
+<a id="tecs.ecs.Transform"></a>
+
+### tecs.ecs.Transform
+
+<pre><code v-pre><a href="#tecs.ecs.Transform">tecs.ecs.Transform</a>: builtins.Transform
+</code></pre>
+
+Positions everything a world holds: the hierarchy, physics, the
+sequencer and the renderer all move the same one. Not a drawing
+component, which is why it is here and not on `tecs.gfx`, and why a
+headless world has it.
 <a id="tecs.ecs.World"></a>
 
 ### tecs.ecs.World
@@ -634,15 +802,6 @@ slots; slot 0 is reserved by the entity-id format).
 <pre><code v-pre>type <a href="#tecs.ecs.World">tecs.ecs.World</a> = types.World
 </code></pre>
 
-<a id="tecs.ecs.builtins"></a>
-
-### tecs.ecs.builtins
-
-<pre><code v-pre><a href="#tecs.ecs.builtins">tecs.ecs.builtins</a>: builtins
-</code></pre>
-
-The components every world carries: `ChildOf`, `Transform`, `TTL`,
-`Paused`, `Disabled` and the state transition events.
 <a id="tecs.ecs.componentByName"></a>
 
 ### tecs.ecs.componentByName

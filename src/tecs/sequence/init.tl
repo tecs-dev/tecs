@@ -1534,8 +1534,8 @@ function sequence.plugin(world: World)
     -- Owner lifetime: a despawned owner cancels the playbacks it governs.
     world:observe(
         0,
-        ecs.builtins.OnDespawn,
-        function(event: ecs.builtins.OnDespawn)
+        ecs.OnDespawn,
+        function(event: ecs.OnDespawn)
             if state.ownerIndex[event.entity] then
                 sequence.cancelOwnedBy(world, event.entity, "targetLost")
             end

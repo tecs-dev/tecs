@@ -77,7 +77,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local time <const> = require("tecs.platform.time")
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 local Renderable <const> = tecs.gfx.Renderable
 

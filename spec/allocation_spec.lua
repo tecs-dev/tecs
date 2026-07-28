@@ -75,13 +75,13 @@ local Frame = require("tecs.gpu.Frame")
 local PassGraph = require("tecs.gpu.PassGraph")
 local time = require("tecs.platform.time")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local events = require("tecs.platform.events")
 local sdl = require("tecs.ffi.sdl3")
 
 local C = sdl.C
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 local Tint = components.Tint
 local Renderable = components.Renderable
 

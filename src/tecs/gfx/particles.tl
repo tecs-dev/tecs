@@ -66,7 +66,7 @@ local type Sheet = sheet.Sheet
 local type Sprite = components.Sprite
 
 local C <const> = sdl.C
-local Transform <const> = ecs.builtins.Transform
+local Transform <const> = ecs.Transform
 
 local floor <const> = math.floor
 local max <const> = math.max
@@ -1884,11 +1884,11 @@ local function plugin(options: PoolOptions): function(World)
         local running <const> = world:query({
             name = "tecs.ParticleEmitters",
             include = {ParticleEmitter, Transform},
-            exclude = {ecs.builtins.Paused},
+            exclude = {ecs.Paused},
         })
         local held <const> = world:query({
             name = "tecs.PausedParticleEmitters",
-            include = {ParticleEmitter, Transform, ecs.builtins.Paused},
+            include = {ParticleEmitter, Transform, ecs.Paused},
         })
 
         renderer:addProducer(self as Renderer.InstanceProducer)

@@ -1250,11 +1250,11 @@ local record types
         --- @return true if present, false otherwise.
         has: function(self, entity: integer, component: components.Component): boolean
 
-        --- Return the live entity currently carrying `tecs.ecs.builtins.Key(key)`,
+        --- Return the live entity currently carrying `tecs.ecs.EntityKey(key)`,
         --- or nil if no live entity has that key.
         byKey: function(self, key: string): integer | nil
 
-        --- Return the live entity currently carrying `tecs.ecs.builtins.Key(key)`,
+        --- Return the live entity currently carrying `tecs.ecs.EntityKey(key)`,
         --- or error if no live entity has that key.
         requireKey: function(self, key: string): integer
 

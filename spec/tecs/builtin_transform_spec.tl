@@ -3,7 +3,7 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Use the actual built-in Transform component
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 describe(
     "Built-in Transform spawn/respawn",
@@ -257,8 +257,8 @@ describe(
 describe(
     "RelativeTransform hierarchy",
     function()
-        local ChildOf <const> = tecs.ecs.builtins.ChildOf
-        local RelativeTransform <const> = tecs.ecs.builtins.RelativeTransform
+        local ChildOf <const> = tecs.ecs.ChildOf
+        local RelativeTransform <const> = tecs.ecs.RelativeTransform
         local WorldImpl <const> = require("tecs.internal.world")
 
         -- Records, per update, whether the child's archetype had a dirty

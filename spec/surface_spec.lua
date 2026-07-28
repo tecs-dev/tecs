@@ -142,10 +142,11 @@ local records = recordsIn(INIT)
 local top = records.tecs
 local described = surfaceNames(INIT)
 
---- The two names on `tecs` that no descriptor answers, and why each is direct.
---- `ecs` reaches nothing below Lua, so it is assigned as the module returns
---- rather than resolved; `version` is a string.
-local DIRECT = { ecs = true, version = true }
+--- The three names on `tecs` that no descriptor answers, and why each is
+--- direct. `ecs` reaches nothing below Lua, so it is assigned as the module
+--- returns rather than resolved; `Transform` comes off it and so is already
+--- loaded whenever `tecs` is; `version` is a string.
+local DIRECT = { ecs = true, version = true, Transform = true }
 
 --- Teal type names that are a Lua type, and the Lua type each of them is. A
 --- field declared one of these carries a value rather than a module, so it is
@@ -196,6 +197,21 @@ describe("the public surface", function()
                     primitive,
                     type(value),
                     "tecs." .. name .. " is not the " .. field.declared .. " it declares"
+                )
+                return
+            end
+
+            -- A name declared as something the ECS carries is republished off
+            -- it rather than resolved, so what it is held to is being that
+            -- exact value. `tecs.Transform` is the one there is: a component,
+            -- so neither a module nor a namespace, and the check that matters
+            -- is that the root and `tecs.ecs` name one component rather than
+            -- two tables that look alike.
+            local republished = field.declared:match("^ecs%.([%a_][%w_]*)$")
+            if republished then
+                assert.is_true(
+                    rawequal(value, require("tecs.ecs")[republished]),
+                    "tecs." .. name .. " is not the same value as tecs.ecs." .. republished
                 )
                 return
             end
@@ -272,7 +288,7 @@ describe("the public surface", function()
             -- everything a world holds, not only what draws, so it is the ECS
             -- builtin and has one spelling.
             assert.is_nil(tecs.gfx.Transform)
-            assert.is_not_nil(tecs.ecs.builtins.Transform)
+            assert.is_not_nil(tecs.Transform)
         end)
 
         it("answers nil for a name it does not carry", function()

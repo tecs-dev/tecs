@@ -836,7 +836,7 @@ local animation <const> = tecs.gfx.animation
 local gfx <const> = tecs.gfx
 
 local hero <const> = world:spawn(
-    tecs.ecs.builtins.Transform(200, 140),
+    tecs.Transform(200, 140),
     gfx.Renderable,
     heroSheet:sprite(),
     animation.of(heroSheet, "walk"),

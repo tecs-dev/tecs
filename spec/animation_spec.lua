@@ -1284,11 +1284,11 @@ describe("tecs.gfx.animation", function()
             -- Pausing is an archetype move as well, and the world's clock does
             -- not stop for one entity, so where it holds has to be said rather
             -- than assumed.
-            world:set(entity, tecs.ecs.builtins.Paused)
+            world:set(entity, tecs.ecs.Paused)
             drive(world, 60)
             assert.equal(2, animation.frameOf(world, entity), "held on the frame it was on")
 
-            world:remove(entity, tecs.ecs.builtins.Paused)
+            world:remove(entity, tecs.ecs.Paused)
             drive(world, STEPS_PER_FRAME)
             assert.equal(3, animation.frameOf(world, entity), "and carries on from it")
         end)

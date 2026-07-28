@@ -1,20 +1,33 @@
 ---
-description: "The components, relationship, events and systems every world registers automatically through tecs.ecs.builtins"
+description: "The components, relationship, events and systems every world registers automatically, all on tecs.ecs"
 outline: deep
 ---
 
 # Builtins
 
-`tecs.ecs.builtins` holds the components, the one relationship, and the events that Tecs registers itself. Every
-world creates them, and the builtin plugin that owns the `TTL` and `RelativeTransform` systems is installed when
-the world is constructed, so nothing here has to be added by hand.
+These are the components, the one relationship, and the events that Tecs registers itself. Every world creates
+them, and the builtin plugin that owns the `TTL` and `RelativeTransform` systems is installed when the world is
+constructed, so nothing here has to be added by hand.
+
+They sit directly on `tecs.ecs`: `tecs.ecs.ChildOf`, `tecs.ecs.TTL`, `tecs.ecs.Paused`. Where they came from
+is a fact about this implementation rather than something a game asking for a parent link should have to know,
+so there is no namespace between the module and the name.
+
+[`Transform`](#transform) is the exception and sits at the root, as `tecs.Transform`. It is the one component
+every subsystem moves, so it belongs to none of them.
+
+One more name differs, and that one is a collision rather than a decision. The durable lookup key is registered
+as `"Key"` and
+is reached as [`tecs.ecs.EntityKey`](#entitykey), because `tecs.ecs.Key` is the typed `world.resources` key
+that [`newKey`](/ecs/#tecs.ecs.newKey) hands out. The registered name is what a snapshot writes and does not
+move.
 
 ## Components
 
 | Component                                 | Storage             | Description                                 |
 | ----------------------------------------- | ------------------- | ------------------------------------------- |
 | [`Name`](#name)                           | scalar, `string`    | A label for an entity                       |
-| [`Key`](#key)                             | scalar, `string`    | A durable, unique lookup key                |
+| [`EntityKey`](#entitykey)                 | scalar, `string`    | A durable, unique lookup key                |
 | [`ChildOf`](#childof)                     | sparse relationship | Parent and child, with cascade delete       |
 | [`Transform`](#transform)                 | FFI struct          | Position, rotation, scale and layer         |
 | [`RelativeTransform`](#relativetransform) | FFI struct          | A transform expressed relative to a parent  |
@@ -27,7 +40,8 @@ the world is constructed, so nothing here has to be added by hand.
 A label for an entity. It is a scalar component of kind `string`, so the column holds the raw string and
 `world:get(id, Name)` returns a string rather than a wrapper.
 
-`Name` is not unique. Use [`Key`](#key) when runtime code or tooling needs a durable address for an entity.
+`Name` is not unique. Use [`EntityKey`](#entitykey) when runtime code or tooling needs a durable address for an
+entity.
 
 **Teal type:**
 
@@ -39,36 +53,36 @@ Name: tecs.ScalarComponent<string>
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.ecs.builtins.Name("Phreddy")
+    tecs.ecs.Name("Phreddy")
 )
 
-local name <const> = world:get(entity, tecs.ecs.builtins.Name) -- "Phreddy"
+local name <const> = world:get(entity, tecs.ecs.Name) -- "Phreddy"
 ```
 
 To change an existing entity's name, use the three-argument form of `world:set`:
 
 ```teal
-world:set(entity, tecs.ecs.builtins.Name, "Greg")
+world:set(entity, tecs.ecs.Name, "Greg")
 ```
 
-### Key {#key}
+### EntityKey {#entitykey}
 
-A durable, developer-assigned lookup key. Keys are unique within a world: spawning or setting a `Key` that
-another live entity already holds raises an error naming the entity that holds it. When an entity despawns, or
-the `Key` component is removed, the key leaves the index and can be claimed again.
+A durable, developer-assigned lookup key, registered as `"Key"`. Keys are unique within a world: spawning or
+setting one that another live entity already holds raises an error naming the entity that holds it. When an
+entity despawns, or the component is removed, the key leaves the index and can be claimed again.
 
 **Teal type:**
 
 ```teal
-Key: tecs.ScalarComponent<string>
+EntityKey: tecs.ScalarComponent<string>
 ```
 
 **Example:**
 
 ```teal
 local player <const> = world:spawn(
-    tecs.ecs.builtins.Key("player"),
-    tecs.ecs.builtins.Name("Player ship")
+    tecs.ecs.EntityKey("player"),
+    tecs.ecs.Name("Player ship")
 )
 
 assert(world:byKey("player") == player)
@@ -76,7 +90,7 @@ local samePlayer <const> = world:requireKey("player")
 ```
 
 ::: tip
-Use `Key` for hot-reload rebinding, authored references, tooling and save-compatible lookups. Use
+Use `EntityKey` for hot-reload rebinding, authored references, tooling and save-compatible lookups. Use
 [`Name`](#name) for human-readable labels.
 :::
 
@@ -94,10 +108,10 @@ children, and their children in turn.
 
 ```teal
 local parent <const> = world:spawn()
-local child <const> = world:spawn(tecs.ecs.builtins.ChildOf(parent))
+local child <const> = world:spawn(tecs.ecs.ChildOf(parent))
 
 -- Visit the children of a parent
-world:targets(parent, tecs.ecs.builtins.ChildOf, function(childId: integer)
+world:targets(parent, tecs.ecs.ChildOf, function(childId: integer)
     print("Child:", childId)
 end)
 
@@ -165,7 +179,7 @@ Positional arguments allocate nothing beyond the component itself, and are what 
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.ecs.builtins.Transform(10, 11, 1, 2) -- x, y, z, layer
+    tecs.Transform(10, 11, 1, 2) -- x, y, z, layer
 )
 ```
 
@@ -173,7 +187,7 @@ The table form is more readable and allocates the table you pass:
 
 ```teal
 world:spawn(
-    tecs.ecs.builtins.Transform.new({
+    tecs.Transform.new({
         x = 10,
         y = 11,
         z = 1,
@@ -190,7 +204,7 @@ explicit `world:markComponentDirty(entity, Transform)` afterwards, or the write 
 :::
 
 ```teal
-local transform <const> = world:getMut(entity, tecs.ecs.builtins.Transform)
+local transform <const> = world:getMut(entity, tecs.Transform)
 transform.rotation = math.pi / 4
 transform.scaleX = 2
 transform.scaleY = 2
@@ -255,12 +269,12 @@ end
 
 ```teal
 local parent <const> = world:spawn(
-    tecs.ecs.builtins.Transform(100, 100, 0)
+    tecs.Transform(100, 100, 0)
 )
 
 local child <const> = world:spawn(
-    tecs.ecs.builtins.ChildOf(parent),
-    tecs.ecs.builtins.RelativeTransform(50, 30)  -- 50 right, 30 down
+    tecs.ecs.ChildOf(parent),
+    tecs.ecs.RelativeTransform(50, 30)  -- 50 right, 30 down
 )
 ```
 
@@ -298,7 +312,7 @@ end
 ```teal
 world:spawn(
     -- Despawn the entity after 10 seconds
-    tecs.ecs.builtins.TTL(10)
+    tecs.ecs.TTL(10)
 )
 ```
 
@@ -310,7 +324,7 @@ ordinary queries, so a disabled entity is not extracted and therefore is not dra
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.ecs.builtins.Disabled
+    tecs.ecs.Disabled
 )
 ```
 
@@ -325,8 +339,8 @@ The [state stack](/ecs/states) manages this tag for you when a state's `onBlur` 
 also set it yourself:
 
 ```teal
-world:set(entity, tecs.ecs.builtins.Paused)
-world:remove(entity, tecs.ecs.builtins.Paused)
+world:set(entity, tecs.ecs.Paused)
+world:remove(entity, tecs.ecs.Paused)
 ```
 
 ## Events
@@ -369,7 +383,7 @@ reason, and drains before returning, so the caller still receives a committed en
 :::
 
 ```teal
-world:observe(0, tecs.ecs.builtins.OnSpawn, function(event: tecs.ecs.builtins.OnSpawn)
+world:observe(0, tecs.ecs.OnSpawn, function(event: tecs.ecs.OnSpawn)
     print("Entity spawned: " .. event.entity)
 end)
 ```
@@ -397,9 +411,9 @@ the slot.
 Observe one entity:
 
 ```teal
-world:observe(entityId, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
+world:observe(entityId, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
     -- The entity is still readable until the despawn commits
-    local transform <const> = world:get(e.entity, tecs.ecs.builtins.Transform)
+    local transform <const> = world:get(e.entity, tecs.Transform)
     if transform then
         spawnExplosionAt(transform.x, transform.y)
     end
@@ -409,7 +423,7 @@ end)
 Or observe every despawn:
 
 ```teal
-world:observe(0, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
+world:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
     print("Entity " .. e.entity .. " was despawned")
 end)
 ```
@@ -428,7 +442,7 @@ end
 ```
 
 ```teal
-world:observe(0, tecs.ecs.builtins.ArchetypeCreated, function(event: tecs.ecs.builtins.ArchetypeCreated)
+world:observe(0, tecs.ecs.ArchetypeCreated, function(event: tecs.ecs.ArchetypeCreated)
     local archetype <const> = event.archetype
     -- inspect newly created archetypes here
 end)

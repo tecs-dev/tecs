@@ -27,7 +27,7 @@ local tecs <const> = require("tecs")
 local particles <const> = require("tecs.gfx.particles")
 local timing <const> = require("tecs.timing")
 
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 local REGIME <const> = os.getenv("BENCH_REGIME") or "large"
 local WARMUP <const> = math.floor(tonumber(os.getenv("BENCH_WARMUP")) or 120)

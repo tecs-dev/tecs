@@ -269,17 +269,17 @@ image it samples, which material shades it, whether it is clipped, whether it li
 whether it contributes geometry at all. None of them is required to use a world; an entity carrying none
 is a position and some game state.
 
-These are not the ECS builtins. `ChildOf`, `TTL`, `Paused`, `Disabled`, `Key` and the state transition
+These are not the ECS builtins. `ChildOf`, `TTL`, `Paused`, `Disabled`, `EntityKey` and the state transition
 events are registered by every world whether or not a renderer exists, and they are documented at
 [builtins](/ecs/builtins). The ones here are registered when the engine half is first touched.
 
 `Transform` is deliberately not among them. It positions everything a world holds rather than only what
-draws, so it is the ECS builtin and is written `tecs.ecs.builtins.Transform`; a second spelling here would
+draws, so it is the ECS builtin and is written `tecs.Transform`; a second spelling here would
 say the hierarchy, physics and the tweens were moving a graphics component.
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.ecs.builtins.Transform(120, 80),
+    tecs.Transform(120, 80),
     tecs.gfx.Tint(1, 0.4, 0.2, 1),
     tecs.gfx.Renderable()
 )
@@ -764,7 +764,7 @@ An image is uploaded once and lives in the array for the life of the renderer.
 
 ```teal
 local sprite, region = app.renderer:registerImage(handle)
-world:spawn(tecs.ecs.builtins.Transform(100, 100), sprite)
+world:spawn(tecs.Transform(100, 100), sprite)
 ```
 
 `registerImage(handle)` takes a decoded [`assets.Handle`](/modules/assets), uploads it, and answers with a

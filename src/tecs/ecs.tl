@@ -70,13 +70,93 @@ local record ecs
 
     --- The phases a system can be scheduled into.
     phases: phases
-    --- The components every world carries: `ChildOf`, `Transform`, `TTL`,
-    --- `Paused`, `Disabled` and the state transition events.
-    builtins: builtins
     --- Composable run conditions, for `SystemConfig.runIf`.
     runif: runIfHelpers
     --- Seeded generation, in named streams a snapshot carries.
     random: random
+
+    -- The components, the relationship and the events every world registers
+    -- for itself, directly on this module rather than grouped under a name of
+    -- their own. `builtins` said where they came from, which is a fact about
+    -- this implementation; a game asking for a parent link wants `ChildOf`,
+    -- and having to know it was registered here rather than by a plugin is a
+    -- level of indirection that answers nothing.
+    --
+    -- `phases`, `random` and `runif` stay grouped, because their members
+    -- cannot say what they are alone: `ecs.PostUpdate` and `ecs.every` would
+    -- each be one name in a list of a hundred with nothing to place them.
+    --
+    -- The names below are what a snapshot writes and reads, so they are also
+    -- a save format. Moving one of these fields does not move the string it
+    -- is registered under, and neither may be changed casually.
+
+    --- Positions everything a world holds: the hierarchy, physics, the
+    --- sequencer and the renderer all move the same one. Not a drawing
+    --- component, which is why it is here and not on `tecs.gfx`, and why a
+    --- headless world has it.
+    Transform: builtins.Transform
+
+    --- A transform expressed relative to a `ChildOf` parent. The builtin
+    --- hierarchy system composes it with the parent's `Transform` into the
+    --- child's world-space one, so a game writes this and reads `Transform`.
+    RelativeTransform: builtins.RelativeTransform
+
+    --- Parent and child. Sparse, so adding one does not split archetypes, and
+    --- cascade-deleting, so despawning a parent takes its children.
+    ChildOf: Relationship
+
+    --- A label for an entity, stored as the raw string. Not unique: use
+    --- `EntityKey` where something has to find one entity again.
+    Name: ScalarComponent<string>
+
+    --- A durable, unique lookup key, read back with `world:byKey`. For hot
+    --- reload, authored references, tooling and save-compatible lookup, where
+    --- an entity id is meaningless across runs.
+    ---
+    --- Spelled `EntityKey` here and registered as `"Key"`, because `Key` on
+    --- this module is the typed `world.resources` key `newKey` hands out, and
+    --- Teal refuses the second declaration outright. The registered name is a
+    --- save format and does not move; this one is the surface.
+    EntityKey: ScalarComponent<string>
+
+    --- Despawns an entity once its time to live reaches zero, counted down in
+    --- `FixedUpdate` by a query declared `type = "logic"`, so a `Paused`
+    --- entity does not burn through it.
+    TTL: builtins.TTL
+
+    --- Excluded from every query that does not ask for it.
+    Disabled: Component
+
+    --- Excluded from logic queries and still drawn, which is the difference
+    --- from `Disabled`: a paused world is one that renders and does not think.
+    Paused: Component
+
+    --- Emitted at the entity when it is spawned.
+    OnSpawn: builtins.OnSpawn
+    --- Emitted at the entity when it is despawned.
+    OnDespawn: builtins.OnDespawn
+    --- Emitted at entity 0 when a new archetype is created.
+    ArchetypeCreated: builtins.ArchetypeCreated
+
+    --- Emitted when a state is pushed onto the stack.
+    StateEnter: builtins.StateEnter
+    --- Emitted when a state is popped off it.
+    StateExit: builtins.StateExit
+    --- Emitted at the state losing focus when another is pushed above it.
+    StateBlur: builtins.StateBlur
+    --- Emitted at the state regaining focus when the one above it is popped.
+    StateFocus: builtins.StateFocus
+
+    --- Emitted at entity 0 before a snapshot's archetypes are written, which
+    --- is where a plugin attaches keyed data or excludes what it re-derives.
+    OnSnapshotSave: builtins.OnSnapshotSave
+    --- Emitted at entity 0 after a snapshot's world is restored and before its
+    --- data section is dispatched, which is where a plugin registers what to
+    --- do with each key it wrote.
+    StartSnapshotLoad: builtins.StartSnapshotLoad
+    --- Emitted at entity 0 once every entity is restored and every data
+    --- callback has run.
+    FinishSnapshotLoad: builtins.FinishSnapshotLoad
 
     --- Absolute ceiling for `World.Config.maxEntities` (2^22 - 1 usable
     --- slots; slot 0 is reserved by the entity-id format).
@@ -321,9 +401,33 @@ function ecs.declaredComponents(): {string: types.components.Component}
 end
 
 ecs.phases = phases
-ecs.builtins = builtins
 ecs.runif = runIfHelpers
 ecs.random = random
+
+-- `plugin` is deliberately not among these. The world installs it itself when
+-- one is constructed, so nothing outside this tree calls it, and `ecs.plugin`
+-- would name the plugin for the ECS rather than the one that owns the `TTL`
+-- and hierarchy systems. Internal code reaches it through
+-- `tecs.internal.builtins`, which is where it is declared.
+ecs.Transform = builtins.Transform
+ecs.RelativeTransform = builtins.RelativeTransform
+ecs.ChildOf = builtins.ChildOf
+ecs.Name = builtins.Name
+ecs.EntityKey = builtins.Key
+ecs.TTL = builtins.TTL
+ecs.Disabled = builtins.Disabled
+ecs.Paused = builtins.Paused
+ecs.OnSpawn = builtins.OnSpawn
+ecs.OnDespawn = builtins.OnDespawn
+ecs.ArchetypeCreated = builtins.ArchetypeCreated
+ecs.StateEnter = builtins.StateEnter
+ecs.StateExit = builtins.StateExit
+ecs.StateBlur = builtins.StateBlur
+ecs.StateFocus = builtins.StateFocus
+ecs.OnSnapshotSave = builtins.OnSnapshotSave
+ecs.StartSnapshotLoad = builtins.StartSnapshotLoad
+ecs.FinishSnapshotLoad = builtins.FinishSnapshotLoad
+
 ecs.newWorld = WorldImpl.new
 ecs.newEvent = events.newEvent
 ecs.newFFIEvent = events.newFFIEvent

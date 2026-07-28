@@ -62,9 +62,9 @@ local FUZZ_TRACE <const> = os.getenv("TECS_FUZZ_TRACE") ~= nil
 -- Id packing mirrors IdAllocator: slot + generation * 2^22.
 local GEN_STRIDE <const> = 4194304
 
-local ChildOf <const> = tecs.ecs.builtins.ChildOf
-local Key <const> = tecs.ecs.builtins.Key
-local Transform <const> = tecs.ecs.builtins.Transform
+local ChildOf <const> = tecs.ecs.ChildOf
+local Key <const> = tecs.ecs.EntityKey
+local Transform <const> = tecs.Transform
 
 -- Fuzz components: one numeric field each so canonical state is cheap.
 local FzA = tecs.ecs.newComponent({
@@ -148,7 +148,7 @@ local FzMark = tecs.ecs.newRelationship({
 -- Pre-register the state tag so `createState("fuzzState")` reuses one
 -- global component across worlds and seeds.
 local FzState = tecs.ecs.newTagComponent({name = "fuzzStateState"})
-local TTL <const> = tecs.ecs.builtins.TTL
+local TTL <const> = tecs.ecs.TTL
 
 -- Ops draw from these; canonical reads also cover FzHealth (pulled in
 -- via requires, never set directly).
@@ -369,8 +369,8 @@ describe(
                         local function installSpawnObserver(w: tecs.World)
                             w:observe(
                                 0,
-                                tecs.ecs.builtins.OnSpawn,
-                                function(ev: tecs.ecs.builtins.OnSpawn)
+                                tecs.ecs.OnSpawn,
+                                function(ev: tecs.ecs.OnSpawn)
                                     if ev.entity % 3 == 0 then
                                         w:set(
                                             ev.entity, (FzB as function(integer): tecs.Component)(ev.entity % 997 + 1)

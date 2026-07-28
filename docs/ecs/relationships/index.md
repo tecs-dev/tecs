@@ -9,9 +9,9 @@ Relationships model directed connections between entities, such as parent-child 
 behaviors, or targeting. Tecs manages their lifecycle automatically, preserving referential integrity
 when entities are despawned.
 
-The engine ships one: `tecs.ecs.builtins.ChildOf`, registered on every world. It is exclusive, sparse, reverse-indexed
+The engine ships one: `tecs.ecs.ChildOf`, registered on every world. It is exclusive, sparse, reverse-indexed
 and cascade-deleting, which is the combination a scene hierarchy wants, and it is what
-`tecs.ecs.builtins.RelativeTransform` follows to compose a child's world `Transform` from its parent's. Everything on
+`tecs.ecs.RelativeTransform` follows to compose a child's world `Transform` from its parent's. Everything on
 this page can be read against that one working example.
 
 ## Relationship features
@@ -75,8 +75,8 @@ world:set(entityA, Targets(enemy))
 -- Parent an entity at spawn. `RelativeTransform` requires `Transform`, so the
 -- child's world transform column arrives with it.
 local child = world:spawn(
-    tecs.ecs.builtins.ChildOf(parent),
-    tecs.ecs.builtins.RelativeTransform(16, 0)
+    tecs.ecs.ChildOf(parent),
+    tecs.ecs.RelativeTransform(16, 0)
 )
 ```
 
@@ -186,8 +186,8 @@ Sparse relationships work seamlessly with queries. A dense wildcard tag is alway
 query uses the same row-indexed pattern as dense columns:
 
 ```teal
-local ChildOf <const> = tecs.ecs.builtins.ChildOf
-local Transform <const> = tecs.ecs.builtins.Transform
+local ChildOf <const> = tecs.ecs.ChildOf
+local Transform <const> = tecs.Transform
 
 local query: tecs.Query = world:query({include = {ChildOf, Transform}})
 
@@ -233,7 +233,7 @@ both dense and sparse relationships:
 ```teal
 -- Find all entities that are children of any parent
 local allChildren: tecs.Query = world:query({
-    include = {tecs.ecs.builtins.ChildOf}
+    include = {tecs.ecs.ChildOf}
 })
 
 -- Find all entities that follow something
@@ -368,7 +368,7 @@ This is how `ChildOf` implements parent-child hierarchies: despawning a parent a
 (and grandchildren, recursively).
 
 ```teal
-local ChildOf <const> = tecs.ecs.builtins.ChildOf
+local ChildOf <const> = tecs.ecs.ChildOf
 
 local parent: integer = world:spawn()
 local child: integer = world:spawn(ChildOf(parent))
@@ -502,7 +502,7 @@ For a sparse relationship, passing the container removes every target at once:
 
 ```teal
 -- Clear the entity's parent, whatever it was
-world:remove(child, tecs.ecs.builtins.ChildOf)
+world:remove(child, tecs.ecs.ChildOf)
 ```
 
 ## Configuration reference

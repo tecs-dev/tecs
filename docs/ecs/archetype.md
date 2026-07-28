@@ -35,7 +35,7 @@ This row and column layout is why query loops bind columns once per archetype:
 local gfx <const> = tecs.gfx
 
 for archetype, length, entities in query:iter() do
-    local transforms = archetype:get(tecs.ecs.builtins.Transform)
+    local transforms = archetype:get(tecs.Transform)
     local tints = archetype:get(gfx.Tint)
 
     for row = 1, length do
@@ -75,7 +75,7 @@ Never take `getMut` for a column you only read. Doing it in a per-frame loop mar
 every archetype every frame, and the extractor then rewrites the whole scene instead of the rows that changed.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 for archetype, length in spinning:iter() do
     -- Rotation is a write, so the column is taken with getMut.

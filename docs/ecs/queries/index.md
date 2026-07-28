@@ -10,7 +10,7 @@ Use queries to find entities with specific [components](/ecs/components/). Most 
 
 Queries are how the engine reaches the world too. `tecs.SyncRenderState` extracts a frame from
 `{Transform, Tint, Renderable}` and `{Transform, PointLight}`; the physics, animation and text plugins each hold
-their own. The examples below use those same engine components, from `tecs.ecs.builtins` and
+their own. The examples below use those same engine components, from `tecs.ecs` and
 [`tecs.gfx`](/modules/gfx/).
 
 ## World methods
@@ -43,20 +43,20 @@ Create queries with `world:query()`, passing a `QueryDescriptor`.
 The `include` property is a list of components an entity must have to match the query.
 
 ```teal{3}
--- Find all entities that have the `tecs.ecs.builtins.Name` component:
+-- Find all entities that have the `tecs.ecs.Name` component:
 world:query({
-    include = {tecs.ecs.builtins.Name}
+    include = {tecs.ecs.Name}
 })
 ```
 
 The `exclude` property is a list of components an entity must not have to match the query.
 
 ```teal{5}
--- Find all entities that have the `tecs.ecs.builtins.Name` component and
--- don't have the `tecs.ecs.builtins.TTL` component.
+-- Find all entities that have the `tecs.ecs.Name` component and
+-- don't have the `tecs.ecs.TTL` component.
 world:query({
-    include = {tecs.ecs.builtins.Name},
-    exclude = {tecs.ecs.builtins.TTL}
+    include = {tecs.ecs.Name},
+    exclude = {tecs.ecs.TTL}
 })
 ```
 
@@ -67,7 +67,7 @@ acts as an OR condition combined with the AND condition of `include`.
 -- Renderables that are textured or materialled: Transform AND Renderable,
 -- plus at least one of Sprite or Material.
 world:query({
-    include = {tecs.ecs.builtins.Transform, tecs.gfx.Renderable},
+    include = {tecs.Transform, tecs.gfx.Renderable},
     includeAny = {tecs.gfx.Sprite, tecs.gfx.Material}
 })
 ```
@@ -78,7 +78,7 @@ queries easier to identify in debug output.
 ```teal{2}
 world:query({
     name = "NameQuery",
-    include = {tecs.ecs.builtins.Name}
+    include = {tecs.ecs.Name}
 })
 ```
 
@@ -118,7 +118,7 @@ deferred, and a deferred world silently queues every later spawn instead of appl
 This is the query the renderer's extractor holds, verbatim:
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 local Renderable <const> = tecs.gfx.Renderable
 
@@ -226,7 +226,7 @@ takes its first step, the world enters a **deferred scope**; `world:set`, `world
 `world:despawn`, and the `batch*` APIs all stage during iteration and apply in a drain phase when the loop exits.
 You can therefore stage structural changes inside the loop body:
 
-The builtin `ttl` system does exactly that: it counts `tecs.ecs.builtins.TTL` down on the fixed clock and despawns
+The builtin `ttl` system does exactly that: it counts `tecs.ecs.TTL` down on the fixed clock and despawns
 from inside the loop.
 
 ```teal
@@ -293,7 +293,7 @@ Create the query once in a plugin and close over it from systems:
 so writing into it is what makes physics interpolation, the hierarchy and extraction all see the result.
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 
 -- Create a movement plugin
 local function movementPlugin(world: tecs.World)
@@ -346,12 +346,12 @@ end
 
 ## Disabled entities
 
-By default, all queries automatically exclude entities that have the `tecs.ecs.builtins.Disabled` component. This
+By default, all queries automatically exclude entities that have the `tecs.ecs.Disabled` component. This
 behavior makes it easy to temporarily hide entities without despawning them.
 
 ```teal
 -- This entity draws nothing: extraction's query excludes Disabled too.
-world:spawn(Transform(100, 100), Tint(1, 1, 1, 1), Renderable(), tecs.ecs.builtins.Disabled)
+world:spawn(Transform(100, 100), Tint(1, 1, 1, 1), Renderable(), tecs.ecs.Disabled)
 ```
 
 To find disabled entities in your queries, explicitly include the `Disabled` component:
@@ -359,13 +359,13 @@ To find disabled entities in your queries, explicitly include the `Disabled` com
 ```teal
 -- Every renderable, including the disabled ones
 local everything = world:query({
-    include = {Transform, Renderable, tecs.ecs.builtins.Disabled}
+    include = {Transform, Renderable, tecs.ecs.Disabled}
 })
 ```
 
 ## Paused entities
 
-`tecs.ecs.builtins.Paused` marks an entity whose simulation should stop while its rendering continues, so it is not
+`tecs.ecs.Paused` marks an entity whose simulation should stop while its rendering continues, so it is not
 excluded from every query the way `Disabled` is. Declare which side of that line a query sits on with `type`:
 
 ```teal

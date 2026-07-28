@@ -1323,7 +1323,7 @@ describe(
                     function()
                         local calls = 0
                         sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
-                        sequence.signalOnEvent(world, "died", tecs.ecs.builtins.OnDespawn)
+                        sequence.signalOnEvent(world, "died", tecs.ecs.OnDespawn)
 
                         local prog = sequence.define(
                             uniqueName(),
@@ -1432,7 +1432,7 @@ describe(
         describe(
             "tweens",
             function()
-                local Transform <const> = tecs.ecs.builtins.Transform
+                local Transform <const> = tecs.Transform
                 local calls: integer
                 local actor: integer
                 local slide: string
@@ -2266,7 +2266,7 @@ describe(
         describe(
             "timelines as programs",
             function()
-                local Transform <const> = tecs.ecs.builtins.Transform
+                local Transform <const> = tecs.Transform
 
                 local function spawn(): integer
                     return world:spawn(Transform(0, 0, 0, 1))
@@ -2516,7 +2516,7 @@ describe(
                 it(
                     "tracks a source authored through the sequence namespace",
                     function()
-                        local leader <const> = world:spawn(Transform(80, 0, 0, 1), tecs.ecs.builtins.Key("spec.leader"))
+                        local leader <const> = world:spawn(Transform(80, 0, 0, 1), tecs.ecs.EntityKey("spec.leader"))
                         local follower <const> = spawn()
                         world:commit()
                         sequence.play(
@@ -2581,7 +2581,7 @@ describe(
                 it(
                     "parks until the provider says the work is done",
                     function()
-                        local actor <const> = world:spawn(tecs.ecs.builtins.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform(0, 0))
                         world:commit()
                         pending[actor] = true
 
@@ -2612,7 +2612,7 @@ describe(
                 it(
                     "does not wait for work that was never started",
                     function()
-                        local actor <const> = world:spawn(tecs.ecs.builtins.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform(0, 0))
                         world:commit()
 
                         local calls = 0
@@ -2637,7 +2637,7 @@ describe(
                 it(
                     "releases a waiter whose entity died",
                     function()
-                        local actor <const> = world:spawn(tecs.ecs.builtins.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform(0, 0))
                         world:commit()
                         pending[actor] = true
 
@@ -2667,7 +2667,7 @@ describe(
                 it(
                     "carries an await through a snapshot",
                     function()
-                        local actor <const> = world:spawn(tecs.ecs.builtins.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform(0, 0))
                         world:commit()
                         pending[actor] = true
 
@@ -2706,7 +2706,7 @@ describe(
                 it(
                     "faults on an unregistered provider",
                     function()
-                        local actor <const> = world:spawn(tecs.ecs.builtins.Transform(0, 0))
+                        local actor <const> = world:spawn(tecs.Transform(0, 0))
                         world:commit()
                         local handle = sequence.play(
                             world,
@@ -2787,7 +2787,7 @@ describe(
                 it(
                     "stops the branches and the timelines a playback started",
                     function()
-                        local Transform <const> = tecs.ecs.builtins.Transform
+                        local Transform <const> = tecs.Transform
                         local actor <const> = world:spawn(Transform(0, 0, 0, 1))
                         world:commit()
 

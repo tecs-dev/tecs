@@ -32,7 +32,7 @@ local tecs <const> = require("tecs")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
 local text <const> = require("tecs.gfx.text")
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 
 --- Text entities on screen.

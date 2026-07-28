@@ -54,13 +54,14 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                            |
 | [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers  |
 | [`tecs.time`](/modules/time)                         | monotonic time                                                             |
+| [`tecs.Transform`](/ecs/builtins#transform)          | where an entity is, and the one component every subsystem moves            |
 | [`tecs.version`](/modules/)                          | the version of this build, as a string                                     |
 | [`tecs.window`](/modules/window)                     | the window, its size, its display and its mode                             |
 | [`tecs.workers`](/modules/workers)                   | typed background jobs                                                      |
 
 ## tecs.ecs
 
-`tecs.ecs` is the ECS: `tecs.ecs.newWorld`, `tecs.ecs.phases`, `tecs.ecs.builtins`, `tecs.ecs.runif`,
+`tecs.ecs` is the ECS: `tecs.ecs.newWorld`, `tecs.Transform`, `tecs.ecs.phases`, `tecs.ecs.runif`,
 `tecs.ecs.random` and the component constructors. It is one table with two ways in. A game reads it off `tecs`
 like any other module; an engine module writes `require("tecs.ecs")`, because `tecs` is the aggregator that
 pulls every engine module in and a module `tecs` exports cannot also depend on `tecs` without making a cycle,

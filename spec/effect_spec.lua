@@ -24,10 +24,10 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local particles = require("tecs.gfx.particles")
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 local ParticleEmitter = particles.ParticleEmitter
 
 -- Two effects that can be told apart without a GPU. Capacity is the emitter's

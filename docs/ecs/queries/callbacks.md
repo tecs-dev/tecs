@@ -20,14 +20,14 @@ excluded component. This callback _does not_ fire when an entity moves between a
 
 ```teal{3}
 world:query({
-    include = {tecs.ecs.builtins.Transform, tecs.box2d.RigidBody},
+    include = {tecs.Transform, tecs.box2d.RigidBody},
     onEntitiesAdded = function(
         archetype: tecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
     )
-        local transforms = archetype:get(tecs.ecs.builtins.Transform)
+        local transforms = archetype:get(tecs.Transform)
         local bodies = archetype:get(tecs.box2d.RigidBody)
         for row = firstRow, lastRow do
             local transform = transforms[row]
@@ -51,14 +51,14 @@ are removed from archetypes, so the rows in the range are still readable.
 
 ```teal{9}
 world:query({
-    include = {tecs.ecs.builtins.Transform, tecs.box2d.RigidBody},
+    include = {tecs.Transform, tecs.box2d.RigidBody},
     onEntitiesRemoved = function(
         archetype: tecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
     )
-        local transforms = archetype:get(tecs.ecs.builtins.Transform)
+        local transforms = archetype:get(tecs.Transform)
         local bodies = archetype:get(tecs.box2d.RigidBody)
         for row = firstRow, lastRow do
             local transform = transforms[row]
@@ -84,7 +84,7 @@ lets you amortize per-entity work (slot allocation, buffer sizing, dirty marking
 Iterate the range directly with `for row = firstRow, lastRow do`.
 
 For auto-attaching companion components, use `requires` on the component declaration rather than query callbacks.
-That is how `tecs.ecs.builtins.RelativeTransform` pulls in `Transform`: the dependency is declared once and applied in
+That is how `tecs.ecs.RelativeTransform` pulls in `Transform`: the dependency is declared once and applied in
 the same archetype transition, so no callback has to observe the add and issue a second one. See
 [Components](/ecs/components/).
 

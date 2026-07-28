@@ -129,12 +129,12 @@ describe(
                 })
 
                 local world = tecs.ecs.newWorld()
-                local e = world:spawn(tecs.ecs.builtins.Transform(1, 2), Score(99), Label("boss"))
+                local e = world:spawn(tecs.Transform(1, 2), Score(99), Label("boss"))
                 world:commit()
 
                 luassert.equals(99, world:get(e, Score))
                 luassert.equals("boss", world:get(e, Label))
-                local t = world:get(e, tecs.ecs.builtins.Transform)
+                local t = world:get(e, tecs.Transform)
                 luassert.equals(1, t.x)
                 luassert.equals(2, t.y)
             end
@@ -257,10 +257,10 @@ describe(
             "works with builtins.Name as a scalar in spawn",
             function()
                 local world = tecs.ecs.newWorld()
-                local e = world:spawn(tecs.ecs.builtins.Name("Frank"))
+                local e = world:spawn(tecs.ecs.Name("Frank"))
                 world:commit()
 
-                luassert.equals("Frank", world:get(e, tecs.ecs.builtins.Name))
+                luassert.equals("Frank", world:get(e, tecs.ecs.Name))
             end
         )
     end

@@ -47,7 +47,8 @@ anything living outside the world. Everything else is yours to carry through
   stack names a state this world has not registered raises, so call `world:createState(name)` for each state
   before loading.
 - **Pipeline runtime state**: the fixed-timestep accumulator and the per-phase enable flags.
-- **The [`Key`](/ecs/builtins) index**, rebuilt from the restored entities after the archetypes are in place.
+- **The [`EntityKey`](/ecs/builtins#entitykey) index**, rebuilt from the restored entities after the archetypes
+  are in place.
 - **Custom data** attached through [`customData`](#customdata) or a [snapshot handler](#snapshot-handlers).
 
 ### Not saved
@@ -147,7 +148,7 @@ plugin that owns them re-derives them from the saved source of truth on load. A 
 per visible tile from a much smaller authored grid is the shape this exists for:
 
 ```teal
-world:observe(0, tecs.ecs.builtins.OnSnapshotSave, function(ev: tecs.ecs.builtins.OnSnapshotSave)
+world:observe(0, tecs.ecs.OnSnapshotSave, function(ev: tecs.ecs.OnSnapshotSave)
     ev:exclude(TileInstance)
 end)
 ```
@@ -336,11 +337,12 @@ fires. A snapshot whose `version` does not match this build's raises.
 ### Runtime handles after load
 
 Snapshots restore durable ECS state, not the application handles pointing into it. If a runtime variable holds
-an entity that must survive save and load, give that entity a [`Key`](/ecs/builtins) and rebind afterwards:
+an entity that must survive save and load, give that entity an [`EntityKey`](/ecs/builtins#entitykey) and rebind
+afterwards:
 
 ```teal
 local playerId = world:spawn(
-    tecs.ecs.builtins.Key("player"),
+    tecs.ecs.EntityKey("player"),
     Player()
 )
 
@@ -381,12 +383,12 @@ Then let setup react to matching entities and install the entity observer:
 
 ```teal
 local despawnEffectQuery = world:query({
-    include = {DespawnEffect, tecs.ecs.builtins.Transform},
+    include = {DespawnEffect, tecs.Transform},
     onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
         local entities = archetype.entities
         for row = firstRow, lastRow do
             local entity = entities[row]
-            world:observe(entity, tecs.ecs.builtins.OnDespawn, function(_ev: tecs.ecs.builtins.OnDespawn)
+            world:observe(entity, tecs.ecs.OnDespawn, function(_ev: tecs.ecs.OnDespawn)
                 -- spawn the effect here
             end, "despawn-effect")
         end

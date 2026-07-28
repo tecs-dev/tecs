@@ -43,6 +43,10 @@ local type TextureArray = require("tecs.gpu.TextureArray")
 --- Extraction: the world-facing half of the frame.
 local EXTRACT <const> = timing.stage("extract")
 
+--- The pose every drawn row is written from, bound once rather than read
+--- off the module at each of the seven places below that name it.
+local Transform <const> = ecs.Transform
+
 local INSTANCE_FLOATS <const> = instancelayout.FLOATS
 local INSTANCE_BYTES <const> = instancelayout.BYTES
 local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
@@ -363,7 +367,7 @@ local function writeRun(
     -- derived later because the sign that carries it is written here, so the
     -- count and the lane are right together or wrong together.
     local blended = 0
-    local transforms = archetype:get(ecs.builtins.Transform)
+    local transforms = archetype:get(Transform)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
     local materialColumn = archetype:get(components.Material)
@@ -1020,7 +1024,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         local dirty = relayout
             or run.moved
             or run.length ~= pending
-            or archetype:isComponentDirty(ecs.builtins.Transform)
+            or archetype:isComponentDirty(Transform)
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
@@ -1106,7 +1110,7 @@ end
 --- Collects lights from the world into the packet.
 local function syncLights(self: Extractor, packet: FramePacket)
     for archetype, length in self._lightSources:iter() do
-        local transforms = archetype:get(ecs.builtins.Transform)
+        local transforms = archetype:get(Transform)
         local sources = archetype:get(components.PointLight)
         for row = 1, length do
             local transform = transforms[row]
@@ -1161,16 +1165,19 @@ function Extractor:install(world: ecs.World, packet: FramePacket, published: fun
     -- pair: taken later, the two would be the same value and every frame would
     -- draw the entity where the step left it.
     local interpolated = world:query({
-        include = {ecs.builtins.Transform, components.PreviousTransform},
+        include = {Transform, components.PreviousTransform},
     })
     world:addSystem({
         name = "tecs.SnapshotTransforms",
         phase = ecs.phases.FixedFirst,
         run = function()
             for archetype, length in interpolated:iter() do
-                local transforms = archetype:get(ecs.builtins.Transform)
-                -- Mutable, because this writes every row it visits: the whole
-                -- column is what the next frame interpolates from.
+                -- The previous pose below is taken mutable, because this
+                -- writes every row it visits: the whole column is what the
+                -- next frame interpolates from. Said here rather than on that
+                -- line, which the formatter miscompiles a comment above once
+                -- the line before it is short enough.
+                local transforms = archetype:get(Transform)
                 local before = archetype:getMut(components.PreviousTransform)
                 for row = 1, length do
                     local transform = transforms[row]
@@ -1184,14 +1191,10 @@ function Extractor:install(world: ecs.World, packet: FramePacket, published: fun
     })
 
     self._renderables = world:query({
-        include = {
-            ecs.builtins.Transform,
-            components.Tint,
-            components.Renderable,
-        },
+        include = {Transform, components.Tint, components.Renderable},
     })
     self._lightSources = world:query({
-        include = {ecs.builtins.Transform, components.PointLight},
+        include = {Transform, components.PointLight},
     })
 
     world:addSystem({

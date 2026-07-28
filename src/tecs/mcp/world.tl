@@ -139,7 +139,7 @@ end
 --- nothing about which entity it is and `Name` is what the ECS provides for
 --- saying so.
 local function nameOf(w: ecs.World, entity: integer): string
-    local Name <const> = ecs.builtins.Name
+    local Name <const> = ecs.Name
     if not w:has(entity, Name as ecs.Component) then
         return nil
     end

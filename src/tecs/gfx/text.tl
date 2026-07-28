@@ -65,11 +65,11 @@ local type Renderer = require("tecs.Renderer")
 local type Component = ecs.Component
 local type World = ecs.World
 
-local Transform <const> = ecs.builtins.Transform
+local Transform <const> = ecs.Transform
 local Tint <const> = components.Tint
 local Clip <const> = components.Clip
 
-local type TransformInstance = ecs.builtins.Transform
+local type TransformInstance = ecs.Transform
 local type TintInstance = components.Tint
 
 local byte <const> = string.byte
@@ -1544,8 +1544,8 @@ function text.textPlugin(options: TextOptions): function(World)
         -- free, and the glyphs in them keep being drawn.
         world:observe(
             0,
-            ecs.builtins.OnDespawn,
-            function(event: ecs.builtins.OnDespawn)
+            ecs.OnDespawn,
+            function(event: ecs.OnDespawn)
                 local item = world:get(event.entity, text.Text)
                 if item == nil then
                     return
@@ -1561,9 +1561,7 @@ function text.textPlugin(options: TextOptions): function(World)
         -- A load replaces the world in place rather than despawning what was
         -- in it, so the observer above never hears about the texts it removed
         -- and the run has to be given up whole.
-        world:observe(
-            0, ecs.builtins.FinishSnapshotLoad, function(_event: ecs.builtins.FinishSnapshotLoad) reset(glyphs) end
-        )
+        world:observe(0, ecs.FinishSnapshotLoad, function(_event: ecs.FinishSnapshotLoad) reset(glyphs) end)
     end
 end
 

@@ -1013,14 +1013,13 @@ describe(
                 it(
                     "excludes disabled entities from queries by default",
                     function()
-                        local builtins = tecs.ecs.builtins
 
                         -- Spawn normal entities
                         world:spawn(Position(1, 1), Velocity(10, 10))
                         world:spawn(Position(2, 2), Velocity(20, 20))
 
                         -- Spawn disabled entity
-                        world:spawn(Position(3, 3), Velocity(30, 30), builtins.Disabled)
+                        world:spawn(Position(3, 3), Velocity(30, 30), tecs.ecs.Disabled)
 
                         world:update(0)
 
@@ -1041,15 +1040,14 @@ describe(
                 it(
                     "includes disabled entities when explicitly requested",
                     function()
-                        local builtins = tecs.ecs.builtins
 
                         -- Spawn disabled entity
-                        world:spawn(Position(1, 1), Velocity(10, 10), builtins.Disabled)
+                        world:spawn(Position(1, 1), Velocity(10, 10), tecs.ecs.Disabled)
 
                         world:update(0)
 
                         -- Query with explicit include of Disabled
-                        local query = world:query({include = {Position, Velocity, builtins.Disabled}})
+                        local query = world:query({include = {Position, Velocity, tecs.ecs.Disabled}})
 
                         local count = 0
                         for archetype, len in query:iter() do
@@ -1077,7 +1075,7 @@ describe(
 
                 before_each(function()
                     world:spawn(Position(1, 1), Velocity(10, 10))
-                    world:spawn(Position(2, 2), Velocity(20, 20), tecs.ecs.builtins.Paused)
+                    world:spawn(Position(2, 2), Velocity(20, 20), tecs.ecs.Paused)
                     world:update(0)
                 end)
 
@@ -1118,7 +1116,7 @@ describe(
                     "keeps paused entities that a logic query includes explicitly",
                     function()
                         local query = world:query({
-                            include = {Position, Velocity, tecs.ecs.builtins.Paused},
+                            include = {Position, Velocity, tecs.ecs.Paused},
                             type = "logic",
                         })
 

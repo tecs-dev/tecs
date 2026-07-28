@@ -21,13 +21,13 @@ local loader = require("tecs.ffi.loader")
 local Extractor = require("tecs.Extractor")
 local FramePacket = require("tecs.FramePacket")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local sheet = require("tecs.gfx.sheet")
 local animation = require("tecs.gfx.animation")
 local frametable = require("tecs.gfx.frametable")
 local instancelayout = require("tecs.gpu.instancelayout")
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 local Tint = components.Tint
 local Renderable = components.Renderable
 local Sprite = components.Sprite
@@ -427,7 +427,7 @@ describe("playback resolved on the GPU", function()
         )
         world:update(STEP)
 
-        world:set(entity, tecs.ecs.builtins.Paused)
+        world:set(entity, tecs.ecs.Paused)
         world:update(STEP)
 
         local _, held, rate = regionAt(instances, 0)

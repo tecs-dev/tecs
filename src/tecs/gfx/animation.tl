@@ -1059,11 +1059,11 @@ function animation.plugin(world: World)
         local running <const> = world:query({
             name = "tecs.EncodedSprites",
             include = {Animation, Sprite},
-            exclude = {ecs.builtins.Paused},
+            exclude = {ecs.Paused},
         })
         local paused <const> = world:query({
             name = "tecs.EncodedPausedSprites",
-            include = {Animation, Sprite, ecs.builtins.Paused},
+            include = {Animation, Sprite, ecs.Paused},
         })
 
         -- The step count each update began on, which is the count the last one

@@ -19,7 +19,7 @@ Tecs provides several component kinds for different use cases.
 - [FFI component](/ecs/components/ffi): backed by an FFI struct. Use this for numeric and primitive data that
   maps cleanly to fixed-size C fields.
 - [Scalar component](/ecs/components/scalar-components): a single string, number, or boolean value. Use this
-  when a component is really just one value (e.g., `tecs.ecs.builtins.Name`).
+  when a component is really just one value (e.g., `tecs.ecs.Name`).
 
 The engine's own render components go through the same factories: `Sprite`, `Tint`, `Material`, `Clip`,
 `PointLight` and `PreviousTransform` are FFI components and `Renderable` is a table component. See
@@ -166,32 +166,32 @@ See [Dirty tracking](/ecs/components/dirty-tracking) for the full dirty-bit mode
 Access an entity's components with `world:get`.
 
 ```teal
-local transform = world:get(entityId, tecs.ecs.builtins.Transform)
+local transform = world:get(entityId, tecs.Transform)
 ```
 
 ::: details Component access is typed
 Tecs is built from the ground up to be strongly typed with [Teal](https://teal-language.org); `get` is generic
 over the provided component type. In the example above, the return value is an instance of
-`tecs.ecs.builtins.Transform` or `nil` if not found.
+`tecs.Transform` or `nil` if not found.
 :::
 
-`tecs.ecs.builtins.Name` is a scalar component of kind `string`, so its column stores the raw string and
-`world:get(entityId, tecs.ecs.builtins.Name)` returns a string directly rather than a wrapper.
+`tecs.ecs.Name` is a scalar component of kind `string`, so its column stores the raw string and
+`world:get(entityId, tecs.ecs.Name)` returns a string directly rather than a wrapper.
 
 ## Setting components
 
 Set components on entities with `world:set`.
 
 ```teal
-world:set(entityId, tecs.ecs.builtins.Name("Frank"))
+world:set(entityId, tecs.ecs.Name("Frank"))
 ```
 
 You can also set components when spawning an entity.
 
 ```teal
 world:spawn(
-    tecs.ecs.builtins.Name("Frank"),
-    tecs.ecs.builtins.Transform(100, 200)
+    tecs.ecs.Name("Frank"),
+    tecs.Transform(100, 200)
 )
 ```
 
@@ -200,7 +200,7 @@ world:spawn(
 Remove components from entities with `world:remove`.
 
 ```teal
-world:remove(entityId, tecs.ecs.builtins.Name)
+world:remove(entityId, tecs.ecs.Name)
 ```
 
 ## Getting components from archetypes
@@ -209,7 +209,7 @@ When iterating entities in a system, the query gives you the archetype directly.
 column once and then index by row, avoiding per-entity lookups:
 
 ```teal
-local Transform <const> = tecs.ecs.builtins.Transform
+local Transform <const> = tecs.Transform
 local query: tecs.Query = world:query({include = {Transform, Velocity}})
 
 world:addSystem({

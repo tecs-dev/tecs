@@ -15,7 +15,7 @@ local sdl = require("tecs.ffi.sdl3")
 local mcp = require("tecs.mcp")
 local mcpWorld = require("tecs.mcp.world")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 
 local C = sdl.C
 
@@ -100,7 +100,7 @@ describe("mcp world tools", function()
 
     it("queries by component and reports what it did not return", function()
         for index = 1, 5 do
-            world:spawn(builtins.Transform(index, 0, 0, 1, 0, 1, 1), components.Renderable())
+            world:spawn(tecs.Transform(index, 0, 0, 1, 0, 1, 1), components.Renderable())
         end
         local result = ok("query", { include = { "Transform", "Renderable" }, limit = 2 })
 
@@ -161,7 +161,7 @@ describe("mcp world tools", function()
     it("reports an entity's Name beside its id", function()
         -- A bare id says nothing about which entity it is, and Name is what
         -- the ECS provides for saying so.
-        local named = world:spawn(components.Renderable(), builtins.Name("player"))
+        local named = world:spawn(components.Renderable(), ecs.Name("player"))
         local anonymous = world:spawn(components.Renderable())
         world:commit()
 

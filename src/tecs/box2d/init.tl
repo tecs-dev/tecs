@@ -50,7 +50,7 @@ local table_clear <const> = require("table.clear")
 local atan2 <const> = math.atan2
 
 local B <const> = binding.C
-local Transform <const> = ecs.builtins.Transform
+local Transform <const> = ecs.Transform
 
 local type Component = ecs.Component
 
@@ -1093,28 +1093,28 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
         })
         local detachedDisabledBodies = world:query({
             name = "tecs.DetachedDisabledBodies",
-            include = {RigidBody, ecs.builtins.Disabled},
+            include = {RigidBody, ecs.Disabled},
             exclude = {Body},
         })
         local pausedBodies = world:query({
             name = "tecs.PausedBodies",
-            include = {Body, Motion, RigidBody, ecs.builtins.Paused},
+            include = {Body, Motion, RigidBody, ecs.Paused},
             exclude = {PhysicsHeld},
         })
         local resumedBodies = world:query({
             name = "tecs.ResumedBodies",
             include = {Body, Motion, RigidBody, PhysicsHeld},
-            exclude = {ecs.builtins.Paused},
+            exclude = {ecs.Paused},
         })
         local disabledBodies = world:query({
             name = "tecs.DisabledBodies",
-            include = {RigidBody, ecs.builtins.Disabled},
+            include = {RigidBody, ecs.Disabled},
             exclude = {PhysicsDisabled},
         })
         local enabledBodies = world:query({
             name = "tecs.EnabledBodies",
             include = {RigidBody, PhysicsDisabled},
-            exclude = {ecs.builtins.Disabled},
+            exclude = {ecs.Disabled},
         })
         local declaredBodies = world:query({
             name = "tecs.LiveBodyDeclarations",
@@ -1154,8 +1154,8 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
         -- being solved for the rest of the session.
         world:observe(
             0,
-            ecs.builtins.OnDespawn,
-            function(event: ecs.builtins.OnDespawn)
+            ecs.OnDespawn,
+            function(event: ecs.OnDespawn)
                 local colliderShape = world:get(event.entity, ColliderShape)
                 if colliderShape ~= nil and colliderShape.index1 ~= 0 then
                     local shape = shapeOf(colliderShape)

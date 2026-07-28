@@ -21,14 +21,14 @@ local Texture = require("tecs.gpu.Texture")
 local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local components = require("tecs.components")
-local builtins = require("tecs.ecs").builtins
+local ecs = require("tecs.ecs")
 local text = require("tecs.gfx.text")
 
 local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 256
 
-local Transform = builtins.Transform
+local Transform = tecs.Transform
 local Tint = components.Tint
 
 describe("gfx.text", function()
@@ -402,8 +402,8 @@ describe("gfx.text", function()
         local parent = world:spawn(Transform(20, 40, 0, 1))
         world:spawn(
             Transform(0, 0, 0, 1),
-            tecs.ecs.builtins.RelativeTransform(0, 0, 0, 0, 1, 1),
-            tecs.ecs.builtins.ChildOf(parent),
+            tecs.ecs.RelativeTransform(0, 0, 0, 0, 1, 1),
+            tecs.ecs.ChildOf(parent),
             Tint(0.0, 1.0, 0.0, 1.0),
             text.Text.new({ text = "H", font = font, size = 96 })
         )
