@@ -30,8 +30,8 @@ The simulation is world-scoped and available as `tecs.box2d.of(world)`. Solver t
 Conflicting `workerCount` values on two worlds raise.
 
 Public positions, extents, linear velocities, impulses, forces, gravity, and hit speeds use pixels. Angles and
-angular velocities use radians. `tecs.box2d.pixelsPerMetre` is the conversion the module has already applied to
-every number above: multiply metres by it, divide pixels by it. Box2D itself solves in metres, and simulating
+angular velocities use radians. `tecs.box2d.pixelsPerMeter` is the conversion the module has already applied to
+every number above: multiply meters by it, divide pixels by it. Box2D itself solves in meters, and simulating
 directly in pixels would put every body far outside the size range its solver tolerances were chosen for.
 
 ## Bodies

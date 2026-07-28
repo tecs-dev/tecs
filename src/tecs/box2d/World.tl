@@ -58,10 +58,10 @@ end
 
 --- One Box2D simulation, in Box2D's own units.
 ---
---- **Everything here is metres, radians and seconds**, unlike `tecs.box2d`
+--- **Everything here is meters, radians and seconds**, unlike `tecs.box2d`
 --- above it, which takes and returns pixels and converts at its own boundary.
 --- A caller that reaches this directly is responsible for the conversion, and
---- `box2d.pixelsPerMetre` is the factor.
+--- `box2d.pixelsPerMeter` is the factor.
 ---
 --- Nothing here is thread safe. A world is created, stepped and destroyed from
 --- the game thread; the solver's own threads are inside `step` and are gone
@@ -117,7 +117,7 @@ local BODY_TYPES <const>: {string: integer} = {
 ---     geometric mean.
 --- @param restitution Bounce, mixed with the other shape's as the larger of
 ---     the two.
---- @param offsetX The shape's centre in the body's frame, in metres.
+--- @param offsetX The shape's centre in the body's frame, in meters.
 --- @param offsetY The same along y.
 --- @param categoryBits The categories this shape belongs to.
 --- @param maskBits The categories it collides with. Two shapes touch only when
@@ -160,8 +160,8 @@ end
 --- Creates a simulation world.
 ---
 --- @param options May be nil, which takes Box2D's own world defaults for
----     everything but the substep count. Gravity is metres per second squared,
----     so a caller working in pixels divides by `box2d.pixelsPerMetre` first.
+---     everything but the substep count. Gravity is meters per second squared,
+---     so a caller working in pixels divides by `box2d.pixelsPerMeter` first.
 --- @return A world the caller owns and has to `destroy`. It takes a reference
 ---     on the process-wide thread pool, so dropping it without destroying it
 ---     keeps those threads alive for the rest of the run.
@@ -276,7 +276,7 @@ function World:endMoves()
 end
 
 --- The last step's transform for the body with this id, or nil if it did not
---- move. Position in metres, rotation as its cosine and sine.
+--- move. Position in meters, rotation as its cosine and sine.
 ---
 --- The rotation is not converted to an angle here: a caller that only needs
 --- the pair should not pay for an inverse tangent it throws away.
@@ -289,8 +289,8 @@ end
 --- @param index1 A body's `index1`, which Box2D numbers from one and reuses
 ---     once a body is destroyed. Only meaningful for this world's bodies: an
 ---     index from another world reads whatever this one has in that slot.
---- @return X in metres, or nil alone when the body did not move.
---- @return Y in metres.
+--- @return X in meters, or nil alone when the body did not move.
+--- @return Y in meters.
 --- @return Cosine of the rotation.
 --- @return Sine of the rotation. Take `atan2(sine, cosine)` for an angle in
 ---     radians, and only if you need one.
@@ -313,7 +313,7 @@ end
 --- The body has no shape yet, so it has no mass and collides with nothing
 --- until `addBox` or `addCircle` is called on it.
 ---
---- @param options May be nil. Position is metres and angle is radians. An
+--- @param options May be nil. Position is meters and angle is radians. An
 ---     unrecognised `type` string is read as static rather than raising.
 --- @return A `b2BodyId`, a value struct that is safe to copy and store. It
 ---     stays valid across steps and is invalidated only by destroying the body
@@ -416,8 +416,8 @@ end
 ---
 --- @param body The body to attach to. Not checked, so a stale handle here is
 ---     Box2D's to reject rather than this function's.
---- @param halfWidth Half the box's full width, in metres.
---- @param halfHeight Half the box's full height, in metres.
+--- @param halfWidth Half the box's full width, in meters.
+--- @param halfHeight Half the box's full height, in meters.
 --- @param options Required, unlike the definition Box2D builds from it: the
 ---     offset is read off this before anything is normalized, so nil raises
 ---     here rather than falling back to the material defaults. Each field
@@ -440,7 +440,7 @@ end
 --- Attaches a circle, centred by the offset in `options`.
 ---
 --- @param body The body to attach to.
---- @param radius Metres.
+--- @param radius Meters.
 --- @param options Required, for the reason `addBox` gives. Its `offsetX` and
 ---     `offsetY` place the circle's centre in the body's frame, so an
 ---     off-centre circle needs no body positioned for it.
@@ -459,9 +459,9 @@ end
 --- centres, excluding the caps.
 ---
 --- @param body The body to attach to.
---- @param radius The cap radius, in metres. It is also the capsule's
+--- @param radius The cap radius, in meters. It is also the capsule's
 ---     half-width, so the full width is twice this.
---- @param length Metres between the two end centres, so the full height is
+--- @param length Meters between the two end centres, so the full height is
 ---     this plus twice the radius. Zero makes a circle of `radius`.
 --- @param options Required, for the reason `addBox` gives. The offset places
 ---     the capsule's midpoint, and the two ends are put half a length either
@@ -562,13 +562,13 @@ local rayTranslationScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 local forceScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 local forcePointScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 
---- Casts a segment and returns the nearest hit. All positions are metres.
+--- Casts a segment and returns the nearest hit. All positions are meters.
 ---
 --- Closest-hit only, and callback-free: Box2D's all-hits and overlap queries
 --- report through a function pointer, which is what keeps them out of this
 --- module.
 ---
---- @param x1 The start of the segment, in metres.
+--- @param x1 The start of the segment, in meters.
 --- @param y1 The same along y.
 --- @param x2 The end of the segment. Nothing past it is tested, so a miss may
 ---     only mean the segment was short.
@@ -578,8 +578,8 @@ local forcePointScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 --- @param maskBits The categories the ray may hit, nil for all of them.
 --- @return The entity owning the nearest shape, or nil alone on a miss.
 ---     Sensors are eligible: only the filter keeps a ray out of one.
---- @return The contact x in metres.
---- @return The contact y in metres.
+--- @return The contact x in meters.
+--- @return The contact y in meters.
 --- @return The x of the surface normal, a unit vector pointing out of the
 ---     shape and so unscaled.
 --- @return The y of the surface normal.
@@ -609,7 +609,7 @@ function World:raycast(
     ), point.x as number, point.y as number, normal.x as number, normal.y as number, hit.fraction as number
 end
 
---- Applies a force at the centre. Force uses Box2D's metre-based units.
+--- Applies a force at the centre. Force uses Box2D's meter-based units.
 ---
 --- Box2D clears the accumulator at the end of every step, so a force has to be
 --- reapplied each step to keep acting.
@@ -631,7 +631,7 @@ end
 --- @param body The body to push, which this wakes.
 --- @param x Newtons along x.
 --- @param y Newtons along y.
---- @param pointX Where the force acts, in world metres rather than the body's
+--- @param pointX Where the force acts, in world meters rather than the body's
 ---     frame.
 --- @param pointY The same along y. A point at the centre of mass makes this
 ---     `applyForce`.
@@ -647,9 +647,9 @@ end
 --- than over the step.
 ---
 --- @param body The body to push, which this wakes.
---- @param x The x impulse, in kilogram-metres per second.
+--- @param x The x impulse, in kilogram-meters per second.
 --- @param y The y impulse.
---- @param pointX Where the impulse lands, in world metres. Off the centre of
+--- @param pointX Where the impulse lands, in world meters. Off the centre of
 ---     mass it becomes spin as well as travel.
 --- @param pointY The same along y.
 function World.applyImpulseAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
@@ -664,7 +664,7 @@ end
 --- above.
 ---
 --- @param body The body to turn, which this wakes.
---- @param torque Newton-metres. Positive raises the angular velocity, and a
+--- @param torque Newton-meters. Positive raises the angular velocity, and a
 ---     body with `fixedRotation` takes it and still does not turn.
 function World.applyTorque(body: loader.CValue, torque: number)
     C.b2Body_ApplyTorque(body, torque, true)
@@ -711,9 +711,9 @@ end
 --- Moves a body outright, without sweeping the gap.
 ---
 --- @param body The body to move.
---- @param x The new origin x, in metres. The origin is what shapes are placed
+--- @param x The new origin x, in meters. The origin is what shapes are placed
 ---     relative to, not the centre of mass.
---- @param y The new origin y, in metres.
+--- @param y The new origin y, in meters.
 --- @param angle Radians. Required here, unlike `physics.teleport`, which fills
 ---     it from the entity's transform.
 function World.setTransform(body: loader.CValue, x: number, y: number, angle: number)
@@ -742,8 +742,8 @@ end
 --- One call per body, and a `b2Vec2` comes back by value, so this allocates
 --- cdata each time. Use `moveOf` over a column of bodies instead.
 ---
---- @return X in metres.
---- @return Y in metres. The body's origin, which its shapes are placed
+--- @return X in meters.
+--- @return Y in meters. The body's origin, which its shapes are placed
 ---     relative to, not its centre of mass.
 function World.getPosition(body: loader.CValue): number, number
     local position = C.b2Body_GetPosition(body)
@@ -765,8 +765,8 @@ end
 
 --- Returns a body's linear velocity.
 ---
---- @return X in metres per second.
---- @return Y in metres per second. Linear only: a body that is only spinning
+--- @return X in meters per second.
+--- @return Y in meters per second. Linear only: a body that is only spinning
 ---     reads zero here.
 function World.getVelocity(body: loader.CValue): number, number
     local velocity = C.b2Body_GetLinearVelocity(body)
@@ -782,8 +782,8 @@ local velocityScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 --- Waking is not optional: Box2D lets a resting island sleep, and a sleeping
 --- body given a velocity keeps sleeping and never moves.
 ---
---- @param x Metres per second, set outright rather than added to.
---- @param y Metres per second. Angular velocity is left alone.
+--- @param x Meters per second, set outright rather than added to.
+--- @param y Meters per second. Angular velocity is left alone.
 function World.setVelocity(body: loader.CValue, x: number, y: number)
     local vector = velocityScratch[0] as loader.CStruct
     vector.x = x

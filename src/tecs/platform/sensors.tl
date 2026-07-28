@@ -42,7 +42,7 @@ local record Sensor
     ---     for fewer than the sensor produces takes the first few rather than
     ---     failing.
     --- @return The values, a fresh list the caller owns and indexed from one.
-    ---     Units are the sensor's own: SDL reports acceleration in metres per
+    ---     Units are the sensor's own: SDL reports acceleration in meters per
     ---     second squared and rotation in radians per second. Nil on failure,
     ---     which includes reading a destroyed sensor.
     --- @return The reason, when the first return is nil.

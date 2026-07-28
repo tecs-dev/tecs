@@ -54,12 +54,12 @@ local Transform <const> = ecs.Transform
 
 local type Component = ecs.Component
 
---- Pixels per simulated metre.
+--- Pixels per simulated meter.
 ---
 --- Box2D is tuned for objects roughly 0.1 to 10 units across, so simulating
 --- directly in pixels puts every body far outside the range its solver
 --- tolerances were chosen for.
-local PIXELS_PER_METRE <const> = 32.0
+local PIXELS_PER_METER <const> = 32.0
 
 --- Body kinds, matching Box2D's `b2BodyType` and `World.tl`'s own map.
 ---
@@ -429,7 +429,7 @@ end
 local record PhysicsOptions
     --- Gravity as x then y, in pixels per second squared, matching world
     --- units. Defaults to 980 downward, which is roughly Earth at this
-    --- module's 32 pixels to the metre. Positive y is down, like `Transform`.
+    --- module's 32 pixels to the meter. Positive y is down, like `Transform`.
     gravity: {number}
     --- Solver substeps per step, defaulting to Box2D's 4. More costs time
     --- linearly and buys stability in stacks and fast contacts; fewer makes a
@@ -456,13 +456,13 @@ local record box2d
     ContactHit: ContactHit
     SensorBegin: SensorBegin
     SensorEnd: SensorEnd
-    --- Pixels per simulated metre, and the conversion every public number on
-    --- this module has already had applied to it. Multiply metres by it,
+    --- Pixels per simulated meter, and the conversion every public number on
+    --- this module has already had applied to it. Multiply meters by it,
     --- divide pixels by it. Named for the units rather than `scale`, which
     --- says neither what is being converted nor which way round it goes, and
     --- a caller guessing wrong is off by a factor of a thousand with nothing
     --- to raise.
-    pixelsPerMetre: number
+    pixelsPerMeter: number
 
     --- The same as `applyImpulse`, given a `RigidBody` row already in hand.
     ---
@@ -490,7 +490,7 @@ box2d.ContactEnd = ContactEnd
 box2d.ContactHit = ContactHit
 box2d.SensorBegin = SensorBegin
 box2d.SensorEnd = SensorEnd
-box2d.pixelsPerMetre = PIXELS_PER_METRE
+box2d.pixelsPerMeter = PIXELS_PER_METER
 
 ContactBegin.init = function(event: ContactBegin, a: integer, b: integer) event.entityA, event.entityB = a, b end
 ContactEnd.init = function(event: ContactEnd, a: integer, b: integer) event.entityA, event.entityB = a, b end
@@ -542,12 +542,12 @@ function box2d.of(world: ecs.World): World
     return world.resources[simulationKey]
 end
 
-local function toMetres(pixels: number): number
-    return pixels / PIXELS_PER_METRE
+local function toMeters(pixels: number): number
+    return pixels / PIXELS_PER_METER
 end
 
-local function toPixels(metres: number): number
-    return metres * PIXELS_PER_METRE
+local function toPixels(meters: number): number
+    return meters * PIXELS_PER_METER
 end
 
 local function colliderFrom(options: BodyOptions): Collider
@@ -747,8 +747,8 @@ function box2d.applyImpulseTo(row: RigidBody, x: number, y: number)
     local body = handleOf(row)
     local impulse = loader.newStruct("b2Vec2")
     local fields = impulse as loader.CStruct
-    fields.x = toMetres(x)
-    fields.y = toMetres(y)
+    fields.x = toMeters(x)
+    fields.y = toMeters(y)
     B.b2Body_ApplyLinearImpulseToCenter(body, impulse, true)
 end
 
@@ -769,14 +769,14 @@ function box2d.applyImpulseAt(world: ecs.World, entity: integer, x: number, y: n
     if row == nil or row.index1 == 0 then
         return
     end
-    World.applyImpulseAt(handleOf(row), toMetres(x), toMetres(y), toMetres(pointX), toMetres(pointY))
+    World.applyImpulseAt(handleOf(row), toMeters(x), toMeters(y), toMeters(pointX), toMeters(pointY))
 end
 
 --- Reads a body's velocity, live from Box2D, in pixels per second.
 ---
 --- Pixels, like every other number this module takes and returns: the extents
 --- and radius `attach` is given, the impulse components, and the plugin's
---- gravity. A caller that wants metres divides by `box2d.pixelsPerMetre`.
+--- gravity. A caller that wants meters divides by `box2d.pixelsPerMeter`.
 ---
 --- This rather than the `Motion` column is what a body is doing right now.
 --- `Motion` is a store written at a pause and a save, not a mirror.
@@ -815,7 +815,7 @@ function box2d.setVelocity(world: ecs.World, entity: integer, vx: number, vy: nu
     if row == nil or row.index1 == 0 then
         return
     end
-    World.setVelocity(handleOf(row), toMetres(vx), toMetres(vy))
+    World.setVelocity(handleOf(row), toMeters(vx), toMeters(vy))
 end
 
 --- Applies a continuous force at the body's centre and wakes it.
@@ -834,7 +834,7 @@ function box2d.applyForce(world: ecs.World, entity: integer, x: number, y: numbe
     if row == nil or row.index1 == 0 then
         return
     end
-    World.applyForce(handleOf(row), toMetres(x), toMetres(y))
+    World.applyForce(handleOf(row), toMeters(x), toMeters(y))
 end
 
 --- Applies a continuous force at a world-space point and wakes the body.
@@ -854,7 +854,7 @@ function box2d.applyForceAt(world: ecs.World, entity: integer, x: number, y: num
     if row == nil or row.index1 == 0 then
         return
     end
-    World.applyForceAt(handleOf(row), toMetres(x), toMetres(y), toMetres(pointX), toMetres(pointY))
+    World.applyForceAt(handleOf(row), toMeters(x), toMeters(y), toMeters(pointX), toMeters(pointY))
 end
 
 --- Applies torque and wakes the body.
@@ -863,9 +863,9 @@ end
 ---
 --- @param world The world holding the entity.
 --- @param entity Does nothing for one with no live body.
---- @param torque Newton-metres, in Box2D's own units. This is the one quantity
+--- @param torque Newton-meters, in Box2D's own units. This is the one quantity
 ---     the module passes through unscaled, because a torque is a force times a
----     distance and so would need `box2d.pixelsPerMetre` squared rather than the
+---     distance and so would need `box2d.pixelsPerMeter` squared rather than the
 ---     single factor everything else takes. Positive raises the body's angular
 ---     velocity, and so the `Transform.rotation` the sync writes.
 function box2d.applyTorque(world: ecs.World, entity: integer, torque: number)
@@ -967,7 +967,7 @@ function box2d.teleport(world: ecs.World, entity: integer, x: number, y: number,
         return
     end
     local rotation = angle or world:get(entity, Transform).rotation
-    World.setTransform(handleOf(row), toMetres(x), toMetres(y), rotation)
+    World.setTransform(handleOf(row), toMeters(x), toMeters(y), rotation)
     local transform = world:getMut(entity, Transform)
     transform.x, transform.y, transform.rotation = x, y, rotation
 end
@@ -997,7 +997,7 @@ function box2d.raycast(
     end
     options = options or {}
     local entity, x, y, nx, ny, fraction = simulation:raycast(
-        toMetres(x1), toMetres(y1), toMetres(x2), toMetres(y2), options.categoryBits, options.maskBits
+        toMeters(x1), toMeters(y1), toMeters(x2), toMeters(y2), options.categoryBits, options.maskBits
     )
     if entity == nil then
         return nil
@@ -1032,8 +1032,8 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
         -- closed over by the systems below, so a step costs no resource lookup.
         local simulation <const> = World.create({
             gravity = {
-                x = toMetres(gravity[1]),
-                y = toMetres(gravity[2]),
+                x = toMeters(gravity[1]),
+                y = toMeters(gravity[2]),
             },
             subStepCount = options.subStepCount,
             workerCount = options.workerCount,
@@ -1045,8 +1045,8 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
                 collider.density,
                 collider.friction,
                 collider.restitution,
-                toMetres(collider.offsetX),
-                toMetres(collider.offsetY),
+                toMeters(collider.offsetX),
+                toMeters(collider.offsetY),
                 collider.categoryBits,
                 collider.maskBits,
                 collider.groupIndex as integer,
@@ -1054,11 +1054,11 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
                 entity
             )
             if collider.shape == COLLIDER_SHAPES.circle then
-                return World.addCircle(body, toMetres(collider.radius), shapeSettings)
+                return World.addCircle(body, toMeters(collider.radius), shapeSettings)
             elseif collider.shape == COLLIDER_SHAPES.capsule then
-                return World.addCapsule(body, toMetres(collider.radius), toMetres(collider.length), shapeSettings)
+                return World.addCapsule(body, toMeters(collider.radius), toMeters(collider.length), shapeSettings)
             else
-                return World.addBox(body, toMetres(collider.halfWidth), toMetres(collider.halfHeight), shapeSettings)
+                return World.addBox(body, toMeters(collider.halfWidth), toMeters(collider.halfHeight), shapeSettings)
             end
         end
 
@@ -1067,7 +1067,7 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
         ): loader.CValue
             local body = simulation:createBody({
                 type = BODY_NAMES[declared.kind as integer] or "dynamic",
-                position = {x = toMetres(transform.x), y = toMetres(transform.y)},
+                position = {x = toMeters(transform.x), y = toMeters(transform.y)},
                 angle = transform.rotation,
                 fixedRotation = declared.fixedRotation ~= 0,
                 gravityScale = declared.gravityScale,
@@ -1241,7 +1241,7 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
                     local pending = createQueue[index]
                     local native = createBody(pending.entity, pending.transform, pending.body, pending.collider)
                     createdBodies[pending.entity] = native
-                    World.setVelocity(native, toMetres(pending.motion.vx), toMetres(pending.motion.vy))
+                    World.setVelocity(native, toMeters(pending.motion.vx), toMeters(pending.motion.vy))
                     World.setAngularVelocity(native, pending.motion.omega)
                     local handle = native as loader.CStruct
                     world:set(
@@ -1328,7 +1328,7 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
                     for row = 1, length do
                         local body = handleOf(rows[row])
                         B.b2Body_SetType(body, declarations[row].kind)
-                        World.setVelocity(body, toMetres(motions[row].vx), toMetres(motions[row].vy))
+                        World.setVelocity(body, toMeters(motions[row].vx), toMeters(motions[row].vy))
                         World.setAngularVelocity(body, motions[row].omega)
                         world:remove(entities[row], PhysicsHeld)
                     end

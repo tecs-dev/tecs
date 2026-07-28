@@ -149,7 +149,7 @@ end)
 describe("ecs.box2d velocity", function()
     -- Every other number this module takes and returns is pixels: the extents
     -- and radius `attach` is given, the impulse components, the plugin's
-    -- gravity. Metres was the outlier, and the difference is a factor of 32:
+    -- gravity. Meters was the outlier, and the difference is a factor of 32:
     -- half a second under 980 px/s^2 reads 490, not 15.3.
     it("reads a falling body's velocity in pixels", function()
         local world = newWorld()
