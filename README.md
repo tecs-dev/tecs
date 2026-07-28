@@ -2474,13 +2474,13 @@ cost three dispatches and no per-frame host writes; what that buys is paid for
 by not being able to inspect, move, kill or count one of them.
 
 Three things divide the work. A `ParticleEffect` is immutable data describing
-how particles spawn and evolve, registered once and shared by every emitter
-naming it. The emitter component names an effect and carries playback state, a
-seed and a few per-instance scales, and deliberately nothing else: if an
-instance could override every effect field then effects would stop being
-reusable GPU data. A pool owns one run of the instance buffer, sub-allocates a
-contiguous slot range of the effect's capacity to each emitter, and records the
-passes that fill it.
+how particles spawn and evolve, registered once under a name and shared by
+every emitter naming it. The emitter component names an effect and carries
+playback state, a seed and a few per-instance scales, and deliberately nothing
+else: if an instance could override every effect field then effects would stop
+being reusable GPU data. A pool owns one run of the instance buffer,
+sub-allocates a contiguous slot range of the effect's capacity to each emitter,
+and records the passes that fill it.
 
 Drawing is not new work. A particle written into the instance buffer is an
 instance: the same sixteen floats, the same four bound floats, the same mark,
@@ -2555,11 +2555,24 @@ arrangement that tried to avoid it would be to get right.
 
 A snapshot carries the emitter and not the field, which is the shape audio is
 already in: the configuration, the seed and the playback state cross, and not
-one particle does. `finished` answers exactly from the schedule and the longest
-lifetime, which is what almost every "has the explosion ended" question is
-actually asking; `estimatedCount` integrates the schedule and subtracts
-expirations, and its name carries the caveat. Neither reads anything back,
-because a readback here is a pipeline stall.
+one particle does. What crosses for the effect is its name. An effect's index
+is `#registry + 1` at the moment it was registered, so it records where in one
+process's registration order the effect landed and means nothing outside it: a
+plugin installed earlier, or a registration behind a condition that was true
+last run, moves every index after it, and a saved one then names whichever
+effect the loading process put in that place. Unlike a material's number that
+is not even a rebuild away, since nothing but call order decides it. So a name
+is required at registration, a name already taken is refused, and a snapshot
+naming an effect this build does not have raises and says which one. Resolving
+it to something else or dropping the component would both load without a word
+and play an effect nobody asked for, which is the failure the name exists to
+prevent.
+
+`finished` answers exactly from the schedule and the longest lifetime, which is
+what almost every "has the explosion ended" question is actually asking;
+`estimatedCount` integrates the schedule and subtracts expirations, and its
+name carries the caveat. Neither reads anything back, because a readback here
+is a pipeline stall.
 
 **Particles are opaque.** There is no blend state anywhere in this engine yet:
 the geometry pass writes with replace, so a colour's alpha reaches the

@@ -40,6 +40,16 @@ local ParticleEmitter = particles.ParticleEmitter
 -- reservation is easy to see in the instance count.
 local POOL = 512
 
+-- An effect's name is unique across the process, so a spec registering a fresh
+-- effect per test mints one rather than repeating a literal. What a name means
+-- to a save is spec/effect_spec.lua's subject; here it only has to be distinct,
+-- and no test below asserts on the name it was given.
+local minted = 0
+local function effectName()
+    minted = minted + 1
+    return "specEffect" .. minted
+end
+
 describe("tecs.gfx.particles", function()
     local window, device, screen
 
@@ -120,6 +130,7 @@ describe("tecs.gfx.particles", function()
     local function stillBurst(options)
         options = options or {}
         return particles.effect({
+            name = effectName(),
             capacity = options.capacity or 64,
             schedule = {
                 rate = 0,
@@ -219,6 +230,7 @@ describe("tecs.gfx.particles", function()
     it("places particles where the emitter is", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
             initial = { lifetime = 10, speed = 0, size = SIZE * 0.3, color = "#ff0000" },
@@ -318,6 +330,7 @@ describe("tecs.gfx.particles", function()
     it("holds a paused emitter's field where it was", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
             initial = { lifetime = 0.2, speed = 0, size = SIZE * 2, color = "#ff0000" },
@@ -358,6 +371,7 @@ describe("tecs.gfx.particles", function()
         local function run(seed)
             local world, renderer = newScene(true)
             local effect = particles.effect({
+                name = effectName(),
                 capacity = 128,
                 schedule = { bursts = { { time = 0, count = 64 } } },
                 spawn = { shape = "disc", width = 20, direction = 0, spread = math.pi * 2 },
@@ -431,6 +445,7 @@ describe("tecs.gfx.particles", function()
     it("moves a particle along its launch velocity", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
             -- Straight down the positive X axis, which is to the right of the
@@ -461,6 +476,7 @@ describe("tecs.gfx.particles", function()
     -- mean guessing which pixels they reached.
     local function ringAt(rotation, outward, speed, direction)
         return particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
             spawn = {
@@ -522,6 +538,7 @@ describe("tecs.gfx.particles", function()
     -- fired. Which one moves with it is the whole difference between them.
     local function movingBurst(world, renderer, space)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { bursts = { { time = 0, count = 8 } } },
             spawn = { shape = "point", space = space },
@@ -636,16 +653,17 @@ describe("tecs.gfx.particles", function()
 
     it("refuses an effect field it cannot make sense of", function()
         assert.has_error(function()
-            particles.effect({ spawn = { shape = "trapezoid" } })
+            particles.effect({ name = effectName(), spawn = { shape = "trapezoid" } })
         end)
         assert.has_error(function()
-            particles.effect({ spawn = { space = "sideways" } })
+            particles.effect({ name = effectName(), spawn = { space = "sideways" } })
         end)
         assert.has_error(function()
-            particles.effect({ initial = { color = "#gg0000" } })
+            particles.effect({ name = effectName(), initial = { color = "#gg0000" } })
         end)
         assert.has_error(function()
             particles.effect({
+                name = effectName(),
                 schedule = {
                     bursts = {
                         { time = 0, count = 1 },
@@ -662,6 +680,7 @@ describe("tecs.gfx.particles", function()
     it("answers finished from the schedule and never from the GPU", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { duration = 0.1, bursts = { { time = 0, count = 4 } } },
             initial = { lifetime = 0.1, speed = 0, size = 4 },
@@ -682,6 +701,7 @@ describe("tecs.gfx.particles", function()
     it("never reports finished for a looping emitter that is playing", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { rate = 30, duration = 0.1, looping = true },
             initial = { lifetime = 0.1, speed = 0, size = 4 },
@@ -697,6 +717,7 @@ describe("tecs.gfx.particles", function()
     it("predicts a steady emitter's live count from its schedule", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 256,
             schedule = { rate = 60, looping = true },
             initial = { lifetime = 1.0, speed = 0, size = 4 },
@@ -719,6 +740,7 @@ describe("tecs.gfx.particles", function()
     it("counts nothing before an emitter's delay has passed", function()
         local world, renderer = newScene(true)
         local effect = particles.effect({
+            name = effectName(),
             capacity = 64,
             schedule = { rate = 60, delay = 100 },
             initial = { lifetime = 1.0, speed = 0, size = 4 },
@@ -822,6 +844,7 @@ describe("tecs.gfx.particles", function()
         -- is given eight. A CPU system drops the emission with no diagnostic,
         -- which is the failure mode this refuses to reproduce.
         local effect = particles.effect({
+            name = effectName(),
             capacity = 8,
             schedule = { rate = 60, looping = true },
             initial = { lifetime = 2.0 },
@@ -836,6 +859,7 @@ describe("tecs.gfx.particles", function()
         -- Accepted so an effect authored today draws correctly once there is a
         -- blended pass, and logged so nobody ships believing it does now.
         local effect = particles.effect({
+            name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
             render = { layer = 1, blend = "add" },
@@ -849,11 +873,51 @@ describe("tecs.gfx.particles", function()
         materials.install()
         local named = materials.names()[1]
         local effect = particles.effect({
+            name = effectName(),
             capacity = 8,
             initial = { lifetime = 1.0 },
             render = { layer = 1, material = named, materialParam = 0.25 },
         })
 
         assert.is_not_nil(effect)
+    end)
+
+    ---------------------------------------------------------------------------
+    -- What an effect is called
+    ---------------------------------------------------------------------------
+
+    it("refuses an effect with no name", function()
+        -- Required rather than optional, because an unnamed effect is one an
+        -- emitter cannot be saved on, and finding that out at save time is
+        -- finding it out too late to do anything about.
+        local ok, err = pcall(function()
+            particles.effect({ capacity = 8, initial = { lifetime = 1.0 } })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("needs a name", 1, true), tostring(err))
+    end)
+
+    it("refuses a second effect under a name already taken", function()
+        local taken = effectName()
+        particles.effect({ name = taken, capacity = 8, initial = { lifetime = 1.0 } })
+
+        local ok, err = pcall(function()
+            particles.effect({ name = taken, capacity = 8, initial = { lifetime = 1.0 } })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find(taken, 1, true), tostring(err))
+    end)
+
+    it("answers an effect by name and nil for one nothing has", function()
+        local name = effectName()
+        local effect = particles.effect({ name = name, capacity = 8, initial = { lifetime = 1.0 } })
+
+        assert.are.equal(effect, particles.find(name))
+        assert.are.equal(name, effect.name)
+        assert.is_nil(particles.find("specEffectNothing"))
+        assert.is_nil(particles.find(nil))
+
+        local names = particles.names()
+        assert.are.equal(name, names[effect.index])
     end)
 end)

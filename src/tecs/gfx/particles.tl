@@ -6,11 +6,17 @@
 --- expires. What crosses back is nothing at all.
 ---
 --- Three things share the work. An `Effect` is immutable data describing how
---- particles spawn and evolve, registered once and shared by every emitter
---- naming it. A `ParticleEmitter` component names an effect and carries
+--- particles spawn and evolve, registered once under a name and shared by every
+--- emitter naming it. A `ParticleEmitter` component names an effect and carries
 --- playback state and a few per-instance scales. A pool owns one run of the
 --- instance buffer, sub-allocates a contiguous slot range to each emitter, and
 --- records the three compute passes that fill it.
+---
+--- The name is what an effect is, and its position in the registry is only how
+--- this process reaches it. A snapshot therefore carries the name: an index
+--- means whichever effect the loading process happened to register in that
+--- place, and a plugin installed in a different order is enough to make it a
+--- different one with nothing said about it.
 ---
 --- Drawing is not new. A particle written into the instance buffer is an
 --- instance: the same sixteen floats, the same four bound floats, the same
@@ -377,6 +383,10 @@ end
 
 --- Everything an effect is.
 local record EffectOptions
+    --- What this effect is called. Required, and unique across the process:
+    --- it is what an emitter's snapshot names, so an effect without one could
+    --- not be saved and two under one name could not be told apart again.
+    name: string
     --- Live particles one emitter of this effect can hold. A steady-state
     --- emitter needs at least `rate * maxLifetime` of them or emissions are
     --- lost, which is checked and warned about here rather than discovered as
@@ -395,7 +405,13 @@ end
 
 --- A registered effect. Immutable, and shared by every emitter naming it.
 local record Effect
-    --- Index in the registry, counting from one.
+    --- What it is called, and the only thing about it that outlives the
+    --- process. Everything a save, a tool or a person identifies an effect by
+    --- is this.
+    name: string
+    --- Where its record sits in the assembled effect table, counting from one.
+    --- A position in registration order, so it means nothing outside the
+    --- process that assigned it and nothing stores one.
     index: integer
     --- Live particles one emitter of this effect holds.
     capacity: integer
@@ -419,9 +435,33 @@ local record Effect
     _colorGradientAt: integer
 end
 
---- Registered effects, and how many times the registry has changed.
+--- Registered effects by position, the same effects by name, and how many times
+--- the registry has changed.
+---
+--- Two views of one set rather than two sets. The array is what `assemble` lays
+--- out and what the shaders index; the map is how a name is resolved back, and
+--- an effect is in both or in neither.
 local registry: {Effect} = {}
+local byName: {string: Effect} = {}
 local revision = 0
+
+--- Every registered effect's name, in registration order.
+local function effectNames(): {string}
+    local names <const>: {string} = {}
+    for index = 1, #registry do names[index] = registry[index].name end
+    return names
+end
+
+--- The effect registered under `name`, or nil when nothing has that name.
+---
+--- The non-raising lookup, for a caller with somewhere better to put the
+--- refusal than an error raised from here. Restoring a `ParticleEmitter` is
+--- that caller: the name it holds is a fact about a file rather than about the
+--- call site, and the message it raises says so.
+local function findEffect(name: string): Effect
+    if name == nil then return nil end
+    return byName[name]
+end
 
 --- Fails with a message naming the field, since a bad number in a table of
 --- forty of them is otherwise reported against the whole call.
@@ -578,6 +618,21 @@ local blendNoted: {string: boolean} = {}
 local function newEffect(options: EffectOptions): Effect
     if options == nil then
         error("tecs: an effect needs options", 2)
+    end
+
+    -- Before any of the forty fields are worked out, so a nameless or a
+    -- duplicated effect is refused where it was written rather than after the
+    -- capacity warning has already been logged about it.
+    local name <const> = options.name
+    if name == nil or name == "" then
+        error("tecs: an effect needs a name; it is what a snapshot names it "
+            .. "by, and there is nothing else about an effect that survives "
+            .. "the process that registered it", 2)
+    end
+    if byName[name] ~= nil then
+        error(("tecs: an effect named '%s' is already registered; two under "
+            .. "one name cannot be told apart again by anything that saved "
+            .. "either"):format(name), 2)
     end
 
     local schedule <const> = options.schedule or {}
@@ -782,6 +837,7 @@ local function newEffect(options: EffectOptions): Effect
     end
 
     local effect <const>: Effect = {
+        name = name,
         index = #registry + 1,
         capacity = capacity,
         maxLifetime = maxLifetime,
@@ -797,8 +853,21 @@ local function newEffect(options: EffectOptions): Effect
         _colorGradientAt = colorGradientAt,
     }
     registry[effect.index] = effect
+    byName[name] = effect
     revision = revision + 1
     return effect
+end
+
+--- Forgets every registered effect.
+---
+--- For a spec that needs to register a set again, which is the only way to put
+--- a differently ordered registry in front of a snapshot from inside one
+--- process. Every handle already handed out goes stale with it: the indices
+--- start over, so an emitter still holding one reads another effect's record.
+local function resetEffects()
+    registry = {}
+    byName = {}
+    revision = revision + 1
 end
 
 --- The assembled effect buffer, and what it was assembled from.
@@ -1774,9 +1843,20 @@ local record particles
     --- The emitter component.
     ParticleEmitter: ParticleEmitter
 
-    --- Registers an effect. Immutable once registered, and shared by every
-    --- emitter naming it.
+    --- Registers an effect under `options.name`. Immutable once registered,
+    --- and shared by every emitter naming it. A name is required and a name
+    --- already taken is refused.
     effect: function(options: EffectOptions): Effect
+
+    --- The effect registered under `name`, or nil when nothing has that name.
+    find: function(name: string): Effect
+
+    --- Every registered effect's name, in registration order.
+    names: function(): {string}
+
+    --- Forgets every registered effect, so a spec can register a set again.
+    --- Every handle already handed out goes stale with it.
+    reset: function()
 
     --- Compiles keyframes into a curve over normalised age.
     curve: function(keys: {CurveKey}): Curve
@@ -1799,6 +1879,9 @@ particles.STATE_FLOATS = STATE_FLOATS
 particles.EFFECT = EFFECT
 particles.EMITTER = EMITTER
 particles.effect = newEffect
+particles.find = findEffect
+particles.names = effectNames
+particles.reset = resetEffects
 particles.curve = newCurve
 particles.gradient = newGradient
 particles.plugin = plugin
@@ -1832,21 +1915,38 @@ particles.ParticleEmitter = ecs.newComponent({
         -- a snapshot cannot reach, and what a restore rebuilds is the emitter.
         -- A burst effect nobody notices; an ambient one comes back empty and
         -- refills over a lifetime.
+        --
+        -- The effect crosses as its name, the way a Sprite carries its image
+        -- and an Animation its sheet. Its index is a position in registration
+        -- order, so a saved one names whichever effect the loading process put
+        -- there: one conditional registration or one plugin installed earlier
+        -- is enough to play a different effect and say nothing about it.
         return {
             state = item.state,
             seed = item.seed,
             rateScale = item.rateScale,
             sizeScale = item.sizeScale,
             timeScale = item.timeScale,
-            effect = item.effect ~= nil and item.effect.index or nil,
+            effect = item.effect ~= nil and item.effect.name or nil,
         }
     end,
     deserialize = function(_world: World, data: {string: any}): ParticleEmitter
-        local index <const> = data.effect as integer
-        local effect <const> = index ~= nil and registry[index] or nil
+        local name <const> = data.effect as string
+        if name == nil or name == "" then
+            error("loadSnapshot: snapshot holds a ParticleEmitter that names "
+                .. "no effect", 0)
+        end
+        -- Neither the first effect nor a dropped component. Both of those load
+        -- without a word and leave the scene playing something nobody asked
+        -- for, which is the failure the name is written to prevent; refusing
+        -- is the only answer here that is not a guess.
+        local effect <const> = findEffect(name)
         if effect == nil then
-            error("tecs: a restored ParticleEmitter names an effect this "
-                .. "process has not registered", 2)
+            local known <const> = effectNames()
+            error(("loadSnapshot: snapshot references particle effect '%s' "
+                .. "which this build does not have; found %s")
+                :format(name, #known > 0 and table.concat(known, ", ")
+                    or "none"), 0)
         end
         return particles.ParticleEmitter({
             effect = effect,

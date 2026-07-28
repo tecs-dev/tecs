@@ -74,6 +74,7 @@ local function spawnEmitters(world: tecs.World)
 
     local perEmitter <const> = math.floor(LIVE / EMITTERS)
     local effect <const> = particles.effect({
+        name = "benchSparks",
         capacity = perEmitter,
         overflow = "replace",
         schedule = { rate = perEmitter / LIFETIME, looping = true },
