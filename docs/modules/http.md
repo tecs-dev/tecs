@@ -3,7 +3,7 @@ description: "An HTTP client driven from a frame, where every request is a futur
 outline: deep
 ---
 
-# http
+# tecs.http
 
 `tecs.http` fetches things over HTTP and HTTPS without stopping the frame it was called from. Every request
 returns a [`Future`](/modules/Future), the loop pumps, and the answer arrives when it arrives.

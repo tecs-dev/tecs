@@ -88,8 +88,8 @@ export default defineConfig({
                 collapsed: false,
                 items: [
                     { text: "Getting started", link: "/getting-started" },
-                    { text: "The surface", link: "/modules/" },
-                    { text: "The CLI", link: "/cli/" },
+                    { text: "Modules", link: "/modules/" },
+                    { text: "Tecs CLI", link: "/cli/" },
                 ],
             },
             // Flat, alphabetical ignoring case, and spelled the way a game
@@ -105,7 +105,7 @@ export default defineConfig({
             // know which half a name belongs to and should not have to. The
             // order matches docs/modules/index.md and the home page exactly.
             {
-                text: "The surface",
+                text: "Modules",
                 collapsed: false,
                 items: [
                     { text: "Overview", link: "/modules/" },
@@ -131,6 +131,7 @@ export default defineConfig({
                     { text: "tecs.Gamepad", link: "/modules/Gamepad" },
                     { text: "tecs.getComponentById", link: "/ecs/components/" },
                     { text: "tecs.hash", link: "/modules/hash" },
+                    { text: "tecs.http", link: "/modules/http" },
                     { text: "tecs.Input", link: "/modules/Input" },
                     { text: "tecs.json", link: "/modules/json" },
                     { text: "tecs.layers", link: "/modules/layers" },

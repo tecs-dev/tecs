@@ -3,7 +3,7 @@ description: "The planned tecs command line tool: its command surface, what a pr
 outline: deep
 ---
 
-# The CLI
+# Tecs CLI
 
 ::: warning Not built yet
 The `tecs` command does not exist on this branch. This page records the shape it is planned to take so that

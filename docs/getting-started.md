@@ -27,7 +27,7 @@ pinned revisions from source, and `make check-package` is the gate on the differ
 
 ::: info There is no CLI yet
 The previous project shipped a `tecs` command that scaffolded, built and packaged games. It is planned here and
-not built. See [the CLI](/cli/).
+not built. See [Tecs CLI](/cli/).
 :::
 
 ## The surface

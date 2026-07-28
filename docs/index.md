@@ -13,7 +13,7 @@ hero:
       text: Get started
       link: /getting-started
     - theme: alt
-      text: The surface
+      text: Modules
       link: /modules/
     - theme: alt
       text: tecs.ecs
@@ -63,7 +63,7 @@ Create a game and run it:
 tecs new my-game && cd my-game && tecs run
 ```
 
-The command is not on this branch yet. [The CLI](/cli/) records the shape it is taking, and
+The command is not on this branch yet. [Tecs CLI](/cli/) records the shape it is taking, and
 [getting started](/getting-started) is how to build and run through `make` in the meantime.
 
 ## Entities are the interface
@@ -215,11 +215,11 @@ world:emit(0, DamageEvent, enemyId, 25)
 
 :::
 
-## The surface
+## Modules
 
 Everything a game reaches is a field on `require("tecs")`. Alphabetical, ignoring case, because that is how a
-name is looked up. The [surface page](/modules/) carries the same list, and
-[the generated one](/modules/surface) carries every signature behind it.
+name is looked up. [Modules](/modules/) carries the same list, and
+[every signature](/modules/surface) carries what is behind each one.
 
 <div class="surface-columns">
 
@@ -244,6 +244,7 @@ name is looked up. The [surface page](/modules/) carries the same list, and
 - [`tecs.Gamepad`](/modules/Gamepad) - identity, lifetime, metadata and outputs
 - [`tecs.getComponentById`](/ecs/components/) - the component a numeric id names
 - [`tecs.hash`](/modules/hash) - hashing
+- [`tecs.http`](/modules/http) - fetching over HTTP without stopping the frame
 - [`tecs.Input`](/modules/Input) - three tiers behind a layer stack
 - [`tecs.json`](/modules/json) - JSON, with the build's own copy of the C parser found
 - [`tecs.layers`](/modules/layers) - z-ordering and per-layer behaviour

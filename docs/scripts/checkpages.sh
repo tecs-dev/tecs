@@ -123,7 +123,9 @@ listOf() {
             }
         ' "$1"
         ;;
-    *) sed -n 's/^- \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' "$1" ;;
+    # Bullets and table rows both, since a page may list either way.
+    *) sed -n -e 's/^- \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' \
+              -e 's/^| \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' "$1" ;;
     esac
 }
 
