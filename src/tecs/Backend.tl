@@ -63,6 +63,35 @@ local QUAD_INDICES <const> = 6
 --- Threads per cull workgroup, matching the scan shaders' local size.
 local CULL_GROUP <const> = 256
 
+--- Which lane's rank the compaction reads out of a packed slot. `LANE_OPAQUE`
+--- and `LANE_BLEND` in `assets/shaders/include/cull.glsl` are the same two
+--- shifts, and the pair only works while they agree.
+local LANE_OPAQUE <const> = 0
+local LANE_BLEND <const> = 16
+
+--- Depth buckets the forward list is sorted into, and the same number as
+--- `BUCKETS` in `assets/shaders/instance.rank.comp.glsl`. It is also that
+--- shader's workgroup size, because a thread there owns a bucket, and the three
+--- only work while they agree.
+---
+--- What it costs is a uint per bucket per block of the forward list, and what
+--- it buys is the resolution the sort has: two blended instances whose depths
+--- differ by less than one part in this many draw in the order the compaction
+--- gave them, which is the order the depth test already resolves opaque
+--- geometry in.
+local BLEND_BUCKETS <const> = 256
+
+--- Instances the forward list holds, whatever the instance buffer holds.
+---
+--- A ceiling rather than a hint. The sort's counts table is a bucket per block
+--- of this, so a forward list as long as a four million instance world would be
+--- a table larger than the world and a scan nobody could afford. Blended
+--- content is a minority of a scene by construction, and past this the
+--- remainder is dropped rather than reported, for the reason `setLightData`
+--- drops a light: the alternative is a frame that raises over geometry nobody
+--- would have picked out of the image.
+local MAX_BLEND <const> = 65536
+
 --- Floats the animation frame table is sized for.
 ---
 --- A ceiling rather than a hint, for the reason the instance capacity is one:
@@ -145,10 +174,16 @@ local record Backend
     deferred: Deferred
     instances: Buffer
     pipeline: GraphicsPipeline
+    --- Draws the forward list over the composited image, with blending baked
+    --- in and the geometry pass's depth attached and not written.
+    blendPipeline: GraphicsPipeline
     sampler: Sampler
     --- Every image, one binding, so the scene is one draw.
     images: TextureArray
     capacity: integer
+    --- Instances the forward list holds, which is `MAX_BLEND` or the whole
+    --- buffer where that is smaller.
+    blendCapacity: integer
     --- Instances the last consumed packet left resident, which is what the
     --- cull is dispatched over and what the geometry pass tests before it
     --- records anything.
@@ -163,11 +198,40 @@ local record Backend
     _mark: ComputePipeline
     _scan: ComputePipeline
     _compact: ComputePipeline
+    --- The two passes that turn the compacted forward list into a sorted one.
+    _rank: ComputePipeline
+    _place: ComputePipeline
     _bounds: Buffer
+    --- A rank per lane per instance, packed into one word: the opaque lane in
+    --- the low half and the forward lane in the high half. One buffer rather
+    --- than two, because a rank is an offset within a workgroup of 256 and two
+    --- of them fit in the word the mark pass already writes.
     _slots: Buffer
     _blocks: Buffer
     _visible: Buffer
     _drawArgs: Buffer
+    --- Survivors of the forward lane per block, then the compacted list, then
+    --- its draw arguments. The same three the opaque lane has, and the
+    --- compaction that fills them is the same shader run against them.
+    _blendBlocks: Buffer
+    _blendVisible: Buffer
+    _blendArgs: Buffer
+    --- What the depth sort works in: a bucket and a within-bucket rank per
+    --- entry, a count per bucket per block, and the list the sort produces.
+    --- The last is what the forward draw walks; `_blendVisible` is what it was
+    --- built from and is never drawn.
+    _blendBucket: Buffer
+    _blendRank: Buffer
+    _blendCounts: Buffer
+    _blendSorted: Buffer
+    --- Blocks the forward list's own dispatches cover, which is its capacity
+    --- rather than the frame's count: every block of the counts table has to be
+    --- written every frame or the scan folds a stale one.
+    _blendGroups: integer
+    --- Whether the last packet said anything was blended. The whole forward
+    --- lane is skipped when nothing is, so a world that blends nothing pays for
+    --- this in one branch and one empty render pass.
+    _blending: boolean
     _indices: Buffer
     --- Frame tables every animated instance resolves against, and the revision
     --- the resident copy was uploaded from. Uploaded when it moves rather than
@@ -202,17 +266,32 @@ local record Backend
     --- has a new handle, and a list holding the old one binds freed memory.
     _geometryBuffers: {loader.CValue}
     _geometryTextures: {loader.CValue}
+    _forwardBuffers: {loader.CValue}
+    _forwardTextures: {loader.CValue}
     _markWrites: {loader.CValue}
     _markReads: {loader.CValue}
     _scanWrites: {loader.CValue}
     _compactWrites: {loader.CValue}
     _compactReads: {loader.CValue}
-    --- The three cull passes, begun again each frame rather than allocated
-    --- per frame; see `ComputePass.begin` for what that asks of a caller.
-    --- Nil until the first frame that culls anything.
+    _blendScanWrites: {loader.CValue}
+    _blendCompactWrites: {loader.CValue}
+    _blendCompactReads: {loader.CValue}
+    _rankWrites: {loader.CValue}
+    _rankReads: {loader.CValue}
+    _bucketScanWrites: {loader.CValue}
+    _placeWrites: {loader.CValue}
+    _placeReads: {loader.CValue}
+    --- The cull passes, begun again each frame rather than allocated per
+    --- frame; see `ComputePass.begin` for what that asks of a caller. Nil
+    --- until the first frame that culls anything.
     _markPass: ComputePass
     _scanPass: ComputePass
     _compactPass: ComputePass
+    _blendScanPass: ComputePass
+    _blendCompactPass: ComputePass
+    _rankPass: ComputePass
+    _bucketScanPass: ComputePass
+    _placePass: ComputePass
     _device: loader.CPtr
     _destroyed: boolean
 end
@@ -284,11 +363,40 @@ local function buildGeometry(self: Backend): GraphicsPipeline
     return pipeline
 end
 
+--- Builds the forward pipeline against the target the composite pass wrote.
+---
+--- The same vertex shader the G-buffer pass uses, because a blended instance is
+--- placed exactly as an opaque one is and only its shading and its blend
+--- differ. What differs here is one colour target instead of two, straight
+--- alpha instead of replace, and depth tested but not written.
+local function buildForward(self: Backend): GraphicsPipeline
+    local device <const> = self._device
+    local vertex = Shader.load(device, "instance.vert", {})
+    local fragment = Shader.load(device, "instance.forward.frag", {})
+    local pipeline = GraphicsPipeline.create(
+        device,
+        {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormat = self.deferred:forwardFormat(),
+            depth = self.deferred:forwardDepth(),
+            blend = true,
+            name = "ecs.forward",
+        }
+    )
+    vertex:destroy()
+    fragment:destroy()
+    return pipeline
+end
+
 --- Builds a backend for `device`.
 function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: BackendOptions): Backend
     local self = setmetatable({} as Backend, BackendMT)
     self._device = device
     self.capacity = options.capacity
+    self.blendCapacity = math.min(self.capacity, MAX_BLEND)
+    self._blendGroups = math.ceil(self.blendCapacity / CULL_GROUP)
+    self._blending = false
     self.count = 0
     self._destroyed = false
 
@@ -370,6 +478,69 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
             size = 32,
         }
     )
+
+    -- The forward lane. Its per-block counts are as long as the world's,
+    -- because the lane it counts is scanned over every instance; everything
+    -- after the compaction is as long as the list itself.
+    self._blendBlocks = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = math.ceil(self.capacity / CULL_GROUP) * 4,
+            name = "tecs.blendBlocks",
+        }
+    )
+    self._blendVisible = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = self.blendCapacity * 4,
+            name = "tecs.blendVisible",
+        }
+    )
+    self._blendArgs = Buffer.create(
+        device,
+        {
+            -- Read as well as written by compute, since the two passes after
+            -- the scan read the count it wrote rather than being told it: the
+            -- CPU never learns how many survived.
+            usage = {"indirect", "computeRead", "computeWrite"},
+            size = 32,
+            name = "tecs.blendArgs",
+        }
+    )
+    self._blendBucket = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = self.blendCapacity * 4,
+            name = "tecs.blendBuckets",
+        }
+    )
+    self._blendRank = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = self.blendCapacity * 4,
+            name = "tecs.blendRanks",
+        }
+    )
+    self._blendCounts = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = BLEND_BUCKETS * self._blendGroups * 4,
+            name = "tecs.blendCounts",
+        }
+    )
+    self._blendSorted = Buffer.create(
+        device,
+        {
+            usage = {"storage", "computeWrite"},
+            size = self.blendCapacity * 4,
+            name = "tecs.blendSorted",
+        }
+    )
     self._playbacks = Buffer.create(
         device,
         {
@@ -393,6 +564,10 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
         args[slot] = 0
     end
     self._drawArgs:upload(args, 32)
+    -- The forward draw's arguments start the same way, and matter before the
+    -- first frame fills them: the pass runs whether or not the lane does, so
+    -- an instance count of zero is what it has to find there.
+    self._blendArgs:upload(args, 32)
 
     -- Two triangles over four corners, uploaded once and never touched again.
     self._indices = Buffer.create(
@@ -430,16 +605,34 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
     self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
     self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
+    self._rank = ComputePipeline.load(device, "instance.rank.comp", {})
+    self._place = ComputePipeline.load(device, "instance.place.comp", {})
 
     -- Seeded with what the buffers hold now, which gives each list its length,
     -- and rewritten wherever it is used.
     self._geometryBuffers = {self.instances.handle, self._visible.handle, self._playbacks.handle}
     self._geometryTextures = {self.images.handle}
-    self._markWrites = {self._slots.handle, self._blocks.handle}
+    self._forwardBuffers = {self.instances.handle, self._blendSorted.handle, self._playbacks.handle}
+    self._forwardTextures = {self.images.handle}
+    self._markWrites = {self._slots.handle, self._blocks.handle, self._blendBlocks.handle}
     self._markReads = {self._bounds.handle}
     self._scanWrites = {self._blocks.handle, self._drawArgs.handle}
     self._compactWrites = {self._visible.handle}
     self._compactReads = {self._slots.handle, self._blocks.handle}
+    self._blendScanWrites = {self._blendBlocks.handle, self._blendArgs.handle}
+    self._blendCompactWrites = {self._blendVisible.handle}
+    self._blendCompactReads = {self._slots.handle, self._blendBlocks.handle}
+    self._rankWrites = {self._blendBucket.handle, self._blendRank.handle, self._blendCounts.handle}
+    self._rankReads = {self.instances.handle, self._blendVisible.handle, self._blendArgs.handle}
+    self._bucketScanWrites = {self._blendCounts.handle, self._blendArgs.handle}
+    self._placeWrites = {self._blendSorted.handle}
+    self._placeReads = {
+        self._blendVisible.handle,
+        self._blendBucket.handle,
+        self._blendRank.handle,
+        self._blendCounts.handle,
+        self._blendArgs.handle,
+    }
 
     self.deferred = Deferred.create(
         device,
@@ -471,10 +664,41 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
                 -- cull rather than by anything here.
                 context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
             end,
+            forward = function(context: Deferred.PassContext)
+                -- Nothing blended means nothing sorted, and the sorted list
+                -- still holds whatever the last frame that did blend left in
+                -- it. The draw arguments would too, so the gate is here rather
+                -- than left to an instance count that is not this frame's.
+                if self.count == 0 or not self._blending then
+                    return
+                end
+                context.pass:bindPipeline(self.blendPipeline.handle)
+
+                context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
+                context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
+                context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
+                -- The lights, and the scene block the resolve was given, so a
+                -- blended fragment is lit by the same description of the frame
+                -- as the opaque one behind it.
+                self.deferred:bindLighting(context)
+
+                local buffers <const> = self._forwardBuffers
+                buffers[1] = self.instances.handle
+                buffers[2] = self._blendSorted.handle
+                buffers[3] = self._playbacks.handle
+                context.pass:bindVertexStorageBuffers(0, buffers)
+
+                local textures <const> = self._forwardTextures
+                textures[1] = self.images.handle
+                context.pass:bindTextures(0, textures, self.sampler.handle)
+                context.pass:bindIndexBuffer(self._indices.handle)
+                context.pass:drawIndexedIndirect(self._blendArgs.handle, 0, 1)
+            end,
         }
     )
 
     self.pipeline = buildGeometry(self)
+    self.blendPipeline = buildForward(self)
 
     return self
 end
@@ -543,18 +767,27 @@ function Backend:rebuildPipelines()
     C.SDL_WaitForGPUIdle(device)
 
     local pipeline: GraphicsPipeline = nil
+    local blend: GraphicsPipeline = nil
     local mark: ComputePipeline = nil
     local scan: ComputePipeline = nil
     local compact: ComputePipeline = nil
+    local rank: ComputePipeline = nil
+    local place: ComputePipeline = nil
     local built, reason = pcall(function(): string
         pipeline = buildGeometry(self)
+        blend = buildForward(self)
         mark = ComputePipeline.load(device, "instance.mark.comp", {})
         scan = ComputePipeline.load(device, "instance.scan.comp", {})
         compact = ComputePipeline.load(device, "instance.compact.comp", {})
+        rank = ComputePipeline.load(device, "instance.rank.comp", {})
+        place = ComputePipeline.load(device, "instance.place.comp", {})
     end)
     if not built then
         if pipeline ~= nil then
             pipeline:destroy()
+        end
+        if blend ~= nil then
+            blend:destroy()
         end
         if mark ~= nil then
             mark:destroy()
@@ -565,21 +798,36 @@ function Backend:rebuildPipelines()
         if compact ~= nil then
             compact:destroy()
         end
+        if rank ~= nil then
+            rank:destroy()
+        end
+        if place ~= nil then
+            place:destroy()
+        end
         error(reason, 0)
     end
 
     local oldPipeline <const> = self.pipeline
+    local oldBlend <const> = self.blendPipeline
     local oldMark <const> = self._mark
     local oldScan <const> = self._scan
     local oldCompact <const> = self._compact
+    local oldRank <const> = self._rank
+    local oldPlace <const> = self._place
     self.pipeline = pipeline
+    self.blendPipeline = blend
     self._mark = mark
     self._scan = scan
     self._compact = compact
+    self._rank = rank
+    self._place = place
     oldPipeline:destroy()
+    oldBlend:destroy()
     oldMark:destroy()
     oldScan:destroy()
     oldCompact:destroy()
+    oldRank:destroy()
+    oldPlace:destroy()
 
     -- Last, because a failure above must leave the lighting and composite
     -- pipelines alone as well: half a reload is harder to reason about than
@@ -638,6 +886,113 @@ function Backend:clearClipRegion(index: integer)
     data[base + 1] = -CLIP_UNBOUNDED
     data[base + 2] = CLIP_UNBOUNDED
     data[base + 3] = CLIP_UNBOUNDED
+end
+
+--- Compacts the forward lane and sorts it back to front.
+---
+--- Five dispatches after the opaque lane's three, and every one of them is
+--- about order. The first two are the same compaction the opaque lane just ran,
+--- against the other half of the slots the mark pass packed, which produces the
+--- blended survivors in instance order: deterministic, and no use, because
+--- instance order is where extraction put a row rather than where the scene put
+--- it. The last three are the counting sort that turns that into depth order,
+--- which is what blending needs and what the depth attachment cannot supply for
+--- geometry that does not write it.
+---
+--- The sort works over the compacted list rather than over the world, which is
+--- the whole reason it is affordable: its counts table is a bucket per block,
+--- and a block per 256 instances of a four million instance world would be a
+--- table larger than the list it describes.
+--- @param groups Workgroups covering every resident instance, as the opaque
+---     lane's dispatches used.
+--- @param cull The uniform both lanes are pushed from, rewritten here.
+local function sortForward(self: Backend, frame: Frame, groups: integer, cull: loader.CArray)
+    local commandBuffer <const> = frame.commandBuffer
+    local blendGroups <const> = self._blendGroups
+
+    -- The forward list's own ceiling from here on, so the scan bounds the draw
+    -- to what the compaction can place.
+    cull[6] = self.blendCapacity
+
+    local scanWrites <const> = self._blendScanWrites
+    scanWrites[1] = self._blendBlocks.handle
+    scanWrites[2] = self._blendArgs.handle
+
+    local scan = ComputePass.begin(commandBuffer, scanWrites, self._blendScanPass)
+    self._blendScanPass = scan
+    scan:bindPipeline(self._scan.handle)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    scan:dispatch(1)
+    scan:finish()
+
+    cull[7] = LANE_BLEND
+    local compactWrites <const> = self._blendCompactWrites
+    compactWrites[1] = self._blendVisible.handle
+    local compactReads <const> = self._blendCompactReads
+    compactReads[1] = self._slots.handle
+    compactReads[2] = self._blendBlocks.handle
+
+    local compact = ComputePass.begin(commandBuffer, compactWrites, self._blendCompactPass)
+    self._blendCompactPass = compact
+    compact:bindPipeline(self._compact.handle)
+    compact:bindStorageBuffers(0, compactReads)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    compact:dispatch(groups)
+    compact:finish()
+
+    -- The sort is laid out against the forward list's blocks rather than the
+    -- world's, and covers all of them however few survived: the scan below
+    -- folds every entry of the counts table, so every one has to have been
+    -- written this frame.
+    cull[5] = blendGroups
+    local rankWrites <const> = self._rankWrites
+    rankWrites[1] = self._blendBucket.handle
+    rankWrites[2] = self._blendRank.handle
+    rankWrites[3] = self._blendCounts.handle
+    local rankReads <const> = self._rankReads
+    rankReads[1] = self.instances.handle
+    rankReads[2] = self._blendVisible.handle
+    rankReads[3] = self._blendArgs.handle
+
+    local rank = ComputePass.begin(commandBuffer, rankWrites, self._rankPass)
+    self._rankPass = rank
+    rank:bindPipeline(self._rank.handle)
+    rank:bindStorageBuffers(0, rankReads)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    rank:dispatch(blendGroups)
+    rank:finish()
+
+    -- Bucket major, so folding the whole table puts every block of a farther
+    -- bucket ahead of the first block of a nearer one.
+    cull[5] = BLEND_BUCKETS * blendGroups
+    local bucketWrites <const> = self._bucketScanWrites
+    bucketWrites[1] = self._blendCounts.handle
+    bucketWrites[2] = self._blendArgs.handle
+
+    local buckets = ComputePass.begin(commandBuffer, bucketWrites, self._bucketScanPass)
+    self._bucketScanPass = buckets
+    buckets:bindPipeline(self._scan.handle)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    buckets:dispatch(1)
+    buckets:finish()
+
+    cull[5] = blendGroups
+    local placeWrites <const> = self._placeWrites
+    placeWrites[1] = self._blendSorted.handle
+    local placeReads <const> = self._placeReads
+    placeReads[1] = self._blendVisible.handle
+    placeReads[2] = self._blendBucket.handle
+    placeReads[3] = self._blendRank.handle
+    placeReads[4] = self._blendCounts.handle
+    placeReads[5] = self._blendArgs.handle
+
+    local place = ComputePass.begin(commandBuffer, placeWrites, self._placePass)
+    self._placePass = place
+    place:bindPipeline(self._place.handle)
+    place:bindStorageBuffers(0, placeReads)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    place:dispatch(blendGroups)
+    place:finish()
 end
 
 --- Uploads what a packet describes, culls, and runs the pipeline.
@@ -703,23 +1058,33 @@ function Backend:consume(packet: FramePacket, frame: Frame)
     self.deferred:setView(view.x, view.y, view.zoom, view.rotation)
     self.deferred:setLightData(packet.lights, packet.lightCount)
 
+    -- Nothing routes into the forward lane unless extraction said something is
+    -- blended, and the whole lane is skipped when nothing is: five compute
+    -- passes and a draw are not a cost a world that blends nothing should pay
+    -- to find out it has nothing to blend.
+    self._blending = packet.blendCount > 0
+
     if self.count > 0 then
         local groups = math.ceil(self.count / CULL_GROUP)
         local bounds = view:viewBounds(frame.width, frame.height)
-        self._cullUniform[0] = bounds[1]
-        self._cullUniform[1] = bounds[2]
-        self._cullUniform[2] = bounds[3]
-        self._cullUniform[3] = bounds[4]
-        self._cullUniform[4] = self.count
-        self._cullUniform[5] = groups
+        local cull <const> = self._cullUniform
+        cull[0] = bounds[1]
+        cull[1] = bounds[2]
+        cull[2] = bounds[3]
+        cull[3] = bounds[4]
+        cull[4] = self.count
+        cull[5] = groups
+        cull[6] = self.capacity
+        cull[7] = LANE_OPAQUE
 
         -- Mark, scan, compact. Each pass reads what the one before it wrote,
-        -- and SDL orders them because each declares what it writes. The five
-        -- buffer lists are the backend's own, rewritten here because a buffer
-        -- that grew since the last frame has a new handle.
+        -- and SDL orders them because each declares what it writes. The buffer
+        -- lists are the backend's own, rewritten here because a buffer that
+        -- grew since the last frame has a new handle.
         local markWrites <const> = self._markWrites
         markWrites[1] = self._slots.handle
         markWrites[2] = self._blocks.handle
+        markWrites[3] = self._blendBlocks.handle
         local markReads <const> = self._markReads
         markReads[1] = self._bounds.handle
 
@@ -727,7 +1092,7 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._markPass = mark
         mark:bindPipeline(self._mark.handle)
         mark:bindStorageBuffers(0, markReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, self._cullUniform, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, 32)
         mark:dispatch(groups)
         mark:finish()
 
@@ -738,7 +1103,7 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         local scan = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
         self._scanPass = scan
         scan:bindPipeline(self._scan.handle)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, self._cullUniform, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, 32)
         scan:dispatch(1)
         scan:finish()
 
@@ -752,9 +1117,13 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._compactPass = compact
         compact:bindPipeline(self._compact.handle)
         compact:bindStorageBuffers(0, compactReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, self._cullUniform, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, 32)
         compact:dispatch(groups)
         compact:finish()
+
+        if self._blending then
+            sortForward(self, frame, groups, cull)
+        end
     end
 
     self.deferred:render(frame)
@@ -785,6 +1154,7 @@ function Backend:destroy()
         stages[index]:destroy()
     end
     self.pipeline:destroy()
+    self.blendPipeline:destroy()
     self.deferred:destroy()
     self.instances:destroy()
     self.sampler:destroy()
@@ -794,11 +1164,20 @@ function Backend:destroy()
     self._blocks:destroy()
     self._visible:destroy()
     self._drawArgs:destroy()
+    self._blendBlocks:destroy()
+    self._blendVisible:destroy()
+    self._blendArgs:destroy()
+    self._blendBucket:destroy()
+    self._blendRank:destroy()
+    self._blendCounts:destroy()
+    self._blendSorted:destroy()
     self._indices:destroy()
     self._playbacks:destroy()
     self._mark:destroy()
     self._scan:destroy()
     self._compact:destroy()
+    self._rank:destroy()
+    self._place:destroy()
 end
 
 return Backend

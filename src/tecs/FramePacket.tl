@@ -36,6 +36,22 @@ local record FramePacket
     --- Instances the extraction actually rewrote. Zero on a still frame.
     rewritten: integer
 
+    --- Resident instances extraction routed to the forward pass.
+    ---
+    --- A number rather than a flag because it is the same walk that produces
+    --- `count`, and a count says how close a scene is to the ceiling the
+    --- forward list has while a flag says nothing. What the backend does with
+    --- it is decide whether to run the forward lane at all: sorting an empty
+    --- list costs five compute passes to discover it is empty, and a world that
+    --- blends nothing should not pay them.
+    ---
+    --- Which instances those are is not carried here. Extraction says so per
+    --- row, by writing the first of the two half extents in the cull bound
+    --- negated, and the mark pass reads the sign; see
+    --- `assets/shaders/include/cull.glsl`. This number and that sign come from
+    --- one test and are wrong together or right together.
+    blendCount: integer
+
     --- Where the view was when the frame was extracted, copied rather than
     --- referenced: the camera the game holds keeps moving, and a frame is
     --- drawn from where it was when it was built.
@@ -77,6 +93,7 @@ function FramePacket.create(): FramePacket
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
+    self.blendCount = 0
     self.cameraX = 0.0
     self.cameraY = 0.0
     self.cameraZoom = 1.0

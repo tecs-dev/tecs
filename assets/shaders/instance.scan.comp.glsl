@@ -9,7 +9,12 @@ layout(local_size_x = 256) in;
 
 layout(set = 1, binding = 0) buffer Counts { uint count[]; } counts;
 layout(set = 1, binding = 1) buffer DrawArgs { uint value[]; } args;
-layout(set = 2, binding = 0) uniform Cull { vec4 view; vec4 params; } cull;
+layout(set = 2, binding = 0) uniform Cull {
+    vec4 view;
+    // y is what this pass reads: how many counts there are to fold. z is the
+    // destination list's capacity, which bounds the draw below.
+    vec4 params;
+} cull;
 
 shared uint partial[256];
 
@@ -42,7 +47,12 @@ void main() {
     }
 
     if (t == 255u) {
-        // The draw's instance count, which the CPU never reads back.
-        args.value[1] = partial[255];
+        // The draw's instance count, which the CPU never reads back. Held to
+        // the destination list's capacity, because the compaction drops what
+        // it cannot place and a draw longer than the list would walk past the
+        // end of it. The opaque list is as long as the instance buffer, so the
+        // ceiling only ever binds on the forward lane, which is deliberately
+        // shorter than the world.
+        args.value[1] = min(partial[255], uint(cull.params.z));
     }
 }

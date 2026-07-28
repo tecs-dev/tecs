@@ -106,18 +106,37 @@ moves. Adding the component is all that is needed; the physics plugin adds it to
 
 ## Tint
 
-Base colour written into the G-buffer's albedo target.
+Base colour, and how much of what is behind the entity survives it.
 
-| Field | Type    | Default | Description    |
-| ----- | ------- | ------- | -------------- |
-| `r`   | `float` | `1`     | Red, 0 to 1.   |
-| `g`   | `float` | `1`     | Green, 0 to 1. |
-| `b`   | `float` | `1`     | Blue, 0 to 1.  |
-| `a`   | `float` | `1`     | Alpha, 0 to 1. |
+| Field | Type    | Default | Description                                 |
+| ----- | ------- | ------- | ------------------------------------------- |
+| `r`   | `float` | `1`     | Red, 0 to 1.                                |
+| `g`   | `float` | `1`     | Green, 0 to 1.                              |
+| `b`   | `float` | `1`     | Blue, 0 to 1.                               |
+| `a`   | `float` | `1`     | Alpha, 0 to 1. At one the entity is opaque. |
 
 **Required for drawing.** The extractor's renderable query is `Transform`, `Tint` and `Renderable` together, so
 an entity missing a `Tint` is not extracted at all. It is also what the sequencer's built-in `color.a` and
 `color.rgba` tween targets write; see [sequence](/modules/sequence#targets).
+
+The alpha is what decides which pass draws the entity. At exactly one it is opaque and goes through the
+G-buffer, where lighting resolves it once for the whole scene however many things overlap. Below one it goes
+through the forward pass instead, which runs after the frame has been composited, blends straight alpha over it,
+and lights itself out of the same lights and the same ambient the resolve used, so the only thing that changes as
+alpha crosses one is how much of the fragment lands.
+
+What crossing one gives up is the G-buffer. A blended entity writes no depth, so it hides nothing behind it and
+nothing that reads a normal or an emission later can see it; blended entities are sorted back to front against
+each other, and against opaque geometry the depth the G-buffer already holds decides. The forward list is shorter
+than the instance buffer, so a scene with more than 65,536 blended entities visible at once draws the ones
+earliest in the buffer and drops the rest. An entity meant to be solid should say so with an alpha of exactly one.
+
+::: warning Not yet reachable from a world
+The renderer half of this is in: the pass, the pipeline, the sort and the lane are built and covered by
+`spec/blend_spec.lua`. What routes a row into the forward lane is extraction writing the cull bound's first half
+extent negated, and extraction does not do that yet, so today an alpha below one is carried into the instance and
+still drawn opaque. This note goes when `src/tecs/Extractor.tl` marks the row.
+:::
 
 ## Sprite
 

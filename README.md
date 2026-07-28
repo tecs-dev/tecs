@@ -2187,13 +2187,12 @@ bit, and is not a target the graph owns, so nothing can read it and nothing can
 follow it. `scene` is what buys the gap: a graph target like any other, frame
 sized, sampled, and readable between frames.
 
-Everything declared between the two sees it. A forward pass drawing blended
-geometry over the composited image, with depth loaded from the geometry pass so
-it sorts against what the G-buffer kept. A post-process reading `scene` and
-writing it back, or reading it and writing a target of its own that a later pass
-folds in. A second view compositing into a rectangle of the same `scene`. None
-of those exist yet and all of them were going to need the same thing, so it is
-one target and one pass rather than several arrangements that unpick each other.
+Everything declared between the two sees it. The forward pass below is the first
+and drew the shape the rest take. A post-process reading `scene` and writing it
+back, or reading it and writing a target of its own that a later pass folds in.
+A second view compositing into a rectangle of the same `scene`. Those two do not
+exist yet and all three were going to need the same thing, so it is one target
+and one pass rather than several arrangements that unpick each other.
 
 `scene` declares no clear, so every pass that writes it loads what is already
 there and each adds to the last. Composite is what makes that defined: it covers
@@ -2207,6 +2206,73 @@ the image that was presented rather than the image before whatever the seam
 holds. What the seam costs is one RGBA8 target at frame size, about 8 MB at
 1080p, one more render pass, and one more fullscreen triangle sampling a texture
 the size of the screen.
+
+### Alpha is what says a thing is blended
+
+A deferred G-buffer has nowhere to put partial coverage. It is written with
+replace, so a fragment at half alpha would overwrite what is behind it rather
+than let any of it through, and a `Tint` alpha below one therefore did nothing
+at all. That is a broken value rather than a missing feature, and the forward
+pass is what fixes it: an entity whose alpha is below one skips the G-buffer and
+is drawn over the composited image with straight alpha instead.
+
+The alpha itself is the mark, rather than a `Blend` component or a per-layer
+flag. A component would make a fade into a structural change per entity per
+frame, which is the most expensive thing this ECS does, and it would let two
+answers to "how transparent is this" disagree. A layer flag would make the
+decision per layer when it is plainly per entity. The alpha is a float already
+being written into the instance, and reading it is free.
+
+Free at the instance, and not at the cull. The mark pass reads a sixteen byte
+cull bound for every instance in the world every frame, drawn or not, and
+reaching into the instance for one float would be a sixty-four byte gather
+against exactly the traffic that split is there to avoid. So the lane travels in
+the bound: a half extent is a length, its sign carries nothing, and extraction
+negates the first of the two for a blended row. The cull takes the magnitude for
+the view test and the sign for the lane.
+
+The forward pass lights itself, which is what makes the alpha a pure coverage
+knob. An unlit overlay would have been smaller, and would have meant an entity
+fading from one to a half popping from lit to unlit on the frame it crossed. It
+runs the same material dispatch and the same light loop the resolve runs, out of
+the same scene block, so the only thing that changes as alpha crosses one is how
+much of the fragment lands. What it gives up is the G-buffer: blended content
+writes no depth, hides nothing behind it, and is invisible to anything that
+reads a normal or an emission later.
+
+### Blending is ordered, and ordering is a second lane
+
+Blending does not commute, so a forward pass has to draw back to front, and the
+compaction that produces its list is ordered by instance index, which is where
+extraction put a row rather than where the scene put it. Depth resolves blended
+geometry against the G-buffer and cannot resolve it against itself, because
+nothing here writes depth.
+
+So the order is established by a counting sort on the depth the extractor
+already computed, for the same reason the compaction is a scan rather than an
+atomic append: a counting sort is stable, so the same scene comes out in the
+same order every frame. It runs in two stages. The mark pass scans two lanes in
+one dispatch over the one bound read it already pays for, packing a rank per
+lane into the word it already writes; the opaque lane compacts as it always did
+and the forward lane compacts beside it. Then the forward list, and only the
+forward list, is bucketed by depth, its buckets scanned, and its entries placed.
+
+Two stages rather than one because the counts a bucketed scan needs are a uint
+per bucket per block, and a block per 256 instances of a four million instance
+world would be a table larger than the world. Over a list that has already been
+compacted the same table is a quarter of a megabyte. That is what fixes the
+forward list's ceiling at 65,536 instances: past it the entries earliest in the
+buffer are drawn and the rest are dropped, which is the same answer
+`setLightData` gives a light beyond the light buffer.
+
+What it costs is five compute passes and a draw on a frame that blends
+something, and one branch and one empty render pass on a frame that does not:
+the packet says how many rows extraction routed forward, and the whole lane is
+skipped at zero. What it gives up is resolution. There are 256 buckets, so two
+blended instances whose depths differ by less than one part in 256 draw in the
+order the compaction gave them, which is the order the depth test already
+resolves opaque geometry in. Raising the count is a constant and a larger counts
+table, not a design change.
 
 ### Lights are in the world
 

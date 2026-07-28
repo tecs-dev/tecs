@@ -48,7 +48,27 @@ ecs.newFFIComponent({
     defaults = {0, 0, 0},
 })
 
---- Base colour written into the G-buffer's albedo target.
+--- Base colour, and how much of what is behind the entity survives it.
+---
+--- The alpha is what decides which pass draws the entity. At one the entity is
+--- opaque and goes through the G-buffer, where lighting resolves it once for
+--- the whole scene however many things overlap. Below one it goes through the
+--- forward pass instead, which runs after the frame has been composited, blends
+--- straight alpha over it, and lights itself.
+---
+--- A value rather than a component, because a fade is the thing this is for and
+--- a fade through a component would be a structural change per entity per
+--- frame: adding and removing a tag moves a row between archetypes, which is
+--- the most expensive thing here, while an alpha crossing one is a float
+--- already being written. It also keeps the two answers to "how transparent is
+--- this" from being able to disagree.
+---
+--- What crossing one costs is what the forward pass cannot do. A blended
+--- entity writes no depth, so it hides nothing behind it and nothing reading
+--- the G-buffer can see it, and the forward list is shorter than the instance
+--- buffer, so a scene with more blended entities than it holds draws the ones
+--- earliest in the buffer and drops the rest. An entity meant to be solid
+--- should say so with an alpha of exactly one.
 local record Tint is Component
     r: number
     g: number

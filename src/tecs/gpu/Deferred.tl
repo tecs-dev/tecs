@@ -1,9 +1,10 @@
 --- The standard deferred pipeline, assembled on a PassGraph.
 ---
---- Four passes: geometry fills a G-buffer, lighting resolves it against a
+--- Five passes: geometry fills a G-buffer, lighting resolves it against a
 --- buffer of lights, composite turns that into the frame's image in the
---- `scene` target, and present copies `scene` to the swapchain. Geometry is a
---- callback because what to draw is the caller's problem; everything else is
+--- `scene` target, forward blends what the G-buffer could not hold over that
+--- image, and present copies `scene` to the swapchain. Geometry and forward are
+--- callbacks because what to draw is the caller's problem; everything else is
 --- the engine's opinion and is built in.
 ---
 --- Composite and present are two passes rather than one because a pass writing
@@ -12,11 +13,9 @@
 --- not a target the graph owns, so nothing can read it and nothing can follow
 --- it. `scene` is the seam that buys the gap. It is a graph target like any
 --- other, frame sized, sampled, and readable between frames, and everything
---- declared between composite and present sees it:
+--- declared between composite and present sees it. `forward` is the first such
+--- pass and the shape the rest take:
 ---
---- * A forward pass drawing blended geometry over the composited image, with
----   depth from `depthOf("geometry")` so it sorts against what the G-buffer
----   kept.
 --- * A post-process reading `scene` and writing it back, or reading it and
 ---   writing a target of its own that a later pass folds in.
 --- * A second view compositing into a rectangle of the same `scene`.
@@ -33,7 +32,10 @@
 --- once per pixel regardless of how many objects overlap it.
 ---
 --- Geometry owns the depth attachment, testing and writing, so wherever two
---- instances overlap the nearer one is what the G-buffer keeps. The three
+--- instances overlap the nearer one is what the G-buffer keeps. Forward tests
+--- against the same attachment and writes none of it, which is what puts
+--- blended geometry behind the opaque geometry in front of it and leaves it
+--- unable to hide another blended fragment from the blend. The three
 --- fullscreen passes have none: each covers every pixel exactly once and has
 --- nothing to be occluded by, so an attachment there would be state to keep in
 --- step for no result.
@@ -111,6 +113,14 @@ local record DeferredOptions
     --- half is lit. Geometry that writes a normal and leaves that alpha at
     --- zero is drawn unlit, which reads as lighting doing nothing.
     geometry: function(context: PassGraph.PassContext)
+    --- Draws blended geometry over the composited image, back to front.
+    ---
+    --- Runs with the geometry pass's depth attached and not written, and with
+    --- the lights already bound: call `bindLighting` after binding a pipeline
+    --- and the fragment stage has what it needs to shade itself. A pipeline
+    --- drawn here is built against `forwardFormat` and `forwardDepth` with
+    --- blending on, and nothing here writes the G-buffer.
+    forward: function(context: PassGraph.PassContext)
     --- Ambient colour, added to every lit fragment before any light is.
     --- Defaults to a dim neutral. A fragment that asked not to be lit does not
     --- receive it, and neither does a pixel nothing drew over.
@@ -123,7 +133,7 @@ local record Deferred
     --- What a geometry callback receives. Re-exported so callers need not
     --- reach into PassGraph for it.
     PassContext: PassGraph.PassContext
-    --- The four passes, so a caller can add its own targets and passes around
+    --- The five passes, so a caller can add its own targets and passes around
     --- them or ask what a pass was built with.
     graph: PassGraph
     --- Lights the lighting pass reads. Set by `setLights` and kept until it is
@@ -153,6 +163,10 @@ local record Deferred
     _binWrites: {loader.CValue}
     _binReads: {loader.CValue}
     _lightingBuffers: {loader.CValue}
+    --- The same three, for the forward pass's fragment stage. A second list
+    --- rather than the same one, because both are rewritten at every use and
+    --- sharing would mean the order of two passes decided what either bound.
+    _forwardBuffers: {loader.CValue}
     --- The binning pass, begun again each frame rather than allocated per
     --- frame; see `ComputePass.begin` for what that asks of a caller.
     _binPass: ComputePass
@@ -215,6 +229,39 @@ local function buildPipeline(device: loader.CPtr, fragmentName: string, format: 
     vertex:destroy()
     fragment:destroy()
     return pipeline
+end
+
+--- Fills the block a pass shading against the lights reads the scene from.
+---
+--- One description of the scene for both passes that shade. The resolve and
+--- the forward pass have to agree about where the camera is and which
+--- rectangle the tile grid covers, because a fragment that looked a tile up
+--- against a different rectangle than the binning dispatch filled reads a list
+--- nothing wrote.
+local function sceneUniform(self: Deferred, width: number, height: number): loader.CArray
+    local scene <const> = self._sceneUniform
+    scene[0] = self.ambient[1]
+    scene[1] = self.ambient[2]
+    scene[2] = self.ambient[3]
+    scene[3] = 0.0
+    scene[4] = width
+    scene[5] = height
+    -- Out to the vec4 the block is laid out in. The light count is not here:
+    -- what bounds a shading loop is a tile's own count, and a second number
+    -- saying something close to it is a second number to keep in step.
+    scene[6] = 0.0
+    scene[7] = 0.0
+    -- As `render` resolved them for this frame, so the grid a fragment looks a
+    -- tile up in is the grid the dispatch filled.
+    scene[8] = self._frameViewX
+    scene[9] = self._frameViewY
+    scene[10] = self._frameViewCos
+    scene[11] = self._frameViewSin
+    scene[12] = self._boundsMinX
+    scene[13] = self._boundsMinY
+    scene[14] = self._boundsMaxX
+    scene[15] = self._boundsMaxY
+    return scene
 end
 
 --- Builds the pipeline and its graph.
@@ -285,6 +332,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._binWrites = {self._tileCounts.handle, self._tileLights.handle}
     self._binReads = {self._lightBuffer.handle}
     self._lightingBuffers = {self._lightBuffer.handle, self._tileCounts.handle, self._tileLights.handle}
+    self._forwardBuffers = {self._lightBuffer.handle, self._tileCounts.handle, self._tileLights.handle}
 
     local graph = PassGraph.create(device, swapchainFormat)
     graph:target({
@@ -345,29 +393,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         inputs = {"albedo", "normal"},
         outputs = {"lit"},
         execute = function(context: PassGraph.PassContext)
-            local scene = self._sceneUniform
-            scene[0] = self.ambient[1]
-            scene[1] = self.ambient[2]
-            scene[2] = self.ambient[3]
-            scene[3] = 0.0
-            scene[4] = context.width
-            scene[5] = context.height
-            -- Out to the vec4 the block is laid out in. The light count is
-            -- not here: what bounds the pass's loop is a tile's own count,
-            -- and a second number saying something close to it is a second
-            -- number to keep in step.
-            scene[6] = 0.0
-            scene[7] = 0.0
-            -- As `render` resolved them for this frame, so the grid the
-            -- fragment looks a tile up in is the grid the dispatch filled.
-            scene[8] = self._frameViewX
-            scene[9] = self._frameViewY
-            scene[10] = self._frameViewCos
-            scene[11] = self._frameViewSin
-            scene[12] = self._boundsMinX
-            scene[13] = self._boundsMinY
-            scene[14] = self._boundsMaxX
-            scene[15] = self._boundsMaxY
+            local scene <const> = sceneUniform(self, context.width, context.height)
 
             local buffers <const> = self._lightingBuffers
             buffers[1] = self._lightBuffer.handle
@@ -388,6 +414,25 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         execute = function(context: PassGraph.PassContext)
             context.pass:bindPipeline(self._compositePipeline.handle)
             context.pass:draw(3)
+        end,
+    })
+
+    graph:pass({
+        -- Writes what composite left rather than clearing it, which `scene`
+        -- gives for nothing by declaring no clear of its own.
+        --
+        -- Depth is attached without a clear, so what it loads is what geometry
+        -- wrote, and without a write, so a blended fragment is rejected by the
+        -- opaque geometry in front of it and rejects nothing itself. That is
+        -- the whole of why blended content has to arrive sorted: depth decides
+        -- it against the G-buffer and cannot decide it against itself.
+        name = "forward",
+        outputs = {"scene"},
+        depth = {test = true, write = false},
+        execute = function(context: PassGraph.PassContext)
+            if options.forward ~= nil then
+                options.forward(context)
+            end
         end,
     })
 
@@ -640,6 +685,41 @@ end
 --- with the attachment it draws into.
 function Deferred:geometryDepth(): GraphicsPipeline.DepthConfig
     return self.graph:depthOf("geometry")
+end
+
+--- Returns the colour format a forward pipeline must be created against.
+---
+--- One target rather than the G-buffer's two: the forward pass draws onto the
+--- composited image, which is a picture and not a description of a surface.
+function Deferred:forwardFormat(): integer
+    return self.graph:formatOf("scene")
+end
+
+--- Returns the depth state a forward pipeline must be created with.
+---
+--- Taken from the pass, like `geometryDepth`, so the pipeline cannot disagree
+--- with the attachment it draws into. It is the geometry pass's attachment with
+--- writing turned off, which is the state the pass declares.
+function Deferred:forwardDepth(): GraphicsPipeline.DepthConfig
+    return self.graph:depthOf("forward")
+end
+
+--- Binds the lights and the scene block a forward fragment stage shades with.
+---
+--- Called from inside the forward callback, after its pipeline is bound. The
+--- lights are this module's and the geometry is the caller's, so the split is
+--- here rather than in the callback reaching for buffers it does not own.
+---
+--- Fragment storage slots zero to two and fragment uniform slot one, leaving
+--- slot zero for whatever the caller pushes; the shader is
+--- `assets/shaders/instance.forward.frag.glsl` and the numbering is its.
+function Deferred:bindLighting(context: PassGraph.PassContext)
+    local buffers <const> = self._forwardBuffers
+    buffers[1] = self._lightBuffer.handle
+    buffers[2] = self._tileCounts.handle
+    buffers[3] = self._tileLights.handle
+    context.pass:bindFragmentStorageBuffers(0, buffers)
+    C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 1, sceneUniform(self, context.width, context.height), 64)
 end
 
 --- Releases everything the pipeline owns. Safe to call more than once.
