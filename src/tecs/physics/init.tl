@@ -1521,6 +1521,9 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
         })
 
         world:addSnapshotHandler({
+            -- A save format rather than a module path, so it stays as it is
+            -- whatever this module is called. See `AGENTS.md` on externally
+            -- typed strings.
             name = "tecs.physics",
             save = function(_world: ecs.World): any
                 for archetype, length in snapshotBodies:iter() do

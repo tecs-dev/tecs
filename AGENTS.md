@@ -291,6 +291,36 @@ because import order is meaningful), comments sparse and informational, and the 
 - Prefer a flat `module.tl` over `module/init.tl` when the module is a single file.
 - The `require` path mirrors the filename; the local binding mirrors it too.
 
+### Externally typed strings are a separate compatibility surface
+
+**Reorganizing Lua namespaces must not rename persisted keys, logger categories, component names,
+event kinds, MCP tool names, or other externally typed strings.**
+
+A Lua name is reached by code this tree can see, so moving one is a rename in a single commit. These
+are reached by a save file written last year, a filter a developer typed into a shell, a JSON payload
+an agent sends, or a snapshot another build wrote. Nothing here can see those call sites, so nothing
+here may move them.
+
+What the rule covers:
+
+- **Snapshot handler keys** (`"tecs.random"`, `"tecs.physics"`, `"tecs.audio"`, `"tecs.sequence"`),
+  and **component, event and relationship names**, since a snapshot names components by string. The
+  failure mode is what makes this absolute rather than a preference: `random.tl`'s `restore` falls
+  through to reseeding when it finds no state, so a renamed key loads successfully and diverges
+  rather than erroring.
+- **Logger names**, which are the unit `SDL_SetLogPriority` filters on, so they are configuration a
+  developer types rather than an identifier.
+- **System names**, which the debug server reports and an agent selects on.
+- **MCP tool names**, and the argument keys of their schemas.
+- **Pass and target names** in the deferred graph, which a game names to add a pass of its own.
+
+So a module that moves keeps its strings, and they will look like oversights afterwards. Say so at
+the declaration: a comment naming the string a compatibility surface is what stops the next reader
+tidying it.
+
+Renaming one of these is a migration, not a rename. It needs an explicit path from the old value and
+validation that finds state written under it, and neither is in scope for a namespace change.
+
 ### Performance
 
 - Avoid allocations in hot paths.

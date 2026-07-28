@@ -57,6 +57,9 @@ local capabilities <const> = require("tecs.platform.capabilities")
 local log <const> = require("tecs.log")
 
 local C <const> = sdl.C
+-- The name a developer filters on with `SDL_SetLogPriority`, so it is
+-- configuration rather than an identifier and does not follow this module if
+-- the module moves.
 local LOGGER <const> = log.get("tecs.watch")
 
 --- Seconds between polls. Fast enough that a save is picked up before a hand

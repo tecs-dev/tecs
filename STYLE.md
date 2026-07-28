@@ -121,6 +121,15 @@ Names fixed elsewhere are preserved verbatim: established MCP tool names
 (`run_lua`, `send_event`), FFI and C symbols, external Lua APIs, Lua
 metamethods (`__call`, `__index`), and generated bindings.
 
+"That Tecs controls" is narrower than it looks, and `AGENTS.md` holds the
+long form under "Externally typed strings are a separate compatibility
+surface". The short version: a snapshot key, a logger name, a component or
+event name, a system name, an MCP tool name and a pass name are all reached
+from outside this tree, by a save file, a shell, or an agent. Moving the
+module they live in does not move them, and a module that has moved keeps
+strings that will read as oversights afterwards. Say at the declaration that
+the string is a compatibility surface.
+
 - Functions, methods, record fields, option keys, and locals: **camelCase**.
   No snake_case in Tecs-controlled identifiers.
 - Types (records, interfaces, enums, aliases): **PascalCase**.

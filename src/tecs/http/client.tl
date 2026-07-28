@@ -202,6 +202,8 @@ loader.declare("http")
 local C <const> = curl.C
 local K <const> = curl.K
 local H <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
+-- The name a developer filters on, so it is configuration rather than an
+-- identifier and does not follow this module if the module moves.
 local LOGGER <const> = log.get("tecs.http")
 
 --- Milliseconds one blocking `wait` slice spends inside `curl_multi_poll`.
