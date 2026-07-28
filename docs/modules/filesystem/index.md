@@ -78,7 +78,7 @@ function filesystem.preferencePath(): string
 
 ::: warning The only place a build may write
 Everything else is read-only on at least one target, and finding that out at run time on a device is expensive.
-[`filesystem.userFolder`](/modules/filesystem#userfolder) answers where a platform's documents or screenshots
+[`filesystem.userFolder`](#userfolder) answers where a platform's documents or screenshots
 live, and none of those is a place a build may write.
 :::
 

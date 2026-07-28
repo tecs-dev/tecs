@@ -83,17 +83,42 @@ def anchorsOf(path):
     return found
 
 
+def exists(path):
+    """Whether the file is there, spelled the way it was asked for.
+
+    `is_file` alone is not enough. The filesystem this is usually run on is
+    case insensitive, so it answers True for `Future.md` when the file on disk
+    is `future.md`, while VitePress resolves a route against its own table and
+    is case sensitive either way. A link that only works locally is the exact
+    thing this script exists to catch.
+    """
+    if not path.is_file():
+        return False
+    walked = DOCS
+    for part in path.relative_to(DOCS).parts:
+        names = {entry.name for entry in walked.iterdir()}
+        if part not in names:
+            return False
+        walked = walked / part
+    return True
+
+
 def pageFor(route):
-    """The file a site-absolute route resolves to, or None."""
+    """The file a site-absolute route resolves to, or None.
+
+    A directory's index is reached only through a trailing slash, because that
+    is what VitePress does: `/modules/gfx/` is the page and `/modules/gfx` is a
+    dead link. Resolving both here would pass a build that fails.
+    """
     clean = route.strip("/")
     if not clean:
         return DOCS / "index.md"
+    if route.endswith("/"):
+        nested = DOCS / clean / "index.md"
+        return nested if exists(nested) else None
     direct = DOCS / f"{clean}.md"
-    if direct.is_file():
+    if exists(direct):
         return direct
-    nested = DOCS / clean / "index.md"
-    if nested.is_file():
-        return nested
     return None
 
 

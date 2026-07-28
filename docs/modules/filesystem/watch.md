@@ -11,7 +11,7 @@ that remembers to ask.
 SDL has no change notification, so a portable watcher is a poll, and going native for one would mean three
 implementations plus a fourth for every platform whose SDK is licensed, to save work measured below in
 microseconds. What it polls is not the content tree but what was loaded:
-[`filesystem.loaded`](/modules/filesystem#loaded) records every path this process has read or decoded, which is a
+[`filesystem.loaded`](/modules/filesystem/#loaded) records every path this process has read or decoded, which is a
 far smaller set and is exactly the set where a change has something to act on, since a file nothing opened has no
 reloader to route to.
 

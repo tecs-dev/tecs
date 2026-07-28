@@ -252,7 +252,7 @@ loads:resolve()
 
 ## Reading a document
 
-Bytes a game interprets itself do not go through a decode at all. That is [`filesystem`](/modules/filesystem),
+Bytes a game interprets itself do not go through a decode at all. That is [`filesystem`](/modules/filesystem/),
 which reads through the platform rather than through stdio, because on Android content lives inside the package
 and `io.open` does not reach it. It answers bytes and never text: a Lua string carries a length, so an image,
 an archive or a binary sidecar comes back whole, and a format that is text is a decoder's opinion.
