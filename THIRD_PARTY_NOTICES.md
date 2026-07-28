@@ -173,7 +173,7 @@ SDL_image's function at all on Apple platforms: CoreGraphics answers it and
 reads WebP, AVIF, JPEG XL, TIFF, BMP and GIF whatever the format options say.
 `SDLIMAGE_BACKEND_WIC` is off for the same reason in the small on Windows.
 
-### Rust image build foundation
+### Rust native build foundation
 
 The static native archive includes Rust's `image` crate with only its PNG and
 JPEG features. The existing Teal modules do not call this ABI yet; SDL3_image
@@ -181,13 +181,60 @@ remains linked during the staged migration. Cargo still links the Rust code
 into the native registry, so its notices belong to the binary now rather than
 only after the call sites move.
 
+The archive also includes `clap` and a schema for the current command surface.
+The Teal dispatcher still owns command execution during this staged migration;
+the Rust schema is compiled, linked, and tested without changing that behavior.
+
 The exact versions are pinned in `native/rust/Cargo.lock`. This distribution
-elects **Apache-2.0** for the Rust standard library and for `adler2`, `autocfg`,
-`bitflags`, `bytemuck`, `cfg-if`, `crc32fast`, `fdeflate`, `flate2`, `image`,
-`miniz_oxide`, `moxcms`, `num-traits`, `png`, `pxfm`, `zune-core`, and
-`zune-jpeg`. It elects **MIT** for `byteorder-lite` and `simd-adler32`, whose
-other available arms do not include Apache-2.0. `LICENSE-APACHE` and
-`LICENSE-MIT` travel with the embedded payload and with an installed package.
+elects **Apache-2.0** for the Rust standard library and for `adler2`, `anstyle`,
+`autocfg`, `bitflags`, `bytemuck`, `cfg-if`, `clap`, `clap_builder`,
+`clap_derive`, `clap_lex`, `crc32fast`, `fdeflate`, `flate2`, `heck`, `image`,
+`miniz_oxide`, `moxcms`, `num-traits`, `png`, `proc-macro2`, `pxfm`, `quote`,
+`syn`, `unicode-ident`, `zune-core`, and `zune-jpeg`. It elects **MIT** for
+`byteorder-lite` and `simd-adler32`, whose other available arms do not include
+Apache-2.0. `LICENSE-APACHE` and `LICENSE-MIT` travel with the embedded payload
+and with an installed package.
+
+`unicode-ident` is also under the Unicode License v3, so that notice is required
+in addition to the Apache-2.0 arm elected above:
+
+> UNICODE LICENSE V3
+>
+> COPYRIGHT AND PERMISSION NOTICE
+>
+> Copyright © 1991-2023 Unicode, Inc.
+>
+> NOTICE TO USER: Carefully read the following legal agreement. BY DOWNLOADING,
+> INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR SOFTWARE, YOU
+> UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE TERMS AND
+> CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT DOWNLOAD, INSTALL,
+> COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of data files and any associated documentation (the "Data Files") or software
+> and any associated documentation (the "Software") to deal in the Data Files
+> or Software without restriction, including without limitation the rights to
+> use, copy, modify, merge, publish, distribute, and/or sell copies of the Data
+> Files or Software, and to permit persons to whom the Data Files or Software
+> are furnished to do so, provided that either (a) this copyright and permission
+> notice appear with all copies of the Data Files or Software, or (b) this
+> copyright and permission notice appear in associated Documentation.
+>
+> THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+> KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+> MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD
+> PARTY RIGHTS.
+>
+> IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE BE
+> LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES, OR ANY
+> DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+> ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+> CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA FILES OR SOFTWARE.
+>
+> Except as contained in this notice, the name of a copyright holder shall not
+> be used in advertising or otherwise to promote the sale, use or other dealings
+> in these Data Files or Software without prior written authorization of the
+> copyright holder.
 
 ### What SDL3_mixer decodes
 

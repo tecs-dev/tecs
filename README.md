@@ -3485,9 +3485,12 @@ Rust native services live in one Cargo workspace under `native/rust`. CMake
 selects the Rust target that matches its own preset, asks Cargo for one static
 archive, and owns the final link. That keeps a single-file build single: Cargo,
 the crate graph, and the archive are build inputs, not files a game needs at
-run time. The image decode/encode ABI is present as build foundation, but the
-Teal image, screenshot, and window modules still use SDL_image until that
-runtime migration lands.
+run time. Every Rust archive build first runs `rustfmt --check` and Clippy with
+warnings denied. The image decode/encode ABI is present as build foundation,
+but the Teal image, screenshot, and window modules still use SDL_image until
+that runtime migration lands. A `clap` schema likewise describes the current
+public CLI and can render its help, but the host still hands arguments to the
+existing Teal dispatcher until the CLI migration lands.
 
 ```
 make presets        list the platform matrix

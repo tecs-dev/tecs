@@ -1,0 +1,303 @@
+use std::cell::RefCell;
+use std::ffi::{c_char, CString};
+use std::ptr;
+use std::slice;
+
+use image::codecs::png::PngEncoder;
+use image::{ImageEncoder, ImageError};
+
+mod cli;
+
+thread_local! {
+    static LAST_ERROR: RefCell<CString> =
+        RefCell::new(CString::new("no error").expect("static string has no NUL"));
+}
+
+/// An owned, tightly packed RGBA8 image.
+///
+/// This is opaque across the C ABI. Its pixel pointer remains valid until
+/// `tecsImageDestroy` releases the image.
+pub struct TecsImage {
+    pixels: Box<[u8]>,
+    width: u32,
+    height: u32,
+}
+
+/// An owned byte buffer returned across the C ABI.
+///
+/// Like `TecsImage`, this is opaque so Rust remains responsible for releasing
+/// the allocation it created.
+pub struct TecsBytes {
+    bytes: Box<[u8]>,
+}
+
+fn set_error(error: impl ToString) {
+    let message = error.to_string().replace('\0', "\\0");
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = CString::new(message).expect("interior NUL bytes were replaced");
+    });
+}
+
+fn decode(bytes: &[u8]) -> Result<TecsImage, ImageError> {
+    let image = image::load_from_memory(bytes)?.into_rgba8();
+    let (width, height) = image.dimensions();
+    Ok(TecsImage {
+        pixels: image.into_raw().into_boxed_slice(),
+        width,
+        height,
+    })
+}
+
+fn encode_png_rgbx(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    pitch: usize,
+) -> Result<TecsBytes, String> {
+    let row_bytes = (width as usize)
+        .checked_mul(4)
+        .ok_or_else(|| "image row is too large".to_owned())?;
+    if pitch < row_bytes {
+        return Err("image pitch is smaller than its pixel row".to_owned());
+    }
+    let required = pitch
+        .checked_mul(height as usize)
+        .ok_or_else(|| "image buffer is too large".to_owned())?;
+    if pixels.len() < required {
+        return Err("image buffer is shorter than its dimensions".to_owned());
+    }
+
+    let packed_len = row_bytes
+        .checked_mul(height as usize)
+        .ok_or_else(|| "image buffer is too large".to_owned())?;
+    let mut packed = Vec::with_capacity(packed_len);
+    for row in 0..height as usize {
+        let start = row * pitch;
+        let packed_start = packed.len();
+        packed.extend_from_slice(&pixels[start..start + row_bytes]);
+        for alpha in packed[packed_start + 3..].iter_mut().step_by(4) {
+            *alpha = 255;
+        }
+    }
+
+    let mut encoded = Vec::new();
+    PngEncoder::new(&mut encoded)
+        .write_image(&packed, width, height, image::ExtendedColorType::Rgba8)
+        .map_err(|error| error.to_string())?;
+    Ok(TecsBytes {
+        bytes: encoded.into_boxed_slice(),
+    })
+}
+
+/// Returns the last error raised on the calling thread.
+///
+/// The pointer remains valid until another Tecs Rust API call fails on this
+/// thread. Callers must copy it when they need it longer.
+#[no_mangle]
+pub extern "C" fn tecsRustError() -> *const c_char {
+    LAST_ERROR.with(|slot| slot.borrow().as_ptr())
+}
+
+/// Builds the help text for the Rust command schema.
+///
+/// The returned allocation belongs to Rust and must be released with
+/// `tecsBytesDestroy`.
+#[no_mangle]
+pub extern "C" fn tecsCliHelp() -> *mut TecsBytes {
+    Box::into_raw(Box::new(TecsBytes {
+        bytes: cli::help().into_boxed_slice(),
+    }))
+}
+
+/// Decodes PNG or JPEG bytes into a tightly packed RGBA8 allocation.
+///
+/// Returns null on malformed input or allocation/size failure and records the
+/// reason in `tecsRustError`.
+///
+/// # Safety
+///
+/// When `length` is nonzero, `bytes` must address at least that many readable
+/// bytes for the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn tecsImageDecode(bytes: *const u8, length: usize) -> *mut TecsImage {
+    if bytes.is_null() && length != 0 {
+        set_error("image input is null");
+        return ptr::null_mut();
+    }
+    let input = if length == 0 {
+        &[]
+    } else {
+        // SAFETY: The caller promises `length` readable bytes for this call.
+        unsafe { slice::from_raw_parts(bytes, length) }
+    };
+    match decode(input) {
+        Ok(image) => Box::into_raw(Box::new(image)),
+        Err(error) => {
+            set_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Borrows an image's pixel allocation.
+///
+/// # Safety
+///
+/// `image` must be null or a live pointer returned by `tecsImageDecode`.
+#[no_mangle]
+pub unsafe extern "C" fn tecsImagePixels(image: *const TecsImage) -> *const u8 {
+    if image.is_null() {
+        return ptr::null();
+    }
+    // SAFETY: A non-null pointer must have come from `tecsImageDecode` and
+    // remain owned by the caller.
+    let image = unsafe { &*image };
+    image.pixels.as_ptr()
+}
+
+/// Returns an image's width.
+///
+/// # Safety
+///
+/// `image` must be null or a live pointer returned by `tecsImageDecode`.
+#[no_mangle]
+pub unsafe extern "C" fn tecsImageWidth(image: *const TecsImage) -> u32 {
+    if image.is_null() {
+        return 0;
+    }
+    // SAFETY: See `tecsImagePixels`.
+    let image = unsafe { &*image };
+    image.width
+}
+
+/// Returns an image's height.
+///
+/// # Safety
+///
+/// `image` must be null or a live pointer returned by `tecsImageDecode`.
+#[no_mangle]
+pub unsafe extern "C" fn tecsImageHeight(image: *const TecsImage) -> u32 {
+    if image.is_null() {
+        return 0;
+    }
+    // SAFETY: See `tecsImagePixels`.
+    let image = unsafe { &*image };
+    image.height
+}
+
+/// Releases an image and its pixels.
+///
+/// # Safety
+///
+/// `image` must be null or an owned pointer returned by `tecsImageDecode`.
+/// A non-null pointer may be destroyed exactly once.
+#[no_mangle]
+pub unsafe extern "C" fn tecsImageDestroy(image: *mut TecsImage) {
+    if !image.is_null() {
+        // SAFETY: Ownership crosses this boundary once and the caller must not
+        // use or destroy the pointer again.
+        drop(unsafe { Box::from_raw(image) });
+    }
+}
+
+/// Encodes RGBX/RGBA bytes as a PNG, forcing every output alpha byte opaque.
+///
+/// # Safety
+///
+/// When `length` is nonzero, `pixels` must address at least that many readable
+/// bytes for the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn tecsImageEncodePngRgbx(
+    pixels: *const u8,
+    length: usize,
+    width: u32,
+    height: u32,
+    pitch: usize,
+) -> *mut TecsBytes {
+    if pixels.is_null() && length != 0 {
+        set_error("image input is null");
+        return ptr::null_mut();
+    }
+    let input = if length == 0 {
+        &[]
+    } else {
+        // SAFETY: The caller promises `length` readable bytes for this call.
+        unsafe { slice::from_raw_parts(pixels, length) }
+    };
+    match encode_png_rgbx(input, width, height, pitch) {
+        Ok(bytes) => Box::into_raw(Box::new(bytes)),
+        Err(error) => {
+            set_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Borrows an encoded byte allocation.
+///
+/// # Safety
+///
+/// `bytes` must be null or a live pointer returned by a Tecs Rust API.
+#[no_mangle]
+pub unsafe extern "C" fn tecsBytesData(bytes: *const TecsBytes) -> *const u8 {
+    if bytes.is_null() {
+        return ptr::null();
+    }
+    // SAFETY: A non-null pointer must have come from a Tecs Rust API and
+    // remain owned by the caller.
+    let bytes = unsafe { &*bytes };
+    bytes.bytes.as_ptr()
+}
+
+/// Returns the length of an encoded byte allocation.
+///
+/// # Safety
+///
+/// `bytes` must be null or a live pointer returned by a Tecs Rust API.
+#[no_mangle]
+pub unsafe extern "C" fn tecsBytesLength(bytes: *const TecsBytes) -> usize {
+    if bytes.is_null() {
+        return 0;
+    }
+    // SAFETY: See `tecsBytesData`.
+    let bytes = unsafe { &*bytes };
+    bytes.bytes.len()
+}
+
+/// Releases an encoded byte allocation.
+///
+/// # Safety
+///
+/// `bytes` must be null or an owned pointer returned by a Tecs Rust API. A
+/// non-null pointer may be destroyed exactly once.
+#[no_mangle]
+pub unsafe extern "C" fn tecsBytesDestroy(bytes: *mut TecsBytes) {
+    if !bytes.is_null() {
+        // SAFETY: Ownership crosses this boundary once and the caller must not
+        // use or destroy the pointer again.
+        drop(unsafe { Box::from_raw(bytes) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode, encode_png_rgbx};
+
+    #[test]
+    fn png_round_trip_is_rgba_and_opaque() {
+        let input = [10, 20, 30, 0, 40, 50, 60, 128];
+        let encoded = encode_png_rgbx(&input, 2, 1, 8).unwrap();
+        let decoded = decode(&encoded.bytes).unwrap();
+        assert_eq!(decoded.width, 2);
+        assert_eq!(decoded.height, 1);
+        assert_eq!(&*decoded.pixels, &[10, 20, 30, 255, 40, 50, 60, 255]);
+    }
+
+    #[test]
+    fn encoder_honors_padded_pitch() {
+        let input = [1, 2, 3, 4, 99, 99, 99, 99, 5, 6, 7, 8, 99, 99, 99, 99];
+        let encoded = encode_png_rgbx(&input, 1, 2, 8).unwrap();
+        let decoded = decode(&encoded.bytes).unwrap();
+        assert_eq!(&*decoded.pixels, &[1, 2, 3, 255, 5, 6, 7, 255]);
+    }
+}

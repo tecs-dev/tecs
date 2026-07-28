@@ -21,6 +21,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(TECS_SYSTEM_DEPS "Resolve dependencies from the system rather than pinned sources" ON)
 option(TECS_BUILD_LUA "Generate FFI bindings and compile the Teal sources" ON)
 option(TECS_RUNTIME_SHADERS "Link a shader compiler, for development. Releases use packaged artifacts." ON)
+set(TECS_RUST_TARGET "" CACHE STRING "Rust target triple. Inferred from the CMake target when empty.")
 
 # One executable and nothing beside it.
 #
@@ -267,6 +268,91 @@ function(tecs_instrument target)
 endfunction()
 
 # ----------------------------------------------------------------- native code
+
+# Rust native services are built as one archive for the same target CMake is
+# assembling. Cargo owns Rust's dependency graph; CMake remains the outer build
+# and owns the final executable link.
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+
+if(TECS_RUST_TARGET STREQUAL "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+        if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+            set(TECS_RUST_TARGET "aarch64-linux-android")
+        elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
+            set(TECS_RUST_TARGET "x86_64-linux-android")
+        endif()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        if(CMAKE_OSX_SYSROOT MATCHES "simulator")
+            if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+                set(TECS_RUST_TARGET "aarch64-apple-ios-sim")
+            else()
+                set(TECS_RUST_TARGET "x86_64-apple-ios")
+            endif()
+        else()
+            set(TECS_RUST_TARGET "aarch64-apple-ios")
+        endif()
+    elseif(APPLE)
+        if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+            set(TECS_RUST_TARGET "x86_64-apple-darwin")
+        else()
+            set(TECS_RUST_TARGET "aarch64-apple-darwin")
+        endif()
+    elseif(WIN32)
+        set(TECS_RUST_TARGET "x86_64-pc-windows-msvc")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(TECS_RUST_TARGET "x86_64-unknown-linux-gnu")
+    endif()
+endif()
+
+if(TECS_RUST_TARGET STREQUAL "")
+    message(
+        FATAL_ERROR
+        "tecs: cannot infer a Rust target for ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}. "
+        "Set TECS_RUST_TARGET explicitly."
+    )
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(TECS_CARGO_PROFILE "debug")
+    set(TECS_CARGO_PROFILE_ARGS "")
+else()
+    set(TECS_CARGO_PROFILE "release")
+    set(TECS_CARGO_PROFILE_ARGS "--release")
+endif()
+
+set(TECS_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo")
+if(WIN32)
+    set(TECS_RUST_ARCHIVE "${TECS_CARGO_TARGET_DIR}/${TECS_RUST_TARGET}/${TECS_CARGO_PROFILE}/tecs_native.lib")
+else()
+    set(TECS_RUST_ARCHIVE "${TECS_CARGO_TARGET_DIR}/${TECS_RUST_TARGET}/${TECS_CARGO_PROFILE}/libtecs_native.a")
+endif()
+
+file(GLOB_RECURSE TECS_RUST_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/native/rust/runtime/src/*.rs")
+add_custom_command(
+    OUTPUT "${TECS_RUST_ARCHIVE}"
+    COMMAND ${CARGO_EXECUTABLE} fmt --all --check
+    COMMAND
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${TECS_CARGO_TARGET_DIR} ${CARGO_EXECUTABLE} clippy --workspace
+        --all-targets --locked --manifest-path "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml" --target ${TECS_RUST_TARGET}
+        ${TECS_CARGO_PROFILE_ARGS} -- -D warnings
+    COMMAND
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${TECS_CARGO_TARGET_DIR} ${CARGO_EXECUTABLE} build --locked
+        --manifest-path "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml" --target ${TECS_RUST_TARGET}
+        ${TECS_CARGO_PROFILE_ARGS}
+    DEPENDS
+        ${TECS_RUST_SOURCES}
+        "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/native/rust/Cargo.lock"
+        "${CMAKE_SOURCE_DIR}/native/rust/runtime/Cargo.toml"
+        "${CMAKE_SOURCE_DIR}/rust-toolchain.toml"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/native/rust"
+    COMMENT "Checking and building Rust native services for ${TECS_RUST_TARGET}"
+    VERBATIM
+)
+add_custom_target(tecs_rust_build DEPENDS "${TECS_RUST_ARCHIVE}")
+add_library(tecs_rust STATIC IMPORTED GLOBAL)
+set_target_properties(tecs_rust PROPERTIES IMPORTED_LOCATION "${TECS_RUST_ARCHIVE}")
+add_dependencies(tecs_rust tecs_rust_build)
 
 # Worker threads and channels. Native because a LuaJIT FFI callback invoked
 # from a thread the VM did not create is unsafe, so a thread entry point cannot
@@ -541,6 +627,7 @@ if(TECS_BUILD_LUA)
     tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(dialogs dialogs.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(http http.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(rust rust.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -585,6 +672,7 @@ if(TECS_BUILD_LUA)
     tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
     tecs_registry(dialogs TecsDialogsApi tecs dialogs.h)
     tecs_registry(http TecsHttpApi tecs http.h)
+    tecs_registry(rust TecsRustApi tecs rust.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and
@@ -621,7 +709,16 @@ if(TECS_BUILD_LUA)
     tecs_instrument(tecs_registry)
     target_link_libraries(
         tecs_registry
-        PUBLIC tecs::sdl3 tecs::sdl3image tecs::sdl3mixer tecs::sdl3net tecs::luajit tecs::curl tecs::zlib tecs::box2d
+        PUBLIC
+            tecs::sdl3
+            tecs::sdl3image
+            tecs::sdl3mixer
+            tecs::sdl3net
+            tecs::luajit
+            tecs::curl
+            tecs::zlib
+            tecs::box2d
+            tecs_rust
     )
 
     # Taking the address of a shader compiler's functions means linking it.
@@ -647,6 +744,14 @@ if(TECS_BUILD_LUA)
     # addresses of that library's functions.
     target_link_libraries(tecs PRIVATE tecs_registry tecs_worker tecs_cjson)
     target_link_libraries(tecs_worker PRIVATE tecs_registry tecs_cjson)
+    if(APPLE AND TECS_SINGLE_FILE)
+        # Apple's classic linker can assert while merging Rust's unwind records
+        # into this unusually large all-static executable. Rust release code
+        # aborts on panic, and DWARF remains available for native backtraces, so
+        # the compact table is neither required for unwinding nor worth making
+        # the final link depend on that linker bug.
+        target_link_options(tecs PRIVATE "-Wl,-no_compact_unwind")
+    endif()
 
     add_custom_target(
         tecs_bindings
@@ -656,6 +761,7 @@ if(TECS_BUILD_LUA)
             "${GEN}/logsinkcdef.lua"
             "${GEN}/taskpoolcdef.lua"
             "${GEN}/httpcdef.lua"
+            "${GEN}/rustcdef.lua"
             "${GEN}/sdl3cdef.lua"
             "${GEN}/sdl3imagecdef.lua"
             "${GEN}/sdl3netcdef.lua"

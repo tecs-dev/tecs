@@ -1,0 +1,13 @@
+[package]
+name = "tecs-native"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+clap = { version = "4.6.4", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
