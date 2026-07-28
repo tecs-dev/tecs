@@ -13,8 +13,7 @@
 --- places that begin one: a compute stage a game installs receives the frame,
 --- but the pipeline's own passes are recorded from three modules that only ever
 --- see the buffer. Keyed this way, every one of them is covered without being
---- asked to opt in, and a threaded split that gives each thread its own command
---- buffer keeps its own entry.
+--- asked to opt in.
 
 local loader <const> = require("tecs.ffi.loader")
 

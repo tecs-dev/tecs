@@ -10,11 +10,9 @@
 --- the whole design exists to avoid. What crosses is where they went: the slot
 --- that was written and the byte ranges within it.
 ---
---- Nothing here is heap-backed and nothing refers to a Lua object. The record
---- itself is a Lua table today and becomes a native slot struct when rendering
---- moves to its own state: the scalars become struct fields, the ranges and the
---- lights are already C storage, and the whole thing is then published by
---- flipping a slot's state rather than by handing over a reference.
+--- Nothing here is heap-backed and nothing refers to a Lua object. The ranges
+--- and the lights are already C storage and the rest is scalars, which is what
+--- keeps a frame's crossing free of anything the collector has to walk.
 
 local loader <const> = require("tecs.ffi.loader")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")

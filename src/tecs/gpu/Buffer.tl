@@ -15,9 +15,11 @@
 --- because most frames change very little of what is resident. Only marked
 --- ranges are copied.
 ---
---- One device buffer, several staging slots. The thread that produces render
---- data writes into one slot while the thread that owns the device flushes
---- another, so neither waits on the other and no copy passes between them.
+--- One device buffer, several staging slots. Extraction writes into one slot
+--- while a submitted upload is still reading another, so the CPU never
+--- overwrites memory the GPU has not finished with and no copy passes between
+--- them. The rotation answers GPU concurrency, which one thread does not
+--- remove.
 --- Slots are addressed by index and all of their bookkeeping is per slot:
 --- mapped address, recorded ranges, dirty byte count. A caller that only
 --- writes sees an address and a capacity; creating, mapping, unmapping,

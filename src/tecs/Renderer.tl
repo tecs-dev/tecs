@@ -7,11 +7,14 @@
 --- pass graph and the image array. A `FramePacket` is everything that crosses,
 --- and neither half holds a reference to the other.
 ---
---- The line is where the thread boundary falls. The extractor runs inside
---- `world:update`, in RenderFirst, and the backend runs afterwards against a
---- frame, so the extraction needs no command buffer and the render needs no
---- world. This object is what still sees both: it owns the packet, rotates the
---- staging slot, and hands the backend's mapped addresses to the extractor.
+--- The line is a dependency rule, not a thread boundary. Both halves run on
+--- the main thread, one after the other: the extractor inside `world:update`,
+--- in RenderFirst, and the backend afterwards against a frame. What the rule
+--- buys is that extraction needs no command buffer and rendering needs no
+--- world, so a world extracts with no device behind it and the backend is
+--- exercised with no world in front of it. This object is what still sees
+--- both: it owns the packet, rotates the staging slot, and hands the backend's
+--- mapped addresses to the extractor.
 ---
 --- What a game holds is this. `renderer.camera` is the extractor's camera and
 --- `renderer.images` is the backend's array, named here so neither half has to
