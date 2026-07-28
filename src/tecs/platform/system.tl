@@ -58,10 +58,6 @@ end
 --- The operating-system half of `tecs.system`: URLs, locales, power, message
 --- boxes and native file and folder dialogs.
 local record system
-    --- Anything carrying a native window handle, which is what a dialog or a
-    --- message box sits over. A `Window` is one.
-    type WindowLike = WindowLike
-
     --- One language the user prefers, in order of preference.
     type Locale = Locale
 

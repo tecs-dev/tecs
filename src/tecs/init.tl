@@ -462,10 +462,6 @@ local record system
     --- What this build of the engine can do on this target.
     type Capabilities = capabilities.Capabilities
 
-    --- Anything carrying a native window handle, which is what a dialog or a
-    --- message box sits over.
-    type WindowLike = systemModule.WindowLike
-
     --- One language the user prefers, in order of preference.
     type Locale = systemModule.Locale
 
@@ -667,9 +663,7 @@ local record system
     --- @param window The window to sit over. Omitted is a free-floating box.
     --- @return Whether it was shown.
     --- @return The reason, when it was not.
-    messageBox: function(
-        kind: string, title: string, message: string, window?: systemModule.WindowLike
-    ): boolean, string
+    messageBox: function(kind: string, title: string, message: string, window?: Window): boolean, string
 
     --- Asks the user to choose a file to open.
     ---

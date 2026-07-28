@@ -1242,32 +1242,23 @@ One language the user prefers, in order of preference.
 </code></pre>
 
 What the machine is running on, and how much of it is left.
-<a id="tecs.system.WindowLike"></a>
-
-### tecs.system.WindowLike
-
-<pre><code v-pre>type <a href="#tecs.system.WindowLike">tecs.system.WindowLike</a> = WindowLike
-</code></pre>
-
-Anything carrying a native window handle, which is what a dialog or a
-message box sits over. A `Window` is one.
 <a id="tecs.system.messageBox"></a>
 
 ### tecs.system.messageBox
 
-<pre><code v-pre>function <a href="#tecs.system.messageBox">tecs.system.messageBox</a>(kind: string, title: string, message: string, window: <a href="#tecs.system.WindowLike">WindowLike</a>): boolean, string
+<pre><code v-pre>function <a href="#tecs.system.messageBox">tecs.system.messageBox</a>(kind: string, title: string, message: string, window: Window): boolean, string
 </code></pre>
 
 Shows a native informational, warning or error dialog.
 
 #### Parameters
 
-| Type                                                                | Name                       | Description |
-| ------------------------------------------------------------------- | -------------------------- | ----------- |
-| <code v-pre>string</code>                                           | <code v-pre>kind</code>    |             |
-| <code v-pre>string</code>                                           | <code v-pre>title</code>   |             |
-| <code v-pre>string</code>                                           | <code v-pre>message</code> |             |
-| <code v-pre><a href="#tecs.system.WindowLike">WindowLike</a></code> | <code v-pre>window</code>  |             |
+| Type                      | Name                       | Description |
+| ------------------------- | -------------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>kind</code>    |             |
+| <code v-pre>string</code> | <code v-pre>title</code>   |             |
+| <code v-pre>string</code> | <code v-pre>message</code> |             |
+| <code v-pre>Window</code> | <code v-pre>window</code>  |             |
 
 #### Returns
 
