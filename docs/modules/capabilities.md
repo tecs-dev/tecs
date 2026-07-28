@@ -3,7 +3,7 @@ description: "What this build of the engine can do on this target, read from the
 outline: deep
 ---
 
-# capabilities
+# tecs.capabilities
 
 `tecs.capabilities` reports what this build of the engine can do on the machine it is running on: whether machine
 code is being generated, whether shaders can be compiled at run time, whether a touch device is attached, how

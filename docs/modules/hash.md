@@ -3,7 +3,7 @@ description: "Content hashes over byte strings: FNV-1a in 64 bits for identity, 
 outline: deep
 ---
 
-# hash
+# tecs.hash
 
 `tecs.hash` computes content hashes over byte strings. What a hash is for decides what belongs here, and two
 callers ask for different things.

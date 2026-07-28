@@ -3,7 +3,7 @@ description: "Deterministic, snapshot-safe sequencing: compiled programs, playba
 outline: deep
 ---
 
-# sequence
+# tecs.sequence
 
 `tecs.sequence` runs scripted gameplay logic that survives a save. Cutscenes, ability chains, spawn waves and
 tutorials are normally written as coroutines, and a suspended coroutine lives in the Lua stack, which cannot be

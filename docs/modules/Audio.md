@@ -3,7 +3,7 @@ description: "Sound output: clips, voices, groups, keyed limits, fades, pitch, l
 outline: deep
 ---
 
-# Audio
+# tecs.Audio
 
 `app.audio` is the whole of sound output: load a clip, play it, set a gain, fade it, repeat it, pitch it, seek
 it, pan it, put it in a group, cap how often it may start, stop it. It is built on SDL_mixer 3, and an entity

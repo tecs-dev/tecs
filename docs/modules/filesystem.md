@@ -3,7 +3,7 @@ description: "Reading, writing, listing, creating, removing, renaming and copyin
 outline: deep
 ---
 
-# filesystem
+# tecs.filesystem
 
 [`tecs.paths`](/modules/paths) answers _where_; `tecs.filesystem` answers _what to do once you have one_. It
 reads and writes whole files, asks what is at a path, walks a directory, and creates, removes, renames and copies

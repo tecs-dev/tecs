@@ -3,7 +3,7 @@ description: "lua-cjson with the build's own copy made reachable: encode, decode
 outline: deep
 ---
 
-# json
+# tecs.json
 
 `tecs.json` is lua-cjson, vendored under `vendor/cjson` and compiled as part of the build. The module is a
 thin wrapper in one respect only: it puts this tree's own library directories on `package.cpath` and then

@@ -3,7 +3,7 @@ description: "Rigid-body simulation on Box2D 3, solved across a shared thread po
 outline: deep
 ---
 
-# physics
+# tecs.physics
 
 `tecs.physics` is rigid-body simulation on Box2D 3. Bodies are attached to entities, the solver runs across a
 shared thread pool, and the solved pose is written back onto the entity's `Transform` so the rest of the engine

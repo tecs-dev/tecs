@@ -3,7 +3,7 @@ description: "The view: centre, zoom, rotation, the world-to-clip matrix, the vi
 outline: deep
 ---
 
-# Camera
+# tecs.Camera
 
 A camera is what the view is looking at: a centre in world units, a zoom, a rotation, and a projection
 mode. It is one type rather than a 2D camera and a 3D one, because the only thing that would differ

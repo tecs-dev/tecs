@@ -3,7 +3,7 @@ description: "A value that settles once: four states, combinators, a source-driv
 outline: deep
 ---
 
-# Future
+# tecs.Future
 
 Several things in this tree are work in flight: an asset decode, a child process, a request. Each of them used to
 own a private settle-once cell with four states, a failure string and a blocking wait that pumped a worker, and

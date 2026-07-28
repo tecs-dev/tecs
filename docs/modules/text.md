@@ -3,7 +3,7 @@ description: "Distance-field text: fonts, the Text component, layout rules, and 
 outline: deep
 ---
 
-# text
+# tecs.text
 
 `tecs.text` draws strings from a multi-channel signed distance field. A `Text` names a font and a
 string, and it is one entity: its glyphs are not entities at all. The plugin registers an instance

@@ -3,7 +3,7 @@ description: "Running child processes on a worker and collecting their output as
 outline: deep
 ---
 
-# proc
+# tecs.proc
 
 `tecs.proc` runs another program. A command line tool, a resource pipeline or an asset build wants to shell out,
 and a game wants to do it between two frames rather than instead of them.

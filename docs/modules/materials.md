@@ -3,7 +3,7 @@ description: "How a material is authored, how a name becomes an id, and the modu
 outline: deep
 ---
 
-# materials
+# tecs.materials
 
 A material is what a fragment is, decided per instance. It is a `.glsl` file under `materials/`
 implementing the contract in `shaders/include/material.glsl`. Every material found is compiled into

@@ -3,7 +3,7 @@ description: "The debug server: JSON-RPC over HTTP answered inside the frame, th
 outline: deep
 ---
 
-# mcp
+# tecs.mcp
 
 `tecs.mcp` is the debug server. It speaks JSON-RPC over HTTP POST, and everything an agent can do is a tool
 registered on it: a name, a JSON Schema and a function. The tool list is generated from the same table that

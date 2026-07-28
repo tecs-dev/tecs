@@ -13,7 +13,7 @@ hero:
       text: Get started
       link: /getting-started
     - theme: alt
-      text: Module reference
+      text: The surface
       link: /modules/
     - theme: alt
       text: The ECS
@@ -34,6 +34,37 @@ features:
     icon:
       src: /images/teal.svg
 ---
+
+## Install
+
+The `tecs` command carries the compiler, the engine, the type definitions and a project template. Nothing else
+has to be on the machine: no Lua, no LuaRocks, no Teal, no C compiler.
+
+::: code-group
+
+```bash [macOS]
+brew install tecs-dev/tap/tecs
+```
+
+```powershell [Windows]
+scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket
+scoop install tecs
+```
+
+```bash [Linux]
+brew install tecs-dev/tap/tecs
+```
+
+:::
+
+Create a game and run it:
+
+```bash
+tecs new my-game && cd my-game && tecs run
+```
+
+The command is not on this branch yet. [The CLI](/cli/) records the shape it is taking, and
+[getting started](/getting-started) is how to build and run through `make` in the meantime.
 
 ## Entities are the interface
 
@@ -186,45 +217,76 @@ world:emit(0, DamageEvent, enemyId, 25)
 
 ## Features
 
+Everything a game reaches is a field on `require("tecs")`, spelled below the way it is written.
+
 <div class="feature-grid">
-<div class="feature-group">
-
-**Core ECS**
-
-- [Static typing](/ecs/) - Teal types for components, queries, systems, events and resources
-- [Worlds and archetypes](/ecs/archetype) - cache-friendly storage for millions of entities
-- [Components](/ecs/components/) - table, tag, scalar and FFI data containers
-- [Dirty tracking](/ecs/components/dirty-tracking) - change-gated systems and GPU synchronisation
-- [Systems and phases](/ecs/systems) - ordered phase scheduling, dependencies, composable run conditions
-- [Queries](/ecs/queries/) - reusable filters with archetype iteration, callbacks and grouping
-- [Events](/ecs/events) - type-safe pub/sub and entity lifecycle events
-- [Relationships](/ecs/relationships/) - links, hierarchies, relative transforms, cascade deletion
-- [Plugins](/ecs/plugins) - modular, shareable game mechanics
-- [Bundles](/ecs/components/bundles) - reusable entity templates and batch spawning
-- [States](/ecs/states) - stack-based game states with transition events
-- [Save games](/ecs/save-games) - snapshots, component codecs, migrations, resource handlers
-- [Built-ins](/ecs/builtins) - names, transforms, hierarchy, TTL, pause, disable, state events
-- [The mutation model](/ecs/mutation-model) - the normative rules for reads, writes and dirty bits
-
-</div>
 <div class="feature-group">
 
 **The engine**
 
-- [Application](/modules/Application) - the object an entry file returns and the host drives
-- [Rendering](/modules/Renderer) - deferred, GPU-driven, with compute culling and one indirect draw
-- [Camera](/modules/Camera) and [layers](/modules/layers) - the view, and z-ordering
-- [Sprites](/modules/sheet) and [animation](/modules/animation) - sheets, frame tags, playback
-- [Text](/modules/text) and [particles](/modules/particles) - distance-field glyphs, and emitters
-- [Materials](/modules/materials) - one fragment shader, compiled from the material set
-- [Input](/modules/Input) and [gamepads](/modules/Gamepad) - three tiers behind a layer stack
-- [Platform events](/modules/events) - typed once, routed, never an SDL union downstream
-- [Audio](/modules/Audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming
-- [Physics](/modules/physics) - Box2D 3, solved across a shared thread pool
-- [Sequencing](/modules/sequence) - timelines with the tween runtime inside them
-- [Assets](/modules/assets), [workers](/modules/workers), [futures](/modules/Future) - loading off the main thread
-- [MCP](/modules/mcp) - the debug server agents and humans drive the running game through
-- [The CLI](/cli/) - planned, not built
+- [`tecs.Application`](/modules/Application) - the object an entry file returns and the host drives
+- [`tecs.Renderer`](/modules/Renderer) - deferred and GPU-driven, with compute culling and one indirect draw
+- [`tecs.Camera`](/modules/Camera) - the view a frame is drawn from
+- [`tecs.layers`](/modules/layers) - z-ordering and per-layer behaviour
+- [`tecs.materials`](/modules/materials) - one fragment shader, compiled from the material set
+- [`tecs.sheet`](/modules/sheet) - sprite sheets, frame tags, pivots
+- [`tecs.animation`](/modules/animation) - sprite playback
+- [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer
+- [`tecs.particles`](/modules/particles) - emitters
+- [`tecs.components`](/modules/components) - the components the renderer reads
+- [`tecs.Window`](/modules/Window) - the window, its size, its display and its mode
+- [`tecs.Input`](/modules/Input) - three tiers behind a layer stack
+- [`tecs.Gamepad`](/modules/Gamepad) - identity, lifetime, metadata and outputs
+- [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
+- [`tecs.clock`](/modules/clock) - monotonic time
+- [`tecs.clipboard`](/modules/clipboard) - the system clipboard
+- [`tecs.proc`](/modules/proc) - shelling out
+- [`tecs.paths`](/modules/paths) - where a game may read and write
+- [`tecs.filesystem`](/modules/filesystem) - touching the filesystem
+- [`tecs.watch`](/modules/watch) - watching files for change
+- [`tecs.capabilities`](/modules/capabilities) - what this machine and this build can do
+- [`tecs.physics`](/modules/physics) - Box2D 3, solved across a shared thread pool
+- [`tecs.Audio`](/modules/Audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming
+- [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
+- [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
+- [`tecs.workers`](/modules/workers) - typed background jobs
+- [`tecs.Future`](/modules/Future) - a value that settles once
+- [`tecs.log`](/modules/log) - SDL's logging, per platform
+- [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
+- [`tecs.json`](/modules/json) - JSON, with the build's own copy of the C parser found
+- [`tecs.hash`](/modules/hash) - hashing
+- [`tecs.compress`](/modules/compress) - compression and decompression
+- [`tecs.random`](/modules/random) - seeded random numbers
+
+</div>
+<div class="feature-group">
+
+**The ECS**
+
+- [`tecs.newWorld`](/ecs/world) - worlds, resources and the state stack
+- [`tecs.newComponent`](/ecs/components/table-components) - table components
+- [`tecs.newFFIComponent`](/ecs/components/ffi) - components backed by FFI structs
+- [`tecs.newTagComponent`](/ecs/components/tag-components) - data-free components in bitset storage
+- [`tecs.newScalarComponent`](/ecs/components/scalar-components) - components that are one value
+- [`tecs.newRelationship`](/ecs/relationships/) - links, hierarchies, cascade deletion
+- [`tecs.newEvent`](/ecs/events) - type-safe pub/sub and entity lifecycle events
+- [`tecs.phases`](/ecs/phases) - ordered phase scheduling
+- [`tecs.runif`](/ecs/systems) - composable run conditions
+- [`tecs.builtins`](/ecs/builtins) - names, transforms, hierarchy, TTL, pause, disable, state events
+- [The whole surface](/modules/) - every name, and [its signatures](/modules/surface)
+
+**Concepts**
+
+- [Archetypes](/ecs/archetype) - cache-friendly storage for millions of entities
+- [Queries](/ecs/queries/) - reusable filters with archetype iteration, callbacks and grouping
+- [Systems](/ecs/systems) - phase scheduling and dependencies
+- [Plugins](/ecs/plugins) - modular, shareable game mechanics
+- [Bundles](/ecs/components/bundles) - reusable entity templates and batch spawning
+- [Dirty tracking](/ecs/components/dirty-tracking) - change-gated systems and GPU synchronisation
+- [States](/ecs/states) - stack-based game states with transition events
+- [Save games](/ecs/save-games) - snapshots, component codecs, migrations, resource handlers
+- [Profiling](/ecs/profiling) - where a frame went
+- [The mutation model](/ecs/mutation-model) - the normative rules for reads, writes and dirty bits
 
 </div>
 </div>

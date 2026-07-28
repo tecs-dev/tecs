@@ -3,7 +3,7 @@ description: "Polling the files this process loaded so an edit drives a reload, 
 outline: deep
 ---
 
-# watch
+# tecs.watch
 
 `tecs.watch` notices that a content file changed, so a reload can be driven by the edit rather than by an agent
 that remembers to ask.

@@ -3,7 +3,7 @@ description: "Layer bands, the depth they resolve to, and what a layer does to i
 outline: deep
 ---
 
-# layers
+# tecs.layers
 
 A layer is a band of the depth range. Everything drawn on a layer sorts within that band and never
 against another one, so a HUD on layer 8 covers a world on layer 1 whatever the two contain. A layer is

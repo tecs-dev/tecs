@@ -3,7 +3,7 @@ description: "SDL's logging behind a Lua-side guard: named loggers mapped to SDL
 outline: deep
 ---
 
-# log
+# tecs.log
 
 `tecs.log` is SDL's logging with a guard in front of it. There is deliberately nothing here to maintain: no
 sinks, no prefixes, no timestamp cache, no ring buffer, and no level configuration of its own. SDL already

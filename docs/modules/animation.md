@@ -3,7 +3,7 @@ description: "Sprite-sheet playback: the Animation component, playing and restar
 outline: deep
 ---
 
-# animation
+# tecs.animation
 
 An `Animation` says which tag of a [sheet](/modules/sheet) is playing, how fast, whether it repeats,
 whether it is running, and where in the tag it has got to. Loading and describing a sheet is the other

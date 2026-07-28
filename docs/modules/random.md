@@ -3,7 +3,7 @@ description: "Seeded generation in named, independent streams a snapshot carries
 outline: deep
 ---
 
-# random
+# tecs.random
 
 `tecs.random` is seeded generation, in named streams a snapshot carries. Nothing here reads a clock. A
 generator produces the same sequence from the same seed on every machine this runs on, which is what lets a

@@ -3,7 +3,7 @@ description: "The engine's render components: Transform, PreviousTransform, Tint
 outline: deep
 ---
 
-# components
+# tecs.components
 
 `tecs.components` is the set of components the engine itself reads. They describe what an entity looks like:
 what colour it is, which image it samples, which material shades it, whether it is clipped, whether it lights

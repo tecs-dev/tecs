@@ -16,6 +16,10 @@ TL     := $(CURDIR)/vendor/bin/tl
 # syntax used here, so floating development rocks are not reproducible.
 TL_REF        ?= 1326d829790b92e23defe69fcf40460103b60d1d
 CERULEAN_REF  ?= ae9c61af4747d3db0a3fa99fde7157ed6c39bf65
+# Renders docs/modules/surface.md, which is committed and diffed against a
+# fresh render, so an unpinned tealdoc would fail the diff on somebody else's
+# machine rather than on the change that moved the surface.
+TEALDOC_REF   ?= d9f3a9ef820c7a2d5751cbae66e49f85c4c423a1
 
 # The build system owns these locations, so it passes them rather than having
 # the engine guess where its own output went.
@@ -90,9 +94,9 @@ deps: ## Install development dependencies (macOS/Homebrew)
 	  clang-format stylua ruff gersemi prettier luarocks
 	@$(MAKE) dev-tools
 
-dev-tools: ## Install pinned Teal and Cerulean into vendor
+dev-tools: ## Install pinned Teal, Cerulean and tealdoc into vendor
 	@TL_REF="$(TL_REF)" CERULEAN_REF="$(CERULEAN_REF)" \
-	  scripts/install-dev-tools.sh
+	  TEALDOC_REF="$(TEALDOC_REF)" scripts/install-dev-tools.sh
 
 configure: ## Configure the selected preset
 	@cmake --preset $(PRESET)

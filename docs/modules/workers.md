@@ -3,7 +3,7 @@ description: "Worker threads and serialized channels: spawning a state of its ow
 outline: deep
 ---
 
-# workers
+# tecs.workers
 
 `tecs.workers` is the only sanctioned way to run work off the main thread. Raw thread creation is deliberately
 not exposed: a LuaJIT FFI callback invoked from a thread the VM did not create is unsafe, and a thread entry

@@ -3,7 +3,7 @@ description: "Sprite sheets: frames, tags, slices and pivots, built from a grid,
 outline: deep
 ---
 
-# sheet
+# tecs.sheet
 
 An image divided into frames, with tags and slices over them. The model is Aseprite's, because that is
 what the art is authored in: a sheet is a list of frames each holding for its own duration, a set of

@@ -3,7 +3,7 @@ description: "DEFLATE decompression through zlib: whole zlib streams, the raw fo
 outline: deep
 ---
 
-# compress
+# tecs.compress
 
 `tecs.compress` decompresses DEFLATE data: zlib streams, and the raw form inside them. Binary asset formats
 store their bulk payload compressed and the engine has to read them, which is the whole requirement, and it is

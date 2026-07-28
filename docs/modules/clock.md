@@ -3,7 +3,7 @@ description: "Frame timing with a monotonic counter, a clamped delta, and an inj
 outline: deep
 ---
 
-# clock
+# tecs.clock
 
 `tecs.clock` is the engine's frame timing. It reads the platform's monotonic performance counter, turns the
 interval between two frames into the `dt` a world receives, and clamps that interval so a stalled frame does not

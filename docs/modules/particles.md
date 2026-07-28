@@ -3,7 +3,7 @@ description: "GPU-simulated particle emitters: effects, curves and gradients, th
 outline: deep
 ---
 
-# particles
+# tecs.particles
 
 `tecs.particles` simulates particles on the GPU and draws them as ordinary instances. An entity is an
 emitter, not a particle. Per-particle state lives in a buffer the CPU never reads and the vertex

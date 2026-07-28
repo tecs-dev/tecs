@@ -3,7 +3,7 @@ description: "Creating an OS window and reading its size, state, confinement and
 outline: deep
 ---
 
-# Window
+# tecs.Window
 
 `tecs.Window` is an OS window, and the displays it can sit on. It creates one, reads and changes its size,
 position, decoration, fullscreen state and opacity, confines the pointer to it, asks for the user's attention

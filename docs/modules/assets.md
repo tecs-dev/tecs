@@ -3,7 +3,7 @@ description: "Asynchronous image and sound loading on a worker thread, with hand
 outline: deep
 ---
 
-# assets
+# tecs.assets
 
 `tecs.assets` decodes images and sounds off the main thread. Decoding a PNG is milliseconds of pure CPU work
 with no GPU involvement, so it happens on a worker and the main thread only uploads. A load never blocks a

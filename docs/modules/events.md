@@ -3,7 +3,7 @@ description: "The engine's typed platform event stream: one wide record per even
 outline: deep
 ---
 
-# events
+# tecs.events
 
 `tecs.events` is the engine's platform event stream: keys, pointers, fingers, pens, gamepads, windows, displays,
 drops, the clipboard, audio devices and the application lifecycle, all as one typed vocabulary. Game code never

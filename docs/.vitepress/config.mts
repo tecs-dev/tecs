@@ -38,6 +38,21 @@ export default defineConfig({
             dark: "tokyo-night",
         },
         languages: [{ ...(tealGrammar as any), name: "teal", aliases: ["tl"] }],
+        // A page is compiled as a Vue template, so `{{ ... }}` inside inline
+        // code is read as an interpolation and rendered as whatever the
+        // expression evaluates to, which for a type like `{{string, string}}`
+        // is nothing. Fenced blocks are already given `v-pre`; inline code is
+        // not, and a signature that quietly loses an argument is exactly the
+        // kind of confidently wrong reference this site is meant not to carry.
+        config(md) {
+            const renderInline = md.renderer.rules.code_inline;
+            md.renderer.rules.code_inline = (tokens, index, options, env, self) => {
+                tokens[index].attrSet("v-pre", "");
+                return renderInline
+                    ? renderInline(tokens, index, options, env, self)
+                    : self.renderToken(tokens, index, options);
+            };
+        },
     },
     head: [
         ["link", { rel: "icon", type: "image/svg+xml", href: "/images/logo.svg" }],
@@ -63,7 +78,7 @@ export default defineConfig({
         nav: [
             { text: "Get started", link: "/getting-started" },
             { text: "ECS", link: "/ecs/" },
-            { text: "Modules", link: "/modules/" },
+            { text: "Surface", link: "/modules/" },
             { text: "CLI", link: "/cli/" },
         ],
 
@@ -73,7 +88,7 @@ export default defineConfig({
                 collapsed: false,
                 items: [
                     { text: "Getting started", link: "/getting-started" },
-                    { text: "Module reference", link: "/modules/" },
+                    { text: "The surface", link: "/modules/" },
                     { text: "The CLI", link: "/cli/" },
                 ],
             },
@@ -127,68 +142,50 @@ export default defineConfig({
                     { text: "Mutation model", link: "/ecs/mutation-model" },
                 ],
             },
+            // Flat, and spelled the way a game writes it. A reader looking for
+            // `tecs.watch` scans for that string; a taxonomy makes them guess
+            // which of four groups somebody filed it under first, and a
+            // collapsed group hides the name entirely until they guess right.
+            // The order matches docs/modules/index.md so the two read alike.
             {
-                text: "Modules",
+                text: "The surface",
                 collapsed: false,
                 items: [
                     { text: "Overview", link: "/modules/" },
-                    {
-                        text: "Lifecycle and rendering",
-                        collapsed: true,
-                        items: [
-                            { text: "Application", link: "/modules/Application" },
-                            { text: "Renderer", link: "/modules/Renderer" },
-                            { text: "Camera", link: "/modules/Camera" },
-                            { text: "layers", link: "/modules/layers" },
-                            { text: "materials", link: "/modules/materials" },
-                            { text: "sheet", link: "/modules/sheet" },
-                            { text: "animation", link: "/modules/animation" },
-                            { text: "text", link: "/modules/text" },
-                            { text: "particles", link: "/modules/particles" },
-                            { text: "components", link: "/modules/components" },
-                        ],
-                    },
-                    {
-                        text: "Platform",
-                        collapsed: true,
-                        items: [
-                            { text: "Window", link: "/modules/Window" },
-                            { text: "Input", link: "/modules/Input" },
-                            { text: "Gamepad", link: "/modules/Gamepad" },
-                            { text: "events", link: "/modules/events" },
-                            { text: "clock", link: "/modules/clock" },
-                            { text: "clipboard", link: "/modules/clipboard" },
-                            { text: "proc", link: "/modules/proc" },
-                            { text: "paths", link: "/modules/paths" },
-                            { text: "filesystem", link: "/modules/filesystem" },
-                            { text: "watch", link: "/modules/watch" },
-                            { text: "capabilities", link: "/modules/capabilities" },
-                        ],
-                    },
-                    {
-                        text: "Simulation and content",
-                        collapsed: true,
-                        items: [
-                            { text: "physics", link: "/modules/physics" },
-                            { text: "Audio", link: "/modules/Audio" },
-                            { text: "sequence", link: "/modules/sequence" },
-                            { text: "assets", link: "/modules/assets" },
-                            { text: "workers", link: "/modules/workers" },
-                            { text: "Future", link: "/modules/Future" },
-                        ],
-                    },
-                    {
-                        text: "Tooling and utilities",
-                        collapsed: true,
-                        items: [
-                            { text: "log", link: "/modules/log" },
-                            { text: "mcp", link: "/modules/mcp" },
-                            { text: "json", link: "/modules/json" },
-                            { text: "hash", link: "/modules/hash" },
-                            { text: "compress", link: "/modules/compress" },
-                            { text: "random", link: "/modules/random" },
-                        ],
-                    },
+                    { text: "Generated signatures", link: "/modules/surface" },
+                    { text: "tecs.Application", link: "/modules/Application" },
+                    { text: "tecs.Renderer", link: "/modules/Renderer" },
+                    { text: "tecs.Camera", link: "/modules/Camera" },
+                    { text: "tecs.layers", link: "/modules/layers" },
+                    { text: "tecs.materials", link: "/modules/materials" },
+                    { text: "tecs.sheet", link: "/modules/sheet" },
+                    { text: "tecs.animation", link: "/modules/animation" },
+                    { text: "tecs.text", link: "/modules/text" },
+                    { text: "tecs.particles", link: "/modules/particles" },
+                    { text: "tecs.components", link: "/modules/components" },
+                    { text: "tecs.Window", link: "/modules/Window" },
+                    { text: "tecs.Input", link: "/modules/Input" },
+                    { text: "tecs.Gamepad", link: "/modules/Gamepad" },
+                    { text: "tecs.events", link: "/modules/events" },
+                    { text: "tecs.clock", link: "/modules/clock" },
+                    { text: "tecs.clipboard", link: "/modules/clipboard" },
+                    { text: "tecs.proc", link: "/modules/proc" },
+                    { text: "tecs.paths", link: "/modules/paths" },
+                    { text: "tecs.filesystem", link: "/modules/filesystem" },
+                    { text: "tecs.watch", link: "/modules/watch" },
+                    { text: "tecs.capabilities", link: "/modules/capabilities" },
+                    { text: "tecs.physics", link: "/modules/physics" },
+                    { text: "tecs.Audio", link: "/modules/Audio" },
+                    { text: "tecs.sequence", link: "/modules/sequence" },
+                    { text: "tecs.assets", link: "/modules/assets" },
+                    { text: "tecs.workers", link: "/modules/workers" },
+                    { text: "tecs.Future", link: "/modules/Future" },
+                    { text: "tecs.log", link: "/modules/log" },
+                    { text: "tecs.mcp", link: "/modules/mcp" },
+                    { text: "tecs.json", link: "/modules/json" },
+                    { text: "tecs.hash", link: "/modules/hash" },
+                    { text: "tecs.compress", link: "/modules/compress" },
+                    { text: "tecs.random", link: "/modules/random" },
                 ],
             },
         ],

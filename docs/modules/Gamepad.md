@@ -3,7 +3,7 @@ description: "One connected gamepad as an object: buttons, axes, sensors, touchp
 outline: deep
 ---
 
-# Gamepad
+# tecs.Gamepad
 
 A gamepad is not a set of globals the way a keyboard nearly is. It has identity, a lifetime shorter than the
 process, metadata, capabilities that differ between devices, and outputs. Two pads sharing one button set is not

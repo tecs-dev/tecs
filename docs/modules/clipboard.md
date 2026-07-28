@@ -3,7 +3,7 @@ description: "Reading and writing the system clipboard, arbitrary mime types, an
 outline: deep
 ---
 
-# clipboard
+# tecs.clipboard
 
 `tecs.clipboard` is the system clipboard: text in, text out, the mime types on offer, the bytes behind one of
 them, and the primary selection beside it.

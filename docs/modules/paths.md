@@ -3,7 +3,7 @@ description: "Where assets are read from and state is written to, asked of the p
 outline: deep
 ---
 
-# paths
+# tecs.paths
 
 `tecs.paths` answers _where_: the directory the executable was loaded from, the one writable directory this
 application owns, and the root content is read from. [`filesystem`](/modules/filesystem) answers _what to do once

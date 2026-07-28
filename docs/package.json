@@ -6,6 +6,8 @@
     "scripts": {
         "docs:dev": "vitepress dev",
         "docs:build": "vitepress build",
-        "docs:preview": "vitepress preview"
+        "docs:preview": "vitepress preview",
+        "docs:surface": "bash scripts/surface.sh",
+        "docs:check": "bash scripts/surface.sh --check && bash scripts/checkpages.sh && python3 scripts/checklinks.py"
     }
 }

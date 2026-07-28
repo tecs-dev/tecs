@@ -4,6 +4,7 @@ set -eu
 
 : "${TL_REF:?Run this through make dev-tools}"
 : "${CERULEAN_REF:?Run this through make dev-tools}"
+: "${TEALDOC_REF:?Run this through make dev-tools}"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 vendor="$repo/vendor"
@@ -35,4 +36,13 @@ PATH="$vendor/bin:$PATH" make --directory="$scratch/cerulean" compile
 (
     cd "$scratch/cerulean"
     luarocks make --tree="$vendor" --lua-version=5.1 cerulean-dev-1.rockspec
+)
+
+git clone --quiet https://github.com/teal-language/tealdoc.git "$scratch/tealdoc"
+git -C "$scratch/tealdoc" checkout --quiet --detach "$TEALDOC_REF"
+install -d "$licenses/tealdoc"
+install -m 0644 "$scratch/tealdoc/LICENSE" "$licenses/tealdoc/LICENSE"
+(
+    cd "$scratch/tealdoc"
+    luarocks make --tree="$vendor" --lua-version=5.1 tealdoc-dev-1.rockspec
 )
