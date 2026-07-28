@@ -70,7 +70,7 @@ local function tecs(args, cwd)
         argv[#argv + 1] = argument
     end
 
-    local run = proc.run({
+    local run = proc.runProcess({
         args = argv,
         cwd = cwd,
         env = {
@@ -85,7 +85,7 @@ local function tecs(args, cwd)
     -- Both streams, because a compiler splits itself between them: the
     -- diagnostics that matter here land on one and the summary on the other,
     -- and a spec that read only one would report an empty string as a failure.
-    local result = proc.result(run)
+    local result = proc.processResult(run)
     if result ~= nil then
         result.output = (result.output or "") .. (result.errorOutput or "")
     end

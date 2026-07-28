@@ -167,7 +167,7 @@ mcp.register({
     whenCrashed = true,
     inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
-        local caps = capabilities.get()
+        local caps = capabilities.capabilities()
         return {
             world = worldContext() or data.null,
             target = caps.target,

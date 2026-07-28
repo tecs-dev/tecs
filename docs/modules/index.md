@@ -36,8 +36,6 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.assets`](/modules/assets)                     | loading content, cached and off the main thread                           |
 | [`tecs.audio`](/modules/audio)                       | clips, voices, groups, limits, the `Sound` component, and devices         |
 | [`tecs.camera`](/modules/camera)                     | the view a frame is drawn from                                            |
-| [`tecs.capabilities`](/modules/capabilities)         | what this machine and this build can do                                   |
-| [`tecs.clipboard`](/modules/clipboard)               | reading and writing the system clipboard                                  |
 | [`tecs.components`](/modules/components)             | the engine's own components, the ones the renderer reads                  |
 | [`tecs.data`](/modules/data)                         | JSON, DEFLATE and hashes over byte strings                                |
 | [`tecs.ecs`](/ecs/)                                  | worlds, components, queries, systems, events and resources                |
@@ -55,10 +53,9 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.net`](/modules/net)                           | nonblocking TCP streams and UDP datagrams                                 |
 | [`tecs.particles`](/modules/particles)               | emitters                                                                  |
 | [`tecs.physics`](/modules/physics)                   | rigid-body simulation on Box2D 3                                          |
-| [`tecs.proc`](/modules/proc)                         | shelling out                                                              |
 | [`tecs.renderer`](/modules/renderer)                 | a world to a frame, through an extractor and a backend                    |
 | [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                           |
-| [`tecs.system`](/modules/system)                     | URLs, locales, power, messages, and native file and folder dialogs        |
+| [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers |
 | [`tecs.text`](/modules/text)                         | distance-field text, drawn through an instance producer                   |
 | [`tecs.time`](/modules/time)                         | monotonic time                                                            |
 | [`tecs.version`](/modules/)                          | the version of this build, as a string                                    |

@@ -92,11 +92,11 @@ end
 --- Raises when a required string argument is missing.
 ---
 --- SDL reads a null `const char *` as an empty string, so a nil slipping into
---- `setText` would clear the clipboard rather than fail, which is the one
+--- `setClipboardText` would clear the clipboard rather than fail, which is the one
 --- outcome nobody meant.
 local function required(value: string, what: string)
     if value == nil then
-        error(("tecs: clipboard.%s needs a string"):format(what), 3)
+        error(("tecs: system.%s needs a string"):format(what), 3)
     end
 end
 
@@ -105,17 +105,17 @@ end
 --- False in a process that never brought up video, where every other function
 --- here answers empty or false. Distinguishes that from a clipboard that is
 --- simply empty, which no other return value can.
-function clipboard.available(): boolean
+function clipboard.clipboardAvailable(): boolean
     return tonumber(C.SDL_WasInit(VIDEO)) ~= 0
 end
 
 --- The clipboard's text, or an empty string when it holds none.
 ---
 --- Empty is also the answer when the clipboard holds something that is not
---- text, and when there is no video. Ask `hasText` to tell those from text
+--- text, and when there is no video. Ask `hasClipboardText` to tell those from text
 --- that is genuinely empty.
-function clipboard.text(): string
-    if not clipboard.available() then
+function clipboard.clipboardText(): string
+    if not clipboard.clipboardAvailable() then
         return ""
     end
     return take(C.SDL_GetClipboardText())
@@ -125,9 +125,9 @@ end
 ---
 --- SDL copies it, so the string is not retained here. Returns false when the
 --- platform refused, which includes having no video.
-function clipboard.setText(text: string): boolean
-    required(text, "setText")
-    if not clipboard.available() then
+function clipboard.setClipboardText(text: string): boolean
+    required(text, "setClipboardText")
+    if not clipboard.clipboardAvailable() then
         return false
     end
     return C.SDL_SetClipboardText(text) as boolean
@@ -138,8 +138,8 @@ end
 --- Cheaper than reading it: no allocation crosses the boundary, and on a
 --- platform where a read negotiates with the owning application, no
 --- negotiation happens.
-function clipboard.hasText(): boolean
-    if not clipboard.available() then
+function clipboard.hasClipboardText(): boolean
+    if not clipboard.clipboardAvailable() then
         return false
     end
     return C.SDL_HasClipboardText() as boolean
@@ -149,8 +149,8 @@ end
 ---
 --- The clipboard is left empty rather than restored to what preceded the
 --- write, because nothing anywhere remembers what that was.
-function clipboard.clear(): boolean
-    if not clipboard.available() then
+function clipboard.clearClipboard(): boolean
+    if not clipboard.clipboardAvailable() then
         return false
     end
     return C.SDL_ClearClipboardData() as boolean
@@ -160,9 +160,9 @@ end
 ---
 --- The same list `clipboardUpdate` carries, for a caller that wants to ask
 --- rather than wait to be told. Empty when the clipboard is empty.
-function clipboard.mimeTypes(): {string}
+function clipboard.clipboardMimeTypes(): {string}
     local found: {string} = {}
-    if not clipboard.available() then
+    if not clipboard.clipboardAvailable() then
         return found
     end
 
@@ -182,9 +182,9 @@ function clipboard.mimeTypes(): {string}
 end
 
 --- Whether the clipboard offers `mimeType`.
-function clipboard.hasData(mimeType: string): boolean
-    required(mimeType, "hasData")
-    if not clipboard.available() then
+function clipboard.hasClipboardData(mimeType: string): boolean
+    required(mimeType, "hasClipboardData")
+    if not clipboard.clipboardAvailable() then
         return false
     end
     return C.SDL_HasClipboardData(mimeType) as boolean
@@ -194,9 +194,9 @@ end
 ---
 --- Nil rather than an empty string, because a mime type can be offered with no
 --- bytes behind it and that is not the same as not being offered.
-function clipboard.data(mimeType: string): string
-    required(mimeType, "data")
-    if not clipboard.available() then
+function clipboard.clipboardData(mimeType: string): string
+    required(mimeType, "clipboardData")
+    if not clipboard.clipboardAvailable() then
         return nil
     end
 
@@ -210,8 +210,8 @@ function clipboard.data(mimeType: string): string
 end
 
 --- The primary selection's text, or an empty string when it holds none.
-function clipboard.primary(): string
-    if not clipboard.available() then
+function clipboard.primarySelection(): string
+    if not clipboard.clipboardAvailable() then
         return ""
     end
     return take(C.SDL_GetPrimarySelectionText())
@@ -221,17 +221,17 @@ end
 ---
 --- Succeeds on a platform that has no primary selection, where SDL keeps the
 --- value for this process and nothing else can read it.
-function clipboard.setPrimary(text: string): boolean
-    required(text, "setPrimary")
-    if not clipboard.available() then
+function clipboard.setPrimarySelection(text: string): boolean
+    required(text, "setPrimarySelection")
+    if not clipboard.clipboardAvailable() then
         return false
     end
     return C.SDL_SetPrimarySelectionText(text) as boolean
 end
 
 --- Whether the primary selection holds text.
-function clipboard.hasPrimary(): boolean
-    if not clipboard.available() then
+function clipboard.hasPrimarySelection(): boolean
+    if not clipboard.clipboardAvailable() then
         return false
     end
     return C.SDL_HasPrimarySelectionText() as boolean

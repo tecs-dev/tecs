@@ -8,11 +8,11 @@ outline: deep
 Several things in this tree are work in flight: an asset decode, a child process, a request. Each of them used to
 own a private settle-once cell with four states, a failure string and a blocking wait that pumped a worker, and
 each had a different word for the same four states. `Future` is that object written once, and what a subsystem
-hands back instead of a private type: [`proc.run`](/modules/proc) returns a `Future<proc.Result>` rather than a
+hands back instead of a private type: [`proc.run`](/modules/system) returns a `Future<proc.Result>` rather than a
 `Proc`. No subsystem exports an alias for the type; callers write `Future`.
 
 ```teal
-tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
+tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
     :map(function(result) return result.output end)
     :recover(function() return "unknown" end)
     :onSettle(function(future) print(future.value) end)
@@ -243,8 +243,8 @@ five hundred loads is two deep rather than five hundred.
 
 ```teal
 local runs <const> = {
-    tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } }),
-    tecs.proc.run({ args = { "git", "status", "--porcelain" } }),
+    tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } }),
+    tecs.system.runProcess({ args = { "git", "status", "--porcelain" } }),
 }
 tecs.future.Future.all(runs):onSettle(function(joined)
     if joined.status == "ready" then
@@ -305,7 +305,7 @@ the inner future's source part way through.
 **Example:**
 
 ```teal
-local head <const> = tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } }):wait()
+local head <const> = tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } }):wait()
 if head.status == "ready" then
     print(head.value.output)
 end

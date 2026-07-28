@@ -76,8 +76,6 @@ MODULES = [
         [("src/tecs/Audio.tl", "tecs.audio.Audio"), ("src/tecs/platform/audio.tl", "tecs.audio")],
     ),
     ("docs/modules/camera.md", [("src/tecs/gfx/Camera.tl", "tecs.camera.Camera")]),
-    ("docs/modules/capabilities.md", [("src/tecs/platform/capabilities.tl", "tecs.capabilities")]),
-    ("docs/modules/clipboard.md", [("src/tecs/platform/clipboard.tl", "tecs.clipboard")]),
     ("docs/modules/components.md", [("src/tecs/components.tl", "tecs.components")]),
     (
         "docs/modules/data.md",
@@ -111,10 +109,17 @@ MODULES = [
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
     ("docs/modules/net.md", [("src/tecs/net.tl", "tecs.net")]),
     ("docs/modules/particles.md", [("src/tecs/gfx/particles.tl", "tecs.particles")]),
-    ("docs/modules/proc.md", [("src/tecs/platform/proc.tl", "tecs.proc")]),
     ("docs/modules/renderer.md", [("src/tecs/Renderer.tl", "tecs.renderer.Renderer")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
-    ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
+    (
+        "docs/modules/system.md",
+        [
+            ("src/tecs/platform/capabilities.tl", "tecs.system"),
+            ("src/tecs/platform/clipboard.tl", "tecs.system"),
+            ("src/tecs/platform/proc.tl", "tecs.system"),
+            ("src/tecs/platform/system.tl", "tecs.system"),
+        ],
+    ),
     ("docs/modules/text.md", [("src/tecs/gfx/text.tl", "tecs.text")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),
     ("docs/modules/window.md", [("src/tecs/platform/Window.tl", "tecs.window.Window")]),

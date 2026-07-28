@@ -185,7 +185,7 @@ end
 --- A release links no shader compiler, which is what tells it apart from a
 --- development build, and it is the same bit `reload_shaders` refuses on.
 function watch.available(): boolean
-    return capabilities.get().runtimeShaders
+    return capabilities.capabilities().runtimeShaders
 end
 
 --- Starts watching, and refuses on a build that should not.

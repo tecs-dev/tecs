@@ -24,7 +24,7 @@ tecs.http.client({ userAgent = "mygame/1.0" })
 ```
 
 There is no line missing from that. A client is driven by the application from the frame it already runs, the same
-way [`assets`](/modules/assets) and [`proc`](/modules/proc) are, so a request started anywhere settles on its own.
+way [`assets`](/modules/assets) and [`proc`](/modules/system) are, so a request started anywhere settles on its own.
 
 `onSettle` is handed the future rather than the value, which is what lets one continuation answer both outcomes.
 [`map`](/modules/future#map), [`flatMap`](/modules/future#flatmap) and [`recover`](/modules/future#recover) are
@@ -153,7 +153,7 @@ A 404 settles `"ready"` with `status` 404. `"failed"` means the transfer did not
 resolve, the connection was refused, TLS did not verify, the deadline passed. `"cancelled"` means this process
 stopped it.
 
-This is the same reasoning [`proc`](/modules/proc) applies to an exit code. A status code is the answer to the
+This is the same reasoning [`proc`](/modules/system) applies to an exit code. A status code is the answer to the
 request, and making it a failure would propagate a 404 through `map` as though the transfer broke. `Response:ok()`
 is the separate question about the answer.
 

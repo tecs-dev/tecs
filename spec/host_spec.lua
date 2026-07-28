@@ -59,7 +59,7 @@ local out = findHost()
 --- spec independent of how the suite was launched.
 local function observations()
     assert.is_not_nil(out, "no bin/tecs above " .. root)
-    local run = proc.run({
+    local run = proc.runProcess({
         args = { out .. "/bin/tecs", "--entry", "spec/fixtures/hostlifecycle.lua" },
         env = {
             TECS_LUA = root,
@@ -70,7 +70,7 @@ local function observations()
     })
     run:wait(60000)
 
-    local result = proc.result(run)
+    local result = proc.processResult(run)
     assert.is_not_nil(result, "the host never started")
     local output = result.output .. "\n" .. result.errorOutput
 
@@ -93,7 +93,7 @@ describe("host", function()
     end)
 
     teardown(function()
-        proc.shutdown()
+        proc.shutdownProcesses()
     end)
 
     -- Defect: the arrival stamp dated an event from the pump that delivered it,

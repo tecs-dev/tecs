@@ -1203,7 +1203,8 @@ holding bytes that will never be written.
 ## The clipboard
 
 `clipboardUpdate` says the clipboard changed and lists the mime types now on
-offer. `tecs.clipboard` is the other half: what those bytes are, and how to put
+offer. The clipboard half of `tecs.system` is the other half: what those bytes
+are, and how to put
 text there. Being told and having no way to look is the worse of the two
 halves to ship alone.
 
@@ -1235,11 +1236,13 @@ The primary selection is a second, independent clipboard rather than a flavour
 of the first: X11 and Wayland fill it with whatever was last selected and paste
 it on a middle click, with no copy step at all. Elsewhere there is no such
 concept, and SDL does not fail there but keeps the value in the video device,
-so `setPrimary` succeeds, `primary` reads back what this process wrote, and
+so `setPrimarySelection` succeeds, `primarySelection` reads back what this
+process wrote, and
 nothing outside the process ever sees it.
 
 The clipboard is part of SDL's video subsystem, so a headless tool has none.
-`available` reports that, which is the only answer that separates no clipboard
+`clipboardAvailable` reports that, which is the only answer that separates no
+clipboard
 from an empty one; the rest short-circuit to empty and false without calling
 SDL, so a question that was never going to be answered does not overwrite the
 SDL error a caller is about to read for some other reason.
@@ -1248,18 +1251,27 @@ Text is UTF-8 and passes through byte for byte. Line endings are not
 normalised, so text copied on Windows arrives as CRLF and stays CRLF, and
 nothing is trimmed from either end. Text stops at the first NUL, because that
 is what terminates the C string SDL returns and what every producer of
-clipboard text intends; `data` uses the length SDL reports instead, so a blob
+clipboard text intends; `clipboardData` uses the length SDL reports instead, so
+a blob
 keeps its NULs.
 
 ## Native platform utilities
 
-The smaller operating-system services stay small modules rather than becoming
-an `Application` grab bag. `tecs.system` holds URLs, locale preference, power,
-the simple blocking message box and asynchronous file and folder selection;
-standalone sensor handles sit under `tecs.input`, beside the pads and the
-keyboard, because a game asking what a device can sense is asking one question.
-Standard cursor shapes stay on `Input`, because cursor choice is an outbound
-input command on the same seam as visibility and relative mode.
+The smaller operating-system services are one module rather than an
+`Application` grab bag, and rather than one name each. `tecs.system` holds what
+this build can do here, the clipboard, running another program, URLs, locale
+preference, power, the simple blocking message box and asynchronous file and
+folder selection. None of them is a subsystem a game builds on: each is a
+handful of calls made when a player asks for something, and four names for that
+meant a game copying a path and then opening its folder reached three modules
+to do one thing. Names are qualified by what they act on, because a bare `text`,
+`data`, `clear`, `run` or `update` means nothing on a module that does all of
+it.
+
+Standalone sensor handles sit under `tecs.input` instead, beside the pads and
+the keyboard, because a game asking what a device can sense is asking one
+question. Standard cursor shapes stay on `Input`, because cursor choice is an
+outbound input command on the same seam as visibility and relative mode.
 
 Device enumeration and microphone capture went the other way and are inside
 `tecs.audio`, beside the mixer, rather than being a module of their own. They
@@ -1298,7 +1310,8 @@ several, and on SDL each of those is the obvious call: `SDL_GetPathInfo` behind
 and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,
 `rename`, `copy`, `write`, `currentDirectory` and `userFolder`. No virtual
 filesystem and no invented path scheme, so a failure is the platform's failure
-and the name says which call to read about. Like `proc` it initialises no
+and the name says which call to read about. Like the process half it
+initialises no
 subsystem and is more useful with no window than with one.
 
 `openWrite` and `openRead` are the pair that is not one call, and they are the
@@ -1334,7 +1347,8 @@ succeeds, `remove` reports success when there was nothing there, `rename` and
 with no such folder.
 
 Everything blocks, and that is the whole of stage one. A path call is one
-syscall rather than another program's lifetime, which is what put `proc` on a
+syscall rather than another program's lifetime, which is what put the process
+runner on a
 worker, and `SDL_LoadFileAsync` reads a file rather than a directory, so it
 would leave the one unbounded case, a recursive glob over a large tree, exactly
 where it was. That case runs on a worker instead: every function takes a path
@@ -1365,7 +1379,7 @@ that pumped, and each of them had a different word for the same four states.
 ```lua
 local Future = require("tecs.Future")
 
-tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
+tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
     :map(function(result) return result.output end)
     :recover(function() return "unknown" end)
     :onSettle(function(future) print(future.value) end)
@@ -1493,12 +1507,12 @@ is the one shape a frame-driven client cannot take.
 
 A command line tool, a resource pipeline or an asset build wants to run another
 program, and a game wants to do it between two frames rather than instead of
-them. `tecs.proc` is that, and it is one of the few subsystems that is more
+them. `tecs.system` is that, and it is one of the few subsystems that is more
 useful without a window than with one, so it initialises no SDL subsystem and
 works under a plain interpreter.
 
 ```lua
-local run = tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
+local run = tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
 -- ... frames pass, the loop pumps ...
 if run.status == "ready" and run.value:succeeded() then
     print(run.value.output)

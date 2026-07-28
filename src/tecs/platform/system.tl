@@ -55,12 +55,27 @@ local record DialogResult
     cancelled: boolean
 end
 
+--- The operating-system half of `tecs.system`: URLs, locales, power, message
+--- boxes and native file and folder dialogs.
 local record system
-    Locale: Locale
-    Power: Power
-    DialogFilter: DialogFilter
-    DialogOptions: DialogOptions
-    DialogResult: DialogResult
+    --- Anything carrying a native window handle, which is what a dialog or a
+    --- message box sits over. A `Window` is one.
+    type WindowLike = WindowLike
+
+    --- One language the user prefers, in order of preference.
+    type Locale = Locale
+
+    --- What the machine is running on, and how much of it is left.
+    type Power = Power
+
+    --- One entry in a dialog's file-type filter.
+    type DialogFilter = DialogFilter
+
+    --- What a dialog is opened with.
+    type DialogOptions = DialogOptions
+
+    --- What the user chose, or that they chose nothing.
+    type DialogResult = DialogResult
 end
 
 local countOut <const> = loader.newArray("int[1]")

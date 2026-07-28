@@ -14,7 +14,8 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 
 local C <const> = sdl.C
 
-local record capabilities
+--- What this build of the engine can do on this target.
+local record Capabilities
     --- Platform name as SDL reports it, such as "macOS" or "Android". A
     --- licensed port answers with its own name instead, since everything here
     --- describes the platform actually installed.
@@ -59,13 +60,19 @@ local record capabilities
     --- Logical cores, for sizing a worker pool.
     cores: integer
 
-    --- Always true. Every target has somewhere to write, and `paths.preferencePath` is
-    --- where: the field exists so a caller can ask rather than assume, not
-    --- because a target answers no.
+    --- Always true. Every target has somewhere to write, and
+    --- `filesystem.preferencePath` is where: the field exists so a caller can
+    --- ask rather than assume, not because a target answers no.
     writableStorage: boolean
 end
 
-local resolved: capabilities = nil
+--- The capability half of `tecs.system`.
+local record capabilities
+    --- What this build of the engine can do on this target.
+    type Capabilities = Capabilities
+end
+
+local resolved: Capabilities = nil
 local cachedGeneration = -1
 
 --- Whether the platform reports a touch device.
@@ -100,7 +107,7 @@ local function jitEnabled(): boolean
 end
 
 --- Forgets the cached answer. A platform change is noticed without this.
-function capabilities.reset()
+function capabilities.resetCapabilities()
     resolved = nil
 end
 
@@ -108,10 +115,10 @@ end
 ---
 --- Cached, since none of these change while a platform is installed. The cache
 --- is keyed on the platform generation, so installing one drops it without
---- anybody calling `reset`.
+--- anybody calling `resetCapabilities`.
 --- @return The same table on every call until the platform changes. Shared,
 ---     so a caller that means to keep it does not also mean to edit it.
-function capabilities.get(): capabilities
+function capabilities.capabilities(): Capabilities
     local generation = adapter.generation()
     if generation ~= cachedGeneration then
         cachedGeneration = generation

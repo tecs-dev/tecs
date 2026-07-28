@@ -872,7 +872,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- exited, and a game that shelled out and did nothing else would otherwise
     -- hold a handle that never leaves "running". Costs a nil check on a
     -- process that has never started a child.
-    proc.update()
+    proc.updateProcesses()
     system.updateDialogs()
 
     -- And again for every open HTTP client. A transfer that completed while
@@ -1202,7 +1202,7 @@ function Application:_shutdown(): boolean
     -- A child outlives the process that started it unless something ends it,
     -- and the worker waiting on one would be a thread inside a library about
     -- to be unmapped. So teardown kills: gently, then forcibly, then joins.
-    proc.shutdown()
+    proc.shutdownProcesses()
     log.closeFile()
 
     if self.device ~= nil then

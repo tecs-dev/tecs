@@ -89,9 +89,20 @@ describe("platform.clipboard on the public surface", function()
         -- observable here is the wiring that keeps it true, which is that the
         -- surface has no value for the name until something asks for one.
         local tecs = require("tecs")
-        assert.is_nil(rawget(tecs, "clipboard"), "nothing may hold the module before it is asked for")
-        assert.are.equal(clipboard, tecs.clipboard)
-        assert.is_not_nil(rawget(tecs, "clipboard"), "and the resolved module is kept, not re-required")
+        assert.is_nil(rawget(tecs, "system"), "nothing may hold the namespace before it is asked for")
+        assert.are.equal(clipboard.clipboardText, tecs.system.clipboardText)
+        assert.is_not_nil(rawget(tecs, "system"), "and the resolved namespace is kept, not rebuilt")
+    end)
+
+    it("is reached under tecs.system with its names qualified", function()
+        -- Four modules answer one name, so a bare `text`, `data` or `clear`
+        -- would mean nothing on it.
+        local tecs = require("tecs")
+        assert.are.equal(clipboard.setClipboardText, tecs.system.setClipboardText)
+        assert.are.equal(clipboard.clipboardData, tecs.system.clipboardData)
+        assert.are.equal(clipboard.primarySelection, tecs.system.primarySelection)
+        assert.is_nil(tecs.system.text)
+        assert.is_nil(tecs.system.data)
     end)
 end)
 
@@ -121,25 +132,25 @@ describe("platform.clipboard with no video", function()
     it("reports that there is no clipboard", function()
         -- The one answer that separates "no clipboard" from "empty clipboard".
         -- Without it every other return value here reads as an empty clipboard.
-        assert.is_false(clipboard.available())
+        assert.is_false(clipboard.clipboardAvailable())
     end)
 
     it("answers empty and false instead of failing", function()
         -- A headless tool is a supported way to run, so asking is allowed and
         -- gets an answer. Nothing raises and nothing claims to have worked.
-        assert.are.equal("", clipboard.text())
-        assert.is_false(clipboard.hasText())
-        assert.is_false(clipboard.hasData(TEXT_MIME))
-        assert.is_nil(clipboard.data(TEXT_MIME))
-        assert.are.same({}, clipboard.mimeTypes())
-        assert.are.equal("", clipboard.primary())
-        assert.is_false(clipboard.hasPrimary())
+        assert.are.equal("", clipboard.clipboardText())
+        assert.is_false(clipboard.hasClipboardText())
+        assert.is_false(clipboard.hasClipboardData(TEXT_MIME))
+        assert.is_nil(clipboard.clipboardData(TEXT_MIME))
+        assert.are.same({}, clipboard.clipboardMimeTypes())
+        assert.are.equal("", clipboard.primarySelection())
+        assert.is_false(clipboard.hasPrimarySelection())
     end)
 
     it("reports a write as failed rather than pretending", function()
-        assert.is_false(clipboard.setText("into the void"))
-        assert.is_false(clipboard.setPrimary("into the void"))
-        assert.is_false(clipboard.clear())
+        assert.is_false(clipboard.setClipboardText("into the void"))
+        assert.is_false(clipboard.setPrimarySelection("into the void"))
+        assert.is_false(clipboard.clearClipboard())
     end)
 
     it("leaves SDL's error alone, having asked SDL nothing", function()
@@ -148,34 +159,34 @@ describe("platform.clipboard with no video", function()
         -- unrelated failure reported later is still the one that happened.
         local asked = {
             function()
-                clipboard.text()
+                clipboard.clipboardText()
             end,
             function()
-                clipboard.hasText()
+                clipboard.hasClipboardText()
             end,
             function()
-                clipboard.setText("ignored")
+                clipboard.setClipboardText("ignored")
             end,
             function()
-                clipboard.clear()
+                clipboard.clearClipboard()
             end,
             function()
-                clipboard.mimeTypes()
+                clipboard.clipboardMimeTypes()
             end,
             function()
-                clipboard.hasData(TEXT_MIME)
+                clipboard.hasClipboardData(TEXT_MIME)
             end,
             function()
-                clipboard.data(TEXT_MIME)
+                clipboard.clipboardData(TEXT_MIME)
             end,
             function()
-                clipboard.primary()
+                clipboard.primarySelection()
             end,
             function()
-                clipboard.setPrimary("ignored")
+                clipboard.setPrimarySelection("ignored")
             end,
             function()
-                clipboard.hasPrimary()
+                clipboard.hasPrimarySelection()
             end,
         }
         for index, ask in ipairs(asked) do
@@ -212,17 +223,17 @@ describe("platform.clipboard", function()
     end)
 
     it("reports that there is a clipboard", function()
-        assert.is_true(clipboard.available())
+        assert.is_true(clipboard.clipboardAvailable())
     end)
 
     it("round-trips text", function()
-        assert.is_true(clipboard.setText("copied"))
-        assert.are.equal("copied", clipboard.text())
+        assert.is_true(clipboard.setClipboardText("copied"))
+        assert.are.equal("copied", clipboard.clipboardText())
     end)
 
     it("answers whether there is any without reading it", function()
-        clipboard.setText("something")
-        assert.is_true(clipboard.hasText())
+        clipboard.setClipboardText("something")
+        assert.is_true(clipboard.hasClipboardText())
     end)
 
     it("passes bytes through unchanged", function()
@@ -230,49 +241,49 @@ describe("platform.clipboard", function()
         -- producer, and whitespace at both ends. None of it is normalised and
         -- none of it is trimmed: what went in is what comes back.
         local awkward = "  caf\195\169 \240\159\142\174 line\r\nline\ntail\t"
-        clipboard.setText(awkward)
-        assert.are.equal(awkward, clipboard.text())
+        clipboard.setClipboardText(awkward)
+        assert.are.equal(awkward, clipboard.clipboardText())
     end)
 
     it("keeps text that is genuinely empty distinguishable", function()
         -- Empty text is a real clipboard state and not the same as no
         -- clipboard, which is why `available` exists separately.
-        assert.is_true(clipboard.setText(""))
-        assert.are.equal("", clipboard.text())
-        assert.is_true(clipboard.available())
+        assert.is_true(clipboard.setClipboardText(""))
+        assert.are.equal("", clipboard.clipboardText())
+        assert.is_true(clipboard.clipboardAvailable())
     end)
 
     it("refuses a write with nothing to write", function()
         -- SDL reads a null string as empty, so a nil that reached it would
         -- clear the clipboard and report success.
-        clipboard.setText("intact")
-        clipboard.setPrimary("also intact")
+        clipboard.setClipboardText("intact")
+        clipboard.setPrimarySelection("also intact")
         assert.has_error(function()
-            clipboard.setText(nil)
-        end, "tecs: clipboard.setText needs a string")
+            clipboard.setClipboardText(nil)
+        end, "tecs: system.setClipboardText needs a string")
         assert.has_error(function()
-            clipboard.setPrimary(nil)
-        end, "tecs: clipboard.setPrimary needs a string")
-        assert.are.equal("intact", clipboard.text())
-        assert.are.equal("also intact", clipboard.primary())
+            clipboard.setPrimarySelection(nil)
+        end, "tecs: system.setPrimarySelection needs a string")
+        assert.are.equal("intact", clipboard.clipboardText())
+        assert.are.equal("also intact", clipboard.primarySelection())
     end)
 
     it("refuses a read with no mime type to read", function()
         -- SDL answers a null mime type with an invalid-parameter failure,
         -- which reads from here as a clipboard that simply holds nothing.
         assert.has_error(function()
-            clipboard.data(nil)
-        end, "tecs: clipboard.data needs a string")
+            clipboard.clipboardData(nil)
+        end, "tecs: system.clipboardData needs a string")
         assert.has_error(function()
-            clipboard.hasData(nil)
-        end, "tecs: clipboard.hasData needs a string")
+            clipboard.hasClipboardData(nil)
+        end, "tecs: system.hasClipboardData needs a string")
     end)
 
     it("lists the mime types on offer", function()
         -- The same list `clipboardUpdate` carries, which is what makes the
         -- event's payload something a caller can act on.
-        clipboard.setText("listed")
-        local offered = clipboard.mimeTypes()
+        clipboard.setClipboardText("listed")
+        local offered = clipboard.clipboardMimeTypes()
         local found = false
         for _, mime in ipairs(offered) do
             if mime == TEXT_MIME then
@@ -283,22 +294,22 @@ describe("platform.clipboard", function()
     end)
 
     it("reads the bytes behind a mime type", function()
-        clipboard.setText("by mime")
-        assert.is_true(clipboard.hasData(TEXT_MIME))
-        assert.are.equal("by mime", clipboard.data(TEXT_MIME))
+        clipboard.setClipboardText("by mime")
+        assert.is_true(clipboard.hasClipboardData(TEXT_MIME))
+        assert.are.equal("by mime", clipboard.clipboardData(TEXT_MIME))
     end)
 
     it("answers nil for a mime type the clipboard does not offer", function()
-        clipboard.setText("only text")
-        assert.is_false(clipboard.hasData("application/x-tecs-nothing"))
-        assert.is_nil(clipboard.data("application/x-tecs-nothing"))
+        clipboard.setClipboardText("only text")
+        assert.is_false(clipboard.hasClipboardData("application/x-tecs-nothing"))
+        assert.is_nil(clipboard.clipboardData("application/x-tecs-nothing"))
     end)
 
     it("withdraws what it put there", function()
-        clipboard.setText("temporary")
-        assert.is_true(clipboard.clear())
-        assert.is_false(clipboard.hasText())
-        assert.are.same({}, clipboard.mimeTypes())
+        clipboard.setClipboardText("temporary")
+        assert.is_true(clipboard.clearClipboard())
+        assert.is_false(clipboard.hasClipboardText())
+        assert.are.same({}, clipboard.clipboardMimeTypes())
     end)
 
     it("round-trips the primary selection", function()
@@ -306,16 +317,16 @@ describe("platform.clipboard", function()
         -- fill it from the selection itself. Where there is no such concept
         -- SDL keeps the value in this process, so the round trip holds
         -- everywhere and only its reach differs.
-        assert.is_true(clipboard.setPrimary("selected"))
-        assert.is_true(clipboard.hasPrimary())
-        assert.are.equal("selected", clipboard.primary())
+        assert.is_true(clipboard.setPrimarySelection("selected"))
+        assert.is_true(clipboard.hasPrimarySelection())
+        assert.are.equal("selected", clipboard.primarySelection())
     end)
 
     it("keeps the primary selection independent of the clipboard", function()
-        clipboard.setText("clipboard side")
-        clipboard.setPrimary("selection side")
-        assert.are.equal("clipboard side", clipboard.text())
-        assert.are.equal("selection side", clipboard.primary())
+        clipboard.setClipboardText("clipboard side")
+        clipboard.setPrimarySelection("selection side")
+        assert.are.equal("clipboard side", clipboard.clipboardText())
+        assert.are.equal("selection side", clipboard.primarySelection())
     end)
 
     it("frees the text, the selection and the blob SDL allocated", function()
@@ -323,14 +334,14 @@ describe("platform.clipboard", function()
         -- failed read with an allocated empty string rather than nothing, so
         -- the free is owed on every path. Forgetting it leaks once per paste,
         -- which nobody attributes to the clipboard.
-        clipboard.setText(string.rep("x", PAYLOAD))
-        clipboard.setPrimary(string.rep("y", PAYLOAD))
+        clipboard.setClipboardText(string.rep("x", PAYLOAD))
+        clipboard.setPrimarySelection(string.rep("y", PAYLOAD))
 
         local before = settled()
         for _ = 1, READS do
-            clipboard.text()
-            clipboard.primary()
-            clipboard.data(TEXT_MIME)
+            clipboard.clipboardText()
+            clipboard.primarySelection()
+            clipboard.clipboardData(TEXT_MIME)
         end
         local grew = settled() - before
         assert.is_true(
@@ -347,10 +358,10 @@ describe("platform.clipboard", function()
         -- so one free releases all of it and freeing an entry would be a
         -- double free. The list is small, hence the count: a leak of it is
         -- only visible in bulk.
-        clipboard.setText("listed")
+        clipboard.setClipboardText("listed")
         local before = settled()
         for _ = 1, LISTS do
-            clipboard.mimeTypes()
+            clipboard.clipboardMimeTypes()
         end
         local grew = settled() - before
         assert.is_true(

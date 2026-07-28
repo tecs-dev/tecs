@@ -17,8 +17,8 @@
 -- What "the thing it claims" means, without restating the descriptors. A name
 -- that resolves to a module resolves to that module itself rather than a copy
 -- of it, and the module's path ends in the name it is reached by:
--- `tecs.hash` is the table `require` answers for a path ending `.hash`. A
--- descriptor pointing `hash` at `tecs.compress` still resolves to a table with
+-- `tecs.assets` is the table `require` answers for a path ending `.assets`. A
+-- descriptor pointing `assets` at `tecs.workers` still resolves to a table with
 -- functions in it, and fails here. A name that resolves to a namespace has no
 -- module of its own, so it is held to its members instead: everything the
 -- record declares on it is reachable.
@@ -128,7 +128,11 @@ describe("the public surface", function()
         -- Everything below is generated from this, so a parse that found
         -- nothing would pass every test by having none to run.
         assert.is_not_nil(top, INIT .. " declares no `local record tecs`")
-        assert.is_true(#top > 30, "only " .. #top .. " public names were parsed from " .. INIT)
+        -- A floor rather than a count: the surface is being reorganised into
+        -- fewer, larger modules, so what this guards against is a parse that
+        -- found a handful of names and then passed every test below by having
+        -- almost none to run.
+        assert.is_true(#top > 10, "only " .. #top .. " public names were parsed from " .. INIT)
     end)
 
     it("declares every name the resolver answers, and no more", function()

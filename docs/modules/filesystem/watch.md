@@ -43,7 +43,7 @@ Whether the watcher can run on this build.
 function watch.available(): boolean
 ```
 
-**Returns:** [`capabilities.get().runtimeShaders`](/modules/capabilities#the-two-shader-bits). A release links no
+**Returns:** [`capabilities.get().runtimeShaders`](/modules/system#the-two-shader-bits). A release links no
 shader compiler, which is the same bit the shader reload tool refuses on and means the same thing.
 
 ### install

@@ -325,14 +325,14 @@ describe("the file watcher", function()
     end)
 
     it("refuses a build that links no shader compiler", function()
-        local real = capabilities.get
-        capabilities.get = function()
+        local real = capabilities.capabilities
+        capabilities.capabilities = function()
             local answered = real()
             return setmetatable({ runtimeShaders = false }, { __index = answered })
         end
 
         local ok, failure = pcall(watch.install, { root = dir })
-        capabilities.get = real
+        capabilities.capabilities = real
 
         assert.is_false(ok)
         assert.is_truthy(

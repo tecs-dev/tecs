@@ -412,14 +412,18 @@ describe("platform contract", function()
         -- cannot load a library by name and has its own bytecode format has to
         -- show up as itself and not as the host that happens to be running.
         adapter.install(fakePlatform())
-        local caps = capabilities.get()
+        local caps = capabilities.capabilities()
 
         assert.are.equal("spec.console", caps.target)
         assert.is_false(caps.dynamicLibraries)
         assert.are.same({ "private" }, caps.shaderFormats)
 
         adapter.reset()
-        assert.are_not.equal("spec.console", capabilities.get().target, "removing the platform must be reflected too")
+        assert.are_not.equal(
+            "spec.console",
+            capabilities.capabilities().target,
+            "removing the platform must be reflected too"
+        )
     end)
 
     it("plays sound through the platform's own output", function()

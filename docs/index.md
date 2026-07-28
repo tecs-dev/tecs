@@ -225,8 +225,6 @@ behind each one.
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.camera`](/modules/camera) - the view a frame is drawn from
-- [`tecs.capabilities`](/modules/capabilities) - what this machine and this build can do
-- [`tecs.clipboard`](/modules/clipboard) - the system clipboard
 - [`tecs.components`](/modules/components) - the components the renderer reads
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
@@ -244,10 +242,9 @@ behind each one.
 - [`tecs.net`](/modules/net) - nonblocking TCP streams and UDP datagrams
 - [`tecs.particles`](/modules/particles) - emitters
 - [`tecs.physics`](/modules/physics) - Box2D 3, solved across a shared thread pool
-- [`tecs.proc`](/modules/proc) - shelling out
 - [`tecs.renderer`](/modules/renderer) - deferred and GPU-driven, with compute culling and one indirect draw
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
-- [`tecs.system`](/modules/system) - URLs, locales, power, messages, and native file and folder dialogs
+- [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer
 - [`tecs.time`](/modules/time) - monotonic time
 - [`tecs.version`](/modules/) - the version of this build, as a string

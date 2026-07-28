@@ -10,7 +10,7 @@
 ---
 --- ## One shape: run to completion
 ---
---- `proc.run` serves the child whose output you want when it finishes:
+--- `proc.runProcess` serves the child whose output you want when it finishes:
 --- `git rev-parse`, `sips`, a shader translator, a packer. The result arrives
 --- whole, once, with the exit status beside it.
 ---
@@ -57,7 +57,7 @@
 --- through the non-blocking streams SDL hands out, instead of calling
 --- `SDL_ReadProcess` and disappearing for the child's lifetime.
 ---
---- `proc.shutdown` therefore kills rather than detaching or reaping. Reaping
+--- `proc.shutdownProcesses` therefore kills rather than detaching or reaping. Reaping
 --- alone has no bound, and a child that never exits parks teardown; detaching
 --- leaves a thread running inside a library the process is about to unmap,
 --- which is the failure `loader`'s `RTLD_NODELETE` already exists for. Killing
@@ -361,7 +361,7 @@ local record proc
     --- of it is on the future: a run in flight is a `Future<Result>` reading
     --- "pending" and a run that ended is the same future carrying one of
     --- these. The one thing worth knowing in between is the child's process id,
-    --- and `proc.pid` answers that from the runner's own bookkeeping.
+    --- and `proc.processResult` answers that from the runner's own bookkeeping.
     record Result
         --- The program and its arguments, as given.
         args: {string}
@@ -389,7 +389,7 @@ local record proc
 
     --- Runs a program and answers a future for it, immediately.
     ---
-    --- Nothing here blocks. The future reads "pending" until `proc.update`, or
+    --- Nothing here blocks. The future reads "pending" until `proc.updateProcesses`, or
     --- a `wait` on it, takes the worker's answer.
     ---
     --- @param options Read here and sent to the worker, so a later edit to the
@@ -400,7 +400,7 @@ local record proc
     ---     `succeeded` is what distinguishes them. It settles "failed" only
     ---     when the child could not be started, and "cancelled" when it was
     ---     killed.
-    run: function(options: Options): Future<Result>
+    runProcess: function(options: Options): Future<Result>
 
     --- The record a run fills in, whatever became of it.
     ---
@@ -418,11 +418,11 @@ local record proc
     --- Nil for a run that never started, which has nothing to report, and for
     --- anything that is not a run from here.
     ---
-    --- @param run A future `proc.run` handed out. Any other future answers nil
+    --- @param run A future `proc.runProcess` handed out. Any other future answers nil
     ---     rather than raising.
     --- @return The runner's own record, not a copy, so it fills in as the child
     ---     runs and the same table is what the future carries when it settles.
-    result: function(run: Future<Result>): Result
+    processResult: function(run: Future<Result>): Result
 
     --- Asks the worker to end a child.
     ---
@@ -435,21 +435,21 @@ local record proc
     --- child only when the last consumer of the future has given it up. This
     --- one ends the child whoever else is watching.
     ---
-    --- @param run A future `proc.run` handed out. One that has already settled
+    --- @param run A future `proc.runProcess` handed out. One that has already settled
     ---     is ignored, so this is safe to call on a race it lost.
     --- @param force Sends the signal a child cannot handle. Defaults to false,
     ---     which asks and may be refused.
-    kill: function(run: Future<Result>, force?: boolean)
+    killProcess: function(run: Future<Result>, force?: boolean)
 
     --- Takes whatever the worker has answered. Call once per frame.
     --- @return How many runs finished.
-    update: function(): integer
+    updateProcesses: function(): integer
 
     --- Runs that have not answered yet.
     ---
     --- @return Every run in flight in this process, not one caller's, and
     ---     counting a child that has been asked to die but has not yet.
-    pending: function(): integer
+    pendingProcesses: function(): integer
 
     --- Starts the runner worker.
     ---
@@ -461,13 +461,13 @@ local record proc
     ---     state's own, which is right whenever the two run from the same
     ---     tree. Only read on the call that actually starts the worker, so
     ---     passing it to a second call changes nothing.
-    install: function(luaPath?: string)
+    installProcessRunner: function(luaPath?: string)
 
     --- Whether the runner worker is running.
     ---
     --- @return A fact about the process rather than about any world. False
     ---     costs nothing to act on: `run` starts the worker itself.
-    installed: function(): boolean
+    processRunnerInstalled: function(): boolean
 
     --- Ends every child still running and stops the worker.
     ---
@@ -483,7 +483,7 @@ local record proc
     --- that reads "still running" for the rest of the process against a runner
     --- that no longer exists.
     --- @param graceMs How long a child gets to end gently. Defaults to 250.
-    shutdown: function(graceMs?: number)
+    shutdownProcesses: function(graceMs?: number)
 end
 
 local type Result = proc.Result
@@ -531,7 +531,7 @@ local pendingCount = 0
 local nextId = 1
 local worker: workers.Worker = nil
 
-function proc.install(luaPath?: string)
+function proc.installProcessRunner(luaPath?: string)
     if worker ~= nil then
         return
     end
@@ -541,7 +541,7 @@ function proc.install(luaPath?: string)
     })
 end
 
-function proc.installed(): boolean
+function proc.processRunnerInstalled(): boolean
     return worker ~= nil
 end
 
@@ -650,7 +650,7 @@ end
 --- output has just gone, so there is nothing left to be gentle on behalf of,
 --- and a refusable signal would leave the child running with no future left to
 --- observe it. A caller who does want to ask rather than insist has
---- `proc.kill(run, false)`, which is that question spelled out.
+--- `proc.killProcess(run, false)`, which is that question spelled out.
 function Runner:cancel(future: Future<any>)
     local entry = byFuture[future as Future<Result>]
     if entry == nil or worker == nil then
@@ -672,17 +672,17 @@ local source <const> = runner as Future.Source
 -- Running
 -------------------------------------------------------------------------------
 
-function proc.run(options: Options): Future<Result>
+function proc.runProcess(options: Options): Future<Result>
     if options == nil or options.args == nil or #options.args == 0 then
-        error("tecs: proc.run needs args, starting with the program", 2)
+        error("tecs: proc.runProcess needs args, starting with the program", 2)
     end
     for index = 1, #options.args do
         if type(options.args[index]) ~= "string" then
-            error(("tecs: proc.run args[%d] is not a string"):format(index), 2)
+            error(("tecs: proc.runProcess args[%d] is not a string"):format(index), 2)
         end
     end
 
-    proc.install()
+    proc.installProcessRunner()
 
     local id = nextId
     nextId = nextId + 1
@@ -717,14 +717,14 @@ function proc.run(options: Options): Future<Result>
     return future
 end
 
-function proc.result(run: Future<Result>): Result
+function proc.processResult(run: Future<Result>): Result
     if run == nil then
         return nil
     end
     return results[run]
 end
 
-function proc.kill(run: Future<Result>, force?: boolean)
+function proc.killProcess(run: Future<Result>, force?: boolean)
     if worker == nil or run == nil then
         return
     end
@@ -735,11 +735,11 @@ function proc.kill(run: Future<Result>, force?: boolean)
     worker:send({kind = "kill", id = entry.id, force = force == true})
 end
 
-function proc.update(): integer
+function proc.updateProcesses(): integer
     return runner:poll()
 end
 
-function proc.pending(): integer
+function proc.pendingProcesses(): integer
     return pendingCount
 end
 
@@ -763,7 +763,7 @@ local function drainFor(ms: number)
     end
 end
 
-function proc.shutdown(graceMs?: number)
+function proc.shutdownProcesses(graceMs?: number)
     if worker == nil then
         return
     end

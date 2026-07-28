@@ -200,7 +200,7 @@ could not be opened" stay apart.
 Every function here is synchronous and blocks the calling thread. A path call is one syscall against a mounted
 device, and [`watch`](/modules/filesystem/watch) measured a path query at 0.86 microseconds on the machine it was written
 on, which is why it puts a hundred of them between frames twice a second and does not notice. That is a
-different answer from [`proc`](/modules/proc), which runs children on a worker because a child blocks for
+different answer from [`proc`](/modules/system), which runs children on a worker because a child blocks for
 another program's lifetime, and from [`assets`](/modules/assets), which decodes on a worker because a PNG is
 milliseconds of pure CPU.
 
@@ -212,7 +212,7 @@ answer comes back as plain data.
 ### Headless
 
 SDL's filesystem API needs no subsystem initialised, and neither this module nor its default backend initialises
-one. There is no `available()` and no video gate, unlike [`clipboard`](/modules/clipboard), because there is
+one. There is no `available()` and no video gate, unlike [`clipboard`](/modules/system), because there is
 nothing to gate on: with no window, no device and no `SDL_Init` at all, every function below answers for real.
 This is one of the few subsystems that is more useful without a window than with one.
 

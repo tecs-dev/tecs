@@ -31,7 +31,6 @@ local type Input = require("tecs.platform.Input")
 local type Gamepad = require("tecs.platform.Gamepad")
 local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
-local type clipboard = require("tecs.platform.clipboard")
 local type proc = require("tecs.platform.proc")
 local type net = require("tecs.net")
 local type capabilities = require("tecs.platform.capabilities")
@@ -50,7 +49,7 @@ local type http = require("tecs.http")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type datajson = require("tecs.data")
-local type system = require("tecs.platform.system")
+local type systemModule = require("tecs.platform.system")
 local type sensors = require("tecs.platform.sensors")
 local type platformAudio = require("tecs.platform.audio")
 
@@ -447,6 +446,258 @@ local record filesystem
     userFolder: function(which: filesystemModule.UserFolder): string, string
 end
 
+--- The operating system, asked directly: what this build can do here, the
+--- clipboard, another program, and the services a desktop offers.
+---
+--- One module because none of these is a subsystem a game builds on. Each is a
+--- few calls a game makes when a player asks for something, and each was too
+--- small to be a name of its own: a game copying a path to the clipboard and
+--- then opening a folder in the file manager was naming three modules to do one
+--- thing. There is deliberately no `tecs.platform`, since that is where this
+--- tree keeps an implementation category rather than a task a game performs.
+---
+--- Names are qualified by what they act on, because a merged module makes a
+--- bare `text`, `data`, `clear`, `run` or `update` mean nothing on its own.
+local record system
+    --- What this build of the engine can do on this target.
+    type Capabilities = capabilities.Capabilities
+
+    --- Anything carrying a native window handle, which is what a dialog or a
+    --- message box sits over.
+    type WindowLike = systemModule.WindowLike
+
+    --- One language the user prefers, in order of preference.
+    type Locale = systemModule.Locale
+
+    --- What the machine is running on, and how much of it is left.
+    type Power = systemModule.Power
+
+    --- One entry in a dialog's file-type filter.
+    type DialogFilter = systemModule.DialogFilter
+
+    --- What a dialog is opened with.
+    type DialogOptions = systemModule.DialogOptions
+
+    --- What the user chose, or that they chose nothing.
+    type DialogResult = systemModule.DialogResult
+
+    --- What to run as a child process, and what it inherits.
+    type ProcessOptions = proc.Options
+
+    --- What a child that ran leaves behind.
+    type ProcessResult = proc.Result
+
+    --- Reads the capabilities of the running build.
+    ---
+    --- @return The same table on every call until the platform changes, and
+    ---     shared, so a caller that means to keep it does not also mean to edit
+    ---     it. Read rather than inferred: selecting behaviour from the
+    ---     operating system's name cannot tell a build that linked a shader
+    ---     compiler from one that did not.
+    capabilities: function(): capabilities.Capabilities
+
+    --- Forgets the cached capabilities. A platform change is noticed without
+    --- this, so this is for a test that changed the build under the process.
+    resetCapabilities: function()
+
+    --- Whether there is a clipboard to read at all.
+    ---
+    --- @return False in a process that never brought up video, where every
+    ---     other clipboard call answers empty or false. This is what tells that
+    ---     apart from a clipboard that is simply empty.
+    clipboardAvailable: function(): boolean
+
+    --- The clipboard's text.
+    ---
+    --- @return The text, or an empty string when the clipboard holds none,
+    ---     holds something that is not text, or there is no video. Ask
+    ---     `hasClipboardText` to tell those from text that is genuinely empty.
+    clipboardText: function(): string
+
+    --- Puts `text` on the clipboard, replacing whatever was there.
+    ---
+    --- @param text Copied by SDL, so the string is not retained. A nil raises
+    ---     rather than clearing the clipboard, which is what SDL would do.
+    --- @return Whether the platform took it. False includes having no video.
+    setClipboardText: function(text: string): boolean
+
+    --- Whether the clipboard holds text.
+    ---
+    --- @return Whether there is text. Cheaper than reading it: no allocation
+    ---     crosses the boundary, and on a platform where a read negotiates with
+    ---     the owning application, no negotiation happens.
+    hasClipboardText: function(): boolean
+
+    --- Withdraws what this application put on the clipboard.
+    ---
+    --- @return Whether it was withdrawn. The clipboard is left empty rather
+    ---     than restored to what preceded the write, because nothing anywhere
+    ---     remembers what that was.
+    clearClipboard: function(): boolean
+
+    --- Mime types the clipboard currently offers.
+    ---
+    --- @return The types, in the order SDL reports them, and a fresh list the
+    ---     caller owns. The same list a `clipboardUpdate` event carries, for a
+    ---     caller that wants to ask rather than wait to be told.
+    clipboardMimeTypes: function(): {string}
+
+    --- Whether the clipboard offers `mimeType`.
+    ---
+    --- @param mimeType A type as the platform spells it. A nil raises.
+    --- @return Whether it is offered.
+    hasClipboardData: function(mimeType: string): boolean
+
+    --- The clipboard's bytes for `mimeType`.
+    ---
+    --- @param mimeType A type as the platform spells it. A nil raises.
+    --- @return The bytes, or nil when the clipboard offers none. Nil rather
+    ---     than an empty string, because a type can be offered with no bytes
+    ---     behind it and that is not the same as not being offered.
+    clipboardData: function(mimeType: string): string
+
+    --- The primary selection's text, which is the X11 middle-click buffer.
+    ---
+    --- @return The text, or an empty string when it holds none.
+    primarySelection: function(): string
+
+    --- Puts `text` in the primary selection.
+    ---
+    --- @param text The selection's new contents. A nil raises.
+    --- @return Whether it was set. True on a platform with no primary
+    ---     selection, where SDL keeps the value for this process alone.
+    setPrimarySelection: function(text: string): boolean
+
+    --- Whether the primary selection holds text.
+    ---
+    --- @return Whether there is text in it.
+    hasPrimarySelection: function(): boolean
+
+    --- Runs a program and answers a future for it, immediately.
+    ---
+    --- @param options Read here and sent to the worker, so a later edit to the
+    ---     same table does not reach the child. Starting the runner is part of
+    ---     this call when nothing has yet.
+    --- @return A future that settles "ready" when the child ends however it
+    ---     ended, so a non-zero exit is still "ready" and `succeeded` is what
+    ---     distinguishes them. "failed" only when the child could not be
+    ---     started, and "cancelled" when it was killed.
+    runProcess: function(options: proc.Options): Future<proc.Result>
+
+    --- The record a run fills in, whatever became of it.
+    ---
+    --- @param run A future `runProcess` handed out. Any other future answers
+    ---     nil.
+    --- @return The result, reachable before the child ends so `pid` can be read
+    ---     as soon as it started, and after a kill, which settles "cancelled"
+    ---     with no value but does not throw away what the child said first. Nil
+    ---     for a run that never started.
+    processResult: function(run: Future<proc.Result>): proc.Result
+
+    --- Ends a running child.
+    ---
+    --- @param run A future `runProcess` handed out. One that has already
+    ---     settled is left alone.
+    --- @param force Skip the polite signal. Omitted asks first.
+    killProcess: function(run: Future<proc.Result>, force?: boolean)
+
+    --- Takes whatever the runner has finished, without blocking.
+    ---
+    --- @return How many runs settled on this call. The application calls this
+    ---     once a frame, so a game only needs it when it is driving the loop
+    ---     itself.
+    updateProcesses: function(): integer
+
+    --- How many children are still running.
+    ---
+    --- @return The count, which is what a shutdown path waits on.
+    pendingProcesses: function(): integer
+
+    --- Starts the worker children are run on.
+    ---
+    --- Part of `runProcess` when nothing has started it, so this is for a
+    --- program that wants the cost paid at a moment it chose.
+    ---
+    --- @param luaPath Where the worker finds this tree, for a host that has put
+    ---     it somewhere the default search does not reach.
+    installProcessRunner: function(luaPath?: string)
+
+    --- Whether the runner worker is up.
+    ---
+    --- @return Whether it is running, which is not whether anything is.
+    processRunnerInstalled: function(): boolean
+
+    --- Kills every running child and stops the runner.
+    ---
+    --- @param graceMs How long to let a child finish after being asked,
+    ---     in milliseconds. Omitted uses the runner's own grace.
+    shutdownProcesses: function(graceMs?: number)
+
+    --- Opens a URL with the operating system's preferred handler.
+    ---
+    --- @param url An absolute URL. Empty or nil is refused rather than passed
+    ---     on.
+    --- @return Whether the platform took it, which is not whether anything
+    ---     opened: the handler runs in another process and reports nothing
+    ---     back.
+    --- @return The reason, when it was refused.
+    openURL: function(url: string): boolean, string
+
+    --- Languages the user prefers, most preferred first.
+    ---
+    --- @return The locales, a fresh list the caller owns. Empty when the
+    ---     platform declines to say, which is not the same as English.
+    preferredLocales: function(): {systemModule.Locale}
+
+    --- The power state now.
+    ---
+    --- @return A reading taken at the call rather than a live view, so it is
+    ---     re-read rather than kept. Seconds and percent are -1 where the
+    ---     platform will not say.
+    power: function(): systemModule.Power
+
+    --- Shows a modal message box and waits for it to be dismissed.
+    ---
+    --- Blocking, and the only blocking call here. It is for the failure a game
+    --- cannot draw its way out of.
+    ---
+    --- @param kind `"error"`, `"warning"` or `"info"`.
+    --- @param title The window's title.
+    --- @param message The body.
+    --- @param window The window to sit over. Omitted is a free-floating box.
+    --- @return Whether it was shown.
+    --- @return The reason, when it was not.
+    messageBox: function(
+        kind: string, title: string, message: string, window?: systemModule.WindowLike
+    ): boolean, string
+
+    --- Asks the user to choose a file to open.
+    ---
+    --- @param options Filters, a starting location, whether several may be
+    ---     chosen, and the window to sit over.
+    --- @return A future settling with what was chosen. Cancelling is a result
+    ---     with `cancelled` true rather than a failure.
+    openFile: function(options?: systemModule.DialogOptions): Future<systemModule.DialogResult>
+
+    --- Asks the user to choose where to save a file.
+    ---
+    --- @param options As `openFile` takes them; `multiple` means nothing here.
+    --- @return A future settling with the chosen path, or with `cancelled`.
+    saveFile: function(options?: systemModule.DialogOptions): Future<systemModule.DialogResult>
+
+    --- Asks the user to choose a folder.
+    ---
+    --- @param options As `openFile` takes them; filters mean nothing here.
+    --- @return A future settling with the chosen folder, or with `cancelled`.
+    openFolder: function(options?: systemModule.DialogOptions): Future<systemModule.DialogResult>
+
+    --- Takes whatever a dialog has answered, without blocking.
+    ---
+    --- @return How many dialogs settled on this call. The application calls
+    ---     this once a frame.
+    updateDialogs: function(): integer
+end
+
 --- A value that settles once.
 local record future
     Future: Future
@@ -733,8 +984,6 @@ local record tecs
     assets: assets
     audio: audio
     camera: camera
-    capabilities: capabilities
-    clipboard: clipboard
     components: components
     data: data
     events: events
@@ -749,7 +998,6 @@ local record tecs
     net: net
     particles: particles
     physics: physics
-    proc: proc
     renderer: renderer
     sequence: sequence
     system: system
@@ -804,8 +1052,6 @@ local SURFACE <const>: {string: Namespace} = {
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
     camera = {module = "tecs.gfx.Camera", class = "Camera"},
-    capabilities = {module = "tecs.platform.capabilities"},
-    clipboard = {module = "tecs.platform.clipboard"},
     components = {module = "tecs.components"},
     data = {module = "tecs.data", beside = {"tecs.compress", "tecs.hash"}},
     events = {module = "tecs.platform.events"},
@@ -829,10 +1075,16 @@ local SURFACE <const>: {string: Namespace} = {
     net = {module = "tecs.net"},
     particles = {module = "tecs.gfx.particles"},
     physics = {module = "tecs.physics"},
-    proc = {module = "tecs.platform.proc"},
     renderer = {module = "tecs.Renderer", class = "Renderer"},
     sequence = {module = "tecs.sequence"},
-    system = {module = "tecs.platform.system"},
+    system = {
+        module = "tecs.platform.system",
+        beside = {
+            "tecs.platform.capabilities",
+            "tecs.platform.clipboard",
+            "tecs.platform.proc",
+        },
+    },
     text = {module = "tecs.gfx.text"},
     time = {module = "tecs.platform.time"},
     window = {module = "tecs.platform.Window", class = "Window"},
