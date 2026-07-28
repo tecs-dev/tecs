@@ -192,6 +192,7 @@ local REACH = {
             "tecs/physics/World.lua",
             "tecs/physics/init.lua",
             "tecs/mcp/transport.lua",
+            "tecs/net.lua",
         },
     },
     {

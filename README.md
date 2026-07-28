@@ -1377,6 +1377,31 @@ starts from an empty one so `env` is the whole of what the child sees. `input`
 writes bytes to the child's standard input and closes it, which is what a child
 reading to end of input is waiting for.
 
+## Networking is a transport, and the loop drives it
+
+[`net.tl`](src/tecs/net.tl) exposes SDL3_net's two transport shapes without
+inventing a protocol above either. TCP is an ordered byte stream, so a write is
+not a message boundary and reads are allowed to be short. UDP preserves a
+packet boundary and promises neither delivery nor order. Length prefixes,
+serialization, reliability and replication all need requirements of their own;
+putting one guess here would make a game work around the engine to choose
+another.
+
+Resolution and client connection are `Future` sources because both settle once,
+can fail before producing a usable object, and SDL3_net already supplies the
+bounded poll and wait operations a source needs. Servers, streams, addresses
+and datagram sockets are not futures: they remain useful across many frames and
+own a native lifetime, so each is closed explicitly. A received packet refs its
+source address before SDL's packet is destroyed, which makes the ownership
+visible rather than leaving a borrowed pointer in a Lua record.
+
+The application does not poll networking unconditionally. `net.poll` is one
+nonblocking call a game makes while resolutions or connections are pending,
+and `Future:wait` drives the same source when blocking outside a frame is the
+honest operation. That leaves a game with no network work off the path and lets
+a headless server using the ECS drive exactly the same module without an
+`Application`.
+
 ## The window
 
 [`platform/Window.tl`](src/tecs/platform/Window.tl) is what SDL's window and
@@ -3050,6 +3075,7 @@ src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/Audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
+src/tecs/net.tl           nonblocking TCP and UDP transport
 src/tecs/hash.tl          FNV-1a and Adler-32 over byte strings
 src/tecs/compress.tl      zlib and raw DEFLATE decompression
 spec/                       busted suite

@@ -1,7 +1,7 @@
 --- SDL3_net binding.
 ---
---- Sockets, and nothing above them. The MCP transport is built on this; the
---- engine itself does not use the network.
+--- Sockets, and nothing above them. The public transport and MCP debug server
+--- are both built on this binding; protocol framing stays above it.
 ---
 --- Chosen over luasocket because it is the same ecosystem as everything else
 --- here, so it reaches the same generated-binding and static-registry path,

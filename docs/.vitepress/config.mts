@@ -140,6 +140,7 @@ export default defineConfig({
                     { text: "tecs.materials", link: "/modules/materials" },
                     { text: "tecs.MAX_ENTITIES", link: "/ecs/world" },
                     { text: "tecs.mcp", link: "/modules/mcp" },
+                    { text: "tecs.net", link: "/modules/net" },
                     { text: "tecs.newComponent", link: "/ecs/components/table-components" },
                     { text: "tecs.newContext", link: "/ecs/world" },
                     { text: "tecs.newEvent", link: "/ecs/events" },

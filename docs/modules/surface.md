@@ -387,6 +387,10 @@ All named keys, as a fresh name -> numeric key id table.
 ## tecs.mcp
 <pre><code v-pre><a href="#tecs.mcp">tecs.mcp</a>: mcp
 </code></pre>
+<a id="tecs.net"></a>
+## tecs.net
+<pre><code v-pre><a href="#tecs.net">tecs.net</a>: net
+</code></pre>
 <a id="tecs.newComponent"></a>
 ## tecs.newComponent
 <pre><code v-pre>function <a href="#tecs.newComponent">tecs.newComponent</a>&lt;C is Component&gt;(ComponentOptions&lt;C&gt;): C

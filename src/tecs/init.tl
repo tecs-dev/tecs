@@ -44,6 +44,7 @@ local type clock = require("tecs.platform.clock")
 local type events = require("tecs.platform.events")
 local type clipboard = require("tecs.platform.clipboard")
 local type proc = require("tecs.platform.proc")
+local type net = require("tecs.net")
 local type capabilities = require("tecs.platform.capabilities")
 local type paths = require("tecs.platform.paths")
 local type filesystem = require("tecs.platform.filesystem")
@@ -119,6 +120,7 @@ local record tecs
     events: events
     clipboard: clipboard
     proc: proc
+    net: net
     capabilities: capabilities
     paths: paths
     filesystem: filesystem
@@ -310,6 +312,7 @@ local ENGINE <const>: {string: string} = {
     events = "tecs.platform.events",
     clipboard = "tecs.platform.clipboard",
     proc = "tecs.platform.proc",
+    net = "tecs.net",
     capabilities = "tecs.platform.capabilities",
     paths = "tecs.platform.paths",
     filesystem = "tecs.platform.filesystem",

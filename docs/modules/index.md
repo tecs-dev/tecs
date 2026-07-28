@@ -55,6 +55,7 @@ checked against a fresh render so it cannot drift.
 | [`tecs.materials`](/modules/materials)                         | the material a draw dispatches to                                         |
 | [`tecs.MAX_ENTITIES`](/ecs/world)                              | the ceiling on a world's `maxEntities`, `2^22 - 1` usable slots           |
 | [`tecs.mcp`](/modules/mcp)                                     | the debug server: transport, tools, sandbox                               |
+| [`tecs.net`](/modules/net)                                     | nonblocking TCP streams and UDP datagrams                                 |
 | [`tecs.newComponent`](/ecs/components/table-components)        | a table component                                                         |
 | [`tecs.newContext`](/ecs/world)                                | a resource container outside a world                                      |
 | [`tecs.newEvent`](/ecs/events)                                 | give an event record its constructor                                      |

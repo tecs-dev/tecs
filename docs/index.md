@@ -253,6 +253,7 @@ name is looked up. [Modules](/modules/) carries the same list, and
 - [`tecs.materials`](/modules/materials) - one fragment shader, compiled from the material set
 - [`tecs.MAX_ENTITIES`](/ecs/world) - the ceiling on `maxEntities`, `2^22 - 1` slots
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
+- [`tecs.net`](/modules/net) - nonblocking TCP streams and UDP datagrams
 - [`tecs.newComponent`](/ecs/components/table-components) - table components
 - [`tecs.newContext`](/ecs/world) - a resource container outside a world
 - [`tecs.newEvent`](/ecs/events) - type-safe pub/sub and entity lifecycle events
