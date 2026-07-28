@@ -84,9 +84,10 @@ Raises only when `maxVoices` is below 1 or at 65536 and above.
 | `maxVoices`     | `integer` | `32`           | Voices that may sound at once. Past this, `play` declines rather than stealing.                            |
 | `streamSeconds` | `number`  | `10.0`         | Seconds past which a clip streams rather than being held in memory.                                        |
 | `backend`       | `Backend` | the platform's | Output backend. The installed platform's by default.                                                       |
+| `device`        | `number`  | system default | Physical id returned by `tecs.audio.playbackDevices`.                                                      |
 
-The output is the platform's default device rather than one chosen by name, so the system migrates the logical
-device when the default changes and plugged-in headphones need no handling.
+With no `device`, the system migrates the logical output when the default changes and plugged-in headphones need
+no handling. An explicit physical id stays on that device until this `Audio` is destroyed.
 
 ### Fields
 
@@ -885,6 +886,48 @@ Keyed limits are not in it, and neither is what a bucket holds. A limit is a rul
 beside the clip it governs, so restoring one from a file would let an old save override a rule the build has
 since changed. A bucket is derived from voices, and a snapshot restores no voices: a `Sound` comes back with its
 voice cleared and starts again.
+
+## Physical devices and microphone capture
+
+Lowercase `tecs.audio` covers the devices around the playback object and audio flowing into the game.
+
+```teal
+function audio.playbackDevices(): {audio.Device}, string
+function audio.recordingDevices(): {audio.Device}, string
+```
+
+Both return the devices attached now plus an error only when the audio subsystem could not start. A device has
+`id`, `name`, `frequency`, and `channels`; the last two are zero if its preferred format was unavailable.
+
+### openMicrophone
+
+```teal
+function audio.openMicrophone(config?: audio.MicrophoneConfig): audio.Microphone, string
+```
+
+Opens the system-default recording device, or `config.device`. SDL converts its input to `config.frequency`
+(48000 by default), `config.channels` (one by default), and interleaved native-endian float32 samples.
+
+No Lua callback is installed. SDL's audio thread fills its own stream and the game pulls completed samples on
+the main thread:
+
+```teal
+local microphone <const>, err <const> = tecs.audio.openMicrophone()
+if microphone ~= nil then
+    local bytes <const> = microphone:read(1024)
+    -- `bytes` contains at most 1024 complete mono float32 frames.
+end
+```
+
+| Method                 | Meaning                                                    |
+| ---------------------- | ---------------------------------------------------------- |
+| `availableFrames()`    | Complete frames ready without blocking                     |
+| `read(maxFrames?)`     | Up to the limit as float32 bytes; `""` when none are ready |
+| `pause()` / `resume()` | Stops or resumes capture, returning `(boolean, error?)`    |
+| `destroy()`            | Closes the stream and device; safe more than once          |
+
+`read` returns `(bytes, nil)` or `(nil, error)`. A frame contains `channels * 4` bytes. It never returns a partial
+frame, and reading a destroyed microphone is an error.
 
 ## Design record
 

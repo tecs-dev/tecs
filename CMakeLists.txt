@@ -211,6 +211,7 @@ add_library(
     native/worker.c
     native/logsink.c
     native/taskpool.c
+    native/dialogs.c
     native/luamods.c
 )
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -426,6 +427,7 @@ if(TECS_BUILD_LUA)
     tecs_cdef(worker worker.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(dialogs dialogs.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -468,6 +470,7 @@ if(TECS_BUILD_LUA)
     tecs_registry(worker TecsWorkerApi tecs worker.h)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
     tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
+    tecs_registry(dialogs TecsDialogsApi tecs dialogs.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and

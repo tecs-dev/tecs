@@ -375,6 +375,9 @@ local record Audio
         streamSeconds: number
         --- Output backend. Defaults to the installed platform's.
         backend: Backend
+        --- Physical output device id from `tecs.audio.playbackDevices`.
+        --- Omitted follows the operating-system default as it changes.
+        device: number
     end
 
     --- A loaded sound.
@@ -635,7 +638,7 @@ function Audio.create(config?: Audio.Config): Audio
     -- so nothing carries over from the previous voice.
     self._params = {loops = 0, loopStartMs = 0, fadeInMs = 0, startMs = 0}
 
-    self._mixer = self._backend.open(self._spec)
+    self._mixer = self._backend.open(self._spec, given.device)
     self.available = self._mixer ~= nil
     if not self.available then
         LOGGER:info("no audio output; sound is silent for this run")

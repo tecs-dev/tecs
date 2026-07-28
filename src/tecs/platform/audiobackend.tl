@@ -91,7 +91,7 @@ local record Backend
     --- The default specifically, not a device chosen by name. A platform that
     --- can follow its own default is expected to, so that plugging in
     --- headphones moves the sound without anything above here being told.
-    open: function(spec: Spec): loader.CPtr
+    open: function(spec: Spec, device?: number): loader.CPtr
     close: function(mixer: loader.CPtr)
     --- Scales the whole mix. A separate number from any voice's gain, which
     --- is what lets the master be set once rather than multiplied into every
@@ -203,7 +203,7 @@ local playProps: integer = 0
 local sdlBackend <const>: Backend = {
     name = "sdl",
 
-    open = function(spec: Spec): loader.CPtr
+    open = function(spec: Spec, device?: number): loader.CPtr
         -- The subsystem is started here rather than alongside video, because a
         -- machine with no sound is a machine that still runs. Failing the
         -- process's whole init over an output nobody may use is not the
@@ -222,9 +222,10 @@ local sdlBackend <const>: Backend = {
         fields.channels = spec.channels
         fields.freq = spec.frequency
 
-        -- The default id, so SDL keeps the logical device pointed at whatever
-        -- the system default becomes. Tracks on it follow the move.
-        local mixer = MIX.MIX_CreateMixerDevice(K.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, audioSpec)
+        -- The default id keeps the logical device pointed at whatever the
+        -- system default becomes. An explicit physical id stays on the device
+        -- the caller selected.
+        local mixer = MIX.MIX_CreateMixerDevice(device or K.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, audioSpec)
         if mixer == nil then
             return nil
         end

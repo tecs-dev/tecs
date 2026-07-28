@@ -277,6 +277,32 @@ describe("compress.inflate", function()
     end)
 end)
 
+describe("compress.deflate", function()
+    it("round trips zlib and raw streams", function()
+        local text = mixture(32768)
+        assert.are.equal(text, compress.inflate(compress.deflate(text)))
+        assert.are.equal(text, compress.inflateRaw(compress.deflateRaw(text)))
+    end)
+
+    it("writes a valid empty stream", function()
+        assert.are.equal("", compress.inflate(compress.deflate("")))
+        assert.are.equal("", compress.inflateRaw(compress.deflateRaw("")))
+    end)
+
+    it("accepts every compression level and rejects invalid ones", function()
+        local text = string.rep("compress me", 100)
+        for level = 0, 9 do
+            assert.are.equal(text, compress.inflate(compress.deflate(text, level)))
+        end
+        assert.has_error(function()
+            compress.deflate(text, 10)
+        end)
+        assert.has_error(function()
+            compress.deflate(text, 1.5)
+        end)
+    end)
+end)
+
 describe("compress.inflateRaw", function()
     it("reads a stream with no wrapper", function()
         assert.are.equal(RAW_TEXT, compress.inflateRaw(RAW))

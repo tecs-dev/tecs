@@ -54,6 +54,8 @@ local function fakeBackend()
         textStarted = 0,
         textStopped = 0,
         areas = {},
+        cursors = {},
+        destroyedCursors = {},
     }
     local attached = {}
 
@@ -152,6 +154,23 @@ local function fakeBackend()
             calls.areas[#calls.areas + 1] = { x = x, y = y, width = width, height = height, cursor = cursor }
             return true
         end,
+
+        createSystemCursor = function(name)
+            return { name = name }
+        end,
+
+        setCursor = function(cursor)
+            calls.cursors[#calls.cursors + 1] = cursor
+            return true
+        end,
+
+        defaultCursor = function()
+            return { name = "default" }
+        end,
+
+        destroyCursor = function(cursor)
+            calls.destroyedCursors[#calls.destroyedCursors + 1] = cursor.name
+        end,
     }, { __index = inputbackend.sdl })
 
     return backend
@@ -183,6 +202,21 @@ describe("platform.Input", function()
         assert.is_false(pcall(function()
             input:scancode("not a key")
         end))
+    end)
+
+    it("owns and replaces system cursor shapes", function()
+        local backend = fakeBackend()
+        local state = Input.create({ backend = backend })
+
+        assert.is_true(state:setCursor("pointer"))
+        assert.are.equal("pointer", backend.calls.cursors[1].name)
+
+        assert.is_true(state:setCursor("text"))
+        assert.are.same({ "pointer" }, backend.calls.destroyedCursors)
+
+        assert.is_true(state:setCursor())
+        assert.are.equal("default", backend.calls.cursors[3].name)
+        assert.are.same({ "pointer", "text" }, backend.calls.destroyedCursors)
     end)
 
     it("reports held keys and edges separately", function()

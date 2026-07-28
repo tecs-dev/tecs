@@ -137,6 +137,7 @@ one gesture twice.
 | `input:captureMouse(enabled)`         | Keeps delivering events while a button is held outside the window |
 | `input:showCursor(visible)`           | Shows or hides the cursor, for the application                    |
 | `input:cursorVisible()`               | Whether it is being shown, asked of the platform                  |
+| `input:setCursor(name?)`              | Selects and owns a standard system cursor                         |
 
 Button names are `"left"`, `"middle"`, `"right"`, `"x1"` and `"x2"`, or a platform button number.
 
@@ -148,6 +149,11 @@ every frame reads its own warp as input unless it accounts for it.
 
 The mode queries ask the platform rather than remembering, so a mode the window lost reports honestly. Without a
 window — which is what a headless test gets — the commands report failure rather than raising.
+
+`setCursor` accepts `"default"`, `"text"`, `"wait"`, `"crosshair"`, `"progress"`, `"pointer"`, `"move"`,
+`"notAllowed"` and the compass resize names (`"nResize"`, `"neResize"`, `"ewResize"`, `"nwseResize"` and the
+rest). Omitting the name restores the default. `Input` releases the prior cursor when it replaces it and releases
+the final one on `destroy`, so callers never own a platform cursor handle.
 
 ## Touch and pen
 

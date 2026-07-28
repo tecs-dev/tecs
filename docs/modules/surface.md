@@ -270,6 +270,10 @@ because a platform that never hands control back has no loop to block in.
 ## tecs.assets
 <pre><code v-pre><a href="#tecs.assets">tecs.assets</a>: assets
 </code></pre>
+<a id="tecs.audio"></a>
+## tecs.audio
+<pre><code v-pre><a href="#tecs.audio">tecs.audio</a>: platformAudio
+</code></pre>
 <a id="tecs.builtins"></a>
 ## tecs.builtins
 <pre><code v-pre><a href="#tecs.builtins">tecs.builtins</a>: builtins
@@ -307,6 +311,10 @@ Look up a registered component by name.
 <a id="tecs.compress"></a>
 ## tecs.compress
 <pre><code v-pre><a href="#tecs.compress">tecs.compress</a>: compress
+</code></pre>
+<a id="tecs.dialogs"></a>
+## tecs.dialogs
+<pre><code v-pre><a href="#tecs.dialogs">tecs.dialogs</a>: dialogs
 </code></pre>
 <a id="tecs.events"></a>
 ## tecs.events
@@ -623,6 +631,10 @@ Create a new World.
 ## tecs.runif
 <pre><code v-pre><a href="#tecs.runif">tecs.runif</a>: runIfHelpers
 </code></pre>
+<a id="tecs.sensors"></a>
+## tecs.sensors
+<pre><code v-pre><a href="#tecs.sensors">tecs.sensors</a>: sensors
+</code></pre>
 <a id="tecs.sequence"></a>
 ## tecs.sequence
 <pre><code v-pre><a href="#tecs.sequence">tecs.sequence</a>: sequence
@@ -630,6 +642,10 @@ Create a new World.
 <a id="tecs.sheet"></a>
 ## tecs.sheet
 <pre><code v-pre><a href="#tecs.sheet">tecs.sheet</a>: sheet
+</code></pre>
+<a id="tecs.system"></a>
+## tecs.system
+<pre><code v-pre><a href="#tecs.system">tecs.system</a>: system
 </code></pre>
 <a id="tecs.text"></a>
 ## tecs.text

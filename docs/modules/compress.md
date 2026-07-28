@@ -1,19 +1,17 @@
 ---
-description: "DEFLATE decompression through zlib: whole zlib streams, the raw form inside them, and the failures both refuse rather than return"
+description: "DEFLATE compression and decompression through zlib, in wrapped and raw forms"
 outline: deep
 ---
 
 # tecs.compress
 
-`tecs.compress` decompresses DEFLATE data: zlib streams, and the raw form inside them. Binary asset formats
-store their bulk payload compressed and the engine has to read them, which is the whole requirement, and it is
-one-directional. Nothing in this tree writes a compressed byte, so there is no `deflate` here: shader packs are
-LuaJIT's own serialization, snapshots go through [JSON](/modules/json), and a screenshot is compressed inside
-SDL_image where SDL owns the encoder.
+`tecs.compress` compresses and decompresses DEFLATE data: zlib streams, and the raw form inside them. Binary asset
+formats use both directions: readers inflate existing chunks, while tooling, save formats and network protocols
+produce compatible ones.
 
-zlib decodes. It is pinned, generated into bindings, carried through the ABI check and loaded the way every
+zlib does both. It is pinned, generated into bindings, carried through the ABI check and loaded the way every
 other native library is, because libcurl needs it to answer a `Content-Encoding`. Once it is in the process for
-that, a decoder written here would be a second implementation of the format to keep correct, and the slower
+that, an implementation written here would be a second copy of the format to keep correct, and the slower
 one. It loads on a worker the same way, so a [worker](/modules/workers) that requires this module gets the
 bindings there rather than inheriting anything from the thread that spawned it.
 
@@ -83,6 +81,29 @@ Both entry points go through `inflate` over a stream rather than `uncompress`, b
 decompressed size up front and treats a wrong one as a failure while `sizeHint` is a hint whose whole contract
 is that being wrong costs a copy, and because the window size is what selects the wrapper: negating it asks
 for the raw form, so one loop answers both.
+
+## deflate
+
+Compresses `bytes` as a zlib stream.
+
+```teal
+function compress.deflate(bytes: string, level?: integer): string
+```
+
+`level` is `-1` for zlib's default or an integer from 0 through 9. Zero stores without compression; 1 favours
+speed and 9 favours size. The default is `-1`. Empty input is valid and produces a complete empty stream.
+
+## deflateRaw
+
+Compresses `bytes` as raw RFC 1951 DEFLATE, with no zlib header or checksum trailer.
+
+```teal
+function compress.deflateRaw(bytes: string, level?: integer): string
+```
+
+The level contract is the same. Both compressors allocate once from `deflateBound`, hand zlib the whole input,
+and return exactly the bytes it produced. Use wrapped `deflate` unless an enclosing format supplies its own
+framing and checksum.
 
 ## What is refused
 

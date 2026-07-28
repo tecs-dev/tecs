@@ -33,6 +33,7 @@ local Backend <const> = require("tecs.Backend")
 local FramePacket <const> = require("tecs.FramePacket")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
+local screenshot <const> = require("tecs.gfx.screenshot")
 
 local type InstanceProducer = Extractor.InstanceProducer
 local type ClipRegion = Backend.ClipRegion
@@ -373,6 +374,23 @@ end
 --- The composited image the last frame produced.
 function Renderer:captureTexture(): Texture
     return self._backend:captureTexture()
+end
+
+--- Encodes the composited image from the last frame as PNG bytes.
+---
+--- Synchronous: texture readback waits for the GPU work producing that frame.
+function Renderer:screenshot(): string, string
+    return screenshot.encode(self:captureTexture())
+end
+
+--- Writes the composited image from the last frame as a PNG.
+---
+--- The path is passed through the installed storage backend unchanged.
+function Renderer:saveScreenshot(path: string): boolean, string
+    if path == nil or path == "" then
+        error("tecs: a screenshot path is required", 2)
+    end
+    return screenshot.save(self:captureTexture(), path)
 end
 
 --- Releases everything the renderer owns. Safe to call more than once.

@@ -6,7 +6,6 @@
 
 local cjson <const> = require("cjson")
 local sdl <const> = require("tecs.ffi.sdl3")
-local image <const> = require("tecs.ffi.sdl3image")
 local capabilities <const> = require("tecs.platform.capabilities")
 local paths <const> = require("tecs.platform.paths")
 local log <const> = require("tecs.log")
@@ -256,28 +255,15 @@ mcp.register({
         },
     },
     handler = function(args: {string: any}): {string: any}
-        local texture = renderer():captureTexture()
-        local pixels = texture:readback()
+        local activeRenderer = renderer()
+        local texture = activeRenderer:captureTexture()
         local width, height = texture.width, texture.height
-
-        -- Wrapping rather than copying: the surface borrows the readback
-        -- buffer, which outlives the save because it is still referenced here.
-        --
-        -- X rather than A in the format, so the alpha channel is ignored. The
-        -- lit target carries the G-buffer's alpha, which is zero everywhere
-        -- nothing was drawn, and a screenshot that came back transparent would
-        -- show as white in every viewer rather than as the black it was.
-        local surface = C.SDL_CreateSurfaceFrom(width, height, C.SDL_PIXELFORMAT_XBGR8888, pixels, width * 4)
-        if surface == nil then
-            error("SDL_CreateSurfaceFrom failed: " .. sdl.error(), 0)
-        end
 
         local name = (args.name as string) or "screenshot.png"
         local path = paths.writable(name)
-        local saved = image.C.IMG_SavePNG(surface, path)
-        C.SDL_DestroySurface(surface)
+        local saved, reason = activeRenderer:saveScreenshot(path)
         if not saved then
-            error("IMG_SavePNG failed: " .. sdl.error(), 0)
+            error(reason, 0)
         end
 
         return {path = path, width = width, height = height}

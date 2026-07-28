@@ -172,6 +172,19 @@ local REACH = {
     },
     {
         bucket = "direct",
+        reason = "Optional operating-system facilities SDL already presents "
+            .. "as one portable contract: native dialogs, locales, power, "
+            .. "standalone sensors and physical audio devices. None is part "
+            .. "of the engine lifecycle or required for a game to run.",
+        modules = {
+            "tecs/platform/audio.lua",
+            "tecs/platform/dialogs.lua",
+            "tecs/platform/sensors.lua",
+            "tecs/platform/system.lua",
+        },
+    },
+    {
+        bucket = "direct",
         reason = "The window, the process lifecycle and the desktop's "
             .. "clipboard. SDL owns the loop on every target it covers, and a "
             .. "port owns its own loop and calls the same four entry points, "
@@ -203,6 +216,7 @@ local REACH = {
         modules = {
             "tecs/Audio.lua",
             "tecs/assets.lua",
+            "tecs/gfx/screenshot.lua",
             "tecs/mcp/tools.lua",
         },
     },
@@ -285,13 +299,6 @@ local STORAGE = {
         symbols = { "IMG_Load" },
         reason = "Loads the window icon from a path. IMG_Load_IO over bytes "
             .. "from filesystem.read is the shape that closes it.",
-    },
-    ["tecs/mcp/tools.lua"] = {
-        bucket = "bypass",
-        symbols = { "IMG_SavePNG" },
-        reason = "Writes a screenshot to a path under paths.writable. The "
-            .. "debug server is development only and never in a shipped "
-            .. "build.",
     },
     ["tecs/assets.lua"] = {
         bucket = "bypass",

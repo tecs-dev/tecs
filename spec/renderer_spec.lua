@@ -185,6 +185,23 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("exports the composited frame as PNG bytes and through storage", function()
+        local world, renderer = newScene()
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
+        frameOnce(world, renderer)
+
+        local png = assert(renderer:screenshot())
+        assert.are.equal("\137PNG\r\n\26\n", png:sub(1, 8))
+
+        local path = "/tmp/tecs-renderer-screenshot-spec.png"
+        assert(renderer:saveScreenshot(path))
+        local file = assert(io.open(path, "rb"))
+        assert.are.equal("\137PNG\r\n\26\n", file:read(8))
+        file:close()
+        os.remove(path)
+        renderer:destroy()
+    end)
+
     it("places an entity on the side its transform names", function()
         -- World units are pixels with the origin at the top left. A quad in
         -- the left half must land in the left half of the readback, which is

@@ -87,6 +87,7 @@ local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
 --- argument to the parameter's type. The result is a `uLong`, 64 bits on every
 --- target here, so it comes back as cdata and has to be converted.
 local adler32 <const> = zlib.C.adler32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
+local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
 
 local record hash
 end
@@ -116,6 +117,15 @@ end
 --- what zlib's own documentation says to pass for the first call.
 function hash.adler32(text: string): integer
     return tonumber(adler32(1, text, #text)) as integer
+end
+
+--- CRC-32 over the bytes of `text`, as a number in [0, 2^32).
+---
+--- The checksum PNG, gzip and ZIP put beside compressed bytes. It detects
+--- accidental corruption and is not a cryptographic digest; use it only where
+--- a format specifies CRC-32 or where an error-detecting checksum is enough.
+function hash.crc32(text: string): integer
+    return tonumber(crc32(0, text, #text)) as integer
 end
 
 return hash

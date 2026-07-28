@@ -202,6 +202,9 @@ local record Input
     --- The window text input and the cursor modes act on. Nil in a headless
     --- test, where those commands report failure instead.
     _window: loader.CPtr
+    --- System cursor this input state owns, or nil while using the platform
+    --- default.
+    _cursor: loader.CPtr
     --- Layer the text-input session belongs to, or nil when none is running.
     --- Popping that layer stops the session, so a menu takes its IME and its
     --- on-screen keyboard with it.
@@ -472,6 +475,11 @@ function Input:destroy()
     end
     if self._textStarted then
         self:stopTextInput()
+    end
+    if self._cursor ~= nil then
+        self._backend.setCursor(self._backend.defaultCursor())
+        self._backend.destroyCursor(self._cursor)
+        self._cursor = nil
     end
 end
 
@@ -823,6 +831,43 @@ end
 --- Whether the cursor is being shown, asked of the platform.
 function Input:cursorVisible(): boolean
     return self._backend.cursorVisible()
+end
+
+--- Selects one of the platform's standard cursor shapes.
+---
+--- Pass nil or `"default"` to restore the platform default. The other names
+--- are `"text"`, `"wait"`, `"crosshair"`, `"progress"`, `"pointer"`,
+--- `"move"`, `"notAllowed"` and the eight compass resize cursors such as
+--- `"ewResize"` and `"nwseResize"`.
+---
+--- The cursor is owned by this input state and released when it is replaced or
+--- when `destroy` runs.
+function Input:setCursor(name?: string): boolean
+    local previous = self._cursor
+    if name == nil or name == "default" then
+        if not self._backend.setCursor(self._backend.defaultCursor()) then
+            return false
+        end
+        self._cursor = nil
+        if previous ~= nil then
+            self._backend.destroyCursor(previous)
+        end
+        return true
+    end
+
+    local cursor = self._backend.createSystemCursor(name)
+    if cursor == nil then
+        error(("tecs: unknown or unavailable system cursor %q"):format(name), 2)
+    end
+    if not self._backend.setCursor(cursor) then
+        self._backend.destroyCursor(cursor)
+        return false
+    end
+    self._cursor = cursor
+    if previous ~= nil then
+        self._backend.destroyCursor(previous)
+    end
+    return true
 end
 
 -------------------------------------------------------------------------------

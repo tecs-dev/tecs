@@ -649,11 +649,13 @@ failure while `sizeHint` is a hint whose whole contract is that being wrong
 costs a copy, and because `inflateInit2_` takes the window size, so negating it
 selects the raw form and one loop answers both.
 
-Nothing writes, so there is still no `deflate`: packs are LuaJIT's own
-serialization, snapshots are JSON, and a screenshot is compressed inside
-SDL_image. zlib puts a compressor one call away, which changes what one would
-cost to write and not what it would cost to trust, and the caller that wants one
-is what should bring it.
+Writing uses the same whole-buffer shape. `compress.deflate` produces a zlib
+stream and `compress.deflateRaw` the RFC 1951 bytes inside one, both from a
+single output allocation sized by `deflateBound`. The optional level is zlib's
+own `-1` through 9 rather than a second vocabulary the engine would have to
+translate and document. CRC-32 joins Adler-32 in `hash`, for the formats such as
+PNG, gzip and ZIP that specify it; neither checksum is presented as content
+identity or integrity.
 
 A malformed stream raises rather than returning: an over-subscribed code table,
 a copy reaching before the start of the output, a stored block whose length
@@ -1159,6 +1161,29 @@ nothing is trimmed from either end. Text stops at the first NUL, because that
 is what terminates the C string SDL returns and what every producer of
 clipboard text intends; `data` uses the length SDL reports instead, so a blob
 keeps its NULs.
+
+## Native platform utilities
+
+The smaller operating-system services stay small modules rather than becoming
+an `Application` grab bag. `tecs.system` holds URLs, locale preference, power
+and the simple blocking message box; `tecs.sensors` owns standalone sensor
+handles; lowercase `tecs.audio` enumerates physical devices and owns microphone
+streams, while `tecs.Audio` remains playback and the `Sound` component.
+Standard cursor shapes stay on `Input`, because cursor choice is an outbound
+input command on the same seam as visibility and relative mode.
+
+File and folder dialogs are the exception to "one SDL call and return". SDL
+retains a callback and may enter it from a thread the VM did not create, so
+`native/dialogs.c` owns that callback, copies its answer behind a mutex, and
+`tecs.dialogs` polls it into a `Future` on the main thread. A Lua `ffi.cast`
+callback would be shorter and would make the program undefined on exactly the
+platform path the dialog exists to use.
+
+Microphone capture avoids the callback family for the same reason. SDL opens
+an audio stream with no callback, its audio thread fills the stream, and Lua
+pulls complete float32 frames with `Microphone:read`. That also gives capture
+an explicit lifetime and a natural nonblocking `availableFrames` query instead
+of making game code run at device-thread cadence.
 
 ## Touching the filesystem
 
@@ -3064,7 +3089,7 @@ scripts/gencdef.py          header -> cdef + constants generator
 scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
 src/tecs/ffi/             library loading and generated binding wrappers
-src/tecs/platform/        window, clock, events, clipboard, proc, input, audio
+src/tecs/platform/        window, input, audio, dialogs, sensors, OS services
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sprite sheets and their playback
@@ -3076,8 +3101,8 @@ src/tecs/Audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
 src/tecs/net.tl           nonblocking TCP and UDP transport
-src/tecs/hash.tl          FNV-1a and Adler-32 over byte strings
-src/tecs/compress.tl      zlib and raw DEFLATE decompression
+src/tecs/hash.tl          FNV-1a, Adler-32 and CRC-32 over byte strings
+src/tecs/compress.tl      zlib and raw DEFLATE in both directions
 spec/                       busted suite
 ```
 

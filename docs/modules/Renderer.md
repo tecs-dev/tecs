@@ -146,6 +146,8 @@ decode the file again only to be handed back the layer it already had and have i
 | `renderer:clearClipRegion(index)`       | Stops that region clipping anything                              |
 | `renderer:device()`                     | The GPU device, for a stage that builds its own pipelines        |
 | `renderer:captureTexture()`             | The composited image the last frame produced                     |
+| `renderer:screenshot()`                 | Encodes that image as PNG bytes                                  |
+| `renderer:saveScreenshot(path)`         | Encodes it and writes through `tecs.filesystem`                  |
 | `renderer:rebuildPipelines()`           | Rebuilds every pipeline from the shader sources as they read now |
 
 Producers are how something that is not an archetype run gets instances into the frame; [`text`](/modules/text)
@@ -162,6 +164,11 @@ it is what an instance says when it wants no clipping at all.
 sources, and this is what makes the next frame draw from them. A source that no longer compiles raises and
 changes nothing. It must not be called from inside a pass: it waits for the device to go idle and releases
 handles a recorded pass would still be reading.
+
+`screenshot` performs a synchronous readback of the last composited image and returns `(png, nil)`, or
+`(nil, error)` when readback or encoding fails. `saveScreenshot` returns `(true, nil)` or `(false, error)` and
+writes through the installed storage backend. The debug server's screenshot tool calls this same public path;
+there is no separate encoder hidden behind tooling.
 
 ## Interpolation
 

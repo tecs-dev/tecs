@@ -1,5 +1,5 @@
 ---
-description: "Content hashes over byte strings: FNV-1a in 64 bits for identity, and zlib's Adler-32 for the format that specifies it"
+description: "Content hashes and checksums over byte strings: FNV-1a, Adler-32, and CRC-32"
 outline: deep
 ---
 
@@ -99,6 +99,18 @@ bytes. It is reached through `adler32_z` rather than `adler32`, because the seco
 It is a sum of a sum, it barely mixes on short inputs, and two files that differ by reordering equal-length
 runs collide outright. Use `fnv1a64` for identity and this only for the format that specifies it.
 :::
+
+## crc32
+
+CRC-32 over the bytes of `text`, using zlib's standard polynomial and initial value.
+
+```teal
+function hash.crc32(text: string): integer
+```
+
+The result is in `[0, 2^32)`. This is the checksum used by PNG, gzip and ZIP; it is present for formats that
+specify CRC-32, not as a cryptographic integrity primitive. Like `adler32`, it accepts arbitrary binary strings
+and uses zlib's size-aware entry point so a length cannot wrap at 4 GB.
 
 ## Design record
 

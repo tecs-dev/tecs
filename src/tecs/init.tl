@@ -64,6 +64,10 @@ local type mcp = require("tecs.mcp")
 local type json = require("tecs.json")
 local type hash = require("tecs.hash")
 local type compress = require("tecs.compress")
+local type system = require("tecs.platform.system")
+local type sensors = require("tecs.platform.sensors")
+local type platformAudio = require("tecs.platform.audio")
+local type dialogs = require("tecs.platform.dialogs")
 
 local record tecs
     type World = types.World
@@ -144,6 +148,10 @@ local record tecs
     json: json
     hash: hash
     compress: compress
+    system: system
+    sensors: sensors
+    audio: platformAudio
+    dialogs: dialogs
     phases: phases
     builtins: builtins
     runif: runIfHelpers
@@ -332,6 +340,10 @@ local ENGINE <const>: {string: string} = {
     json = "tecs.json",
     hash = "tecs.hash",
     compress = "tecs.compress",
+    system = "tecs.platform.system",
+    sensors = "tecs.platform.sensors",
+    audio = "tecs.platform.audio",
+    dialogs = "tecs.platform.dialogs",
 }
 
 setmetatable(

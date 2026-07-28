@@ -1,16 +1,12 @@
---- DEFLATE decompression: zlib streams, and the raw form inside them.
+--- DEFLATE compression and decompression: zlib streams, and the raw form
+--- inside them.
 ---
 --- Binary asset formats store their bulk payload compressed, and the engine has
---- to read them. That is the whole requirement, and it is one-directional:
---- nothing in this tree writes a compressed byte. Shader packs are LuaJIT's own
---- serialization, snapshots go through JSON, and a screenshot is compressed
---- inside `IMG_SavePNG` where SDL_image owns the encoder. So there is no
---- `deflate` here. zlib puts one within reach of a single call, which changes
---- what an encoder would cost to write and not what it would cost to trust: one
---- with no caller is one nothing exercises, and the caller that wants it is what
---- should bring it.
+--- to read them. Games also write compressed save data, replays, caches and
+--- network payloads, and those bytes need the matching encoder rather than a
+--- private compressor in each caller.
 ---
---- **zlib decodes.** It is pinned, generated into `tecs.ffi.zlib`, carried
+--- **zlib does both.** It is pinned, generated into `tecs.ffi.zlib`, carried
 --- through the ABI check and loaded the same way every other native library is,
 --- because libcurl needs it to answer a `Content-Encoding`. Once it is in the
 --- process for that, a decoder written here would be a second implementation of
@@ -54,6 +50,19 @@ local inflateInit2 <const> = C.inflateInit2_ as function(
 ): integer
 local inflate <const> = C.inflate as function(stream: loader.CValue, flush: integer): integer
 local inflateEnd <const> = C.inflateEnd as function(stream: loader.CValue): integer
+local deflateInit2 <const> = C.deflateInit2_ as function(
+    stream: loader.CValue,
+    level: integer,
+    method: integer,
+    windowBits: integer,
+    memoryLevel: integer,
+    strategy: integer,
+    version: string,
+    size: integer
+): integer
+local deflate <const> = C.deflate as function(stream: loader.CValue, flush: integer): integer
+local deflateEnd <const> = C.deflateEnd as function(stream: loader.CValue): integer
+local deflateBound <const> = C.deflateBound as function(stream: loader.CValue, size: integer): loader.CValue
 
 --- What `inflateInit2_` checks itself against, and what it is checked against.
 ---
@@ -167,6 +176,75 @@ local function run(bytes: string, windowBits: integer, sizeHint?: integer): stri
             return nil, "tecs: the compressed stream ends inside a block"
         end
     end
+end
+
+--- Validates and normalises a compression level. Minus one asks zlib for its
+--- default, and zero through nine run from stored bytes to the smallest output.
+local function compressionLevel(level?: integer): integer
+    local given = level
+    if given == nil then
+        return K.Z_DEFAULT_COMPRESSION
+    end
+    if given ~= math.floor(given) or given < -1 or given > 9 then
+        error("tecs: compression level must be an integer from -1 to 9", 3)
+    end
+    return given
+end
+
+--- Deflates all of `bytes` under `windowBits`, returning the bytes or nil and
+--- the native failure. `deflateBound` guarantees one output buffer is enough,
+--- so encoding allocates once and never grows or copies.
+local function encode(bytes: string, windowBits: integer, level?: integer): string, string
+    local stream <const> = loader.newStruct("z_stream")
+    local fields <const> = stream as loader.CStruct
+    local status = deflateInit2(
+        stream, compressionLevel(level), K.Z_DEFLATED, windowBits, 8, K.Z_DEFAULT_STRATEGY, VERSION, STREAM_SIZE
+    )
+    if status ~= K.Z_OK then
+        return nil, describe(fields, status)
+    end
+
+    local capacity = tonumber(deflateBound(stream, #bytes)) as integer
+    local out <const> = loader.newArray("uint8_t[?]", capacity)
+    fields.next_in = ffi.cast("uint8_t *", bytes)
+    fields.avail_in = #bytes
+    fields.next_out = out
+    fields.avail_out = capacity
+
+    status = deflate(stream, K.Z_FINISH)
+    if status ~= K.Z_STREAM_END then
+        local reason = describe(fields, status)
+        deflateEnd(stream)
+        return nil, reason
+    end
+    local produced = capacity - (fields.avail_out as integer)
+    deflateEnd(stream)
+    return loader.toBytes(out as loader.CValue, produced)
+end
+
+--- Compresses bytes as a raw RFC 1951 DEFLATE stream.
+---
+--- @param level Minus one or omitted uses zlib's default. Zero stores without
+---     compression; one through nine trade time for size.
+function compress.deflateRaw(bytes: string, level?: integer): string
+    local result, reason = encode(bytes, -WINDOW_BITS, level)
+    if result == nil then
+        error(reason, 2)
+    end
+    return result
+end
+
+--- Compresses bytes as an RFC 1950 zlib stream, including its header and
+--- Adler-32 trailer.
+---
+--- @param level Minus one or omitted uses zlib's default. Zero stores without
+---     compression; one through nine trade time for size.
+function compress.deflate(bytes: string, level?: integer): string
+    local result, reason = encode(bytes, WINDOW_BITS, level)
+    if result == nil then
+        error(reason, 2)
+    end
+    return result
 end
 
 --- Decompresses a raw DEFLATE stream, the form RFC 1951 defines.

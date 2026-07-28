@@ -130,6 +130,12 @@ local record Backend
     captureMouse: function(enabled: boolean): boolean
     showCursor: function(visible: boolean): boolean
     cursorVisible: function(): boolean
+    --- Creates one of the platform's standard cursor shapes. The caller owns
+    --- the returned handle and destroys it after replacing it.
+    createSystemCursor: function(name: string): loader.CPtr
+    setCursor: function(cursor: loader.CPtr): boolean
+    defaultCursor: function(): loader.CPtr
+    destroyCursor: function(cursor: loader.CPtr)
 
     ------------------------------------------------------------------ names
     --
@@ -253,6 +259,29 @@ local SENSORS <const>: {string: integer} = {
     rightGyro = enumValue("SDL_SENSOR_GYRO_R"),
     leftAccelerometer = enumValue("SDL_SENSOR_ACCEL_L"),
     rightAccelerometer = enumValue("SDL_SENSOR_ACCEL_R"),
+}
+
+local SYSTEM_CURSORS <const>: {string: integer} = {
+    default = enumValue("SDL_SYSTEM_CURSOR_DEFAULT"),
+    text = enumValue("SDL_SYSTEM_CURSOR_TEXT"),
+    wait = enumValue("SDL_SYSTEM_CURSOR_WAIT"),
+    crosshair = enumValue("SDL_SYSTEM_CURSOR_CROSSHAIR"),
+    progress = enumValue("SDL_SYSTEM_CURSOR_PROGRESS"),
+    nwseResize = enumValue("SDL_SYSTEM_CURSOR_NWSE_RESIZE"),
+    neswResize = enumValue("SDL_SYSTEM_CURSOR_NESW_RESIZE"),
+    ewResize = enumValue("SDL_SYSTEM_CURSOR_EW_RESIZE"),
+    nsResize = enumValue("SDL_SYSTEM_CURSOR_NS_RESIZE"),
+    move = enumValue("SDL_SYSTEM_CURSOR_MOVE"),
+    notAllowed = enumValue("SDL_SYSTEM_CURSOR_NOT_ALLOWED"),
+    pointer = enumValue("SDL_SYSTEM_CURSOR_POINTER"),
+    nwResize = enumValue("SDL_SYSTEM_CURSOR_NW_RESIZE"),
+    nResize = enumValue("SDL_SYSTEM_CURSOR_N_RESIZE"),
+    neResize = enumValue("SDL_SYSTEM_CURSOR_NE_RESIZE"),
+    eResize = enumValue("SDL_SYSTEM_CURSOR_E_RESIZE"),
+    seResize = enumValue("SDL_SYSTEM_CURSOR_SE_RESIZE"),
+    sResize = enumValue("SDL_SYSTEM_CURSOR_S_RESIZE"),
+    swResize = enumValue("SDL_SYSTEM_CURSOR_SW_RESIZE"),
+    wResize = enumValue("SDL_SYSTEM_CURSOR_W_RESIZE"),
 }
 
 local MOUSE_BUTTONS <const>: {string: integer} = {
@@ -506,6 +535,24 @@ local sdlBackend <const>: Backend = {
     end,
 
     cursorVisible = function(): boolean return C.SDL_CursorVisible() as boolean end,
+
+    createSystemCursor = function(name: string): loader.CPtr
+        local kind = SYSTEM_CURSORS[name]
+        if kind == nil then
+            return nil
+        end
+        local cursor = C.SDL_CreateSystemCursor(kind)
+        if cursor == nil then
+            return nil
+        end
+        return cursor
+    end,
+
+    setCursor = function(cursor: loader.CPtr): boolean return C.SDL_SetCursor(cursor) as boolean end,
+
+    defaultCursor = function(): loader.CPtr return C.SDL_GetDefaultCursor() end,
+
+    destroyCursor = function(cursor: loader.CPtr) C.SDL_DestroyCursor(cursor) end,
 
     scancodeFromName = function(name: string): integer return tonumber(C.SDL_GetScancodeFromName(name)) as integer end,
 
