@@ -1,5 +1,5 @@
 ---
-description: "Drawing: the camera a frame is drawn from, the renderer that draws it, and the vocabularies a scene is described in"
+description: "Drawing: the camera, the render components, the renderer, text, and the vocabularies a scene is described in"
 outline: deep
 ---
 
@@ -48,6 +48,12 @@ The module a name resolves to is the module itself and not a copy of it, so
 `tecs.gfx.layers` and `require("tecs.gfx.layers")` are one table. A value written through one is read back
 through the other, which matters for `layers.maxY` and `layers.maxZ`, the two module values a game is
 expected to assign.
+
+The names on `tecs.gfx` itself resolve the same way, off whichever of the files below answers each one,
+so reading `tecs.gfx.Tint` loads the render components and reading `tecs.gfx.loadFont` loads the text
+module. `Camera` and `Renderer` are classes rather than modules of their own: they are reached through
+this namespace, `tecs.gfx.Camera`, and documented here rather than on a page apiece, because a class is
+a type its namespace owns.
 
 ## The camera
 

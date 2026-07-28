@@ -268,8 +268,27 @@ resolves, and the shader and material loaders read content through the same
 two. So those live in `platform/content.tl`, below both, and `tecs.filesystem`
 is what a game writes. A namespace assembled from several modules with no
 principal one keeps the table built for the name, and keeps the record with it:
-`tecs.audio` and `tecs.input` are the two left, and both are a class and its
-satellites rather than a merge.
+`tecs.audio`, `tecs.input` and `tecs.gfx` are the three left. The first two are
+a class and its satellites rather than a merge.
+
+`tecs.gfx` is the one that had a choice and declined it, and the reason is the
+laziness above rather than the shape. It answers four things a scene reaches
+for directly, the camera, the components, the renderer and text, and four
+modules below it. Any of the four could have been made its principal, or a new
+`gfx/init.tl` written to be one, and a principal is loaded the moment its name
+is read: every candidate reaches SDL through the FFI to load, so
+`tecs.gfx.layers` would have demanded a graphics stack to answer a question
+about layer bands. A `gfx/init.tl` lazy in its own members would have been the
+resolver again, one directory down, with the same record in it. So the record
+stays where the resolver is, and it is the cost this shape is worth paying.
+
+What `tecs.gfx` does not carry is `Transform`. Grouping by the task a game is
+doing puts a name where it is used, and a transform is used by the hierarchy,
+by physics, by the sequencer and by the extractor, so filing it under drawing
+would tell three of those four that they were moving a graphics component. It
+is the ECS builtin and is written `tecs.ecs.builtins.Transform`, once; the
+component module used to re-export it, which was a second spelling of one
+thing, and a second spelling is the alias this tree does not keep.
 
 `spec/surface_spec.lua` walks the whole of it. The record in `init.tl` is what
 a game is type-checked against and the descriptor table beneath it is what a
