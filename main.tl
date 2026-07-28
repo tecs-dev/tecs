@@ -117,12 +117,12 @@ return tecs.application({
     },
     framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
     debug = true,
-    ambient = { 0.05, 0.05, 0.08 },
+    ambientLight = { 0.05, 0.05, 0.08 },
     -- Headroom over the field for the lights and for a glyph per character of
     -- the caption, since a glyph is an entity and an instance like any other.
     capacity = COUNT + 256,
     maxEntities = COUNT + 512,
-    maxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
+    debugMaxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 

@@ -116,9 +116,9 @@ local reactions = 0
 return tecs.application({
     window = { title = "latency", width = WIDTH, height = HEIGHT },
     presentMode = os.getenv("BENCH_PRESENT") or "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = COUNT + 64,
-    maxFrames = TOTAL,
+    debugMaxFrames = TOTAL,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local input = app.input

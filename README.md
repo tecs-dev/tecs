@@ -64,8 +64,14 @@ Working today:
 - Shaders packaged as artifacts, so a release links no compiler
 - A platform contract with seven seams, and an SDL implementation of all seven
 - A debug server over HTTP that survives a crash in game code, with tools that
-  read and write the world, capture the frame, and report what the mixer is
-  doing
+  read and write the world, capture the frame, report what the mixer is doing,
+  and pick the loop back up once the fault is fixed. The log file it reads
+  through `get_logs` is written when the server or `debug` is asked for and not
+  otherwise, so a shipped game writes no file nobody asked for; SDL already
+  dispatches to a destination a human can read on every platform
+- The platform lifecycle answered where it arrives, including a checkpoint the
+  game prepares during ordinary frames and the engine flushes on being
+  backgrounded or terminated
 - Per-stage frame timing with percentiles, which is how any of the numbers in
   this file were arrived at, and event-to-photon latency reported through the
   same stages
@@ -398,6 +404,24 @@ is reachable from the application while it is held: the frame is recorded on
 `app._frame` the moment it is acquired, so recovery can resolve one that the
 throw skipped past.
 
+The first traceback is the one kept, and every later one is logged instead. Two
+paths produce a later one. Teardown runs `world:shutdown` on a crashed world
+deliberately, because a game that acquired something before it threw still has
+to be given the chance to give it back, and a `Shutdown` system reaching for
+what the crash left half built throws in its turn. And an event delivered to a
+game that has stopped can be handled by an observer that throws. The second is
+closed outright: while the application is crashed, events are folded into engine
+state and not emitted on the bus, so quit still closes the window and `Input`
+still tracks what is held while nothing reaches the game. A game whose systems
+are not running is not in a state to handle an event either.
+
+The staging slot rotates before the frame is recorded rather than after. A
+throw inside the recording used to skip the rotation, and recovery submits
+whatever copy passes were already encoded, so the next extraction would write
+into the slot the GPU was copying out of. Which slot a frame uploads from is
+carried on the packet rather than read from the renderer, so moving the
+rotation earlier changes nothing about what is drawn.
+
 A begun pass registers itself against its command buffer in `gpu.passscope` and
 takes itself off there when it finishes. That is the one thing a call site
 cannot do for itself, and registering by command buffer rather than by frame is
@@ -428,6 +452,40 @@ query scope is clamped at zero so a cursor closed after an unwind cannot push
 the depth negative. Nothing in the ECS catches to do this: catching there would
 build the traceback at the rethrow rather than at the line that failed, and the
 traceback is the point.
+
+### Picking the loop back up
+
+A crash used to latch for the life of the process, so one nil index in a
+gameplay system stopped simulation permanently even though the world, the device
+and the renderer are demonstrably healthy afterwards, which is what
+`spec/exceptions_spec.lua` exists to show. `app:clearCrash()` lifts it, and its
+own documentation is the contract: another frame to look at and a chance to
+reload; the world may be inconsistent, reload before trusting it.
+
+The name is chosen against being mistaken for fault tolerance. What the guard
+restored are the engine's invariants, which are the ones it can name. A game's
+are not restored and cannot be, because a system that threw halfway through its
+query left some entities updated and some not, and nothing here knows which half
+or what either half meant.
+
+Two gates, and they are different kinds of thing. The first is whether this is a
+development build at all, which is `debug` or `mcpPort` in the config: a shipped
+build has neither, latches on the first crash and stays latched, because there
+is nobody there to read the frame and carrying on with a world that is provably
+inconsistent is how one bug becomes a corrupted save. The second is severity,
+and it is narrow rather than a judgement about how bad the throw looked:
+recovery reports whether it had to force-end a pass or cancel a frame instead of
+submitting it, and neither resumes at any setting, because the device is then
+not in the state the engine intended and the next frame would be recorded
+against something nobody can describe.
+
+The callers are the debug server's `clear_crash` tool and the file watcher's
+reloads, and both mean the same thing: something about the run has changed, try
+it again. That is what gives the watcher its purpose back. Simulated time stops
+with the simulation, so `app.elapsed` does not accumulate the length of the fix.
+`Input`'s fixed-phase gate is known to survive a resume latched on if the throw
+landed between `FixedFirst` and `FixedLast`; clearing it is a call to
+`input:exitFixedPhase` and has not been made yet. Physics resumability is open.
 
 ## Workers and assets
 
@@ -999,6 +1057,71 @@ callback cannot meet any deadline, and the host says so if the hook overruns.
 The event is queued as well as dispatched. The hook is where a game meets the
 platform's deadline; the stream is where it observes the change like any other,
 and those answer different questions.
+
+The engine answers five of the six. `_lowMemory` collects, a full cycle rather
+than a step, because what is being asked for is the low-water mark and the pause
+it costs is cheaper than being killed. `_willEnterBackground` suspends and
+flushes the checkpoint below. `_didEnterBackground` waits for the device to go
+idle, so nothing is in flight across a suspension whose length is not ours.
+`_didEnterForeground` unsuspends and restarts the clock, because whatever the
+platform did while we were away is not elapsed game time and a dt of it would
+put every fixed step of the interval through in one frame. `_terminating`
+offers the checkpoint one last time, since a termination out of the foreground
+never went through a backgrounding.
+
+Suspension is set and cleared in the hooks rather than folded out of the queued
+events, which is where it used to be. On Android the process blocks as soon as
+the backgrounding has been dispatched, so the drain that would have folded it is
+after the resume: acting on the event is acting a whole suspension too late.
+
+`_willEnterForeground` is deliberately unanswered. It says the application is
+about to be visible again and the engine has nothing to do before the platform
+is actually drawing, which is what `_didEnterForeground` beside it is for. A
+game that wants the earlier moment observes `events.on.appWillEnterForeground`.
+
+Releasing the graphics device on backgrounding, and recreating it on the way
+back, is where an engine that has shipped to Android ends up, and it is a stated
+gap rather than a half-written path. Three things have to be true first. Every
+GPU handle in the process would have to be reachable from one place to be
+released and recreated, and they are not: they belong to the backend, the
+deferred pipeline, the image array and every buffer, and a recreation that
+missed one is a use-after-free rather than a black frame. The image array would
+have to be refillable, and the pixels behind it are released at
+`Renderer:registerImage` because the array holds them, so there is nothing on
+the CPU to upload again. And it would have to be testable, and none of these
+events fires on a platform the suite runs on, so a recovery path written now is
+one whose first execution is on a player's phone.
+
+### The checkpoint, which is bytes and not a callback
+
+A game could not save state on being backgrounded at all, and the plumbing is
+the easy half. The contract is the part that decides whether it works.
+
+At this engine's entity counts a world is not serialisable inside a platform
+callback. iOS allows roughly five seconds from the hook returning and Android
+rather less, and a callback that walked four million entities would be killed
+part way through and leave nothing behind. So `_willEnterBackground` writes a
+buffer the game already had.
+
+`app:stageCheckpoint(bytes)` is how it gets one, called from an ordinary system
+on an ordinary frame whenever the state worth keeping has changed. It takes
+bytes rather than a function that produces them, and that is the whole design.
+A function would let a game postpone the serialising into exactly the callback
+that cannot afford it while looking like it had prepared something; a string
+cannot, because by the time one exists the expensive half has already happened
+on a frame that could pay for it. The host times the hook and says so past
+250 ms, which is the check on the rest.
+
+Staging again replaces what was staged: there is one checkpoint, not a queue.
+Staging once and backgrounding twice writes once, on the argument the host
+deduplicates backgroundings with, which is that the second write is the one that
+gets interrupted and it had nothing new to say. The write goes through a
+neighbouring file and a rename, so what is on disk is either the previous
+checkpoint or this one and never half of either. `app:readCheckpoint()` is the
+other half, read while building the world; nil covers a first run, a game that
+staged nothing and a file the player deleted, and none of those is an error.
+`config.checkpoint` names the file, and staging without one raises rather than
+holding bytes that will never be written.
 
 ## The clipboard
 
@@ -2647,6 +2770,12 @@ It is development only. `Application.Config.watch` starts it, the `watch` tool
 turns it on, off and a poll at a time, and `install` refuses on a build that
 links no shader compiler, which is the same bit `reload_shaders` refuses on and
 the same thing it means: a release polls nothing.
+
+Each reload ends by asking `clearCrash` to pick the loop back up, which is what
+the watcher is for. A file that broke the game is a file someone is about to
+fix, and a loop that stays stopped after the fix has landed makes the watcher a
+notification rather than a tool. A handler that raised never gets there: the
+reload refused, so nothing has changed.
 
 Content is never resolved against the working directory. That happens to work
 when a build is launched from a project root and is meaningless the moment

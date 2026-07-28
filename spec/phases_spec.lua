@@ -51,7 +51,6 @@ describe("phases", function()
 
         local app = Application.create({
             window = { title = "phases", width = 64, height = 64 },
-            logFile = "",
             plugin = plugin,
         })
 

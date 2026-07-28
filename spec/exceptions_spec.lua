@@ -369,6 +369,48 @@ describe("exception safety", function()
     end)
 
     ---------------------------------------------------------------------------
+    -- The staging slot a throw would have left the next extraction writing into
+    ---------------------------------------------------------------------------
+
+    -- Recovery submits whatever the frame had already encoded, which for a
+    -- throw after the flush includes the copies out of the staging slot the
+    -- extraction wrote. The rotation is what points the next extraction at the
+    -- other slot, so a rotation the throw skipped leaves the next extraction
+    -- writing into memory the GPU is copying out of. Unreachable until a
+    -- crashed loop could render again, and reachable now that it can.
+    it("rotates the staging slot even when the recording throws", function()
+        local world, renderer = newScene()
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 16, 16), Tint(1, 0, 0, 1), Renderable())
+
+        local backend = renderer._backend
+        local consume = backend.consume
+        backend.consume = function()
+            error("spec: the recording threw")
+        end
+
+        world:update(1 / 60)
+        local wrote = renderer._packet.slot
+        local frame = newFrame()
+        local ok, reason = pcall(renderer.render, renderer, frame)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("the recording threw", 1, true))
+        assert.is_nil(frame:abandon())
+
+        assert.are_not.equal(wrote, renderer._slot, "the next extraction writes the slot that frame read")
+
+        -- And the extractor was actually repointed, rather than the renderer
+        -- having moved a number nothing consults.
+        backend.consume = consume
+        world:update(1 / 60)
+        assert.are_not.equal(wrote, renderer._packet.slot)
+
+        local next_ = drawFrame(world, renderer)
+        assert.are.equal("submitted", next_.state)
+
+        renderer:destroy()
+    end)
+
+    ---------------------------------------------------------------------------
     -- A pass left open on one command buffer does not follow the next one
     ---------------------------------------------------------------------------
 

@@ -42,8 +42,17 @@ local type ComputeStage = Backend.ComputeStage
 --- beyond it are dropped rather than growing the buffer mid-frame.
 local DEFAULT_CAPACITY <const> = 65536
 
+--- Ambient light when none was asked for.
+---
+--- White, so a scene with no lights in it draws its own colours rather than a
+--- fraction of them. A dim default makes the first thing anyone builds look
+--- broken and makes lighting the price of seeing anything at all; at white,
+--- lights add on top of a scene that is already legible.
+local DEFAULT_AMBIENT <const>: {number} = { 1.0, 1.0, 1.0 }
+
 local record RendererOptions
-    --- Ambient colour applied everywhere.
+    --- Light every surface receives before any light entity contributes, as
+    --- red, green and blue. Defaults to white.
     ambient: {number}
     --- Instances the buffer is sized for.
     capacity: integer
@@ -120,8 +129,14 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._slot = 0
     self._packet = FramePacket.create()
 
+    -- A copy rather than the constant itself, so a caller reaching for
+    -- `renderer.deferred.ambient` and writing into it moves this renderer's
+    -- light and not every renderer's.
+    local ambient <const> = options.ambient
+        or { DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3] }
+
     local backend = Backend.create(device, swapchainFormat, {
-        ambient = options.ambient,
+        ambient = ambient,
         capacity = self.capacity,
         cell = options.cell,
         layers = options.layers,
@@ -333,13 +348,22 @@ function Renderer:render(frame: Frame)
         packet:setCamera(self.camera)
     end
 
-    self._backend:consume(packet, frame)
-
-    -- Rotated after the copies are encoded, so the next extraction writes a
-    -- slot this frame is not still uploading from.
+    -- Rotated before the frame is recorded rather than after, so a throw
+    -- inside the recording cannot skip it. That frame is still resolved: the
+    -- recovery path submits whatever copy passes were encoded before the
+    -- throw, and if the extractor were still pointed at the slot they read
+    -- from, the next extraction would write into memory the GPU is copying
+    -- out of.
+    --
+    -- Which slot this frame uploads from is decided by the packet, not by
+    -- this field, so moving the rotation earlier does not move what is drawn.
+    -- Mapping does not cycle, so it neither waits on nor reallocates the slot
+    -- the frame below is about to flush.
     local slot = (self._slot + 1) % Buffer.slotCount
     self._slot = slot
     self._extractor:setStaging(slot, self._backend:mapSlot(slot))
+
+    self._backend:consume(packet, frame)
 end
 
 --- The composited image the last frame produced.

@@ -681,7 +681,6 @@ describe("Application's window configuration", function()
 
     setup(function()
         app = Application.create({
-            logFile = "",
             window = {
                 title = "configured",
                 width = SIZE,

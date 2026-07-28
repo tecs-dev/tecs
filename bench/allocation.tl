@@ -188,12 +188,12 @@ local probedWindows: {Window} = {}
 return tecs.application({
     window = { title = "allocation", width = WIDTH, height = HEIGHT },
     presentMode = "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = COUNT + 64,
     maxEntities = COUNT + 1024,
     -- Two windows per regime, and one frame after each to close the last
     -- measured frame's `submit` bracket.
-    maxFrames = #REGIMES * 2 * (WARMUP + FRAMES + 1) + 1,
+    debugMaxFrames = #REGIMES * 2 * (WARMUP + FRAMES + 1) + 1,
 
     plugin = function(world: tecs.World, _app: tecs.Application)
         spawnField(world)

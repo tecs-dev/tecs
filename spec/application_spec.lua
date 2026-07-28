@@ -16,13 +16,21 @@ local phases = require("tecs.internal.phases")
 local components = require("tecs.components")
 local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
+local clock = require("tecs.platform.clock")
+local filesystem = require("tecs.platform.filesystem")
+local paths = require("tecs.platform.paths")
+local log = require("tecs.log")
+local mcp = require("tecs.mcp")
 
 local FIXTURE = "spec/fixtures/split.png"
 
---- An application with a window small enough to be cheap and no log file.
+--- A checkpoint name nothing else in the suite writes.
+local CHECKPOINT = "spec-checkpoint.bin"
+
+--- An application with a window small enough to be cheap. It sets no log file
+--- and no `debug`, so nothing here writes one.
 local function build(config)
     config.window = { title = "application", width = 64, height = 64 }
-    config.logFile = ""
     return Application.create(config)
 end
 
@@ -453,6 +461,556 @@ describe("Application", function()
             explode = false
             app:_simulate(1 / 60)
             assert.are.equal("submitted", app._frame.state)
+            app:_shutdown()
+        end)
+    end)
+
+    ---------------------------------------------------------------------------
+    -- Resuming after a crash
+    ---------------------------------------------------------------------------
+
+    -- `_crashed` used to latch for the life of the process, so one nil index in
+    -- a gameplay system stopped simulation permanently even though the world,
+    -- the device and the renderer are provably healthy afterwards, which is
+    -- what `exceptions_spec` demonstrates. Resumption is a debugging
+    -- affordance and is gated as one.
+    describe("clearCrash", function()
+        --- An application whose Update system throws until `stop` is called,
+        --- and which counts the frames it ran to completion.
+        local function crashing(config)
+            local ran = 0
+            local explode = true
+            config.plugin = function(world)
+                world:addSystem({
+                    name = "spec.ThrowsOnDemand",
+                    phase = phases.Update,
+                    run = function()
+                        if explode then
+                            error("gameplay boom")
+                        end
+                        ran = ran + 1
+                    end,
+                })
+            end
+            local app = build(config)
+            return app,
+                function()
+                    return ran
+                end,
+                function()
+                    explode = false
+                end
+        end
+
+        it("latches for good in a build that is neither debug nor served", function()
+            local app, ran = crashing({})
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+            assert.is_truthy(app:crashed():match("gameplay boom"))
+
+            local resumed, reason = app:clearCrash()
+            assert.is_false(resumed, "a shipped build resumed after a crash")
+            assert.is_truthy(reason:find("neither debug nor mcpPort", 1, true))
+            assert.is_truthy(app:crashed(), "the traceback was cleared anyway")
+
+            -- And it stays stopped, which is the behaviour the gate exists for.
+            app:_iterate(nil, 0, nil)
+            assert.are.equal(0, ran())
+            app:_shutdown()
+        end)
+
+        it("resumes a development build, and the loop simulates again", function()
+            local app, ran, stop = crashing({ debug = true })
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+            assert.is_truthy(app:crashed():match("gameplay boom"))
+            app:_iterate(nil, 0, nil)
+            assert.are.equal(0, ran(), "a crashed loop went on simulating")
+
+            stop()
+            assert.is_true(app:clearCrash())
+            assert.is_nil(app:crashed())
+            assert.is_nil(mcp.crashed(), "the debug server was still told it had crashed")
+
+            app:_iterate(nil, 0, nil)
+            assert.are.equal(1, ran(), "the loop did not pick up after the fix")
+            assert.are.equal("submitted", app._frame.state, "the frame after the resume did not draw")
+            app:_shutdown()
+        end)
+
+        it("refuses when recovery had to force-end a pass", function()
+            -- Severity is a second gate and a narrow one: this is the case
+            -- where the device is not in the state the engine intended, so
+            -- the next frame would be recorded against something nobody can
+            -- describe. A development build makes no difference to it.
+            local app = build({
+                debug = true,
+                plugin = function(world, self)
+                    world:spawn(
+                        components.Transform(32, 32, 0, 1, 0, 16, 16),
+                        components.Tint(1, 0, 0, 1),
+                        components.Renderable()
+                    )
+                    self.renderer:addComputeStage({
+                        active = function()
+                            return true
+                        end,
+                        record = function(_, frame, instances)
+                            ComputePass.begin(frame.commandBuffer, { instances.handle })
+                            error("stage boom")
+                        end,
+                        destroy = function() end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            local open = passscope.openCount()
+            app:_iterate(nil, 0, nil)
+            assert.is_truthy(app:crashed():match("stage boom"))
+            assert.are.equal(open, passscope.openCount(), "the pass was not ended")
+
+            local resumed, reason = app:clearCrash()
+            assert.is_false(resumed, "resumed onto a device recovery had to force")
+            assert.is_truthy(reason:find("force-ended", 1, true))
+            assert.is_truthy(app:crashed())
+            app:_shutdown()
+        end)
+
+        it("says nothing is wrong when nothing has crashed", function()
+            local app = build({ debug = true })
+            assert.is_true(app:_init())
+            assert.is_true(app:clearCrash(), "a healthy application refused to carry on")
+            app:_shutdown()
+        end)
+
+        -- A crashed game is not in a state to handle an event either, and an
+        -- observer that throws while handling one produces a second traceback
+        -- that replaces the first. The first is the one that explained the
+        -- fault, and on the run where it happened it is all there is.
+        it("delivers no event to game code after a crash, and keeps the first traceback", function()
+            local observed = 0
+            local app = build({
+                debug = true,
+                plugin = function(world)
+                    world:observe(0, events.on.keyDown, function()
+                        observed = observed + 1
+                        error("observer boom")
+                    end)
+                    world:addSystem({
+                        name = "spec.ThrowsFirst",
+                        phase = phases.Update,
+                        run = function()
+                            error("system boom")
+                        end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+            assert.is_truthy(app:crashed():match("system boom"))
+
+            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            assert.are.equal(0, observed, "an observer ran in a game that had stopped")
+            assert.is_truthy(app:crashed():match("system boom"), "a later throw replaced the traceback")
+
+            -- Engine folding is not gated with it, which is what keeps
+            -- `send_event` useful after a crash: a window nobody can close is
+            -- worse than one that is not drawing.
+            app:_receive({ kind = "quit" })
+            assert.is_true(app.quitRequested, "quit stopped working after a crash")
+
+            -- And the observer is delivered to again once the crash is cleared.
+            app:clearCrash()
+            app:_receive({ kind = "keyDown", scancode = 44, down = true })
+            assert.are.equal(1, observed, "clearing the crash did not restore delivery")
+            app:_shutdown()
+        end)
+
+        -- The other path that used to overwrite the traceback, and the one the
+        -- delivery gate above does not cover: teardown runs `world:shutdown`
+        -- on a crashed world deliberately, so a `Shutdown` system reaching for
+        -- what the crash left half built throws in its turn.
+        it("keeps the first traceback through a teardown that throws as well", function()
+            local app = build({
+                plugin = function(world)
+                    world:addSystem({
+                        name = "spec.ThrowsInUpdate",
+                        phase = phases.Update,
+                        run = function()
+                            error("original boom")
+                        end,
+                    })
+                    world:addSystem({
+                        name = "spec.ThrowsInShutdown",
+                        phase = phases.Shutdown,
+                        run = function()
+                            error("teardown boom")
+                        end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+            assert.is_truthy(app:crashed():match("original boom"))
+
+            assert.is_true(app:_shutdown())
+            assert.is_truthy(app:crashed():match("original boom"), "the teardown's throw replaced the explanation")
+        end)
+
+        it("holds simulated time still while the loop is not simulating", function()
+            local app, _, stop = crashing({ debug = true })
+            assert.is_true(app:_init())
+
+            app:_iterate(nil, 0, nil)
+            local stopped = app.elapsed
+            for _ = 1, 5 do
+                app:_iterate(nil, 0, nil)
+            end
+            assert.are.equal(stopped, app.elapsed, "elapsed counted a fix nobody simulated")
+
+            stop()
+            app:clearCrash()
+            app:_iterate(nil, 0, nil)
+            assert.is_true(app.elapsed > stopped, "elapsed stopped advancing after the resume")
+            app:_shutdown()
+        end)
+    end)
+
+    ---------------------------------------------------------------------------
+    -- The platform lifecycle
+    ---------------------------------------------------------------------------
+
+    -- SDL dispatches these six from its event watcher rather than queueing
+    -- them, and the host calls one method per event at the instant it arrives;
+    -- `host_spec` covers that dispatch against the real binary. What is here is
+    -- what the methods do, which is reachable in process.
+    describe("the platform lifecycle", function()
+        local function removeCheckpoint()
+            local path = paths.writable(CHECKPOINT)
+            filesystem.remove(path)
+            filesystem.remove(path .. ".new")
+        end
+
+        before_each(removeCheckpoint)
+        after_each(removeCheckpoint)
+
+        it("suspends on backgrounding and unsuspends on foregrounding", function()
+            local app = build({})
+            assert.is_true(app:_init())
+
+            app:_willEnterBackground()
+            assert.is_true(app.suspended)
+
+            -- Suspended, so the loop runs without simulating.
+            local ran = app.frame
+            app:_iterate(nil, 0, nil)
+            assert.are.equal(ran + 1, app.frame)
+            assert.are.equal(0, app.elapsed, "a suspended iteration advanced simulated time")
+
+            app:_didEnterForeground()
+            assert.is_false(app.suspended)
+            app:_shutdown()
+        end)
+
+        -- The suspension used to be folded out of the queued event. On Android
+        -- the process blocks as soon as the backgrounding has been dispatched,
+        -- so the drain that would have folded it is after the resume: acting on
+        -- the event is acting a whole suspension too late.
+        it("does not fold the queued lifecycle events into suspension", function()
+            local app = build({})
+            assert.is_true(app:_init())
+
+            app:_receive({ kind = "appWillEnterBackground" })
+            assert.is_false(app.suspended, "the drain suspended instead of the hook")
+
+            app:_willEnterBackground()
+            app:_receive({ kind = "appDidEnterForeground" })
+            assert.is_true(app.suspended, "the drain unsuspended instead of the hook")
+            app:_shutdown()
+        end)
+
+        it("restarts the clock on foregrounding rather than integrating the gap", function()
+            local app = build({})
+            assert.is_true(app:_init())
+            app:_iterate(nil, 0, nil)
+
+            -- A suspension the platform did not tell us the length of, stood in
+            -- for by a stall. Without the reset the first step afterwards
+            -- carries the whole of it.
+            app:_willEnterBackground()
+            local until_ = clock.now() + 0.05
+            while clock.now() < until_ do
+            end
+            app:_didEnterForeground()
+
+            local dt = clock.step()
+            assert.is_true(dt < 0.02, ("the gap was integrated: dt was %.3f s"):format(dt))
+            app:_shutdown()
+        end)
+
+        it("collects on low memory", function()
+            local app = build({})
+            assert.is_true(app:_init())
+
+            -- Garbage the collector has not reached yet, so there is something
+            -- for the hook to give back rather than a no-op that always passes.
+            local waste = {}
+            for index = 1, 20000 do
+                waste[index] = { index }
+            end
+            waste = nil
+            local before = collectgarbage("count")
+            app:_lowMemory()
+            assert.is_true(collectgarbage("count") < before, "low memory gave nothing back")
+            app:_shutdown()
+        end)
+
+        it("survives a backgrounding and a foregrounding, and draws afterwards", function()
+            local app = build({
+                plugin = function(world)
+                    world:spawn(
+                        components.Transform(32, 32, 0, 1, 0, 16, 16),
+                        components.Tint(1, 0, 0, 1),
+                        components.Renderable()
+                    )
+                end,
+            })
+            assert.is_true(app:_init())
+            app:_iterate(nil, 0, nil)
+
+            app:_willEnterBackground()
+            app:_didEnterBackground()
+            app:_didEnterForeground()
+
+            app:_iterate(nil, 0, nil)
+            assert.are.equal("submitted", app._frame.state, "the frame after the resume did not draw")
+            app:_shutdown()
+        end)
+    end)
+
+    ---------------------------------------------------------------------------
+    -- The checkpoint
+    ---------------------------------------------------------------------------
+
+    -- A game could not save state on being backgrounded at all: the host copied
+    -- the event and returned, and there was no hook to call. The contract is
+    -- the interesting half. At this project's scale a world is not serialisable
+    -- inside a platform callback, so the surface takes bytes the game already
+    -- prepared and cannot be handed a function that would defer the expensive
+    -- part into exactly the callback that cannot afford it.
+    describe("the checkpoint", function()
+        local function removeCheckpoint()
+            local path = paths.writable(CHECKPOINT)
+            filesystem.remove(path)
+            filesystem.remove(path .. ".new")
+        end
+
+        before_each(removeCheckpoint)
+        after_each(removeCheckpoint)
+
+        it("writes what a frame staged when the platform backgrounds us", function()
+            local app = build({ checkpoint = CHECKPOINT })
+            assert.is_true(app:_init())
+
+            assert.is_nil(app:readCheckpoint(), "a first run found a checkpoint")
+            app:stageCheckpoint("level=3;hp=41")
+
+            -- Nothing is written until the platform asks, because the frame
+            -- that prepared it is not the moment there is a deadline.
+            assert.is_false(filesystem.exists(paths.writable(CHECKPOINT)))
+
+            app:_willEnterBackground()
+            assert.are.equal("level=3;hp=41", app:readCheckpoint())
+            app:_shutdown()
+        end)
+
+        it("hands the next run what the last one left", function()
+            local first = build({ checkpoint = CHECKPOINT })
+            assert.is_true(first:_init())
+            first:stageCheckpoint("carried over")
+            first:_willEnterBackground()
+            first:_shutdown()
+
+            local restored
+            local second = build({
+                checkpoint = CHECKPOINT,
+                plugin = function(_, app)
+                    restored = app:readCheckpoint()
+                end,
+            })
+            assert.is_true(second:_init())
+            assert.are.equal("carried over", restored, "the plugin could not read the last run's checkpoint")
+            second:_shutdown()
+        end)
+
+        it("leaves nothing half written and no scratch file behind", function()
+            local app = build({ checkpoint = CHECKPOINT })
+            assert.is_true(app:_init())
+            app:stageCheckpoint(("x"):rep(4096))
+            app:_willEnterBackground()
+
+            assert.are.equal(4096, #app:readCheckpoint())
+            assert.is_false(
+                filesystem.exists(paths.writable(CHECKPOINT) .. ".new"),
+                "the file the write goes through was left on disk"
+            )
+            app:_shutdown()
+        end)
+
+        -- One write per staging, on the same argument the host deduplicates
+        -- backgroundings with: the second write is the one that gets
+        -- interrupted, and it had nothing new to say.
+        it("writes once for one staging, however many backgroundings", function()
+            local app = build({ checkpoint = CHECKPOINT })
+            assert.is_true(app:_init())
+
+            app:stageCheckpoint("first")
+            app:_willEnterBackground()
+            filesystem.remove(paths.writable(CHECKPOINT))
+
+            app:_willEnterBackground()
+            assert.is_nil(app:readCheckpoint(), "a backgrounding with nothing staged wrote again")
+
+            app:stageCheckpoint("second")
+            app:_willEnterBackground()
+            assert.are.equal("second", app:readCheckpoint())
+            app:_shutdown()
+        end)
+
+        -- A termination out of the foreground never went through a
+        -- backgrounding, so this is the only call a game gets.
+        it("flushes on termination as well as on backgrounding", function()
+            local app = build({ checkpoint = CHECKPOINT })
+            assert.is_true(app:_init())
+
+            app:stageCheckpoint("dying words")
+            app:_terminating()
+            assert.are.equal("dying words", app:readCheckpoint())
+            app:_shutdown()
+        end)
+
+        -- Holding bytes that will never be written is the one failure a game
+        -- would not notice, so it is the one thing here that raises.
+        it("refuses to stage when no checkpoint file was configured", function()
+            local app = build({})
+            assert.is_true(app:_init())
+
+            assert.is_nil(app:checkpointPath())
+            assert.is_nil(app:readCheckpoint())
+            local ok, reason = pcall(app.stageCheckpoint, app, "nowhere to put this")
+            assert.is_false(ok)
+            assert.is_truthy(tostring(reason):find("no checkpoint file is configured", 1, true))
+            app:_shutdown()
+        end)
+    end)
+
+    ---------------------------------------------------------------------------
+    -- The configuration surface
+    ---------------------------------------------------------------------------
+
+    describe("configuration", function()
+        after_each(function()
+            log.closeFile()
+        end)
+
+        -- The file exists for the debug server: `get_logs` is a seek and a read
+        -- because of it. `mcpPort` is opt-in on the rule that a game should not
+        -- open a socket nobody asked for, and a file nobody asked for is the
+        -- same thing on disk, so the file follows the thing that reads it.
+        it("writes no log file for a game that asked for neither a server nor debug", function()
+            local app = build({})
+            assert.is_true(app:_init())
+            assert.is_nil(log.filePath(), "a game got a file on a user's disk without asking")
+            app:_shutdown()
+        end)
+
+        it("writes one for a debug build", function()
+            local app = build({ debug = true })
+            assert.is_true(app:_init())
+            assert.is_truthy(log.filePath())
+            assert.is_truthy(log.filePath():find("log.jsonl", 1, true))
+            app:_shutdown()
+        end)
+
+        it("writes the one a game named, whatever else is set", function()
+            local app = build({ logFile = "spec-named.jsonl" })
+            assert.is_true(app:_init())
+            assert.is_truthy(log.filePath():find("spec-named.jsonl", 1, true))
+            app:_shutdown()
+            filesystem.remove(paths.writable("spec-named.jsonl"))
+        end)
+
+        it("sets the log level before anything has had a chance to speak", function()
+            local logger = log.get("spec.level")
+            logger:setLevel(log.TRACE)
+            local app = build({ logLevel = log.ERROR })
+            assert.is_true(app:_init())
+
+            assert.is_false(logger:enabled(log.INFO), "an INFO message would still be emitted")
+            assert.is_true(logger:enabled(log.ERROR))
+            app:_shutdown()
+            log.setLevel(log.INFO)
+        end)
+
+        -- The old default was 0.08, which renders a nearly black screen for a
+        -- game that has not set up lighting. White shows sprites at their own
+        -- colour and lets lights add on top of them.
+        it("lights an unlit scene at full ambient", function()
+            local app = build({})
+            assert.is_true(app:_init())
+            assert.are.same({ 1.0, 1.0, 1.0 }, app.renderer.deferred.ambient)
+            app:_shutdown()
+        end)
+
+        it("takes the ambient a game named", function()
+            local app = build({ ambientLight = { 0.2, 0.3, 0.4 } })
+            assert.is_true(app:_init())
+            assert.are.same({ 0.2, 0.3, 0.4 }, app.renderer.deferred.ambient)
+            app:_shutdown()
+        end)
+
+        -- The world's fixed step had no route through the application at all:
+        -- `newWorld` was handed `maxEntities` and nothing else, so a game
+        -- could not set its own timestep however much it wanted to. The
+        -- absence of a spec is why nobody noticed.
+        it("hands the world the fixed step a game configured", function()
+            local app = build({
+                timestep = 1 / 8,
+                fixedMaxSteps = 3,
+                fixedOverload = "accumulate",
+            })
+            assert.is_true(app:_init())
+
+            local timestep = app.world:getFixedTiming()
+            assert.are.equal(1 / 8, timestep)
+            assert.are.equal(3, app.world.pipeline.fixedMaxSteps)
+            assert.are.equal("accumulate", app.world.pipeline.fixedOverload)
+            app:_shutdown()
+        end)
+
+        it("leaves the fixed step at its defaults when a game says nothing", function()
+            local app = build({})
+            assert.is_true(app:_init())
+
+            local timestep = app.world:getFixedTiming()
+            assert.are.equal(1 / 60, timestep)
+            assert.are.equal(10, app.world.pipeline.fixedMaxSteps)
+            assert.are.equal("drop", app.world.pipeline.fixedOverload)
+            app:_shutdown()
+        end)
+
+        it("stops the loop after debugMaxFrames iterations", function()
+            local app = build({ debugMaxFrames = 3 })
+            assert.is_true(app:_init())
+
+            assert.is_true(app:_iterate(nil, 0, nil))
+            assert.is_true(app:_iterate(nil, 0, nil))
+            assert.is_false(app:_iterate(nil, 0, nil), "the run did not stop where it was told to")
             app:_shutdown()
         end)
     end)

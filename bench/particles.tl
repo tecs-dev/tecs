@@ -129,10 +129,10 @@ local DELTA <const> = timing.stage("delta")
 return tecs.application({
     window = { title = "particles", width = WIDTH, height = HEIGHT },
     presentMode = "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = POOL + 1024,
     maxEntities = 4096,
-    maxFrames = WARMUP + FRAMES,
+    debugMaxFrames = WARMUP + FRAMES,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer

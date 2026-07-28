@@ -381,10 +381,10 @@ describe("proc", function()
     end)
 
     describe("through the application lifecycle", function()
-        --- An application with a window small enough to be cheap and no log.
+        --- An application with a window small enough to be cheap. Neither
+        --- `logFile` nor `debug` is set, so no log file is written.
         local function build(config)
             config.window = { title = "proc", width = 64, height = 64 }
-            config.logFile = ""
             return Application.create(config)
         end
 

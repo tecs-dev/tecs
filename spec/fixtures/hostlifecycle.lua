@@ -60,13 +60,15 @@ local inUpdate = false
 
 return tecs.application({
     window = { title = "hostlifecycle", width = 64, height = 64 },
-    logFile = "",
-    maxFrames = FRAMES,
+    debugMaxFrames = FRAMES,
 
     plugin = function(world, app)
-        -- The hooks the host offers. Set on the instance because that is what a
-        -- game does today: the host looks the method up on the application it
-        -- was handed, so a field and a method are the same thing to it.
+        -- The hooks the host offers, shadowed on the instance so that what is
+        -- counted here is the host's dispatch rather than the engine's answer
+        -- to it. The host looks the method up on the application it was
+        -- handed, so a field and a method are the same thing to it, and an
+        -- instance field wins over the one on `Application`. What the engine
+        -- does inside each is `application_spec`'s business.
         app._willEnterBackground = function()
             backgroundHookCount = backgroundHookCount + 1
             if backgroundHookFrame == nil then
@@ -88,9 +90,10 @@ return tecs.application({
             terminatingHookCount = terminatingHookCount + 1
         end
 
-        -- Deliberately no `_didEnterBackground`, `_willEnterForeground` or
-        -- `_didEnterForeground`. A hook a game did not write must not be an
-        -- error, and a run that failed here would say so.
+        -- Deliberately no `_didEnterBackground` or `_didEnterForeground`, so
+        -- the engine's own answer runs for those, and no
+        -- `_willEnterForeground`, which nothing answers at all. A hook nobody
+        -- wrote must not be an error, and a run that failed here would say so.
 
         world:observe(0, events.on.keyDown, function(event)
             if pushedAt ~= nil and arrivalDelta == nil and event.arrival ~= nil then
@@ -102,10 +105,11 @@ return tecs.application({
             if backgroundEventFrame == nil then
                 backgroundEventFrame = frame
             end
-            -- The engine suspends simulation on this event, which would stop
-            -- the frame counter and with it the rest of the schedule below.
-            -- What is under test is the host, not that policy, so the fixture
-            -- keeps running.
+            -- Suspension is set by `_willEnterBackground`, which this fixture
+            -- shadows, so nothing here should be suspended. Cleared anyway,
+            -- because a suspended run stops the frame counter and with it the
+            -- rest of the schedule below, and what is under test is the host
+            -- rather than that policy.
             app.suspended = false
         end)
 

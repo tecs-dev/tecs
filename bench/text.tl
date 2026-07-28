@@ -89,11 +89,10 @@ end
 return tecs.application({
     window = { title = "text", width = WIDTH, height = HEIGHT },
     presentMode = "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = TEXTS * (LENGTH + 4) + 256,
     maxEntities = TEXTS * (LENGTH + 4) + 4096,
-    maxFrames = WARMUP + FRAMES,
-    logFile = "",
+    debugMaxFrames = WARMUP + FRAMES,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer

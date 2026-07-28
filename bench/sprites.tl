@@ -223,13 +223,12 @@ end
 return tecs.application({
     window = { title = "sprites", width = WIDTH, height = HEIGHT },
     presentMode = "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = TOTAL + 64,
     -- The default ceiling is a million slots, so a scale run has to raise it
     -- rather than discovering the limit as a spawn failure.
     maxEntities = TOTAL + 1024,
-    maxFrames = WARMUP + FRAMES,
-    logFile = "",
+    debugMaxFrames = WARMUP + FRAMES,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer

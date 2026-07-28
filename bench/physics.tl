@@ -151,10 +151,9 @@ end
 return tecs.application({
     window = { title = "physics", width = WIDTH, height = HEIGHT },
     presentMode = "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = BODIES + 64,
-    maxFrames = WARMUP + FRAMES,
-    logFile = "",
+    debugMaxFrames = WARMUP + FRAMES,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer

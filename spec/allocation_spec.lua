@@ -249,10 +249,9 @@ local function scene()
     return Application.create({
         window = { title = "allocation", width = 320, height = 240 },
         presentMode = "immediate",
-        ambient = { 1.0, 1.0, 1.0 },
+        ambientLight = { 1.0, 1.0, 1.0 },
         capacity = STILL + EXTRA + MOVERS + 64,
         maxEntities = STILL + EXTRA + MOVERS + 1024,
-        logFile = "",
         plugin = function(world)
             world:batchSpawn(STILL, { Transform, Tint, Renderable }, fill)
             world:batchSpawn(MOVERS, { Transform, Tint, Renderable, Mover }, fill)

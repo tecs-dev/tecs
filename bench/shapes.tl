@@ -115,12 +115,12 @@ local DELTA <const> = timing.stage("delta")
 return tecs.application({
     window = { title = "shapes", width = WIDTH, height = HEIGHT },
     presentMode = "immediate",
-    ambient = { 1.0, 1.0, 1.0 },
+    ambientLight = { 1.0, 1.0, 1.0 },
     capacity = COUNT + 64,
     -- The default ceiling is a million slots, so a scale run has to raise it
     -- rather than discovering the limit as a spawn failure.
     maxEntities = COUNT + 1024,
-    maxFrames = WARMUP + FRAMES,
+    debugMaxFrames = WARMUP + FRAMES,
 
     plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer

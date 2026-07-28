@@ -530,7 +530,6 @@ describe("reload_shaders against a running application", function()
     it("rebuilds the pipelines of the application that is running", function()
         local app = Application.create({
             window = { title = "reload", width = 64, height = 64 },
-            logFile = "",
             -- Binding the tools is what registering a port turns on, and the
             -- reload is registered beside them.
             mcpPort = 7137,
@@ -566,7 +565,6 @@ describe("reload_shaders against a running application", function()
     it("runs the watcher an application was configured with", function()
         local app = Application.create({
             window = { title = "watch", width = 64, height = 64 },
-            logFile = "",
             watch = { interval = 0 },
         })
         assert.is_true(app:_init())
