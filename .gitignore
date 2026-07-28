@@ -12,6 +12,12 @@
 
 .mcp.json
 
+# The documentation site. Its dependencies and its build output; the content
+# and the VitePress configuration are tracked.
+/docs/node_modules/
+/docs/.vitepress/cache/
+/docs/.vitepress/dist/
+
 # macOS system files
 .DS_Store
 

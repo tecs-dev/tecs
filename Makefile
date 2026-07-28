@@ -72,7 +72,7 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
         bench-sprites bench-text bench-particles bench-latency bench-alloc \
         bench-ecs \
         bench-json \
-        bench-snapshot bench-bitset format format-check
+        bench-snapshot bench-bitset format format-check docs-check
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -113,6 +113,13 @@ format: ## Format sources in place
 
 format-check: ## Report unformatted sources, writing nothing
 	@python3 scripts/format.py --check
+
+# The site and the offline reference the CLI is planned to serve are one content
+# tree, and a page's `description:` is what labels it in both, so a page without
+# one is invisible in the index rather than merely undocumented. Checked here
+# because it needs no build, like the two above it.
+docs-check: ## Verify every docs page has a description
+	@bash scripts/check-docs-descriptions.sh
 
 # Two runs, because the headless specs fork. `io.popen` forks this process, and
 # by the time the rest of the suite has run there are live threads in it: the
