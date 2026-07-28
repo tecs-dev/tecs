@@ -33,42 +33,118 @@ local table_new <const> = require("table.new")
 
 local DEFAULT_MAX_SIZE <const> = 4096
 
+--- When a pooled table is emptied.
+---
+--- `"acquire"` clears just before `acquire` hands the table back, so a released table keeps
+--- whatever it held until it is next taken out. `"release"` clears on the way in instead,
+--- which is what a pool holding GC roots wants: the references are dropped at the moment the
+--- caller is done rather than at the moment somebody asks. `"never"` leaves the contents
+--- alone and the caller owns emptying it.
 local enum ClearPolicy
     "acquire"
     "release"
     "never"
 end
 
+--- Options for `pool.newTablePool`. Every field is optional.
 local record TablePoolOpts
+    --- Defaults to `"acquire"`.
     clearOn: ClearPolicy
+
+    --- Deepest the free stack grows. A release past it drops the table for the collector
+    --- rather than pooling it, so a pool cannot pin an unbounded number of tables when
+    --- releases outrun acquires. Defaults to 4096, and the stack is preallocated to this
+    --- many slots, so a large value costs that memory up front.
     maxSize: integer
+
+    --- Array part preallocated on a table the pool creates fresh, in elements. Recycled
+    --- tables keep whatever capacity they already grew to, so this only shapes the first
+    --- use of each. Defaults to 0.
     arrayHint: integer
+
+    --- Hash part preallocated on a table the pool creates fresh, in entries. Defaults to 0.
     hashHint: integer
 end
 
 --- LIFO pool of reusable tables. acquire() returns `any`; callers cast it.
+---
+--- Acquire and release are entirely by hand: nothing tracks which tables are out, so
+--- releasing one twice pools the same table twice and two later acquires hand the same table
+--- to two callers. A table that is never released is not leaked, it is simply collected.
 local record TablePool
+    --- Private. The free stack, holding `_size` tables from index 1 upwards.
     _stack: {any}
+
+    --- Private. How many tables are on the free stack, which is not `#_stack`, because
+    --- popping stores nil above the new top rather than shrinking anything.
     _size: integer
+
+    --- Private. `TablePoolOpts.maxSize`, resolved.
     _maxSize: integer
+
+    --- Private. `TablePoolOpts.arrayHint`, resolved.
     _arrayHint: integer
+
+    --- Private. `TablePoolOpts.hashHint`, resolved.
     _hashHint: integer
+
+    --- Private. `ClearPolicy` decided once, so neither hot path compares strings.
     _clearOnAcquire: boolean
+
+    --- Private. See `_clearOnAcquire`.
     _clearOnRelease: boolean
 
+    --- Takes a table off the pool, or makes one when the pool is empty.
+    ---
+    --- Never nil: an empty pool is not an error, it allocates. So a pool sized under its
+    --- real peak still works and only stops saving allocations, which is why nothing here
+    --- reports depth.
+    ---
+    --- @return The caller's until it is released, and empty only under `"acquire"` or
+    ---     `"release"` clearing. A fresh table is always empty whatever the policy.
     acquire: function(self): any
+
+    --- Hands a table back.
+    ---
+    --- The caller must hold no further reference: a later `acquire` returns this same table
+    --- and two owners then write over each other. A release that would take the free stack
+    --- past `maxSize` drops the table instead, and skips clearing it, since nothing can
+    --- reach it afterwards.
     release: function(self, item: any)
+
+    --- Drops every pooled table, leaving the pool empty.
+    ---
+    --- Tables currently out are unaffected and may still be released.
     clear: function(self)
 end
 
+--- Per-subsystem table pools.
+---
+--- Each subsystem owns its own pool, so a hot path picks the sizing and the clear policy
+--- that suit it instead of contending for one shared free list.
 local record pool
     --- Immutable empty table placeholder.
+    ---
+    --- One table for the whole process, so returning it costs nothing and every caller
+    --- returning "no elements" compares equal. Writing to it raises rather than corrupting
+    --- every other holder, and `getmetatable` answers the string `"protected"`, so the
+    --- metatable cannot be replaced to get around that.
     EMPTY: {any}
 
+    --- When a pooled table is emptied.
     type ClearPolicy = ClearPolicy
+
+    --- Options for `newTablePool`.
     type TablePoolOpts = TablePoolOpts
+
+    --- A LIFO pool of reusable tables.
     type TablePool = TablePool
 
+    --- Creates an empty pool. Nothing is allocated for the tables themselves up front; the
+    --- first `maxSize` acquires all allocate.
+    ---
+    --- @param opts Omitted takes every default: `"acquire"` clearing, 4096 deep, no
+    ---     preallocation on a fresh table.
     newTablePool: function(opts?: TablePoolOpts): TablePool
 end
 

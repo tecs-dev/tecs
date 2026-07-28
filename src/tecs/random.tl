@@ -148,6 +148,11 @@ local GRAD3Z <const>: {number} = {
     -R2,
 }
 
+--- Seeded generation, in named streams a snapshot carries.
+---
+--- Nothing here reads a clock, so the same seed gives the same sequence on every machine.
+--- A game usually wants `stream`, which ties a generator to a world and to a name and puts
+--- its state in the world's snapshots; `new` and `noise` stand outside any world.
 local record random
     --- A generator. Four 32-bit words of xoshiro128** state, and the draws
     --- taken off it.
@@ -157,9 +162,19 @@ local record random
     --- is the whole thing this module exists to avoid. Give each thread a
     --- stream of its own.
     record Random
+        --- Private. The first of the four xoshiro128** state words, held as a
+        --- 32-bit two's-complement integer, so it is often negative and it is
+        --- not the unsigned value a C implementation would print.
         _s0: integer
+
+        --- Private. See `_s0`.
         _s1: integer
+
+        --- Private. See `_s0`.
         _s2: integer
+
+        --- Private. See `_s0`. The four are never all zero at once, which is
+        --- the one state xoshiro cannot leave.
         _s3: integer
 
         --- The next value, in [0, 1). Advances the generator.
@@ -185,10 +200,17 @@ local record random
 
         --- The four state words. Plain integers, so a snapshot, a log line or
         --- a bug report can all carry them.
+        ---
+        --- @return A fresh four-element array each call, and a copy: writing to
+        ---     it does not move the generator, and the generator moving does
+        ---     not change it.
         state: function(self: Random): {integer}
 
         --- Puts four state words back, in place, so anything already holding
         --- this generator draws from what was put back.
+        ---
+        --- @param words Exactly four, in the order `state` gives them. Any
+        ---     other length raises, as does all four being zero.
         setState: function(self: Random, words: {integer})
     end
 
@@ -199,6 +221,9 @@ local record random
     --- same answer, and nothing here advances anything, so a field is safe to
     --- share and needs nothing from a snapshot.
     record Noise
+        --- Private. Perlin's permutation table: a shuffle of 0..255 followed by
+        --- a second copy of itself, so 512 entries from index 1, and a lattice
+        --- lookup that steps one past the end wraps without a mask.
         _perm: {integer}
 
         --- Noise at (x, y), in [-1, 1]. Exactly zero at integer coordinates,
@@ -210,9 +235,14 @@ local record random
 
         --- Fractional Brownian motion: `octaves` layers of `noise2`, each
         --- twice as fine and half as loud, normalised back into [-1, 1].
+        ---
+        --- @param octaves One or more. Zero or a negative count raises rather
+        ---     than returning a flat field, since it has no meaning here.
         fbm2: function(self: Noise, x: number, y: number, octaves: integer): number
 
         --- The same, over `noise3`.
+        ---
+        --- @param octaves One or more, as for `fbm2`.
         fbm3: function(self: Noise, x: number, y: number, z: number, octaves: integer): number
     end
 
@@ -220,9 +250,15 @@ local record random
     --- What a tool, a benchmark or a test wants; a game usually wants `stream`.
     ---
     --- A seed is read as a 32-bit word, so 2^31 and -2^31 name the same one.
+    ---
+    --- @param seed Omitted takes a fixed constant, not a clock, so an unseeded
+    ---     generator still repeats run to run.
     new: function(seed?: integer): Random
 
     --- A noise field from `seed`, read the same way `new` reads one.
+    ---
+    --- @param seed Omitted takes the same fixed constant `new` does, so two
+    ---     unseeded fields are the same field.
     noise: function(seed?: integer): Noise
 
     --- The generator named `name` in `world`, made on the first ask and the
@@ -231,12 +267,21 @@ local record random
     --- Names are namespaced by dots the way snapshot data keys are; the engine
     --- uses `tecs.audio` and `tecs.runif`, so a game's own names should carry
     --- its own prefix.
+    ---
+    --- @param name Nil or empty raises. Names are compared byte for byte, so
+    ---     two spellings of the same idea are two independent streams.
+    --- @return The world's generator for this name, not a copy: two callers
+    ---     asking for one name draw from the same sequence, in the order they
+    ---     happen to ask.
     stream: function(world: ecs.World, name: string): Random
 
     --- Sets the world's seed and restarts every stream in it from that seed.
     ---
     --- Call it during setup. Calling it mid-run is well defined and rewinds
     --- everything, which is rarely what a caller means.
+    ---
+    --- @param seed Read as a 32-bit word, as `new` reads one. There is no way
+    ---     to ask a world for its seed back; take it from a snapshot instead.
     seed: function(world: ecs.World, seed: integer)
 end
 

@@ -18,6 +18,12 @@
 local ffi <const> = require("ffi")
 local clock <const> = require("tecs.platform.clock")
 
+--- Per-stage frame timing, for judging a change to the frame's structure.
+---
+--- Recording is process-wide, not per world, and off unless `TECS_TIMING` is set or a caller
+--- calls `enable`. Everything is recorded in seconds and reported in milliseconds, and the
+--- clock behind it is monotonic with an arbitrary origin, so a sample is an interval and
+--- never a time of day.
 local record timing
     --- Whether anything is being recorded. Read it before doing work that
     --- exists only to be measured.
@@ -29,21 +35,46 @@ local record timing
     --- copies of the same table is worse than none.
     auto: boolean
 
+    --- One named thing being timed, and the frames recorded for it.
+    ---
+    --- Held by the caller and handed back to `mark` and `finish`, so neither has to look a
+    --- name up per frame. There is one stage per name for the life of the process.
     record Stage
+        --- The name it was registered under, which is what `report` labels the row with.
         name: string
+
+        --- A `double[?]` of `capacity` seconds values, indexed from 0, holding the first
+        --- `count` of them. Nil while nothing has ever been recorded, because a stage
+        --- registered with timing off allocates nothing until `enable` gives it storage.
         samples: any
+
+        --- How many frames are recorded, and the index the next one goes at.
         count: integer
+
+        --- How many samples `samples` holds. Zero when the stage has no storage.
         capacity: integer
     end
 
+    --- One stage's distribution over the frames it recorded, as `report` returns it.
+    ---
+    --- Every duration is milliseconds, not the seconds that went in. Percentiles are
+    --- nearest-rank off the sorted samples, so each is a sample that was actually
+    --- observed and none is interpolated.
     record Report
+        --- The stage's name.
         name: string
         --- Milliseconds.
         p50: number
+        --- Milliseconds.
         p95: number
+        --- Milliseconds.
         p99: number
+        --- Milliseconds. The arithmetic mean over every recorded frame.
         mean: number
+        --- Milliseconds. The slowest frame recorded, not a percentile.
         max: number
+        --- Frames the row is computed from, which is at least one and is capped by the
+        --- stage's capacity, so a run longer than that describes its beginning.
         frames: integer
     end
 end
@@ -63,6 +94,11 @@ local byName: {string: timing.Stage} = {}
 --- Registering an unknown stage while disabled is still allowed and still
 --- returns a handle, so a caller holds one unconditionally and branches on
 --- `timing.enabled` at the point of measurement rather than at setup.
+---
+--- @param name What a report row is labelled with. Registering a name twice returns the
+---     first stage rather than making a second, so two callers timing the same thing share
+---     one distribution.
+--- @return The same object on every call for a name, and it lives as long as the process.
 function timing.stage(name: string): timing.Stage
     local existing = byName[name]
     if existing ~= nil then
@@ -102,6 +138,9 @@ end
 ---
 --- Past capacity the sample is dropped rather than wrapping, so a long run
 --- reports its beginning honestly instead of an arbitrary window of it.
+---
+--- @param seconds A duration in seconds, which the report scales to milliseconds. Nothing
+---     checks the sign, so a subtraction done the wrong way round is recorded as given.
 function timing.mark(stage: timing.Stage, seconds: number)
     if not timing.enabled then
         return
@@ -115,6 +154,9 @@ function timing.mark(stage: timing.Stage, seconds: number)
 end
 
 --- Starts a span. Returns the value `finish` subtracts from.
+---
+--- @return A monotonic reading in seconds, whose origin means nothing on its own. Zero
+---     while recording is off, which `finish` then ignores rather than reading as a moment.
 function timing.begin(): number
     if not timing.enabled then
         return 0.0
@@ -126,6 +168,10 @@ end
 ---
 --- The return exists for a caller that needs the value as well as the record,
 --- such as one stage that has to be subtracted out of another.
+---
+--- @param started What `begin` returned. A value from anywhere else is not comparable.
+--- @return The span in seconds, and zero while recording is off, where nothing was
+---     measured and nothing was recorded either.
 function timing.finish(stage: timing.Stage, started: number): number
     if not timing.enabled then
         return 0.0
@@ -167,6 +213,9 @@ local consumedAt = 0.0
 ---
 --- Stamped where the platform handed the event over, not where a step picked
 --- it up: the interval between those two is what the measurement exists for.
+---
+--- @param at A `timing.begin` reading, in seconds. Only the earliest arrival since the last
+---     step is kept, so calling this for every event in a burst costs nothing extra.
 function timing.inputArrived(at: number)
     if not timing.enabled then
         return
@@ -182,6 +231,8 @@ end
 --- arrived after this one rather than counting these twice. A step that takes
 --- no input records nothing: a frame nobody was waiting on has no latency, and
 --- averaging it in only makes the number smaller.
+---
+--- @param at A `timing.begin` reading, in seconds, taken where the step starts.
 function timing.inputConsumed(at: number)
     if not timing.enabled then
         return
@@ -193,6 +244,12 @@ end
 
 --- Records the frame that step produced being submitted, and completes the
 --- sample. `drawStarted` is where simulation ended and drawing began.
+---
+--- Records nothing at all when the step it belongs to took no input, which is not an error
+--- and is the common case in a run nobody is touching.
+---
+--- @param drawStarted A `timing.begin` reading, in seconds, between the step and the draw.
+--- @param at A `timing.begin` reading, in seconds, at submission.
 function timing.inputPresented(drawStarted: number, at: number)
     if not timing.enabled then
         return
@@ -245,6 +302,10 @@ local function percentile(count: integer, fraction: number): number
 end
 
 --- Every stage that recorded a frame, in registration order.
+---
+--- @return A fresh array each call, the caller's to keep. A stage with no frames is left
+---     out entirely rather than reported as zeroes, so the array is usually shorter than
+---     the number of registered stages and may be empty.
 function timing.report(): {timing.Report}
     local out: {timing.Report} = {}
     for index = 1, #stages do
@@ -281,6 +342,9 @@ end
 ---
 --- One block from one place, so two runs of a bench diff against each other
 --- rather than being read side by side and compared by eye.
+---
+--- @return A header, a rule and one row per stage, with no trailing newline. The empty
+---     string when nothing was recorded, so it can be printed unconditionally.
 function timing.format(): string
     local report = timing.report()
     if #report == 0 then

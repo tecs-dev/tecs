@@ -79,6 +79,18 @@ local DEFAULT_WAIT_MS <const> = 5000
 --- Milliseconds one blocking slice costs when the source does not say.
 local DEFAULT_SLICE_MS <const> = 16
 
+--- A value that settles once, and the combinators over it.
+---
+--- `status` moves from "pending" to exactly one of "ready", "failed" or "cancelled" and
+--- never moves again, so the first answer wins and every later settlement is dropped.
+--- Reading `value` is only meaningful on "ready" and `error` only on "failed" or
+--- "cancelled".
+---
+--- Nothing settles itself. A future advances when its source is pumped, which a frame does
+--- through the subsystem that owns the source and a startup path does through `wait`.
+---
+--- There is no synchronisation here: a future is created, settled and read on one thread,
+--- and a source must settle its futures on the thread that pumps it.
 local record Future<T>
     --- Where a future's settlements come from, and what a blocking wait spends
     --- its time in.
@@ -166,6 +178,11 @@ local record Future<T>
     --- already settled runs on the next drain rather than inline, which is what
     --- keeps a chain built one link at a time from growing the Lua stack. A
     --- listener that raises is logged and does not stop the others.
+    ---
+    --- @param listener Called once, with this future, whichever of the three terminal
+    ---     states it reached; read `status` rather than assuming a value. Nil raises.
+    --- @return This same future, not a derived one, so chaining `onSettle` registers
+    ---     several listeners on one thing rather than building a chain.
     onSettle: function(self: Future<T>, listener: function(Future<T>)): Future<T>
 
     --- A future carrying `transform` applied to this one's value.
@@ -173,6 +190,11 @@ local record Future<T>
     --- `transform` runs only on "ready". A "failed" or "cancelled" upstream
     --- propagates without calling it, and a raise inside it becomes this link's
     --- failure.
+    ---
+    --- @param transform Called at most once, with the upstream value. Nil raises here and
+    ---     now rather than at settlement.
+    --- @return A new future watching this one. Cancelling it gives up this link's interest
+    ---     in the upstream and does not settle the upstream unless nothing else wants it.
     map: function<U>(self: Future<T>, transform: function(T): U): Future<U>
 
     --- A future carrying whatever the future `transform` starts settles to.
@@ -183,12 +205,21 @@ local record Future<T>
     --- a chain can begin on a worker and end somewhere else; and cancelling
     --- before the outer settles stops `transform` from ever being called, since
     --- there is nothing yet to cancel afterwards.
+    ---
+    --- @param transform Called at most once, on "ready" only. Returning nil rather than a
+    ---     future fails this link; nil for `transform` itself raises here and now.
+    --- @return A new future settling to whatever the inner one settles to, status and all,
+    ---     so an inner that is cancelled leaves this cancelled and not failed.
     flatMap: function<U>(self: Future<T>, transform: function(T): Future<U>): Future<U>
 
     --- A future that turns this one's failure into a value.
     ---
     --- `recovery` runs only on "failed". A "cancelled" upstream is not
     --- recovered, which is the whole reason the two are distinct states.
+    ---
+    --- @param recovery Given the upstream's error string. Raising inside it fails this
+    ---     link with that raise instead, so a recovery cannot fail silently. Nil raises
+    ---     here and now.
     recover: function(self: Future<T>, recovery: function(string): T): Future<T>
 
     --- Blocks until this future settles, advancing its source.
@@ -223,9 +254,15 @@ local record Future<T>
     --- settled by that subsystem's source, and calling this on one is a caller
     --- settling work it does not own. Settling twice is a no-op, so the first
     --- answer wins.
+    ---
+    --- @param value Stored as it is, not copied, and read back off `value`. Nil is a legal
+    ---     value and still settles "ready", which is how a future over nothing settles.
     complete: function(self: Future<T>, value: T)
 
     --- Settles this future as failed, if nothing has settled it yet.
+    ---
+    --- @param err A sentence for a log, not something to match on. Nil becomes "failed",
+    ---     so `error` is set on every failed future.
     fail: function(self: Future<T>, err: string)
 
     --- Settles this future as cancelled, if nothing has settled it yet.
@@ -236,6 +273,9 @@ local record Future<T>
     --- states an outcome that has already happened. A child killed on request
     --- or at its deadline reaches its future through here, as does a transfer
     --- taken off the multi.
+    ---
+    --- @param err Nil becomes "cancelled". No watcher counting happens here: this settles
+    ---     the future outright, whoever else was waiting on it.
     abandon: function(self: Future<T>, err: string)
 
     ---------------------------------------------------------------------------
@@ -248,12 +288,20 @@ local record Future<T>
     --- that decides when something finishes. `source` is what a `wait` on it
     --- advances; omitted, the future can only be settled by whoever holds it
     --- and a `wait` on it returns at once.
+    ---
+    --- @return A future at "pending" with one watcher, so a single `cancel` on it settles
+    ---     it "cancelled" and calls the source's hook.
     pending: function<U>(source?: Source): Future<U>
 
     --- A future already carrying a value.
+    ---
+    --- @return A future at "ready" with no source, so `wait` on it returns at once and
+    ---     `cancel` does nothing. A listener added to it still runs on the next drain.
     settled: function<U>(value: U): Future<U>
 
     --- A future already carrying a failure.
+    ---
+    --- @param err Nil becomes "failed".
     failed: function<U>(err: string): Future<U>
 
     --- A future carrying every input's value, in input order.
@@ -266,6 +314,11 @@ local record Future<T>
     --- Fan-in does not nest: each listener decrements a counter and only the
     --- last input settles the join, so a join over five hundred loads is two
     --- deep rather than five hundred.
+    ---
+    --- @param inputs Read once; adding to the list afterwards changes nothing. Empty gives
+    ---     an already-ready future over an empty array. Nil raises.
+    --- @return A future whose value is a fresh array indexed as `inputs` is, so a hole
+    ---     cannot appear: the join only settles "ready" once every slot is filled.
     all: function<U>(inputs: {Future<U>}): Future<{U}>
 
     --- Makes a future something a sequence can wait for.
@@ -295,6 +348,13 @@ local record Future<T>
     ---
     --- There is no `setPaused`: a decode in flight cannot be paused, and the
     --- contract says a provider that cannot pause its work does not offer it.
+    ---
+    --- @param entity What the await binds to, and it must still be alive when the program
+    ---     parks; the VM releases a cursor whose entity is dead.
+    --- @param key A program constant, not something derived per call, since the await
+    ---     names it. Nil or empty raises.
+    --- @param future Nil raises. One that has already settled is deliberately not written
+    ---     down, so a later await on that key carries straight on rather than hanging.
     track: function<U>(world: World, entity: integer, key: string, future: Future<U>)
 end
 

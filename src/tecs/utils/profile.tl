@@ -26,7 +26,15 @@ local table_remove <const> = table.remove
 local log <const> = require("tecs.log")
 local LOGGER <const> = log.get("tecs.profile")
 
+--- Profiling tools for Tecs.
+---
+--- Two channels, `sample` for where time goes and `trace` for whether the JIT is compiling
+--- the code it went into. Both are process-wide rather than per world, both attribute work
+--- through the `jit.zone` stack, and at most one session of each kind may be running.
+--- Neither is free: a session left running costs on every sample or every trace abort, so
+--- stop one when the question it was opened for is answered.
 local record profile
+    --- Options for `profile.sample`. Every field is optional.
     record SampleOptions
         --- Sampler interval in ms. Default 10 (100 samples/sec). Raise for
         --- longer low-overhead sessions; don't go below 10 unless you've
@@ -41,6 +49,7 @@ local record profile
         zone: string
     end
 
+    --- Options for `profile.trace`. Every field is optional.
     record TraceOptions
         --- Include benign trace-formation events ("leaving loop",
         --- "down-recursion", "up-recursion", "inner loop") in the report.
@@ -48,6 +57,10 @@ local record profile
         includeBenign: boolean
     end
 
+    --- One place the JIT gave up, and how often it did.
+    ---
+    --- A row of a `TraceReport`, not a live object: it is built at `stop` and nothing writes
+    --- to it afterwards.
     record AbortSite
         --- "blacklist", "warn", or "info".
         severity: string
@@ -64,8 +77,13 @@ local record profile
         zone: string
     end
 
+    --- What a trace session saw, as `TraceSession:stop` returns it.
+    ---
+    --- `tostring` on it renders `sites` as RFC 4180 CSV, so it prints and diffs directly.
     record TraceReport
         --- Wallclock seconds the session was active.
+        --- Whole seconds: it comes from `os.time`, so a session shorter than one reads as
+        --- zero and dividing by it is a caller's problem.
         durationSec: number
         --- Total abort events recorded. Excludes benign trace-formation
         --- events unless `includeBenign` was set.
@@ -78,10 +96,19 @@ local record profile
         sites: {AbortSite}
     end
 
+    --- A running sampler, as `profile.sample` returns it.
+    ---
+    --- Live until `stop`, and there is at most one of these at a time. Dropping the handle
+    --- without stopping leaves the timer running for the rest of the process.
     record SampleSession
         --- Stop the session and return the collapsed-stack text. If `filename`
         --- is given, the text is also written to that path as a side effect.
         --- Errors if called twice.
+        ---
+        --- One line per distinct stack, semicolon-separated frames then a space then the
+        --- sample count, no trailing newline. The empty string when nothing was sampled,
+        --- which a short session or a narrow `zone` prefix both produce. Writing raises
+        --- when the path cannot be opened, after the session has already been stopped.
         stop: function(SampleSession, ?string): string
         --- Skip recording samples until `:resume()` is called. The timer
         --- keeps firing (cost: one boolean check per sample); the data
@@ -93,6 +120,10 @@ local record profile
         resume: function(SampleSession)
     end
 
+    --- A running trace-abort collector, as `profile.trace` returns it.
+    ---
+    --- Live until `stop`, and there is at most one of these at a time. Dropping the handle
+    --- without stopping leaves the JIT event hook attached for the rest of the process.
     record TraceSession
         --- Stop the session and return the TraceReport. `tostring(report)`
         --- renders the `sites` table as RFC 4180 CSV (suitable for
@@ -113,11 +144,19 @@ local record profile
 
     --- Start a sampling session. Returns a handle whose `:stop()` returns
     --- collapsed-stack text. Errors if a sample session is already active.
+    ---
+    --- `zone` filtering is applied at `stop`, not while sampling, so narrowing it costs
+    --- nothing at runtime and widening it later is not possible: what was outside the
+    --- prefix was still collected, but the prefix is fixed when the session starts.
+    ---
+    --- @param opts Omitted samples every zone at 10 ms to a depth of 16.
     sample: function(opts?: SampleOptions): SampleSession
 
     --- Start a trace abort session. Returns a handle whose `:stop()` returns
     --- a TraceReport (with `__tostring` for direct printing). Errors if a
     --- trace session is already active.
+    ---
+    --- @param opts Omitted leaves benign trace-formation events out of the report.
     trace: function(opts?: TraceOptions): TraceSession
 end
 

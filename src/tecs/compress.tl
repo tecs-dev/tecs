@@ -95,6 +95,11 @@ local CODE_NAMES <const>: {integer: string} = {
     [K.Z_VERSION_ERROR] = "the zlib in this process is not the one these " .. "bindings were generated against",
 }
 
+--- DEFLATE decompression: zlib streams, and the raw form inside them.
+---
+--- Decoding only; nothing here compresses. Both functions raise on a stream that does not
+--- decode rather than returning nil, and the message they raise is a diagnostic, not
+--- something to match against.
 local record compress
 end
 
@@ -253,8 +258,11 @@ end
 --- stream of something else until the codes stop making sense. A container that
 --- carries a length or a checksum of its own should check it.
 ---
+--- @param bytes The whole stream, compressed. An empty string raises, since it is not one.
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
+--- @return The decompressed bytes, which may be empty. Never nil: a stream that does not
+---     decode raises.
 function compress.inflateRaw(bytes: string, sizeHint?: integer): string
     if #bytes == 0 then
         error("tecs: an empty string is not a DEFLATE stream", 2)
@@ -280,8 +288,12 @@ end
 --- failure worth never returning. zlib stops and asks for the dictionary, and
 --- since there is nowhere to get one, the ask is the refusal.
 ---
+--- @param bytes The whole stream, header and Adler-32 trailer included. An empty string
+---     raises, since it is not one.
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
+--- @return The decompressed bytes, which may be empty. Never nil: a bad header, a corrupt
+---     block, a truncated stream and a trailer that disagrees all raise.
 function compress.inflate(bytes: string, sizeHint?: integer): string
     if #bytes == 0 then
         error("tecs: an empty string is not a zlib stream", 2)

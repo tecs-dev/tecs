@@ -30,4 +30,6 @@ end
 candidates[#candidates + 1] = package.cpath
 package.cpath = table.concat(candidates, ";")
 
+--- lua-cjson, unwrapped: `encode`, `decode`, and the rest of that library's surface, from
+--- the copy this build produced rather than whatever the system has installed.
 return require("cjson")

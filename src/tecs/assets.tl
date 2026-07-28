@@ -162,6 +162,15 @@ while true do
 end
 ]==]
 
+--- One asynchronous load, and what it decoded to.
+---
+--- Returned the moment a load is asked for, before anything has been decoded, so every
+--- field but `kind`, `path` and `status` is nil until `status` reads "ready". Nothing here
+--- advances on its own: a handle only changes when `assets.update`, `Batch:resolve`,
+--- `Batch:wait` or `assets.waitAll` takes the worker's answer.
+---
+--- What a ready handle points at is owned by the handle and freed by `release`, so a caller
+--- keeping the pixels or the clip past that is reading freed memory.
 local record Handle
     --- What was asked for: "image" or "sound".
     kind: string
@@ -170,10 +179,18 @@ local record Handle
     --- decode it no longer owns is told that rather than finding nil where the
     --- pixels were.
     status: string
+
+    --- The path the load was asked for, unchanged. Not resolved, so it is whatever the
+    --- caller passed.
     path: string
+
     --- Decoded RGBA pixels, valid until `release`. Images only.
     pixels: loader.CValue
+
+    --- Pixels across, not bytes. Images only.
     width: integer
+
+    --- Pixel rows. Images only.
     height: integer
     --- Row stride in bytes, which a decoder may pad beyond width * 4.
     pitch: integer
@@ -185,7 +202,12 @@ local record Handle
     --- Length in milliseconds, or -1 when the file cannot say. Sounds only.
     durationMs: integer
     --- Set if loading failed.
+    --- A sentence for a log or a message, not something to match on. Nil in every other
+    --- status, including "released".
     error: string
+
+    --- Private. The `SDL_Surface` the pixels belong to, owned here and destroyed by
+    --- `release`. Images only.
     _surface: loader.CValue
     --- Id the worker answers with, so a release can find this in the queue.
     _id: integer
@@ -194,7 +216,18 @@ local record Handle
     _shares: integer
 end
 
+--- Asynchronous asset loading.
+---
+--- Images and sounds decode on one worker thread, which `install` starts and `shutdown`
+--- ends; nothing loads before the first or after the second. A load returns a `Handle`
+--- straight away and never blocks a frame, and a handle only moves off "loading" when
+--- something on the main thread takes the worker's answer, which is what `update` is for.
+---
+--- Nothing here is a cache and nothing here touches the GPU: two loads of a path that do
+--- not overlap decode twice, and what comes back is CPU-side pixels or a mixer clip that a
+--- caller uploads or plays itself.
 local record assets
+    --- One asynchronous load.
     Handle: Handle
 
     --- A set of loads to wait on, with something of the caller's beside each.
@@ -212,20 +245,37 @@ local record assets
     --- that is that a callback must not add to the batch it is being called
     --- from.
     record Batch<T>
+        --- Private. The callback given at construction, called once per load that leaves
+        --- "loading", whether it succeeded or failed.
         _finished: function(key: T, handle: Handle)
+
+        --- Private. Loads not yet handed to the callback, compacted in place as they
+        --- resolve, so an index is not stable across a `resolve`.
         _handles: {Handle}
+
+        --- Private. The caller's values, held at the same indexes as `_handles`.
         _keys: {T}
 
         --- Adds a load to wait on, with the caller's value beside it.
+        ---
+        --- Adding one handle twice waits on it twice and calls back twice. Adding one
+        --- already finished is allowed; the next `resolve` hands it over.
         add: function(self, handle: Handle, key: T)
 
         --- Loads still in flight.
+        ---
+        --- @return How many of the batch's handles read "loading" right now. Counts what is
+        ---     still unresolved, so it drops to zero a `resolve` before the batch empties.
         pending: function(self): integer
 
         --- Hands every finished load to the callback and drops it.
         ---
         --- Takes whatever the worker has answered first, so a subsystem
         --- polling only its own batch still sees its loads finish.
+        ---
+        --- The callback gets a failed load as well as a ready one; check `handle.status`
+        --- rather than assuming pixels. It must not add to this batch, which is being
+        --- compacted underneath it.
         --- @return How many were resolved by this call.
         resolve: function(self): integer
 
@@ -233,11 +283,16 @@ local record assets
         ---
         --- For startup, shutdown and tests. A frame calls `resolve` instead.
         --- @param timeoutMs Milliseconds to wait. Defaults to 5000.
-        --- @return How many were resolved.
+        --- @return How many were resolved. A timeout is not an error and is not reported:
+        ---     the count is simply short and the rest stay in the batch, so check
+        ---     `pending` after this rather than trusting the return.
         wait: function(self, timeoutMs?: number): integer
     end
 
     --- Whether the loading worker is running.
+    ---
+    --- For a subsystem that loads an asset of its own and has no way of knowing whether the
+    --- game has started the worker yet.
     installed: function(): boolean
 end
 
@@ -254,19 +309,16 @@ local inFlight: {string: Handle} = {}
 local nextId = 1
 local worker: workers.Worker = nil
 
---- Every path this process has read or decoded, and what it was read as.
----
---- Every file the engine opens comes through one of the three functions below,
---- so this is the whole of what a run has touched. It is what a watcher polls,
---- because polling what was loaded is a fraction of the work of walking a
---- content tree and is the only set where a change has anything to act on.
-
 --- Starts the loading worker.
 ---
 --- Installing twice is installing once. Spawning unconditionally would leave
 --- the first thread running with both its channels and nothing reading them,
 --- and every decode already queued would answer into a channel that has been
 --- dropped, so a load in flight across the second call would never resolve.
+---
+--- @param luaPath `package.path` for the worker's own state, which shares no loaded modules
+---     with this one. Defaults to this state's, which is what makes the worker resolve the
+---     same modules the game does.
 function assets.install(luaPath?: string)
     if worker ~= nil then
         return
@@ -277,10 +329,6 @@ function assets.install(luaPath?: string)
     })
 end
 
---- Whether the loading worker is running.
----
---- For a subsystem that loads an asset of its own and has no way of knowing
---- whether the game has started the worker yet.
 function assets.installed(): boolean
     return worker ~= nil
 end
@@ -306,6 +354,12 @@ end
 --- last of them to release is the one that frees. A load that starts after the
 --- first has resolved decodes again: nothing here is a cache, and a handle
 --- that has been released is not something to hand out a second time.
+---
+--- @param path PNG or JPEG; no other format is compiled in, and one that is not either
+---     fails the decode rather than being refused here.
+--- @return A handle at "loading", never nil. Raises instead when `install` has not run.
+---     Failures reach it through `status`, not through this call: a missing file is a
+---     handle that turns "failed" once the worker has looked.
 function assets.loadImage(path: string): Handle
     filesystem.note(path, "image")
     local shared = inFlight[path]
@@ -332,6 +386,14 @@ end
 --- The library is initialised here rather than on the worker: `MIX_Init` is
 --- documented as not thread safe, and doing it before the task is sent puts it
 --- in order ahead of every decode without a lock.
+---
+--- Two overlapping loads of one path do not share, unlike images: each gets its own clip.
+---
+--- @param mode "resident", "stream" or "auto". Anything else is treated as "stream".
+--- @param streamMs The boundary "auto" decides on, in milliseconds. Read only under
+---     "auto", and a file whose length the container cannot state streams whatever it says.
+--- @return A handle at "loading", or one already at "failed" when the mixer could not be
+---     initialised, which is the one failure reported without waiting for the worker.
 function assets.loadSound(path: string, mode: string, streamMs: integer): Handle
     filesystem.note(path, "sound")
     if not sdl3mixer.init() then
@@ -426,6 +488,9 @@ end
 ---
 --- Where several loads shared one decode, this releases one of them, and the
 --- last one frees.
+---
+--- Calling it on an already released handle does nothing, so a shutdown path need not know
+--- whether something else got there first.
 function Handle:release()
     if self.status == "released" then
         return
@@ -454,6 +519,13 @@ function Handle:release()
 end
 
 --- Takes finished decodes and uploads them. Call once per frame.
+---
+--- Polls, never blocks, and drains everything the worker has answered rather than one
+--- result. Handles do not change state without this, so a game that stops calling it has
+--- loads that stay "loading" forever.
+---
+--- @return How many handles moved off "loading" this call, which is zero when nothing has
+---     finished and also zero when no worker is installed.
 function assets.update(): integer
     if worker == nil then
         return 0
@@ -472,6 +544,9 @@ function assets.update(): integer
 end
 
 --- Handles still waiting on the worker.
+---
+--- @return Every load in flight in this process, not one caller's. Counted by walking the
+---     set, so it is fine per frame and not per entity.
 function assets.pending(): integer
     local count = 0
     for _ in pairs(pending) do
@@ -518,6 +593,10 @@ end
 --- Blocks until every queued load has finished.
 ---
 --- For startup and tests. A frame should poll `update` instead.
+---
+--- @param timeoutMs Wall-clock milliseconds, defaulting to 5000. Running out is not an
+---     error and is not reported, so read `assets.pending` afterwards to tell the two
+---     endings apart.
 function assets.waitAll(timeoutMs?: number)
     spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean return assets.pending() > 0 end)
 end
@@ -531,6 +610,11 @@ end
 --- The callback is given once rather than at every drain, because what a batch
 --- does with a load is a property of who made it and not of the moment it is
 --- looked at.
+---
+--- @param finished Called once per load that leaves "loading", ready or failed alike, on
+---     the thread that drains the batch. Required; nil raises.
+--- @return An empty batch. Nothing registers it, so a batch nobody resolves simply holds
+---     its handles.
 function assets.batch<T>(finished: function(key: T, handle: Handle)): Batch<T>
     if finished == nil then
         error("tecs: a batch needs something to hand finished loads to", 2)
@@ -597,6 +681,10 @@ function Batch:wait(timeoutMs?: number): integer
 end
 
 --- Stops the loading worker.
+---
+--- Blocks until the thread has exited. Loads still in flight are dropped and their handles
+--- stay at "loading" forever, so drain with `waitAll` first if their results are wanted.
+--- Releasing a handle that is already ready still works afterwards; this frees nothing.
 function assets.shutdown()
     if worker == nil then
         return

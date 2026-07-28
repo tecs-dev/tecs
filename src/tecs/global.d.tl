@@ -14,4 +14,9 @@
 ---     global_env_def = "tecs.global"
 local type TecsModule = require("tecs")
 
+--- The `tecs` module, as a global.
+---
+--- The same table `require("tecs")` returns, metatable included, so the two spellings behave
+--- identically. Nil until something has required `tecs`, directly or transitively, which an
+--- entry file does before any game code runs.
 global tecs: TecsModule

@@ -89,6 +89,11 @@ local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
 local adler32 <const> = zlib.C.adler32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
 local crc32 <const> = zlib.C.crc32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
 
+--- Content hashes over byte strings.
+---
+--- Each function names its algorithm, because a value produced here is written into files
+--- that outlive the process and the format is therefore part of the signature. Neither
+--- function resists a collision built on purpose; see the note at the top of this file.
 local record hash
 end
 
