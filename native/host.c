@@ -570,6 +570,24 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     if (content) {
         lua_pushstring(L, content);
         lua_setglobal(L, "__tecsContent");
+
+        /* The content root goes on package.path here rather than in every
+         * entry file, so a game's first line can be the game. TECS_LUA wins
+         * where it is set, which is how a development run reads out of a build
+         * tree rather than out of an installed one. */
+        const char *over = SDL_getenv("TECS_LUA");
+        const char *root = over ? over : content;
+        lua_getglobal(L, "package");
+        lua_getfield(L, -1, "path");
+        const char *had = lua_tostring(L, -1);
+        char *path = NULL;
+        SDL_asprintf(&path, "%s/?.lua;%s/?/init.lua;%s", root, root,
+                     had ? had : "");
+        lua_pop(L, 1);
+        lua_pushstring(L, path);
+        lua_setfield(L, -2, "path");
+        lua_pop(L, 1);
+        SDL_free(path);
     }
 
     char *resolved = NULL;
@@ -583,7 +601,23 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
     SDL_free(content);
 
+    /* The engine is loaded before a game's first line, so `tecs` is simply
+     * there. Requiring it is what sets the global, and asking every file to do
+     * that is ceremony a game should never have to think about: a game writes
+     * `tecs.newWorld()` in any file and it works.
+     *
+     * A tool running under a plain interpreter never reaches this, so the
+     * headless property holds: nothing outside the host pays for the engine
+     * unless it asks. */
     lua_pushcfunction(L, traceback);
+    lua_getglobal(L, "require");
+    lua_pushstring(L, "tecs");
+    if (lua_pcall(L, 1, 0, -3) != 0) {
+        SDL_Log("tecs: %s", lua_tostring(L, -1));
+        SDL_free(resolved);
+        return SDL_APP_FAILURE;
+    }
+
     int loaded = luaL_loadfile(L, entry) == 0 && lua_pcall(L, 0, 1, -2) == 0;
     if (!loaded) {
         SDL_Log("tecs: %s", lua_tostring(L, -1));
