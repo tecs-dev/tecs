@@ -1,5 +1,5 @@
 ---
-description: "The planned tecs command line tool: its command surface, what a project is, and what it will not do"
+description: "The planned tecs command line tool: its commands, what a project is, and what it will not do"
 outline: deep
 ---
 
@@ -16,7 +16,7 @@ Build and run through `make` in the meantime. See [getting started](/getting-sta
 The command line tool is meant to be the primary way to use Tecs: install one file, run `tecs new`, and never see
 CMake, Make, LuaRocks or a C compiler. It links nothing on a user's machine and needs no toolchain there.
 
-## The planned command surface
+## The planned commands
 
 | Command            | What it does                                                         |
 | ------------------ | -------------------------------------------------------------------- |

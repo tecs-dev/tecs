@@ -10,15 +10,6 @@ buffers, and hot reload. Game code and engine subsystems can attach arbitrary ke
 data, so a snapshot stays self-contained: a player profile, an RNG seed, and a mixer setting travel in the same
 file as the entities.
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-`tecs` is also set as a global, so the require line is optional. Snapshots are methods on a world, so there is
-no separate module to reach for.
-
 ```teal
 -- Save the world into a LuaJIT string.buffer.
 local buf = world:saveSnapshot().buffer
@@ -70,6 +61,11 @@ anything living outside the world. Everything else is yours to carry through
   [World resources](#world-resources).
 - **Process-local runtime objects**: GPU buffers, device handles, physics bodies, audio voices, open files, and
   worker threads.
+- **Work in flight.** A [`Future`](/modules/future) holds listeners, a source and, through it, a native handle,
+  so no save carries one. A sequence cursor parked on a future is saved, as a provider name, an entity and a
+  key: after a load nothing is tracked, `isPending` answers false, and the parked cursor resumes on the next
+  fixed step. A game that wants the wait to still mean something re-issues the work and re-tracks it under the
+  same key.
 - **Lua locals, closures, and callbacks.** A variable holding an entity id, and an observer registered on an
   entity address, do not survive a load. Rebind them from a [`Key`](#runtime-handles-after-load), or reinstall
   them from ECS data.
@@ -97,8 +93,12 @@ are the worked examples of why:
   leaves the restored text without one, which lays out nothing rather than failing the load.
 - **`tecs.physics.RigidBody`** serializes to nothing at all and restores as the null handle, because a Box2D
   handle is dense and reused, so a saved one would name whichever body the loading run happened to put in that
-  slot. An entity that simulated before a load does not simulate after it until something attaches a body
-  again. See [physics](/modules/physics).
+  slot, and the sync would write a stranger's pose into this entity's `Transform` with nothing to signal it.
+  The null handle is inert rather than merely wrong: the write-back reads no movement for it, and the impulse
+  and velocity calls refuse it instead of indexing off the front of Box2D's body array. So an entity that
+  simulated before a load does not simulate after it until something attaches a body again. The description
+  does survive, in the `Body` and `Collider` components, and `physics.hasBody` is how to tell an entity whose
+  body is gone from one that never had one. See [physics](/modules/physics).
 
 The pattern behind all five: a name is durable and an index is not.
 
@@ -166,7 +166,9 @@ Three engine subsystems already carry their own state across a snapshot, so thes
   Seeding during setup, which a game that cares does anyway, is enough to avoid that.
 - **Audio.** Installing the mixer adds a `"tecs.audio"` handler covering the master gain and mute, plus the
   gain, mute, and pause of every group that has one set. Loading routes through the ordinary setters, so voices
-  already sounding follow.
+  already sounding follow. Keyed limits are deliberately not carried: a limit is a rule the build states at
+  startup beside the clip it governs, and restoring one from a file would let an old save override a rule the
+  build has since changed. Set your limits during setup, as you would anyway.
 - **Text.** The text plugin observes `FinishSnapshotLoad` and gives up its glyph run whole, because a load
   replaces the world in place rather than despawning what was in it.
 
@@ -610,9 +612,3 @@ Each entity row is a positional array, `{id, comp1Data, comp2Data, ...}`, aligne
 `columnIndices`; each element is whatever the component's `serialize` returned. The table writer strips
 fingerprints, because a table load always goes through per-component `deserialize` and handles schema drift
 intrinsically.
-
-## Design record
-
-- [Sound](https://github.com/tecs-dev/tecs/blob/main/README.md#sound)
-- [A body's lifetime](https://github.com/tecs-dev/tecs/blob/main/README.md#a-bodys-lifetime)
-- [A value that settles once](https://github.com/tecs-dev/tecs/blob/main/README.md#a-value-that-settles-once)

@@ -8,16 +8,6 @@ outline: deep
 A component is a plain data object attached to an entity. Components describe traits like position, velocity,
 or health, and are the building blocks of game state.
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-`require("tecs")` is the whole surface, and it also installs itself as a global, so the require line is
-optional in a game. The component factories (`tecs.ecs.newComponent`, `tecs.ecs.newFFIComponent`,
-`tecs.ecs.newScalarComponent`, `tecs.ecs.newTagComponent`) live directly on it.
-
 ## Component types
 
 Tecs provides several component kinds for different use cases.
@@ -321,7 +311,3 @@ and `newFFIRelationship`.
 
 See [Serialization](/ecs/components/serialization#skipping-a-component-from-snapshots) for examples and
 save/load guidance.
-
-## Design record
-
-- [The surface is a global](https://github.com/tecs-dev/tecs/blob/main/README.md#the-surface-is-a-global)

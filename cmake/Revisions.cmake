@@ -74,10 +74,10 @@ set(TECS_MBEDTLS_TAG "mbedtls-4.1.1" CACHE STRING "Mbed TLS revision, curl's TLS
 # The Makefile reads all three out of this file rather than declaring them
 # again, so `make dev-tools` installs what the build bakes in.
 #
-# tealdoc renders docs/modules/surface.md, which is committed and diffed against
-# a fresh render, so an unpinned one would fail the diff on somebody else's
-# machine rather than on the change that moved the surface. It is not compiled
-# into the binary, because `tecs docs` was dropped: the users are game
+# tealdoc renders the reference section of every module page, which is committed
+# and diffed against a fresh render, so an unpinned one would fail the diff on
+# somebody else's machine rather than on the change that moved a name. It is not
+# compiled into the binary, because `tecs docs` was dropped: the users are game
 # developers, and a documentation mirror inside a binary is a second copy of the
 # site to keep in step.
 #
@@ -87,4 +87,4 @@ set(TECS_MBEDTLS_TAG "mbedtls-4.1.1" CACHE STRING "Mbed TLS revision, curl's TLS
 # Cerulean would duplicate a reformat that already happened elsewhere.
 set(TECS_TL_REF "1326d829790b92e23defe69fcf40460103b60d1d" CACHE STRING "Teal revision")
 set(TECS_CERULEAN_REF "ae9c61af4747d3db0a3fa99fde7157ed6c39bf65" CACHE STRING "Cerulean revision")
-set(TECS_TEALDOC_REF "d9f3a9ef820c7a2d5751cbae66e49f85c4c423a1" CACHE STRING "tealdoc revision")
+set(TECS_TEALDOC_REF "347342ba0aa5d55868e48319ca275be93b174d70" CACHE STRING "tealdoc revision")

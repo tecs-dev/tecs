@@ -10,15 +10,6 @@ work happens at all: the engine's own extraction, transform interpolation and in
 is everything a game writes. The phase decides when a system runs, and a `runIf` predicate decides whether it
 runs at all this frame.
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")` and every module is a field on it. `tecs` is also set as a global, which
-makes the require line optional.
-
 ## Creating a system
 
 Add systems to a world with `world:addSystem()`, passing a configuration table. The `run` function receives the
@@ -87,6 +78,20 @@ the last phase that still lands in the same frame. A write made in `Render` or l
 
 `world:update` clears every component's dirty bit once the pipeline finishes, so a dirty-gated consumer has to
 read within the same update that produced the write.
+
+## A system that throws
+
+Under an application, a system runs inside a guard, so a throw does not unwind to the host and does not end the
+process. The traceback is logged, the frame gives back what it was holding, and `world:unwind()` closes every
+deferred scope the failed system left open, which is what stops a throw inside `query:iter()` from leaving every
+later mutation staged. Simulation then stops, and the loop goes on running around it: events are still drained
+so the window still closes, the debug server still answers, and `app:crashed()` carries the traceback. What is
+on screen is whatever the frame had drawn before it threw.
+
+That makes the line that failed inspectable rather than gone, which a lifecycle callback outside the world could
+not offer. It is not fault tolerance: the engine's invariants are restored, a game's are not, because a system
+that threw halfway through its query updated some entities and not others. A development build resumes with
+`app:clearCrash()`; a shipped build stays stopped. See [Crashes](/modules/application#crashes).
 
 ## World methods
 
@@ -436,7 +441,3 @@ world:removeSystem("MyUpdateSystem")
 ```
 
 `tecs.ecs.runif.after` uses the same call to clean itself up once its delay elapses.
-
-## Design record
-
-- [One way in](https://github.com/tecs-dev/tecs/blob/main/README.md#one-way-in)

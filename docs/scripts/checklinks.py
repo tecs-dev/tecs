@@ -16,7 +16,9 @@ when that section is renamed. Slugs follow GitHub's rule, which is what
 VitePress uses: lowercase, spaces to hyphens, punctuation dropped.
 
 External links are not fetched. This says a link resolves inside the tree, not
-that github.com still serves what it points at.
+that github.com still serves what it points at. One external target is refused
+outright: a link into `README.md`, because a page that sends a reader to the
+design record to find out how something works has not documented it.
 
 Run from anywhere: python3 docs/scripts/checklinks.py
 """
@@ -37,10 +39,17 @@ HTML_HREF = re.compile(r'href="([^"]+)"')
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 EXPLICIT_ID = re.compile(r"\{#([^}]+)\}\s*$")
 
-# An `<a id="...">` anchor, which the generated reference page is full of.
+# An `<a id="...">` anchor, which a generated reference section is full of.
 HTML_ANCHOR = re.compile(r'<a id="([^"]+)"')
 
 SKIPPED_PREFIXES = ("http://", "https://", "mailto:", "tel:", "//")
+
+# A link into the design record. Refused rather than followed: a site that sends
+# a reader to a design document to find out how something works has not
+# documented it. What a reader needs to use a module belongs on the module's
+# page, in the page's own words. `README.md` keeps the history, which is a
+# different job and not one a reader of this site has come for.
+DESIGN_RECORD = re.compile(r"README\.md(#|$|\?)")
 
 
 def slug(text):
@@ -113,6 +122,9 @@ def main():
     for page in pages:
         relative = page.relative_to(DOCS)
         for number, target in linksIn(page):
+            if DESIGN_RECORD.search(target):
+                broken.append((relative, number, target, "links into the design record"))
+                continue
             if target.startswith(SKIPPED_PREFIXES):
                 continue
 

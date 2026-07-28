@@ -182,7 +182,7 @@ re-adds what hook A removed, and so on) stops with an error after 64 waves.
 
 ## Related archetype observers
 
-Query callbacks are the supported surface for reacting to match-set changes. An archetype also accepts a lower
+Query callbacks are the supported way to react to match-set changes. An archetype also accepts a lower
 level `ArchetypeEntityObserver` through `archetype:addEntityObserver`, which adds `onEntityMove`, `onActivated`,
 `onDeactivated`, and `onArchetypeDestroyed` on top of the two range hooks. Registration applies only to that one
 archetype; it does not discover other archetypes with the same components, which is what a query does for you.

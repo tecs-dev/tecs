@@ -19,9 +19,9 @@ TL     := $(CURDIR)/vendor/bin/tl
 # Cerulean are compiled into the `tecs` binary, and a tree formatted by one
 # version and checked by another is the failure this pin exists to prevent.
 # tealdoc is named there for company rather than because it is linked: it
-# renders docs/modules/reference.md, which is committed and diffed against a
-# fresh render, so an unpinned one would fail the diff on somebody else's
-# machine rather than on the change that moved a name.
+# renders the reference section of every module page, which is committed and
+# diffed against a fresh render, so an unpinned one would fail the diff on
+# somebody else's machine rather than on the change that moved a name.
 #
 # Matched on the variable name alone and split on the quotes, because make
 # counts parentheses inside `$(shell ...)` and a regex holding one does not
@@ -29,9 +29,6 @@ TL     := $(CURDIR)/vendor/bin/tl
 REVISIONS     := cmake/Revisions.cmake
 TL_REF        ?= $(shell grep TECS_TL_REF $(REVISIONS) | cut -d'"' -f2)
 CERULEAN_REF  ?= $(shell grep TECS_CERULEAN_REF $(REVISIONS) | cut -d'"' -f2)
-# Renders the generated reference page, which is committed and diffed against a
-# fresh render, so an unpinned tealdoc fails that diff on somebody else's
-# machine rather than on the change that moved a signature.
 TEALDOC_REF   ?= $(shell grep TECS_TEALDOC_REF $(REVISIONS) | cut -d'"' -f2)
 
 # The build system owns these locations, so it passes them rather than having
@@ -144,7 +141,7 @@ docs-check: ## Verify the documentation against the API it describes
 	@bash scripts/check-docs-descriptions.sh
 	@bash docs/scripts/checkpages.sh
 	@python3 docs/scripts/checklinks.py
-	@bash docs/scripts/reference.sh --check
+	@python3 docs/scripts/reference.py --check
 
 # The site's own tooling, which needs node rather than anything this build
 # owns. Kept here so the commands sit beside the rest rather than being

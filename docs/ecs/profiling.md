@@ -14,14 +14,39 @@ that share the LuaJIT zone stack for attribution:
 Each call returns a session handle. `:stop()` ends the session and returns its report; calling it twice raises.
 One sample session and one trace session may be active at a time.
 
-## Requiring it
-
-`tecs.utils.*` modules are part of the supported API and are required directly rather than reached through the
-`tecs` surface:
+This one is not a field on `tecs`. The `tecs.utils.*` modules are supported API and are required directly:
 
 ```teal
 local profile <const> = require("tecs.utils.profile")
 ```
+
+## What neither channel sees
+
+Both channels report on code while it runs. Two costs sit outside what either of them, or a frame-time average,
+can show, so a game chasing one of these has to measure it deliberately.
+
+**Latency.** Frame time cannot see how long a player waits between a press and the frame that reacted to it, and
+the two move independently: anything that pipelines a frame buys throughput and pays for it in latency. Measure
+the interval from the event arriving to the frame that consumed it being submitted, over the frames that
+actually consumed one. A frame nobody was waiting on has no latency, and averaging it in only makes the number
+smaller. Charge a batch of events to the frame from its oldest event, which is that batch's worst case.
+
+**Allocation.** A frame that allocates has bought a collection some later frame pays for, so the cost lands away
+from where it was incurred and arrives as a tail nobody can attribute. Measuring it is mostly a matter of not
+being fooled three times:
+
+- `collectgarbage("count")` reports the size of the heap, not what was allocated, so a collection inside the
+  measurement window eats the delta and more work can read as less. Stop the collector for the window.
+- `collectgarbage` is not compiled by LuaJIT, so a probe inside the frame aborts every trace that would have
+  covered it. The compiler then spends the run recording and recompiling, which is itself heap traffic charged
+  to the frame being measured. Measure twice instead: once with no probe in the frame at all, for the total, and
+  once with probes at phase boundaries, for the breakdown, counting only the frames the compiler did not touch.
+- LuaJIT removes allocations that do not escape a trace, so the same source measures differently depending on
+  what happened to be compiled. A cursor that never leaves the loop it opens is the everyday case: it costs
+  nothing once the traversal is compiled, and no reading can see it.
+
+`profile.trace` is what confirms the second point in your own code. If the abort report grows when the probes go
+in, the reading is measuring the compiler rather than the frame.
 
 ## Sampling profiler
 
@@ -318,11 +343,6 @@ function TraceSession:resume()
 | `reason`   | `string`  | Human-readable reason from `jit.vmdef.traceerr`. NYI bytecode aborts are rendered with the opcode name. |
 | `location` | `string`  | `"<file>:<line>"` of the function being recorded when the abort happened.                               |
 | `zone`     | `string`  | Active zone path at abort time, empty when no zone was on the stack.                                    |
-
-## Design record
-
-- [Measuring latency](https://github.com/tecs-dev/tecs/blob/main/README.md#measuring-latency)
-- [Measuring allocation](https://github.com/tecs-dev/tecs/blob/main/README.md#measuring-allocation)
 
 [1]: https://luajit.org/ext_profiler.html#jit_zone
 [2]: https://www.brendangregg.com/flamegraphs.html

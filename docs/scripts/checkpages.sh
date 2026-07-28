@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Holds the documentation to the public API: every public name has a page,
-# every page under docs/modules/ names something public, and the three places
-# that list the modules list all of them in the same order.
+# every page under docs/modules/ names something public, the two places that
+# list the modules list all of them in the same order, and the sidebar has one
+# row per page.
 #
 # The names come out of `src/tecs/init.tl`, which is the definition of what is
 # public rather than a list kept beside it. The value fields of `record tecs`
@@ -25,9 +26,9 @@
 # pass as "the index is complete", never as "the pages are right".
 #
 # The one machine-checkable claim about content lives next door:
-# docs/scripts/reference.sh --check diffs the generated signature page against a
-# fresh render, so signatures cannot drift even though the words around them
-# can.
+# docs/scripts/reference.py --check diffs the reference section of every module
+# page against a fresh render, so signatures cannot drift even though the words
+# around them can.
 #
 # Run from anywhere: bash docs/scripts/checkpages.sh
 set -euo pipefail
@@ -58,9 +59,9 @@ if [ -z "$public" ]; then
     exit 1
 fi
 
-# Pages that are the index or are generated from `init.tl` itself, which name
-# every module by construction and so prove nothing about coverage.
-notAModulePage="index reference"
+# The index, which names every module by construction and so proves nothing
+# about coverage.
+notAModulePage="index"
 
 missing=()
 for name in $public; do
@@ -94,55 +95,72 @@ while IFS= read -r page; do
     stubs+=("$(basename "$page" .md)")
 done < <(grep -rl '^::: warning This page is pending$' --include='*.md' docs/modules | sort)
 
-# The modules are listed three times: the index, the home page and the sidebar.
-# Three copies of one list is two chances to disagree, and a name added to two
-# of them reads as complete from whichever one you happened to open. So the
-# order is derived here rather than trusted, and all three are held to it.
+# The modules are listed twice, on the index and on the home page. Two copies of
+# one list is a chance to disagree, and a name added to one of them reads as
+# complete from whichever you happened to open. So the order is derived here
+# rather than trusted, and both are held to it.
 #
 # Alphabetical ignoring case, ties broken by byte order. LC_ALL=C pins that,
 # since a locale that collates differently would make this pass on one machine
 # and fail on another.
 expected=$(printf '%s\n' $public | LC_ALL=C sort -f)
 
-# Markdown writes a name as ``- [`tecs.name`](link)``; the sidebar writes it as
-# `{ text: "tecs.name", link: ... }`. Both are matched at the start of a line,
-# so a name mentioned in prose is not mistaken for a list entry.
-#
-# The site config is read from `sidebar:` onwards and only where a `link:` sits
-# on the same line. Both exclusions are there for `tecs.ecs`, which is written
-# in the top nav and again as a sidebar group heading, neither of which is the
-# module list. Anchoring on those keys rather than on indentation keeps this
-# working through a reformat.
+# A name is written as ``- [`tecs.name`](link)`` or as a table row, since a page
+# may list either way. Both are matched at the start of a line, so a name
+# mentioned in prose is not mistaken for a list entry.
 listOf() {
-    case "$1" in
-    *.mts)
-        awk '
-            /^ *sidebar: \[/ { inside = 1 }
-            inside && /link:/ && match($0, /text: "tecs\.[A-Za-z_][A-Za-z0-9_]*"/) {
-                print substr($0, RSTART + 12, RLENGTH - 13)
-            }
-        ' "$1"
-        ;;
-    # Bullets and table rows both, since a page may list either way.
-    *) sed -n -e 's/^- \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' \
-              -e 's/^| \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' "$1" ;;
-    esac
+    sed -n -e 's/^- \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' \
+           -e 's/^| \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' "$1"
 }
 
 status=0
 
-for listing in docs/modules/index.md docs/index.md docs/.vitepress/config.mts; do
+for listing in docs/modules/index.md docs/index.md; do
     if [ "$(listOf "$listing")" != "$expected" ]; then
         echo "$listing does not list the modules in the expected order:" >&2
         diff -u <(printf '%s\n' "$expected") <(listOf "$listing") |
             sed -e '1,2d' -e 's/^/  /' >&2
         echo >&2
-        echo "One alphabetical list, ignoring case, in all three places. Lines" >&2
+        echo "One alphabetical list, ignoring case, in both places. Lines" >&2
         echo "starting - or + above are what that file has wrong." >&2
         echo >&2
         status=1
     fi
 done
+
+# The sidebar is held to the pages instead, because that is what it is for. It
+# moves a reader between pages; a function lives on the page that documents it
+# and is reached through that page's own outline. So a row per page, no row for
+# anything smaller, and nothing unreachable.
+#
+# Read from `sidebar:` onwards, so the top nav and the social links are not
+# mistaken for navigation into the content. Duplicates collapse, since a group's
+# own overview row repeats the link the group heading above it carries.
+sidebarLinks=$(awk '
+    /^ *sidebar: \[/ { inside = 1 }
+    inside && match($0, /link: "\/[^"]*"/) {
+        print substr($0, RSTART + 7, RLENGTH - 8)
+    }
+' docs/.vitepress/config.mts | sort -u)
+
+# Every page, as the link that reaches it. The home page is the site root and is
+# not navigated to from the sidebar; node_modules and the theme are not content.
+pageLinks=$(find docs -name '*.md' \
+    -not -path 'docs/node_modules/*' \
+    -not -path 'docs/.vitepress/*' \
+    -not -path 'docs/index.md' |
+    sed -e 's|^docs||' -e 's|\.md$||' -e 's|/index$|/|' | sort -u)
+
+if [ "$sidebarLinks" != "$pageLinks" ]; then
+    echo "docs/.vitepress/config.mts does not have one sidebar row per page:" >&2
+    diff -u <(printf '%s\n' "$pageLinks") <(printf '%s\n' "$sidebarLinks") |
+        sed -e '1,2d' -e 's/^/  /' >&2
+    echo >&2
+    echo "A line starting - is a page nothing navigates to; one starting + is a" >&2
+    echo "sidebar row pointing at no page." >&2
+    echo >&2
+    status=1
+fi
 
 if [ "${#missing[@]}" -gt 0 ]; then
     echo "Public names in $init with no page: ${#missing[@]}" >&2
@@ -169,7 +187,7 @@ if [ "$status" -ne 0 ]; then
 fi
 
 count=$(printf '%s\n' $public | wc -l | tr -d ' ')
-echo "OK: all $count public names have a page, listed alike in three places, and no page outlives its module"
+echo "OK: all $count public names have a page, listed alike in both indexes, one sidebar row per page, and no page outlives its module"
 
 if [ "${#stubs[@]}" -gt 0 ]; then
     echo "Stubbed, pending a module that is still moving: ${#stubs[@]} (${stubs[*]})"

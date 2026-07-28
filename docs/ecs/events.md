@@ -12,15 +12,6 @@ This page covers the ECS event system, which is what `world:emit` and `world:obs
 platform events, the window, keyboard, mouse, gamepad and file-drop stream, are a separate module that delivers
 one ECS event type per kind onto the same bus at address `0`; see [`events`](/modules/events).
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")` and every module is a field on it. `tecs` is also set as a global, which
-makes the require line optional.
-
 ## Core concepts
 
 The system centers on three ideas:
@@ -59,6 +50,21 @@ return tecs.application.create({
     end,
 })
 ```
+
+## An observer is not a system
+
+An observer runs at the moment of the emit, inside whatever the emitter was doing, rather than at a point in
+the frame it chose. That has consequences worth knowing before reaching for one:
+
+- A `world:emit` from a system runs its observers before that `emit` call returns, in the emitting system's
+  phase, inside whatever [deferred scope](/ecs/queries/#mutations-during-iteration) the emitter holds.
+- Platform events at address `0` are delivered as they arrive from the host, which is ahead of `world:update`.
+  So a platform observer fires before every system in the frame the event belongs to, outside every phase: no
+  fixed step, and none of the pause or state gating a system gets from its phase and its `runIf`.
+
+A reaction that needs phase order, the fixed step or state gating folds the event into something a system reads
+instead. That is what [`Input`](/modules/input) does with the whole platform stream: it consumes it into state,
+and systems read that state in phase.
 
 ## World-level events
 
@@ -358,7 +364,3 @@ function tecs.ecs.newMessageBus(): MessageBus
 | `bus:clearAddress(address)`                           | Remove every observer at one address. This is what an entity despawn uses.                                                                                                                          |
 | `bus:clearEntityObservers()`                          | Remove every per-entity observer, that is every address except the global `0`, preserving global subscriptions. Used by `world:clearEntities`.                                                      |
 | `bus:reset()`                                         | Remove all observers, global ones included. Full teardown.                                                                                                                                          |
-
-## Design record
-
-- [Events are a type per kind](https://github.com/tecs-dev/tecs/blob/main/README.md#events-are-a-type-per-kind)

@@ -30,18 +30,21 @@ The previous project shipped a `tecs` command that scaffolded, built and package
 not built. See [Tecs CLI](/cli/).
 :::
 
-## The surface
+## Reaching the engine
 
-`require("tecs")` is the whole surface, ECS and engine together.
+`tecs` is ambient in a game. The module installs itself as a global as it returns, and the host has already
+loaded it by the time an entry file runs, so every file in a game reaches `tecs.ecs.newWorld()` and
+`tecs.camera.Camera` with no require line. It is the same table `require` gives back, metatable included, so a
+headless tool or a spec that does not go through the host writes `local tecs <const> = require("tecs")` first
+and gets exactly that.
 
-```teal
-local tecs <const> = require("tecs")
-```
+Every module but `tecs.ecs` resolves on first field access, so loading `tecs` loads no engine module and a
+headless tool, a test or a server never demands a graphics stack.
 
-`tecs` is also a global, set by the module itself as it returns, so a game can write `tecs.ecs.newWorld()` in any file
-with no require line. It is the same table `require` gives back, metatable included. Engine modules resolve on
-first field access, so `require("tecs")` alone loads no engine module and a headless tool, a test or a server
-never demands a graphics stack.
+A game's own modules resolve the same way. The host puts the content root on `package.path` before it loads
+anything, so `require("game.enemies")` finds `game/enemies.lua` beside the entry chunk with no path setup in the
+entry file. A development run overrides the root with `TECS_LUA`, which is how it reads out of a build tree
+rather than out of an installed one.
 
 Teal types the global through `src/tecs/global.d.tl`, which reads the type off the module rather than restating
 it, so the two cannot drift. A game names that declaration in its own `tlconfig.lua`:
@@ -56,7 +59,7 @@ return {
 }
 ```
 
-`tl check` then reports `tecs.newWorldd()` as an invalid key at the line that wrote it.
+`tl check` then reports `tecs.ecs.newWorldd()` as an invalid key at the line that wrote it.
 
 ## The entry file
 
@@ -65,8 +68,6 @@ through `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. A pla
 back has no loop to block in, which is why the shape is this and not a `run()`.
 
 ```teal
-local tecs <const> = require("tecs")
-
 return tecs.application.create({
     plugin = function(world: tecs.World, app: tecs.application.Application)
         -- register systems, observers and entities here
@@ -97,7 +98,6 @@ The entry plugin is handed the world and the application, in that order. The wor
 plugin the world takes is `function(world)`, so the entry reads as that shape with one more thing.
 
 ```teal
-local tecs <const> = require("tecs")
 local Transform <const> = tecs.ecs.builtins.Transform
 
 return tecs.application.create({
@@ -136,5 +136,4 @@ mechanism rather than two.
 ## Where to go next
 
 - [The ECS](/ecs/): worlds, components, queries, systems, events, states and snapshots.
-- [The module reference](/modules/): one page per module on the public surface.
-- [The design record](https://github.com/tecs-dev/tecs/blob/main/README.md): why the engine is shaped as it is.
+- [The module reference](/modules/): one page per module a game can reach.

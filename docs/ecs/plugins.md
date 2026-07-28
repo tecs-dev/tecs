@@ -12,15 +12,6 @@ observers and entities. It is the unit of composition in Tecs, and it is the onl
 type Plugin = function(world: World)
 ```
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")` and every module is a field on it. `tecs` is also set as a global, which
-makes the require line optional.
-
 ## The entry plugin
 
 `Application.Config` carries one `plugin`, a `function(world, app)`, and nothing else a game supplies is called
@@ -46,7 +37,13 @@ return tecs.application.create({
 
 The world comes first because every plugin the world takes is `function(world)`: the entry reads as that shape
 with one more thing, and a body moved between the entry and a delegated plugin cannot silently swap its
-arguments. The application is passed rather than looked up, so there is no nil case for a plugin to check.
+arguments. The application is passed rather than looked up, so there is no nil case for a plugin to check, and
+there is no way to reach it from a world that has one: capture it here, in the closure the systems and
+observers you register are written in. `app.renderer` is reached the same way.
+
+Being handed the application is not a second lifecycle mechanism. A system that captured `app` when the plugin
+registered it can do everything a per-frame callback could, and gets phase order, the fixed step, pause and
+state gating and the crash guard along with it, which a callback would not have.
 
 The entry plugin runs before the startup phases, so anything it spawns is resident before the first frame is
 extracted. See [Getting started](/getting-started) for the entry file and
@@ -249,8 +246,3 @@ there is no way to opt out. See [Builtins](/ecs/builtins#the-builtin-plugin).
 4. **State your dependencies.** Read the resource you need at setup and error when it is missing.
 5. **Export your types.** If a plugin defines components or events other code uses, put them on the module
    record.
-
-## Design record
-
-- [One plugin, and what it is handed](https://github.com/tecs-dev/tecs/blob/main/README.md#one-plugin-and-what-it-is-handed)
-- [One way in](https://github.com/tecs-dev/tecs/blob/main/README.md#one-way-in)

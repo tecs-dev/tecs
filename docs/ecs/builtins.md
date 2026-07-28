@@ -9,15 +9,6 @@ outline: deep
 world creates them, and the builtin plugin that owns the `TTL` and `RelativeTransform` systems is installed when
 the world is constructed, so nothing here has to be added by hand.
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")` and every module is a field on it, so these live on `tecs.ecs.builtins`.
-`tecs` is also set as a global, which makes the require line optional.
-
 ## Components
 
 | Component                                 | Storage             | Description                                 |

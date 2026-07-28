@@ -38,21 +38,6 @@ export default defineConfig({
             dark: "tokyo-night",
         },
         languages: [{ ...(tealGrammar as any), name: "teal", aliases: ["tl"] }],
-        // A page is compiled as a Vue template, so `{{ ... }}` inside inline
-        // code is read as an interpolation and rendered as whatever the
-        // expression evaluates to, which for a type like `{{string, string}}`
-        // is nothing. Fenced blocks are already given `v-pre`; inline code is
-        // not, and a signature that quietly loses an argument is exactly the
-        // kind of confidently wrong reference this site is meant not to carry.
-        config(md) {
-            const renderInline = md.renderer.rules.code_inline;
-            md.renderer.rules.code_inline = (tokens, index, options, env, self) => {
-                tokens[index].attrSet("v-pre", "");
-                return renderInline
-                    ? renderInline(tokens, index, options, env, self)
-                    : self.renderToken(tokens, index, options);
-            };
-        },
     },
     head: [
         ["link", { rel: "icon", type: "image/svg+xml", href: "/images/logo.svg" }],
@@ -92,21 +77,28 @@ export default defineConfig({
                     { text: "Tecs CLI", link: "/cli/" },
                 ],
             },
+            // One row per page, and no row for anything smaller. The sidebar
+            // moves a reader between pages; a function lives on the page that
+            // documents it and is reached by scrolling or through the outline
+            // VitePress renders from that page's own headings. Three rows that
+            // land in the same place teach a reader that the sidebar does not
+            // know where things are.
+            //
             // Flat, alphabetical ignoring case, and spelled the way a game
             // writes it. A reader looking for `tecs.watch` scans for that
             // string; a thematic grouping makes them guess which of four
             // headings somebody filed it under first, and a collapsed group
             // hides the name entirely until they guess right.
             //
-            // Every module is here, including `tecs.ecs`, whose own pages are
-            // the group below. The order matches docs/modules/index.md and the
-            // home page exactly.
+            // `tecs.ecs` is the group below rather than a row here, and
+            // `tecs.version` is a string with no page of its own; both are in
+            // the index, which is the list of names.
             {
                 text: "Modules",
                 collapsed: false,
                 items: [
                     { text: "Overview", link: "/modules/" },
-                    { text: "Generated signatures", link: "/modules/reference" },
+                    { text: "Generated signatures", link: "/modules/" },
                     { text: "tecs.animation", link: "/modules/animation" },
                     { text: "tecs.application", link: "/modules/application" },
                     { text: "tecs.assets", link: "/modules/assets" },
@@ -117,7 +109,6 @@ export default defineConfig({
                     { text: "tecs.clock", link: "/modules/clock" },
                     { text: "tecs.components", link: "/modules/components" },
                     { text: "tecs.compress", link: "/modules/compress" },
-                    { text: "tecs.ecs", link: "/ecs/" },
                     { text: "tecs.events", link: "/modules/events" },
                     { text: "tecs.filesystem", link: "/modules/filesystem" },
                     { text: "tecs.future", link: "/modules/future" },
@@ -141,7 +132,6 @@ export default defineConfig({
                     { text: "tecs.sheet", link: "/modules/sheet" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.text", link: "/modules/text" },
-                    { text: "tecs.version", link: "/modules/reference" },
                     { text: "tecs.watch", link: "/modules/watch" },
                     { text: "tecs.window", link: "/modules/window" },
                     { text: "tecs.workers", link: "/modules/workers" },

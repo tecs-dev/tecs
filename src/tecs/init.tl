@@ -59,10 +59,10 @@ local type sensors = require("tecs.platform.sensors")
 local type platformAudio = require("tecs.platform.audio")
 
 -- A class gets a module of its own, lowercase, and the class sits inside it
--- under its own name. `tecs.camera.Camera` rather than `tecs.Camera`, so one
--- name is the namespace and the other is the type, and no name is both at
--- once. The satellite records each class carries are named here too, so a
--- game reaches `tecs.window.Options` without going through `Window` first.
+-- under its own name: `tecs.camera.Camera`. One name is the namespace and the
+-- other is the type, so no name is both at once. The satellite records each
+-- class carries are named here too, so a game reaches `tecs.window.Options`
+-- without going through `Window` first.
 
 --- The object an entry file returns, and what builds one.
 local record application

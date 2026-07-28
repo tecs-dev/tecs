@@ -426,7 +426,3 @@ for archetype, len, entities in world:findArchetypes(PointLight) do
     end
 end
 ```
-
-## Design record
-
-- [A frame that throws puts back what it was holding](https://github.com/tecs-dev/tecs/blob/main/README.md#a-frame-that-throws-puts-back-what-it-was-holding)

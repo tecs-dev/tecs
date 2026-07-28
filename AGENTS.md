@@ -51,8 +51,8 @@ needs a Python with `jinja2` and `jsonschema` on the build host, which Mbed TLS 
 ```text
 tecs/
 ├── src/tecs/
-│   ├── init.tl            # The public surface, ECS and engine
-│   ├── ecs.tl             # The ECS half, for engine code
+│   ├── init.tl            # The public API: one module per name, ECS and engine
+│   ├── ecs.tl             # tecs.ecs, for a game and for engine code alike
 │   ├── types.tl
 │   ├── internal/          # ECS implementation
 │   ├── utils/
@@ -87,12 +87,17 @@ tecs/
 
 ### The dependency rule
 
-`require("tecs")` is the whole surface and is what a game requires. Engine modules require `tecs.ecs` instead,
-because the surface exports those modules and a module that also depended on the surface would be a cycle, which
-Teal rejects even through a type-only require.
+`tecs` is what a game reaches, and every public name on it is `tecs.<module>.<thing>`: `tecs.ecs.newWorld`,
+`tecs.camera.Camera`, `tecs.application.create`. The host loads `tecs` before a game's first line, so a game
+writes no require; a headless tool or a spec writes `require("tecs")` and gets the same table.
 
-So the graph runs one way: internal code depends on a half, only a game depends on the whole. `tecs.ecs` carries
-what the engine actually uses rather than the whole ECS API, so the dependency stays legible.
+Engine modules require `tecs.ecs` rather than `tecs`, because `tecs` is the aggregator that pulls every engine
+module in and a module `tecs` exports cannot also depend on `tecs` without making a cycle, which Teal rejects
+even through a type-only require.
+
+`tecs.ecs` is one table for both readers: the ECS a game writes, and the module engine code requires. So the
+graph runs one way, and nothing under `tecs.ecs` may require the whole. A module that needs only a type reaches
+for `tecs.types`, which sits below both.
 
 `tecs.internal.*` modules are implementation details with no stability guarantee.
 

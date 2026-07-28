@@ -243,7 +243,3 @@ Queries handle discovery, filtering, and observer registration for you.
 
 To discover new archetypes as they are created, observe the `ArchetypeCreated` event on the world (address 0).
 See [Builtins](/ecs/builtins).
-
-## Design record
-
-- [Buffer writes](https://github.com/tecs-dev/tecs/blob/main/README.md#buffer-writes)

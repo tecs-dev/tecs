@@ -8,16 +8,6 @@ outline: deep
 The `World` is the core of the Tecs entity component system. It owns entities, components, systems, plugins,
 resources, queries and the state stack, and it is what a frame is run against.
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")`, and `tecs` is also set as a global, so the require line is optional.
-Engine modules on the surface resolve lazily on first field access, which keeps a world buildable with no
-window and no device.
-
 ## Creating a world
 
 Create a world that runs its fixed phases at 60 Hz using the default configuration:
@@ -1008,8 +998,3 @@ local myStats = {}
 world:getStats(myStats)
 print("Entities:", myStats.entities)
 ```
-
-## Design record
-
-- [One plugin, and what it is handed](https://github.com/tecs-dev/tecs/blob/main/README.md#one-plugin-and-what-it-is-handed)
-- [A frame that throws puts back what it was holding](https://github.com/tecs-dev/tecs/blob/main/README.md#a-frame-that-throws-puts-back-what-it-was-holding)

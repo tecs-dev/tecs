@@ -13,7 +13,13 @@ animation, text layout, audio and render extraction are all systems the engine r
 game's systems interleave with them by declaring a phase rather than by being called from somewhere.
 
 [`Application`](/modules/application) drives all three groups. It runs the game's plugin, then `world:startup()`
-once, then `world:update(dt)` per iteration, then `world:shutdown()` at teardown.
+once, then `world:update(dt)` per iteration, then `world:shutdown()` at teardown. Nothing else calls back into a
+game per frame: a phase is where per-frame work is declared, and the three groups are the whole lifecycle.
+
+Events are the exception, and they are not in a phase at all. A platform event is delivered to its observers as
+it arrives, ahead of `world:update`, so an observer runs before every system in the frame the event belongs to
+and gets none of the fixed step, pause or state gating a phase carries. See
+[An observer is not a system](/ecs/events#an-observer-is-not-a-system).
 
 ## Phase groups
 
@@ -300,7 +306,3 @@ function World:runPhase(phase: Phase, dt?: number)
 
 - `phase`: Phase or phase group to run.
 - `dt`: Optional delta time passed to systems in that phase. Defaults to `0`.
-
-## Design record
-
-- [One way in](https://github.com/tecs-dev/tecs/blob/main/README.md#one-way-in)

@@ -24,7 +24,7 @@ local record runIf
     --- using the same interval.
     ---
     --- Jitter is drawn from the world's `tecs.runif` stream, so a run reseeded
-    --- with `tecs.random.seed` fires on the same frames every time and a
+    --- with `tecs.ecs.random.seed` fires on the same frames every time and a
     --- snapshot carries where the jitter had got to.
     ---
     --- @param interval The interval in seconds between fires.

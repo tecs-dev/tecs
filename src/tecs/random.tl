@@ -23,10 +23,10 @@
 --- a pure function of its seed and its coordinates; a game rebuilds the same
 --- field by asking for the same seed, so there is nothing for a save to carry.
 ---
----     local rng <const> = tecs.random.stream(world, "loot")
+---     local rng <const> = tecs.ecs.random.stream(world, "loot")
 ---     local roll <const> = rng:integer(1, 20)
 ---
----     local field <const> = tecs.random.noise(1234)
+---     local field <const> = tecs.ecs.random.noise(1234)
 ---     local height <const> = field:fbm2(x * 0.01, y * 0.01, 4)
 
 local type types = require("tecs.types")

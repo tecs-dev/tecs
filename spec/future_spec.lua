@@ -14,7 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local sequence = require("tecs.sequence")
-local Future = require("tecs.future.Future")
+local Future = require("tecs.Future")
 
 local C = sdl.C
 

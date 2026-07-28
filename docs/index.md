@@ -213,9 +213,9 @@ world:emit(0, DamageEvent, enemyId, 25)
 
 ## Modules
 
-Everything a game reaches is a field on `tecs`, which is ambient: the host loads it before a game's first line,
-so no require and no path setup. Alphabetical, ignoring case, because that is how a name is looked up.
-[Modules](/modules/) carries the same list, and [the generated reference](/modules/reference) carries what is
+Everything a game reaches is a field on `tecs`, which is ambient in a game: it is already loaded by the time an
+entry file runs, so no require line. Alphabetical, ignoring case, because that is how a name is looked up.
+[Modules](/modules/) carries the same list, and [the generated reference](/modules/) carries what is
 behind each one.
 
 <div class="module-columns">
@@ -254,7 +254,7 @@ behind each one.
 - [`tecs.sheet`](/modules/sheet) - sprite sheets, frame tags, pivots
 - [`tecs.system`](/modules/system) - URLs, locales, power, messages, and native file and folder dialogs
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer
-- [`tecs.version`](/modules/reference) - the version of this build, as a string
+- [`tecs.version`](/modules/) - the version of this build, as a string
 - [`tecs.watch`](/modules/watch) - watching files for change
 - [`tecs.window`](/modules/window) - the window, its size, its display and its mode
 - [`tecs.workers`](/modules/workers) - typed background jobs

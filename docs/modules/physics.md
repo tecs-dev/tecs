@@ -152,8 +152,3 @@ reconcile system rebuilds bodies and secondary shapes and restores motion.
 
 Contact warm-start impulses are unavailable through Box2D's C API and are not saved, so a restored resting stack
 can settle briefly. Restore is suitable for save games, not bit-exact replay continuation.
-
-## Design record
-
-- [Physics threads](https://github.com/tecs-dev/tecs/blob/main/README.md#physics-threads)
-- [A body's lifetime](https://github.com/tecs-dev/tecs/blob/main/README.md#a-bodys-lifetime)

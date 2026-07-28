@@ -5,11 +5,10 @@ outline: [2, 2]
 
 # Modules
 
-Every name below is a field on `tecs`, spelled here exactly as a game writes it. `tecs` is ambient: the host
-loads it before a game's first line and puts the content root on the module path, so an entry file and every
-file it pulls in reach `tecs.ecs.newWorld()` with no require line and no path setup. A headless tool or a spec
-does not go through the host, and writes `local tecs <const> = require("tecs")` first; it is the same table
-either way.
+Every name below is a field on `tecs`, spelled here exactly as a game writes it. `tecs` is ambient in a game:
+the module installs itself as a global as it returns and the host has already loaded it by the time an entry
+file runs, so no file in a game needs a require line. A headless tool or a spec does not go through the host
+and writes `local tecs <const> = require("tecs")` first; it is the same table either way.
 
 Each module is one namespace, and the thing inside it carries its own name: `tecs.camera.Camera` is the class,
 `tecs.camera` is where it lives. So no name is a type and a namespace at once, and a satellite record sits
@@ -19,7 +18,7 @@ The list is alphabetical, ignoring case, because that is how a name is looked up
 `tecs.watch` and wants the line that says `tecs.watch`, not a category somebody else chose to file it under.
 
 This list is the index; the pages behind it are the reference. For signatures, parameters and returns of
-everything at once, see [the generated reference](/modules/reference), which is rendered from `src/tecs/init.tl`
+everything at once, see [the generated reference](/modules/), which is rendered from `src/tecs/init.tl`
 and checked against a fresh render so it cannot drift.
 
 ## Every module
@@ -60,7 +59,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.sheet`](/modules/sheet)               | sprite sheets: loading one, and what is in it                             |
 | [`tecs.system`](/modules/system)             | URLs, locales, power, messages, and native file and folder dialogs        |
 | [`tecs.text`](/modules/text)                 | distance-field text, drawn through an instance producer                   |
-| [`tecs.version`](/modules/reference)         | the version of this build, as a string                                    |
+| [`tecs.version`](/modules/)                  | the version of this build, as a string                                    |
 | [`tecs.watch`](/modules/watch)               | watching files for change                                                 |
 | [`tecs.window`](/modules/window)             | the window, its size, its display and its mode                            |
 | [`tecs.workers`](/modules/workers)           | typed background jobs                                                     |

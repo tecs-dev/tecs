@@ -24,15 +24,6 @@ local field <const> = tecs.ecs.random.noise(1234)
 local height <const> = field:fbm2(x * 0.01, y * 0.01, 4)
 ```
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.ecs.random`.
-`tecs` is also set as a global, which makes the require line optional.
-
 ## Streams
 
 A stream belongs to a world. The first ask makes it; every ask after returns the same object, so a system that
@@ -271,7 +262,3 @@ The same, over `noise3`.
 ```teal
 function Noise:fbm3(x: number, y: number, z: number, octaves: integer): number
 ```
-
-## Design record
-
-- [Locked decisions](https://github.com/tecs-dev/tecs/blob/main/README.md#locked-decisions)

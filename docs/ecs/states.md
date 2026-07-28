@@ -13,15 +13,6 @@ the state loses focus or is popped.
 States are created from a game's entry plugin, along with everything else it registers. See
 [Plugins](/ecs/plugins).
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-```
-
-The whole surface is `require("tecs")` and every module is a field on it. `tecs` is also set as a global, which
-makes the require line optional.
-
 ## World methods
 
 These methods are available on every `World`.

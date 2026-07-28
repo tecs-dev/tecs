@@ -219,7 +219,3 @@ conformance checklist for adding or changing a mutation path.
   dirty.
 - **Observer hygiene**: per-entity observers never survive into a recycled slot.
 - **Reservation accounting**: staged moves reserve destination capacity so drains do not reallocate mid-pass.
-
-## Design record
-
-- [A frame that throws puts back what it was holding](https://github.com/tecs-dev/tecs/blob/main/README.md#a-frame-that-throws-puts-back-what-it-was-holding)

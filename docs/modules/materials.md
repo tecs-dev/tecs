@@ -18,13 +18,6 @@ small: entities of a kind cluster.
 `tecs.materials` is the host half of that: it finds the files, assigns the ids, builds the dispatch
 and hands it to the shader loader.
 
-## Requiring it
-
-```teal
-local tecs <const> = require("tecs")
-local materials <const> = tecs.materials
-```
-
 ## Selecting a material on an entity
 
 An entity with no `Material` component draws as the default, which samples the image array and covers
@@ -67,8 +60,21 @@ the scene.
 | `glyph`    | A multi-channel distance-field glyph   | The field's range as a fraction of an atlas cell               |
 
 `textured` takes its coverage from the texel's alpha at a threshold of a half, which is what makes a
-cut-out sprite a cut-out. `glyph` is the material [text](/modules/text) selects, and it is unlit, so a
-caption draws at its own colour rather than being left in the dark by a scene's lights.
+cut-out sprite a cut-out: the pass writes depth and does not blend, so a quad that covered its whole
+rectangle would hide whatever stood behind the transparent part of the image as well as painting over it.
+The test is on the texture's own alpha rather than on the product with the tint, so an entity with no
+`Sprite` samples the opaque white layer and draws at whatever tint alpha it carries. A half rather than any
+nonzero alpha because coverage here is a yes or a no: a texel kept at low alpha lands at full strength as a
+dark fringe rather than as a soft edge. An image authored with a soft edge therefore gets a hard one, cut
+where the artwork crosses half alpha.
+
+`glyph` is the material [text](/modules/text) selects, and it is unlit, so a caption draws at its own
+colour rather than being left in the dark by a scene's lights.
+
+Only three of them claim a shape to the lighting pass: `circle` and `ellipse` return a dome, `capsule`
+returns a cylinder with hemispherical caps, and everything else is flat and facing the viewer. That is
+per material rather than per texture, so a sprite that wants a normal per texel wants a normal map, which
+is a sidecar image and is not built.
 
 `line` is the one whose parameterisation is worth stating: it runs along the quad's diagonal, so
 placing it at the midpoint of two points and scaling it by their signed difference draws the segment
@@ -109,6 +115,12 @@ Every material starts from `materialDefaults()` rather than declaring a bare `Ma
 is what lets the contract grow a field without every material in every root having to learn about it
 on the same day. The default normal is flat and facing the viewer, because a 2D sprite genuinely has
 no normal, and a material claims a shape only where its own silhouette is one.
+
+A normal is carried into the world by the instance's rotation and by whichever axes its scale mirrored,
+and not by the scale itself, so writing a dome on an entity stretched to ten by one still gives a dome
+rather than something read as flat. A shape is taken to swell with itself: a 2D transform says how wide
+and how tall a thing is drawn and nothing about how far it stands out of the plane. A negative scale does
+flip the normal with the quad, which is what a mirrored surface facing the other way means.
 
 Two helpers come with the contract: `domeNormal(rim)`, the normal of a dome over a flat field, and
 `sdRoundedBox(p, extent, radius)`, the signed distance to a rounded box. The shared image array is
@@ -156,6 +168,27 @@ function materials.id(name: string): integer
 **Returns:** the id. A name no material was found under raises, and the message lists what was found.
 Calling this installs the materials if they are not installed already.
 
+### find
+
+The same lookup, answering nil instead of raising.
+
+```teal
+function materials.find(name: string): integer
+```
+
+**Returns:** the id, or nil when nothing has that name. What `id` is built on, for a caller with somewhere
+better to put the refusal than an error raised from here.
+
+### name
+
+The material an id dispatches to.
+
+```teal
+function materials.name(id: integer): string
+```
+
+**Returns:** the name, or nil when nothing has that id.
+
 ### names
 
 Every material name, in id order.
@@ -173,6 +206,12 @@ Adding a material renumbers the ones after it alphabetically. That matters only 
 stored an id across a rebuild, which is why `Material` components are built from `materials.id(name)`
 and never from a literal.
 :::
+
+That is also why a `Material` crosses a snapshot as its material's name rather than as its id, the way a
+`Sprite` carries its image's name. A snapshot outlives the process, and a build with one more material file
+would read an id that means a different shader and render the scene wrong without saying so. `name` writes
+it and `find` resolves it again; a name this build does not have raises and says which one, since falling
+back to the default or dropping the component are the same silent wrong shader by another route.
 
 ## Adding your own
 
@@ -252,10 +291,230 @@ builder installs the materials before it enumerates anything, so the packaged di
 exactly the material files that were present at build time and cannot drift from what a development
 build would have compiled. `assets/materials/` is globbed when the tree is assembled, so a material
 file added there is in the build the next time it runs.
+<!-- @generated by docs/scripts/reference.py from src/tecs/gpu/materials.tl. Do not edit below this line. -->
 
-## Design record
+## Reference
 
-- [Shapes are materials](https://github.com/tecs-dev/tecs/blob/main/README.md#shapes-are-materials)
-- [Materials say which way they face](https://github.com/tecs-dev/tecs/blob/main/README.md#materials-say-which-way-they-face)
-- [The shader pipeline](https://github.com/tecs-dev/tecs/blob/main/README.md#the-shader-pipeline)
-- [GPU-driven by default](https://github.com/tecs-dev/tecs/blob/main/README.md#gpu-driven-by-default)
+Every function and type this module carries, rendered from `src/tecs/gpu/materials.tl`.
+
+<a id="tecs.materials.Material"></a>
+
+### tecs.materials.Material
+
+<pre><code v-pre>record <a href="#tecs.materials.Material">tecs.materials.Material</a>
+</code></pre>
+
+One material: its name, the id this build gave it, and its source.
+<a id="tecs.materials.Material.name"></a>
+
+### tecs.materials.Material.name
+
+<pre><code v-pre><a href="#tecs.materials.Material.name">tecs.materials.Material.name</a>: string
+</code></pre>
+
+The file's name without its extension, and how a game asks for it.
+<a id="tecs.materials.Material.id"></a>
+
+### tecs.materials.Material.id
+
+<pre><code v-pre><a href="#tecs.materials.Material.id">tecs.materials.Material.id</a>: integer
+</code></pre>
+
+What an instance carries to select this material. Assigned by
+`install` from sorted order, so it holds only for the set of files
+that were present when the dispatch was built.
+<a id="tecs.materials.Material.source"></a>
+
+### tecs.materials.Material.source
+
+<pre><code v-pre><a href="#tecs.materials.Material.source">tecs.materials.Material.source</a>: string
+</code></pre>
+
+The material's GLSL, as read. Renamed on the way into the dispatch
+rather than here, so this is still the text the file holds.
+<a id="tecs.materials.addRoot"></a>
+
+### tecs.materials.addRoot
+
+<pre><code v-pre>function <a href="#tecs.materials.addRoot">tecs.materials.addRoot</a>(path: string)
+</code></pre>
+
+Adds a directory to search before the ones already known, so a game's
+materials are found alongside the engine's.
+
+#### Parameters
+
+| Type                      | Name                    | Description |
+| ------------------------- | ----------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>path</code> |             |
+
+<a id="tecs.materials.defaultName"></a>
+
+### tecs.materials.defaultName
+
+<pre><code v-pre><a href="#tecs.materials.defaultName">tecs.materials.defaultName</a>: string
+</code></pre>
+
+Name of the material an entity with no Material component draws as.
+<a id="tecs.materials.define"></a>
+
+### tecs.materials.define
+
+<pre><code v-pre>function <a href="#tecs.materials.define">tecs.materials.define</a>(name: string, source: string)
+</code></pre>
+
+Supplies a material from memory rather than a file.
+
+For a spec, and for a game that generates one at build time. Beats a file
+of the same name in any root, and renumbers the set on the next `install`
+as adding a file would.
+
+#### Parameters
+
+| Type                      | Name                      | Description |
+| ------------------------- | ------------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>name</code>   |             |
+| <code v-pre>string</code> | <code v-pre>source</code> |             |
+
+<a id="tecs.materials.find"></a>
+
+### tecs.materials.find
+
+<pre><code v-pre>function <a href="#tecs.materials.find">tecs.materials.find</a>(name: string): integer
+</code></pre>
+
+The id a material is dispatched by, or nil when nothing has that name.
+
+What `id` is built on, for a caller with somewhere better to put the
+refusal than an error raised from here. Reading a `Material` back out of a
+snapshot is that caller: the name it holds is a fact about the file rather
+than about the call site, and the message says so.
+
+#### Parameters
+
+| Type                      | Name                    | Description |
+| ------------------------- | ----------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>name</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>integer</code> |             |
+
+<a id="tecs.materials.id"></a>
+
+### tecs.materials.id
+
+<pre><code v-pre>function <a href="#tecs.materials.id">tecs.materials.id</a>(name: string): integer
+</code></pre>
+
+The id a material is dispatched by, or an error naming what was found.
+
+Resolved by name so a game never writes a number: the numbering depends on
+which files exist, and hard-coding one would break the moment a material was
+added ahead of it alphabetically.
+
+#### Parameters
+
+| Type                      | Name                    | Description |
+| ------------------------- | ----------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>name</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>integer</code> |             |
+
+<a id="tecs.materials.install"></a>
+
+### tecs.materials.install
+
+<pre><code v-pre>function <a href="#tecs.materials.install">tecs.materials.install</a>()
+</code></pre>
+
+Reads the materials and publishes the dispatch. Idempotent.
+
+Called by shader loading rather than by a game, so a fragment shader cannot
+be built before the materials it dispatches to are known. Adding a root or
+defining a material puts this back on, and the next load rebuilds.
+<a id="tecs.materials.name"></a>
+
+### tecs.materials.name
+
+<pre><code v-pre>function <a href="#tecs.materials.name">tecs.materials.name</a>(id: integer): string
+</code></pre>
+
+The material an id dispatches to, or nil when nothing has that id.
+
+The reverse of `id`, and what a snapshot writes in place of the number.
+Nothing is kept in step to answer it: `order` already holds the names at
+their ids, counting from one, so this is the lookup the numbering was
+assigned from rather than a second copy of it.
+
+#### Parameters
+
+| Type                       | Name                  | Description |
+| -------------------------- | --------------------- | ----------- |
+| <code v-pre>integer</code> | <code v-pre>id</code> |             |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
+
+<a id="tecs.materials.names"></a>
+
+### tecs.materials.names
+
+<pre><code v-pre>function <a href="#tecs.materials.names">tecs.materials.names</a>(): {string}
+</code></pre>
+
+Every material name, in id order.
+
+The default first at id zero, then the rest alphabetically. Not sorted as a
+whole: the default's place is fixed by what a zero on an instance has to
+mean, wherever its own name would otherwise fall.
+
+#### Returns
+
+| Type                        | Description                   |
+| --------------------------- | ----------------------------- |
+| <code v-pre>{string}</code> | A fresh list the caller owns. |
+
+<a id="tecs.materials.reload"></a>
+
+### tecs.materials.reload
+
+<pre><code v-pre>function <a href="#tecs.materials.reload">tecs.materials.reload</a>(): boolean, string
+</code></pre>
+
+Re-reads every material and republishes the dispatch.
+
+Refused when the set of materials has changed, and this is the whole reason
+there is a rule rather than a re-read. Ids come from sorted name order, so a
+file appearing or disappearing renumbers every material after it
+alphabetically, and a `Material` component in a live world holds a number
+that was resolved before the change. Editing a body reloads; adding or
+removing one is a restart.
+
+Materials supplied through `define` are kept as they are: those came from
+memory rather than a root, and nothing on disk has an opinion about them.
+
+#### Returns
+
+| Type                       | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| <code v-pre>boolean</code> | Whether the dispatch was rebuilt.                   |
+| <code v-pre>string</code>  | Why not, and nil whenever the first answer is true. |
+
+<a id="tecs.materials.reset"></a>
+
+### tecs.materials.reset
+
+<pre><code v-pre>function <a href="#tecs.materials.reset">tecs.materials.reset</a>()
+</code></pre>
+
+Forgets everything read, so a spec can start from the files again.
