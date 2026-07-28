@@ -323,7 +323,10 @@ def main() -> int:
     # the same thing, and the build failure it causes names the wrong line.
     stray = []
     for page in sorted((REPO / "docs").rglob("*.md")):
-        if "node_modules" in page.parts:
+        # The same two the link checker skips. `.vitepress/dist` is a build
+        # output, so scanning it reports every finding twice and reports them
+        # against a path nobody edits.
+        if "node_modules" in page.parts or ".vitepress" in page.parts:
             continue
         for number, name, line in strayTags(page.read_text()):
             stray.append((page.relative_to(REPO), number, name, line))
