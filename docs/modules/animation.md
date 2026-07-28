@@ -1578,9 +1578,9 @@ systems that installs, and worlds already carrying them keep them.
 
 #### Parameters
 
-| Type                       | Name                       | Description                                                                                                                                                                                |
-| -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre>boolean</code> | <code v-pre>enabled</code> | False puts playback back on the host, for a world that wants events and frame queries without opting in or recomputing and is small enough to pay a walk of every animation on every step. |
+| Type                       | Name                       | Description                                                                                                                                                                                                                                                                                                               |
+| -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | <code v-pre>enabled</code> | False puts playback back on the host, for a world that wants events and frame queries without opting in or recomputing and is small enough to pay a frame lookup and a Sprite write per playing animation on every step. A parked one costs the row it sits in and nothing more, so what a step costs is what is running. |
 
 <a id="tecs.animation.usesGPU"></a>
 

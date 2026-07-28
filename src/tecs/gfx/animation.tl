@@ -283,7 +283,9 @@ local record animation
     --- systems that installs, and worlds already carrying them keep them.
     --- @param enabled False puts playback back on the host, for a world that
     ---     wants events and frame queries without opting in or recomputing and
-    ---     is small enough to pay a walk of every animation on every step.
+    ---     is small enough to pay a frame lookup and a Sprite write per playing
+    ---     animation on every step. A parked one costs the row it sits in and
+    ---     nothing more, so what a step costs is what is running.
     useGPU: function(enabled: boolean)
 
     --- Whether playback resolves on the GPU.
@@ -554,6 +556,16 @@ local function advance(world: World, query: Query, dt: number)
         -- Sheets are few and neighbouring rows tend to share one.
         local cachedId = 0
         local cached: Sheet = nil
+        -- The layer the cached sheet's frames live on, resolved with the sheet
+        -- rather than per row. A frame is a region of an image and not a
+        -- region on its own, so a sheet bound to another image moves the quad's
+        -- layer as well as its UVs, and the layer is compared rather than
+        -- assumed to follow the frame index: a sheet swapped under an entity
+        -- can land on the index the last one left behind, and the quad would go
+        -- on sampling the old image with the new rect. An unbound sheet names
+        -- no image and answers -1, which writes the region alone and leaves
+        -- whatever the entity's Sprite already had.
+        local cachedSlot: number = -1
 
         for row = 1, length do
             local instance = animations[row]
@@ -561,126 +573,130 @@ local function advance(world: World, query: Query, dt: number)
             if sheetId ~= cachedId then
                 cached = sheet.byId(sheetId)
                 cachedId = sheetId
+                cachedSlot = cached ~= nil and cached._slot or -1
             end
             local source = cached
 
             if source ~= nil then
-                local tagId <const> = instance.tag as integer
-                local time = instance.time
-                local completed, looped = false, false
-                -- Whether time moved this step. Everything below the advance
-                -- turns on it, because a row whose time stood still shows the
-                -- frame it already showed.
-                local advanced = false
+                -- Three things can put a different picture on a row: its clock
+                -- running, its never having had a frame at all, and its sheet
+                -- having been bound to another image since the row was
+                -- written. A row that is none of the three shows what it
+                -- already shows, so the walk reads nothing further out of it
+                -- and everything below is skipped. Most sprites in a large
+                -- world are standing still at any moment, and this is what
+                -- keeps a step proportional to the ones that are not.
+                local running <const> = instance.playing and instance.speed > 0
+                -- The other two, which hold whatever the clock did.
+                local settle <const> = instance.frame == 0 or (cachedSlot >= 0 and sprites[row].slot ~= cachedSlot)
 
-                -- The cycle is the sum of the durations of the frames the tag
-                -- visits, which the sheet worked out when it was built: a
-                -- pingpong tag counts the frames it passes twice twice, and a
-                -- hold frame lengthens it by exactly its own duration. Read
-                -- inside the test rather than above it, so a row that is not
-                -- playing costs no table index to find that out.
-                local speed <const> = instance.speed
-                local cycle <const> = (instance.playing and speed > 0) and (source._cycle[tagId] or 0.0) or 0.0
+                if running or settle then
+                    local tagId <const> = instance.tag as integer
+                    local time = instance.time
+                    local completed, looped = false, false
+                    -- Whether time moved this step. Everything below the
+                    -- advance turns on it, because a row whose time stood still
+                    -- shows the frame it already showed.
+                    local advanced = false
 
-                if cycle > 0 then
-                    advanced = true
-                    if not marked then
-                        archetype:getMut(Animation)
-                        marked = true
-                    end
-                    -- A one-shot parks at the end of its cycle and stops, so
-                    -- finding one there and playing is something that set
-                    -- `playing` back to true. That reads as asking for the
-                    -- animation again, and it starts over: advancing from the
-                    -- end instead would park it again on this step and on every
-                    -- step after it, emitting Completed each time, forever.
-                    if not instance.loop and time >= cycle then
-                        time = 0.0
-                    end
-                    time = time + dt * speed
-                    if time >= cycle then
-                        if instance.loop then
-                            time = time % cycle
-                            looped = true
-                        else
-                            -- Parked one whole cycle in, which the lookup below
-                            -- reads as the last step. Holding the time rather
-                            -- than the index keeps one field the answer.
-                            time = cycle
-                            instance.playing = false
-                            completed = true
+                    -- The cycle is the sum of the durations of the frames the
+                    -- tag visits, which the sheet worked out when it was built:
+                    -- a pingpong tag counts the frames it passes twice twice,
+                    -- and a hold frame lengthens it by exactly its own
+                    -- duration. Read behind the test rather than ahead of it,
+                    -- so a row that is here for one of the other two reasons
+                    -- costs no table index to find that out.
+                    local cycle <const> = running and (source._cycle[tagId] or 0.0) or 0.0
+
+                    if cycle > 0 then
+                        advanced = true
+                        if not marked then
+                            archetype:getMut(Animation)
+                            marked = true
                         end
-                    end
-                    instance.time = time
-                end
-
-                -- A frame is a region of an image, not a region on its own, so
-                -- a sheet bound to another image moves the quad's layer as well
-                -- as its UVs. The layer is compared rather than assumed to
-                -- follow the frame index, because a sheet swapped under an
-                -- entity can land on the index the last one left behind and the
-                -- quad would go on sampling the old image with the new rect.
-                --
-                -- An unbound sheet names no image, so it writes the region
-                -- alone and leaves whatever the entity's Sprite already had.
-                local slot <const> = source._slot
-                -- Three things can put a different frame on a row: time
-                -- moving, the row never having had one, and the sheet having
-                -- been bound to another image since it was written. All three
-                -- are comparisons, where answering them the long way is a scan
-                -- of the tag's cycle and a handful of writes into the Sprite
-                -- column. Most sprites in a large world are standing still at
-                -- any moment, and this is what stops them costing what a
-                -- playing one does.
-                if advanced or instance.frame == 0 or (slot >= 0 and sprites[row].slot ~= slot) then
-                    local frame <const> = source:frameAt(tagId, time)
-                    local target <const> = sprites[row]
-                    local changed <const> = frame ~= instance.frame
-                    if changed or (slot >= 0 and target.slot ~= slot) then
-                        if changed then
-                            if not marked then
-                                archetype:getMut(Animation)
-                                marked = true
+                        -- A one-shot parks at the end of its cycle and stops,
+                        -- so finding one there and playing is something that
+                        -- set `playing` back to true. That reads as asking for
+                        -- the animation again, and it starts over: advancing
+                        -- from the end instead would park it again on this step
+                        -- and on every step after it, emitting Completed each
+                        -- time, forever.
+                        if not instance.loop and time >= cycle then
+                            time = 0.0
+                        end
+                        time = time + dt * instance.speed
+                        if time >= cycle then
+                            if instance.loop then
+                                time = time % cycle
+                                looped = true
+                            else
+                                -- Parked one whole cycle in, which the lookup
+                                -- below reads as the last step. Holding the
+                                -- time rather than the index keeps one field
+                                -- the answer.
+                                time = cycle
+                                instance.playing = false
+                                completed = true
                             end
-                            instance.frame = frame
                         end
-                        if not wrote then
-                            archetype:getMut(Sprite)
-                            wrote = true
-                        end
-                        local base <const> = (frame - 1) * 4
-                        local uvs <const> = source._uvs
-                        target.u0 = uvs[base + 1]
-                        target.v0 = uvs[base + 2]
-                        target.u1 = uvs[base + 3]
-                        target.v1 = uvs[base + 4]
-                        if slot >= 0 then
-                            target.image = source._image
-                            target.slot = slot
-                        end
+                        instance.time = time
                     end
 
-                    -- A slice bound to another sheet is left where it is: the
-                    -- frame index counts through this sheet's frames and means
-                    -- nothing in another's, so resolving there would move the
-                    -- pivot to whatever that index happened to name.
-                    if pivots ~= nil and changed then
-                        local pivot <const> = pivots[row]
-                        local slice <const> = pivot.slice as integer
-                        if slice > 0 and pivot.sheet as integer == sheetId then
-                            if not moved then
-                                archetype:getMut(Pivot)
-                                moved = true
+                    -- A running row still has to have moved, which a tag whose
+                    -- frames are held for no time at all leaves it not having
+                    -- done. Looking the frame up is a scan of the cycle, so it
+                    -- is worth the test rather than worth the answer.
+                    if advanced or settle then
+                        local frame <const> = source:frameAt(tagId, time)
+                        local target <const> = sprites[row]
+                        local changed <const> = frame ~= instance.frame
+                        if changed or (cachedSlot >= 0 and target.slot ~= cachedSlot) then
+                            if changed then
+                                if not marked then
+                                    archetype:getMut(Animation)
+                                    marked = true
+                                end
+                                instance.frame = frame
                             end
-                            pivot.x, pivot.y = source:pivotOf(slice, frame)
+                            if not wrote then
+                                archetype:getMut(Sprite)
+                                wrote = true
+                            end
+                            local base <const> = (frame - 1) * 4
+                            local uvs <const> = source._uvs
+                            target.u0 = uvs[base + 1]
+                            target.v0 = uvs[base + 2]
+                            target.u1 = uvs[base + 3]
+                            target.v1 = uvs[base + 4]
+                            if cachedSlot >= 0 then
+                                target.image = source._image
+                                target.slot = cachedSlot
+                            end
+                        end
+
+                        -- A slice bound to another sheet is left where it is:
+                        -- the frame index counts through this sheet's frames
+                        -- and means nothing in another's, so resolving there
+                        -- would move the pivot to whatever that index happened
+                        -- to name.
+                        if pivots ~= nil and changed then
+                            local pivot <const> = pivots[row]
+                            local slice <const> = pivot.slice as integer
+                            if slice > 0 and pivot.sheet as integer == sheetId then
+                                if not moved then
+                                    archetype:getMut(Pivot)
+                                    moved = true
+                                end
+                                pivot.x, pivot.y = source:pivotOf(slice, frame)
+                            end
                         end
                     end
-                end
 
-                if completed and wantsCompleted then
-                    world:emit(0, animation.Completed, entities[row], source, source:tagName(tagId))
-                elseif looped and wantsLooped then
-                    world:emit(0, animation.Looped, entities[row], source, source:tagName(tagId))
+                    if completed and wantsCompleted then
+                        world:emit(0, animation.Completed, entities[row], source, source:tagName(tagId))
+                    elseif looped and wantsLooped then
+                        world:emit(0, animation.Looped, entities[row], source, source:tagName(tagId))
+                    end
                 end
             end
         end

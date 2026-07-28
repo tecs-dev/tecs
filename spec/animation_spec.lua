@@ -1441,6 +1441,26 @@ describe("tecs.gfx.animation", function()
             end)
         end)
 
+        it("looks up no frame for a row held by its speed", function()
+            withPlayback(false, function()
+                -- A speed of zero holds the frame and leaves `playing` alone,
+                -- which is the second way a row stands still. It has to cost
+                -- what the first one costs or half a parked crowd is charged
+                -- for a scan of the cycle it is not moving through.
+                local world = animatedWorld()
+                local s = stripSheet()
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+
+                world:update(STEP)
+                world:getMut(entity, Animation).speed = 0.0
+
+                local counted = countLookups(s)
+                drive(world, 10)
+
+                assert.equal(0, counted.frames, "a held sprite shows the frame it already has")
+            end)
+        end)
+
         it("looks no frame up at all once playback is on the GPU", function()
             withPlayback(true, function()
                 -- The whole cost this removes: a scene of animations asks the
@@ -1833,6 +1853,30 @@ describe("tecs.gfx.animation", function()
                 local sprite = world:get(entity, Sprite)
                 assert.equal(1, world:get(entity, Animation).frame, "the frame index is the one it already had")
                 assert.equal(5, sprite.slot, "and the layer moved anyway")
+                assert.equal(9, sprite.image)
+            end)
+        end)
+
+        it("follows a sheet rebound under a sprite that is not playing", function()
+            withPlayback(false, function()
+                -- The case a walk that skipped every parked row would swallow.
+                -- Rebinding is what a reloaded image does, and an entity
+                -- standing still through it has to end up pointed at the layer
+                -- the image landed on rather than at the one it left.
+                local world = animatedWorld()
+                local s = stripSheet()
+                s:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+
+                world:spawn(s:sprite(1), animation.of(s, "run", { playing = false }))
+                local entity = world:spawn(s:sprite(1), animation.of(s, "run", { playing = false }))
+                drive(world, 3)
+                assert.equal(2, world:get(entity, Sprite).slot)
+
+                s:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+                drive(world, 1)
+
+                local sprite = world:get(entity, Sprite)
+                assert.equal(5, sprite.slot, "the layer moved without the clock moving")
                 assert.equal(9, sprite.image)
             end)
         end)
