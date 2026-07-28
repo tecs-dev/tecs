@@ -738,7 +738,7 @@ describe("Application", function()
     -- what the methods do, which is reachable in process.
     describe("the platform lifecycle", function()
         local function removeCheckpoint()
-            local path = paths.writable(CHECKPOINT)
+            local path = paths.writablePath(CHECKPOINT)
             filesystem.remove(path)
             filesystem.remove(path .. ".new")
         end
@@ -852,7 +852,7 @@ describe("Application", function()
     -- part into exactly the callback that cannot afford it.
     describe("the checkpoint", function()
         local function removeCheckpoint()
-            local path = paths.writable(CHECKPOINT)
+            local path = paths.writablePath(CHECKPOINT)
             filesystem.remove(path)
             filesystem.remove(path .. ".new")
         end
@@ -869,7 +869,7 @@ describe("Application", function()
 
             -- Nothing is written until the platform asks, because the frame
             -- that prepared it is not the moment there is a deadline.
-            assert.is_false(filesystem.exists(paths.writable(CHECKPOINT)))
+            assert.is_false(filesystem.exists(paths.writablePath(CHECKPOINT)))
 
             app:_willEnterBackground()
             assert.are.equal("level=3;hp=41", app:readCheckpoint())
@@ -903,7 +903,7 @@ describe("Application", function()
 
             assert.are.equal(4096, #app:readCheckpoint())
             assert.is_false(
-                filesystem.exists(paths.writable(CHECKPOINT) .. ".new"),
+                filesystem.exists(paths.writablePath(CHECKPOINT) .. ".new"),
                 "the file the write goes through was left on disk"
             )
             app:_shutdown()
@@ -918,7 +918,7 @@ describe("Application", function()
 
             app:stageCheckpoint("first")
             app:_willEnterBackground()
-            filesystem.remove(paths.writable(CHECKPOINT))
+            filesystem.remove(paths.writablePath(CHECKPOINT))
 
             app:_willEnterBackground()
             assert.is_nil(app:readCheckpoint(), "a backgrounding with nothing staged wrote again")
@@ -989,7 +989,7 @@ describe("Application", function()
             assert.is_true(app:_init())
             assert.is_truthy(log.filePath():find("spec-named.jsonl", 1, true))
             app:_shutdown()
-            filesystem.remove(paths.writable("spec-named.jsonl"))
+            filesystem.remove(paths.writablePath("spec-named.jsonl"))
         end)
 
         it("sets the log level before anything has had a chance to speak", function()

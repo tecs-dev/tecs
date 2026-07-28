@@ -178,8 +178,8 @@ mcp.register({
             packagedShaders = caps.packagedShaders,
             shaderFormats = caps.shaderFormats,
             cores = caps.cores,
-            assets = paths.assets(),
-            writable = paths.pref(),
+            assets = paths.assetRoot(),
+            writable = paths.preferencePath(),
             logFile = log.filePath() or data.null,
             loggers = log.loggers(),
         }
@@ -279,7 +279,7 @@ mcp.register({
         local width, height = texture.width, texture.height
 
         local name = (args.name as string) or "screenshot.png"
-        local path = paths.writable(name)
+        local path = paths.writablePath(name)
         local saved, reason = activeRenderer:saveScreenshot(path)
         if not saved then
             error(reason, 0)

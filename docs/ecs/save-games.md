@@ -301,9 +301,9 @@ It accepts the same [options](#snapshotoptions) as a binary save minus `buffer` 
 JSON-friendly, so `tecs.data` gives you a human-readable save:
 
 ```teal
-tecs.filesystem.write(tecs.paths.writable("save.json"), tecs.data.encodeJSON(snap))
+tecs.filesystem.write(tecs.filesystem.writablePath("save.json"), tecs.data.encodeJSON(snap))
 
-local payload = tecs.filesystem.read(tecs.paths.writable("save.json"))
+local payload = tecs.filesystem.read(tecs.filesystem.writablePath("save.json"))
 world:loadSnapshot(tecs.data.decodeJSON(payload))
 ```
 
@@ -408,17 +408,17 @@ disk is yours to choose.
 The shortest path. `opts.path` writes the bytes and still returns the tagged result:
 
 ```teal
-world:saveSnapshot({path = tecs.paths.writable("save.bin")})
+world:saveSnapshot({path = tecs.filesystem.writablePath("save.bin")})
 ```
 
 ### Through the platform filesystem
 
-`tecs.paths.writable` resolves against the only directory a build may write to, and `tecs.filesystem` reads and
+`tecs.filesystem.writablePath` resolves against the only directory a build may write to, and `tecs.filesystem` reads and
 writes bytes through the platform rather than stdio, which is what reaches content on targets where stdio does
 not.
 
 ```teal
-local path = tecs.paths.writable("save.bin")
+local path = tecs.filesystem.writablePath("save.bin")
 
 -- Save
 local buf = world:saveSnapshot().buffer

@@ -3,9 +3,9 @@ description: "Polling the files this process loaded so an edit drives a reload, 
 outline: deep
 ---
 
-# tecs.watch
+# tecs.filesystem.watch
 
-`tecs.watch` notices that a content file changed, so a reload can be driven by the edit rather than by an agent
+`tecs.filesystem.watch` notices that a content file changed, so a reload can be driven by the edit rather than by an agent
 that remembers to ask.
 
 SDL has no change notification, so a portable watcher is a poll, and going native for one would mean three
@@ -68,8 +68,8 @@ since the process opened it. Raises when `available` is false.
 **Example:**
 
 ```teal
-if tecs.watch.available() then
-    tecs.watch.install({ interval = 0.25 })
+if tecs.filesystem.watch.available() then
+    tecs.filesystem.watch.install({ interval = 0.25 })
 end
 ```
 
@@ -128,10 +128,14 @@ half that decides what a glyph is, so they are the half with a font's rules over
 A handler runs guarded: a raise is logged rather than propagated, on the grounds that a handler which raised has
 said the file is not usable, which is the same answer as waiting for the next save.
 
+It logs under `tecs.watch`, not `tecs.filesystem.watch`. A logger name is what `SDL_SetLogPriority` filters on,
+so it is configuration a developer typed into a shell rather than a name this tree can rename in a commit, and
+it did not follow the module when the module moved.
+
 **Example:**
 
 ```teal
-tecs.watch.on("document", function(change: tecs.watch.Change)
+tecs.filesystem.watch.on("document", function(change: tecs.filesystem.watch.Change)
     if change.path:match("%.json$") ~= nil then reloadLevel(change.path) end
 end)
 ```
@@ -220,26 +224,26 @@ function watch.dispatched(): integer
 
 Every function and type this module carries, rendered from `src/tecs/platform/watch.tl`.
 
-<a id="tecs.watch.Change"></a>
+<a id="tecs.filesystem.watch.Change"></a>
 
-### tecs.watch.Change
+### tecs.filesystem.watch.Change
 
-<pre><code v-pre>record <a href="#tecs.watch.Change">tecs.watch.Change</a>
+<pre><code v-pre>record <a href="#tecs.filesystem.watch.Change">tecs.filesystem.watch.Change</a>
 </code></pre>
 
 What a handler is told about.
-<a id="tecs.watch.Change.path"></a>
+<a id="tecs.filesystem.watch.Change.path"></a>
 
-### tecs.watch.Change.path
+### tecs.filesystem.watch.Change.path
 
-<pre><code v-pre><a href="#tecs.watch.Change.path">tecs.watch.Change.path</a>: string
+<pre><code v-pre><a href="#tecs.filesystem.watch.Change.path">tecs.filesystem.watch.Change.path</a>: string
 </code></pre>
 
-<a id="tecs.watch.Change.kind"></a>
+<a id="tecs.filesystem.watch.Change.kind"></a>
 
-### tecs.watch.Change.kind
+### tecs.filesystem.watch.Change.kind
 
-<pre><code v-pre><a href="#tecs.watch.Change.kind">tecs.watch.Change.kind</a>: string
+<pre><code v-pre><a href="#tecs.filesystem.watch.Change.kind">tecs.filesystem.watch.Change.kind</a>: string
 </code></pre>
 
 "image", "sound", "font", "shader" or "document".
@@ -249,54 +253,54 @@ image, was loaded as one, and reloads as one: its texels are
 replaced under the rect they already occupy and no glyph has to be
 told. The metrics are the half that decides what a glyph is, so they
 are the half with a font's rules over them.
-<a id="tecs.watch.Config"></a>
+<a id="tecs.filesystem.watch.Config"></a>
 
-### tecs.watch.Config
+### tecs.filesystem.watch.Config
 
-<pre><code v-pre>record <a href="#tecs.watch.Config">tecs.watch.Config</a>
+<pre><code v-pre>record <a href="#tecs.filesystem.watch.Config">tecs.filesystem.watch.Config</a>
 </code></pre>
 
-<a id="tecs.watch.Config.interval"></a>
+<a id="tecs.filesystem.watch.Config.interval"></a>
 
-### tecs.watch.Config.interval
+### tecs.filesystem.watch.Config.interval
 
-<pre><code v-pre><a href="#tecs.watch.Config.interval">tecs.watch.Config.interval</a>: number
+<pre><code v-pre><a href="#tecs.filesystem.watch.Config.interval">tecs.filesystem.watch.Config.interval</a>: number
 </code></pre>
 
 Seconds between polls. Defaults to 0.5.
-<a id="tecs.watch.Config.settle"></a>
+<a id="tecs.filesystem.watch.Config.settle"></a>
 
-### tecs.watch.Config.settle
+### tecs.filesystem.watch.Config.settle
 
-<pre><code v-pre><a href="#tecs.watch.Config.settle">tecs.watch.Config.settle</a>: integer
+<pre><code v-pre><a href="#tecs.filesystem.watch.Config.settle">tecs.filesystem.watch.Config.settle</a>: integer
 </code></pre>
 
 Polls a change must repeat before it is dispatched. Defaults to 1,
 so a change is seen twice. Zero dispatches the first time a file
 reads differently, which is what a test that writes whole files
 wants and what an editor that truncates will trip over.
-<a id="tecs.watch.Config.root"></a>
+<a id="tecs.filesystem.watch.Config.root"></a>
 
-### tecs.watch.Config.root
+### tecs.filesystem.watch.Config.root
 
-<pre><code v-pre><a href="#tecs.watch.Config.root">tecs.watch.Config.root</a>: string
+<pre><code v-pre><a href="#tecs.filesystem.watch.Config.root">tecs.filesystem.watch.Config.root</a>: string
 </code></pre>
 
 Only paths under this prefix are watched. Defaults to the content
 root, so a file the engine read from somewhere else is not content
 and is left alone.
-<a id="tecs.watch.Handler"></a>
+<a id="tecs.filesystem.watch.Handler"></a>
 
-### tecs.watch.Handler
+### tecs.filesystem.watch.Handler
 
-<pre><code v-pre>type <a href="#tecs.watch.Handler">tecs.watch.Handler</a> = function(<a href="#tecs.watch.Change">Change</a>)
+<pre><code v-pre>type <a href="#tecs.filesystem.watch.Handler">tecs.filesystem.watch.Handler</a> = function(<a href="#tecs.filesystem.watch.Change">Change</a>)
 </code></pre>
 
-<a id="tecs.watch.available"></a>
+<a id="tecs.filesystem.watch.available"></a>
 
-### tecs.watch.available
+### tecs.filesystem.watch.available
 
-<pre><code v-pre>function <a href="#tecs.watch.available">tecs.watch.available</a>(): boolean
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.available">tecs.filesystem.watch.available</a>(): boolean
 </code></pre>
 
 Whether the watcher can run on this build.
@@ -310,11 +314,11 @@ development build, and it is the same bit `reload_shaders` refuses on.
 | -------------------------- | ----------- |
 | <code v-pre>boolean</code> |             |
 
-<a id="tecs.watch.dispatched"></a>
+<a id="tecs.filesystem.watch.dispatched"></a>
 
-### tecs.watch.dispatched
+### tecs.filesystem.watch.dispatched
 
-<pre><code v-pre>function <a href="#tecs.watch.dispatched">tecs.watch.dispatched</a>(): integer
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.dispatched">tecs.filesystem.watch.dispatched</a>(): integer
 </code></pre>
 
 Changes dispatched since `install`.
@@ -325,11 +329,11 @@ Changes dispatched since `install`.
 | -------------------------- | ----------- |
 | <code v-pre>integer</code> |             |
 
-<a id="tecs.watch.install"></a>
+<a id="tecs.filesystem.watch.install"></a>
 
-### tecs.watch.install
+### tecs.filesystem.watch.install
 
-<pre><code v-pre>function <a href="#tecs.watch.install">tecs.watch.install</a>(config: watch.Config)
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.install">tecs.filesystem.watch.install</a>(config: watch.Config)
 </code></pre>
 
 Starts watching, and refuses on a build that should not.
@@ -343,11 +347,11 @@ for a file that has not changed since the process opened it.
 | ------------------------------- | ------------------------- | ----------- |
 | <code v-pre>watch.Config</code> | <code v-pre>config</code> |             |
 
-<a id="tecs.watch.installed"></a>
+<a id="tecs.filesystem.watch.installed"></a>
 
-### tecs.watch.installed
+### tecs.filesystem.watch.installed
 
-<pre><code v-pre>function <a href="#tecs.watch.installed">tecs.watch.installed</a>(): boolean
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.installed">tecs.filesystem.watch.installed</a>(): boolean
 </code></pre>
 
 Whether the watcher is running.
@@ -358,11 +362,11 @@ Whether the watcher is running.
 | -------------------------- | ----------- |
 | <code v-pre>boolean</code> |             |
 
-<a id="tecs.watch.kinds"></a>
+<a id="tecs.filesystem.watch.kinds"></a>
 
-### tecs.watch.kinds
+### tecs.filesystem.watch.kinds
 
-<pre><code v-pre>function <a href="#tecs.watch.kinds">tecs.watch.kinds</a>(): {string}
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.kinds">tecs.filesystem.watch.kinds</a>(): {string}
 </code></pre>
 
 Kinds something is registered to reload, sorted.
@@ -373,11 +377,11 @@ Kinds something is registered to reload, sorted.
 | --------------------------- | ----------- |
 | <code v-pre>{string}</code> |             |
 
-<a id="tecs.watch.on"></a>
+<a id="tecs.filesystem.watch.on"></a>
 
-### tecs.watch.on
+### tecs.filesystem.watch.on
 
-<pre><code v-pre>function <a href="#tecs.watch.on">tecs.watch.on</a>(kind: string, handler: watch.Handler)
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.on">tecs.filesystem.watch.on</a>(kind: string, handler: watch.Handler)
 </code></pre>
 
 Registers what reloads a kind. Re-registering a kind replaces it, and nil
@@ -394,11 +398,11 @@ each kind, the way it already hands the shader tool its pipeline rebuild.
 | <code v-pre>string</code>        | <code v-pre>kind</code>    |             |
 | <code v-pre>watch.Handler</code> | <code v-pre>handler</code> |             |
 
-<a id="tecs.watch.poll"></a>
+<a id="tecs.filesystem.watch.poll"></a>
 
-### tecs.watch.poll
+### tecs.filesystem.watch.poll
 
-<pre><code v-pre>function <a href="#tecs.watch.poll">tecs.watch.poll</a>(): integer
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.poll">tecs.filesystem.watch.poll</a>(): integer
 </code></pre>
 
 Scans if the interval has elapsed. Call once per iteration.
@@ -412,11 +416,11 @@ this can sit in the loop unconditionally.
 | -------------------------- | --------------------------------- |
 | <code v-pre>integer</code> | How many changes were dispatched. |
 
-<a id="tecs.watch.scan"></a>
+<a id="tecs.filesystem.watch.scan"></a>
 
-### tecs.watch.scan
+### tecs.filesystem.watch.scan
 
-<pre><code v-pre>function <a href="#tecs.watch.scan">tecs.watch.scan</a>(): integer
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.scan">tecs.filesystem.watch.scan</a>(): integer
 </code></pre>
 
 Looks at every watched path once, whatever the interval says.
@@ -431,11 +435,11 @@ half-written file is asserted on without sleeping.
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>integer</code> | How many changes were dispatched, which is handlers run rather than paths looked at. Zero while nothing is being watched. |
 
-<a id="tecs.watch.uninstall"></a>
+<a id="tecs.filesystem.watch.uninstall"></a>
 
-### tecs.watch.uninstall
+### tecs.filesystem.watch.uninstall
 
-<pre><code v-pre>function <a href="#tecs.watch.uninstall">tecs.watch.uninstall</a>()
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.uninstall">tecs.filesystem.watch.uninstall</a>()
 </code></pre>
 
 Stops watching and forgets every path's state.
@@ -443,11 +447,11 @@ Stops watching and forgets every path's state.
 The handlers stay registered. What a kind reloads is a property of the
 build rather than of whether anything is watching right now, and a game
 that turns the watcher off and on again means the second thing.
-<a id="tecs.watch.unsettled"></a>
+<a id="tecs.filesystem.watch.unsettled"></a>
 
-### tecs.watch.unsettled
+### tecs.filesystem.watch.unsettled
 
-<pre><code v-pre>function <a href="#tecs.watch.unsettled">tecs.watch.unsettled</a>(): {string}
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.unsettled">tecs.filesystem.watch.unsettled</a>(): {string}
 </code></pre>
 
 Paths that have changed and have not settled yet, sorted.
@@ -461,11 +465,11 @@ show that a truncated write was seen and not acted on.
 | --------------------------- | ----------- |
 | <code v-pre>{string}</code> |             |
 
-<a id="tecs.watch.watching"></a>
+<a id="tecs.filesystem.watch.watching"></a>
 
-### tecs.watch.watching
+### tecs.filesystem.watch.watching
 
-<pre><code v-pre>function <a href="#tecs.watch.watching">tecs.watch.watching</a>(): {string}
+<pre><code v-pre>function <a href="#tecs.filesystem.watch.watching">tecs.filesystem.watch.watching</a>(): {string}
 </code></pre>
 
 Every path being watched, sorted.

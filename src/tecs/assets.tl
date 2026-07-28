@@ -38,10 +38,10 @@
 --- Reading a document is therefore two halves with nothing between them:
 ---
 ---     local tecs <const> = require("tecs")
----     local bytes <const> = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
+---     local bytes <const> = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
 ---     local level <const> = tecs.data.decodeJSON(bytes)
 ---
---- `paths.asset` resolves against the content root and `read` answers nil for
+--- `paths.assetPath` resolves against the content root and `read` answers nil for
 --- a path with no file, so a game distinguishes an absent document from a
 --- malformed one, which the decoder raises on. A parser for a binary format
 --- sits in exactly that second position, over the same bytes.

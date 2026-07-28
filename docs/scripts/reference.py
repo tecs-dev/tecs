@@ -88,7 +88,14 @@ MODULES = [
         ],
     ),
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
-    ("docs/modules/filesystem.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
+    (
+        "docs/modules/filesystem/index.md",
+        [
+            ("src/tecs/platform/paths.tl", "tecs.filesystem"),
+            ("src/tecs/platform/filesystem.tl", "tecs.filesystem"),
+        ],
+    ),
+    ("docs/modules/filesystem/watch.md", [("src/tecs/platform/watch.tl", "tecs.filesystem.watch")]),
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
     ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),
     (
@@ -104,14 +111,12 @@ MODULES = [
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
     ("docs/modules/net.md", [("src/tecs/net.tl", "tecs.net")]),
     ("docs/modules/particles.md", [("src/tecs/gfx/particles.tl", "tecs.particles")]),
-    ("docs/modules/paths.md", [("src/tecs/platform/paths.tl", "tecs.paths")]),
     ("docs/modules/proc.md", [("src/tecs/platform/proc.tl", "tecs.proc")]),
     ("docs/modules/renderer.md", [("src/tecs/Renderer.tl", "tecs.renderer.Renderer")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/text.md", [("src/tecs/gfx/text.tl", "tecs.text")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),
-    ("docs/modules/watch.md", [("src/tecs/platform/watch.tl", "tecs.watch")]),
     ("docs/modules/window.md", [("src/tecs/platform/Window.tl", "tecs.window.Window")]),
     ("docs/modules/workers.md", [("src/tecs/workers.tl", "tecs.workers")]),
 ]

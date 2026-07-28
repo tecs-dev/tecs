@@ -167,7 +167,7 @@ local built = false
 
 local function searchRoots(): {string}
     if roots == nil then
-        roots = {paths.asset("materials/")}
+        roots = {paths.assetPath("materials/")}
     end
     return roots
 end

@@ -59,7 +59,7 @@ local record capabilities
     --- Logical cores, for sizing a worker pool.
     cores: integer
 
-    --- Always true. Every target has somewhere to write, and `paths.pref` is
+    --- Always true. Every target has somewhere to write, and `paths.preferencePath` is
     --- where: the field exists so a caller can ask rather than assume, not
     --- because a target answers no.
     writableStorage: boolean

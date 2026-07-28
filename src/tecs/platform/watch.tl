@@ -206,7 +206,7 @@ function watch.install(config?: watch.Config)
     if settleCount < 0 then
         error("tecs: settle counts polls, so it cannot be negative", 2)
     end
-    root = given.root or paths.assets()
+    root = given.root or paths.assetRoot()
     entries = {}
     running = true
     dispatched = 0

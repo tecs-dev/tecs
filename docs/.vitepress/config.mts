@@ -85,7 +85,7 @@ export default defineConfig({
             // know where things are.
             //
             // Alphabetical ignoring case, and spelled the way a game writes it.
-            // A reader looking for `tecs.watch` scans for that string; a
+            // A reader looking for `tecs.filesystem.watch` scans for that string; a
             // thematic grouping makes them guess which of four headings
             // somebody filed it under first, and a collapsed group hides the
             // name entirely until they guess right.
@@ -116,7 +116,14 @@ export default defineConfig({
                     { text: "tecs.components", link: "/modules/components" },
                     { text: "tecs.data", link: "/modules/data" },
                     { text: "tecs.events", link: "/modules/events" },
-                    { text: "tecs.filesystem", link: "/modules/filesystem" },
+                    {
+                        text: "tecs.filesystem",
+                        collapsed: false,
+                        items: [
+                            { text: "Overview", link: "/modules/filesystem/" },
+                            { text: "tecs.filesystem.watch", link: "/modules/filesystem/watch" },
+                        ],
+                    },
                     { text: "tecs.future", link: "/modules/future" },
                     {
                         text: "tecs.gfx",
@@ -133,7 +140,6 @@ export default defineConfig({
                     { text: "tecs.mcp", link: "/modules/mcp" },
                     { text: "tecs.net", link: "/modules/net" },
                     { text: "tecs.particles", link: "/modules/particles" },
-                    { text: "tecs.paths", link: "/modules/paths" },
                     { text: "tecs.physics", link: "/modules/physics" },
                     { text: "tecs.proc", link: "/modules/proc" },
                     { text: "tecs.renderer", link: "/modules/renderer" },
@@ -141,7 +147,6 @@ export default defineConfig({
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.text", link: "/modules/text" },
                     { text: "tecs.time", link: "/modules/time" },
-                    { text: "tecs.watch", link: "/modules/watch" },
                     { text: "tecs.window", link: "/modules/window" },
                     { text: "tecs.workers", link: "/modules/workers" },
                 ],

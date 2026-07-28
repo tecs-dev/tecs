@@ -568,20 +568,20 @@ function Application:_init(): boolean
         logFile = "log.jsonl"
     end
     if logFile ~= nil then
-        log.openFile(paths.writable(logFile))
+        log.openFile(paths.writablePath(logFile))
     end
 
     -- Resolved before the game's plugin runs, so a game can read what the last
     -- run left while it is building the world it is going to put back.
     if config.checkpoint ~= nil then
-        self._checkpointPath = paths.writable(config.checkpoint)
+        self._checkpointPath = paths.writablePath(config.checkpoint)
     end
 
     -- Before the device, because the pack decides which shader format the
     -- device may claim, and that decides which backend SDL selects. The name
     -- is fixed rather than configurable: the build produces the pack and the
     -- engine finds it, and there is no version of that a game decides.
-    local packPath = paths.asset("shaders.tsp")
+    local packPath = paths.assetPath("shaders.tsp")
     local pack = shaderpack.read(packPath)
     if pack ~= nil then
         shadercompiler.usePack(pack)

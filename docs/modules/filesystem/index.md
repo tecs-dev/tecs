@@ -1,17 +1,178 @@
 ---
-description: "Reading, writing, listing, creating, removing, renaming and copying paths, with failure as a value rather than a raise"
+description: "Where a game may read and write, what to do with a path once you have one, and the watcher that reports when a file changed"
 outline: deep
 ---
 
 # tecs.filesystem
 
-[`tecs.paths`](/modules/paths) answers _where_; `tecs.filesystem` answers _what to do once you have one_. It
-reads and writes whole files, asks what is at a path, walks a directory, and creates, removes, renames and copies
-paths.
+`tecs.filesystem` answers both halves of touching a file: where it is, and what to do with it once you have
+the path. `assetPath` and `writablePath` resolve against the two roots a build is allowed to use; `read`,
+`write`, `glob`, `copy` and the rest act on whatever path they are handed.
 
-There is deliberately no second way to resolve a path here. Every function takes the string the platform takes,
-so `paths.writable("slot1")`, a path a user typed and an absolute path from somewhere else all work, and none of
-them is rewritten on the way through. No virtual filesystem, no mount table, no invented scheme.
+They were two modules and are one, because they were never two questions. Every path a game touches is
+resolved and then acted on in the same breath, and a caller holding one half had to name the other module to
+do anything with it.
+
+There is still deliberately no second way to resolve a path. Every operation takes the string the platform
+takes, so a path from `assetPath`, a path a user typed and an absolute path from somewhere else all work, and
+none of them is rewritten on the way through. No virtual filesystem, no mount table, no invented scheme.
+
+## What is under it
+
+| Module                                               | What it is                                      |
+| ---------------------------------------------------- | ----------------------------------------------- |
+| [`tecs.filesystem.watch`](/modules/filesystem/watch) | polling for changed files, and dispatching them |
+
+Watching is below rather than beside because it is a running poller with a lifecycle of its own rather than a
+call that answers, and its vocabulary, an interval, a settle count and a set of kinds, means nothing to the
+rest of this. It resolves the first time it is read, so a program that never watches never loads it.
+
+`tecs.filesystem` answers _where_: the directory the executable was loaded from, the one writable directory this
+application owns, and the root content is read from. [`filesystem`](/modules/filesystem) answers _what to do once
+you have one_.
+
+It is never the process working directory. On desktop that happens to work when a build is launched from a
+project root and breaks the moment someone double-clicks it; on mobile there is no meaningful working directory
+at all, and writing next to the executable is not permitted. So the platform is asked instead, through the
+adapter seam a licensed port replaces. Assets sit beside the executable, or wherever the bundle put them;
+writable state goes where the platform keeps it for this application and nowhere else.
+
+Every root is cached, and the cache is keyed on the platform generation, so installing a platform drops it
+without anyone calling `reset`.
+
+## Where a path comes from
+
+Two roots, and a build may use exactly them. Content is read from one and state is written to the other, and
+neither is the process working directory: on desktop that happens to work when launched from a project root and
+breaks the moment someone double-clicks, and on mobile there is no meaningful working directory at all.
+
+### Naming the writable directory
+
+| Field          | Type     | Default  | Description                                                               |
+| -------------- | -------- | -------- | ------------------------------------------------------------------------- |
+| `organisation` | `string` | `"tecs"` | Organisation name the platform uses to build the writable directory path. |
+| `application`  | `string` | `"tecs"` | Application name, used the same way.                                      |
+
+Set both before anything asks for `pref`, since the answer is cached from the first call.
+
+```teal
+tecs.filesystem.organisation = "Ex Nihilo"
+tecs.filesystem.application = "Starfarer"
+```
+
+### The roots a path is resolved against
+
+#### basePath
+
+The directory the executable was loaded from, with a trailing separator.
+
+```teal
+function filesystem.basePath(): string
+```
+
+**Returns:** the directory, or an empty string when the platform declines to say. Empty is a real answer on some
+targets rather than an error, and callers fall back to a relative path.
+
+#### preferencePath
+
+The writable directory for this application, created if absent.
+
+```teal
+function filesystem.preferencePath(): string
+```
+
+**Returns:** the directory, with a trailing separator. Named from `organisation` and `application`.
+
+::: warning The only place a build may write
+Everything else is read-only on at least one target, and finding that out at run time on a device is expensive.
+[`filesystem.userFolder`](/modules/filesystem#userfolder) answers where a platform's documents or screenshots
+live, and none of those is a place a build may write.
+:::
+
+#### assetRoot
+
+The root the engine reads content from.
+
+```teal
+function filesystem.assetRoot(): string
+```
+
+**Returns:** the root, with a trailing separator.
+
+Three sources, in order:
+
+1. The `TECS_ASSETS` environment variable, when it is set and not empty. That is how a development run reads
+   straight out of a build tree instead of a staged copy.
+2. What the host was told at build time, since the build knows the layout it installed and this is not something
+   to sniff for.
+3. `filesystem.basePath()`, which is where a single-directory build puts everything.
+
+### Resolving against a root
+
+#### assetPath
+
+Resolves `relative` against the asset root.
+
+```teal
+function filesystem.assetPath(relative: string): string
+```
+
+**Parameters:**
+
+- `relative`: a path below the content root.
+
+**Returns:** `filesystem.assetRoot() .. relative`. Plain concatenation: there is no virtual filesystem and no invented
+scheme, which is what lets a port hand out roots of its own.
+
+#### writablePath
+
+Resolves `relative` against the writable root.
+
+```teal
+function filesystem.writablePath(relative: string): string
+```
+
+**Example:**
+
+```teal
+local save <const> = tecs.filesystem.writablePath("slot1.json")
+tecs.filesystem.write(save, tecs.data.encodeJSON(state))
+
+local sheet <const> = tecs.filesystem.assetPath("sprites/hero.png")
+```
+
+### Cache control
+
+#### resetPaths
+
+Forgets the cached roots.
+
+```teal
+function filesystem.resetPaths()
+```
+
+A platform change is noticed without this, so it is for a test or a tool that changed the environment underneath
+a running process.
+
+#### setAssetRoot
+
+Overrides the asset root, for a test or a tool.
+
+```teal
+function filesystem.setAssetRoot(root: string)
+```
+
+**Parameters:**
+
+- `root`: the directory to read content from. A trailing separator is added when it is missing.
+
+Synchronises with the platform generation first, so the override outlives a platform change that may have
+preceded it rather than being dropped by the next read.
+
+## Doing something with a path
+
+The other half reads and writes whole files, asks what is at a path, walks a directory, and creates, removes,
+renames and copies paths.
 
 Nothing here reaches the operating system directly: every function delegates to the storage backend the installed
 platform supplies, which is SDL's unless a port replaced it. What stays in this module is what a port should not
@@ -19,12 +180,12 @@ have to write again, which is the argument checks, the record of what has been o
 that are one backend call answered differently.
 
 ```teal
-local save <const> = tecs.paths.writable("slot1.json")
+local save <const> = tecs.filesystem.writablePath("slot1.json")
 tecs.filesystem.write(save, tecs.data.encodeJSON(state))
 local bytes <const> = tecs.filesystem.read(save)
 ```
 
-## Failure is a value
+### Failure is a value
 
 Nothing here raises for a filesystem outcome. Every function answers a status, and every failing one puts the
 backend's reason beside it as its second return, so the message a caller shows is the operating system's own.
@@ -34,10 +195,10 @@ the filesystem did.
 A failed enumeration answers nil rather than an empty list, so "this directory is empty" and "this directory
 could not be opened" stay apart.
 
-## Blocking
+### Blocking
 
 Every function here is synchronous and blocks the calling thread. A path call is one syscall against a mounted
-device, and [`watch`](/modules/watch) measured a path query at 0.86 microseconds on the machine it was written
+device, and [`watch`](/modules/filesystem/watch) measured a path query at 0.86 microseconds on the machine it was written
 on, which is why it puts a hundred of them between frames twice a second and does not notice. That is a
 different answer from [`proc`](/modules/proc), which runs children on a worker because a child blocks for
 another program's lifetime, and from [`assets`](/modules/assets), which decodes on a worker because a PNG is
@@ -48,16 +209,16 @@ else: every function takes a path and returns a value, so nothing crosses a thre
 off the main thread is [`workers.spawn`](/modules/workers) with a source that requires this module, and the
 answer comes back as plain data.
 
-## Headless
+### Headless
 
 SDL's filesystem API needs no subsystem initialised, and neither this module nor its default backend initialises
 one. There is no `available()` and no video gate, unlike [`clipboard`](/modules/clipboard), because there is
 nothing to gate on: with no window, no device and no `SDL_Init` at all, every function below answers for real.
 This is one of the few subsystems that is more useful without a window than with one.
 
-## Reading and writing
+### Reading and writing
 
-### read
+#### read
 
 Reads a whole file and returns its bytes.
 
@@ -67,7 +228,7 @@ function filesystem.read(path: string, kind?: string): string
 
 **Parameters:**
 
-- `path`: an absolute path, or one [`paths.asset`](/modules/paths#asset) has resolved.
+- `path`: an absolute path, or one [`filesystem.assetPath`](#assetpath) has resolved.
 - `kind`: what the bytes were read as, for anything watching what this process has opened. Bytes are bytes, so
   nothing here can tell a font's metrics from a level; whatever asked can, and this is where it says so. Omitted,
   the path is recorded as `"document"`.
@@ -81,7 +242,7 @@ own length, so a NUL in the middle of it is a byte like any other.
 Synchronous, which is what makes it usable while a world is being built. This is for the documents a game or the
 engine reads once; a decode a frame should not wait on goes through [`assets`](/modules/assets) instead.
 
-### write
+#### write
 
 Writes `bytes` to `path`, replacing whatever was there.
 
@@ -94,7 +255,7 @@ function filesystem.write(path: string, bytes: string): boolean, string
 Binary: the string's own length is what is written, so a NUL in the middle of it is a byte like any other and an
 empty string makes an empty file. The parent directory must already exist. A nil `bytes` raises.
 
-### note
+#### note
 
 Records a path under the kind it was first read as.
 
@@ -106,7 +267,7 @@ A named kind supersedes `"document"`. The two can arrive in either order, since 
 metrics as a document before anything loads them as a font. Decoding happens elsewhere, on a worker, so `assets`
 records what it opened through here rather than keeping a second list nothing else can see.
 
-### loaded
+#### loaded
 
 Every path this process has read or decoded, by the kind it was read as.
 
@@ -119,11 +280,11 @@ means to keep it does not also mean to edit it. Values are `"image"`, `"sound"`,
 bytes nothing named.
 
 A path that failed to load is here too. Whatever asked for it named it, and a file that would not decode is
-exactly the one worth noticing a change to. This is the set [`watch`](/modules/watch) polls.
+exactly the one worth noticing a change to. This is the set [`watch`](/modules/filesystem/watch) polls.
 
-## Asking about a path
+### Asking about a path
 
-### info
+#### info
 
 What is at `path`.
 
@@ -150,7 +311,7 @@ to needing and is worth having in exchange for a plain number rather than a boxe
 Symbolic links are followed, so a link to a file reports `"file"` and a link to nothing reports nothing at all.
 `"other"` is what is left: a socket, a fifo, a device node.
 
-### exists, isFile, isDirectory
+#### exists, isFile, isDirectory
 
 ```teal
 function filesystem.exists(path: string): boolean
@@ -162,7 +323,7 @@ The same backend call as `info` with the answer thrown away, so asking two of th
 syscalls. Call `info` once when you want more than one bit of it. Both `isFile` and `isDirectory` follow
 symbolic links.
 
-## Enumeration
+### Enumeration
 
 Enumeration is glob, and there is no callback: SDL's directory enumeration takes a function pointer it calls per
 entry, and the seam is shaped around the allocating form instead so no FFI callback is ever installed for a
@@ -178,7 +339,7 @@ million entries is a million Lua strings. That is the honest trade and there is 
 - `glob(dir, "*/*.png")` reaches exactly one level down.
   :::
 
-### glob
+#### glob
 
 Entries under `path` matching `pattern`, as paths relative to `path`.
 
@@ -199,7 +360,7 @@ directory, which nil does not.
 Directories are returned alongside files and are not distinguished; ask `info` about the ones you care about.
 The order is the platform's own, is not sorted, and is not stable across machines; sort it if you need it to be.
 
-### list
+#### list
 
 Names directly inside `path`, not recursively.
 
@@ -210,9 +371,9 @@ function filesystem.list(path: string): {string}, string
 A glob with a `"*"` pattern, which is what confines it to one level. Names, not paths: join them to `path`
 yourself, which is also what keeps this from being a second path resolver.
 
-## Changing the tree
+### Changing the tree
 
-### createDirectory
+#### createDirectory
 
 Creates `path`, and any parents it needs.
 
@@ -224,7 +385,7 @@ Succeeds on a directory that already exists. SDL's backend also leaves an SDL er
 having tried once before making the parents; that string is not returned here and nothing clears it, so read the
 second return value rather than SDL's error after a call that reported success.
 
-### remove
+#### remove
 
 Removes a file, or an empty directory.
 
@@ -248,7 +409,7 @@ end
 tecs.filesystem.remove(root)
 ```
 
-### rename
+#### rename
 
 Moves `from` to `to`, replacing whatever was at `to`.
 
@@ -259,7 +420,7 @@ function filesystem.rename(from: string, to: string): boolean, string
 Directories move as well as files, and an existing destination is overwritten with no warning and nothing to
 undo it. Whether this works across filesystems is the platform's business.
 
-### copy
+#### copy
 
 Copies the file at `from` to `to`, replacing whatever was at `to`.
 
@@ -270,9 +431,9 @@ function filesystem.copy(from: string, to: string): boolean, string
 Files only: a directory is refused. The destination's parent must already exist; neither `copy` nor `write`
 creates it.
 
-## Asking about the host
+### Asking about the host
 
-### currentDirectory
+#### currentDirectory
 
 The process working directory, with a trailing separator.
 
@@ -285,9 +446,9 @@ most of the ones that are not a desktop.
 
 Here because a command line tool is given relative paths by whoever ran it and has to resolve them against
 something. It is emphatically not where a game reads content from or writes state to;
-[`paths.assets`](/modules/paths#assets) and [`paths.pref`](/modules/paths#pref) answer that.
+[`filesystem.assetRoot`](#assetroot) and [`filesystem.preferencePath`](#preferencepath) answer that.
 
-### userFolder
+#### userFolder
 
 One of the platform's well-known folders, with a trailing separator.
 
@@ -306,13 +467,154 @@ function filesystem.userFolder(which: UserFolder): string, string
 A platform that has no such concept says so rather than inventing a path: macOS has no saved-games, screenshots
 or templates folder and answers nil for all three, and a platform that is not a desktop may have none of them.
 Treat every one of these as absent until it is not, and never as a place a build may write;
-[`paths.pref`](/modules/paths#pref) is the only such place.
+[`filesystem.preferencePath`](#preferencepath) is the only such place.
 :::
-<!-- @generated by docs/scripts/reference.py from src/tecs/platform/filesystem.tl. Do not edit below this line. -->
+<!-- @generated by docs/scripts/reference.py from src/tecs/platform/paths.tl, src/tecs/platform/filesystem.tl. Do not edit below this line. -->
 
 ## Reference
 
-Every function and type this module carries, rendered from `src/tecs/platform/filesystem.tl`.
+Every function and type this module carries, rendered from `src/tecs/platform/paths.tl` and `src/tecs/platform/filesystem.tl`.
+
+<a id="tecs.filesystem.application"></a>
+
+### tecs.filesystem.application
+
+<pre><code v-pre><a href="#tecs.filesystem.application">tecs.filesystem.application</a>: string
+</code></pre>
+
+<a id="tecs.filesystem.assetPath"></a>
+
+### tecs.filesystem.assetPath
+
+<pre><code v-pre>function <a href="#tecs.filesystem.assetPath">tecs.filesystem.assetPath</a>(relative: string): string
+</code></pre>
+
+Resolves `relative` against the asset root.
+
+#### Parameters
+
+| Type                      | Name                        | Description |
+| ------------------------- | --------------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>relative</code> |             |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
+
+<a id="tecs.filesystem.assetRoot"></a>
+
+### tecs.filesystem.assetRoot
+
+<pre><code v-pre>function <a href="#tecs.filesystem.assetRoot">tecs.filesystem.assetRoot</a>(): string
+</code></pre>
+
+Root the engine reads content from.
+
+Three sources, in order. `TECS_ASSETS` wins, which is how a development
+run reads straight out of a build tree instead of a staged copy. Then what
+the host was told at build time, since the build knows the layout it
+installed and this is not something to sniff for. Then the executable's own
+directory, which is where a single-directory build puts everything.
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
+
+<a id="tecs.filesystem.basePath"></a>
+
+### tecs.filesystem.basePath
+
+<pre><code v-pre>function <a href="#tecs.filesystem.basePath">tecs.filesystem.basePath</a>(): string
+</code></pre>
+
+Directory the executable was loaded from, with a trailing separator.
+
+Empty when the platform declines to say, which is the case on some targets
+rather than an error: callers fall back to a relative path.
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
+
+<a id="tecs.filesystem.organisation"></a>
+
+### tecs.filesystem.organisation
+
+<pre><code v-pre><a href="#tecs.filesystem.organisation">tecs.filesystem.organisation</a>: string
+</code></pre>
+
+Organisation and application names, used to name the writable
+directory. Set before anything asks for `preferencePath`.
+<a id="tecs.filesystem.preferencePath"></a>
+
+### tecs.filesystem.preferencePath
+
+<pre><code v-pre>function <a href="#tecs.filesystem.preferencePath">tecs.filesystem.preferencePath</a>(): string
+</code></pre>
+
+Writable directory for this application, created if absent.
+
+The only place a build may write. Everything else is read-only on at least
+one target, and finding that out at run time on a device is expensive.
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
+
+<a id="tecs.filesystem.resetPaths"></a>
+
+### tecs.filesystem.resetPaths
+
+<pre><code v-pre>function <a href="#tecs.filesystem.resetPaths">tecs.filesystem.resetPaths</a>()
+</code></pre>
+
+Forgets the cached roots. A platform change is noticed without this.
+<a id="tecs.filesystem.setAssetRoot"></a>
+
+### tecs.filesystem.setAssetRoot
+
+<pre><code v-pre>function <a href="#tecs.filesystem.setAssetRoot">tecs.filesystem.setAssetRoot</a>(root: string)
+</code></pre>
+
+Overrides the asset root, for a test or a tool.
+
+Synchronises first, so the override outlives the platform change that may
+have preceded it rather than being dropped by the next read.
+
+#### Parameters
+
+| Type                      | Name                    | Description |
+| ------------------------- | ----------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>root</code> |             |
+
+<a id="tecs.filesystem.writablePath"></a>
+
+### tecs.filesystem.writablePath
+
+<pre><code v-pre>function <a href="#tecs.filesystem.writablePath">tecs.filesystem.writablePath</a>(relative: string): string
+</code></pre>
+
+Resolves `relative` against the writable root.
+
+#### Parameters
+
+| Type                      | Name                        | Description |
+| ------------------------- | --------------------------- | ----------- |
+| <code v-pre>string</code> | <code v-pre>relative</code> |             |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
 
 <a id="tecs.filesystem.GlobOptions"></a>
 
@@ -427,7 +729,7 @@ The process working directory, with a trailing separator.
 
 Here because a command line tool is given relative paths by whoever ran it
 and has to resolve them against something. It is emphatically not where a
-game reads content from or writes state to: `paths.assets` and `paths.pref`
+game reads content from or writes state to: `paths.assetRoot` and `paths.preferencePath`
 answer that, and say why. A platform with no working directory answers nil,
 which is most of the ones that are not a desktop.
 
@@ -711,7 +1013,7 @@ should not wait on goes through `assets.loadImage` or `assets.loadSound`.
 
 | Type                      | Name                    | Description                                                                                                                                                                                                                                              |
 | ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>string</code> | <code v-pre>path</code> | An absolute path, or one `paths.asset` has resolved.                                                                                                                                                                                                     |
+| <code v-pre>string</code> | <code v-pre>path</code> | An absolute path, or one `paths.assetPath` has resolved.                                                                                                                                                                                                 |
 | <code v-pre>string</code> | <code v-pre>kind</code> | What the bytes were read as, for anything watching what this process has opened. Bytes are bytes, so nothing here can tell a font's metrics from a level; whatever asked can, and this is where it says so. Omitted, the path is recorded as a document. |
 
 #### Returns
@@ -797,7 +1099,7 @@ One of the platform's well-known folders, with a trailing separator.
 so rather than inventing a path: macOS has no saved-games, screenshots or
 templates folder and answers nil for all three, and a platform that is not a
 desktop may have none of them. Treat every one of these as absent until it
-is not, and never as a place a build may write; `paths.pref` is the only
+is not, and never as a place a build may write; `paths.preferencePath` is the only
 such place.
 
 #### Parameters

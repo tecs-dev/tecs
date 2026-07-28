@@ -200,9 +200,14 @@ describe("the public surface", function()
             assert.is_true(rawequal(tecs.gfx.layers, require("tecs.gfx.layers")))
         end)
 
-        it("memoizes on the namespace, as a top-level name does on tecs", function()
-            local layers = tecs.gfx.layers
-            assert.is_true(rawequal(layers, rawget(tecs.gfx, "layers")))
+        it("resolves once and answers the same table afterwards", function()
+            assert.is_true(rawequal(tecs.gfx.layers, tecs.gfx.layers))
+            -- Held beside the namespace rather than on it. The table a caller
+            -- holds stays empty so that both metamethods keep being consulted;
+            -- a member written onto it would stop `__index` firing, and with it
+            -- the write-through that sends `tecs.filesystem.organisation` to
+            -- the module that reads it back.
+            assert.is_nil(rawget(tecs.gfx, "layers"))
         end)
 
         it("does not answer at the root it moved off", function()

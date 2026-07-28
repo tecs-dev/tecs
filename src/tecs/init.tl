@@ -35,8 +35,7 @@ local type clipboard = require("tecs.platform.clipboard")
 local type proc = require("tecs.platform.proc")
 local type net = require("tecs.net")
 local type capabilities = require("tecs.platform.capabilities")
-local type paths = require("tecs.platform.paths")
-local type filesystem = require("tecs.platform.filesystem")
+local type filesystemModule = require("tecs.platform.filesystem")
 local type watch = require("tecs.platform.watch")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
@@ -201,6 +200,251 @@ local record input
     ---     `destroy`. Nil on failure, and nothing is left open in that case.
     --- @return The reason, when the first return is nil.
     openSensor: function(id: number): sensors.Sensor, string
+end
+
+--- Files: where they are, what is in them, and when one changed.
+---
+--- Where and what were two modules and are one, because they were never two
+--- questions. Every path a game touches is resolved and then acted on in the
+--- same breath, and a caller holding one half had to name the other module to
+--- do anything with it. There is still deliberately no second way to resolve a
+--- path: every operation takes the string the platform takes, so a path from
+--- here, a path a user typed and an absolute path from somewhere else all work
+--- and none is rewritten on the way through.
+---
+--- Watching is the one thing below rather than beside, under
+--- `tecs.filesystem.watch`. It is a running poller with a lifecycle of its own
+--- rather than a call that answers, and its vocabulary, an interval, a settle
+--- count and a set of kinds, means nothing to the rest of this.
+local record filesystem
+    --- Polling for changed files, and dispatching what changed.
+    watch: watch
+
+    --- What a path is. Symbolic links are followed, so a link never reports as
+    --- one: "other" is a socket, a fifo or a device.
+    type PathType = filesystemModule.PathType
+
+    --- What the backend answered about one path.
+    type Info = filesystemModule.Info
+
+    --- Which of the platform's well-known folders to ask for.
+    type UserFolder = filesystemModule.UserFolder
+
+    --- How a pattern is matched.
+    type GlobOptions = filesystemModule.GlobOptions
+
+    --- A write that takes its bytes in pieces.
+    type Writer = filesystemModule.Writer
+
+    --- A read that hands its bytes over in pieces.
+    type Reader = filesystemModule.Reader
+
+    --- Organisation and application names, used to name the writable
+    --- directory. Set before anything asks for `preferencePath`.
+    organisation: string
+    application: string
+
+    --- Directory the executable was loaded from, with a trailing separator.
+    ---
+    --- @return The directory. Empty rather than nil when the platform declines
+    ---     to say, which is the case on some targets and is not an error.
+    basePath: function(): string
+
+    --- Writable directory for this application, created if absent.
+    ---
+    --- @return The directory, with a trailing separator, named from
+    ---     `organisation` and `application`. The only place a build may write:
+    ---     everything else is read-only on at least one target.
+    preferencePath: function(): string
+
+    --- Root the engine reads content from, with a trailing separator.
+    ---
+    --- @return `TECS_ASSETS` if it is set, then what the host was told at build
+    ---     time, then `basePath`. Cached until the platform changes.
+    assetRoot: function(): string
+
+    --- Resolves `relative` against the asset root.
+    ---
+    --- @param relative A path under the content root, with `/` separators.
+    ---     Joined, not validated: nothing here asks whether the file is there.
+    --- @return The absolute path.
+    assetPath: function(relative: string): string
+
+    --- Resolves `relative` against the writable root.
+    ---
+    --- @param relative A path under the preference directory.
+    --- @return The absolute path.
+    writablePath: function(relative: string): string
+
+    --- Overrides the asset root, for a test or a tool.
+    ---
+    --- @param root The directory to read content from. A trailing separator is
+    ---     added when it is missing rather than doubled when it is not.
+    setAssetRoot: function(root: string)
+
+    --- Forgets the cached roots. A platform change is noticed without this, so
+    --- this is for a test that moved something under the process.
+    resetPaths: function()
+
+    --- What is at `path`, or nil when there is nothing there.
+    ---
+    --- @param path Any path the platform takes.
+    --- @return The info, or nil for a path that does not exist, a broken
+    ---     symbolic link, or a directory that cannot be searched.
+    --- @return The reason, which is what separates those cases.
+    info: function(path: string): filesystemModule.Info, string
+
+    --- Whether anything is at `path`.
+    ---
+    --- @param path Any path the platform takes.
+    --- @return Whether it is there. One syscall, as are `isFile` and
+    ---     `isDirectory`, so ask `info` once when more than one bit is wanted.
+    exists: function(path: string): boolean
+
+    --- Whether `path` is a regular file, following symbolic links.
+    ---
+    --- @param path Any path the platform takes.
+    --- @return Whether it is a file. False for a path that is not there.
+    isFile: function(path: string): boolean
+
+    --- Whether `path` is a directory, following symbolic links.
+    ---
+    --- @param path Any path the platform takes.
+    --- @return Whether it is a directory. False for a path that is not there.
+    isDirectory: function(path: string): boolean
+
+    --- Entries under `path` matching `pattern`, as paths relative to `path`.
+    ---
+    --- @param path The directory to walk.
+    --- @param pattern `*` and `?` wildcards, neither of which matches a
+    ---     separator, or nil for the whole tree below `path`.
+    --- @param options How the pattern is matched.
+    --- @return The entries, joined with `/` whatever the platform's separator
+    ---     is, in the platform's own order and not sorted. Directories are
+    ---     among them and are not marked. Nil when `path` could not be
+    ---     enumerated, which an empty list does not mean.
+    --- @return The reason, when the first return is nil.
+    glob: function(path: string, pattern?: string, options?: filesystemModule.GlobOptions): {string}, string
+
+    --- Names directly inside `path`, not recursively.
+    ---
+    --- @param path The directory to read.
+    --- @return The names, not paths: join them to `path` yourself, which is
+    ---     what keeps this from being a second path resolver.
+    --- @return The reason, when the first return is nil.
+    list: function(path: string): {string}, string
+
+    --- Creates `path`, and any parents it needs.
+    ---
+    --- @param path The directory to create.
+    --- @return Whether it is there afterwards, which includes a directory that
+    ---     already existed. SDL's backend leaves an error string set even on
+    ---     success, so do not read `SDL_GetError` after this.
+    --- @return The reason, when it failed.
+    createDirectory: function(path: string): boolean, string
+
+    --- Removes a file, or an empty directory.
+    ---
+    --- @param path What to remove. A directory with anything in it fails; this
+    ---     does not recurse.
+    --- @return Whether the path is gone, which is true when there was nothing
+    ---     there to start with. Ask `exists` first if the difference matters.
+    --- @return The reason, when it failed.
+    remove: function(path: string): boolean, string
+
+    --- Moves `from` to `to`, replacing whatever was at `to`.
+    ---
+    --- @param from A file or a directory.
+    --- @param to The destination, overwritten with no warning and nothing to
+    ---     undo it.
+    --- @return Whether it moved. Whether this works across filesystems is the
+    ---     platform's business.
+    --- @return The reason, when it failed.
+    rename: function(from: string, to: string): boolean, string
+
+    --- Copies the file at `from` to `to`, replacing whatever was at `to`.
+    ---
+    --- @param from A file. A directory is refused.
+    --- @param to The destination, whose parent must already exist.
+    --- @return Whether it copied.
+    --- @return The reason, when it failed.
+    copy: function(from: string, to: string): boolean, string
+
+    --- Records a path under the kind it was first read as.
+    ---
+    --- @param path The path that was opened.
+    --- @param kind What the bytes are: "image", "sound", "font", or
+    ---     "document". A named kind supersedes "document" whichever order the
+    ---     two arrive in, since `read` answers bytes and cannot know what asked
+    ---     for them.
+    note: function(path: string, kind: string)
+
+    --- Reads a whole file and returns its bytes.
+    ---
+    --- Synchronous, which is what makes it usable while a world is being built.
+    --- A decode a frame should not wait on goes through `assets` instead.
+    ---
+    --- @param path An absolute path, or one `assetPath` has resolved.
+    --- @param kind What the bytes were read as, for anything watching what this
+    ---     process has opened. Omitted records the path as a document.
+    --- @return The bytes, which carry their own length so a NUL in the middle
+    ---     is a byte like any other. Nil when the file could not be read.
+    read: function(path: string, kind?: string): string
+
+    --- Every path this process has read or decoded, by the kind it was read as.
+    ---
+    --- @return The live table, so something consulting it periodically does not
+    ---     copy it, and shared, so a caller that means to keep it does not also
+    ---     mean to edit it. A path that failed to load is in it too, and is
+    ---     exactly the one worth noticing a change to.
+    loaded: function(): {string: string}
+
+    --- Writes `bytes` to `path`, replacing whatever was there.
+    ---
+    --- @param path The file to write. Its parent directory must already exist.
+    --- @param bytes What to write. The string's own length is written, so an
+    ---     empty string makes an empty file.
+    --- @return Whether it was written.
+    --- @return The reason, when it failed.
+    write: function(path: string, bytes: string): boolean, string
+
+    --- Opens `path` for writing in pieces, replacing whatever was there.
+    ---
+    --- @param path The file to write.
+    --- @return The writer, which must be closed: the bytes are not guaranteed
+    ---     to be on disk until `close` answers, and that is the call a full
+    ---     disk is reported by. Nil when there is none.
+    --- @return The reason, when the first return is nil.
+    openWrite: function(path: string): filesystemModule.Writer, string
+
+    --- Opens `path` for reading in pieces. The mirror of `openWrite`.
+    ---
+    --- @param path The file to read.
+    --- @return The reader, for a file to be handed over as it goes rather than
+    ---     held whole. Nil when there is none.
+    --- @return The reason, when the first return is nil.
+    openRead: function(path: string): filesystemModule.Reader, string
+
+    --- The process working directory, with a trailing separator.
+    ---
+    --- Where a command line tool resolves the relative paths it was given.
+    --- Emphatically not where a game reads content or writes state:
+    --- `assetRoot` and `preferencePath` answer that.
+    ---
+    --- @return The directory, or nil on a platform that has none, which is most
+    ---     that are not a desktop.
+    --- @return The reason, when the first return is nil.
+    currentDirectory: function(): string, string
+
+    --- One of the platform's well-known folders, with a trailing separator.
+    ---
+    --- @param which Which folder. A name the backend does not know raises.
+    --- @return The folder, or nil, which is legitimate and common: macOS has no
+    ---     saved-games, screenshots or templates folder, and a platform that is
+    ---     not a desktop may have none of them. Never a place a build may
+    ---     write; `preferencePath` is the only one.
+    --- @return The reason, when the first return is nil.
+    userFolder: function(which: filesystemModule.UserFolder): string, string
 end
 
 --- A value that settles once.
@@ -504,7 +748,6 @@ local record tecs
     mcp: mcp
     net: net
     particles: particles
-    paths: paths
     physics: physics
     proc: proc
     renderer: renderer
@@ -512,7 +755,6 @@ local record tecs
     system: system
     text: text
     time: time
-    watch: watch
     window: window
     workers: workers
 
@@ -567,7 +809,11 @@ local SURFACE <const>: {string: Namespace} = {
     components = {module = "tecs.components"},
     data = {module = "tecs.data", beside = {"tecs.compress", "tecs.hash"}},
     events = {module = "tecs.platform.events"},
-    filesystem = {module = "tecs.platform.filesystem"},
+    filesystem = {
+        module = "tecs.platform.filesystem",
+        beside = {"tecs.platform.paths"},
+        within = {watch = {module = "tecs.platform.watch"}},
+    },
     future = {module = "tecs.Future", class = "Future"},
     gfx = {within = {layers = {module = "tecs.gfx.layers"}}},
     http = {module = "tecs.http"},
@@ -582,7 +828,6 @@ local SURFACE <const>: {string: Namespace} = {
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net"},
     particles = {module = "tecs.gfx.particles"},
-    paths = {module = "tecs.platform.paths"},
     physics = {module = "tecs.physics"},
     proc = {module = "tecs.platform.proc"},
     renderer = {module = "tecs.Renderer", class = "Renderer"},
@@ -590,7 +835,6 @@ local SURFACE <const>: {string: Namespace} = {
     system = {module = "tecs.platform.system"},
     text = {module = "tecs.gfx.text"},
     time = {module = "tecs.platform.time"},
-    watch = {module = "tecs.platform.watch"},
     window = {module = "tecs.platform.Window", class = "Window"},
     workers = {module = "tecs.workers"},
 }
@@ -615,36 +859,80 @@ local resolve: function(spec: Namespace): any
 --- because they are the cheaper ones to load and no name is in more than one: a
 --- module below is its own file, and listing a sound device does not open a
 --- mixer.
+---
+--- What is resolved is remembered in a table beside the one answered with
+--- rather than on it. The table a caller holds stays empty, so both metamethods
+--- keep being consulted: memoizing onto it would stop `__index` firing after
+--- the first read, and `__newindex` fires only for a name the table does not
+--- already carry, so the first write after a read would land here instead of on
+--- the module that owns the name.
 local function namespace(spec: Namespace): {string: any}
-    local members: {string: any} = {}
-    return setmetatable(
-        members,
-        {
-            __index = function(self: {string: any}, name: string): any
-                local member: any = nil
-                if spec.within ~= nil and spec.within[name] ~= nil then
-                    member = resolve(spec.within[name])
-                end
-                if member == nil and spec.beside ~= nil then
-                    for _, path in ipairs(spec.beside) do
-                        member = (require(path) as {string: any})[name]
-                        if member ~= nil then
-                            break
-                        end
+    local resolved: {string: any} = {}
+    return setmetatable({} as {string: any}, {
+        __index = function(_self: {string: any}, name: string): any
+            local member: any = resolved[name]
+            if member ~= nil then
+                return member
+            end
+            if spec.within ~= nil and spec.within[name] ~= nil then
+                member = resolve(spec.within[name])
+            end
+            if member == nil and spec.beside ~= nil then
+                for _, path in ipairs(spec.beside) do
+                    member = (require(path) as {string: any})[name]
+                    if member ~= nil then
+                        break
                     end
                 end
-                if member == nil and spec.module ~= nil then
-                    local module = require(spec.module) as {string: any}
-                    member = name == spec.class and module or module[name]
+            end
+            if member == nil and spec.module ~= nil then
+                local module = require(spec.module) as {string: any}
+                member = name == spec.class and module or module[name]
+            end
+            if member == nil then
+                return nil
+            end
+            resolved[name] = member
+            return member
+        end,
+
+        --- Sends a write to whichever module answers the name.
+        ---
+        --- A namespace stands in front of several modules, and some of what
+        --- they carry is assigned rather than called:
+        --- `tecs.filesystem.organisation` is read back by
+        --- `preferencePath`, so a write parked on this table would be a
+        --- write nothing sees. Ownership is decided the way a read decides
+        --- it, and a name no module below answers is the namespace's own.
+        ---
+        --- What was resolved earlier is dropped rather than replaced, so
+        --- the next read asks the owner again instead of trusting a copy
+        --- taken before the write.
+        __newindex = function(_self: {string: any}, name: string, value: any)
+            local owner: {string: any} = nil
+            if spec.beside ~= nil then
+                for _, path in ipairs(spec.beside) do
+                    local module = require(path) as {string: any}
+                    if module[name] ~= nil then
+                        owner = module
+                        break
+                    end
                 end
-                if member == nil then
-                    return nil
+            end
+            if owner == nil and spec.module ~= nil then
+                local module = require(spec.module) as {string: any}
+                if module[name] ~= nil then
+                    owner = module
                 end
-                rawset(self, name, member)
-                return member
-            end,
-        }
-    )
+            end
+            if owner == nil then
+                resolved[name] = value
+                return
+            end
+            owner[name] = value
+            resolved[name] = nil
+        end,
+    })
 end
 
 resolve = function(spec: Namespace): any

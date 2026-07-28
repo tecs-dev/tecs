@@ -609,7 +609,7 @@ describe("gfx.text", function()
         --- nothing about the image behind them.
         local function shipped(factor)
             local cjson = require("cjson")
-            local source = filesystem.read(tecs.paths.asset("fonts/jetbrainsmono-extrabold-msdf.json"))
+            local source = filesystem.read(tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.json"))
             local root = cjson.decode(source)
             for _, entry in ipairs(root.chars) do
                 entry.xadvance = entry.xadvance * factor
@@ -626,7 +626,7 @@ describe("gfx.text", function()
             write(secondPath, shipped(1))
             second = text.loadFont({
                 metrics = secondPath,
-                atlas = tecs.paths.asset("fonts/jetbrainsmono-extrabold-msdf.png"),
+                atlas = tecs.filesystem.assetPath("fonts/jetbrainsmono-extrabold-msdf.png"),
             })
         end)
 

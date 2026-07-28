@@ -1,9 +1,10 @@
 --- Doing things to paths: reading, writing, listing, creating, removing,
 --- renaming, copying, and asking what is there.
 ---
---- `tecs.paths` answers *where*, and this answers *what to do once you have
---- one*. There is deliberately no second way to resolve a path here: every
---- function takes the string the platform takes, so `paths.writable("slot1")`,
+--- The path half of `tecs.filesystem` is `paths` beside this file, which
+--- answers *where*; this answers *what to do once you have one*. There is
+--- deliberately no second way to resolve a path here: every function takes the
+--- string the platform takes, so `paths.writablePath("slot1")`,
 --- a path a user typed and an absolute path from somewhere else all work and
 --- none of them is rewritten on the way through. No virtual filesystem, no
 --- mount table, no invented scheme.
@@ -55,7 +56,7 @@
 --- one. `assets` records its own decodes through `note` for the same reason.
 ---
 ---     local tecs <const> = require("tecs")
----     local save <const> = tecs.paths.writable("slot1.json")
+---     local save <const> = tecs.filesystem.writablePath("slot1.json")
 ---     tecs.filesystem.write(save, tecs.data.encodeJSON(state))
 ---     local bytes <const> = tecs.filesystem.read(save)
 ---
@@ -367,7 +368,7 @@ end
 --- Synchronous, which is what makes it usable while a world is being built.
 --- This is for the documents a game or the engine reads once; a decode a frame
 --- should not wait on goes through `assets.loadImage` or `assets.loadSound`.
---- @param path An absolute path, or one `paths.asset` has resolved.
+--- @param path An absolute path, or one `paths.assetPath` has resolved.
 --- @param kind What the bytes were read as, for anything watching what this
 ---     process has opened. Bytes are bytes, so nothing here can tell a font's
 ---     metrics from a level; whatever asked can, and this is where it says so.
@@ -505,7 +506,7 @@ end
 ---
 --- Here because a command line tool is given relative paths by whoever ran it
 --- and has to resolve them against something. It is emphatically not where a
---- game reads content from or writes state to: `paths.assets` and `paths.pref`
+--- game reads content from or writes state to: `paths.assetRoot` and `paths.preferencePath`
 --- answer that, and say why. A platform with no working directory answers nil,
 --- which is most of the ones that are not a desktop.
 --- @return The directory, or nil and the reason.
@@ -523,7 +524,7 @@ end
 --- so rather than inventing a path: macOS has no saved-games, screenshots or
 --- templates folder and answers nil for all three, and a platform that is not a
 --- desktop may have none of them. Treat every one of these as absent until it
---- is not, and never as a place a build may write; `paths.pref` is the only
+--- is not, and never as a place a build may write; `paths.preferencePath` is the only
 --- such place.
 --- @return The folder, or nil and the reason.
 function filesystem.userFolder(which: UserFolder): string, string

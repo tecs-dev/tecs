@@ -57,7 +57,7 @@ DataStream.ofBytes(pointer, length)             -- an FFI buffer you keep alive
 
 **A destination is written as the transfer runs.** Each pump hands what has arrived to the destination and drops
 it, so a 500 MB download is never a 500 MB string: it is one frame's worth of arrival at a time. Files go through
-[`filesystem`](/modules/filesystem), and so through the storage seam a port replaces; a handle is yours and is
+[`filesystem`](/modules/filesystem/), and so through the storage seam a port replaces; a handle is yours and is
 written to directly.
 
 A transfer that fails part way through leaves what had arrived where it was going: a file `into` named holds a

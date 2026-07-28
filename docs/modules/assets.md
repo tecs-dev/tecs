@@ -107,7 +107,7 @@ function assets.loadImage(path: string): Handle
 
 **Parameters:**
 
-- `path`: an absolute path, or one [`paths`](/modules/paths) has resolved against the content root.
+- `path`: an absolute path, or one [`filesystem`](/modules/filesystem/) has resolved against the content root.
 
 **Returns:** a `Handle` in the `"loading"` state. Calling this before `install` raises.
 
@@ -117,7 +117,7 @@ last of them to release is the one that frees. A load that starts after the firs
 nothing here is a cache, and a handle that has been released is not something to hand out a second time.
 
 ```teal
-local handle <const> = tecs.assets.loadImage(tecs.paths.asset("sprites/hero.png"))
+local handle <const> = tecs.assets.loadImage(tecs.filesystem.assetPath("sprites/hero.png"))
 -- ... frames later, once handle.status == "ready"
 local sprite <const> = renderer:registerImage(handle)
 handle:release()
@@ -244,8 +244,8 @@ local loads <const> = tecs.assets.batch(function(name: string, handle: tecs.asse
     handle:release()
 end)
 
-loads:add(tecs.assets.loadImage(tecs.paths.asset("ui.png")), "ui")
-loads:add(tecs.assets.loadImage(tecs.paths.asset("tiles.png")), "tiles")
+loads:add(tecs.assets.loadImage(tecs.filesystem.assetPath("ui.png")), "ui")
+loads:add(tecs.assets.loadImage(tecs.filesystem.assetPath("tiles.png")), "tiles")
 -- once per frame
 loads:resolve()
 ```
@@ -260,11 +260,11 @@ an archive or a binary sidecar comes back whole, and a format that is text is a 
 Reading a document is therefore two halves with nothing between them:
 
 ```teal
-local bytes <const> = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
+local bytes <const> = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
 local level <const> = tecs.data.decodeJSON(bytes)
 ```
 
-`paths.asset` resolves against the content root and `read` answers nil for a path with no file, so a game
+`assetPath` resolves against the content root and `read` answers nil for a path with no file, so a game
 distinguishes an absent document from a malformed one, which the decoder raises on. Every path this process has
 read or decoded is recorded, including the ones queued here, and `filesystem.loaded` is what the file watcher
 polls instead of walking the content tree.

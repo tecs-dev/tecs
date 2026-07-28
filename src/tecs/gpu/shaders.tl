@@ -86,7 +86,7 @@ local roots: {string} = nil
 
 local function searchRoots(): {string}
     if roots == nil then
-        roots = {paths.asset("shaders/")}
+        roots = {paths.assetPath("shaders/")}
     end
     return roots
 end

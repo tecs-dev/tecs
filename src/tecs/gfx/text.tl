@@ -280,7 +280,7 @@ local function resolve(path: string): string
     if path:sub(1, 1) == "/" then
         return path
     end
-    return paths.asset(path)
+    return paths.assetPath(path)
 end
 
 --- Everything up to and including the final separator, or the empty string.

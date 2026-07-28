@@ -660,7 +660,7 @@ text is a decoder's opinion. Reading a document is that call and a decoder over
 it, with nothing in between:
 
 ```lua
-local bytes = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
+local bytes = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
 local level = tecs.data.decodeJSON(bytes)
 ```
 
@@ -1287,8 +1287,12 @@ of making game code run at device-thread cadence.
 
 ## Touching the filesystem
 
-`tecs.paths` answers where a path is; `tecs.filesystem` is what to do once you
-have one. It is one backend call per function and nothing composed out of
+`tecs.filesystem` answers both halves: where a path is, and what to do once
+you have one. They were two modules, `paths` and `filesystem`, and are one,
+because they were never two questions. Every path a game touches is resolved
+and then acted on in the same breath, and a caller holding one half had to name
+the other module to do anything with it. `paths.tl` is still its own file and
+the surface reads it beside `filesystem.tl`, so neither loads for the other. It is one backend call per function and nothing composed out of
 several, and on SDL each of those is the obvious call: `SDL_GetPathInfo` behind
 `info`, `exists`, `isFile` and `isDirectory`, `SDL_GlobDirectory` behind `list`
 and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,

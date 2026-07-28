@@ -105,11 +105,11 @@ function data.decodeJSON(text: string): any
 **Example:**
 
 ```teal
-local bytes <const> = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
+local bytes <const> = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
 local level <const> = tecs.data.decodeJSON(bytes)
 ```
 
-[`filesystem.read`](/modules/filesystem) answers `nil` for a path with no file, so an absent document stays
+[`filesystem.read`](/modules/filesystem/) answers `nil` for a path with no file, so an absent document stays
 distinguishable from a malformed one, which this raises on.
 
 Malformed means malformed: a truncated document, a single-quoted key, a trailing comma, a comment, and the

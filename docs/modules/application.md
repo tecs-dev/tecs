@@ -96,16 +96,16 @@ the world sits in others; worth nothing for a scene held in a single archetype.
 
 ### Sound, logging and diagnostics
 
-| Field            | What it does                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `audio`          | [`Audio.Config`](/modules/audio). Omitted opens the platform's default device      |
-| `logFile`        | Log file under the writable root, as JSON Lines, beside the platform's destination |
-| `logLevel`       | Lowest priority that reaches the log at all, from [`tecs.log`](/modules/log)       |
-| `checkpoint`     | File the staged checkpoint is written to when the platform backgrounds us          |
-| `mcpPort`        | Port for the [debug server](/modules/mcp). Omitted means no server                 |
-| `watch`          | [`watch.Config`](/modules/watch) for content hot reload. Omitted means no watcher  |
-| `debug`          | Marks this a development run                                                       |
-| `debugMaxFrames` | Stops after this many iterations                                                   |
+| Field            | What it does                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `audio`          | [`Audio.Config`](/modules/audio). Omitted opens the platform's default device                |
+| `logFile`        | Log file under the writable root, as JSON Lines, beside the platform's destination           |
+| `logLevel`       | Lowest priority that reaches the log at all, from [`tecs.log`](/modules/log)                 |
+| `checkpoint`     | File the staged checkpoint is written to when the platform backgrounds us                    |
+| `mcpPort`        | Port for the [debug server](/modules/mcp). Omitted means no server                           |
+| `watch`          | [`watch.Config`](/modules/filesystem/watch) for content hot reload. Omitted means no watcher |
+| `debug`          | Marks this a development run                                                                 |
+| `debugMaxFrames` | Stops after this many iterations                                                             |
 
 `mcpPort` and `watch` are omitted by default because a game should no more open a socket nobody asked for than
 poll a filesystem nobody asked for. A release refuses the watcher outright.

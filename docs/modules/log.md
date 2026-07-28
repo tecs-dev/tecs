@@ -208,7 +208,7 @@ function log.openFile(path: string): boolean
 
 **Parameters:**
 
-- `path`: an absolute path. Put it under the writable root with [`paths.writable`](/modules/paths).
+- `path`: an absolute path. Put it under the writable root with [`writablePath`](/modules/filesystem/#writablepath).
 
 **Returns:** whether the file was opened.
 

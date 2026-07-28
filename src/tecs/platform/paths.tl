@@ -1,4 +1,5 @@
---- Where assets are read from and state is written to.
+--- Where assets are read from and state is written to: the path half of
+--- `tecs.filesystem`.
 ---
 --- Never the process working directory. On desktop that happens to work when
 --- launched from a project root and breaks the moment someone double-clicks;
@@ -14,7 +15,7 @@ local adapter <const> = require("tecs.platform.adapter")
 
 local record paths
     --- Organisation and application names, used to name the writable
-    --- directory. Set before anything asks for `pref`.
+    --- directory. Set before anything asks for `preferencePath`.
     organisation: string
     application: string
 end
@@ -43,7 +44,7 @@ end
 ---
 --- Empty when the platform declines to say, which is the case on some targets
 --- rather than an error: callers fall back to a relative path.
-function paths.base(): string
+function paths.basePath(): string
     fresh()
     if baseCache ~= nil then
         return baseCache
@@ -56,7 +57,7 @@ end
 ---
 --- The only place a build may write. Everything else is read-only on at least
 --- one target, and finding that out at run time on a device is expensive.
-function paths.pref(): string
+function paths.preferencePath(): string
     fresh()
     if prefCache ~= nil then
         return prefCache
@@ -72,7 +73,7 @@ end
 --- the host was told at build time, since the build knows the layout it
 --- installed and this is not something to sniff for. Then the executable's own
 --- directory, which is where a single-directory build puts everything.
-function paths.assets(): string
+function paths.assetRoot(): string
     fresh()
     if assetsCache ~= nil then
         return assetsCache
@@ -85,23 +86,23 @@ function paths.assets(): string
     if override ~= nil and override ~= "" then
         assetsCache = override:sub(-1) == "/" and override or override .. "/"
     else
-        assetsCache = paths.base()
+        assetsCache = paths.basePath()
     end
     return assetsCache
 end
 
 --- Resolves `relative` against the asset root.
-function paths.asset(relative: string): string
-    return paths.assets() .. relative
+function paths.assetPath(relative: string): string
+    return paths.assetRoot() .. relative
 end
 
 --- Resolves `relative` against the writable root.
-function paths.writable(relative: string): string
-    return paths.pref() .. relative
+function paths.writablePath(relative: string): string
+    return paths.preferencePath() .. relative
 end
 
 --- Forgets the cached roots. A platform change is noticed without this.
-function paths.reset()
+function paths.resetPaths()
     cachedGeneration = adapter.generation()
     baseCache = nil
     prefCache = nil
@@ -112,7 +113,7 @@ end
 ---
 --- Synchronises first, so the override outlives the platform change that may
 --- have preceded it rather than being dropped by the next read.
-function paths.setAssets(root: string)
+function paths.setAssetRoot(root: string)
     fresh()
     assetsCache = root:sub(-1) == "/" and root or root .. "/"
 end

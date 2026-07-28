@@ -72,7 +72,7 @@ local choice <const> = tecs.system.openFile({
     filters = {
         { name = "Images", pattern = "png;jpg;jpeg" },
     },
-    defaultLocation = tecs.paths.content(),
+    defaultLocation = tecs.filesystem.assetRoot(),
     multiple = true,
 })
 ```

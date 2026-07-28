@@ -55,14 +55,14 @@ end
 
 --- The `tecs` binary that is running, as an absolute path.
 ---
---- `paths.base` is the executable's own directory, which SDL answers from the
+--- `paths.basePath` is the executable's own directory, which SDL answers from the
 --- process rather than from `argv[0]`, so it survives being reached through a
 --- symbolic link or a `PATH` lookup. Only the file name comes from `argv[0]`,
 --- which is what makes a renamed copy still find itself.
 function layout.self(): string
     local argv = (_G as {string: {integer: string}})["arg"]
     local invoked = argv ~= nil and argv[0] or "tecs"
-    local base = tecs.paths.base()
+    local base = tecs.filesystem.basePath()
     if base == nil or base == "" then
         return invoked
     end

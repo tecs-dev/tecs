@@ -82,10 +82,13 @@ describe("the tecs global", function()
         assert.is_not_nil(camera)
         assert.is_true(rawequal(camera, rawget(_G.tecs, "camera")))
 
-        -- The namespace memoizes its members the same way, and the class it
-        -- carries is the module itself rather than a copy of it.
+        -- The class a namespace carries is the module itself rather than a
+        -- copy of it, and reading it twice answers the same table. What was
+        -- resolved is held beside the namespace rather than on it, so the
+        -- table a caller holds stays empty and its metamethods keep firing.
         assert.is_true(rawequal(camera.Camera, require("tecs.gfx.Camera")))
-        assert.is_true(rawequal(camera.Camera, rawget(camera, "Camera")))
+        assert.is_true(rawequal(camera.Camera, camera.Camera))
+        assert.is_nil(rawget(camera, "Camera"))
     end)
 
     it("answers nil for a member a namespace does not have", function()

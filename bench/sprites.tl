@@ -243,7 +243,7 @@ return tecs.application.create({
         if not assets.installed() then
             assets.install()
         end
-        local handle <const> = assets.loadImage(paths.asset(ATLAS))
+        local handle <const> = assets.loadImage(paths.assetPath(ATLAS))
         assets.waitAll()
         if handle.status ~= "ready" then
             error(("tecs: cannot load '%s': %s"):format(ATLAS, handle.error or handle.status))

@@ -73,12 +73,12 @@ world:addSystem({
     phase = tecs.ecs.phases.First,
     runIf = tecs.ecs.runif.after(5),
     run = function()
-        session:stop(tecs.paths.writable("tecs.collapsed"))
+        session:stop(tecs.filesystem.writablePath("tecs.collapsed"))
     end,
 })
 ```
 
-`tecs.paths.writable` resolves against the only directory a build may write to, which matters on targets where
+`tecs.filesystem.writablePath` resolves against the only directory a build may write to, which matters on targets where
 the working directory is read-only.
 
 ### Custom zones
@@ -138,7 +138,7 @@ print(report)
 Or pass a path to write the formatted report:
 
 ```teal
-session:stop(tecs.paths.writable("aborts.csv"))
+session:stop(tecs.filesystem.writablePath("aborts.csv"))
 ```
 
 Periodic reporting from a system, restarting after each report:
@@ -180,7 +180,7 @@ The summary values `durationSec`, `totalAborts`, and `blacklisted` live on the r
 rather than in the CSV. Read them directly:
 
 ```teal
-local report = session:stop(tecs.paths.writable("aborts.csv"))
+local report = session:stop(tecs.filesystem.writablePath("aborts.csv"))
 print(string.format("%ds, %d aborts, %d blacklisted",
     report.durationSec, report.totalAborts, report.blacklisted))
 ```

@@ -231,7 +231,8 @@ behind each one.
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
-- [`tecs.filesystem`](/modules/filesystem) - touching the filesystem
+- [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
+- [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
 - [`tecs.future`](/modules/future) - a value that settles once
 - [`tecs.gfx`](/modules/gfx/) - drawing, and the modules a scene is described in
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
@@ -242,7 +243,6 @@ behind each one.
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net) - nonblocking TCP streams and UDP datagrams
 - [`tecs.particles`](/modules/particles) - emitters
-- [`tecs.paths`](/modules/paths) - where a game may read and write
 - [`tecs.physics`](/modules/physics) - Box2D 3, solved across a shared thread pool
 - [`tecs.proc`](/modules/proc) - shelling out
 - [`tecs.renderer`](/modules/renderer) - deferred and GPU-driven, with compute culling and one indirect draw
@@ -251,7 +251,6 @@ behind each one.
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer
 - [`tecs.time`](/modules/time) - monotonic time
 - [`tecs.version`](/modules/) - the version of this build, as a string
-- [`tecs.watch`](/modules/watch) - watching files for change
 - [`tecs.window`](/modules/window) - the window, its size, its display and its mode
 - [`tecs.workers`](/modules/workers) - typed background jobs
 
