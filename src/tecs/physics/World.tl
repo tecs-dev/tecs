@@ -108,6 +108,29 @@ local BODY_TYPES <const>: {string: integer} = {
 }
 
 --- Builds the internal shape options without exposing Box2D definitions.
+---
+--- Positional rather than a table, because the caller is the per-body sync and
+--- a table literal there is an allocation per shape per rebuild.
+---
+--- @param density Mass per unit area.
+--- @param friction Coulomb friction, mixed with the other shape's as their
+---     geometric mean.
+--- @param restitution Bounce, mixed with the other shape's as the larger of
+---     the two.
+--- @param offsetX The shape's centre in the body's frame, in metres.
+--- @param offsetY The same along y.
+--- @param categoryBits The categories this shape belongs to.
+--- @param maskBits The categories it collides with. Two shapes touch only when
+---     each one's mask names the other's category.
+--- @param groupIndex Overrides the bits between shapes sharing a non-zero
+---     value: positive always collides, negative never does.
+--- @param isSensor Whether the shape reports overlaps instead of colliding. A
+---     sensor is built with contact and hit events off and sensor events on.
+--- @param entity Stored as the shape's user data, which is how a contact names
+---     an entity without a lookup.
+--- @return A fresh table, so the caller may keep it. Every field is passed
+---     through as given, nil included, and `addBox` and its siblings are where
+---     the defaults land.
 function World.shapeOptions(
     density: number,
     friction: number,
@@ -391,9 +414,14 @@ end
 --- Axis aligned in the body's frame, so it turns with the body. Attaching a
 --- shape recomputes the body's mass from the shape's density.
 ---
+--- @param body The body to attach to. Not checked, so a stale handle here is
+---     Box2D's to reject rather than this function's.
 --- @param halfWidth Half the box's full width, in metres.
 --- @param halfHeight Half the box's full height, in metres.
---- @param options May be nil, which takes Box2D's material defaults.
+--- @param options Required, unlike the definition Box2D builds from it: the
+---     offset is read off this before anything is normalized, so nil raises
+---     here rather than falling back to the material defaults. Each field
+---     within it may be nil.
 --- @return A `b2ShapeId`. It is invalidated by destroying the shape, the body
 ---     or the world.
 function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number, options: ShapeOptions): loader.CValue
@@ -409,10 +437,13 @@ function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number
     return C.b2CreatePolygonShape(body, shapeDef(options), polygon) as loader.CValue
 end
 
---- Attaches a circle centred on the body's origin.
+--- Attaches a circle, centred by the offset in `options`.
 ---
---- @param radius Metres. There is no offset parameter: the centre is the
----     body's origin, so an off-centre circle needs a body positioned for it.
+--- @param body The body to attach to.
+--- @param radius Metres.
+--- @param options Required, for the reason `addBox` gives. Its `offsetX` and
+---     `offsetY` place the circle's centre in the body's frame, so an
+---     off-centre circle needs no body positioned for it.
 --- @return A `b2ShapeId`, with the same lifetime as `addBox`'s.
 function World.addCircle(body: loader.CValue, radius: number, options: ShapeOptions): loader.CValue
     local circle = ffi.new("b2Circle[1]") as loader.CArray
@@ -426,6 +457,16 @@ end
 
 --- Attaches a vertical capsule. `length` is the distance between the two end
 --- centres, excluding the caps.
+---
+--- @param body The body to attach to.
+--- @param radius The cap radius, in metres. It is also the capsule's
+---     half-width, so the full width is twice this.
+--- @param length Metres between the two end centres, so the full height is
+---     this plus twice the radius. Zero makes a circle of `radius`.
+--- @param options Required, for the reason `addBox` gives. The offset places
+---     the capsule's midpoint, and the two ends are put half a length either
+---     side of it along y.
+--- @return A `b2ShapeId`, with the same lifetime as `addBox`'s.
 function World.addCapsule(body: loader.CValue, radius: number, length: number, options: ShapeOptions): loader.CValue
     local capsule = ffi.new("b2Capsule[1]") as loader.CArray
     local shape = capsule[0] as loader.CStruct
@@ -441,7 +482,14 @@ end
 
 local shapeScratch <const> = ffi.new("b2ShapeId[1]") as loader.CArray
 
---- Removes a body's single primary shape.
+--- Destroys the first shape Box2D lists for a body, and nothing when it has
+--- none.
+---
+--- @param body Its shape list is read one entry deep, and Box2D links a new
+---     shape at the head, so the entry that comes back is the most recently
+---     attached rather than the first. On a body carrying only the shape it
+---     was declared with, those are the same one; on a body that has since
+---     gained a secondary collider, they are not.
 function World.removeShape(body: loader.CValue)
     if (tonumber(C.b2Body_GetShapes(body, shapeScratch, 1)) as integer) > 0 then
         C.b2DestroyShape(shapeScratch[0], true)
@@ -449,11 +497,24 @@ function World.removeShape(body: loader.CValue)
 end
 
 --- Returns the entity stored on a body, or zero when none was.
+---
+--- @param body A live handle. The user data is read without validating it, so
+---     a destroyed body's handle is the caller's problem.
+--- @return The entity `createBody` was given, or zero for a body created
+---     without one. Zero is not a valid entity, so it doubles as "none".
 function World.entityOfBody(body: loader.CValue): integer
     return tonumber(ffi.cast("intptr_t", C.b2Body_GetUserData(body))) as integer
 end
 
 --- Returns the entity owning a shape, or zero when none was.
+---
+--- @param shape Validated first, unlike `entityOfBody`'s body, because the
+---     contact and sensor buffers name shapes that a later event in the same
+---     drain may already have destroyed.
+--- @return The shape's own entity where it has one, which is how a secondary
+---     collider reports itself rather than its body. Falls back to the body's
+---     entity, so a shape declared with its body answers with that body. Zero
+---     when the shape is invalid or neither carries an entity.
 function World.entityOfShape(shape: loader.CValue): integer
     if not (C.b2Shape_IsValid(shape) as boolean) then
         return 0
@@ -472,6 +533,28 @@ local forceScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 local forcePointScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 
 --- Casts a segment and returns the nearest hit. All positions are metres.
+---
+--- Closest-hit only, and callback-free: Box2D's all-hits and overlap queries
+--- report through a function pointer, which is what keeps them out of this
+--- module.
+---
+--- @param x1 The start of the segment, in metres.
+--- @param y1 The same along y.
+--- @param x2 The end of the segment. Nothing past it is tested, so a miss may
+---     only mean the segment was short.
+--- @param y2 The same along y.
+--- @param categoryBits The ray's own categories, nil for all of them. A shape
+---     whose mask names none of these is skipped.
+--- @param maskBits The categories the ray may hit, nil for all of them.
+--- @return The entity owning the nearest shape, or nil alone on a miss.
+---     Sensors are eligible: only the filter keeps a ray out of one.
+--- @return The contact x in metres.
+--- @return The contact y in metres.
+--- @return The x of the surface normal, a unit vector pointing out of the
+---     shape and so unscaled.
+--- @return The y of the surface normal.
+--- @return How far along the segment the hit is, 0 at the start and 1 at the
+---     end.
 function World:raycast(
     x1: number, y1: number, x2: number, y2: number, categoryBits: number, maskBits: number
 ): integer, number, number, number, number, number
@@ -497,12 +580,31 @@ function World:raycast(
 end
 
 --- Applies a force at the centre. Force uses Box2D's metre-based units.
+---
+--- Box2D clears the accumulator at the end of every step, so a force has to be
+--- reapplied each step to keep acting.
+---
+--- @param body The body to push. Wakes it, because a sleeping body accumulates
+---     force and never moves.
+--- @param x Newtons along x, applied at the centre of mass so it imparts no
+---     spin.
+--- @param y Newtons along y.
 function World.applyForce(body: loader.CValue, x: number, y: number)
     local vector = forceScratch[0] as loader.CStruct
     vector.x, vector.y = x, y
     C.b2Body_ApplyForceToCenter(body, forceScratch[0], true)
 end
 
+--- Applies a force at a world point, which spins the body as well as pushing
+--- it. Cleared each step, like `applyForce`.
+---
+--- @param body The body to push, which this wakes.
+--- @param x Newtons along x.
+--- @param y Newtons along y.
+--- @param pointX Where the force acts, in world metres rather than the body's
+---     frame.
+--- @param pointY The same along y. A point at the centre of mass makes this
+---     `applyForce`.
 function World.applyForceAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
     local vector = forceScratch[0] as loader.CStruct
     vector.x, vector.y = x, y
@@ -511,6 +613,15 @@ function World.applyForceAt(body: loader.CValue, x: number, y: number, pointX: n
     C.b2Body_ApplyForce(body, forceScratch[0], forcePointScratch[0], true)
 end
 
+--- Applies a linear impulse at a world point, changing velocity at once rather
+--- than over the step.
+---
+--- @param body The body to push, which this wakes.
+--- @param x The x impulse, in kilogram-metres per second.
+--- @param y The y impulse.
+--- @param pointX Where the impulse lands, in world metres. Off the centre of
+---     mass it becomes spin as well as travel.
+--- @param pointY The same along y.
 function World.applyImpulseAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
     local vector = forceScratch[0] as loader.CStruct
     vector.x, vector.y = x, y
@@ -519,27 +630,62 @@ function World.applyImpulseAt(body: loader.CValue, x: number, y: number, pointX:
     C.b2Body_ApplyLinearImpulse(body, forceScratch[0], forcePointScratch[0], true)
 end
 
+--- Applies torque about the centre of mass. Cleared each step, like the forces
+--- above.
+---
+--- @param body The body to turn, which this wakes.
+--- @param torque Newton-metres. Positive raises the angular velocity, and a
+---     body with `fixedRotation` takes it and still does not turn.
 function World.applyTorque(body: loader.CValue, torque: number)
     C.b2Body_ApplyTorque(body, torque, true)
 end
 
+--- Reads a body's angular velocity.
+---
+--- @param body The body to read.
+--- @return Radians per second, in the direction a rising angle turns. Zero for
+---     a static body and for one with `fixedRotation`.
 function World.angularVelocity(body: loader.CValue): number
     return C.b2Body_GetAngularVelocity(body) as number
 end
 
+--- Sets a body's angular velocity and wakes it.
+---
+--- @param body The body to spin.
+--- @param omega Radians per second, set outright. Box2D discards it for a
+---     static body and for one with `fixedRotation`, which read back zero; the
+---     wake still happens either way.
 function World.setAngularVelocity(body: loader.CValue, omega: number)
     C.b2Body_SetAngularVelocity(body, omega)
     C.b2Body_SetAwake(body, true)
 end
 
+--- Wakes a body or puts it to sleep.
+---
+--- @param body The body to act on.
+--- @param awake False sleeps it where it is rather than waiting for it to come
+---     to rest, so a body still moving stops until something touches it.
 function World.setAwake(body: loader.CValue, awake: boolean)
     C.b2Body_SetAwake(body, awake)
 end
 
+--- Whether Box2D is still solving this body.
+---
+--- @param body The body to read.
+--- @return Whether it is awake. Bodies sleep as an island, so one at rest
+---     touching a moving body stays awake.
 function World.isAwake(body: loader.CValue): boolean
     return C.b2Body_IsAwake(body) as boolean
 end
 
+--- Moves a body outright, without sweeping the gap.
+---
+--- @param body The body to move.
+--- @param x The new origin x, in metres. The origin is what shapes are placed
+---     relative to, not the centre of mass.
+--- @param y The new origin y, in metres.
+--- @param angle Radians. Required here, unlike `physics.teleport`, which fills
+---     it from the entity's transform.
 function World.setTransform(body: loader.CValue, x: number, y: number, angle: number)
     local position = rayOriginScratch[0] as loader.CStruct
     position.x, position.y = x, y
