@@ -11,7 +11,7 @@
 --- the middle of it. The cost is that a tool must not block: it is running
 --- during a frame someone is watching.
 
-local cjson <const> = require("cjson")
+local cjson <const> = require("tecs.json")
 local clock <const> = require("tecs.platform.clock")
 local log <const> = require("tecs.log")
 local transport <const> = require("tecs.mcp.transport")

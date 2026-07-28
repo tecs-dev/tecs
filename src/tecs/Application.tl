@@ -51,7 +51,7 @@
 --- save state on being backgrounded, because there may be no later drain to
 --- do it in, and `stageCheckpoint` is the surface for exactly that.
 
-local cjson <const> = require("cjson")
+local cjson <const> = require("tecs.json")
 local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

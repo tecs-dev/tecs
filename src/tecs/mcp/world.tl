@@ -15,7 +15,7 @@
 --- tools can name anything anybody registered, including a game's own, and
 --- nothing has to be told about a component twice.
 
-local cjson <const> = require("cjson")
+local cjson <const> = require("tecs.json")
 local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 

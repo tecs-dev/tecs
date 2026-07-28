@@ -357,6 +357,10 @@ local function writeRun(
 )
     local floats = self._instances
     local bounds = self._bounds
+    -- Rows in this run whose tint asks for blending. Counted here rather than
+    -- derived later because the sign that carries it is written here, so the
+    -- count and the lane are right together or wrong together.
+    local blended = 0
     local transforms = archetype:get(components.Transform)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
@@ -567,10 +571,22 @@ local function writeRun(
         local bound = (offset + row - 1) * BOUND_FLOATS
         bounds[bound] = centreX
         bounds[bound + 1] = centreY
-        bounds[bound + 2] = ex
+        -- A half extent is a length and its sign carries nothing, so the sign
+        -- is what tells the cull which lane a row belongs in. Negative is
+        -- blended, and the cull takes the magnitude for the view test and the
+        -- sign for the lane, so the lane costs no fetch of its own: the mark
+        -- pass already reads this bound and deliberately never touches the
+        -- 64-byte instance.
+        if tint.a < 1.0 then
+            bounds[bound + 2] = -ex
+            blended = blended + 1
+        else
+            bounds[bound + 2] = ex
+        end
         bounds[bound + 3] = ey
     end
 
+    packet.blendCount = packet.blendCount + blended
     packet.instanceRanges:mark(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)
     packet.boundsRanges:mark(offset * BOUND_BYTES, length * BOUND_BYTES)
 end

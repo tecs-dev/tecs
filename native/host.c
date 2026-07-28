@@ -638,13 +638,16 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
      * A tool running under a plain interpreter never reaches this, so the
      * headless property holds: nothing outside the host pays for the engine
      * unless it asks. */
+    /* Attempted rather than required, because an entry chunk is not always a
+     * game. A single-file build's chunk is the command line tool, and
+     * unpacking its payload and setting package.path is the first thing it
+     * does, so the engine is not reachable yet and must not be insisted on.
+     * A game's chunk finds it already loaded and writes `tecs.newWorld()` with
+     * no preamble; a chunk that sets up its own paths requires it itself, as
+     * the tool does. */
     lua_getglobal(L, "require");
     lua_pushstring(L, "tecs");
-    if (lua_pcall(L, 1, 0, -3) != 0) {
-        SDL_Log("tecs: %s", lua_tostring(L, -1));
-        SDL_free(resolved);
-        return SDL_APP_FAILURE;
-    }
+    if (lua_pcall(L, 1, 0, 0) != 0) lua_pop(L, 1);
 
     lua_insert(L, -2);
     int loaded = compiled == 0 && lua_pcall(L, 0, 1, -2) == 0;

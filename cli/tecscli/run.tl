@@ -251,15 +251,12 @@ local function commandTest(paths: layout): integer
     end
 
     local buildRoot = project.path(found, found.build)
-    package.path = table.concat(
-        {
-            buildRoot .. "/spec/?.lua",
-            buildRoot .. "/lua/?.lua",
-            buildRoot .. "/lua/?/init.lua",
-            package.path,
-        },
-        ";"
-    )
+    package.path = table.concat({
+        buildRoot .. "/spec/?.lua",
+        buildRoot .. "/lua/?.lua",
+        buildRoot .. "/lua/?/init.lua",
+        package.path,
+    }, ";")
 
     testing.reset()
     for _, relative in ipairs(specs) do

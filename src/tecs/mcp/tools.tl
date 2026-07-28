@@ -4,7 +4,7 @@
 --- ones that are true of any build and that an agent reaches for before it
 --- knows anything else: is it alive, what is it, and what has it been saying.
 
-local cjson <const> = require("cjson")
+local cjson <const> = require("tecs.json")
 local sdl <const> = require("tecs.ffi.sdl3")
 local capabilities <const> = require("tecs.platform.capabilities")
 local paths <const> = require("tecs.platform.paths")
