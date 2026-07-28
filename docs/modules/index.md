@@ -40,7 +40,6 @@ checked against a fresh render so it cannot drift.
 | [`tecs.components`](/modules/components)                               | the engine's own components, the ones the renderer reads                  |
 | [`tecs.compress`](/modules/compress)                                   | compression and decompression                                             |
 | [`tecs.DEFAULT_MAX_ENTITIES`](/ecs/world)                              | the default `maxEntities` when a world names none, `2^20`                 |
-| [`tecs.dialogs`](/modules/dialogs)                                     | asynchronous native file and folder pickers                               |
 | [`tecs.events`](/modules/events)                                       | platform events, typed once and routed                                    |
 | [`tecs.filesystem`](/modules/filesystem)                               | touching the filesystem                                                   |
 | [`tecs.findKey`](/ecs/world)                                           | the key a name was created with, or nil                                   |
@@ -81,7 +80,7 @@ checked against a fresh render so it cannot drift.
 | [`tecs.sensors`](/modules/sensors)                                     | standalone accelerometers and gyroscopes                                  |
 | [`tecs.sequence`](/modules/sequence)                                   | the sequencer, with the tween runtime inside it                           |
 | [`tecs.sheet`](/modules/sheet)                                         | sprite sheets: loading one, and what is in it                             |
-| [`tecs.system`](/modules/system)                                       | URLs, locales, power, and simple native messages                          |
+| [`tecs.system`](/modules/system)                                       | URLs, locales, power, messages, and native file and folder dialogs        |
 | [`tecs.text`](/modules/text)                                           | distance-field text, drawn through an instance producer                   |
 | [`tecs.version`](/modules/surface)                                     | the version of this build, as a string                                    |
 | [`tecs.watch`](/modules/watch)                                         | watching files for change                                                 |

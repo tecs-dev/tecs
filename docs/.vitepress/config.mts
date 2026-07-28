@@ -125,7 +125,6 @@ export default defineConfig({
                     { text: "tecs.components", link: "/modules/components" },
                     { text: "tecs.compress", link: "/modules/compress" },
                     { text: "tecs.DEFAULT_MAX_ENTITIES", link: "/ecs/world" },
-                    { text: "tecs.dialogs", link: "/modules/dialogs" },
                     { text: "tecs.events", link: "/modules/events" },
                     { text: "tecs.filesystem", link: "/modules/filesystem" },
                     { text: "tecs.findKey", link: "/ecs/world" },

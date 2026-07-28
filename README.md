@@ -1165,17 +1165,18 @@ keeps its NULs.
 ## Native platform utilities
 
 The smaller operating-system services stay small modules rather than becoming
-an `Application` grab bag. `tecs.system` holds URLs, locale preference, power
-and the simple blocking message box; `tecs.sensors` owns standalone sensor
-handles; lowercase `tecs.audio` enumerates physical devices and owns microphone
-streams, while `tecs.Audio` remains playback and the `Sound` component.
+an `Application` grab bag. `tecs.system` holds URLs, locale preference, power,
+the simple blocking message box and asynchronous file and folder selection;
+`tecs.sensors` owns standalone sensor handles; lowercase `tecs.audio`
+enumerates physical devices and owns microphone streams, while `tecs.Audio`
+remains playback and the `Sound` component.
 Standard cursor shapes stay on `Input`, because cursor choice is an outbound
 input command on the same seam as visibility and relative mode.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
 `native/dialogs.c` owns that callback, copies its answer behind a mutex, and
-`tecs.dialogs` polls it into a `Future` on the main thread. A Lua `ffi.cast`
+`tecs.system` polls it into a `Future` on the main thread. A Lua `ffi.cast`
 callback would be shorter and would make the program undefined on exactly the
 platform path the dialog exists to use.
 

@@ -178,7 +178,6 @@ local REACH = {
             .. "of the engine lifecycle or required for a game to run.",
         modules = {
             "tecs/platform/audio.lua",
-            "tecs/platform/dialogs.lua",
             "tecs/platform/sensors.lua",
             "tecs/platform/system.lua",
         },

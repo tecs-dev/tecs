@@ -69,7 +69,7 @@ local sequence <const> = require("tecs.sequence")
 local filesystem <const> = require("tecs.platform.filesystem")
 local paths <const> = require("tecs.platform.paths")
 local proc <const> = require("tecs.platform.proc")
-local dialogs <const> = require("tecs.platform.dialogs")
+local system <const> = require("tecs.platform.system")
 local watch <const> = require("tecs.platform.watch")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
@@ -857,7 +857,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- hold a handle that never leaves "running". Costs a nil check on a
     -- process that has never started a child.
     proc.update()
-    dialogs.update()
+    system.updateDialogs()
 
     -- Outside the suspension and crash guards, for the reason above and one
     -- more: a shader edited to fix the crash is exactly what a stopped process

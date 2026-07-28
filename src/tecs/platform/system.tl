@@ -4,11 +4,15 @@
 --- lifecycle. They therefore live together instead of being methods on a
 --- window or on `Application`.
 
+local Future <const> = require("tecs.Future")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 
+loader.declare("dialogs")
+
 local C <const> = sdl.C
 local K <const> = sdl.K
+local D <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "dialogs")
 
 local record WindowLike
     handle: loader.CPtr
@@ -32,9 +36,34 @@ local record Power
     percent: integer
 end
 
+local record DialogFilter
+    --- Label shown beside the filter, such as `"Images"`.
+    name: string
+    --- Semicolon-separated extensions, such as `"png;jpg;jpeg"`.
+    pattern: string
+end
+
+local record DialogOptions
+    window: WindowLike
+    filters: {DialogFilter}
+    defaultLocation: string
+    multiple: boolean
+end
+
+local record DialogResult
+    --- Selected paths. Empty when the user cancelled.
+    paths: {string}
+    --- One-based selected filter, or zero when no filter applies.
+    filter: integer
+    cancelled: boolean
+end
+
 local record system
     Locale: Locale
     Power: Power
+    DialogFilter: DialogFilter
+    DialogOptions: DialogOptions
+    DialogResult: DialogResult
 end
 
 local countOut <const> = loader.newArray("int[1]")
@@ -100,9 +129,6 @@ function system.power(): Power
 end
 
 --- Shows a native informational, warning or error dialog.
----
---- This is intentionally the simple blocking form. File pickers are
---- asynchronous and live in `tecs.dialogs`.
 function system.messageBox(kind: string, title: string, message: string, window?: WindowLike): boolean, string
     local flags = MESSAGE_FLAGS[kind]
     if flags == nil then
@@ -113,6 +139,142 @@ function system.messageBox(kind: string, title: string, message: string, window?
         return false, sdl.error()
     end
     return true, nil
+end
+
+-------------------------------------------------------------------------------
+-- Asynchronous file and folder dialogs
+-------------------------------------------------------------------------------
+
+--- SDL retains the file-dialog callback and may enter it from a thread LuaJIT
+--- did not create. `native/dialogs.c` owns that callback and copies its answer;
+--- this source polls the copied result and settles futures on the main thread.
+
+local record DialogEntry
+    handle: loader.CPtr
+    future: Future<DialogResult>
+end
+
+local record DialogSource
+    sliceMs: number
+    defaultWaitMs: number
+    poll: function(self: DialogSource): integer
+    advance: function(self: DialogSource, ms: number): integer
+end
+
+local DialogSourceMT <const>: metatable<DialogSource> = {__index = DialogSource}
+local pendingDialogs: {DialogEntry} = {}
+
+local function finishDialog(entry: DialogEntry)
+    local handle = entry.handle
+    local errorPointer = D.tecsDialogError(handle)
+    if errorPointer ~= nil then
+        entry.future:fail(loader.toString(errorPointer))
+    else
+        local paths: {string} = {}
+        local count = tonumber(D.tecsDialogPathCount(handle)) as integer
+        for index = 0, count - 1 do
+            paths[index + 1] = loader.toString(D.tecsDialogPath(handle, index))
+        end
+        local selected = tonumber(D.tecsDialogFilter(handle)) as integer
+        entry.future:complete({
+            paths = paths,
+            filter = selected >= 0 and selected + 1 or 0,
+            cancelled = D.tecsDialogCancelled(handle) as boolean,
+        })
+    end
+    D.tecsDialogDestroy(handle)
+end
+
+function DialogSource:poll(): integer
+    local settled = 0
+    for index = #pendingDialogs, 1, -1 do
+        local entry = pendingDialogs[index]
+        if D.tecsDialogReady(entry.handle) then
+            finishDialog(entry)
+            table.remove(pendingDialogs, index)
+            settled = settled + 1
+        end
+    end
+    return settled
+end
+
+function DialogSource:advance(ms: number): integer
+    local settled = self:poll()
+    if settled > 0 or ms <= 0 then
+        return settled
+    end
+    C.SDL_Delay(math.floor(ms))
+    return self:poll()
+end
+
+local dialogSource <const> = setmetatable({
+    sliceMs = 16,
+    defaultWaitMs = 300000,
+} as DialogSource, DialogSourceMT)
+
+local function filterArrays(options: DialogOptions): loader.CArray, loader.CArray, integer
+    local filters = options.filters
+    if filters == nil or #filters == 0 then
+        return nil, nil, 0
+    end
+    local names = loader.newArray("const char *[?]", #filters)
+    local patterns = loader.newArray("const char *[?]", #filters)
+    for index = 1, #filters do
+        local filter = filters[index]
+        if filter.name == nil or filter.name == "" then
+            error(("tecs: dialog filter %d needs a name"):format(index), 3)
+        end
+        if filter.pattern == nil or filter.pattern == "" then
+            error(("tecs: dialog filter %d needs a pattern"):format(index), 3)
+        end
+        names[index - 1] = filter.name
+        patterns[index - 1] = filter.pattern
+    end
+    return names, patterns, #filters
+end
+
+local function trackDialog(handle: loader.CPtr): Future<DialogResult>
+    if handle == nil then
+        return Future.failed("cannot allocate file-dialog state") as Future<DialogResult>
+    end
+    local future = Future.pending(dialogSource as Future.Source) as Future<DialogResult>
+    pendingDialogs[#pendingDialogs + 1] = {handle = handle, future = future}
+    -- A setup allocation can fail before SDL opens anything.
+    dialogSource:poll()
+    return future
+end
+
+--- Opens a native file picker.
+function system.openFile(options?: DialogOptions): Future<DialogResult>
+    local given = options or {} as DialogOptions
+    local names, patterns, count = filterArrays(given)
+    local window = given.window ~= nil and given.window.handle or nil
+    return trackDialog(
+        D.tecsDialogOpenFile(window, names, patterns, count, given.defaultLocation, given.multiple == true)
+    )
+end
+
+--- Opens a native save-file picker. At most one path is returned.
+function system.saveFile(options?: DialogOptions): Future<DialogResult>
+    local given = options or {} as DialogOptions
+    local names, patterns, count = filterArrays(given)
+    local window = given.window ~= nil and given.window.handle or nil
+    return trackDialog(D.tecsDialogSaveFile(window, names, patterns, count, given.defaultLocation))
+end
+
+--- Opens a native folder picker.
+function system.openFolder(options?: DialogOptions): Future<DialogResult>
+    local given = options or {} as DialogOptions
+    local window = given.window ~= nil and given.window.handle or nil
+    return trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true))
+end
+
+--- Settles file and folder dialogs whose native callback has answered.
+---
+--- `Application` calls this every frame. It is public for a headless tool that
+--- creates dialogs without an application.
+function system.updateDialogs(): integer
+    return dialogSource:poll()
 end
 
 return system

@@ -1,12 +1,13 @@
 ---
-description: "Operating-system utilities: URLs, preferred locales, power state, and simple native message boxes"
+description: "Operating-system utilities: URLs, locales, power, message boxes, and asynchronous file and folder dialogs"
 outline: deep
 ---
 
 # tecs.system
 
-`tecs.system` groups small process-wide services SDL presents consistently. They are not window state and do not
-need an `Application`; a window is optional only when a message box should be parented to one.
+`tecs.system` groups small process-wide services SDL presents consistently. They are not window state. A window
+is optional when a message box or file picker should be parented to one, and an `Application` is only needed to
+pump asynchronous dialog results automatically.
 
 ## openURL
 
@@ -44,4 +45,63 @@ function system.messageBox(
 ```
 
 Shows a simple blocking native message box. `kind` is `"info"`, `"warning"` or `"error"`. Pass a window to make
-the box modal to it. File and folder selection is asynchronous and belongs to [`tecs.dialogs`](/modules/dialogs).
+the box modal to it.
+
+## File and folder dialogs
+
+```teal
+function system.openFile(
+    options?: system.DialogOptions
+): Future<system.DialogResult>
+
+function system.saveFile(
+    options?: system.DialogOptions
+): Future<system.DialogResult>
+
+function system.openFolder(
+    options?: system.DialogOptions
+): Future<system.DialogResult>
+```
+
+These open native platform pickers and return [`Future`](/modules/Future) values. `saveFile` returns at most one
+path. `openFile` and `openFolder` return one unless `multiple` is true.
+
+```teal
+local choice <const> = tecs.system.openFile({
+    window = app.window,
+    filters = {
+        { name = "Images", pattern = "png;jpg;jpeg" },
+    },
+    defaultLocation = tecs.paths.content(),
+    multiple = true,
+})
+```
+
+`DialogOptions` has these fields:
+
+| Field             | Type                    | Meaning                                                  |
+| ----------------- | ----------------------- | -------------------------------------------------------- |
+| `window`          | `Window`                | Optional parent window                                   |
+| `filters`         | `{system.DialogFilter}` | Display names and semicolon-separated extension patterns |
+| `defaultLocation` | `string`                | Initial directory or file                                |
+| `multiple`        | `boolean`               | Allows several selections on open-file and open-folder   |
+
+Every filter needs a non-empty `name` and `pattern`; invalid filters raise before a dialog opens.
+
+A ready future carries `paths`, `filter`, and `cancelled`. `filter` is one-based, or zero when no filter applies.
+Closing the picker without choosing is a successful result with `cancelled = true` and an empty path list;
+failure means the platform could not complete the dialog.
+
+SDL retains a callback for these pickers and may invoke it from a thread LuaJIT did not create.
+`native/dialogs.c` therefore copies its answer behind a mutex, and `Application` settles the future on the main
+thread.
+
+## updateDialogs
+
+```teal
+function system.updateDialogs(): integer
+```
+
+Settles completed file and folder dialogs and returns how many completed. `Application` calls this each frame. A
+tool that uses dialogs without an application can call it itself or use `future:wait()`, whose source polls the
+native state.

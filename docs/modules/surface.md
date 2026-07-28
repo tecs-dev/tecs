@@ -312,10 +312,6 @@ Look up a registered component by name.
 ## tecs.compress
 <pre><code v-pre><a href="#tecs.compress">tecs.compress</a>: compress
 </code></pre>
-<a id="tecs.dialogs"></a>
-## tecs.dialogs
-<pre><code v-pre><a href="#tecs.dialogs">tecs.dialogs</a>: dialogs
-</code></pre>
 <a id="tecs.events"></a>
 ## tecs.events
 <pre><code v-pre><a href="#tecs.events">tecs.events</a>: events
