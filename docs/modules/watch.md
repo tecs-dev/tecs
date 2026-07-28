@@ -427,9 +427,9 @@ half-written file is asserted on without sleeping.
 
 #### Returns
 
-| Type                       | Description                       |
-| -------------------------- | --------------------------------- |
-| <code v-pre>integer</code> | How many changes were dispatched. |
+| Type                       | Description                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | How many changes were dispatched, which is handlers run rather than paths looked at. Zero while nothing is being watched. |
 
 <a id="tecs.watch.uninstall"></a>
 

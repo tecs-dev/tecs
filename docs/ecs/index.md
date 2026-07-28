@@ -647,7 +647,7 @@ The components every world carries: `ChildOf`, `Transform`, `TTL`,
 
 ### tecs.ecs.componentByName
 
-<pre><code v-pre>function <a href="#tecs.ecs.componentByName">tecs.ecs.componentByName</a>(string): <a href="#tecs.ecs.Component">Component</a>
+<pre><code v-pre>function <a href="#tecs.ecs.componentByName">tecs.ecs.componentByName</a>(name: string): <a href="#tecs.ecs.Component">Component</a>
 </code></pre>
 
 The component registered under `name`, or nil.
@@ -661,15 +661,15 @@ Finds a dense relationship instance by its stamped name as well, which
 
 #### Parameters
 
-| Type                      | Name | Description |
-| ------------------------- | ---- | ----------- |
-| <code v-pre>string</code> |      |             |
+| Type                      | Name                    | Description                                                                                  |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | The `name` the component was registered under, which is the record's own name by convention. |
 
 #### Returns
 
-| Type                                                           | Description |
-| -------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> |             |
+| Type                                                           | Description                                                                                                                                                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> | The component, or nil when nothing has registered that name yet. Nil is a question of whether the declaring module has been required, not of whether any world carries the component. |
 
 <a id="tecs.ecs.declaredComponents"></a>
 
@@ -689,9 +689,9 @@ them, and none of them is a component anybody declared.
 
 #### Returns
 
-| Type                                                                      | Description |
-| ------------------------------------------------------------------------- | ----------- |
-| <code v-pre>{string : <a href="#tecs.ecs.Component">Component</a>}</code> |             |
+| Type                                                                      | Description                                                                                                                                                                                                |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{string : <a href="#tecs.ecs.Component">Component</a>}</code> | A fresh table each call, built by walking the whole registry, so this is for tooling rather than for a per-frame path. What is declared in the process, which is a superset of what any one world carries. |
 
 <a id="tecs.ecs.findKey"></a>
 
@@ -710,36 +710,36 @@ Find a named key created by `newKey`. Returns nil when unknown.
 
 #### Parameters
 
-| Type                      | Name                    | Description                        |
-| ------------------------- | ----------------------- | ---------------------------------- |
-| <code v-pre>string</code> | <code v-pre>name</code> | The name the key was created with. |
+| Type                      | Name                    | Description                                                                                                          |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | The name the key was created with. Unnamed keys are unreachable here, which is the reason `newKey` warns about them. |
 
 #### Returns
 
-| Type                                                               | Description |
-| ------------------------------------------------------------------ | ----------- |
-| <code v-pre><a href="#tecs.ecs.Key">Key</a>&lt;T&gt; \| nil</code> |             |
+| Type                                                               | Description                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.Key">Key</a>&lt;T&gt; \| nil</code> | The existing key, so a value stored under it is readable without the module that created it. Nil when no key of that name has been created yet, which is a question of load order rather than of spelling: the key appears once its module has run. |
 
 <a id="tecs.ecs.getComponentById"></a>
 
 ### tecs.ecs.getComponentById
 
-<pre><code v-pre>function <a href="#tecs.ecs.getComponentById">tecs.ecs.getComponentById</a>(integer): <a href="#tecs.ecs.Component">Component</a>
+<pre><code v-pre>function <a href="#tecs.ecs.getComponentById">tecs.ecs.getComponentById</a>(id: integer): <a href="#tecs.ecs.Component">Component</a>
 </code></pre>
 
 Look up a registered component by numeric ID.
 
 #### Parameters
 
-| Type                       | Name | Description |
-| -------------------------- | ---- | ----------- |
-| <code v-pre>integer</code> |      |             |
+| Type                       | Name                  | Description                                                                                            |
+| -------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| <code v-pre>integer</code> | <code v-pre>id</code> | A component id, which is allocated once at registration and is the same in every world in the process. |
 
 #### Returns
 
-| Type                                                           | Description |
-| -------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> |             |
+| Type                                                           | Description                                                                                                                                                                               |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> | The component, or nil for an id that was never allocated. Ids are not stable across runs: registration order decides them, so a saved id is only meaningful within the run that wrote it. |
 
 <a id="tecs.ecs.listKeys"></a>
 
@@ -752,15 +752,15 @@ All named keys, as a fresh name -> numeric key id table.
 
 #### Returns
 
-| Type                                  | Description |
-| ------------------------------------- | ----------- |
-| <code v-pre>{string : integer}</code> |             |
+| Type                                  | Description                                                                                                                                                                                                                  |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{string : integer}</code> | A fresh table each call, so the caller may keep it and the registry stays unwritable from outside `newKey`. Names span the process rather than one world, so a key here is not evidence that any world has a value under it. |
 
 <a id="tecs.ecs.newComponent"></a>
 
 ### tecs.ecs.newComponent
 
-<pre><code v-pre>function <a href="#tecs.ecs.newComponent">tecs.ecs.newComponent</a>&lt;C is <a href="#tecs.ecs.Component">Component</a>&gt;(<a href="#tecs.ecs.ComponentOptions">ComponentOptions</a>&lt;C&gt;): C
+<pre><code v-pre>function <a href="#tecs.ecs.newComponent">tecs.ecs.newComponent</a>&lt;C is <a href="#tecs.ecs.Component">Component</a>&gt;(options: <a href="#tecs.ecs.ComponentOptions">ComponentOptions</a>&lt;C&gt;): C
 </code></pre>
 
 Creates and registers a new table component. See `ecs.ComponentOptions`
@@ -775,15 +775,15 @@ and the component docs for the shared `fields` / `defaults` / `init` /
 
 #### Parameters
 
-| Type                                                                                  | Name | Description |
-| ------------------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.ecs.ComponentOptions">ComponentOptions</a>&lt;C&gt;</code> |      |             |
+| Type                                                                                  | Name                       | Description                                                                                                                                      |
+| ------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre><a href="#tecs.ecs.ComponentOptions">ComponentOptions</a>&lt;C&gt;</code> | <code v-pre>options</code> | Its `name` is the registry key, so it has to be unique in the process and is what queries, snapshots and the MCP tools address the component by. |
 
 #### Returns
 
-| Type                 | Description |
-| -------------------- | ----------- |
-| <code v-pre>C</code> |             |
+| Type                 | Description                                                                                                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>C</code> | The same `container` record passed in, now registered and callable as a constructor. Registration is process-wide and permanent, so this belongs at module scope rather than in a plugin that may be added to two worlds. |
 
 <a id="tecs.ecs.newContext"></a>
 
@@ -796,9 +796,9 @@ Create a new Context instance.
 
 #### Returns
 
-| Type                                                       | Description |
-| ---------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.ecs.Context">Context</a></code> |             |
+| Type                                                       | Description                                                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.Context">Context</a></code> | An empty context, which is the keyed store `world.resources` is one of. For something wanting that store without a world. |
 
 <a id="tecs.ecs.newEvent"></a>
 
@@ -817,15 +817,15 @@ Configure an event to have an appropriate __call based constructor.
 
 #### Parameters
 
-| Type                 | Name                     | Description                      |
-| -------------------- | ------------------------ | -------------------------------- |
-| <code v-pre>E</code> | <code v-pre>event</code> | The event instance to configure. |
+| Type                 | Name                     | Description                                                                                                                                                                                                                             |
+| -------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>E</code> | <code v-pre>event</code> | Mutated in place rather than copied, so the record the caller declared is the one that becomes callable. Its `init`, where it has one, is what the constructor's arguments are handed to, so `init` is what decides the call signature. |
 
 <a id="tecs.ecs.newFFIComponent"></a>
 
 ### tecs.ecs.newFFIComponent
 
-<pre><code v-pre>function <a href="#tecs.ecs.newFFIComponent">tecs.ecs.newFFIComponent</a>&lt;C is <a href="#tecs.ecs.Component">Component</a>&gt;(<a href="#tecs.ecs.FFIComponentOptions">FFIComponentOptions</a>&lt;C&gt;): C
+<pre><code v-pre>function <a href="#tecs.ecs.newFFIComponent">tecs.ecs.newFFIComponent</a>&lt;C is <a href="#tecs.ecs.Component">Component</a>&gt;(options: <a href="#tecs.ecs.FFIComponentOptions">FFIComponentOptions</a>&lt;C&gt;): C
 </code></pre>
 
 Creates and registers an FFI-based component. Same constructor model
@@ -839,15 +839,15 @@ as `newComponent`, but the base instance is an FFI struct.
 
 #### Parameters
 
-| Type                                                                                        | Name | Description |
-| ------------------------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.ecs.FFIComponentOptions">FFIComponentOptions</a>&lt;C&gt;</code> |      |             |
+| Type                                                                                        | Name                       | Description                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.FFIComponentOptions">FFIComponentOptions</a>&lt;C&gt;</code> | <code v-pre>options</code> | Its `fields` have to map to a C struct, so numbers, booleans and fixed-size arrays only. One field needing a Lua table makes the whole component a table component. |
 
 #### Returns
 
-| Type                 | Description |
-| -------------------- | ----------- |
-| <code v-pre>C</code> |             |
+| Type                 | Description                                                                                                                                                                                                           |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>C</code> | The registered component. Its columns are contiguous cdata, so writing a row through `world:get` bypasses dirty tracking and needs an explicit `world:markComponentDirty`, and `world:batchSpawn` skips its defaults. |
 
 <a id="tecs.ecs.newFFIEvent"></a>
 
@@ -866,17 +866,17 @@ Configure an FFI event to have an appropriate __call based constructor.
 
 #### Parameters
 
-| Type                                                     | Name                          | Description                                                            |
-| -------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------- |
-| <code v-pre>E</code>                                     | <code v-pre>event</code>      | The event type to configure.                                           |
-| <code v-pre><span v-pre>{{</span>string, string}}</code> | <code v-pre>fields</code>     | Field definitions in format <span v-pre>{{</span>"name", "type"}, ...} |
-| <code v-pre>string</code>                                | <code v-pre>structName</code> | Optional struct name (auto-generated if not provided)                  |
+| Type                                                     | Name                          | Description                                                                                                                                                          |
+| -------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>E</code>                                     | <code v-pre>event</code>      | Mutated in place, as `newEvent` does it.                                                                                                                             |
+| <code v-pre><span v-pre>{{</span>string, string}}</code> | <code v-pre>fields</code>     | Name and C type per field, in declaration order, which is also the order the constructor takes them in. The same C-struct restriction `newFFIComponent` has applies. |
+| <code v-pre>string</code>                                | <code v-pre>structName</code> | Optional. One is generated when it is left out, and it only needs naming when something else has to name the same struct.                                            |
 
 <a id="tecs.ecs.newFFIRelationship"></a>
 
 ### tecs.ecs.newFFIRelationship
 
-<pre><code v-pre>function <a href="#tecs.ecs.newFFIRelationship">tecs.ecs.newFFIRelationship</a>&lt;R is <a href="#tecs.ecs.Relationship">Relationship</a>&gt;(<a href="#tecs.ecs.FFIRelationshipOptions">FFIRelationshipOptions</a>&lt;R&gt;): R
+<pre><code v-pre>function <a href="#tecs.ecs.newFFIRelationship">tecs.ecs.newFFIRelationship</a>&lt;R is <a href="#tecs.ecs.Relationship">Relationship</a>&gt;(config: <a href="#tecs.ecs.FFIRelationshipOptions">FFIRelationshipOptions</a>&lt;R&gt;): R
 </code></pre>
 
 Create an FFI-backed relationship with data fields.
@@ -889,15 +889,15 @@ Create an FFI-backed relationship with data fields.
 
 #### Parameters
 
-| Type                                                                                              | Name | Description |
-| ------------------------------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.ecs.FFIRelationshipOptions">FFIRelationshipOptions</a>&lt;R&gt;</code> |      |             |
+| Type                                                                                              | Name                      | Description                                                                                                                 |
+| ------------------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.FFIRelationshipOptions">FFIRelationshipOptions</a>&lt;R&gt;</code> | <code v-pre>config</code> | As `newRelationship`, plus the `fields` the edge itself carries, under the same C-struct restriction `newFFIComponent` has. |
 
 #### Returns
 
-| Type                 | Description |
-| -------------------- | ----------- |
-| <code v-pre>R</code> |             |
+| Type                 | Description                  |
+| -------------------- | ---------------------------- |
+| <code v-pre>R</code> | The registered relationship. |
 
 <a id="tecs.ecs.newKey"></a>
 
@@ -928,16 +928,16 @@ read as a `T` rather than as `any`.
 
 #### Parameters
 
-| Type                      | Name                       | Description                                           |
-| ------------------------- | -------------------------- | ----------------------------------------------------- |
-| <code v-pre>string</code> | <code v-pre>name</code>    | A stable, unique name for the key, e.g. "game.state". |
-| <code v-pre>T</code>      | <code v-pre>forType</code> | Optional type parameter for type inference.           |
+| Type                      | Name                       | Description                                                                                                                                                  |
+| ------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>string</code> | <code v-pre>name</code>    | Namespaced, like "game.state". Omitting it is what triggers the warning above, and the key it returns is still usable, just anonymous and new on every call. |
+| <code v-pre>T</code>      | <code v-pre>forType</code> | Never read. It exists so the call site can say what `T` is, since Teal has no explicit type argument; pass `nil as T`.                                       |
 
 #### Returns
 
-| Type                                                        | Description                                           |
-| ----------------------------------------------------------- | ----------------------------------------------------- |
-| <code v-pre><a href="#tecs.ecs.Key">Key</a>&lt;T&gt;</code> | A new key that can be used to store values of type T. |
+| Type                                                        | Description                                                                                                                                                                                        |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.Key">Key</a>&lt;T&gt;</code> | The key for that name, which is the same one every later call with the same name gets rather than a fresh one. That is what makes values keyed by it survive a module re-running under hot reload. |
 
 <a id="tecs.ecs.newMessageBus"></a>
 
@@ -950,15 +950,15 @@ Create a new address-based event message bus.
 
 #### Returns
 
-| Type                                                             | Description |
-| ---------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.ecs.MessageBus">MessageBus</a></code> |             |
+| Type                                                             | Description                                                                                                                                                                                   |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.MessageBus">MessageBus</a></code> | A bus of its own, unconnected to any world's. A world already carries one, which `world:emit` and `world:observe` reach, so this is for messaging that should outlive or sit outside a world. |
 
 <a id="tecs.ecs.newRelationship"></a>
 
 ### tecs.ecs.newRelationship
 
-<pre><code v-pre>function <a href="#tecs.ecs.newRelationship">tecs.ecs.newRelationship</a>&lt;R is <a href="#tecs.ecs.Relationship">Relationship</a>&gt;(<a href="#tecs.ecs.RelationshipOptions">RelationshipOptions</a>&lt;R&gt;): R
+<pre><code v-pre>function <a href="#tecs.ecs.newRelationship">tecs.ecs.newRelationship</a>&lt;R is <a href="#tecs.ecs.Relationship">Relationship</a>&gt;(config: <a href="#tecs.ecs.RelationshipOptions">RelationshipOptions</a>&lt;R&gt;): R
 </code></pre>
 
 Creates and registers a new relationship component. See the relationship
@@ -975,21 +975,21 @@ carry data.
 
 #### Parameters
 
-| Type                                                                                        | Name | Description |
-| ------------------------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.ecs.RelationshipOptions">RelationshipOptions</a>&lt;R&gt;</code> |      |             |
+| Type                                                                                        | Name                      | Description                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.RelationshipOptions">RelationshipOptions</a>&lt;R&gt;</code> | <code v-pre>config</code> | `exclusive` keeps one target per entity, replacing rather than adding. `sparse` keeps edges out of the archetype key, so adding one does not split archetypes. `cascadeDelete` despawns the sources when the target goes, and raises here unless `exclusive` and `reverseIndex` are both set, since finding the sources is what the reverse index is for. |
 
 #### Returns
 
-| Type                 | Description |
-| -------------------- | ----------- |
-| <code v-pre>R</code> |             |
+| Type                 | Description                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>R</code> | The registered relationship, called with a target to make an instance. A dense relationship registers one component per target under a stamped name, which is why `declaredComponents` leaves those out. |
 
 <a id="tecs.ecs.newScalarComponent"></a>
 
 ### tecs.ecs.newScalarComponent
 
-<pre><code v-pre>function <a href="#tecs.ecs.newScalarComponent">tecs.ecs.newScalarComponent</a>&lt;T&gt;(<a href="#tecs.ecs.ScalarComponentOptions">ScalarComponentOptions</a>&lt;T&gt;): <a href="#tecs.ecs.ScalarComponent">ScalarComponent</a>&lt;T&gt;
+<pre><code v-pre>function <a href="#tecs.ecs.newScalarComponent">tecs.ecs.newScalarComponent</a>&lt;T&gt;(options: <a href="#tecs.ecs.ScalarComponentOptions">ScalarComponentOptions</a>&lt;T&gt;): <a href="#tecs.ecs.ScalarComponent">ScalarComponent</a>&lt;T&gt;
 </code></pre>
 
 Creates and registers a new scalar component.
@@ -1002,36 +1002,36 @@ Creates and registers a new scalar component.
 
 #### Parameters
 
-| Type                                                                                              | Name | Description |
-| ------------------------------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.ecs.ScalarComponentOptions">ScalarComponentOptions</a>&lt;T&gt;</code> |      |             |
+| Type                                                                                              | Name                       | Description                                                                                                      |
+| ------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.ScalarComponentOptions">ScalarComponentOptions</a>&lt;T&gt;</code> | <code v-pre>options</code> | Describes a component that is one value rather than a record of fields, so its column holds that value directly. |
 
 #### Returns
 
-| Type                                                                                | Description |
-| ----------------------------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.ecs.ScalarComponent">ScalarComponent</a>&lt;T&gt;</code> |             |
+| Type                                                                                | Description                                                                                           |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.ScalarComponent">ScalarComponent</a>&lt;T&gt;</code> | The registered component, whose rows are read and written as bare values rather than through a field. |
 
 <a id="tecs.ecs.newTagComponent"></a>
 
 ### tecs.ecs.newTagComponent
 
-<pre><code v-pre>function <a href="#tecs.ecs.newTagComponent">tecs.ecs.newTagComponent</a>(<a href="#tecs.ecs.TagComponentOptions">TagComponentOptions</a>): <a href="#tecs.ecs.Component">Component</a>
+<pre><code v-pre>function <a href="#tecs.ecs.newTagComponent">tecs.ecs.newTagComponent</a>(options: <a href="#tecs.ecs.TagComponentOptions">TagComponentOptions</a>): <a href="#tecs.ecs.Component">Component</a>
 </code></pre>
 
 Creates and registers a new tag component that uses bitset storage for efficiency.
 
 #### Parameters
 
-| Type                                                                               | Name | Description |
-| ---------------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.ecs.TagComponentOptions">TagComponentOptions</a></code> |      |             |
+| Type                                                                               | Name                       | Description                                                                     |
+| ---------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.TagComponentOptions">TagComponentOptions</a></code> | <code v-pre>options</code> | Name only: a tag carries no fields, which is what lets it be stored as one bit. |
 
 #### Returns
 
-| Type                                                           | Description |
-| -------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> |             |
+| Type                                                           | Description                                                                                                                                                                                                              |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre><a href="#tecs.ecs.Component">Component</a></code> | The registered tag. Queries match it by archetype rather than by scanning, so a stable flag is cheaper as a tag than as a boolean field, while one toggled often is not: every flip moves the entity between archetypes. |
 
 <a id="tecs.ecs.newWorld"></a>
 
@@ -1044,15 +1044,15 @@ Create a new World.
 
 #### Parameters
 
-| Type                                  | Name                      | Description                   |
-| ------------------------------------- | ------------------------- | ----------------------------- |
-| <code v-pre>types.World.Config</code> | <code v-pre>config</code> | Optional world configuration. |
+| Type                                  | Name                      | Description                                                                                                                                                                                                                                                             |
+| ------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>types.World.Config</code> | <code v-pre>config</code> | May be nil, which takes `DEFAULT_MAX_ENTITIES` slots and the default pipeline. `maxEntities` is the one field worth deciding up front: it sizes the entity index at creation and is not grown later, so a world that runs out of slots raises rather than reallocating. |
 
 #### Returns
 
-| Type                                                   | Description        |
-| ------------------------------------------------------ | ------------------ |
-| <code v-pre><a href="#tecs.ecs.World">World</a></code> | the created World. |
+| Type                                                   | Description                                                                                                                                                                                                                                  |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.ecs.World">World</a></code> | A world with the builtin components already registered and no systems. Worlds are independent: an entity id is meaningful only in the world that issued it, while a component id is process-wide and shared by every world that carries one. |
 
 <a id="tecs.ecs.phases"></a>
 

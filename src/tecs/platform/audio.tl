@@ -23,16 +23,59 @@ local record Device
     channels: integer
 end
 
+--- An open recording device, pulled rather than pushed.
+---
+--- Capture is running by the time one of these exists, and SDL's own thread is
+--- filling the stream behind it. Nothing arrives until `read` asks, so a game
+--- that stops asking leaves samples to pile up in SDL's buffer rather than
+--- losing them.
 local record Microphone
+    --- Samples per second, after SDL's conversion from whatever the device
+    --- actually runs at. The value asked for, not the device's own.
     frequency: integer
+    --- Interleaved channels per frame, again after conversion.
     channels: integer
     _stream: loader.CPtr
     _destroyed: boolean
 
+    --- Complete sample frames ready to read without blocking.
+    ---
+    --- @return Whole frames only, so a partly arrived frame is not counted and
+    ---     reads as zero until the rest of it lands. Zero once destroyed,
+    ---     rather than an error.
     availableFrames: function(self: Microphone): integer
+
+    --- Pulls up to `maxFrames` complete sample frames.
+    ---
+    --- @param maxFrames Omit to take everything ready now. Zero is allowed and
+    ---     takes nothing. A limit above what is ready takes what is ready
+    ---     rather than waiting for the rest.
+    --- @return Interleaved native-endian float32 samples, as bytes in a string,
+    ---     `channels * 4` per frame. An empty string means nothing was ready
+    ---     and is not a failure. Nil on one, with the reason beside it: a
+    ---     destroyed microphone, a `maxFrames` that is not a non-negative
+    ---     integer, or SDL's own error.
+    --- @return The reason, when the first return is nil.
     read: function(self: Microphone, maxFrames?: integer): string, string
+
+    --- Stops the device filling the stream, keeping whatever is already in it.
+    ---
+    --- @return False with a reason on failure, including for a microphone
+    ---     already destroyed. Pausing one already paused succeeds.
+    --- @return The reason, when the first return is false.
     pause: function(self: Microphone): boolean, string
+
+    --- Starts the device filling the stream again after `pause`.
+    ---
+    --- @return False with a reason on failure, including for a microphone
+    ---     already destroyed.
+    --- @return The reason, when the first return is false.
     resume: function(self: Microphone): boolean, string
+
+    --- Stops capture and closes the recording device. Safe more than once.
+    ---
+    --- Whatever was captured and not yet read is discarded with the stream, so
+    --- a last `read` belongs before this rather than after.
     destroy: function(self: Microphone)
 end
 
@@ -105,11 +148,23 @@ local function devices(recording: boolean): {Device}, string
 end
 
 --- Physical playback devices attached now.
+---
+--- A snapshot, not a subscription: devices come and go while a game runs, so
+--- an id held across a hotplug may name nothing.
+---
+--- @return The devices, listed afresh each call and the caller's to keep.
+---     Empty rather than nil when the audio subsystem cannot start, so a caller
+---     that only iterates needs no nil check.
+--- @return SDL's reason, when something went wrong. Nil on success, including
+---     for a machine that genuinely has no playback device.
 function audio.playbackDevices(): {Device}, string
     return devices(false)
 end
 
 --- Physical recording devices attached now.
+---
+--- @return The devices, read as `playbackDevices` reads its own.
+--- @return SDL's reason, when something went wrong.
 function audio.recordingDevices(): {Device}, string
     return devices(true)
 end
@@ -118,6 +173,18 @@ end
 ---
 --- No callback is installed. SDL's audio thread fills its own stream and the
 --- game pulls completed bytes from the main thread with `read`.
+---
+--- @param config May be nil, which opens the system's current default
+---     recording device at 48000 Hz in mono. `frequency` has to be a positive
+---     integer and `channels` an integer from 1 to 32; either outside that
+---     range is reported rather than raised. SDL converts the device's real
+---     format to what is asked for, so these are what `read` returns and not
+---     what the hardware runs at.
+--- @return An open microphone, already recording: the stream is resumed before
+---     this returns, so samples accumulate from here whether or not anything
+---     reads them. Nil on failure, with the reason beside it, and nothing is
+---     left open in that case.
+--- @return The reason, when the first return is nil.
 function audio.openMicrophone(config?: MicrophoneConfig): Microphone, string
     local ok, err = ensureSubsystem()
     if not ok then
@@ -156,7 +223,6 @@ function audio.openMicrophone(config?: MicrophoneConfig): Microphone, string
     } as Microphone, MicrophoneMT), nil
 end
 
---- Complete sample frames ready to read without blocking.
 function Microphone:availableFrames(): integer
     if self._destroyed then
         return 0
@@ -168,11 +234,6 @@ function Microphone:availableFrames(): integer
     return math.floor(bytes / (self.channels * BYTES_PER_SAMPLE))
 end
 
---- Pulls up to `maxFrames` complete sample frames.
----
---- The returned string is interleaved native-endian float32 data. Omit the
---- limit to take everything ready now. An empty string means no frame was
---- ready and is not an error.
 function Microphone:read(maxFrames?: integer): string, string
     if self._destroyed then
         return nil, "microphone is destroyed"
@@ -216,7 +277,6 @@ function Microphone:resume(): boolean, string
     return true, nil
 end
 
---- Stops capture and closes the recording device. Safe more than once.
 function Microphone:destroy()
     if self._destroyed then
         return

@@ -214,9 +214,23 @@ local record Input
     --- by hand.
     _textStarted: boolean
 
+    --- Stops text input and clears whatever was being composed.
+    ---
     --- Declared here because the layer stack and the shutdown path both stop a
     --- session, and both read better above where text input is defined.
+    ---
+    --- @return False when no session was running, in which case the composition
+    ---     state is cleared anyway, so this is safe to call unconditionally on
+    ---     a teardown path.
     stopTextInput: function(self: Input): boolean
+
+    --- Moves the area a running text session reports, for a field that scrolls
+    --- or a caret that moved since `startTextInput` was given one.
+    ---
+    --- @param area Read here and not retained, so a later edit to the same
+    ---     table has no effect until this is called again.
+    --- @return Whatever the platform answered. False is not worth acting on:
+    ---     the area is a hint, and text input keeps working without it.
     setTextInputArea: function(self: Input, area: TextArea): boolean
 end
 
@@ -920,7 +934,6 @@ function Input:startTextInput(layer?: Layer, options?: TextOptions): boolean
     return true
 end
 
---- Stops text input and clears whatever was being composed.
 function Input:stopTextInput(): boolean
     self._textLayer = nil
     self.composition = ""

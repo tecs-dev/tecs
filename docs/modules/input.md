@@ -1215,6 +1215,9 @@ land over what the player is typing.
 
 Stops text input and clears whatever was being composed.
 
+Declared here because the layer stack and the shutdown path both stop a
+session, and both read better above where text input is defined.
+
 #### Parameters
 
 | Type                     | Name                    | Description |
@@ -1223,9 +1226,9 @@ Stops text input and clears whatever was being composed.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | False when no session was running, in which case the composition state is cleared anyway, so this is safe to call unconditionally on a teardown path. |
 
 <a id="tecs.input.Input.text"></a>
 

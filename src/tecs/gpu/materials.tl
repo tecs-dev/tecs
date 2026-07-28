@@ -57,22 +57,99 @@ local record materials
     --- Name of the material an entity with no Material component draws as.
     defaultName: string
 
-    --- Adds a directory to search before the ones already known.
+    --- Adds a directory to search before the ones already known, so a game's
+    --- materials are found alongside the engine's.
+    ---
+    --- @param path Searched ahead of every root already added, so a game's file
+    ---     of a given name beats the engine's. A trailing slash is added when
+    ---     it is missing. The directory is not read here: this only puts the
+    ---     next `install` back on.
     addRoot: function(path: string)
+
     --- Supplies a material from memory rather than a file.
+    ---
+    --- For a spec, and for a game that generates one at build time. Beats a
+    --- file of the same name in any root, and renumbers the set on the next
+    --- `install` as adding a file would.
+    ---
+    --- @param name The name a game asks for, and what a file would have been
+    ---     called without its extension.
+    --- @param source The material's GLSL, taken as given and renamed only on
+    ---     the way into the dispatch.
     define: function(name: string, source: string)
+
     --- Reads the materials and publishes the dispatch. Idempotent.
+    ---
+    --- Called by shader loading rather than by a game, so a fragment shader
+    --- cannot be built before the materials it dispatches to are known. Adding
+    --- a root or defining a material puts this back on, and the next load
+    --- rebuilds.
     install: function()
-    --- Re-reads every material and republishes the dispatch, or refuses.
+
+    --- Re-reads every material and republishes the dispatch.
+    ---
+    --- Refused when the set of materials has changed, and this is the whole
+    --- reason there is a rule rather than a re-read. Ids come from sorted name
+    --- order, so a file appearing or disappearing renumbers every material
+    --- after it alphabetically, and a `Material` component in a live world
+    --- holds a number that was resolved before the change. Editing a body
+    --- reloads; adding or removing one is a restart.
+    ---
+    --- Materials supplied through `define` are kept as they are: those came
+    --- from memory rather than a root, and nothing on disk has an opinion about
+    --- them.
+    ---
+    --- @return Whether the dispatch was rebuilt.
+    --- @return Why not, and nil whenever the first answer is true.
     reload: function(): boolean, string
-    --- The id a material is dispatched by, resolved from its name.
+
+    --- The id a material is dispatched by, or an error naming what was found.
+    ---
+    --- Resolved by name so a game never writes a number: the numbering depends
+    --- on which files exist, and hard-coding one would break the moment a
+    --- material was added ahead of it alphabetically.
+    ---
+    --- @param name The material's file name without its extension.
+    --- @return The id an instance carries to select it. Raises on a name
+    ---     nothing has, listing what there was, because a misspelled material
+    ---     is a build mistake rather than a runtime condition.
     id: function(name: string): integer
-    --- The same, answering nil rather than raising on a name nothing has.
+
+    --- The id a material is dispatched by, or nil when nothing has that name.
+    ---
+    --- What `id` is built on, for a caller with somewhere better to put the
+    --- refusal than an error raised from here. Reading a `Material` back out of
+    --- a snapshot is that caller: the name it holds is a fact about the file
+    --- rather than about the call site, and the message says so.
+    ---
+    --- @param name The material's file name without its extension.
+    --- @return The id, or nil for a name nothing has. Installs first, so a name
+    ---     is resolved against the materials on disk rather than against
+    ---     whatever had been read so far.
     find: function(name: string): integer
+
     --- The material an id dispatches to, or nil when nothing has that id.
+    ---
+    --- The reverse of `id`, and what a snapshot writes in place of the number.
+    --- Nothing is kept in step to answer it: `order` already holds the names at
+    --- their ids, counting from one, so this is the lookup the numbering was
+    --- assigned from rather than a second copy of it.
+    ---
+    --- @param id An id as an instance carries it. Nil answers nil rather than
+    ---     raising, so a component read back with no material needs no guard.
+    --- @return The material's name, or nil when nothing has that id.
     name: function(id: integer): string
+
     --- Every material name, in id order.
+    ---
+    --- The default first at id zero, then the rest alphabetically. Not sorted
+    --- as a whole: the default's place is fixed by what a zero on an instance
+    --- has to mean, wherever its own name would otherwise fall.
+    ---
+    --- @return A fresh list the caller owns, indexed from one while the ids it
+    ---     describes count from zero.
     names: function(): {string}
+
     --- Forgets everything read, so a spec can start from the files again.
     reset: function()
 end
@@ -95,8 +172,6 @@ local function searchRoots(): {string}
     return roots
 end
 
---- Adds a directory to search before the ones already known, so a game's
---- materials are found alongside the engine's.
 function materials.addRoot(path: string)
     local list = searchRoots()
     table.insert(list, 1, path:sub(-1) == "/" and path or path .. "/")
@@ -108,11 +183,6 @@ local function mangle(name: string): string
     return "material_" .. (name:gsub("[^%w]", "_"))
 end
 
---- Supplies a material from memory rather than a file.
----
---- For a spec, and for a game that generates one at build time. Beats a file
---- of the same name in any root, and renumbers the set on the next `install`
---- as adding a file would.
 function materials.define(name: string, source: string)
     byName[name] = {name = name, id = 0, source = source}
     defined[name] = true
@@ -196,11 +266,6 @@ local function assemble(): string
     return table.concat(parts, "\n")
 end
 
---- Reads the materials and publishes the dispatch. Idempotent.
----
---- Called by shader loading rather than by a game, so a fragment shader cannot
---- be built before the materials it dispatches to are known. Adding a root or
---- defining a material puts this back on, and the next load rebuilds.
 function materials.install()
     if built then
         return
@@ -210,11 +275,6 @@ function materials.install()
     shaders.provide(DISPATCH, assemble())
 end
 
---- The id a material is dispatched by, or an error naming what was found.
----
---- Resolved by name so a game never writes a number: the numbering depends on
---- which files exist, and hard-coding one would break the moment a material was
---- added ahead of it alphabetically.
 function materials.id(name: string): integer
     local id = materials.find(name)
     if id == nil then
@@ -223,12 +283,6 @@ function materials.id(name: string): integer
     return id
 end
 
---- The id a material is dispatched by, or nil when nothing has that name.
----
---- What `id` is built on, for a caller with somewhere better to put the
---- refusal than an error raised from here. Reading a `Material` back out of a
---- snapshot is that caller: the name it holds is a fact about the file rather
---- than about the call site, and the message says so.
 function materials.find(name: string): integer
     materials.install()
     local material = byName[name]
@@ -238,12 +292,6 @@ function materials.find(name: string): integer
     return material.id
 end
 
---- The material an id dispatches to, or nil when nothing has that id.
----
---- The reverse of `id`, and what a snapshot writes in place of the number.
---- Nothing is kept in step to answer it: `order` already holds the names at
---- their ids, counting from one, so this is the lookup the numbering was
---- assigned from rather than a second copy of it.
 function materials.name(id: integer): string
     materials.install()
     if id == nil then
@@ -252,12 +300,6 @@ function materials.name(id: integer): string
     return order[id + 1]
 end
 
---- Every material name, in id order.
----
---- The default first at id zero, then the rest alphabetically. Not sorted as a
---- whole: the default's place is fixed by what a zero on an instance has to
---- mean, wherever its own name would otherwise fall.
---- @return A fresh list the caller owns.
 function materials.names(): {string}
     materials.install()
     local list: {string} = {}
@@ -267,19 +309,6 @@ function materials.names(): {string}
     return list
 end
 
---- Re-reads every material and republishes the dispatch.
----
---- Refused when the set of materials has changed, and this is the whole reason
---- there is a rule rather than a re-read. Ids come from sorted name order, so a
---- file appearing or disappearing renumbers every material after it
---- alphabetically, and a `Material` component in a live world holds a number
---- that was resolved before the change. Editing a body reloads; adding or
---- removing one is a restart.
----
---- Materials supplied through `define` are kept as they are: those came from
---- memory rather than a root, and nothing on disk has an opinion about them.
---- @return Whether the dispatch was rebuilt.
---- @return Why not, and nil whenever the first answer is true.
 function materials.reload(): boolean, string
     materials.install()
 

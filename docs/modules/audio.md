@@ -2655,16 +2655,16 @@ game pulls completed bytes from the main thread with `read`.
 
 #### Parameters
 
-| Type                                                                           | Name                      | Description |
-| ------------------------------------------------------------------------------ | ------------------------- | ----------- |
-| <code v-pre><a href="#tecs.audio.MicrophoneConfig">MicrophoneConfig</a></code> | <code v-pre>config</code> |             |
+| Type                                                                           | Name                      | Description                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------ | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.audio.MicrophoneConfig">MicrophoneConfig</a></code> | <code v-pre>config</code> | May be nil, which opens the system's current default recording device at 48000 Hz in mono. `frequency` has to be a positive integer and `channels` an integer from 1 to 32; either outside that range is reported rather than raised. SDL converts the device's real format to what is asked for, so these are what `read` returns and not what the hardware runs at. |
 
 #### Returns
 
-| Type                                                               | Description |
-| ------------------------------------------------------------------ | ----------- |
-| <code v-pre><a href="#tecs.audio.Microphone">Microphone</a></code> |             |
-| <code v-pre>string</code>                                          |             |
+| Type                                                               | Description                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.audio.Microphone">Microphone</a></code> | An open microphone, already recording: the stream is resumed before this returns, so samples accumulate from here whether or not anything reads them. Nil on failure, with the reason beside it, and nothing is left open in that case. |
+| <code v-pre>string</code>                                          | The reason, when the first return is nil.                                                                                                                                                                                               |
 
 <a id="tecs.audio.playbackDevices"></a>
 
@@ -2675,12 +2675,15 @@ game pulls completed bytes from the main thread with `read`.
 
 Physical playback devices attached now.
 
+A snapshot, not a subscription: devices come and go while a game runs, so
+an id held across a hotplug may name nothing.
+
 #### Returns
 
-| Type                                                         | Description |
-| ------------------------------------------------------------ | ----------- |
-| <code v-pre>{<a href="#tecs.audio.Device">Device</a>}</code> |             |
-| <code v-pre>string</code>                                    |             |
+| Type                                                         | Description                                                                                                                                                                    |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>{<a href="#tecs.audio.Device">Device</a>}</code> | The devices, listed afresh each call and the caller's to keep. Empty rather than nil when the audio subsystem cannot start, so a caller that only iterates needs no nil check. |
+| <code v-pre>string</code>                                    | SDL's reason, when something went wrong. Nil on success, including for a machine that genuinely has no playback device.                                                        |
 
 <a id="tecs.audio.recordingDevices"></a>
 
@@ -2693,7 +2696,7 @@ Physical recording devices attached now.
 
 #### Returns
 
-| Type                                                         | Description |
-| ------------------------------------------------------------ | ----------- |
-| <code v-pre>{<a href="#tecs.audio.Device">Device</a>}</code> |             |
-| <code v-pre>string</code>                                    |             |
+| Type                                                         | Description                                           |
+| ------------------------------------------------------------ | ----------------------------------------------------- |
+| <code v-pre>{<a href="#tecs.audio.Device">Device</a>}</code> | The devices, read as `playbackDevices` reads its own. |
+| <code v-pre>string</code>                                    | SDL's reason, when something went wrong.              |

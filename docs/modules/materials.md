@@ -344,9 +344,9 @@ materials are found alongside the engine's.
 
 #### Parameters
 
-| Type                      | Name                    | Description |
-| ------------------------- | ----------------------- | ----------- |
-| <code v-pre>string</code> | <code v-pre>path</code> |             |
+| Type                      | Name                    | Description                                                                                                                                                                                                               |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>path</code> | Searched ahead of every root already added, so a game's file of a given name beats the engine's. A trailing slash is added when it is missing. The directory is not read here: this only puts the next `install` back on. |
 
 <a id="tecs.materials.defaultName"></a>
 
@@ -365,16 +365,16 @@ Name of the material an entity with no Material component draws as.
 
 Supplies a material from memory rather than a file.
 
-For a spec, and for a game that generates one at build time. Beats a file
-of the same name in any root, and renumbers the set on the next `install`
-as adding a file would.
+For a spec, and for a game that generates one at build time. Beats a
+file of the same name in any root, and renumbers the set on the next
+`install` as adding a file would.
 
 #### Parameters
 
-| Type                      | Name                      | Description |
-| ------------------------- | ------------------------- | ----------- |
-| <code v-pre>string</code> | <code v-pre>name</code>   |             |
-| <code v-pre>string</code> | <code v-pre>source</code> |             |
+| Type                      | Name                      | Description                                                                             |
+| ------------------------- | ------------------------- | --------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code>   | The name a game asks for, and what a file would have been called without its extension. |
+| <code v-pre>string</code> | <code v-pre>source</code> | The material's GLSL, taken as given and renamed only on the way into the dispatch.      |
 
 <a id="tecs.materials.find"></a>
 
@@ -386,21 +386,21 @@ as adding a file would.
 The id a material is dispatched by, or nil when nothing has that name.
 
 What `id` is built on, for a caller with somewhere better to put the
-refusal than an error raised from here. Reading a `Material` back out of a
-snapshot is that caller: the name it holds is a fact about the file rather
-than about the call site, and the message says so.
+refusal than an error raised from here. Reading a `Material` back out of
+a snapshot is that caller: the name it holds is a fact about the file
+rather than about the call site, and the message says so.
 
 #### Parameters
 
-| Type                      | Name                    | Description |
-| ------------------------- | ----------------------- | ----------- |
-| <code v-pre>string</code> | <code v-pre>name</code> |             |
+| Type                      | Name                    | Description                                     |
+| ------------------------- | ----------------------- | ----------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | The material's file name without its extension. |
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>integer</code> |             |
+| Type                       | Description                                                                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | The id, or nil for a name nothing has. Installs first, so a name is resolved against the materials on disk rather than against whatever had been read so far. |
 
 <a id="tecs.materials.id"></a>
 
@@ -411,21 +411,21 @@ than about the call site, and the message says so.
 
 The id a material is dispatched by, or an error naming what was found.
 
-Resolved by name so a game never writes a number: the numbering depends on
-which files exist, and hard-coding one would break the moment a material was
-added ahead of it alphabetically.
+Resolved by name so a game never writes a number: the numbering depends
+on which files exist, and hard-coding one would break the moment a
+material was added ahead of it alphabetically.
 
 #### Parameters
 
-| Type                      | Name                    | Description |
-| ------------------------- | ----------------------- | ----------- |
-| <code v-pre>string</code> | <code v-pre>name</code> |             |
+| Type                      | Name                    | Description                                     |
+| ------------------------- | ----------------------- | ----------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | The material's file name without its extension. |
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>integer</code> |             |
+| Type                       | Description                                                                                                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | The id an instance carries to select it. Raises on a name nothing has, listing what there was, because a misspelled material is a build mistake rather than a runtime condition. |
 
 <a id="tecs.materials.install"></a>
 
@@ -436,9 +436,10 @@ added ahead of it alphabetically.
 
 Reads the materials and publishes the dispatch. Idempotent.
 
-Called by shader loading rather than by a game, so a fragment shader cannot
-be built before the materials it dispatches to are known. Adding a root or
-defining a material puts this back on, and the next load rebuilds.
+Called by shader loading rather than by a game, so a fragment shader
+cannot be built before the materials it dispatches to are known. Adding
+a root or defining a material puts this back on, and the next load
+rebuilds.
 <a id="tecs.materials.name"></a>
 
 ### tecs.materials.name
@@ -455,15 +456,15 @@ assigned from rather than a second copy of it.
 
 #### Parameters
 
-| Type                       | Name                  | Description |
-| -------------------------- | --------------------- | ----------- |
-| <code v-pre>integer</code> | <code v-pre>id</code> |             |
+| Type                       | Name                  | Description                                                                                                                     |
+| -------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | <code v-pre>id</code> | An id as an instance carries it. Nil answers nil rather than raising, so a component read back with no material needs no guard. |
 
 #### Returns
 
-| Type                      | Description |
-| ------------------------- | ----------- |
-| <code v-pre>string</code> |             |
+| Type                      | Description                                           |
+| ------------------------- | ----------------------------------------------------- |
+| <code v-pre>string</code> | The material's name, or nil when nothing has that id. |
 
 <a id="tecs.materials.names"></a>
 
@@ -474,15 +475,15 @@ assigned from rather than a second copy of it.
 
 Every material name, in id order.
 
-The default first at id zero, then the rest alphabetically. Not sorted as a
-whole: the default's place is fixed by what a zero on an instance has to
-mean, wherever its own name would otherwise fall.
+The default first at id zero, then the rest alphabetically. Not sorted
+as a whole: the default's place is fixed by what a zero on an instance
+has to mean, wherever its own name would otherwise fall.
 
 #### Returns
 
-| Type                        | Description                   |
-| --------------------------- | ----------------------------- |
-| <code v-pre>{string}</code> | A fresh list the caller owns. |
+| Type                        | Description                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------ |
+| <code v-pre>{string}</code> | A fresh list the caller owns, indexed from one while the ids it describes count from zero. |
 
 <a id="tecs.materials.reload"></a>
 
@@ -493,15 +494,16 @@ mean, wherever its own name would otherwise fall.
 
 Re-reads every material and republishes the dispatch.
 
-Refused when the set of materials has changed, and this is the whole reason
-there is a rule rather than a re-read. Ids come from sorted name order, so a
-file appearing or disappearing renumbers every material after it
-alphabetically, and a `Material` component in a live world holds a number
-that was resolved before the change. Editing a body reloads; adding or
-removing one is a restart.
+Refused when the set of materials has changed, and this is the whole
+reason there is a rule rather than a re-read. Ids come from sorted name
+order, so a file appearing or disappearing renumbers every material
+after it alphabetically, and a `Material` component in a live world
+holds a number that was resolved before the change. Editing a body
+reloads; adding or removing one is a restart.
 
-Materials supplied through `define` are kept as they are: those came from
-memory rather than a root, and nothing on disk has an opinion about them.
+Materials supplied through `define` are kept as they are: those came
+from memory rather than a root, and nothing on disk has an opinion about
+them.
 
 #### Returns
 

@@ -87,23 +87,58 @@ local record ecs
 
     --- Create a new World.
     ---
-    --- @param config Optional world configuration.
-    --- @return the created World.
+    --- @param config May be nil, which takes `DEFAULT_MAX_ENTITIES` slots and
+    ---     the default pipeline. `maxEntities` is the one field worth deciding
+    ---     up front: it sizes the entity index at creation and is not grown
+    ---     later, so a world that runs out of slots raises rather than
+    ---     reallocating.
+    --- @return A world with the builtin components already registered and no
+    ---     systems. Worlds are independent: an entity id is meaningful only in
+    ---     the world that issued it, while a component id is process-wide and
+    ---     shared by every world that carries one.
     newWorld: function(config?: types.World.Config): World
 
     --- Creates and registers a new table component. See `ecs.ComponentOptions`
     --- and the component docs for the shared `fields` / `defaults` / `init` /
     --- `.new` model.
+    ---
+    --- @param options Its `name` is the registry key, so it has to be unique in
+    ---     the process and is what queries, snapshots and the MCP tools address
+    ---     the component by.
+    --- @return The same `container` record passed in, now registered and
+    ---     callable as a constructor. Registration is process-wide and
+    ---     permanent, so this belongs at module scope rather than in a plugin
+    ---     that may be added to two worlds.
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
 
     --- Creates and registers a new scalar component.
+    ---
+    --- @param options Describes a component that is one value rather than a
+    ---     record of fields, so its column holds that value directly.
+    --- @return The registered component, whose rows are read and written as
+    ---     bare values rather than through a field.
     newScalarComponent: function<T>(options: ScalarComponentOptions<T>): ScalarComponent<T>
 
     --- Creates and registers a new tag component that uses bitset storage for efficiency.
+    ---
+    --- @param options Name only: a tag carries no fields, which is what lets it
+    ---     be stored as one bit.
+    --- @return The registered tag. Queries match it by archetype rather than by
+    ---     scanning, so a stable flag is cheaper as a tag than as a boolean
+    ---     field, while one toggled often is not: every flip moves the entity
+    ---     between archetypes.
     newTagComponent: function(options: TagComponentOptions): Component
 
     --- Creates and registers an FFI-based component. Same constructor model
     --- as `newComponent`, but the base instance is an FFI struct.
+    ---
+    --- @param options Its `fields` have to map to a C struct, so numbers,
+    ---     booleans and fixed-size arrays only. One field needing a Lua table
+    ---     makes the whole component a table component.
+    --- @return The registered component. Its columns are contiguous cdata, so
+    ---     writing a row through `world:get` bypasses dirty tracking and needs
+    ---     an explicit `world:markComponentDirty`, and `world:batchSpawn`
+    ---     skips its defaults.
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
 
     --- Creates and registers a new relationship component. See the relationship
@@ -111,24 +146,49 @@ local record ecs
     --- (name plus flags, no `container`/`fields`) is backed by a compact FFI
     --- struct automatically; add `container`/`fields` for relationships that
     --- carry data.
+    ---
+    --- @param config `exclusive` keeps one target per entity, replacing rather
+    ---     than adding. `sparse` keeps edges out of the archetype key, so
+    ---     adding one does not split archetypes. `cascadeDelete` despawns the
+    ---     sources when the target goes, and raises here unless `exclusive` and
+    ---     `reverseIndex` are both set, since finding the sources is what the
+    ---     reverse index is for.
+    --- @return The registered relationship, called with a target to make an
+    ---     instance. A dense relationship registers one component per target
+    ---     under a stamped name, which is why `declaredComponents` leaves those
+    ---     out.
     newRelationship: function<R is Relationship>(config: RelationshipOptions<R>): R
 
     --- Create an FFI-backed relationship with data fields.
+    ---
+    --- @param config As `newRelationship`, plus the `fields` the edge itself
+    ---     carries, under the same C-struct restriction `newFFIComponent` has.
+    --- @return The registered relationship.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
 
     --- Configure an event to have an appropriate __call based constructor.
     ---
-    --- @param event The event instance to configure.
+    --- @param event Mutated in place rather than copied, so the record the
+    ---     caller declared is the one that becomes callable. Its `init`, where
+    ---     it has one, is what the constructor's arguments are handed to, so
+    ---     `init` is what decides the call signature.
     newEvent: function<E is Event>(event: E)
 
     --- Configure an FFI event to have an appropriate __call based constructor.
     ---
-    --- @param event The event type to configure.
-    --- @param fields Field definitions in format {{"name", "type"}, ...}
-    --- @param structName Optional struct name (auto-generated if not provided)
+    --- @param event Mutated in place, as `newEvent` does it.
+    --- @param fields Name and C type per field, in declaration order, which is
+    ---     also the order the constructor takes them in. The same C-struct
+    ---     restriction `newFFIComponent` has applies.
+    --- @param structName Optional. One is generated when it is left out, and it
+    ---     only needs naming when something else has to name the same struct.
     newFFIEvent: function<E is Event>(event: E, fields: {{string, string}}, structName?: string)
 
     --- Create a new address-based event message bus.
+    ---
+    --- @return A bus of its own, unconnected to any world's. A world already
+    ---     carries one, which `world:emit` and `world:observe` reach, so this
+    ---     is for messaging that should outlive or sit outside a world.
     newMessageBus: function(): MessageBus
 
     --- A typed key for `world.resources`, and the way an engine module stores
@@ -145,23 +205,47 @@ local record ecs
     --- argument at a call site: pass `nil as T` for `world.resources[key]` to
     --- read as a `T` rather than as `any`.
     ---
-    --- @param name A stable, unique name for the key, e.g. "game.state".
-    --- @param forType Optional type parameter for type inference.
-    --- @return A new key that can be used to store values of type T.
+    --- @param name Namespaced, like "game.state". Omitting it is what triggers
+    ---     the warning above, and the key it returns is still usable, just
+    ---     anonymous and new on every call.
+    --- @param forType Never read. It exists so the call site can say what `T`
+    ---     is, since Teal has no explicit type argument; pass `nil as T`.
+    --- @return The key for that name, which is the same one every later call
+    ---     with the same name gets rather than a fresh one. That is what makes
+    ---     values keyed by it survive a module re-running under hot reload.
     newKey: function<T>(name?: string, forType?: T): Key<T>
 
     --- Find a named key created by `newKey`. Returns nil when unknown.
     ---
-    --- @param name The name the key was created with.
+    --- @param name The name the key was created with. Unnamed keys are
+    ---     unreachable here, which is the reason `newKey` warns about them.
+    --- @return The existing key, so a value stored under it is readable without
+    ---     the module that created it. Nil when no key of that name has been
+    ---     created yet, which is a question of load order rather than of
+    ---     spelling: the key appears once its module has run.
     findKey: function<T>(name: string): Key<T> | nil
 
     --- All named keys, as a fresh name -> numeric key id table.
+    ---
+    --- @return A fresh table each call, so the caller may keep it and the
+    ---     registry stays unwritable from outside `newKey`. Names span the
+    ---     process rather than one world, so a key here is not evidence that
+    ---     any world has a value under it.
     listKeys: function(): {string: integer}
 
     --- Create a new Context instance.
+    ---
+    --- @return An empty context, which is the keyed store `world.resources` is
+    ---     one of. For something wanting that store without a world.
     newContext: function(): Context
 
     --- Look up a registered component by numeric ID.
+    ---
+    --- @param id A component id, which is allocated once at registration and is
+    ---     the same in every world in the process.
+    --- @return The component, or nil for an id that was never allocated. Ids
+    ---     are not stable across runs: registration order decides them, so a
+    ---     saved id is only meaningful within the run that wrote it.
     getComponentById: function(id: integer): Component
 
     --- The component registered under `name`, or nil.
@@ -172,6 +256,12 @@ local record ecs
     ---
     --- Finds a dense relationship instance by its stamped name as well, which
     --- `declaredComponents` leaves out.
+    ---
+    --- @param name The `name` the component was registered under, which is the
+    ---     record's own name by convention.
+    --- @return The component, or nil when nothing has registered that name yet.
+    ---     Nil is a question of whether the declaring module has been required,
+    ---     not of whether any world carries the component.
     componentByName: function(name: string): Component
 
     --- Every component declared in this process, name to component.
@@ -182,6 +272,11 @@ local record ecs
     --- Dense relationship instances are left out. One is registered per target
     --- under a stamped `Rel->42` name, so a world with many edges has many of
     --- them, and none of them is a component anybody declared.
+    ---
+    --- @return A fresh table each call, built by walking the whole registry, so
+    ---     this is for tooling rather than for a per-frame path. What is
+    ---     declared in the process, which is a superset of what any one world
+    ---     carries.
     declaredComponents: function(): {string: Component}
 end
 

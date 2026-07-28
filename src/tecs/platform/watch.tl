@@ -123,6 +123,13 @@ local record watch
     type Handler = function(change: Change)
 
     --- Looks at every watched path once, whatever the interval says.
+    ---
+    --- What `poll` calls when the interval has elapsed, and what a test drives
+    --- directly: settling is counted in polls, so stepping it by hand is how a
+    --- half-written file is asserted on without sleeping.
+    ---
+    --- @return How many changes were dispatched, which is handlers run rather
+    ---     than paths looked at. Zero while nothing is being watched.
     scan: function(): integer
 end
 
@@ -314,12 +321,6 @@ local function dispatch(path: string, entry: Entry): boolean
     return true
 end
 
---- Looks at every watched path once, whatever the interval says.
----
---- What `poll` calls when the interval has elapsed, and what a test drives
---- directly: settling is counted in polls, so stepping it by hand is how a
---- half-written file is asserted on without sleeping.
---- @return How many changes were dispatched.
 function watch.scan(): integer
     if not running then
         return 0

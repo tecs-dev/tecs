@@ -537,14 +537,17 @@ queue, and expected to invoke the handler for each recorded event.
 
 The event type for a kind, or nil for a name this build does not know.
 
+What `on` is for code holding a kind it cannot spell in source, which
+is the conversion itself and the debug tools.
+
 #### Parameters
 
-| Type                      | Name                    | Description |
-| ------------------------- | ----------------------- | ----------- |
-| <code v-pre>string</code> | <code v-pre>kind</code> |             |
+| Type                      | Name                    | Description                                                                                                            |
+| ------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>kind</code> | A kind name as `on` spells it. Names are this build's, so a kind SDL added later is unknown here rather than an error. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.events.Event">Event</a></code> |             |
+| Type                                                      | Description                                                             |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.events.Event">Event</a></code> | The event type to observe, or nil for a name this build does not carry. |

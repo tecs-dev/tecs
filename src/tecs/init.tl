@@ -74,6 +74,14 @@ local record application
     --- `return tecs.application.create(config)` and the host drives it from
     --- there, because a platform that never hands control back has no loop to
     --- block in.
+    ---
+    --- @param config Read here, so a field changed on the table afterwards is
+    ---     not seen. Nothing is opened yet: the window, the GPU device and the
+    ---     audio mixer are the host's to bring up on the first callback, which
+    ---     is what lets an entry file be loaded by a tool that never runs one.
+    --- @return The application the host drives through its init, event, iterate
+    ---     and quit callbacks. Returning it is the whole contract; a game that
+    ---     calls into it itself is doing the host's job.
     create: function(config: Application.Config): Application
 end
 

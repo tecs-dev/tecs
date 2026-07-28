@@ -319,6 +319,11 @@ local record events
     ---
     --- What `on` is for code holding a kind it cannot spell in source, which
     --- is the conversion itself and the debug tools.
+    ---
+    --- @param kind A kind name as `on` spells it. Names are this build's, so a
+    ---     kind SDL added later is unknown here rather than an error.
+    --- @return The event type to observe, or nil for a name this build does not
+    ---     carry.
     typeOf: function(kind: string): Event
 end
 
@@ -466,7 +471,6 @@ declare("unknown")
 
 events.on = TYPES as KindTypes
 
---- The event type for a kind, or nil for a name this build does not know.
 function events.typeOf(kind: string): Event
     return TYPES[kind]
 end
