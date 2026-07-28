@@ -644,8 +644,7 @@ describe(
                         luassert.error_matches(function()
                             w2:set(12345, tecs.builtins.Name("TestEntity"))
                         end, "Entity ID not found: 12345",
-                        "Should fail when adding component to an unknown entity"
-                        )
+                        "Should fail when adding component to an unknown entity")
                     end
                 )
 

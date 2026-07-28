@@ -155,8 +155,7 @@ describe(
                 luassert.error_matches(function()
                     test.pipeline:update(FPS, test.world)
                 end, "Cycle detected in system dependencies",
-                "Should detect cycles in system dependencies"
-                )
+                "Should detect cycles in system dependencies")
             end
         )
 
@@ -609,13 +608,13 @@ describe(
         it(
             "rejects a configuration that cannot work",
             function()
-                luassert.is_false(pcall(function() pipeline.new(0) end
-                ), "a zero timestep is an infinite loop, not a fast one"
-                )
+                luassert.is_false(pcall(function()
+                    pipeline.new(0)
+                end), "a zero timestep is an infinite loop, not a fast one")
                 luassert.is_false(pcall(function() pipeline.new(-1 / 60) end))
-                luassert.is_false(pcall(function() pipeline.new(1 / 60, 0) end
-                ), "a frame that may run no steps never advances"
-                )
+                luassert.is_false(pcall(function()
+                    pipeline.new(1 / 60, 0)
+                end), "a frame that may run no steps never advances")
                 luassert.is_false(pcall(function() pipeline.new(1 / 60, 2.5 as integer) end))
                 luassert.is_false(pcall(function() pipeline.new(1 / 60, 10, "clamp" as tecs.FixedOverload) end))
             end

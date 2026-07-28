@@ -105,8 +105,7 @@ end
 -- Per-slot working state. One flat struct so a whole playback's state is a
 -- single contiguous allocation the evaluation loop indexes rather than a
 -- table per slot.
-ffi.cdef(
-    [[
+ffi.cdef([[
     typedef struct {
         double init;
         double applied;
@@ -120,8 +119,7 @@ ffi.cdef(
         double d3;
         double d4;
     } TweenSlotState;
-]]
-)
+]])
 
 local record TweenSlotState
     init: number
@@ -1080,8 +1078,7 @@ function tweeneval.deserializeTimeline(data: {string: any}): TimelineImpl
         channel = data.channel as string,
         presetName = data.presetName as string,
         pinned = data.pinned == true,
-    } as TimelineImpl, TIMELINE_MT
-    )
+    } as TimelineImpl, TIMELINE_MT)
 end
 
 -------------------------------------------------------------------------------

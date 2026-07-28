@@ -767,8 +767,7 @@ local function sourceFor(inputs: {Future<any>}): Source
         at = 0,
         sliceMs = distinct[1].sliceMs,
         defaultWaitMs = distinct[1].defaultWaitMs,
-    } as RoundRobin, RoundRobinMT
-    ) as Source
+    } as RoundRobin, RoundRobinMT) as Source
 end
 
 function Future.all<U>(inputs: {Future<U>}): Future<{U}>

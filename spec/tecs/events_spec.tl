@@ -498,8 +498,7 @@ describe(
                                     {"value", "int32_t"},
                                 }
                             )
-                        end, "Field #1: 'typeId' is reserved and must not be specified manually"
-                        )
+                        end, "Field #1: 'typeId' is reserved and must not be specified manually")
 
                         luassert.is_nil(
                             FFIReservedField.eventId, "Expected invalid FFI event registration to leave eventId unset"

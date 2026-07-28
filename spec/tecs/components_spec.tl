@@ -551,8 +551,7 @@ describe(
                                 container = {},
                                 defaults = {0},
                             })
-                        end, "Relationship BadRelDefaults: `defaults` requires `fields`"
-                        )
+                        end, "Relationship BadRelDefaults: `defaults` requires `fields`")
                     end
                 )
 
@@ -777,8 +776,7 @@ describe(
                             function()
                                 luassert.has_error(function()
                                     tecs.builtins.Transform(10, 20, 30, 0)
-                                end, "Transform layer must be greater than 0, got: 0"
-                                )
+                                end, "Transform layer must be greater than 0, got: 0")
                             end
                         )
 
@@ -798,8 +796,7 @@ describe(
                             function()
                                 luassert.has_error(function()
                                     tecs.builtins.Transform(0, 0, 0, -1)
-                                end, "Transform layer must be greater than 0, got: -1"
-                                )
+                                end, "Transform layer must be greater than 0, got: -1")
                             end
                         )
 
@@ -808,8 +805,7 @@ describe(
                             function()
                                 luassert.has_error(function()
                                     tecs.builtins.Transform.new({x = 0, y = 0, z = 0, layer = -5})
-                                end, "Transform layer must be greater than 0, got: -5"
-                                )
+                                end, "Transform layer must be greater than 0, got: -5")
                             end
                         )
 
@@ -831,8 +827,7 @@ describe(
                             function()
                                 luassert.has_error(function()
                                     tecs.builtins.Transform.new({x = 50, y = 60, z = 70, layer = 0})
-                                end, "Transform layer must be greater than 0, got: 0"
-                                )
+                                end, "Transform layer must be greater than 0, got: 0")
                             end
                         )
 
@@ -1097,8 +1092,7 @@ describe(
                                 container = {},
                                 defaults = {0, 0},
                             })
-                        end, "Component BadDefaultsComp: `defaults` requires `fields`"
-                        )
+                        end, "Component BadDefaultsComp: `defaults` requires `fields`")
                     end
                 )
 

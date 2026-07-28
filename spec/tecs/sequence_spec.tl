@@ -599,8 +599,7 @@ describe(
 
                         stepWorld(world, 1)
                         luassert.same({"a", "b", "done"}, order,
-                        "blocks run in fork order, and the join resumes in the same step"
-                        )
+                        "blocks run in fork order, and the join resumes in the same step")
                     end
                 )
 
@@ -694,8 +693,7 @@ describe(
                                     sequence.fork({sequence.waitSteps(2), sequence.call("spec.a")}),
                                     sequence.waitSteps(3),
                                     sequence.call("spec.b"),
-                                }, {sequence.waitSteps(3), sequence.call("spec.c")}
-                                ),
+                                }, {sequence.waitSteps(3), sequence.call("spec.c")}),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -2330,8 +2328,7 @@ describe(
                         local entity <const> = start({
                             sequence.tweenRun({
                                 sequence.tweenAdjust(0.25, "linear", "transform.x", 10),
-                            }, {mode = "loop", count = 3}
-                            ),
+                            }, {mode = "loop", count = 3}),
                         })
                         for _ = 1, 50 do
                             world:update(1 / 60)

@@ -17,11 +17,9 @@ local ffi <const> = require("ffi")
 -- Enough of dlfcn to pin a library in memory. Declared here rather than
 -- generated, because it is the C library's own interface and exists on every
 -- target that can load one at all.
-ffi.cdef(
-    [[
+ffi.cdef([[
 void *dlopen(const char *path, int mode);
-]]
-)
+]])
 
 --- Load now, and never unmap.
 ---

@@ -721,8 +721,7 @@ function profile.TraceSession:stop(filename?: string): profile.TraceReport
         totalAborts = counters.total,
         blacklisted = counters.black,
         sites = sites,
-    } as profile.TraceReport, TRACE_REPORT_MT
-    )
+    } as profile.TraceReport, TRACE_REPORT_MT)
     if filename then
         writeToFile(filename, tostring(report))
         LOGGER:info(

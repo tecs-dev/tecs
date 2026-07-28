@@ -91,8 +91,7 @@ function Buttons.create(): Buttons
         released = {},
         latchedPressed = {},
         latchedReleased = {},
-    } as Buttons, ButtonsMT
-    )
+    } as Buttons, ButtonsMT)
 end
 
 --- Records a press in all three tiers.

@@ -539,8 +539,7 @@ function assets.batch<T>(finished: function(key: T, handle: Handle)): Batch<T>
         _finished = finished,
         _handles = {},
         _keys = {},
-    } as Batch<T>, BatchMT as metatable<Batch<T>>
-    )
+    } as Batch<T>, BatchMT as metatable<Batch<T>>)
 end
 
 function Batch:add(handle: Handle, key: T)

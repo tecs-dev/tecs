@@ -263,8 +263,7 @@ describe(
                         luassert.error_matches(function()
                             world:removeSystem("NonExistentSystem")
                         end, "System 'NonExistentSystem' not found",
-                        "Should error when system not found"
-                        )
+                        "Should error when system not found")
                     end
                 )
             end
