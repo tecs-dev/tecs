@@ -1,0 +1,86 @@
+# clang-tidy over the C in native/ and cli/, which is around nineteen hundred
+# lines. At that size the default check set is worse than no check set: it
+# answers with a few hundred diagnostics, nobody reads the list twice, and a
+# real finding arrives in the middle of them. So this is curated, and every
+# check switched off below was switched off because it fired on this tree and
+# was wrong about it.
+#
+# Run it against a compile database, which `CMAKE_EXPORT_COMPILE_COMMANDS` in
+# CMakeLists.txt writes into every build tree:
+#
+#   clang-tidy -p out/macos-arm64-dev native/*.c
+#
+# It is not a gate. The compiler's own warnings are, and they are the ones that
+# run on every build on every preset; this is the deeper pass somebody runs
+# while changing native code. Homebrew's `llvm` is where clang-tidy comes from
+# on macOS, and it needs `--extra-arg=-isysroot --extra-arg=$(xcrun
+# --show-sdk-path)` because it does not find the platform SDK on its own.
+#
+# What is deliberately absent: the whole `readability-` family bar three, and
+# `modernize-`. Layout is clang-format's and .clang-format decides it; a tidy
+# check that rewrites braces or splits declarations is arguing with the
+# formatter. `modernize-` targets C++ and has nothing to say about C99.
+
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-inconsistent-declaration-parameter-name,
+  readability-non-const-parameter,
+  readability-redundant-casting,
+  -bugprone-branch-clone,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -misc-include-cleaner,
+  -performance-no-int-to-ptr,
+  -readability-math-missing-parentheses
+
+# Only this repository's headers. Without it every diagnostic SDL's, Box2D's and
+# SPIRV-Cross's headers can produce arrives here, which is the same mistake as
+# pointing the compiler's warnings at a vendored tree.
+HeaderFilterRegex: '(native|cli)/[^/]+\.h$'
+
+# Generated sources are the generator's output, so a finding in one is a change
+# to scripts/genregistry.py rather than to the file. Excluded here so a run over
+# a build tree does not report the same thing fourteen times.
+ExcludeHeaderFilterRegex: 'generated/'
+
+WarningsAsErrors: ''
+FormatStyle: file
+
+# Why each exclusion above is there, in the order they appear.
+#
+# bugprone-branch-clone
+#   Reads the five escape cases in logsink.c's writeEscaped as identical
+#   because they have the same shape, and the `if` under them the same way.
+#   They write different characters. Structural clone detection cannot tell
+#   a table written as a switch from a copy-paste error.
+#
+# bugprone-easily-swappable-parameters
+#   Seven hits, every one of them a signature this tree does not own:
+#   Box2D's task callback takes two `void *`, SDL's dialog filters arrive as
+#   two parallel `const char *const *`. A binding cannot reorder what it binds.
+#
+# bugprone-multi-level-implicit-pointer-conversion
+#   Fires on `SDL_free(char **)` and `SDL_free(void **)`, which is how the
+#   event batches and the dialog result release the arrays they allocated.
+#   Passing a `T **` where `void *` is expected is ordinary C.
+#
+# misc-include-cleaner
+#   A hundred and forty-six hits, all of the form "you used a type SDL.h
+#   included for you, so include the inner header". SDL, Box2D and curl each
+#   publish one header on purpose and their inner ones are not an interface.
+#
+# performance-no-int-to-ptr
+#   Both hits are in mcodearena.c, where turning an address into a pointer is
+#   the entire operation: the file probes for free address space by handing
+#   mmap a computed hint.
+#
+# readability-math-missing-parentheses
+#   Wants parentheses around `major * 10000 + minor * 100 + patch`. C's
+#   precedence is not a readability problem here and the parentheses would be
+#   noise in three places that are already right.

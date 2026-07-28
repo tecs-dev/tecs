@@ -7,8 +7,16 @@ project(tecs C CXX)
 # there is one description of how the engine is assembled rather than one per
 # platform to keep in step.
 
+# C99, and required rather than preferred: a compiler that cannot give it fails
+# to configure instead of quietly giving something else. AGENTS.md holds the
+# reasoning, including why CMAKE_C_EXTENSIONS is left at its default.
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# What clang-tidy reads to learn how a file is compiled. Written into every
+# build tree because the tool is run against one, and a database that exists
+# only when somebody remembers a flag is a tool nobody runs. See .clang-tidy.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(TECS_SYSTEM_DEPS "Resolve dependencies from the system rather than pinned sources" ON)
 option(TECS_BUILD_LUA "Generate FFI bindings and compile the Teal sources" ON)
@@ -163,6 +171,101 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 # it gets shipped.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS_SYSTEM_DEPS})
 
+# --------------------------------------------------- first-party build options
+#
+# Two functions, and the split between them is the whole point. `tecs_warnings`
+# goes on the C this repository wrote; `tecs_instrument` goes on everything this
+# build compiles, vendored code included.
+#
+# Warnings stop at the boundary because a warning is a conversation between a
+# compiler and the person who wrote the line, and nobody here wrote lua_cjson or
+# dtoa. Mbed TLS already needed MBEDTLS_FATAL_WARNINGS OFF for the mirror image
+# of this: a compiler newer than a pinned revision turns that project's warning
+# into this project's build failure. Pointing the same gun the other way, at
+# vendored sources, would be the same mistake with the same fix.
+#
+# Instrumentation does not stop there, because a sanitizer is about the code
+# that runs rather than about who wrote it, and lua_cjson parses input a game
+# did not author.
+
+option(TECS_WERROR "Turn first-party warnings into errors. What CI sets; leave off locally." OFF)
+option(TECS_UNINIT_PATTERN "Fill uninitialised locals with a pattern rather than leaving them arbitrary" OFF)
+set(TECS_SANITIZE "" CACHE STRING "Sanitizers to compile and link with, as the comma-separated list -fsanitize takes")
+
+include(CheckCCompilerFlag)
+
+# What a first-party translation unit is compiled with.
+#
+# -Wvla and -Wconversion are here by decision rather than by inheritance from
+# -Wextra. A variable-length array puts an attacker-influenced size on the
+# stack, and this tree has none; an implicit narrowing is how a size becomes a
+# smaller size without anyone writing that down, which is the arithmetic every
+# allocation here depends on being right.
+#
+# Two plausible members are deliberately absent. -Wcast-qual fires where a const
+# has to be dropped to free memory this code allocated, which is unavoidable
+# rather than wrong, and on the generated registry, which hands a `const void *`
+# to a Lua API that takes `void *`. -Wswitch-enum fires on a switch that already
+# has a default, which is the case -Wswitch (in -Wall) exists to allow.
+if(MSVC)
+    set(TECS_C_WARNINGS /W4)
+else()
+    set(TECS_C_WARNINGS
+        -Wall
+        -Wextra
+        -Wvla
+        -Wconversion
+        -Wshadow
+        -Wpointer-arith
+        -Wstrict-prototypes
+        -Wmissing-prototypes
+        -Wold-style-definition
+        -Wredundant-decls
+        -Wwrite-strings
+        -Wdouble-promotion
+        -Wformat=2
+        -Wundef
+        -Wcast-align
+        -Wnull-dereference
+    )
+endif()
+
+# Applies the warning set to first-party C, fatal only where asked.
+function(tecs_warnings target)
+    target_compile_options(${target} PRIVATE ${TECS_C_WARNINGS})
+    if(TECS_WERROR)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /WX)
+        else()
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    endif()
+endfunction()
+
+# An uninitialised local reads as whatever the last frame left there, which is
+# the one defect class that behaves differently under a debugger, under a
+# different optimisation level and on a different machine. Filling it makes the
+# value the same every time, so a test that fails once fails again.
+#
+# Checked rather than assumed: it is clang 8 and GCC 12 onwards, and a compiler
+# without it should build rather than fail on a flag it does not know.
+check_c_compiler_flag("-ftrivial-auto-var-init=pattern" TECS_HAS_UNINIT_PATTERN)
+
+# Applies the codegen this build asks for: sanitizers, and the uninitialised
+# fill. Both change what the compiler emits rather than what it complains
+# about, so they go on vendored sources too.
+function(tecs_instrument target)
+    if(TECS_UNINIT_PATTERN AND TECS_HAS_UNINIT_PATTERN)
+        target_compile_options(${target} PRIVATE -ftrivial-auto-var-init=pattern)
+    endif()
+    if(TECS_SANITIZE)
+        # Frame pointers because a sanitizer's report is a stack trace, and an
+        # omitted frame pointer turns the frame that allocated into a guess.
+        target_compile_options(${target} PRIVATE "-fsanitize=${TECS_SANITIZE}" -fno-omit-frame-pointer)
+        target_link_options(${target} PRIVATE "-fsanitize=${TECS_SANITIZE}")
+    endif()
+endfunction()
+
 # ----------------------------------------------------------------- native code
 
 # Worker threads and channels. Native because a LuaJIT FFI callback invoked
@@ -182,6 +285,7 @@ add_library(tecs_cjson STATIC ${TECS_CJSON_SOURCES})
 target_compile_definitions(tecs_cjson PRIVATE ${TECS_CJSON_DEFINES})
 target_link_libraries(tecs_cjson PRIVATE tecs::luajit)
 set_target_properties(tecs_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
+tecs_instrument(tecs_cjson)
 
 # The loadable copy exists for the ways of running this tree that are not the
 # host: a spec or a tool under a plain interpreter requires `cjson` the ordinary
@@ -195,6 +299,7 @@ if(NOT TECS_SINGLE_FILE)
         PROPERTIES PREFIX "" SUFFIX ".so" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     )
     target_link_libraries(cjson PRIVATE tecs::luajit)
+    tecs_instrument(cjson)
 endif()
 
 # Shared everywhere but a single-file build, where every library the FFI would
@@ -221,6 +326,8 @@ target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit tecs::curl)
 # Box2D symbol is referenced: the solver calls in, through pointers it was
 # given, so this links nothing.
 target_include_directories(tecs_worker PRIVATE ${TECS_BOX2D_INCLUDE_DIRS})
+tecs_warnings(tecs_worker)
+tecs_instrument(tecs_worker)
 
 # SPIRV-Cross ships static archives only, and the FFI needs a shared object.
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
@@ -235,6 +342,8 @@ set_target_properties(
     PROPERTIES OUTPUT_NAME spirvcrossc LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 target_include_directories(tecs_spirvcross PRIVATE ${TECS_SPVC_INCLUDE_DIRS})
+tecs_warnings(tecs_spirvcross)
+tecs_instrument(tecs_spirvcross)
 
 set(TECS_SPVC_ARCHIVES
     spirv-cross-c
@@ -294,6 +403,8 @@ set(TECS_CONTENT "../share/tecs/lua/" CACHE STRING "Content directory relative t
 target_compile_definitions(tecs PRIVATE TECS_CONTENT="${TECS_CONTENT}" TECS_ENTRY="${TECS_ENTRY}")
 set_target_properties(tecs PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 target_link_libraries(tecs PRIVATE tecs::sdl3 tecs::luajit)
+tecs_warnings(tecs)
+tecs_instrument(tecs)
 
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     # LuaJIT on x64 macOS needs its allocations below 2GB.
@@ -504,6 +615,10 @@ if(TECS_BUILD_LUA)
 
     add_library(tecs_registry STATIC native/registry.c ${TECS_REGISTRY_SOURCES})
     target_include_directories(tecs_registry PUBLIC "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
+    # The generated tables are first-party too: they are this repository's
+    # generator writing them, so a warning in one is a bug in scripts/.
+    tecs_warnings(tecs_registry)
+    tecs_instrument(tecs_registry)
     target_link_libraries(
         tecs_registry
         PUBLIC tecs::sdl3 tecs::sdl3image tecs::sdl3mixer tecs::sdl3net tecs::luajit tecs::curl tecs::zlib tecs::box2d

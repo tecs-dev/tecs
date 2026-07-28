@@ -46,6 +46,10 @@ the system, which is convenient and not shippable. A packaged preset builds pinn
 `make check-package` is the gate on the difference, and only a packaged install can pass it. A packaged preset also
 needs a Python with `jinja2` and `jsonschema` on the build host, which Mbed TLS generates sources with.
 
+`macos-arm64-sanitize` and `linux-x64-sanitize` are development presets with AddressSanitizer and
+UndefinedBehaviorSanitizer under the C. Run the host through them, which is `make run` or any of the
+benchmarks; `make test` cannot use them, and CONTRIBUTING.md says why and what to do instead.
+
 ## Project Structure
 
 ```text
@@ -166,6 +170,33 @@ So, in order of preference:
 
 There are currently no `ffi.cast` callbacks in Lua anywhere in `src/`. Adding the first one is a
 decision worth making deliberately.
+
+### The C the tree is written in
+
+**C99, and that is settled.** The only things a later standard offers this code are
+`_Static_assert` and `_Atomic`; atomics already arrive from SDL as `SDL_AtomicInt`, and MSVC drives
+the Windows preset with comparatively recent support for later C. `CMAKE_C_STANDARD_REQUIRED` is
+`ON`, so a compiler that cannot give C99 fails to configure rather than quietly giving something
+else.
+
+`CMAKE_C_EXTENSIONS` is left at its default, which is `gnu99` rather than `c99`, and that is load
+bearing on Linux. `-std=c99` defines `__STRICT_ANSI__`, glibc's `features.h` then leaves
+`_DEFAULT_SOURCE` and `_GNU_SOURCE` undefined, and `native/mcodearena.c` reaches for `MAP_ANONYMOUS`
+and `dladdr`, both of which those macros gate. Moving to `c99` means writing feature-test macros
+into every file that touches a POSIX header, which buys nothing the standard pin does not already
+buy.
+
+**A header the FFI binds must stay a C subset LuaJIT can parse.** `scripts/gencdef.py` runs the
+preprocessor over `native/*.h` and hands the result to `ffi.cdef`, which accepts less than a
+compiler does. An anonymous union, a bit-field of an unusual width, a `_Static_assert`, an attribute
+in a declaration: each of those compiles and then breaks binding generation, which fails as a module
+that will not load rather than as a header that will not compile. So the headers under `native/`
+are declarations and nothing else, and anything a binding does not need stays in the `.c`.
+
+Do not write `_Static_assert` layout checks. `make abi-check` already does the stronger version: it
+generates a C program comparing LuaJIT's view of every record against the compiler's, checking size,
+alignment and every field offset across 219 records. A static assert only checks a header against
+itself.
 
 ### Testing
 
