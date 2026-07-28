@@ -17,14 +17,32 @@ loader.declare("taskpool")
 --- The pool shares the worker library.
 local C <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "taskpool")
 
+--- A pool of solver threads, and the two native callbacks Box2D drives it
+--- through.
+---
+--- One is normally `acquire`d rather than created: the whole process shares a
+--- single pool, because threads are a property of the machine and not of any
+--- one simulation. Nothing here is safe across threads itself; a pool is
+--- created, installed and destroyed from the game thread, and the only code
+--- that runs on its workers is Box2D's own, inside `b2World_Step`.
 local record TaskPool
     --- Worker slots, counting the thread that steps the world. This is what
     --- Box2D is told, and it is what the pool reached rather than what was
     --- asked for.
     workerCount: integer
+
+    --- The native pool, which Box2D receives as its `userTaskContext`. Nil
+    --- once `destroy` has run, which is what makes a second `destroy` a no-op.
     handle: loader.CPtr
+
+    --- Private. Box2D's enqueue callback, taken from C once at creation
+    --- because a Lua one would be entered from a thread the VM never made.
     _enqueue: loader.CValue
+
+    --- Private. Box2D's finish callback, the other half of `_enqueue`.
     _finish: loader.CValue
+
+    --- Private. Whether the threads have been joined and the pool freed.
     _destroyed: boolean
     --- What `acquire` was asked for, which is what a later `acquire` has to
     --- agree with. Nil on a pool built through `create`.
@@ -41,6 +59,15 @@ local TaskPoolMT <const>: metatable<TaskPool> = {__index = TaskPool}
 --- `workerCount` counts the thread that steps the world, so one starts no
 --- threads and every task runs inline, which is what a world given no executor
 --- does. Defaults to a count derived from the machine.
+---
+--- @param workerCount Total slots including the calling thread, so the pool
+---     starts `workerCount - 1` threads. Clamped to at least 1 and at most 64,
+---     and clamped again to what actually started if a thread failed to, so
+---     read `workerCount` off the result rather than assuming it. Omit for
+---     `defaultWorkerCount`.
+--- @return A pool the caller owns and has to `destroy`. It is not the shared
+---     one and does not participate in `acquire`'s reference count, so prefer
+---     `acquire` unless a test needs a pool of its own.
 function TaskPool.create(workerCount?: integer): TaskPool
     local requested = workerCount or tonumber(C.tecsTaskPoolDefaultWorkerCount()) as integer
 
@@ -63,6 +90,11 @@ end
 --- The worker count written is the pool's own. Box2D indexes per-worker state
 --- by it, so a definition naming more workers than the pool started would have
 --- the solver address state that does not exist.
+---
+--- @param definition A `b2WorldDef`, mutated in place: four fields are written
+---     and the rest are left alone. Box2D copies the definition at world
+---     creation, so the definition need not outlive the call, but the pool has
+---     to outlive the world.
 function TaskPool:install(definition: loader.CStruct)
     definition.workerCount = self.workerCount
     definition.enqueueTask = self._enqueue
@@ -107,6 +139,11 @@ local shared: TaskPool = nil
 --- `workerCount` is therefore first-acquire-wins. A later caller naming a
 --- different one raises rather than being silently ignored: two numbers that
 --- have to agree and can disagree is a defect waiting.
+---
+--- @param workerCount Honoured only by the first `acquire`. A later one may
+---     omit it, and passing a different value raises rather than resizing.
+--- @return The process-wide pool, with one more outstanding reference. Pair
+---     every call with `release`, not `destroy`.
 function TaskPool.acquire(workerCount?: integer): TaskPool
     if shared ~= nil then
         if workerCount ~= nil and workerCount ~= shared._requested then
@@ -153,11 +190,19 @@ end
 ---
 --- Zero once every pool is destroyed. Exposed so a test can observe that
 --- shutdown joined rather than infer it from a clean exit.
+---
+--- @return Threads the pools started, so the game thread is not counted even
+---     though `workerCount` counts it. A pool of one worker contributes zero.
 function TaskPool.liveThreadCount(): integer
     return tonumber(C.tecsTaskPoolLiveThreadCount()) as integer
 end
 
 --- The worker count a pool created without one uses.
+---
+--- @return Derived from the machine's performance core count, falling back to
+---     its logical CPU count, and capped at 8: the solver's stages are short
+---     enough that past a handful of workers the coordination costs more than
+---     the work. Includes the calling thread, and is never below 1.
 function TaskPool.defaultWorkerCount(): integer
     return tonumber(C.tecsTaskPoolDefaultWorkerCount()) as integer
 end

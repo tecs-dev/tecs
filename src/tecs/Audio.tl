@@ -362,7 +362,39 @@ local record Bucket
     last: number
 end
 
+--- One audio output and the voices sounding on it.
+---
+--- Units, in one place, because none of them is in a signature:
+---
+---   * **Time is seconds** everywhere on this surface: a fade, a seek, a loop
+---     point, a cooldown, a clip's duration. Milliseconds appear only below the
+---     platform seam. Every fade is a duration to run for, never a moment to
+---     finish at, so calling one twice restarts it rather than moving a
+---     deadline.
+---   * **Gain is linear amplitude, not decibels.** 0 is silence and 1 is the
+---     sound as recorded. Above 1 is louder and may clip. The level a voice
+---     reaches the hardware at is its own gain times its group's gain times the
+---     master gain, and a mute at either level composes as a zero without
+---     discarding the gain underneath it.
+---   * **Pitch is a playback rate, not an interval.** 1 is unchanged, 2 is an
+---     octave up and half as long, 0.5 an octave down and twice as long. It
+---     resamples, so it changes duration; there is no time-stretch here.
+---   * **Position is the mixer's frame, not the world's.** The listener is
+---     fixed at the origin and cannot be moved, x is positive to the right, y
+---     is positive **up**, and z is positive behind. World Y runs down, so a
+---     caller feeding world coordinates in has to flip Y as well as subtract
+---     whatever it decided is listening. See `Sound`.
+---
+--- A voice handle is a generation and a slot packed into one integer. It stays
+--- meaningful for exactly as long as the voice sounds: once the voice ends, or
+--- is stopped, or is reaped by `update`, every call taking the handle becomes a
+--- no-op, and it never starts naming the next voice to take that slot. Nothing
+--- has to be released, and holding a stale handle is not an error.
+---
+--- Nothing here is thread safe, and nothing here calls back. Everything runs on
+--- the thread that calls it.
 local record Audio
+    --- What `create` takes. Every field is optional.
     record Config
         --- Frames per second. Defaults to 48000.
         frequency: integer
@@ -381,7 +413,15 @@ local record Audio
     end
 
     --- A loaded sound.
+    ---
+    --- Returned by `load` before the file has been read, so check `status`
+    --- rather than assuming it is playable. The instance is shared: loading the
+    --- same path twice hands back the same table, and its fields are updated in
+    --- place as the load settles, so a caller holding one sees it become ready
+    --- without asking again.
     record Clip
+        --- The path it was loaded from, exactly as given. This is a clip's
+        --- identity, so two spellings of one file are two clips.
         path: string
         --- Index of `path`, which is what a `Sound` component carries.
         id: integer
@@ -395,15 +435,26 @@ local record Audio
         --- Whether the decoded audio is held in memory. False for a clip each
         --- voice reads from the file for itself.
         resident: boolean
+
+        --- Private. The asset load this clip came from, held so a reload can
+        --- swap it and `destroy` can release it. Nil once released.
         _handle: assets.Handle
     end
 
+    --- What `load` takes. The one field is optional.
     record LoadOptions
         --- Forces streaming when true and residency when false. Left unset,
         --- the clip's duration decides against `streamSeconds`.
         stream: boolean
     end
 
+    --- What `play` takes. Every field is optional, and the whole table may be
+    --- omitted.
+    ---
+    --- Read once, when the voice starts. Changing the table afterwards reaches
+    --- nothing: use `setGain`, `setPitch`, `setLoop`, `setPosition` and
+    --- `setStereo` on the handle instead. The table is not retained, so one
+    --- table may be filled and reused for every play.
     record PlayOptions
         --- 0 to 1, before the group and the master gains. Defaults to 1.
         gain: number
@@ -427,15 +478,22 @@ local record Audio
         key: string
         --- Position, when `spatial`. See `Sound` for what the numbers mean.
         spatial: boolean
+        --- Positive to the right of the listener. Defaults to 0.
         x: number
+        --- Positive **above** the listener, which is the opposite sign from
+        --- world Y. Defaults to 0.
         y: number
+        --- Positive behind the listener. Defaults to 0.
         z: number
         --- Pins the voice to the front pair of speakers at `left` and
         --- `right`, which is a pan rather than a position. Ignored when
         --- `spatial` is set, because the mixer holds one placement per track.
         --- Both gains default to 1.
         stereo: boolean
+        --- Gain out of the left speaker, on the same linear scale as `gain`.
+        --- Negative reads as silence and above 1 is louder. Defaults to 1.
         left: number
+        --- Gain out of the right speaker, on the same terms as `left`.
         right: number
     end
 
@@ -455,11 +513,19 @@ local record Audio
         clip: string
         --- What the voice asked for, before its group and the master.
         gain: number
-        --- What reached the track, the group's gain and mute included.
+        --- What reached the track, the group's gain and mute included. The
+        --- master gain is not in it: that is the mixer's own number and is not
+        --- multiplied per voice.
         applied: number
+        --- Playback rate as the track carries it, so the pitch variance a
+        --- `play` drew is already in it rather than the rate that was asked
+        --- for.
         pitch: number
+        --- Group tag, or nil for a voice in none.
         group: string
+        --- Limit bucket, or nil for a voice counted against none.
         key: string
+        --- Whether a pause is holding it, whether its own or its group's.
         paused: boolean
         --- Whether a fade-out is running it down.
         stopping: boolean
@@ -467,38 +533,93 @@ local record Audio
         owned: boolean
         --- Whether it repeats when it reaches the end.
         loop: boolean
+        --- Whether it is placed in space. Never true at the same time as
+        --- `stereo`: the mixer holds one placement per track.
         spatial: boolean
+        --- Last position pushed, in the mixer's frame: positive right.
+        --- Meaningless unless `spatial`.
         x: number
+        --- Last position pushed, positive up. Meaningless unless `spatial`.
         y: number
+        --- Last position pushed, positive behind. Meaningless unless
+        --- `spatial`.
         z: number
         --- Whether it is pinned to the front pair, and at what gains.
         stereo: boolean
+        --- Left speaker gain last pushed. Meaningless unless `stereo`.
         left: number
+        --- Right speaker gain last pushed. Meaningless unless `stereo`.
         right: number
     end
 
+    --- The `Sound` component, for a game that wants to query or set it. See
+    --- the record's own documentation for what its fields mean.
     Sound: Sound
 
     --- Whether an output opened. False on a machine with no sound, where
     --- every call here still works and nothing is heard.
     available: boolean
 
+    --- Private. The platform seam every call below goes through, so nothing
+    --- here names a mixer symbol itself.
     _backend: Backend
+
+    --- Private. The open output. Nil on a machine that has none and again
+    --- after `destroy`, which is what `available` reports.
     _mixer: loader.CPtr
+
+    --- Private. The layout the output was opened with.
     _spec: audiobackend.Spec
+
+    --- Private. One play-options record, refilled per play. Every field is
+    --- written each time, so nothing carries over between voices.
     _params: audiobackend.PlayParams
+
+    --- Private. Every voice slot, sounding or not, indexed from one. Its
+    --- length is `maxVoices` and never changes after `create`.
     _voices: {Voice}
+
+    --- Private. Slots not in use, as a stack taken from the end, so the first
+    --- sound of a run gets slot one.
     _free: {integer}
+
+    --- Private. Slots currently sounding, paused and fading ones included.
     _sounding: integer
+
+    --- Private. The streaming threshold in milliseconds, which is where
+    --- `streamSeconds` ends up.
     _streamMs: integer
+
+    --- Private. The master gain as set, which a mute holds down without
+    --- discarding.
     _masterGain: number
+
+    --- Private. Whether a master mute is holding the output at zero.
     _muted: boolean
+
+    --- Private. Gain per group name, absent meaning 1. Kept here rather than
+    --- on the mixer's tags, whose per-tag gain would overwrite each voice's
+    --- own.
     _groupGains: {string: number}
+
+    --- Private. Mute per group name, absent meaning not muted.
     _groupMuted: {string: boolean}
+
+    --- Private. Pause per group name, absent meaning not paused. A standing
+    --- instruction, so a voice starting into a paused group is held too.
     _groupPaused: {string: boolean}
+
+    --- Private. The limit each key carries, or absent for no limit.
     _limits: {string: Audio.Limit}
+
+    --- Private. Live count and last start time per key, created on the first
+    --- voice counted against it.
     _buckets: {string: Bucket}
+
+    --- Private. Clips this instance has loaded, keyed by interned clip index.
     _clips: {integer: Clip}
+
+    --- Private. Loads in flight, resolved by `update`.
     _loads: assets.Batch<Audio.Clip>
     --- Where pitch variance is drawn from. A mixer of its own until `install`
     --- points it at the world's `tecs.audio` stream, so a save carries the
@@ -521,11 +642,20 @@ local installed <const>: {ecs.World: Audio} = setmetatable({}, {__mode = "k"} as
 Audio.Sound = Sound
 
 --- Index of a clip path, assigning one the first time it is seen.
+---
+--- @param path Must be non-empty; an empty one raises. Not checked against the
+---     filesystem, so this hands out an index for a path that does not exist.
+--- @return An index from 1 up, shared by every `Audio` in the process. It is
+---     this run's numbering and means nothing in a file, which is why `Sound`
+---     serializes the path instead.
 function Audio.clipId(path: string): integer
     return clipId(path)
 end
 
 --- Path a clip index stands for, or nil when it names nothing.
+---
+--- @param id Zero is the index of no clip and answers nil, as does any index
+---     never handed out.
 function Audio.clipPath(id: integer): string
     return clipPaths[id]
 end
@@ -534,11 +664,18 @@ end
 ---
 --- What a `Sound` carries in `group`. The index means nothing outside the run
 --- that handed it out, so it belongs in a component and never in a file.
+---
+--- @param name Must be non-empty; an empty one raises. A group needs no
+---     declaring: naming one here is all it takes to exist.
+--- @return An index from 1 up, shared by every `Audio` in the process.
 function Audio.groupId(name: string): integer
     return groupId(name)
 end
 
 --- Name a group index stands for, or nil when it names nothing.
+---
+--- @param id Zero is the index of no group and answers nil, which is what a
+---     `Sound` in no group carries.
 function Audio.groupName(id: integer): string
     return groupNames[id]
 end
@@ -547,6 +684,10 @@ end
 ---
 --- What a build asked for and what it got are different questions: a decoder
 --- whose dependency was not found is dropped silently. This answers the second.
+---
+--- @return Decoder names such as `"WAV"` and `"OGG"`, in the mixer's own order
+---     rather than sorted, and empty when the mixer will not start at all. A
+---     fresh table each call.
 function Audio.decoders(): {string}
     if not sdl3mixer.init() then
         return {}
@@ -580,6 +721,13 @@ end
 --- object whose calls all succeed and produce nothing, because a game that
 --- cannot be played without an audio device is rarer than a test machine
 --- without one.
+---
+--- @param config May be omitted for the defaults. `maxVoices` outside 1 to
+---     65535 raises, which is the one thing here that does; every other field
+---     out of range is the platform's to refuse.
+--- @return An instance the caller owns and has to `destroy`. Check
+---     `available` for whether an output actually opened; it is false on a
+---     machine with no sound, and every call still succeeds and is silent.
 function Audio.create(config?: Audio.Config): Audio
     local given = config or {} as Audio.Config
     local self = setmetatable({} as Audio, AudioMT)
@@ -647,6 +795,12 @@ function Audio.create(config?: Audio.Config): Audio
 end
 
 --- Stops everything and closes the output.
+---
+--- Blocks until loads in flight have settled, since a clip arriving afterwards
+--- would hold a pointer into a library that has released everything it made.
+--- Every voice is stopped without a fade, every clip goes to `"released"`, and
+--- every world this was installed into stops answering from `Audio.of`. There
+--- is no reopening: make a new instance instead.
 function Audio:destroy()
     -- Drained first. A clip that arrived after the mixer had gone would hold a
     -- pointer into a library that has released everything it made.
@@ -711,6 +865,14 @@ end
 --- playing it twice over is two voices reading one clip. `options.stream`
 --- overrides the duration threshold that otherwise decides whether the clip is
 --- held in memory.
+---
+--- @param path Must be non-empty. Not checked here: a path that does not exist
+---     returns a clip that settles to `"failed"` a frame or two later, so this
+---     never raises for a missing file.
+--- @return A clip whose `status` is `"loading"` on the first call for a path
+---     and whatever it has since become on a later one. Never nil. The
+---     instance belongs to this `Audio` and is the same table every call for
+---     that path returns, so `options` is honoured only by the first.
 function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     local id = clipId(path)
     local existing = self._clips[id]
@@ -746,6 +908,10 @@ function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
 end
 
 --- The clip an index stands for, or nil when this instance has not loaded it.
+---
+--- @param id From `Audio.clipId`, or off a `Sound.clip` field. Clip indices are
+---     shared across the process but clips are not, so an index another
+---     instance loaded answers nil here.
 function Audio:clip(id: integer): Audio.Clip
     return self._clips[id]
 end
@@ -753,11 +919,21 @@ end
 --- Blocks until every queued load has finished.
 ---
 --- For startup and tests. A frame should let `update` resolve them instead.
+---
+--- @param timeoutMs **Milliseconds**, unlike the seconds everything else on
+---     this surface takes, because it is a wait on the asset worker rather
+---     than an audio duration. Omitting it does not wait forever: it takes a
+---     5000 ms default. Running out is not reported, so read `loading`
+---     afterwards to tell a finished wait from a timed-out one.
 function Audio:waitForLoads(timeoutMs?: number)
     self._loads:wait(timeoutMs)
 end
 
 --- Clips still being read.
+---
+--- @return Loads not yet settled. Counts loads rather than clips, and a clip
+---     that failed is settled, so this reaching zero means every `load` has an
+---     answer and not that every answer was a success.
 function Audio:loading(): integer
     return self._loads:pending()
 end
@@ -1112,6 +1288,19 @@ end
 --- cooldown declined it, every voice is busy, or the machine has no output.
 --- None of those is worth raising over: a sound that does not play is not a
 --- reason for a frame to stop.
+---
+--- A key's limit **drops the new voice**; it never steals an older one. A
+--- sound that stops halfway through because something else started is harder
+--- to explain than one that never started, and the same reasoning is why a
+--- full voice pool declines rather than stealing.
+---
+--- @param clip nil is accepted and returns zero, so a `load` result may be
+---     passed straight in without a guard.
+--- @param options Read once, here. Nothing in it is followed afterwards.
+--- @return A handle for `stop`, `playing`, `setGain` and the rest, or zero
+---     when nothing started. It stays valid while the voice sounds and goes
+---     inert for good once it does not; it is never reissued for a later
+---     voice, and nothing has to be released.
 function Audio:play(clip: Audio.Clip, options?: Audio.PlayOptions): integer
     return start(self, clip, options or {} as Audio.PlayOptions, false)
 end
@@ -1120,6 +1309,13 @@ end
 ---
 --- `fadeOut` seconds keeps the voice sounding while it fades, so `playing`
 --- stays true until `update` sees the mixer finish it.
+---
+--- @param handle A stale one is a no-op, as is one already fading out: a
+---     second stop does not shorten a fade in progress.
+--- @param fadeOut Seconds to ramp down over, a duration and not a moment to
+---     finish at. Omitted or zero stops at once and frees the slot within this
+---     call. The ramp is the mixer's, so it follows the audio clock rather
+---     than the frame rate.
 function Audio:stop(handle: integer, fadeOut?: number)
     local voice = voiceOf(self, handle)
     if voice == nil or voice.stopping then
@@ -1140,6 +1336,15 @@ end
 --- A faded stop leaves each voice sounding until the mixer finishes it, so
 --- they are reaped by `update` rather than here. The ramp is the mixer's, on
 --- the same terms as `stop` and `stopGroup`.
+---
+--- Reaches every voice, whichever group it is in and whether a `Sound`
+--- component started it or `play` did. A row still asking to sound starts a
+--- fresh voice on the next audio pass, so this silences a world rather than
+--- keeping it silent.
+---
+--- @param fadeOut Seconds, a duration. Omitted or zero frees every slot within
+---     this call. A positive one unpauses the voices it fades, because a
+---     paused voice does not advance and its fade would never finish.
 function Audio:stopAll(fadeOut?: number)
     local seconds = fadeOut or 0.0
     local fadeMs = math.floor(seconds * 1000)
@@ -1161,11 +1366,20 @@ end
 
 --- Whether a handle still names a sounding voice. A paused or fading voice
 --- still counts: it has not finished.
+---
+--- @return false for a handle whose voice has ended, for zero, and for one
+---     from another `Audio`. A voice that ended on its own reads true until
+---     the next `update` reaps it, since nothing here is told the instant it
+---     finished.
 function Audio:playing(handle: integer): boolean
     return voiceOf(self, handle) ~= nil
 end
 
 --- Whether a handle names a voice a pause is holding.
+---
+--- @return true whether the hold came from `pause` on this handle or from
+---     `pauseGroup` on its group; the two are not told apart. false for a
+---     handle that names nothing.
 function Audio:paused(handle: integer): boolean
     local voice = voiceOf(self, handle)
     return voice ~= nil and voice.paused
@@ -1191,6 +1405,10 @@ end
 --- with `start` and `fadeIn`. That re-reads the input rather than holding it,
 --- so it is a different thing from a pause, and which of the two a moment
 --- wants is a game's answer rather than this layer's.
+---
+--- @param handle A no-op for a handle that names nothing, one already paused,
+---     and one fading out, since a paused fade would never finish. Not holder
+---     counted: one `resume` undoes any number of `pause` calls.
 function Audio:pause(handle: integer)
     local voice = voiceOf(self, handle)
     if voice == nil or voice.paused or voice.stopping then
@@ -1201,6 +1419,11 @@ function Audio:pause(handle: integer)
 end
 
 --- Lets a paused voice carry on.
+---
+--- @param handle A no-op for a handle that names nothing and for one that is
+---     not paused. Resumes a voice its group paused, and the group's hold does
+---     not put it back; a voice starting into that group afterwards is still
+---     held.
 function Audio:resume(handle: integer)
     local voice = voiceOf(self, handle)
     if voice == nil or not voice.paused then
@@ -1211,6 +1434,12 @@ function Audio:resume(handle: integer)
 end
 
 --- Sets a voice's gain, before its group and the master.
+---
+--- @param handle A no-op for one that names nothing.
+--- @param gain Linear amplitude, not decibels: 0 is silence, 1 is the clip as
+---     recorded, above 1 is louder and may clip. Takes effect on the next
+---     buffer the mixer fills rather than ramping, so a large jump on a
+---     sounding voice can be audible as a step.
 function Audio:setGain(handle: integer, gain: number)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1221,6 +1450,10 @@ function Audio:setGain(handle: integer, gain: number)
 end
 
 --- Sets a voice's playback rate. 1 is unchanged.
+---
+--- @param ratio A resampling rate, not an interval: 2 is an octave up and half
+---     as long, 0.5 an octave down and twice as long. It changes how long the
+---     clip takes, so a looped voice's period moves with it.
 function Audio:setPitch(handle: integer, ratio: number)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1235,6 +1468,10 @@ end
 --- looping piece of music lets it play out to its end rather than cutting it,
 --- and setting it on a one-shot keeps it going. It reaches a sounding voice
 --- only: a stopped one takes its count from the next play.
+---
+--- @param loop true repeats forever; there is no finite repeat count here.
+---     Setting it does not move the loop point, which is fixed by the
+---     `loopStart` the voice was played with.
 function Audio:setLoop(handle: integer, loop: boolean)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1244,6 +1481,9 @@ function Audio:setLoop(handle: integer, loop: boolean)
 end
 
 --- Whether a voice repeats when it reaches the end.
+---
+--- @return What this layer last told the mixer, not a reading from it. false
+---     for a handle that names nothing.
 function Audio:looping(handle: integer): boolean
     local voice = voiceOf(self, handle)
     return voice ~= nil and voice.loop
@@ -1254,6 +1494,13 @@ end
 --- False when the handle names nothing, or when the input cannot seek: a
 --- decoder is allowed not to be able to, and some can only reach a time
 --- rather than an exact sample.
+---
+--- @param seconds From the start of the clip, not from where the voice is now,
+---     and not from the loop point. Converted through the track's own rate, so
+---     it lands on a sample frame rather than on a mixer tick.
+--- @return false when the handle names nothing or the input refused the seek.
+---     A true does not promise the exact sample: some decoders reach only the
+---     nearest point they can.
 function Audio:seek(handle: integer, seconds: number): boolean
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1267,6 +1514,11 @@ end
 --- Nil when the handle names nothing or the mixer cannot say. A paused voice
 --- reports where it stopped, which with `seek` and `fadeIn` is what taking a
 --- sound back where it left off is built from.
+---
+--- @return Seconds from the start of the clip, so a looped voice's reading
+---     falls back at each repeat rather than accumulating. nil when the handle
+---     names nothing and nil when the mixer will not say, which are not told
+---     apart here.
 function Audio:tell(handle: integer): number
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1282,6 +1534,15 @@ end
 --- Places a voice in space. See `Sound` for what the numbers mean.
 ---
 --- Replaces a pan set by `setStereo` rather than combining with it.
+---
+--- Puts the voice in the mixer's 3D mode, which folds its input down to mono
+--- before placing it, so a stereo clip loses its stereo image when positioned.
+---
+--- @param x Positive to the right of the listener, which is fixed at the
+---     origin and cannot be moved.
+--- @param y Positive **above** the listener. World Y runs down, so world
+---     coordinates need their Y negated on the way in.
+--- @param z Positive behind the listener.
 function Audio:setPosition(handle: integer, x: number, y: number, z: number)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1301,6 +1562,13 @@ end
 ---
 --- Replaces a position set by `setPosition` rather than combining with it:
 --- the mixer holds one placement per track, and each call writes it.
+---
+--- @param left Gain out of the left speaker, on the same linear scale as
+---     `setGain`. It multiplies with the voice, group and master gains rather
+---     than replacing any of them, so a pan of 1 and 1 is not silence.
+--- @param right Gain out of the right speaker. There is no normalization
+---     between the two: 1 and 1 is the sound at full out of both sides, not
+---     half out of each.
 function Audio:setStereo(handle: integer, left: number, right: number)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1310,6 +1578,10 @@ function Audio:setStereo(handle: integer, left: number, right: number)
 end
 
 --- Returns a voice to unpositioned mixing, out of either placement.
+---
+--- One call answers for both, because clearing either mode in the mixer clears
+--- the other. A no-op for a handle that names nothing and for a voice that was
+--- never placed.
 function Audio:clearSpatial(handle: integer)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1324,6 +1596,9 @@ end
 --- Setting this while muted changes the level a later unmute returns to and
 --- nothing that is audible now, which is what a volume slider moved with the
 --- sound off should do.
+---
+--- @param gain Linear amplitude, not decibels, on the same scale as a voice's:
+---     0 silences, 1 leaves the mix as mixed, above 1 is louder and may clip.
 function Audio:setMasterGain(gain: number)
     self._masterGain = gain
     if self._mixer ~= nil and not self._muted then
@@ -1360,11 +1635,17 @@ function Audio:muted(): boolean
 end
 
 --- Voices sounding right now, including paused and fading ones.
+---
+--- @return Slots in use, so it drops only when `update` reaps a voice, not the
+---     instant one ends. `play` declines once it reaches `maxVoices`.
 function Audio:sounding(): integer
     return self._sounding
 end
 
 --- Voices that may sound at once, as `maxVoices` configured it.
+---
+--- @return The ceiling `play` refuses at, fixed for the instance's life. Not
+---     a hardware limit: it is what `create` was given, defaulting to 32.
 function Audio:maxVoices(): integer
     return #self._voices
 end
@@ -1377,6 +1658,12 @@ end
 ---
 --- Composed here rather than through the mixer's per-tag gain, which writes
 --- each tagged track's own gain and would overwrite what the voice asked for.
+---
+--- @param name Needs no declaring, and setting a gain on a name nothing is in
+---     is how a game configures a group before anything joins it. Recorded
+---     against the name, so it outlives every voice that was in it.
+--- @param gain Linear amplitude, multiplied with each voice's own gain. There
+---     is no removing it: set 1 to return the group to unscaled.
 function Audio:setGroupGain(name: string, gain: number)
     self._groupGains[name] = gain
     for slot = 1, #self._voices do
@@ -1391,6 +1678,9 @@ end
 ---
 --- The level, not what is audible: a muted group still answers with the gain
 --- an unmute would put back.
+---
+--- @return 1 for a group nothing has set, which is indistinguishable from one
+---     explicitly set to 1.
 function Audio:groupGain(name: string): number
     return self._groupGains[name] or 1.0
 end
@@ -1426,6 +1716,10 @@ end
 --- Recorded as well as sent, because the mixer's tag pause reaches what is
 --- sounding when it is called: without the record, a sound started into a
 --- paused group would be the one thing still heard.
+---
+--- @param name Not holder counted: one `resumeGroup` undoes any number of
+---     these. A voice `resume`d out of a paused group stays going, and the
+---     group's hold still applies to whatever joins next.
 function Audio:pauseGroup(name: string)
     self._groupPaused[name] = true
     if self._mixer == nil then
@@ -1485,6 +1779,10 @@ end
 --- Every group this instance knows of: one whose gain, mute or pause has been
 --- set, and one a sounding voice is in. Sorted, so a caller reading it twice
 --- reads it the same way.
+---
+--- @return A fresh table each call, which the caller owns. A group whose only
+---     voice has ended and which nothing was set on drops out of it, so this
+---     is not a stable list of a game's groups.
 function Audio:groups(): {string}
     local names: {string} = {}
     local seen: {string: boolean} = {}
@@ -1503,6 +1801,13 @@ end
 ---
 --- A faded stop leaves the voices sounding until they finish, so they are
 --- reaped by `update` rather than here.
+---
+--- Stops the voices, not the group: a gain, mute or pause set on the name
+--- survives, and anything that joins afterwards starts under them.
+---
+--- @param fadeOut Seconds, a duration. Omitted or zero frees the slots within
+---     this call. A positive one unpauses the voices it fades, since a paused
+---     voice's fade would never finish.
 function Audio:stopGroup(name: string, fadeOut?: number)
     if self._mixer == nil then
         return
@@ -1537,22 +1842,42 @@ end
 --- to know about the other.
 ---
 --- Passing nil removes the limit. Voices already sounding are left alone.
+---
+--- When a limit is reached the **new voice is dropped**: `play` returns zero
+--- and nothing already sounding is stolen or cut short.
+---
+--- @param limit nil removes the limit. Lowering `voices` below what the key
+---     already holds does not stop any of them; it only refuses the next until
+---     enough have ended. `cooldown` is measured from when a voice last
+---     started, against the time `update` has been told about, so a game that
+---     never calls `update` never advances a cooldown.
 function Audio:setLimit(key: string, limit: Audio.Limit)
     self._limits[key] = limit
 end
 
 --- The limit a key carries, or nil.
+---
+--- @return The record that was set, not a copy, so writing through it changes
+---     the limit in force.
 function Audio:limit(key: string): Audio.Limit
     return self._limits[key]
 end
 
 --- Voices a key is holding right now.
+---
+--- @return Voices counted against the key, paused and fading ones included,
+---     since a slot is not given back until the voice ends. 0 for a key that
+---     has never held one.
 function Audio:keyCount(key: string): integer
     local bucket = self._buckets[key]
     return bucket ~= nil and bucket.count or 0
 end
 
 --- Every key with a limit set or a voice counted against it, sorted.
+---
+--- @return A fresh table each call, which the caller owns. A key keeps its
+---     bucket once one exists, so a key that has played and stopped is still
+---     listed.
 function Audio:keys(): {string}
     local names: {string} = {}
     local seen: {string: boolean} = {}
@@ -1577,6 +1902,9 @@ end
 ---
 --- For introspection: it builds a list per call, so nothing on a frame's path
 --- should read it.
+---
+--- @return A fresh list each call, holding the live clip records rather than
+---     copies, so their `status` moves under a caller that keeps one.
 function Audio:clips(): {Audio.Clip}
     local ids: {integer} = {}
     for id in pairs(self._clips) do
@@ -1594,6 +1922,10 @@ end
 ---
 --- For introspection, on the same terms as `clips`. The handles it reports are
 --- the ones `playing` and `stop` take, so what this shows can be acted on.
+---
+--- @return A fresh list of fresh records each call, ordered by voice slot,
+---     which is not the order the voices started in. It is a snapshot: nothing
+---     in it follows the voice afterwards.
 function Audio:voices(): {Audio.VoiceInfo}
     local list: {Audio.VoiceInfo} = {}
     for slot = 1, #self._voices do
@@ -1634,6 +1966,16 @@ end
 --- The step is what a cooldown is measured against. Nothing else here needs
 --- time: a fade is the mixer's to run, and a voice is over when the mixer says
 --- so rather than when a clock here says it should be.
+---
+--- Not a world system, and `install` deliberately does not add one: reaping has
+--- to keep happening while the world is paused, so an application drives this
+--- from the iteration instead.
+---
+--- @param dt Seconds since the last call, added to the clock cooldowns are
+---     measured against. Omitting it advances nothing, which is what a test
+---     stepping voices without time wants.
+--- @return Voices still sounding after the reap, the same number `sounding`
+---     answers.
 function Audio:update(dt?: number): integer
     self._now = self._now + (dt or 0.0)
     self._loads:resolve()
@@ -1882,6 +2224,9 @@ end
 ---
 --- What lets something holding only the world reach the mixer, which is what
 --- the debug tools have and what a game writing its own systems often has too.
+---
+--- @return nil before `install` and again after the instance is destroyed,
+---     since a destroyed one stops answering for every world it was in.
 function Audio.of(world: ecs.World): Audio
     return installed[world]
 end
@@ -1892,6 +2237,10 @@ end
 --- `update` is not added here. Reaping voices is not world work: it has to
 --- keep happening while the world is paused, and an application drives it from
 --- the iteration instead.
+---
+--- @param world Repoints this instance's pitch variance at the world's
+---     `tecs.audio` random stream, so installing into a second world moves the
+---     variance to that one's. One `Audio` per world is the shape this expects.
 function Audio:install(world: ecs.World)
     installed[world] = self
 

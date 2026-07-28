@@ -56,18 +56,46 @@ local record WorldOptions
     workerCount: integer
 end
 
+--- One Box2D simulation, in Box2D's own units.
+---
+--- **Everything here is metres, radians and seconds**, unlike `tecs.physics`
+--- above it, which takes and returns pixels and converts at its own boundary.
+--- A caller that reaches this directly is responsible for the conversion, and
+--- `physics.scale` is the factor.
+---
+--- Nothing here is thread safe. A world is created, stepped and destroyed from
+--- the game thread; the solver's own threads are inside `step` and are gone
+--- again before it returns.
 local record World
+    --- The `b2WorldId`. Nil once `destroy` has run, which is what makes a
+    --- second `destroy` a no-op.
     handle: loader.CValue
+
+    --- Solver substeps per `step`, fixed at creation. Read by `step` on every
+    --- call, so writing it changes later steps.
     subStepCount: integer
+
     --- The threads the solver runs on. Shared with every other simulation in
     --- the process and held by reference for the world's lifetime.
     taskPool: TaskPool
+
+    --- Private. Whether the Box2D world has been destroyed and the pool
+    --- reference given back.
     _destroyed: boolean
 
     --- The last step's movement, indexed by body. See `World:beginMoves`.
     _moves: loader.CValue
+
+    --- Private. Entries in `_moves`, which is how many bodies the last step
+    --- moved, not how many the world holds.
     _moveCount: integer
+
+    --- Private. Body slot to one-based index into `_moves`, zero for a body
+    --- that did not move. Owned by this world and reused between steps.
     _moveOf: loader.CArray
+
+    --- Private. Slots `_moveOf` has room for. It grows by doubling and never
+    --- shrinks, so it settles at the highest body slot the session has seen.
     _moveOfCapacity: integer
 end
 
@@ -107,6 +135,13 @@ function World.shapeOptions(
 end
 
 --- Creates a simulation world.
+---
+--- @param options May be nil, which takes Box2D's own world defaults for
+---     everything but the substep count. Gravity is metres per second squared,
+---     so a caller working in pixels divides by `physics.scale` first.
+--- @return A world the caller owns and has to `destroy`. It takes a reference
+---     on the process-wide thread pool, so dropping it without destroying it
+---     keeps those threads alive for the rest of the run.
 function World.create(options: WorldOptions): World
     options = options or {}
 
@@ -141,6 +176,17 @@ end
 ---
 --- Callers are responsible for feeding a fixed timestep; Box2D's solver is
 --- not robust to a varying one, and a variable step makes replay diverge.
+---
+--- Body handles survive a step: Box2D keeps a body's id stable for its whole
+--- life, and only destroying the body or the world invalidates one. What does
+--- not survive is the movement array, which `beginMoves` reads and which the
+--- next step replaces.
+---
+--- The solver runs on the pool's threads for the duration of this call and
+--- has rejoined by the time it returns, so no callback of the caller's runs
+--- off the game thread and nothing is in flight afterwards.
+---
+--- @param dt Seconds. Zero is accepted by Box2D and advances nothing.
 function World:step(dt: number)
     C.b2World_Step(self.handle, dt, self.subStepCount)
 end
@@ -155,6 +201,9 @@ end
 --- allocations a frame that this avoids entirely.
 ---
 --- Valid until the next step, which is Box2D's guarantee about the array.
+---
+--- Pair it with `endMoves`; leaving the index built leaves last step's answers
+--- in it, so a later `moveOf` reports movement that has already been consumed.
 function World:beginMoves()
     local events = C.b2World_GetBodyEvents(self.handle) as loader.CStruct
     local count = events.moveCount as integer
@@ -213,6 +262,15 @@ end
 --- test of its own: Box2D numbers bodies from one, so nothing ever writes
 --- that slot, and a `RigidBody` restored from a snapshot lands here rather
 --- than on a body it does not own.
+---
+--- @param index1 A body's `index1`, which Box2D numbers from one and reuses
+---     once a body is destroyed. Only meaningful for this world's bodies: an
+---     index from another world reads whatever this one has in that slot.
+--- @return X in metres, or nil alone when the body did not move.
+--- @return Y in metres.
+--- @return Cosine of the rotation.
+--- @return Sine of the rotation. Take `atan2(sine, cosine)` for an angle in
+---     radians, and only if you need one.
 function World:moveOf(index1: integer): number, number, number, number
     if index1 >= self._moveOfCapacity then
         return nil
@@ -228,6 +286,15 @@ function World:moveOf(index1: integer): number, number, number, number
 end
 
 --- Creates a body and returns its handle.
+---
+--- The body has no shape yet, so it has no mass and collides with nothing
+--- until `addBox` or `addCircle` is called on it.
+---
+--- @param options May be nil. Position is metres and angle is radians. An
+---     unrecognised `type` string is read as static rather than raising.
+--- @return A `b2BodyId`, a value struct that is safe to copy and store. It
+---     stays valid across steps and is invalidated only by destroying the body
+---     or this world.
 function World:createBody(options: BodyOptions): loader.CValue
     options = options or {}
 
@@ -320,6 +387,15 @@ end
 
 --- Attaches an axis-aligned box to `body`. Extents are half-widths, matching
 --- Box2D's convention.
+---
+--- Axis aligned in the body's frame, so it turns with the body. Attaching a
+--- shape recomputes the body's mass from the shape's density.
+---
+--- @param halfWidth Half the box's full width, in metres.
+--- @param halfHeight Half the box's full height, in metres.
+--- @param options May be nil, which takes Box2D's material defaults.
+--- @return A `b2ShapeId`. It is invalidated by destroying the shape, the body
+---     or the world.
 function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number, options: ShapeOptions): loader.CValue
     local polygon = ffi.new("b2Polygon[1]") as loader.CArray
     local offset = ffi.new("b2Vec2[1]") as loader.CArray
@@ -334,6 +410,10 @@ function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number
 end
 
 --- Attaches a circle centred on the body's origin.
+---
+--- @param radius Metres. There is no offset parameter: the centre is the
+---     body's origin, so an off-centre circle needs a body positioned for it.
+--- @return A `b2ShapeId`, with the same lifetime as `addBox`'s.
 function World.addCircle(body: loader.CValue, radius: number, options: ShapeOptions): loader.CValue
     local circle = ffi.new("b2Circle[1]") as loader.CArray
     local shape = circle[0] as loader.CStruct
@@ -473,12 +553,22 @@ end
 ---
 --- Box2D counts them by walking its solver sets, so this is a diagnostic
 --- rather than something to call per frame.
+---
+--- @return Bodies of every type, static included, and sleeping ones as well as
+---     awake ones.
 function World:bodyCount(): integer
     local counters = C.b2World_GetCounters(self.handle) as loader.CStruct
     return counters.bodyCount as integer
 end
 
 --- Returns a body's world position.
+---
+--- One call per body, and a `b2Vec2` comes back by value, so this allocates
+--- cdata each time. Use `moveOf` over a column of bodies instead.
+---
+--- @return X in metres.
+--- @return Y in metres. The body's origin, which its shapes are placed
+---     relative to, not its centre of mass.
 function World.getPosition(body: loader.CValue): number, number
     local position = C.b2Body_GetPosition(body)
     return position.x as number, position.y as number
@@ -488,12 +578,20 @@ end
 ---
 --- b2Rot_GetAngle is header-only, so the conversion from the stored
 --- cosine/sine pair happens here.
+---
+--- @return Radians in (-pi, pi]: the stored pair is normalized, so an angle
+---     does not accumulate past a full turn and a body spun twice round reads
+---     the same as one spun once.
 function World.getAngle(body: loader.CValue): number
     local rotation = C.b2Body_GetRotation(body)
     return math.atan2(rotation.s as number, rotation.c as number)
 end
 
 --- Returns a body's linear velocity.
+---
+--- @return X in metres per second.
+--- @return Y in metres per second. Linear only: a body that is only spinning
+---     reads zero here.
 function World.getVelocity(body: loader.CValue): number, number
     local velocity = C.b2Body_GetLinearVelocity(body)
     return velocity.x as number, velocity.y as number
@@ -507,6 +605,9 @@ local velocityScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
 ---
 --- Waking is not optional: Box2D lets a resting island sleep, and a sleeping
 --- body given a velocity keeps sleeping and never moves.
+---
+--- @param x Metres per second, set outright rather than added to.
+--- @param y Metres per second. Angular velocity is left alone.
 function World.setVelocity(body: loader.CValue, x: number, y: number)
     local vector = velocityScratch[0] as loader.CStruct
     vector.x = x

@@ -42,6 +42,22 @@ local DEFAULT_HOLDER <const> = "user"
 -- The runtime records live in the leaf types module; bind them so the body
 -- below reads the same as when they were declared here.
 local type ProgramImpl = seqtypes.ProgramImpl
+
+--- Authoring, playback and inspection of sequences, timelines included.
+---
+--- Programs are compiled once under a name and are global: `define` and
+--- `timeline` take no world, and the same compiled program plays on any number
+--- of them. Everything with a per-playback identity takes a world, because the
+--- cursor arena, the action registry and the clocks are per-world state.
+---
+--- Two units run through the whole surface and are not interchangeable.
+--- Durations written as `number` are seconds. Anything named a step or a tick
+--- is a whole count of one clock's advances, and which clock is the program's,
+--- fixed by `DefineOptions.clock` at `define` time: `"fixed"` ticks once per
+--- fixed step, `"frame"` once per gameplay frame however many fixed steps that
+--- frame ran, `"presentation"` once per gameplay frame carrying the frame's
+--- real elapsed time. A tick count is therefore only comparable against
+--- another from the same clock, which is why `currentStep` takes one.
 local record sequence
     ---------------------------------------------------------------------------
     -- Types
@@ -87,21 +103,58 @@ local record sequence
 
     --- Name of a built-in easing curve, and the shape of any curve.
     type EasingName = tweeneval.EasingName
+
+    --- A curve, as normalized progress in to eased progress out.
+    ---
+    --- Easing shapes the value, not the schedule: the argument is how far
+    --- through its own window the interpolation is, clamped to [0, 1], and the
+    --- result is the fraction of the way from start to destination to place
+    --- the target at. A curve that leaves [0, 1] overshoots the destination
+    --- rather than the duration, which is what `backOut` and `elasticOut` are
+    --- for. The window itself is fixed at compile time, so no curve can make a
+    --- timeline longer or shorter or move what follows it.
     type EasingFunction = tweeneval.EasingFunction
 
-    --- Name of a built-in component-field target, and a target value.
+    --- Name of a built-in component-field target.
     type TargetName = tweeneval.TargetName
+
+    --- What a timeline operation writes: a component and the one to four
+    --- numeric fields of it to interpolate.
+    ---
+    --- Opaque, and built only through `sequence.target`: a built-in such as
+    --- `sequence.target.translateXY`, or `sequence.target.field(C, "hp")` for a
+    --- component of your own. Every operation that takes one also accepts a
+    --- `TargetName` naming the same built-in, which is the form that survives
+    --- `defineData`. Safe to share between timelines: a target holds no
+    --- per-playback state.
     type Target = tweeneval.Target
 
     --- A live component-field tracking source.
     type TrackSource = tweeneval.TrackSource
 
-    --- One authored timeline operation, and a list of them.
+    --- One authored timeline operation.
     type TimelineNode = tweeneval.TimelineNode
+
+    --- Timeline operations in order, as one list.
+    ---
+    --- Entries run one after the next, each starting where the one before it
+    --- ended, except that a `tweenParallel` runs its arguments from a shared
+    --- start. A nested list is read as a block and behaves the same as one.
+    ---
+    --- Compiling a spec writes the resolved form into the same table, so a
+    --- spec is consumed by the `timeline` or `tweenRun` that takes it: pass a
+    --- fresh one per timeline rather than holding one and reusing it.
     type TimelineSpec = tweeneval.TimelineSpec
 
-    --- How a timeline repeats, and the options a nested run takes.
+    --- How a timeline repeats.
     type PlaybackMode = tweeneval.PlaybackMode
+
+    --- What a `tweenRun` does with the timeline it nests.
+    ---
+    --- Omitting it runs the nested timeline once. A nested `"loop"` or
+    --- `"pingPong"` must set `count`, because a parent has to know how long
+    --- its own window is; only the root timeline of a `sequence.timeline`,
+    --- through `params`, may repeat without one.
     type RunOptions = tweeneval.RunOptions
 
     --- The built-in easing curves: `sequence.easing.quadOut`.
@@ -119,6 +172,26 @@ local record sequence
     TrackingTarget: tweeneval.TrackingTarget
 
     --- Interpolate to an absolute destination.
+    ---
+    --- The starting values are read off the entity the first tick the
+    --- operation is evaluated, not when the timeline is compiled, so the same
+    --- timeline played on two entities starts from wherever each of them is.
+    ---
+    --- @param duration Seconds, and strictly positive: a zero is rejected at
+    ---     compile time. Use `tweenWait` for a gap that moves nothing.
+    --- @param target Which component fields move, and in which order `t1`
+    ---     through `t4` line up with them.
+    --- @param t1 Destination for the target's first field, in that field's own
+    ---     units: pixels for a translate, radians for a rotation, 0 to 1 for a
+    ---     colour channel. A shortest-path rotation target still takes an
+    ---     absolute angle and picks the short way round to it.
+    --- @param t2 Destination for the second field, for a target that has one.
+    --- @param t3 Destination for the third field, for a four-field target.
+    --- @param t4 Destination for the fourth field, for a four-field target.
+    ---     An argument past the target's field count is ignored; one the
+    ---     target has and you omit counts as a destination of zero.
+    --- @return A node for a `TimelineSpec`, consumed by the timeline that
+    ---     compiles it and not reusable in a second one.
     tweenTo: function(
         duration: number,
         curve: EasingName | EasingFunction,
@@ -130,6 +203,21 @@ local record sequence
     ): TimelineNode
 
     --- Interpolate by a relative delta, read from wherever the value starts.
+    ---
+    --- Identical to `tweenTo` except that `t1` through `t4` are the amount to
+    --- move by rather than where to end up, so the destination depends on the
+    --- entity's value the first tick the operation is evaluated.
+    ---
+    --- @param duration Seconds, and strictly positive.
+    --- @param t1 Change applied to the target's first field, in that field's
+    ---     own units, and signed: negative moves the other way.
+    --- @param t2 Change applied to the second field.
+    --- @param t3 Change applied to the third field.
+    --- @param t4 Change applied to the fourth field. An argument past the
+    ---     target's field count is ignored; an omitted one is a change of
+    ---     zero, which holds that field where it started.
+    --- @return A node for a `TimelineSpec`, consumed by the timeline that
+    ---     compiles it.
     tweenAdjust: function(
         duration: number,
         curve: EasingName | EasingFunction,
@@ -141,20 +229,60 @@ local record sequence
     ): TimelineNode
 
     --- Interpolate toward a destination that keeps moving.
+    ---
+    --- The start is fixed the first tick, as with `tweenTo`, but the
+    --- destination is re-read from `from` every tick the operation is inside
+    --- its window, so the entity chases a value that is still changing. Once
+    --- the window ends the last destination is held rather than followed.
+    ---
+    --- @param duration Seconds, and strictly positive.
+    --- @param from Where the destination is read each tick. A source whose
+    ---     entity or component is missing reads as zero rather than faulting,
+    ---     so an entity chasing something that despawned drifts to the origin.
+    ---     A source named by world key is the exception and requires the key
+    ---     to be set.
+    --- @return A node for a `TimelineSpec`, consumed by the timeline that
+    ---     compiles it.
     tweenTrack: function(
         duration: number, curve: EasingName | EasingFunction, target: TargetName | Target, from: TrackSource
     ): TimelineNode
 
     --- Advance the timeline cursor without changing anything.
+    ---
+    --- @param duration Seconds. Zero is allowed and is a no-op, unlike the
+    ---     duration of an interpolating operation.
+    --- @return A node for a `TimelineSpec`.
     tweenWait: function(duration: number): TimelineNode
 
     --- Emit a named `sequence.Event` when the cursor reaches this point.
+    ---
+    --- Occupies no time, so what follows it starts at the same instant.
+    ---
+    --- @param name Carried on the event as its name; the sequencer attaches no
+    ---     meaning to it.
+    --- @return A node for a `TimelineSpec`.
     tweenEmit: function(name: string): TimelineNode
 
     --- Run a nested timeline, given as its own spec.
+    ---
+    --- The nested timeline occupies a window of the parent equal to its own
+    --- length times its pass count, so a repeating nested run needs a finite
+    --- `count`. Its own operations keep their per-playback state separately
+    --- from the parent's.
+    ---
+    --- @param spec Compiled in place if it has not been already, so the table
+    ---     given here belongs to this node afterwards.
+    --- @return A node for a `TimelineSpec`.
     tweenRun: function(spec: TimelineSpec, options?: RunOptions): TimelineNode
 
     --- Run timeline nodes concurrently, ending with the longest.
+    ---
+    --- Every argument starts at the point the `tweenParallel` sits at, and
+    --- what follows starts after the last of them ends. Two arguments writing
+    --- the same component field is not an error and the later one in argument
+    --- order wins each tick.
+    ---
+    --- @return A node for a `TimelineSpec`.
     tweenParallel: function(...: TimelineNode): TimelineNode
 
     --- Which clock a program is scheduled against.
@@ -193,9 +321,17 @@ local record sequence
     ---         {op = "call", action = "game.lockControls"},
     ---         {op = "wait", seconds = 1.5},
     ---     })
+    ---
+    --- @param rows One table per step, keyed by `op` and the fields that step
+    ---     takes. Names of the steps are `dataOps`.
+    --- @return The compiled program, or nil when a row is bad.
+    --- @return nil on success; on failure the path to the first bad entry,
+    ---     which is why the two are never both set.
     defineData: function(name: string, rows: {any}, options?: DefineOptions): Program, string
 
     --- The step names `defineData` accepts, sorted.
+    ---
+    --- @return A fresh table each call, which the caller owns.
     dataOps: function(): {string}
 
     --- Compile a program under a stable symbolic name.
@@ -204,6 +340,17 @@ local record sequence
     --- default, counts fixed steps and is what gameplay logic wants.
     --- `"frame"` counts gameplay frames, one tick per frame however many fixed
     --- steps that frame runs, which is what scripted input needs.
+    --- `"presentation"` is also accepted and ticks once per gameplay frame
+    --- carrying the frame's real elapsed time.
+    ---
+    --- @param name Defining over a name already in use publishes a new
+    ---     version rather than replacing the old one: playbacks already
+    ---     running keep the version they started on, and only later `play`
+    ---     calls see the new one.
+    --- @param nodes An empty list is accepted and compiles to a program that
+    ---     completes on its first tick.
+    --- @return The compiled program, immutable and shared by every playback
+    ---     of it, so the same value plays on any number of worlds.
     define: function(name: string, nodes: {Node}, options?: DefineOptions): Program
 
     --- Options for `timeline`.
@@ -235,19 +382,49 @@ local record sequence
     ---         sequence.tweenTo(0.4, "quadOut", "color.a", 0),
     ---     })
     ---     sequence.play(world, fade, {owner = e, params = {delay = 0.2}})
+    ---
+    --- @param name Shared with `define`'s namespace, and versioned the same
+    ---     way: compiling over a live name publishes a new version and leaves
+    ---     playbacks of the old one running it.
+    --- @param spec Compiled in place, so the table given here belongs to the
+    ---     timeline afterwards and must not be compiled a second time.
+    --- @return The compiled program, also reachable by name through `program`.
     timeline: function(name: string, spec: TimelineSpec, options?: TimelineOptions): Program
 
     --- Look up a defined program: the newest version, or a specific one.
     --- Every version a playback still runs stays reachable.
+    ---
+    --- @param version Versions start at 1 and rise by one per `define` of the
+    ---     same name. Omit it for the newest.
+    --- @return nil when the name was never defined, or when that version was
+    ---     superseded and the last playback of it has since ended. The newest
+    ---     version of a name is never dropped.
     program: function(name: string, version?: integer): Program
 
     --- Names of every defined program, sorted.
+    ---
+    --- @return A fresh table each call, which the caller owns. Registration is
+    ---     global, so this spans every world in the process.
     programNames: function(): {string}
 
     --- Reference an entity supplied through `PlayOptions.bindings`.
+    ---
+    --- Resolved when the instruction using it runs, not at `play`, so a
+    --- binding may name an entity that does not exist yet.
+    ---
+    --- @param name Must be non-empty. It is matched against the keys of
+    ---     `PlayOptions.bindings`, and a name with no binding resolves to
+    ---     nothing rather than faulting.
     bind: function(name: string): EntityRef
 
     --- Run a registered action.
+    ---
+    --- @param action Resolved per world when the instruction runs, not at
+    ---     `define`, so a program may name an action registered later. A name
+    ---     still unregistered when the step runs faults the playback.
+    --- @param ... Compiled into the program's const pool, so they are the same
+    ---     values for every playback of it. Put anything that differs between
+    ---     two playbacks in `PlayOptions.params` instead.
     call: function(action: string, ...: Argument): Node
 
     --- Wait for a duration in seconds.
@@ -257,6 +434,11 @@ local record sequence
     --- waiting at least one step. Programs therefore stay independent of any
     --- one world's timestep. Use `waitSteps` when the exact step count
     --- matters more than the wall-clock duration.
+    ---
+    --- @param seconds Non-negative; a negative one is rejected here rather
+    ---     than at compile time. Zero still costs a tick: the cursor resumes
+    ---     on the program's next tick rather than carrying on within this one,
+    ---     so no duration makes `wait` free.
     wait: function(seconds: number): Node
 
     --- Block until a named signal is raised.
@@ -283,9 +465,23 @@ local record sequence
     ---
     --- `waitSteps(0)` yields: the cursor resumes on the next fixed step
     --- rather than continuing within the current one.
+    ---
+    --- @param steps Ticks of the program's own clock, so a program defined
+    ---     against `"frame"` or `"presentation"` counts those and not fixed
+    ---     steps. Non-negative and whole; a fraction is rejected here.
     waitSteps: function(steps: integer): Node
 
     --- Emit an ECS event at address 0.
+    ---
+    --- Occupies no tick: the step after it runs in the same one.
+    ---
+    --- @param event Carried as the `sequence.Event`'s name. Observers watch
+    ---     `sequence.Event` itself and filter on this, rather than each name
+    ---     being an event type of its own.
+    --- @param ... Const-pool values, as `call`'s are, delivered on the event's
+    ---     `args` with any `bind` reference already resolved to an entity id.
+    ---     That list is copied for each emit and leaves with the event, so an
+    ---     observer may keep it, unlike the one an action receives.
     emit: function(event: string, ...: Argument): Node
 
     --- Repeat a block.
@@ -413,6 +609,10 @@ local record sequence
     signal: function(world: World, name: string): integer
 
     --- Playbacks currently blocked on a signal name.
+    ---
+    --- @return 0 for a name nothing waits on, including one never signalled.
+    ---     Counts what is parked right now, so a signal already raised this
+    ---     step is still counted until the next step delivers it.
     waitingOn: function(world: World, name: string): integer
 
     ---------------------------------------------------------------------------
@@ -420,9 +620,19 @@ local record sequence
     ---------------------------------------------------------------------------
 
     --- Start a program. The first instruction runs on the next fixed step.
+    ---
+    --- @param program A value from `define` or `timeline`, not a name. The
+    ---     version handed in is the version this playback runs for its whole
+    ---     life, even if the name is redefined under it.
+    --- @return A handle to the new playback, valid until it ends. A handle
+    ---     carries a generation, so one whose playback has ended never names a
+    ---     later playback that took the same slot.
     play: function(world: World, program: Program, options?: PlayOptions): Handle
 
     --- Stop a playback and release its cursor. Safe on a finished handle.
+    ---
+    --- @return false when the handle names nothing running, whether it already
+    ---     finished, was already cancelled, or came from another world.
     cancel: function(world: World, handle: Handle): boolean
 
     --- Suspend a playback, its branches, and anything it started.
@@ -446,6 +656,11 @@ local record sequence
     resume: function(world: World, handle: Handle, holder?: string): boolean
 
     --- Inspect a playback. Returns nil for a handle this world never issued.
+    ---
+    --- @return A fresh table each call, which the caller owns. A finished
+    ---     playback still answers, with `state` saying how it ended, until its
+    ---     slot is taken by a later `play`; after that the generation no
+    ---     longer matches and the answer is nil.
     status: function(world: World, handle: Handle): Status
 
     --- Cancel every playback owned by an entity.
@@ -453,13 +668,25 @@ local record sequence
     --- `reason` is what anything waiting on one of them is told. The owner
     --- despawning reports `targetLost`, which is what a waiter needs to tell
     --- "it was stopped" from "what it was moving is gone".
+    ---
+    --- @param owner An entity id. A playback started without an owner is
+    ---     owned by nothing rather than by entity 0, so no argument reaches
+    ---     one and only `cancel` on its handle stops it.
+    --- @return How many were running and are now cancelled; 0 when the entity
+    ---     owns none.
     cancelOwnedBy: function(world: World, owner: integer, reason?: TweenOutcome): integer
 
     --- Number of live playbacks, for tests and diagnostics.
+    ---
+    --- @return Branches counted individually, since a branch is a playback of
+    ---     its own.
     activeCount: function(world: World): integer
 
     --- Handles of every live playback, branches included, in a stable
     --- order. For diagnostics and the debugger, not for hot paths.
+    ---
+    --- @return A fresh table each call, ordered by cursor slot, which is
+    ---     stable within a run but is not creation order.
     playbacks: function(world: World): {Handle}
 
     ---------------------------------------------------------------------------
@@ -467,10 +694,21 @@ local record sequence
     ---------------------------------------------------------------------------
 
     --- Per-step instruction budget for playbacks that do not set their own.
+    ---
+    --- @param instructions Must be at least 1. It caps how many instructions
+    ---     one playback runs per tick, and exceeding it faults the playback
+    ---     with `budgetExceeded` rather than deferring the rest, so it is a
+    ---     guard against a `loop` with no wait in it, not a scheduler. Applies
+    ---     to playbacks started after this call; a running one keeps the
+    ---     budget it started with.
     setInstructionBudget: function(world: World, instructions: integer)
 
     --- A clock's current tick, as counted by the sequencer. Defaults to the
     --- fixed clock.
+    ---
+    --- @return Ticks since the sequencer was installed on this world, not
+    ---     since the process started, and rising by one per tick of that one
+    ---     clock. Comparable only against another reading of the same clock.
     currentStep: function(world: World, clock?: ClockId): integer
 
     --- What a playback will certainly do next, and when.
@@ -480,6 +718,11 @@ local record sequence
     --- known without running it. Ticks are counted in the playback's own
     --- clock, from now.
     --- @param withinTicks Report only what is due within this many ticks.
+    ---     Counted in the playback's own clock, from now. Omit for everything
+    ---     the walk can reach.
+    --- @return A fresh table each call. Empty for a handle that names nothing
+    ---     running, and also for one parked on a signal, a query, a join or a
+    ---     tween, since none of those has a predictable start.
     upcoming: function(world: World, handle: Handle, withinTicks?: integer): {Step}
 
     --- One step a playback will reach without branching.
@@ -487,6 +730,10 @@ local record sequence
 
     --- Render a program as readable instructions.
     --- @param pc Mark this instruction, as a playback's `status` reports it.
+    ---     Omit for an unmarked listing.
+    --- @return A header naming the program and its version, then one line per
+    ---     instruction, newline separated. For reading and not for parsing:
+    ---     the format is free to change.
     disassemble: function(program: Program, pc?: integer): string
 
     --- Install the sequencer. Auto-installed by `tecs.application`, and safe
