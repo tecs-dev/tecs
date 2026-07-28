@@ -74,7 +74,20 @@ export default defineConfig({
                 items: [
                     { text: "Getting started", link: "/getting-started" },
                     { text: "Modules", link: "/modules/" },
-                    { text: "Tecs CLI", link: "/cli/" },
+                ],
+            },
+            // The CLI is its own group rather than a row under the
+            // introduction, because it is a tool with a surface of its own
+            // rather than one more thing to read once. It does not exist on
+            // this branch, and every page under it says so; the structure is
+            // here so that the shape is settled before the tool is written.
+            {
+                text: "CLI",
+                collapsed: false,
+                items: [
+                    { text: "Overview", link: "/cli/" },
+                    { text: "Projects", link: "/cli/projects" },
+                    { text: "Scope", link: "/cli/scope" },
                 ],
             },
             // One row per page, and no row for anything smaller. The sidebar
