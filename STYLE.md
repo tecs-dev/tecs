@@ -55,15 +55,15 @@ anybody has to apply it.
 
 ## What the formatter cannot decide
 
-These are judgement, and they are what a review is for.
+These are judgment, and they are what a review is for.
 
 - Group `require`s at the top, followed by `local type` aliases. The formatter
   deliberately does not sort them (`sort_requires = false`): import order is
   meaningful where one module has to be reached before another runs, so a tool
-  that reordered them could change behaviour.
+  that reordered them could change behavior.
 - Prefer early returns over nested conditionals.
 - Comments are sparse and informational. Public functions, records and modules
-  get `---` doc comments describing behaviour and constraints rather than
+  get `---` doc comments describing behavior and constraints rather than
   restating the signature. No commented-out code.
 - Names, and the file and module split above, which no tool can check.
 

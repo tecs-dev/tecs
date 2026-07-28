@@ -31,7 +31,7 @@ local function newSource(settings)
         defaultWaitMs = settings.defaultWaitMs,
         polls = 0,
         advances = 0,
-        cancelled = {},
+        canceled = {},
         -- Called on each advance, so a test can settle from inside a wait.
         onAdvance = settings.onAdvance,
     }
@@ -49,7 +49,7 @@ local function newSource(settings)
     end
     if settings.cancels ~= false then
         function source:cancel(future)
-            self.cancelled[#self.cancelled + 1] = future
+            self.canceled[#self.canceled + 1] = future
         end
     end
     return source
@@ -295,10 +295,10 @@ describe("tecs.future.Future", function()
         end)
 
         -- The one place "cancel only this link" needs a second sentence. There
-        -- is a window where the chain has been cancelled and the inner work has
-        -- not been created, and cancelling after the fact cannot reach into
+        -- is a window where the chain has been canceled and the inner work has
+        -- not been created, and canceling after the fact cannot reach into
         -- something that does not exist.
-        it("never starts the inner when cancelled before the outer settles", function()
+        it("never starts the inner when canceled before the outer settles", function()
             local started = false
             local outer = Future.pending()
             local chained = outer:flatMap(function()
@@ -307,11 +307,11 @@ describe("tecs.future.Future", function()
             end)
 
             chained:cancel()
-            assert.are.equal("cancelled", chained.status)
+            assert.are.equal("canceled", chained.status)
 
             outer:complete(1)
-            assert.is_false(started, "the inner work was started for a cancelled chain")
-            assert.are.equal("cancelled", chained.status)
+            assert.is_false(started, "the inner work was started for a canceled chain")
+            assert.are.equal("canceled", chained.status)
         end)
 
         it("turns a raise inside the transform into that link's failure", function()
@@ -406,9 +406,9 @@ describe("tecs.future.Future", function()
             assert.are.equal("real", recovered.value)
         end)
 
-        -- The whole reason "cancelled" is a state of its own. A caller who
-        -- cancelled a load did not ask for a fallback value.
-        it("does not recover a cancelled upstream", function()
+        -- The whole reason "canceled" is a state of its own. A caller who
+        -- canceled a load did not ask for a fallback value.
+        it("does not recover a canceled upstream", function()
             local called = false
             local source = newSource()
             local future = Future.pending(source)
@@ -421,7 +421,7 @@ describe("tecs.future.Future", function()
             future:cancel()
 
             assert.is_false(called, "a cancellation was recovered from")
-            assert.are.equal("cancelled", recovered.status)
+            assert.are.equal("canceled", recovered.status)
         end)
     end)
 
@@ -505,14 +505,14 @@ describe("tecs.future.Future", function()
     end)
 
     describe("cancel", function()
-        it("settles as cancelled and asks the source to stop the work", function()
+        it("settles as canceled and asks the source to stop the work", function()
             local source = newSource()
             local future = Future.pending(source)
             future:cancel()
 
-            assert.are.equal("cancelled", future.status)
-            assert.are.equal(1, #source.cancelled)
-            assert.are.equal(future, source.cancelled[1])
+            assert.are.equal("canceled", future.status)
+            assert.are.equal(1, #source.canceled)
+            assert.are.equal(future, source.canceled[1])
         end)
 
         it("is a no-op on a settled future", function()
@@ -522,7 +522,7 @@ describe("tecs.future.Future", function()
             future:cancel()
 
             assert.are.equal("ready", future.status)
-            assert.are.equal(0, #source.cancelled)
+            assert.are.equal(0, #source.canceled)
         end)
 
         -- The pending half of what `assets.Handle._shares` counted. Two loads
@@ -534,15 +534,15 @@ describe("tecs.future.Future", function()
             future._watchers = future._watchers + 1
 
             future:cancel()
-            assert.are.equal("pending", future.status, "a shared load was cancelled by one sharer")
-            assert.are.equal(0, #source.cancelled)
+            assert.are.equal("pending", future.status, "a shared load was canceled by one sharer")
+            assert.are.equal(0, #source.canceled)
 
             future:cancel()
-            assert.are.equal("cancelled", future.status)
-            assert.are.equal(1, #source.cancelled)
+            assert.are.equal("canceled", future.status)
+            assert.are.equal(1, #source.canceled)
         end)
 
-        it("leaves the work running when a derived link is cancelled", function()
+        it("leaves the work running when a derived link is canceled", function()
             local source = newSource()
             local future = Future.pending(source)
             local mapped = future:map(function(value)
@@ -550,13 +550,13 @@ describe("tecs.future.Future", function()
             end)
 
             mapped:cancel()
-            assert.are.equal("cancelled", mapped.status)
-            assert.are.equal("pending", future.status, "the root was cancelled by its dependent")
-            assert.are.equal(0, #source.cancelled)
+            assert.are.equal("canceled", mapped.status)
+            assert.are.equal("pending", future.status, "the root was canceled by its dependent")
+            assert.are.equal(0, #source.canceled)
 
             -- And the dropped link is not called when the root settles anyway.
             future:complete("still wanted")
-            assert.are.equal("cancelled", mapped.status)
+            assert.are.equal("canceled", mapped.status)
         end)
 
         it("reaches the root when the last link goes", function()
@@ -569,8 +569,8 @@ describe("tecs.future.Future", function()
             future:cancel()
             assert.are.equal("pending", future.status, "the map link still wanted it")
             mapped:cancel()
-            assert.are.equal("cancelled", future.status)
-            assert.are.equal(1, #source.cancelled)
+            assert.are.equal("canceled", future.status)
+            assert.are.equal(1, #source.canceled)
         end)
 
         -- The hook belongs to the source and answers for work the source
@@ -586,29 +586,29 @@ describe("tecs.future.Future", function()
             end)
 
             mapped:cancel()
-            assert.are.equal(0, #source.cancelled, "a derived link reached the source's work")
+            assert.are.equal(0, #source.canceled, "a derived link reached the source's work")
 
             future:cancel()
-            assert.are.equal(1, #source.cancelled)
-            assert.are.equal(future, source.cancelled[1])
+            assert.are.equal(1, #source.canceled)
+            assert.are.equal(future, source.canceled[1])
         end)
 
         it("leaves the work running when the source offers no hook", function()
             local source = newSource({ cancels = false })
             local future = Future.pending(source)
             future:cancel()
-            assert.are.equal("cancelled", future.status)
+            assert.are.equal("canceled", future.status)
         end)
 
-        it("propagates as cancelled rather than failed", function()
+        it("propagates as canceled rather than failed", function()
             local future = Future.pending(newSource())
             future:cancel()
-            assert.are.equal("cancelled", future.status)
+            assert.are.equal("canceled", future.status)
 
             local mapped = future:map(function(value)
                 return value
             end)
-            assert.are.equal("cancelled", mapped.status)
+            assert.are.equal("canceled", mapped.status)
             assert.are_not.equal("failed", mapped.status)
         end)
 
@@ -686,13 +686,13 @@ describe("tecs.future.Future", function()
             assert.is_true(second.advances > 0, "the other source never got a slice")
         end)
 
-        it("decrements every input when the join is cancelled", function()
+        it("decrements every input when the join is canceled", function()
             local source = newSource()
             local first, second = Future.pending(source), Future.pending(source)
             local joined = Future.all({ first, second })
 
             joined:cancel()
-            assert.are.equal("cancelled", joined.status)
+            assert.are.equal("canceled", joined.status)
 
             -- Each input is one holder lighter, and still held by whoever
             -- started it. That holder giving up is what finishes them, and it
@@ -700,9 +700,9 @@ describe("tecs.future.Future", function()
             assert.are.equal("pending", first.status)
             first:cancel()
             second:cancel()
-            assert.are.equal("cancelled", first.status)
-            assert.are.equal("cancelled", second.status)
-            assert.are.equal(2, #source.cancelled)
+            assert.are.equal("canceled", first.status)
+            assert.are.equal("canceled", second.status)
+            assert.are.equal(2, #source.canceled)
         end)
 
         it("leaves an input the join never took", function()

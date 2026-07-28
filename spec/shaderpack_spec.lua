@@ -315,9 +315,9 @@ describe("rendering from a pack", function()
         })
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
         local pixels = screen:readback()
-        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
         renderer:destroy()
-        return centre
+        return center
     end
 
     it("renders the same pixels as a build that compiled the shaders", function()

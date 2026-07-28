@@ -158,7 +158,7 @@ describe("the public surface", function()
         -- Everything below is generated from this, so a parse that found
         -- nothing would pass every test by having none to run.
         assert.is_not_nil(top, INIT .. " declares no `local record tecs`")
-        -- A floor rather than a count: the surface is being reorganised into
+        -- A floor rather than a count: the surface is being reorganized into
         -- fewer, larger modules, so what this guards against is a parse that
         -- found a handful of names and then passed every test below by having
         -- almost none to run.
@@ -328,10 +328,10 @@ describe("the public surface", function()
 
         it("takes a write on the module that reads it back", function()
             local filesystem = require("tecs.platform.filesystem")
-            local previous = filesystem.organisation
-            tecs.filesystem.organisation = "Ex Nihilo"
-            assert.are.equal("Ex Nihilo", filesystem.organisation)
-            tecs.filesystem.organisation = previous
+            local previous = filesystem.organization
+            tecs.filesystem.organization = "Ex Nihilo"
+            assert.are.equal("Ex Nihilo", filesystem.organization)
+            tecs.filesystem.organization = previous
         end)
 
         it("answers nil for a name neither it nor the names below it carry", function()

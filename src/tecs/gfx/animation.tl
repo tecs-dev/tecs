@@ -557,7 +557,7 @@ local function advance(world: World, query: Query, dt: number)
         -- from frame to frame, so it is rewritten exactly when the frame is.
         local pivots <const> = archetype:get(Pivot)
         local moved = false
-        -- Sheets are few and neighbouring rows tend to share one.
+        -- Sheets are few and neighboring rows tend to share one.
         local cachedId = 0
         local cached: Sheet = nil
         -- The layer the cached sheet's frames live on, resolved with the sheet
@@ -764,7 +764,7 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
             -- most of them.
             local pivots <const> = archetype:get(Pivot)
             local moved = false
-            -- Sheets are few and neighbouring rows tend to share one, and a
+            -- Sheets are few and neighboring rows tend to share one, and a
             -- crowd playing one cycle shares the tag and the slice as well.
             local cachedId = 0
             local cachedTag = -1

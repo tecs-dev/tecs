@@ -14,7 +14,7 @@ MaterialOutput material(MaterialInput frag) {
     // its bounding rectangle as well as painting it.
     //
     // Tested on the texel's own alpha rather than on the product, so the tint
-    // stays a colour: an entity with no Sprite samples the opaque white layer
+    // stays a color: an entity with no Sprite samples the opaque white layer
     // and draws whatever its tint alpha is, exactly as an untextured quad
     // always has.
     //

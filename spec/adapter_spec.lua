@@ -148,8 +148,8 @@ local function fakePlatform(queued)
         basePath = function()
             return "/dev/content/"
         end,
-        prefPath = function(organisation, application)
-            return "/dev/save/" .. organisation .. "/" .. application .. "/"
+        prefPath = function(organization, application)
+            return "/dev/save/" .. organization .. "/" .. application .. "/"
         end,
         -- A licensed backend's bytecode has no public format name, which is
         -- what the private format is for.

@@ -244,7 +244,7 @@ def recoverTypes(rejected: str, alreadyDeclared: set, needed) -> str:
 
 # Stem of the throwaway program the constants are recovered from. Distinctive
 # on purpose: a macro reaching `__FILE__` evaluates to this program's own name,
-# and that value is recognised by looking for this.
+# and that value is recognized by looking for this.
 PROBE_NAME = "tecsconsts"
 
 

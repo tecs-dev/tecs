@@ -10,7 +10,7 @@ drops, the clipboard, audio devices and the application lifecycle, all as one ty
 sees an `SDL_Event`, both because the union is a poor thing to program against and because its pointer is only
 valid inside the callback that produced it.
 
-Every platform delivers the same vocabulary: desktop, mobile, replay and tests. Unrecognised SDL events arrive as
+Every platform delivers the same vocabulary: desktop, mobile, replay and tests. Unrecognized SDL events arrive as
 `unknown` carrying their numeric type rather than being dropped, so upgrading SDL surfaces new input instead of
 silently losing it.
 
@@ -68,7 +68,7 @@ is for code that cannot spell the kind in source, which is the conversion itself
 
 ### kinds
 
-Every kind this build recognises, sorted.
+Every kind this build recognizes, sorted.
 
 ```teal
 function events.kinds(): {string}
@@ -142,7 +142,7 @@ the frames worth catching.
 | ---------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `x`, `y`                     | `number`  | Pointer position, in window coordinates.                                                                                                                                        |
 | `dx`, `dy`                   | `number`  | Movement since the previous event of this kind.                                                                                                                                 |
-| `normalX`, `normalY`         | `number`  | Position as the platform reported it, in 0..1 across the window. Touch is normalised at source, and a normalised position survives a resize where a window coordinate does not. |
+| `normalX`, `normalY`         | `number`  | Position as the platform reported it, in 0..1 across the window. Touch is normalized at source, and a normalized position survives a resize where a window coordinate does not. |
 | `button`                     | `integer` | Mouse, gamepad or pen button.                                                                                                                                                   |
 | `clicks`                     | `integer` | How many times this button was pressed in quick succession, as the platform counts it against its own double-click interval. One for a single click, two for a double.          |
 | `wheelX`, `wheelY`           | `number`  | Wheel movement. Positive `wheelY` is a scroll away from the player and positive `wheelX` is a scroll to the right.                                                              |
@@ -284,12 +284,12 @@ function events.push(kind: string, fields: Event)
 
 **Parameters:**
 
-- `kind`: one of [`events.kinds()`](#kinds). An unrecognised name raises.
+- `kind`: one of [`events.kinds()`](#kinds). An unrecognized name raises.
 - `fields`: a partial `Event`. Only the fields a kind uses are read.
 
 Takes the engine's vocabulary rather than an SDL union, so a test or a tool can inject input without knowing
 SDL's layout. Payloads are filled for the key, mouse, wheel, pen, gamepad, device, pinch, window and display
-kinds; any other recognised kind is pushed carrying its type and nothing else, which is what a kind whose payload
+kinds; any other recognized kind is pushed carrying its type and nothing else, which is what a kind whose payload
 nobody injects needs and is not what a caller expecting a full event would assume.
 
 SDL stamps the timestamp, so a pushed event arrives ordered against real ones rather than ahead of them.
@@ -301,10 +301,10 @@ tecs.events.push("mouseDown", { button = 1, x = 120, y = 64 })
 tecs.events.push("gamepadAxis", { which = 0, axis = 0, value = -1.0 })
 ```
 
-::: tip A flipped wheel round-trips as a normalisation
+::: tip A flipped wheel round-trips as a normalization
 A wheel payload is written the way the platform writes one, so `flipped` sets the direction and the axes beside
 it are left as given. The conversion then negates them, which is what a caller asking for a flipped scroll is
-asking to see: the round trip is the normalisation, not the identity.
+asking to see: the round trip is the normalization, not the identity.
 :::
 
 ## Wiring the stream
@@ -320,7 +320,7 @@ Tells the converter how large the window is.
 function events.setTouchScale(width: number, height: number)
 ```
 
-Touch arrives normalised, so this is what lets touch positions be reported in the same units mouse positions
+Touch arrives normalized, so this is what lets touch positions be reported in the same units mouse positions
 arrive in as well as in the platform's own 0..1. Logical window size, not pixels: scaling touch by the pixel size
 would put the two pointers in different units on every high-density display.
 
@@ -445,7 +445,7 @@ Whether a kind carries player input rather than describing the platform.
 <pre><code v-pre>function <a href="#tecs.events.kinds">tecs.events.kinds</a>(): {string}
 </code></pre>
 
-Every kind this build recognises, for tooling that enumerates them.
+Every kind this build recognizes, for tooling that enumerates them.
 
 #### Returns
 
@@ -476,14 +476,14 @@ can inject input without knowing SDL's layout. Only the fields a kind uses
 are read.
 
 Payloads are filled for the key, mouse, wheel, pen, gamepad, device, pinch,
-window and display kinds. Any other recognised kind is pushed carrying its
+window and display kinds. Any other recognized kind is pushed carrying its
 type and nothing else, which is what a kind whose payload nobody injects
 needs and is not what a caller expecting a full event would assume.
 
 A wheel payload is written the way the platform writes one, so `flipped`
 sets the direction and the axes beside it are left as given. The conversion
 then negates them, which is what a caller asking for a flipped scroll is
-asking to see: the round trip is the normalisation, not the identity.
+asking to see: the round trip is the normalization, not the identity.
 
 SDL stamps the timestamp, so a pushed event arrives ordered against real
 ones rather than ahead of them.
@@ -492,7 +492,7 @@ ones rather than ahead of them.
 
 | Type                                                      | Name                      | Description                                           |
 | --------------------------------------------------------- | ------------------------- | ----------------------------------------------------- |
-| <code v-pre>string</code>                                 | <code v-pre>kind</code>   | One of `events.kinds()`. An unrecognised name raises. |
+| <code v-pre>string</code>                                 | <code v-pre>kind</code>   | One of `events.kinds()`. An unrecognized name raises. |
 | <code v-pre><a href="#tecs.events.Event">Event</a></code> | <code v-pre>fields</code> |                                                       |
 
 <a id="tecs.events.setTouchScale"></a>

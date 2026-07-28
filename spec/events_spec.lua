@@ -49,7 +49,7 @@ describe("platform.events", function()
         events.source = nil
     end)
 
-    it("names every kind it recognises", function()
+    it("names every kind it recognizes", function()
         local kinds = {}
         for _, kind in ipairs(events.kinds()) do
             kinds[kind] = true
@@ -209,7 +209,7 @@ describe("platform.events", function()
         assert.are.equal(6, event.which, "and which keyboard produced it")
     end)
 
-    it("normalises a wheel the platform reports flipped", function()
+    it("normalizes a wheel the platform reports flipped", function()
         -- Natural scrolling is reported, not applied: the platform negates
         -- both axes and sets a flag saying it did. A conversion that carried
         -- the pair through unread would scroll every menu backwards on every
@@ -297,7 +297,7 @@ describe("platform.events", function()
     end)
 
     it("converts text and composition into Lua strings", function()
-        -- A recognised kind has to mean a usable payload. The pointer is only
+        -- A recognized kind has to mean a usable payload. The pointer is only
         -- valid where it was read, so what arrives above is a copy.
         local typed = "hi"
         local composing = "ni"
@@ -567,9 +567,9 @@ describe("platform.events", function()
             "the identity must survive exactly, not as a rounded double"
         )
         assert.is_truthy(event.touchDevice:find("42"), "and so must the device it belongs to")
-        -- Touch arrives normalised and is reported in window units as well,
+        -- Touch arrives normalized and is reported in window units as well,
         -- since a window coordinate does not survive a resize and the
-        -- normalised one does.
+        -- normalized one does.
         assert.are.equal(0.5, event.normalX)
         assert.are.equal(0.25, event.normalY)
         assert.are.equal(400.0, event.x)
@@ -594,7 +594,7 @@ describe("platform.events", function()
         events.setTouchScale(800, 600)
     end)
 
-    it("surfaces an unrecognised SDL event rather than dropping it", function()
+    it("surfaces an unrecognized SDL event rather than dropping it", function()
         -- Upgrading SDL must not silently discard new input.
         local queue, count = queueOf(function(q)
             q[0].type = 0x7FFE
@@ -722,7 +722,7 @@ describe("platform.events", function()
 
     it("pushes a wheel the way a platform sends one, flipped or not", function()
         -- Natural scrolling is undone by the conversion, so a push that
-        -- carried the normalised pair would never reach that code. These
+        -- carried the normalized pair would never reach that code. These
         -- are the raw axes, and the flipped one is expected back negated.
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         C.SDL_PumpEvents()

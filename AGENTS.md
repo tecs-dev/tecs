@@ -229,7 +229,7 @@ next person believes it. This is not a nicety, and reviews should treat a missin
 they treat a missing spec.
 
 What "user-facing" means here: anything a game can call, configure, spawn or observe. A new module,
-a new function, a renamed or removed field, a changed default, a changed error, a behaviour a game
+a new function, a renamed or removed field, a changed default, a changed error, a behavior a game
 could depend on. Internals under `internal/` are not, unless the change is visible through something
 that is.
 
@@ -245,7 +245,7 @@ Two places, and they hold different things:
 The failure this exists to prevent has already happened here. Pages ported from an earlier tree
 claimed writing `Transform` needed no dirty tracking and that `archetype:get` on a tag returns nil.
 Both read as authoritative and both were false, and neither was caught by a test, because nothing
-tests prose. The only defence is the person making the change, at the time they make it.
+tests prose. The only defense is the person making the change, at the time they make it.
 
 - Prefer linking to entry points that exist in this repo, not guessed future paths.
 - A page that cannot be verified against the code should not be written. A gap is honest; a

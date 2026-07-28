@@ -16,7 +16,7 @@
 --- than per graph because a pass that must not have one is as ordinary as a
 --- pass that must, and a pipeline bound in either has to agree with it.
 ---
---- A colour clear comes from the target, which is right while one pass writes
+--- A color clear comes from the target, which is right while one pass writes
 --- a target and wrong as soon as two do: the second would clear the first
 --- one's result away. A pass may therefore override it, with `PassGraph.LOAD`
 --- as the way to say "load, whatever the target asks for". That is what any
@@ -34,14 +34,14 @@ local RenderPass <const> = require("tecs.gpu.RenderPass")
 local GraphicsPipeline <const> = require("tecs.gpu.GraphicsPipeline")
 local Frame <const> = require("tecs.gpu.Frame")
 
---- Default colour format for intermediate targets. Eight bits per channel is
+--- Default color format for intermediate targets. Eight bits per channel is
 --- enough for albedo and composited output; targets holding normals or
 --- lighting values ask for a wider format explicitly.
 local DEFAULT_FORMAT <const> = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 
 --- The clear a pass asks for when what it wants is not to clear at all.
 ---
---- A sentinel rather than a colour, matched by identity, because the field it
+--- A sentinel rather than a color, matched by identity, because the field it
 --- goes in already uses nil for "the target decides" and a pass overriding a
 --- target that clears needs a third answer. Its contents are never read.
 local LOAD <const>: RenderPass.ClearColor = {r = 0, g = 0, b = 0, a = 0}
@@ -59,7 +59,7 @@ local record TargetSpec
     --- Size relative to the frame. 0.5 halves each axis, as a bloom or
     --- occlusion target would.
     scale: number
-    --- Clear colour applied when a pass writes this target. Omitted targets
+    --- Clear color applied when a pass writes this target. Omitted targets
     --- load their previous contents.
     clear: RenderPass.ClearColor
 end
@@ -92,7 +92,7 @@ end
 --- the pass inside it, describe the next frame's pass by the time that frame
 --- runs.
 local record Prepared
-    --- Colour attachments, one record per output, or one for the swapchain.
+    --- Color attachments, one record per output, or one for the swapchain.
     attachments: {RenderPass.Attachment}
     --- Fragment sampler bindings, or nil for a pass that reads nothing.
     textures: {loader.CValue}
@@ -139,7 +139,7 @@ local record PassSpec
     outputs: {string}
     --- How this pass uses depth. Omit for a pass with no depth attachment.
     depth: DepthState
-    --- Colour clear for every output this pass writes, winning over what the
+    --- Color clear for every output this pass writes, winning over what the
     --- targets themselves declare. `PassGraph.LOAD` loads instead of clearing,
     --- which is what a pass writing a target a previous pass already filled
     --- asks for. Omit to take each target's own clear.
@@ -326,7 +326,7 @@ function PassGraph:pass(spec: PassSpec): PassGraph
         self._needsDepth = true
     end
 
-    -- One colour attachment per output, or the single swapchain one a pass
+    -- One color attachment per output, or the single swapchain one a pass
     -- with no outputs renders into. Built here so `execute` only ever writes
     -- fields; a pass is run far too often to build its arguments per frame.
     local outputs <const> = spec.outputs or {}

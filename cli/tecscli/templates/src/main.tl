@@ -26,7 +26,7 @@ return tecs.application.create({
         -- particular renderer. This is what teaches the world to draw strings.
         world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
 
-        -- Measuring first is how the greeting ends up centred. It reads the
+        -- Measuring first is how the greeting ends up centerd. It reads the
         -- font and touches no entity.
         local greeting <const> = tecs.gfx.Text.new({
             text = "Hello Tecs",
@@ -38,7 +38,7 @@ return tecs.application.create({
         local restY <const> = (height - textHeight) * 0.5
 
         -- An entity is an id and the components on it, and that is the whole
-        -- model: where it is, what colour it is, what it says. There is no
+        -- model: where it is, what color it is, what it says. There is no
         -- sprite object to make and no draw call to issue.
         local label <const> = world:spawn(
             tecs.Transform((width - textWidth) * 0.5, restY), tecs.gfx.Tint(0.93, 0.96, 1.0, 1.0), greeting

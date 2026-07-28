@@ -103,7 +103,7 @@ describe("particle effect identity across a snapshot", function()
     end)
 
     -- The tint is a game-set value that nothing else records, so an emitter
-    -- that came back the right effect but the wrong colour would look like a
+    -- that came back the right effect but the wrong color would look like a
     -- rendering fault rather than a save one.
     it("carries the tint a game set on it", function()
         local effect = register("specTinted", 8)

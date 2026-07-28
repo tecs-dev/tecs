@@ -187,7 +187,7 @@ local record sequence
     ---     through `t4` line up with them.
     --- @param t1 Destination for the target's first field, in that field's own
     ---     units: pixels for a translate, radians for a rotation, 0 to 1 for a
-    ---     colour channel. A shortest-path rotation target still takes an
+    ---     color channel. A shortest-path rotation target still takes an
     ---     absolute angle and picks the short way round to it.
     --- @param t2 Destination for the second field, for a target that has one.
     --- @param t3 Destination for the third field, for a four-field target.
@@ -555,7 +555,7 @@ local record sequence
 
     --- Repeat a block.
     ---
-    --- @param count Iterations, or nil to repeat until cancelled. A positive
+    --- @param count Iterations, or nil to repeat until canceled. A positive
     ---     whole number; zero and a fraction are rejected here.
     --- @param nodes The block, run in order and started again from its first
     ---     node. Must be non-empty. A block with no wait in it spends the
@@ -572,7 +572,7 @@ local record sequence
     --- that playback next waits, joins, or ends, within the same tick.
     ---
     --- A branch never outlives the playback that forked it: finishing or
-    --- cancelling that playback cancels the branches it has not joined. A
+    --- canceling that playback cancels the branches it has not joined. A
     --- branch that faults takes its parent with it, faulted `branchFaulted`,
     --- rather than leaving a `join` one branch short forever.
     ---
@@ -608,7 +608,7 @@ local record sequence
     ---     here, for the same reason `define` rejects one as a constant.
     --- @param params The started playback's `params`, so `mode`, `count`,
     ---     `speed` and `delay` shape it as they do for `play`. A `channel` in
-    ---     it names the slot the playback takes on that entity, cancelling
+    ---     it names the slot the playback takes on that entity, canceling
     ---     whatever held the slot and reporting `replaced` to anything waiting
     ---     on it.
     --- @return A node for `define`, and not to be put in a second program.
@@ -682,7 +682,7 @@ local record sequence
 
     --- Wait for the tween the most recent `playTween` started.
     ---
-    --- Resumes when that specific playback completes, is cancelled, is
+    --- Resumes when that specific playback completes, is canceled, is
     --- replaced on its channel, or loses its entity, so it never waits
     --- forever. `status` reports which of those happened, as `tweenOutcome`.
     ---
@@ -793,7 +793,7 @@ local record sequence
 
     --- Playbacks currently blocked on a signal name.
     ---
-    --- @return 0 for a name nothing waits on, including one never signalled.
+    --- @return 0 for a name nothing waits on, including one never signaled.
     ---     Counts what is parked right now, so a signal already raised this
     ---     step is still counted until the next step delivers it.
     waitingOn: function(world: World, name: string): integer
@@ -821,15 +821,15 @@ local record sequence
     --- Stop a playback and release its cursor. Safe on a finished handle.
     ---
     --- It takes the branches it forked with it, and a playback parked in a
-    --- `waitTween` on the one cancelled is told `cancelled` and resumes. What
+    --- `waitTween` on the one canceled is told `canceled` and resumes. What
     --- a `playTween` started is a playback in its own right and is not
-    --- cancelled with the one that started it, unlike a pause, which cascades
+    --- canceled with the one that started it, unlike a pause, which cascades
     --- to it: stop it through its owner with `cancelOwnedBy`.
     ---
     --- @param handle Read against this world's cursor arena, so one issued by
     ---     another world is meaningless here rather than reliably ignored.
     --- @return false when the handle names nothing running, whether it already
-    ---     finished or was already cancelled.
+    ---     finished or was already canceled.
     cancel: function(world: World, handle: Handle): boolean
 
     --- Suspend a playback, its branches, and anything it started.
@@ -885,8 +885,8 @@ local record sequence
     ---     one and only `cancel` on its handle stops it.
     --- @param reason What a playback parked in a `waitTween` on one of these
     ---     is told, and what its `status` reports afterwards as
-    ---     `tweenOutcome`. Omitted, a waiter is told `cancelled`.
-    --- @return How many were running and are now cancelled; 0 when the entity
+    ---     `tweenOutcome`. Omitted, a waiter is told `canceled`.
+    --- @return How many were running and are now canceled; 0 when the entity
     ---     owns none. A branch carries the owner of the playback that forked
     ---     it, so it is reached by the same call, and each cursor is counted
     ---     once however it was reached.
@@ -1334,7 +1334,7 @@ function sequence.cancel(world: World, handle: sequence.Handle): boolean
     if not cursor or not cursor.alive then
         return false
     end
-    seqcursors.retire(state, cursor, "cancelled")
+    seqcursors.retire(state, cursor, "canceled")
     return true
 end
 
@@ -1403,15 +1403,15 @@ function sequence.cancelOwnedBy(world: World, owner: integer, reason?: sequence.
         slots[#slots + 1] = slot
     end
     table.sort(slots)
-    local cancelled = 0
+    local canceled = 0
     for i = 1, #slots do
         local cursor = state.cursors[slots[i]]
         if cursor and cursor.alive then
-            seqcursors.retire(state, cursor, "cancelled", reason)
-            cancelled = cancelled + 1
+            seqcursors.retire(state, cursor, "canceled", reason)
+            canceled = canceled + 1
         end
     end
-    return cancelled
+    return canceled
 end
 
 function sequence.activeCount(world: World): integer

@@ -117,7 +117,7 @@ case-insensitively, so `"space"` and `"left shift"` work too. A name nothing mat
 never firing.
 
 `keyName` gives the name of the position, which is not the character the player's layout produces there: the key
-`scancode("Q")` names is labelled Q whatever a French keyboard prints on it. That is what to show a player when
+`scancode("Q")` names is labeled Q whatever a French keyboard prints on it. That is what to show a player when
 displaying a binding.
 
 Modifier names are `"shift"`, `"ctrl"`, `"alt"`, `"gui"` and `"capsLock"`. Either side counts for the unsided
@@ -185,7 +185,7 @@ between calls, so anything retaining one has to copy it.
 
 Each `Touch` carries `device` and `finger` as opaque identities, `x` and `y` in window coordinates, `normalX` and
 `normalY` as the platform's own 0..1 across the window, and `pressure` on a surface that measures it. The
-normalised pair is the one that survives a resize; the window pair is converted using the size `events` was last
+normalized pair is the one that survives a resize; the window pair is converted using the size `events` was last
 told about, so it is stale by one frame if the window resized without that being updated.
 
 The pen is a set of fields rather than a list, because one pen's state is kept and a second pen overwrites the
@@ -284,7 +284,7 @@ at its last value.
 
 `kind` is one of `"standard"`, `"xbox360"`, `"xboxOne"`, `"ps3"`, `"ps4"`, `"ps5"`, `"switchPro"`,
 `"joyconLeft"`, `"joyconRight"`, `"joyconPair"` and `"gamecube"`, or `"unknown"` when the platform does not
-recognise the device.
+recognize the device.
 
 ### Button and axis names
 
@@ -572,7 +572,7 @@ function Gamepad:rumble(low: number, high: number, seconds: number): boolean
 
 **Returns:** whether the platform accepted it.
 
-A second call replaces the first rather than adding to it, so a long effect is cancelled by a short one.
+A second call replaces the first rather than adding to it, so a long effect is canceled by a short one.
 
 #### rumbleTriggers
 
@@ -969,7 +969,7 @@ taken out of it stays valid and answers as disconnected.
 
 Folds one typed event into the state.
 
-Unrecognised kinds are ignored, so this can be handed the whole stream.
+Unrecognized kinds are ignored, so this can be handed the whole stream.
 
 Nothing is retained: every field the state keeps is copied out here, so the
 caller is free to reuse the record, which the converter does.
@@ -1015,7 +1015,7 @@ movement binding stays where it is on every layout.
 The name of a physical key, for showing a binding back to the player.
 
 The platform's own name for the position, which is not the character the
-player's layout produces there: the key `scancode("Q")` names is labelled Q
+player's layout produces there: the key `scancode("Q")` names is labeled Q
 whatever a French keyboard prints on it.
 
 #### Parameters
@@ -2188,7 +2188,7 @@ Returns false rather than raising when the device is gone or has no motor,
 because rumble is a garnish and a game should not have to guard it.
 
 A second call replaces the first rather than adding to it, so a long effect
-is cancelled by a short one. Seconds are rounded to milliseconds, which is
+is canceled by a short one. Seconds are rounded to milliseconds, which is
 the resolution the platform takes.
 
 #### Parameters

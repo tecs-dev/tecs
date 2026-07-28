@@ -5,7 +5,7 @@
 --- practice at most one entry at all. What the table exists for is the case the
 --- call site cannot cover: a pass body that throws skips the `finish` written
 --- after it, and a command buffer with a pass still open can be neither
---- submitted nor cancelled. Recovery has the command buffer and nothing else,
+--- submitted nor canceled. Recovery has the command buffer and nothing else,
 --- so this is how it reaches the pass.
 ---
 --- Registration is by command buffer rather than by frame because a pass is

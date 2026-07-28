@@ -5,7 +5,7 @@ outline: deep
 
 # State stack
 
-Every world owns a stack of named states, which is how play, pause, menus and game-over screens are modelled.
+Every world owns a stack of named states, which is how play, pause, menus and game-over screens are modeled.
 Push a state to enter it, pop to leave. Each state carries a tag component that is added automatically to
 entities spawned while the state is on top, and a lifecycle policy decides what happens to those entities when
 the state loses focus or is popped.

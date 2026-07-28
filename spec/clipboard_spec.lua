@@ -238,7 +238,7 @@ describe("platform.clipboard", function()
 
     it("passes bytes through unchanged", function()
         -- UTF-8 that is not ASCII, an embedded newline, CRLF from a Windows
-        -- producer, and whitespace at both ends. None of it is normalised and
+        -- producer, and whitespace at both ends. None of it is normalized and
         -- none of it is trimmed: what went in is what comes back.
         local awkward = "  caf\195\169 \240\159\142\174 line\r\nline\ntail\t"
         system.setClipboardText(awkward)

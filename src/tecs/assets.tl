@@ -62,7 +62,7 @@ local filesystem <const> = require("tecs.platform.filesystem")
 local C <const> = sdl.C
 local MIX <const> = sdl3mixer.C
 
---- Runs on the worker. Decodes to a normalised layout and returns an address.
+--- Runs on the worker. Decodes to a normalized layout and returns an address.
 local DECODER <const> = [==[
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
@@ -86,7 +86,7 @@ local function decodeImage(task)
         return { id = task.id, error = "cannot decode " .. task.path }
     end
 
-    -- Normalising here means the upload path handles exactly one layout,
+    -- Normalizing here means the upload path handles exactly one layout,
     -- and the conversion cost lands off the main thread with the decode.
     local converted = C.SDL_ConvertSurface(surface, RGBA32)
     C.SDL_DestroySurface(surface)
@@ -308,7 +308,7 @@ local record assets
     ---
     --- @return Whether the worker exists, which is a fact about the process rather
     ---     than about any world. False means a load raises rather than queueing,
-    ---     so this is the guard rather than an optimisation.
+    ---     so this is the guard rather than an optimization.
     installed: function(): boolean
 end
 
@@ -399,7 +399,7 @@ end
 --- `mode` is "resident", "stream", or "auto", and auto keeps anything shorter
 --- than `streamMs` resident.
 ---
---- The library is initialised here rather than on the worker: `MIX_Init` is
+--- The library is initialized here rather than on the worker: `MIX_Init` is
 --- documented as not thread safe, and doing it before the task is sent puts it
 --- in order ahead of every decode without a lock.
 ---
@@ -409,7 +409,7 @@ end
 --- @param streamMs The boundary "auto" decides on, in milliseconds. Read only under
 ---     "auto", and a file whose length the container cannot state streams whatever it says.
 --- @return A handle at "loading", or one already at "failed" when the mixer could not be
----     initialised, which is the one failure reported without waiting for the worker.
+---     initialized, which is the one failure reported without waiting for the worker.
 function assets.loadSound(path: string, mode: string, streamMs: integer): Handle
     filesystem.note(path, "sound")
     if not sdl3mixer.init() then

@@ -111,11 +111,11 @@ def main():
         sys.exit(f"no exported functions found for {args.name}")
 
     members = []
-    initialisers = []
+    initializers = []
     for returnType, name, params in functions:
         pointer = f"{returnType} (*{name})({params});"
         members.append(f"    {pointer}")
-        initialisers.append(f"    .{name} = {name},")
+        initializers.append(f"    .{name} = {name},")
 
     struct = args.struct
     body = "\n".join(members)
@@ -135,7 +135,7 @@ typedef struct {struct} {{
 }} {struct};
 
 static const {struct} api = {{
-{chr(10).join(initialisers)}
+{chr(10).join(initializers)}
 }};
 
 /* Returned untyped so the registry stays one shape regardless of which

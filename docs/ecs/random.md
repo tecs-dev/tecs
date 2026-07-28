@@ -234,7 +234,7 @@ function Noise:noise3(x: number, y: number, z: number): number
 
 ### Noise:fbm2
 
-Fractional Brownian motion: `octaves` layers of `noise2`, each twice as fine and half as loud, normalised back
+Fractional Brownian motion: `octaves` layers of `noise2`, each twice as fine and half as loud, normalized back
 into [-1, 1].
 
 ```teal

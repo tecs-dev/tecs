@@ -5,7 +5,7 @@
 -- dropped, and a sort that ordered the list backwards all produce a plausible
 -- frame. So every claim here is a pixel read back out of the scene target, and
 -- every one of them is paired with the same scene drawn opaque, which is the
--- only way to tell a blend from a colour that happened to look like one.
+-- only way to tell a blend from a color that happened to look like one.
 
 -- Our build first, so it wins over the ECS repo's own engine tree.
 -- The build directory is the build system's to choose, so it is passed in.
@@ -137,10 +137,10 @@ describe("forward blending", function()
         finish(packet, 2, 1)
 
         local scene, pixels = consume(backend, packet)
-        local centre = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
-        near(centre.r, 128, "half the red behind must survive")
-        near(centre.g, 128, "half the green in front must land")
-        near(centre.b, 0, "nothing wrote blue")
+        local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
+        near(center.r, 128, "half the red behind must survive")
+        near(center.g, 128, "half the green in front must land")
+        near(center.b, 0, "nothing wrote blue")
 
         backend:destroy()
     end)
@@ -157,9 +157,9 @@ describe("forward blending", function()
         finish(packet, 2, 0)
 
         local scene, pixels = consume(backend, packet)
-        local centre = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.g, "an opaque quad in front must cover what is behind it")
-        assert.are.equal(0, centre.r, "and none of it may survive")
+        local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
+        assert.are.equal(255, center.g, "an opaque quad in front must cover what is behind it")
+        assert.are.equal(0, center.r, "and none of it may survive")
 
         backend:destroy()
     end)
@@ -168,7 +168,7 @@ describe("forward blending", function()
         -- Two blended quads over an opaque one, written nearest first so that
         -- instance order is exactly the wrong order. Straight alpha does not
         -- commute, so the two orders give different pixels: far then near
-        -- leaves more of the near quad's colour, and the sort is the only thing
+        -- leaves more of the near quad's color, and the sort is the only thing
         -- that can produce it from this layout.
         local backend = newBackend()
         local packet = FramePacket.create()
@@ -179,15 +179,15 @@ describe("forward blending", function()
         finish(packet, 3, 2)
 
         local scene, pixels = consume(backend, packet)
-        local centre = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
 
         -- Red over white gives (1, 0.5, 0.5); blue over that gives
         -- (0.5, 0.25, 0.75). The other order gives (0.75, 0.25, 0.5), which is
         -- the same three numbers with red and blue exchanged.
-        near(centre.r, 128, "the farther quad's red must be half covered")
-        near(centre.g, 64, "green comes only from the white behind both")
-        near(centre.b, 191, "the nearer quad's blue must be the last thing applied")
-        assert.is_true(centre.b > centre.r, "back to front, not front to back")
+        near(center.r, 128, "the farther quad's red must be half covered")
+        near(center.g, 64, "green comes only from the white behind both")
+        near(center.b, 191, "the nearer quad's blue must be the last thing applied")
+        assert.is_true(center.b > center.r, "back to front, not front to back")
 
         backend:destroy()
     end)
@@ -209,9 +209,9 @@ describe("forward blending", function()
         finish(packet, 2, 0)
 
         local scene, pixels = consume(backend, packet)
-        local centre = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.g)
-        assert.are.equal(0, centre.r, "the previous frame's forward list must not be drawn again")
+        local center = scene:getPixel(pixels, SIZE / 2, SIZE / 2)
+        assert.are.equal(255, center.g)
+        assert.are.equal(0, center.r, "the previous frame's forward list must not be drawn again")
 
         backend:destroy()
     end)

@@ -485,7 +485,7 @@ local function run(bytes: string, windowBits: integer, sizeHint?: integer): stri
     end
 end
 
---- Validates and normalises a compression level. Minus one asks zlib for its
+--- Validates and normalizes a compression level. Minus one asks zlib for its
 --- default, and zero through nine run from stored bytes to the smallest output.
 local function compressionLevel(level?: integer): integer
     local given = level

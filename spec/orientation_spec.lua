@@ -4,7 +4,7 @@
 -- test, and it is the axis that goes wrong: world Y runs down the screen, the
 -- camera negates it on the way to clip space, and a second flip anywhere
 -- between the instance's UV rect and the sampler composes with that one
--- instead of cancelling it. The result still draws the image, in the right
+-- instead of canceling it. The result still draws the image, in the right
 -- place, at the right size, mirrored. So the image here is split top and
 -- bottom as well as left and right, and every quadrant is checked.
 
@@ -67,22 +67,22 @@ describe("a sampled image", function()
         return world, renderer
     end
 
-    -- Two texels by two, one colour each, in the shape registerImage consumes.
+    -- Two texels by two, one color each, in the shape registerImage consumes.
     -- Rows arrive top first, which is what every decoder this reads from
     -- produces and what the region's v0 therefore names.
     local function quadrants(name)
         local pixels = loader.newArray("uint8_t[16]")
-        local colours = {
+        local colors = {
             { 255, 0, 0 }, -- top left, red
             { 0, 255, 0 }, -- top right, green
             { 0, 0, 255 }, -- bottom left, blue
             { 255, 255, 0 }, -- bottom right, yellow
         }
         for index = 0, 3 do
-            local colour = colours[index + 1]
-            pixels[index * 4] = colour[1]
-            pixels[index * 4 + 1] = colour[2]
-            pixels[index * 4 + 2] = colour[3]
+            local color = colors[index + 1]
+            pixels[index * 4] = color[1]
+            pixels[index * 4 + 1] = color[2]
+            pixels[index * 4 + 2] = color[3]
             pixels[index * 4 + 3] = 255
         end
         return {
@@ -127,7 +127,7 @@ describe("a sampled image", function()
         local bottomRight = screen:getPixel(pixels, SIZE * 3 / 4, SIZE * 3 / 4)
 
         -- Readback row zero is the top of the image, so the image's first row
-        -- belongs at low row indices. Naming the colour each corner would
+        -- belongs at low row indices. Naming the color each corner would
         -- carry under a flip is what makes a failure readable.
         assert.are.equal(255, topLeft.r, "the image's first row is red on the left, and belongs at the top")
         assert.are.equal(0, topLeft.b, "blue at the top left is the image drawn upside down")

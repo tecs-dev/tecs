@@ -26,7 +26,7 @@ development build. A release polls nothing.
 
 [`Application`](/modules/application) starts the watcher when its config asks for one, and registers the
 reloaders for `"shader"`, `"image"`, `"sound"` and `"font"` before it does, so a game that only wants the stock
-behaviour writes no code here at all. Each of those four ends by asking the application to pick the loop back up
+behavior writes no code here at all. Each of those four ends by asking the application to pick the loop back up
 after a crash, which is most of what the watcher is for: a file that broke the game is a file someone is about to
 fix, and a loop that stays stopped after the fix has landed makes the watcher a notification rather than a tool. A
 handler that raised never gets that far, because the reload refused and nothing changed.

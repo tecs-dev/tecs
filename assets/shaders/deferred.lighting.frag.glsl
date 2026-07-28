@@ -36,7 +36,7 @@ layout(set = 2, binding = 3) uniform sampler2D dropShadowMask;
 
 struct Light {
     vec4 position;   // xy in world units, z height, w radius
-    vec4 color;      // rgb colour, a intensity
+    vec4 color;      // rgb color, a intensity
 };
 
 layout(set = 2, binding = LIGHT_BINDING) readonly buffer Lights {
@@ -52,11 +52,11 @@ layout(set = 2, binding = LIGHT_BINDING + 2) readonly buffer TileLights {
 } tileLights;
 
 layout(set = 3, binding = 0) uniform Scene {
-    vec4 ambient;      // rgb ambient colour, a unused
+    vec4 ambient;      // rgb ambient color, a unused
     // xy target size, zw unused. What bounds the loop below is the tile's own
     // count rather than the scene's, so the scene's is not here.
     vec4 viewport;
-    // xy the camera's centre in world units, zw its rotation divided through
+    // xy the camera's center in world units, zw its rotation divided through
     // by its zoom. A rotation and a scale rather than a matrix inverse: the
     // projection is orthographic, so its inverse is a 2x2 and an offset, and
     // every fragment pays two multiply-adds instead of a 4x4 by a vec4.
@@ -138,7 +138,7 @@ float marchShadow(vec2 world, vec2 lightAt, float lightHeight, float attenuation
 
     int steps = clamp(int(float(scene.maskParams.z) * attenuation + 0.5), 4, int(scene.maskParams.z));
     vec2 stride = (to - from) / float(steps);
-    // Normalised against the height a full-height occluder stands, which is the
+    // Normalized against the height a full-height occluder stands, which is the
     // one number that puts a light's world height and a mask's zero-to-one
     // height in the same space.
     float rise = max(lightHeight / max(scene.maskParams.w, 1e-3), 1e-3);
@@ -164,9 +164,9 @@ void main() {
     vec4 albedo = texture(gAlbedo, vUV);
     vec4 encoded = texture(gNormal, vUV);
 
-    // A material that asked not to be lit passes through at its own colour.
+    // A material that asked not to be lit passes through at its own color.
     // The G-buffer clears this to zero, so anything nothing drew over also
-    // takes this path and stays the clear colour rather than picking up
+    // takes this path and stays the clear color rather than picking up
     // ambient.
     if (encoded.a < 0.5) {
         outColor = albedo;

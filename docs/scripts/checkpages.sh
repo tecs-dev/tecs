@@ -28,7 +28,7 @@
 # WHAT THIS DOES NOT CATCH, and the list is longer than what it does. It sees a
 # module added without a page. It cannot see a function whose signature moved
 # without its section moving, a default that changed without the sentence about
-# it changing, a page that describes behaviour the code never had, or a page
+# it changing, a page that describes behavior the code never had, or a page
 # that is three sentences of throat-clearing under a correct title. Nothing
 # here reads prose, and prose is where the documentation actually is. Treat a
 # pass as "the index is complete", never as "the pages are right".

@@ -19,6 +19,6 @@ call_parentheses = "Input"
 # lines each.
 collapse_simple_statement = "Never"
 
-# Require order is load order. Sorting it is a behaviour change wearing a
+# Require order is load order. Sorting it is a behavior change wearing a
 # formatter's clothes.
 sort_requires = { enabled = false }

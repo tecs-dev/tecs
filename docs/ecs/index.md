@@ -73,7 +73,7 @@ fifth of a second and twenty at a million entities.
 
 ## Components
 
-Components describe traits: a position, a colour, a tint, a sound. They are the building blocks of game state.
+Components describe traits: a position, a color, a tint, a sound. They are the building blocks of game state.
 Reading one back is typed, because you pass the component's type rather than a string:
 
 ```teal

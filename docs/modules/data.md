@@ -327,8 +327,8 @@ Compresses `bytes` as a zlib stream.
 function data.deflate(bytes: string, level?: integer): string
 ```
 
-`level` is `-1` for zlib's default or an integer from 0 through 9. Zero stores without compression; 1 favours
-speed and 9 favours size. The default is `-1`. Empty input is valid and produces a complete empty stream.
+`level` is `-1` for zlib's default or an integer from 0 through 9. Zero stores without compression; 1 favors
+speed and 9 favors size. The default is `-1`. Empty input is valid and produces a complete empty stream.
 
 ## deflateRaw
 

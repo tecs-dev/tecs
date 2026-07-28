@@ -35,7 +35,7 @@ local world = tecs.ecs.newWorld({
 ## World lifecycle
 
 An [`Application`](/modules/application) owns a world and drives it: it calls `world:startup` at the end of
-initialisation, once the entry plugin has run, so everything the plugin spawned is resident before the first
+initialization, once the entry plugin has run, so everything the plugin spawned is resident before the first
 frame; `world:update(dt)` once per host iteration; and `world:shutdown` before anything is destroyed. A game
 does not call these itself. It reaches the world through the entry plugin `tecs.application.create` takes; see
 [Getting started](/getting-started). Call them yourself only when you drive a world with no application, as
@@ -201,7 +201,7 @@ local gfx <const> = tecs.gfx
 -- Spawn an entity with no components:
 local id = world:spawn()
 
--- A renderable entity: a transform, a colour, and the marker that says it
+-- A renderable entity: a transform, a color, and the marker that says it
 -- contributes geometry.
 local playerId = world:spawn(
     tecs.Transform(100, 100),

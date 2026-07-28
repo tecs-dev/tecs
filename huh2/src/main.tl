@@ -19,8 +19,8 @@ local function spawnRing(world: tecs.ecs.World, width: number, height: number)
     local Tint <const> = tecs.gfx.Tint
     local Renderable <const> = tecs.gfx.Renderable
 
-    local centreX <const> = width * 0.5
-    local centreY <const> = height * 0.5
+    local centerX <const> = width * 0.5
+    local centerY <const> = height * 0.5
     local radius <const> = math.min(width, height) * 0.32
 
     world:batchSpawn(
@@ -33,8 +33,8 @@ local function spawnRing(world: tecs.ecs.World, width: number, height: number)
                 local index = row - firstRow
                 local angle = index / COUNT * math.pi * 2
                 local transform = transforms[row]
-                transform.x = centreX + math.cos(angle) * radius
-                transform.y = centreY + math.sin(angle) * radius
+                transform.x = centerX + math.cos(angle) * radius
+                transform.y = centerY + math.sin(angle) * radius
                 transform.rotation = angle
                 transform.scaleX = 14
                 transform.scaleY = 14

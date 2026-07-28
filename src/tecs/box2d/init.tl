@@ -114,9 +114,9 @@ local record Collider is Component
     halfWidth: number
     halfHeight: number
     radius: number
-    --- Capsule only: the distance between its two end centres.
+    --- Capsule only: the distance between its two end centers.
     length: number
-    --- The shape's centre in the body frame.
+    --- The shape's center in the body frame.
     offsetX: number
     offsetY: number
     density: number
@@ -288,7 +288,7 @@ local ColliderOf <const> = ecs.newRelationship({
 --- shape on somebody else's body and has no damping or gravity of its own.
 local record BodyOptions
     --- "static", "kinematic", or "dynamic". Defaults to dynamic, and an
-    --- unrecognised string raises rather than falling back, so a typo is
+    --- unrecognized string raises rather than falling back, so a typo is
     --- caught at the call rather than found later as a body that will not
     --- move.
     type: string
@@ -346,13 +346,13 @@ local record BodyOptions
     --- Reports overlaps as `SensorBegin` and `SensorEnd` without a collision
     --- response. Defaults to false. A sensor emits no contact or hit events.
     isSensor: boolean
-    --- The shape's centre in the body's own frame, in pixels, so it turns with
-    --- the body. Both default to 0, which centres the shape on the body's
+    --- The shape's center in the body's own frame, in pixels, so it turns with
+    --- the body. Both default to 0, which centers the shape on the body's
     --- origin.
     offsetX: number
     offsetY: number
     --- Selects a vertical capsule, and is the distance between its two end
-    --- centres, excluding the caps, so the full height is this plus twice the
+    --- centers, excluding the caps, so the full height is this plus twice the
     --- radius. `radius` stays the cap radius and has to be positive.
     capsuleLength: number
 end
@@ -475,7 +475,7 @@ local record box2d
     ---     handle reads off the front of that array.
     --- @param x Pixel-scaled impulse along x. Dividing it by the body's mass in
     ---     kilograms gives the change in velocity in pixels per second.
-    --- @param y The same along y, positive downward. Applied at the centre of
+    --- @param y The same along y, positive downward. Applied at the center of
     ---     mass, so neither component imparts spin.
     applyImpulseTo: function(row: RigidBody, x: number, y: number)
 end
@@ -592,7 +592,7 @@ end
 ---     are deferred together, so this is one archetype move rather than two.
 --- @param options Read once, here. Later changes go through `world:getMut` on
 ---     `Body` or `Collider`, which the fixed step reapplies to the live body.
----     An unrecognised `type` raises, and so does a `capsuleLength` without a
+---     An unrecognized `type` raises, and so does a `capsuleLength` without a
 ---     positive `radius`; both blame the caller's line rather than this one.
 function box2d.attach(world: ecs.World, entity: integer, options: BodyOptions)
     options = options or {}
@@ -714,7 +714,7 @@ function box2d.hasBody(world: ecs.World, entity: integer): boolean
     return B.b2Body_IsValid(handleOf(row)) as boolean
 end
 
---- Pushes a body once, at its centre of mass.
+--- Pushes a body once, at its center of mass.
 ---
 --- An impulse rather than a force, so the effect does not depend on how long
 --- the step happened to be. Wakes the body: Box2D lets a resting island sleep,
@@ -726,7 +726,7 @@ end
 --- @param x Pixel-scaled impulse along x. Dividing it by the body's mass in
 ---     kilograms gives the change in velocity in pixels per second, so the
 ---     same push moves a light body further than a heavy one.
---- @param y The same along y, positive downward. Applied at the centre of
+--- @param y The same along y, positive downward. Applied at the center of
 ---     mass, so neither component imparts spin; `applyImpulseAt` is the one
 ---     that does.
 function box2d.applyImpulse(world: ecs.World, entity: integer, x: number, y: number)
@@ -760,9 +760,9 @@ end
 --- @param x Pixel-scaled impulse along x, read as `applyImpulse` reads it.
 --- @param y The same along y, positive downward.
 --- @param pointX Where the push lands, in world pixels rather than in the
----     body's frame. The further it is from the centre of mass, the more of
+---     body's frame. The further it is from the center of mass, the more of
 ---     the impulse becomes spin and the less becomes travel.
---- @param pointY The same along y. A point at the centre of mass makes this
+--- @param pointY The same along y. A point at the center of mass makes this
 ---     exactly `applyImpulse`.
 function box2d.applyImpulseAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
@@ -818,7 +818,7 @@ function box2d.setVelocity(world: ecs.World, entity: integer, vx: number, vy: nu
     World.setVelocity(handleOf(row), toMeters(vx), toMeters(vy))
 end
 
---- Applies a continuous force at the body's centre and wakes it.
+--- Applies a continuous force at the body's center and wakes it.
 ---
 --- Cleared by Box2D at the end of every step, so holding a body up against
 --- gravity means calling this every fixed step rather than once.
@@ -827,7 +827,7 @@ end
 --- @param entity Does nothing for one with no live body.
 --- @param x Pixel-scaled force along x. Dividing it by the body's mass in
 ---     kilograms gives the acceleration in pixels per second squared.
---- @param y The same along y, positive downward. Applied at the centre of
+--- @param y The same along y, positive downward. Applied at the center of
 ---     mass, so neither component imparts spin.
 function box2d.applyForce(world: ecs.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
@@ -846,7 +846,7 @@ end
 --- @param x Pixel-scaled force along x, read as `applyForce` reads it.
 --- @param y The same along y, positive downward.
 --- @param pointX Where the force is applied, in world pixels rather than in
----     the body's frame. Off the centre of mass it produces torque as well as
+---     the body's frame. Off the center of mass it produces torque as well as
 ---     acceleration.
 --- @param pointY The same along y.
 function box2d.applyForceAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
@@ -954,7 +954,7 @@ end
 ---     included, so this is not a way to move an entity physics is not
 ---     simulating.
 --- @param x Where to put the body's origin, in world pixels. This is the pose
----     the shapes are placed relative to, not the centre of mass, so an
+---     the shapes are placed relative to, not the center of mass, so an
 ---     offset collider lands offset.
 --- @param y The same along y, positive downward.
 --- @param angle Radians. Nil keeps the entity's current `Transform.rotation`,

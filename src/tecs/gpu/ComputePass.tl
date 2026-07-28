@@ -5,7 +5,7 @@
 --- declaration is what lets SDL insert the barriers between a compute pass
 --- that writes a buffer and the render pass that reads it.
 ---
---- Nothing is synchronised within a pass. Two dispatches in one pass race
+--- Nothing is synchronized within a pass. Two dispatches in one pass race
 --- against each other over anything they both touch, so a dispatch that reads
 --- what an earlier one wrote belongs in a second pass: finish this one and
 --- begin another. That is also the only sequencing available, since no other
@@ -100,7 +100,7 @@ local record ComputePass
     ---     any sampled and read-only storage textures the shader declares.
     --- @param buffers Device buffer handles, not `Buffer` objects. Binding one
     ---     the pass also declared read-write races the dispatch that writes it,
-    ---     since nothing inside a pass is synchronised.
+    ---     since nothing inside a pass is synchronized.
     bindStorageBuffers: function(self, firstSlot: integer, buffers: {loader.CValue})
 
     --- Dispatches `x` by `y` by `z` workgroups.

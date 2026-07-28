@@ -30,7 +30,7 @@
 --- particle-shaped reaches it: a row is routed forward by extraction negating
 --- the first half extent of its cull bound, and the simulate pass writes every
 --- particle's bound with both extents positive. So a particle goes to the
---- G-buffer, which is written with replace, and a colour's alpha channel
+--- G-buffer, which is written with replace, and a color's alpha channel
 --- reaches the swapchain having blended against nothing. A gradient ending at
 --- transparent black writes opaque black over whatever was behind it, which is
 --- worse than not fading at all. Alpha is carried, and it is inert. What works
@@ -233,13 +233,13 @@ end
 --- equal bounds are a constant.
 local type Value = number | Range
 
---- A curve over normalised age, compiled to a lookup table.
+--- A curve over normalized age, compiled to a lookup table.
 local record Curve
     --- Evenly spaced samples over zero to one.
     samples: {number}
 end
 
---- A colour gradient over normalised age, compiled to a lookup table.
+--- A color gradient over normalized age, compiled to a lookup table.
 ---
 --- The alpha channel is carried and is inert until a particle can be routed
 --- into the forward blended lane.
@@ -248,12 +248,12 @@ local record Gradient
     samples: {number}
 end
 
---- A colour, as `#rrggbb`, `#rrggbbaa`, `0xrrggbbaa`, or four numbers in zero
+--- A color, as `#rrggbb`, `#rrggbbaa`, `0xrrggbbaa`, or four numbers in zero
 --- to one.
 local type Color = string | number | {number}
 
 --- One key of a curve or a gradient. Heterogeneous by design: the first entry
---- is a normalised age and the second is whatever the table is of, so this is
+--- is a normalized age and the second is whatever the table is of, so this is
 --- one of the few places a list of `any` is the honest declaration rather than
 --- a missing one.
 local type CurveKey = {any}
@@ -275,7 +275,7 @@ local record SpawnOptions
     --- "uniform" or "normal". A gaussian spread is what makes a column read as
     --- a column rather than as a slab. Defaults to "uniform".
     distribution: string
-    --- Launch direction in radians, and the **full** cone centred on it, so a
+    --- Launch direction in radians, and the **full** cone centerd on it, so a
     --- particle leaves within plus or minus half of `spread`. Half-angle is the
     --- other plausible reading of `spread` and a mismatch is silent, so it is
     --- said here.
@@ -323,16 +323,16 @@ local record InitialOptions
     size: Value
     rotation: Value
     angularVelocity: Value
-    --- Constant acceleration, randomised per axis. Independent axes are what
+    --- Constant acceleration, randomized per axis. Independent axes are what
     --- make a plume drift apart instead of translating as a block.
     accelerationX: Value
     accelerationY: Value
-    --- Colour every particle starts with, multiplied by the gradient and by
+    --- Color every particle starts with, multiplied by the gradient and by
     --- the emitter's tint.
     color: Color
 end
 
---- How a particle evolves over its life, against normalised age.
+--- How a particle evolves over its life, against normalized age.
 local record UpdateOptions
     --- Damping in units of one over seconds, applied as
     --- `velocity = velocity / (1 + drag * dt)`, so it composes with any step.
@@ -343,7 +343,7 @@ local record UpdateOptions
     tangentialAcceleration: Value
     --- Multiplies the particle's own size over its life.
     size: Curve
-    --- Multiplies the particle's own colour over its life. Its alpha channel
+    --- Multiplies the particle's own color over its life. Its alpha channel
     --- is inert until a particle can be routed into the forward blended lane.
     color: Gradient
 end
@@ -359,7 +359,7 @@ local record RenderOptions
     sprite: Sprite
     --- A sheet and a tag to animate, instead of a still region. The cycle is
     --- played exactly once over each particle's own life and clamps at the
-    --- end, so a randomised lifetime randomises the playback speed.
+    --- end, so a randomized lifetime randomizes the playback speed.
     ---
     --- Uses the same frame table an animated entity does, so per-frame
     --- durations, reverse and pingpong all arrive already spent.
@@ -502,12 +502,12 @@ local function boundsOf(value: Value, lo: number, hi: number, field: string, lev
     return low, high
 end
 
---- One hex pair of a colour string, as a channel in zero to one.
+--- One hex pair of a color string, as a channel in zero to one.
 local function channelAt(body: string, at: integer): number
     return (tonumber(body:sub(at, at + 1), 16) as number) / 255.0
 end
 
---- A colour as four channels in zero to one.
+--- A color as four channels in zero to one.
 local function colorOf(value: Color, field: string, level: integer): number, number, number, number
     if value == nil then
         return 1.0, 1.0, 1.0, 1.0
@@ -600,9 +600,9 @@ local function newCurve(keys: {CurveKey}): Curve
     }
 end
 
---- Compiles keyframes into a colour gradient.
+--- Compiles keyframes into a color gradient.
 ---
---- Keys are `{ age, colour }`. The alpha channel is carried and is inert until
+--- Keys are `{ age, color }`. The alpha channel is carried and is inert until
 --- a particle can be routed into the forward blended lane: today a fade to
 --- transparent writes opaque, and the only fade that works is the size curve
 --- going to zero.
@@ -612,7 +612,7 @@ local function newGradient(keys: {CurveKey}): Gradient
             keys,
             4,
             function(key: CurveKey, into: {number})
-                into[1], into[2], into[3], into[4] = colorOf(key[2] as Color, "a gradient colour", 4)
+                into[1], into[2], into[3], into[4] = colorOf(key[2] as Color, "a gradient color", 4)
             end,
             3
         ),
@@ -827,7 +827,7 @@ local function newEffect(options: EffectOptions): Effect
         logger:warn(
             "particle blend '%s' is accepted and ignored: nothing "
                 .. "particle-shaped reaches the forward blended lane, so "
-                .. "particles draw opaque and a colour's alpha reaches the "
+                .. "particles draw opaque and a color's alpha reaches the "
                 .. "target unblended",
             render.blend
         )
@@ -981,7 +981,7 @@ local record ParticleEmitter is ecs.Component
     rateScale: number
     sizeScale: number
     timeScale: number
-    --- Multiplies every particle's colour. Its alpha is inert until a particle
+    --- Multiplies every particle's color. Its alpha is inert until a particle
     --- can be routed into the forward blended lane.
     tint: Color
 
@@ -1163,7 +1163,7 @@ local record Holding
     index: integer
     base: integer
     count: integer
-    --- The tint as it was last read, and what it parsed to. Parsing a colour
+    --- The tint as it was last read, and what it parsed to. Parsing a color
     --- string per emitter per frame would be the one allocation in a loop that
     --- otherwise has none, and a tint changes rarely.
     tint: Color
@@ -1929,7 +1929,7 @@ local record particles
     type Range = Range
     --- Accepted wherever a property may vary per particle.
     type Value = Value
-    --- Accepted wherever a colour is asked for.
+    --- Accepted wherever a color is asked for.
     type Color = Color
     --- What `poolOf` answers with.
     type Pool = Pool
@@ -1991,7 +1991,7 @@ local record particles
     --- Every handle already handed out goes stale with it.
     reset: function()
 
-    --- Compiles keyframes into a curve over normalised age.
+    --- Compiles keyframes into a curve over normalized age.
     ---
     --- @param keys `{age, value}` pairs with age in zero to one. They may sit
     ---     anywhere in that span and need not be sorted; what comes out is the
@@ -2002,13 +2002,13 @@ local record particles
     ---     outside zero to one read as the nearest end.
     curve: function(keys: {CurveKey}): Curve
 
-    --- Compiles keyframes into a colour gradient over normalised age.
+    --- Compiles keyframes into a color gradient over normalized age.
     ---
-    --- @param keys `{age, colour}` pairs, on the same terms as `curve` takes
+    --- @param keys `{age, color}` pairs, on the same terms as `curve` takes
     ---     its values. The alpha channel is carried and is inert.
     --- @return A gradient resampled like a curve, interpolating each channel
-    ---     separately, so two colours blend through whatever lies between them
-    ---     componentwise rather than around a colour wheel.
+    ---     separately, so two colors blend through whatever lies between them
+    ---     componentwise rather than around a color wheel.
     gradient: function(keys: {CurveKey}): Gradient
 
     --- Installs the pool on a world. Nothing is allocated or dispatched
@@ -2079,7 +2079,7 @@ particles.ParticleEmitter = ecs.newComponent({
         -- The tint crosses whole rather than as the four numbers it parses
         -- to. A `Color` is a name, a packed number or a table, and the parsed
         -- form is a cache on the pool's own record; writing the parsed one back
-        -- would turn every named colour into an anonymous quadruple that no
+        -- would turn every named color into an anonymous quadruple that no
         -- longer follows the palette it was named from.
         return {
             state = item.state,

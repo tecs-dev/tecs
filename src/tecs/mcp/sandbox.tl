@@ -52,7 +52,7 @@ local record sandbox
     --- it rather than a failed call.
     ---
     --- Cycles are not detected. The depth cap is the only thing that stops a
-    --- self-referential table, and it stops it by summarising, not by failing.
+    --- self-referential table, and it stops it by summarizing, not by failing.
     ---
     --- @param value Anything at all, cdata and coroutines included.
     --- @param depth Recursion depth already spent, for the recursive calls
@@ -163,7 +163,7 @@ function sandbox.compile(code: string): function(any): any..., string
     return chunk as function(any): any...
 end
 
---- Depth beyond which a table is summarised rather than walked. Deep enough
+--- Depth beyond which a table is summarized rather than walked. Deep enough
 --- for the shapes an agent asks for, shallow enough that returning the world
 --- by mistake answers instead of hanging.
 local MAX_DEPTH <const> = 6

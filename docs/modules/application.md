@@ -6,7 +6,7 @@ outline: [2, 3]
 # tecs.application.Application
 
 `tecs.application.Application` is the lifecycle the C host drives. An entry file ends with `return tecs.application.create(config)`,
-and the host calls into the returned object to initialise, for each event, for each iteration, and to shut down.
+and the host calls into the returned object to initialize, for each event, for each iteration, and to shut down.
 
 It is not a function that runs until done. A platform that never hands control back has no loop to block in, so
 the loop lives below Lua and the application is what it calls.
@@ -32,7 +32,7 @@ A system's order is declared by its phase, both systems and observers are visibl
 run inside a guard that keeps the process alive and inspectable after the game throws. So the four lifecycle
 points an engine usually hands a game map onto what the ECS already had:
 
-- **Startup** — `PreStartup`, `Startup`, `PostStartup`, run once at the end of initialisation.
+- **Startup** — `PreStartup`, `Startup`, `PostStartup`, run once at the end of initialization.
 - **Per frame** — the ordinary phases, run by `world:update`.
 - **Per event** — `world:observe(0, tecs.events.on.<kind>, handler)`.
 - **Teardown** — `PreShutdown`, `Shutdown`, `PostShutdown`, run once before anything is destroyed.
@@ -45,8 +45,8 @@ The world comes first in the signature because every plugin the world takes is `
 as that shape with one more thing, and code moves between here and a delegated plugin without a silent argument
 swap.
 
-The plugin runs at the end of initialisation, after every engine subsystem is installed and before the startup
-phases run, so a `Startup` system it registers runs on this initialisation rather than the next one.
+The plugin runs at the end of initialization, after every engine subsystem is installed and before the startup
+phases run, so a `Startup` system it registers runs on this initialization rather than the next one.
 
 ## The config
 
@@ -63,8 +63,8 @@ that could disagree.
 | `presentMode`    | How the swapchain presents. Omitted leaves the device's own default              |
 | `ambientLight`   | Light every surface receives before any light entity contributes. Defaults white |
 
-`ambientLight` defaults to white rather than a dim grey because a scene that has placed no lights is the first
-thing anyone builds, and it should look like what it is: sprites at their own colour, with lights adding on top.
+`ambientLight` defaults to white rather than a dim gray because a scene that has placed no lights is the first
+thing anyone builds, and it should look like what it is: sprites at their own color, with lights adding on top.
 A game doing its own lighting turns this down to the level it wants unlit parts of the scene to sit at.
 
 ### The world and the renderer
@@ -177,7 +177,7 @@ reaction in phase does what `Input` does, which is fold the event into something
 ## Checkpoints
 
 Mobile platforms give an application a few seconds' notice before backgrounding it, and rather less on Android.
-A world is not serialisable inside any of that at this project's scale, so this takes bytes rather than a
+A world is not serializable inside any of that at this project's scale, so this takes bytes rather than a
 callback that produces them.
 
 ```teal
@@ -240,9 +240,9 @@ not a decision recovery gets to make.
 It refuses on two gates:
 
 - **This build is not a development one.** With none of `debug`, `mcpPort` or `watch` set, the first crash
-  latches and stays latched. That is the right shipped behaviour: there is nobody there to read the frame, and
+  latches and stays latched. That is the right shipped behavior: there is nobody there to read the frame, and
   carrying on with a world that is provably inconsistent is how one bug becomes a corrupted save.
-- **Recovery was not clean.** If a pass had to be force-ended or a frame cancelled rather than submitted, the
+- **Recovery was not clean.** If a pass had to be force-ended or a frame canceled rather than submitted, the
   device is not in the state the engine intended, and the next frame would be recorded against a device nobody
   can describe. That refuses at any setting.
 
@@ -335,9 +335,9 @@ something this build does at all.
 Light every surface receives before any light entity contributes,
 as red, green and blue. Defaults to white.
 
-White rather than a dim grey, because a scene that has placed no
+White rather than a dim gray, because a scene that has placed no
 lights is the first thing anyone builds and it should look like
-what it is: sprites at their own colour, with lights adding on top
+what it is: sprites at their own color, with lights adding on top
 of them. A game doing its own lighting turns this down to the
 level it wants the unlit parts of the scene to sit at.
 <a id="tecs.application.Application.Config.audio"></a>
@@ -547,9 +547,9 @@ real window to completion without a human closing it.
 
 The game, as one function handed the world and this application.
 
-Called at the end of initialisation, after every engine subsystem is
+Called at the end of initialization, after every engine subsystem is
 installed and before the startup phases run, so it can register a
-`Startup` system and have it run this initialisation rather than the
+`Startup` system and have it run this initialization rather than the
 next one.
 
 One entry point rather than a list, because composing plugins is
@@ -624,11 +624,11 @@ The first is whether this build is a development one at all, which is
 the configuration that most wants this: a game running one is being edited,
 and reloading the file that threw is exactly the way back. A shipped build
 has none of the three, latches on the first crash and stays latched, which
-is the right shipped behaviour:
+is the right shipped behavior:
 there is nobody there to read the frame, and carrying on with a world that
 is provably inconsistent is how one bug becomes a corrupted save.
 
-The second is severity, and it is narrower rather than a judgement about
+The second is severity, and it is narrower rather than a judgment about
 how bad the throw looked. Recovery reports whether it had to force-end a
 pass or cancel a frame instead of submitting it, and in either case the
 device is not in the state the engine intended; see `_recover`. Those do
@@ -793,10 +793,10 @@ worth keeping has changed. Nothing is written here; the bytes are held, and
 What this takes is bytes rather than a function that produces them, and
 that is the whole design rather than an inconvenience. iOS allows roughly
 five seconds from the backgrounding callback returning and Android rather
-less, and at this project's scale a world is not serialisable inside any of
+less, and at this project's scale a world is not serializable inside any of
 it: a callback that walked four million entities would be killed part way
 through and leave nothing behind. A function would let a game postpone the
-serialising into exactly that callback while looking like it had prepared
+serializing into exactly that callback while looking like it had prepared
 something. A string cannot: by the time it exists, the expensive half has
 already happened on a frame that could afford it. The host times the hook
 and says so past 250 ms, which is the check on the rest.

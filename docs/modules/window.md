@@ -37,7 +37,7 @@ the same thing and is not.
 An event reports a _change_. Nothing reports the state a window started in: a window created hidden fires no
 `windowHidden`, a window that has never had focus fires no `windowFocusLost`, and a game that only listens has to
 assume an initial value and hope the platform agrees. The getters here are how the first frame learns where it
-stands, and how any later frame resynchronises without keeping a mirror of the event stream.
+stands, and how any later frame resynchronizes without keeping a mirror of the event stream.
 
 They agree with the events by construction: each one asks SDL rather than caching, so the flags a getter reads
 are the flags the event was derived from. `id` is the bridge between the two, since it is the value an event's
@@ -73,7 +73,7 @@ Creates a window.
 function Window.create(options: Window.Options): Window
 ```
 
-Requires SDL's video subsystem to have been initialised, and raises when the window could not be created.
+Requires SDL's video subsystem to have been initialized, and raises when the window could not be created.
 
 Flags that SDL only accepts at creation are taken from `options` and set there; everything else in `options` is
 applied straight afterwards and has a setter of its own, so nothing is reachable at creation that is not
@@ -155,9 +155,9 @@ just set has somewhere to wait. Everywhere else the change is already applied an
 ## Changing a window a device has claimed
 
 Safe: size, position, minimum and maximum size, aspect ratio, fullscreen, borders, opacity, visibility and
-minimisation. The pass graph sizes its targets from the swapchain texture it acquires each frame rather than from
+minimization. The pass graph sizes its targets from the swapchain texture it acquires each frame rather than from
 anything asked of the window, so a size change is picked up on the next frame with no reconfiguration; a hidden
-or minimised window acquires no texture and the frame is skipped whole.
+or minimized window acquires no texture and the frame is skipped whole.
 
 Asynchronous: on some window systems a size, position or fullscreen change is a request the compositor answers
 later, so reading the value straight back reports the old one. `sync` waits for the pending changes to land, and
@@ -187,7 +187,7 @@ function Window:safeArea(): integer, integer, integer, integer
 | `displayScale` | How much larger than its natural size the desktop asks content to be drawn. Not a ratio between the two sizes; it is the user's scaling preference, so it is what a font size or a UI metric is multiplied by, and it changes without the window resizing.           |
 | `position`     | Position of the top-left corner in screen coordinates.                                                                                                                                                                                                               |
 | `setPosition`  | Moves the window. The coordinate space spans every display, so a negative or very large position is how a window is put on a second monitor.                                                                                                                         |
-| `center`       | Centres the window on `displayId`, or on the display it is already on.                                                                                                                                                                                               |
+| `center`       | Centers the window on `displayId`, or on the display it is already on.                                                                                                                                                                                               |
 | `borderSize`   | Thickness of the window manager's decoration, as top, left, bottom and right in screen coordinates. All zero on a platform that does not decorate windows and on a borderless one, which is the honest answer rather than a failure.                                 |
 | `safeArea`     | The part of the window nothing is drawn over, as x, y, width and height. The whole window on a desktop; smaller where a notch, a rounded corner or a system gesture area overlaps it, which is what a phone or a handheld needs to keep a health bar out from under. |
 
@@ -231,14 +231,14 @@ function Window:hasMouseFocus(): boolean
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `show`          | Maps the window onto the desktop. What a window created `hidden` needs before anything it draws is seen.                                                                            |
 | `hide`          | Unmaps the window without destroying it. Safe while a device holds it: no swapchain texture is acquired and the frame is skipped whole rather than drawn nowhere.                   |
-| `isVisible`     | Whether the window is mapped. False for a window created `hidden` and one `hide` was called on, and true for a minimised window, which is mapped and not visible.                   |
+| `isVisible`     | Whether the window is mapped. False for a window created `hidden` and one `hide` was called on, and true for a minimized window, which is mapped and not visible.                   |
 | `raise`         | Brings the window to the front and gives it input focus. Distinct from `flash`: this takes focus, which a desktop may refuse or may allow to interrupt whatever the user was doing. |
-| `minimize`      | Minimises to the taskbar or dock.                                                                                                                                                   |
-| `isMinimized`   | Whether it is minimised. `events.windowMinimized` reports that it became so; this is how the first frame after startup finds out.                                                   |
-| `maximize`      | Maximises to fill the display's usable bounds.                                                                                                                                      |
-| `isMaximized`   | Whether it is maximised.                                                                                                                                                            |
-| `restore`       | Returns a minimised or maximised window to its previous size and position.                                                                                                          |
-| `isOccluded`    | Whether something is covering the window entirely, so a frame drawn now is not seen. Independent of minimisation, and both stop the swapchain handing out a texture.                |
+| `minimize`      | Minimizes to the taskbar or dock.                                                                                                                                                   |
+| `isMinimized`   | Whether it is minimized. `events.windowMinimized` reports that it became so; this is how the first frame after startup finds out.                                                   |
+| `maximize`      | Maximizes to fill the display's usable bounds.                                                                                                                                      |
+| `isMaximized`   | Whether it is maximized.                                                                                                                                                            |
+| `restore`       | Returns a minimized or maximized window to its previous size and position.                                                                                                          |
+| `isOccluded`    | Whether something is covering the window entirely, so a frame drawn now is not seen. Independent of minimization, and both stop the swapchain handing out a texture.                |
 | `hasFocus`      | Whether the window has keyboard focus, which is where key events are going.                                                                                                         |
 | `hasMouseFocus` | Whether the pointer is over the window. False while relative mouse mode is on, since there is no pointer position for the window to contain.                                        |
 
@@ -348,7 +348,7 @@ in a window that is not rendering yet.
 
 ## Confinement
 
-Pointer behaviour is [`Input`](/modules/input)'s: relative mouse mode, warping, capture and cursor visibility all
+Pointer behavior is [`Input`](/modules/input)'s: relative mouse mode, warping, capture and cursor visibility all
 act through the window but are input modes. What is here instead is confinement, which is a property of the
 window's bargain with the window manager rather than of the pointer.
 
@@ -857,7 +857,7 @@ one, which is the honest answer rather than a failure.
 <pre><code v-pre>function <a href="#tecs.window.Window.center">tecs.window.Window.center</a>(self: Window, displayId: integer): boolean
 </code></pre>
 
-Centres the window on `display`, or on the display it is already on.
+Centers the window on `display`, or on the display it is already on.
 
 #### Parameters
 
@@ -1449,7 +1449,7 @@ Whether the window is fullscreen.
 <pre><code v-pre>function <a href="#tecs.window.Window.isMaximized">tecs.window.Window.isMaximized</a>(self: Window): boolean
 </code></pre>
 
-Whether the window is maximised.
+Whether the window is maximized.
 
 #### Parameters
 
@@ -1470,7 +1470,7 @@ Whether the window is maximised.
 <pre><code v-pre>function <a href="#tecs.window.Window.isMinimized">tecs.window.Window.isMinimized</a>(self: Window): boolean
 </code></pre>
 
-Whether the window is minimised. `events.windowMinimized` reports that it
+Whether the window is minimized. `events.windowMinimized` reports that it
 became so; this is how the first frame after startup finds out.
 
 #### Parameters
@@ -1495,8 +1495,8 @@ became so; this is how the first frame after startup finds out.
 Whether something is covering the window entirely.
 
 A frame drawn now is not seen, which is worth knowing before an expensive
-one is built. Independent of minimisation: an occluded window is mapped and
-not minimised, and both stop the swapchain handing out a texture.
+one is built. Independent of minimization: an occluded window is mapped and
+not minimized, and both stop the swapchain handing out a texture.
 
 #### Parameters
 
@@ -1540,7 +1540,7 @@ Whether the window can be resized by dragging its edge. Says nothing about
 </code></pre>
 
 Whether the window is mapped. False for a window created `hidden` and one
-that `hide` was called on, and true for a minimised window, which is mapped
+that `hide` was called on, and true for a minimized window, which is mapped
 and not visible.
 
 #### Parameters
@@ -1583,7 +1583,7 @@ Whether the desktop's own keyboard shortcuts are being intercepted.
 <pre><code v-pre>function <a href="#tecs.window.Window.maximize">tecs.window.Window.maximize</a>(self: Window): boolean
 </code></pre>
 
-Maximises the window to fill the display's usable bounds.
+Maximizes the window to fill the display's usable bounds.
 
 #### Parameters
 
@@ -1627,7 +1627,7 @@ a dimension that has no limit.
 <pre><code v-pre>function <a href="#tecs.window.Window.minimize">tecs.window.Window.minimize</a>(self: Window): boolean
 </code></pre>
 
-Minimises the window to the taskbar or dock.
+Minimizes the window to the taskbar or dock.
 
 #### Parameters
 
@@ -1896,7 +1896,7 @@ unless the user just did something that expects a window to come forward.
 <pre><code v-pre>function <a href="#tecs.window.Window.restore">tecs.window.Window.restore</a>(self: Window): boolean
 </code></pre>
 
-Returns a minimised or maximised window to its previous size and position.
+Returns a minimized or maximized window to its previous size and position.
 
 #### Parameters
 

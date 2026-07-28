@@ -11,7 +11,7 @@
 -- Three things are deliberately not exercised. Actual fullscreen animates for
 -- most of a second on a desktop and would take over the display of whoever is
 -- running the suite, so the fullscreen *mode* plumbing is driven on a windowed
--- window, which is where SDL records it. Minimising and maximising are
+-- window, which is where SDL records it. Minimizing and maximizing are
 -- requests the window manager answers later, so the calls are made and the
 -- resulting flags are not asserted on. Keyboard grab asks some desktops for a
 -- permission prompt, so it is set and cleared without asserting the desktop
@@ -117,7 +117,7 @@ describe("platform.Window", function()
         assert.are.equal(140, y)
     end)
 
-    it("centres on a display", function()
+    it("centers on a display", function()
         assert.is_true(window:center())
         assert.is_true(window:center(window:display()))
         window:sync()
@@ -162,7 +162,7 @@ describe("platform.Window", function()
         -- Its own window, and destroyed here. Asking AppKit to zoom a window
         -- that has ever carried a content aspect ratio traps inside AppKit, and
         -- clearing the ratio first does not undo it, so a window that has been
-        -- given one cannot be handed on to the maximise test above.
+        -- given one cannot be handed on to the maximize test above.
         local shaped = Window.create({ title = "shaped", width = SIZE, height = SIZE })
         assert.is_true(shaped:setAspectRatio(1.0, 2.0))
         local minimum, maximum = shaped:aspectRatio()
@@ -195,8 +195,8 @@ describe("platform.Window", function()
 
     it("asks the window manager to change its state", function()
         -- The requests are made and the flags are not read back: a compositor
-        -- answers these later and the answer is what the minimised and
-        -- maximised events report.
+        -- answers these later and the answer is what the minimized and
+        -- maximized events report.
         assert.is_true(window:maximize())
         assert.is_boolean(window:isMaximized())
         assert.is_true(window:restore())

@@ -49,8 +49,8 @@ local LIGHTS <const> = math.floor(tonumber(os.getenv("TECS_LIGHTS")) or 3)
 --- twenty. The callback writes columns in place, so no component values are
 --- constructed at all.
 local function spawnField(world: tecs.World, width: number, height: number)
-    local centreX = width * 0.5
-    local centreY = height * 0.5
+    local centerX = width * 0.5
+    local centerY = height * 0.5
     local extent = math.min(width, height) * 0.46 * WORLD
     local golden <const> = 2.39996
 
@@ -70,8 +70,8 @@ local function spawnField(world: tecs.World, width: number, height: number)
                 local hue = index / COUNT
 
                 local transform = transforms[row]
-                transform.x = centreX + math.cos(angle) * radius
-                transform.y = centreY + math.sin(angle) * radius
+                transform.x = centerX + math.cos(angle) * radius
+                transform.y = centerY + math.sin(angle) * radius
                 transform.rotation = angle
                 transform.scaleX = size
                 transform.scaleY = size
@@ -96,7 +96,7 @@ local function spawnLights(world: tecs.World, width: number, height: number)
     for index = 1, LIGHTS do
         -- The palette cycles, and lights past the first three spread over the
         -- view so a bench with many of them is not three stacked in the middle.
-        local colour = palette[(index - 1) % #palette + 1]
+        local color = palette[(index - 1) % #palette + 1]
         local x, y = width * 0.5, height * 0.5
         if index > #palette then
             local radius = math.sqrt(index / LIGHTS) * math.min(width, height) * 0.45
@@ -105,7 +105,7 @@ local function spawnLights(world: tecs.World, width: number, height: number)
         end
         world:spawn(
             Transform(x, y, 0, 1, 0, 1, 1),
-            PointLight(120.0, math.min(width, height) * 0.7, colour[1], colour[2], colour[3], 3.0)
+            PointLight(120.0, math.min(width, height) * 0.7, color[1], color[2], color[3], 3.0)
         )
     end
 end

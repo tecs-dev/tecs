@@ -12,7 +12,7 @@
 --- What a pipeline bakes has to agree with the pass it is bound in and with the
 --- shaders it was built from, and neither agreement is checked here:
 ---
---- - Colour formats must match the pass's attachments in count and in order.
+--- - Color formats must match the pass's attachments in count and in order.
 ---   `RenderPass.begin` takes the attachments and this takes the formats, and
 ---   nothing joins the two up before SDL rejects the bind.
 --- - A pipeline with `depth` set can only be bound in a pass begun with a depth
@@ -61,11 +61,11 @@ local record PipelineOptions
     --- SDL keeps whatever it needs out of them.
     vertexShader: Shader
     fragmentShader: Shader
-    --- Format of the single colour target this pipeline writes to. Use
+    --- Format of the single color target this pipeline writes to. Use
     --- `colorFormats` for a G-buffer or any other multi-target pass. One of the
     --- two is required and `colorFormats` wins when both are given.
     colorFormat: integer
-    --- Formats of every colour target, in attachment order. A pipeline bakes
+    --- Formats of every color target, in attachment order. A pipeline bakes
     --- these, so they must match the pass it is used in exactly.
     colorFormats: {integer}
     --- "triangleList", "triangleStrip", "lineList", "lineStrip", "pointList".
@@ -76,8 +76,8 @@ local record PipelineOptions
     --- the other way has its two faces swapped rather than its culling
     --- disabled.
     cull: string
-    --- Straight alpha blending, applied to every colour target rather than to
-    --- one of them. Defaults to false, which writes the fragment's colour and
+    --- Straight alpha blending, applied to every color target rather than to
+    --- one of them. Defaults to false, which writes the fragment's color and
     --- alpha through unmodified. Ignored when `blendMode` is given.
     blend: boolean
     --- Which blend to bake, for the cases a boolean cannot say.
@@ -87,7 +87,7 @@ local record PipelineOptions
     --- channel, and both ignore the two factors entirely. They are what a
     --- target resolving by coverage rather than by order needs: the value in a
     --- pixel becomes a function of the set of fragments that covered it and not
-    --- of their order, which on an unsigned normalised target is bit exact. An
+    --- of their order, which on an unsigned normalized target is bit exact. An
     --- occluder mask wants the tallest occluder to win and a shadow target
     --- wants the darkest shadow to, and neither may depend on which of them the
     --- device rasterised first.
@@ -121,7 +121,7 @@ local record GraphicsPipeline
     --- Creates a pipeline.
     ---
     --- Raises on an unknown primitive, cull mode or depth compare op, and on
-    --- options that name no colour format at all. Everything that has to agree
+    --- options that name no color format at all. Everything that has to agree
     --- with a pass or a shader is unchecked and surfaces as an SDL failure at
     --- creation or at bind.
     --- @param device The `SDL_GPUDevice` the pipeline is created on, and the
@@ -174,7 +174,7 @@ local COMPARE_OPS <const>: {string: integer} = {
 -- library loaded, and a number that comes from the header cannot drift from
 -- it. Copying went wrong here once: these enums open with an INVALID member,
 -- so every name sits one above where the header appears to list it, and
--- source alpha spent that time meaning destination colour.
+-- source alpha spent that time meaning destination color.
 local BLEND_FACTOR_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_SRC_ALPHA) as integer
 local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA) as integer
 local BLEND_FACTOR_ONE <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE) as integer

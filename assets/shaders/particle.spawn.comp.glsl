@@ -96,7 +96,7 @@ void main() {
     float birth = clock - steps + 1.0
         + floor(float(offset) * steps / float(count));
 
-    // And spread along the path the emitter travelled, by this emission's own
+    // And spread along the path the emitter traveled, by this emission's own
     // fraction of the frame. Without it a fast emitter lays clumps at frame
     // boundaries, which is the most visible artefact a trail has.
     float along = (float(offset) + 0.5) / float(count);
@@ -166,7 +166,7 @@ void main() {
     // two independent.
     float turned = facing + effects.value[effect + EFFECT_SHAPE_ROTATION];
 
-    // The full cone centred on the launch direction, which is what `spread`
+    // The full cone centerd on the launch direction, which is what `spread`
     // means here and in the reference this follows. Half of it is the other
     // plausible reading and getting it wrong is silent.
     float launch = turned + outward

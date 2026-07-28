@@ -36,7 +36,7 @@ local record TextureOptions
     --- neither is safe to assume, since backends differ about both.
     format: integer
     --- Any of "colorTarget", "sampled", "depthTarget", "computeRead",
-    --- "computeWrite", "graphicsRead". Defaults to a samplable colour target.
+    --- "computeWrite", "graphicsRead". Defaults to a samplable color target.
     usage: {string}
     --- Label handed to SDL, which a graphics debugger shows against the
     --- resource. Optional; a texture created without one is unnamed there.
@@ -99,7 +99,7 @@ local record DepthFormat
     name: string
     --- The smallest difference the format keeps anywhere in zero to one.
     ---
-    --- A normalised integer steps uniformly, so this is one over the values it
+    --- A normalized integer steps uniformly, so this is one over the values it
     --- has. A float does not: its step is finest near zero and coarsest at the
     --- top of the range, so what is quoted is the step at the top, which is
     --- the one the far layers are drawn at.
@@ -368,7 +368,7 @@ end
 --- Blocks until the GPU has finished, so this is a diagnostic and test path,
 --- not something a frame should call.
 ---
---- Four bytes a pixel is assumed, which is what makes this a colour-target
+--- Four bytes a pixel is assumed, which is what makes this a color-target
 --- path: a depth texture reads back a byte count that does not describe it.
 --- @return A fresh `width * height * 4` byte array the caller owns, with rows
 ---     running down from the top-left. Index it through `getPixel`.

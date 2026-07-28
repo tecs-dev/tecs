@@ -21,7 +21,7 @@ user's machine. `make run` runs this repository's own demo, which is a test of t
 runs a project. Both stay, and neither delegates to the other.
 
 **It does not cross-compile.** A macOS host cannot produce a Windows game and the reverse is worse, since a Mach-O
-needs an SDK whose licence forbids redistributing it. `tecs dist` packages for the platform it is running on, and
+needs an SDK whose license forbids redistributing it. `tecs dist` packages for the platform it is running on, and
 `tecs new` scaffolds a CI workflow with a three-OS matrix that runs it on each.
 
 ## Offline documentation

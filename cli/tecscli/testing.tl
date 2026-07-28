@@ -16,7 +16,7 @@
 --- is: about a hundred lines, no dependency, and it runs inside the same
 --- process that has the engine already loaded, so a spec can build a world.
 ---
---- What it deliberately does not have: tags, filters, randomised order,
+--- What it deliberately does not have: tags, filters, randomized order,
 --- parallelism, coverage, output formats. Each of those is worth adding the
 --- day something needs it and none is worth guessing at now.
 

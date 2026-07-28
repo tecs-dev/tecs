@@ -5,7 +5,7 @@
 // in the scene, which is what makes many lights affordable: a light's cost
 // becomes proportional to what it covers instead of to how many pixels exist.
 //
-// World space, not screen space and not normalised device coordinates. The
+// World space, not screen space and not normalized device coordinates. The
 // grid covers the rectangle the camera can see, measured in world units, so a
 // light's position and its radius are both already in the space the tiles are
 // measured in and the zoom enters once, as the half extent of that rectangle.

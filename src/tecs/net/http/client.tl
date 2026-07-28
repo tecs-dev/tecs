@@ -54,7 +54,7 @@
 --- failure would propagate a 404 through `map` as though the transfer broke.
 --- `Response:ok()` is the separate question about the answer.
 ---
---- `"cancelled"` is this process stopping the transfer, through
+--- `"canceled"` is this process stopping the transfer, through
 --- `Future:cancel` or `Client:close`.
 ---
 --- ## A body is a `DataStream`, in both directions
@@ -160,7 +160,7 @@
 --- HTTP/1.1 only: `USE_NGHTTP2` is off, so there is no multiplexing to make
 --- one connection carry many requests. A development preset resolves libcurl
 --- from the system and may well get HTTP/2, so this is one of the few places a
---- development and a packaged build differ in behaviour rather than only in
+--- development and a packaged build differ in behavior rather than only in
 --- what they link. The bounds are what keep the slower of the two honest.
 ---
 --- ## A body is never a live connection
@@ -422,7 +422,7 @@ local record client
 
         --- Stops every transfer and releases the multi handle.
         ---
-        --- Each unsettled future settles `"cancelled"`. A closed client raises
+        --- Each unsettled future settles `"canceled"`. A closed client raises
         --- on `send` and answers 0 to `pump`, rather than being silently
         --- useless.
         ---
@@ -701,7 +701,7 @@ end
 --- Closes a transfer's destination, whatever the outcome.
 ---
 --- A failed transfer has the same handle open as a successful one, and a
---- cancelled one too, so this runs on every path out. What closing said
+--- canceled one too, so this runs on every path out. What closing said
 --- becomes the transfer's failure when nothing else already is one: that call
 --- is where a full disk is reported.
 local function closeSink(transfer: Transfer)
@@ -1185,7 +1185,7 @@ function Client:cancel(future: Future<any>)
     -- A no-op when this is the source hook, since `Future:cancel` has already
     -- written the state; the settlement is for a caller who called this
     -- directly with a future still pending.
-    transfer.future:abandon("cancelled")
+    transfer.future:abandon("canceled")
 end
 
 function Client:close()

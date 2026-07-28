@@ -77,7 +77,7 @@ describe("ecs.Renderer", function()
         return world, renderer
     end
 
-    -- A decoded image of one solid colour, in the shape registerImage
+    -- A decoded image of one solid color, in the shape registerImage
     -- consumes. Telling a name apart from a layer takes two images whose
     -- difference reaches the screen, and building them here keeps that
     -- difference in the test rather than in a fixture file.
@@ -96,7 +96,7 @@ describe("ecs.Renderer", function()
     end
 
     -- Two texels side by side, the left one opaque and the right one cut away.
-    -- Both carry the same colour, because that is what a cut-out looks like
+    -- Both carry the same color, because that is what a cut-out looks like
     -- when a paint program keeps the pixels it made transparent: a coverage
     -- test that read the tinted result rather than the texture's own alpha
     -- would find ink on both halves and keep them both.
@@ -165,10 +165,10 @@ describe("ecs.Renderer", function()
     it("draws nothing when the world is empty", function()
         local world, renderer = newScene()
         local pixels = frameOnce(world, renderer)
-        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
 
         assert.are.equal(0, renderer.count)
-        assert.are.equal(0, centre.r)
+        assert.are.equal(0, center.r)
         renderer:destroy()
     end)
 
@@ -178,11 +178,11 @@ describe("ecs.Renderer", function()
         world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
-        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
 
         assert.are.equal(1, renderer.count)
-        assert.are.equal(255, centre.r, "the entity's tint should reach the screen")
-        assert.are.equal(0, centre.g)
+        assert.are.equal(255, center.r, "the entity's tint should reach the screen")
+        assert.are.equal(0, center.g)
         renderer:destroy()
     end)
 
@@ -255,10 +255,10 @@ describe("ecs.Renderer", function()
         world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1), PointLight(12.0, 30.0, 1.0, 1.0, 1.0, 4.0))
 
         local pixels = frameOnce(world, renderer)
-        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
         local corner = screen:getPixel(pixels, 2, 2)
 
-        assert.is_true(centre.r > 180, ("under the light should be bright, got %d"):format(centre.r))
+        assert.is_true(center.r > 180, ("under the light should be bright, got %d"):format(center.r))
         assert.is_true(corner.r < 60, ("beyond the radius should stay dark, got %d"):format(corner.r))
         renderer:destroy()
     end)
@@ -357,8 +357,8 @@ describe("ecs.Renderer", function()
             Renderable()
         )
 
-        local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
-        assert.is_true(math.abs(centre.r - 128) <= 2, ("expected the tint to halve red, got %d"):format(centre.r))
+        local center = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.is_true(math.abs(center.r - 128) <= 2, ("expected the tint to halve red, got %d"):format(center.r))
         renderer:destroy()
     end)
 
@@ -420,10 +420,10 @@ describe("ecs.Renderer", function()
     end)
 
     it("lets geometry behind a cut-out show through it", function()
-        -- This is the half a colour test cannot see. The cut-out is on the
+        -- This is the half a color test cannot see. The cut-out is on the
         -- nearer layer, so its depth is what the blue quad behind it is tested
         -- against, and a full-quad silhouette rejects that quad before its
-        -- colour can reach the target. Which of the two draws first does not
+        -- color can reach the target. Which of the two draws first does not
         -- change the answer: covering the whole rectangle either hides the blue
         -- one or paints over it.
         local world, renderer = newScene()
@@ -467,7 +467,7 @@ describe("ecs.Renderer", function()
             return world, renderer
         end
 
-        -- An image of one colour, at whatever size the packer is being asked
+        -- An image of one color, at whatever size the packer is being asked
         -- to place. Registered under a name of its own so the renderer's own
         -- registry is exercised the way a real load exercises it.
         local function block(name, size, r, g, b)
@@ -521,12 +521,12 @@ describe("ecs.Renderer", function()
         end)
 
         it("draws each packed image back as itself", function()
-            -- The assertion that matters. Eight distinct colours packed into
+            -- The assertion that matters. Eight distinct colors packed into
             -- one layer, each drawn on its own frame covering the target: a
             -- region whose origin was dropped anywhere between the packer and
-            -- the sampler shows up as a quad wearing a neighbour's colour.
+            -- the sampler shows up as a quad wearing a neighbor's color.
             local world, renderer = packedScene()
-            local colours = {
+            local colors = {
                 { 255, 0, 0 },
                 { 0, 255, 0 },
                 { 0, 0, 255 },
@@ -536,9 +536,9 @@ describe("ecs.Renderer", function()
                 { 128, 0, 0 },
                 { 0, 128, 0 },
             }
-            for index = 1, #colours do
-                local colour = colours[index]
-                renderer:registerImage(block("spec://draw" .. index, 8, colour[1], colour[2], colour[3]))
+            for index = 1, #colors do
+                local color = colors[index]
+                renderer:registerImage(block("spec://draw" .. index, 8, color[1], color[2], color[3]))
             end
             assert.are.equal(1, renderer.images.used)
 
@@ -549,7 +549,7 @@ describe("ecs.Renderer", function()
                 Renderable()
             )
 
-            for index = 1, #colours do
+            for index = 1, #colors do
                 local sprite = world:getMut(entity, Sprite)
                 local wanted = renderer:sprite("spec://draw" .. index)
                 sprite.image, sprite.slot = wanted.image, wanted.slot
@@ -557,7 +557,7 @@ describe("ecs.Renderer", function()
                 sprite.u1, sprite.v1 = wanted.u1, wanted.v1
 
                 local pixels = frameOnce(world, renderer)
-                local colour = colours[index]
+                local color = colors[index]
                 -- Four corners as well as the middle, because a rect that is
                 -- one texel out reads correctly in the middle of the quad and
                 -- wrongly at its edges.
@@ -569,9 +569,9 @@ describe("ecs.Renderer", function()
                     { SIZE - 3, SIZE - 3 },
                 }) do
                     local pixel = screen:getPixel(pixels, at[1], at[2])
-                    assert.are.equal(colour[1], pixel.r, ("image %d at %d,%d"):format(index, at[1], at[2]))
-                    assert.are.equal(colour[2], pixel.g)
-                    assert.are.equal(colour[3], pixel.b)
+                    assert.are.equal(color[1], pixel.r, ("image %d at %d,%d"):format(index, at[1], at[2]))
+                    assert.are.equal(color[2], pixel.g)
+                    assert.are.equal(color[3], pixel.b)
                 end
             end
             renderer:destroy()
@@ -613,11 +613,11 @@ describe("ecs.Renderer", function()
             renderer:destroy()
         end)
 
-        it("replaces a packed image without touching its neighbours", function()
+        it("replaces a packed image without touching its neighbors", function()
             -- The assertion the packer makes replacing hard. Four images share
             -- a layer, so writing the layer, or writing at its origin, or
-            -- forgetting the gutter would all reach a neighbour: each of them
-            -- is a different colour, and each is drawn back afterwards.
+            -- forgetting the gutter would all reach a neighbor: each of them
+            -- is a different color, and each is drawn back afterwards.
             local world, renderer = packedScene()
             for index = 1, 4 do
                 renderer:registerImage(block("spec://replace" .. index, 8, 0, 0, index * 60))
@@ -652,9 +652,9 @@ describe("ecs.Renderer", function()
                 sprite.u0, sprite.v0 = wanted.u0, wanted.v0
                 sprite.u1, sprite.v1 = wanted.u1, wanted.v1
 
-                local neighbour = frameOnce(world, renderer)
+                local neighbor = frameOnce(world, renderer)
                 for _, at in ipairs({ { SIZE / 2, SIZE / 2 }, { 3, 3 }, { SIZE - 3, SIZE - 3 } }) do
-                    local pixel = screen:getPixel(neighbour, at[1], at[2])
+                    local pixel = screen:getPixel(neighbor, at[1], at[2])
                     assert.are.equal(0, pixel.r, ("image %d at %d,%d"):format(index, at[1], at[2]))
                     assert.are.equal(index * 60, pixel.b)
                 end
@@ -716,9 +716,9 @@ describe("ecs.Renderer", function()
             local pixels = frameOnce(world, renderer)
             shaders.override("instance.frag", nil)
 
-            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
-            assert.are.equal(255, centre.b, "the frame is still binding the pipeline it started with")
-            assert.are.equal(0, centre.r)
+            local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            assert.are.equal(255, center.b, "the frame is still binding the pipeline it started with")
+            assert.are.equal(0, center.r)
 
             -- And back, because reloading after a mistake is most of what a
             -- reload is for.
@@ -924,9 +924,9 @@ describe("ecs.Renderer", function()
             second,
             Renderable()
         )
-        local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.r, "the pixels are the ones the first spelling uploaded")
-        assert.are.equal(0, centre.g)
+        local center = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, center.r, "the pixels are the ones the first spelling uploaded")
+        assert.are.equal(0, center.g)
         renderer:destroy()
     end)
 
@@ -964,9 +964,9 @@ describe("ecs.Renderer", function()
         )
 
         restored:loadSnapshot(saved)
-        local centre = screen:getPixel(frameOnce(restored, second), SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.g, "and green after it")
-        assert.are.equal(0, centre.r)
+        local center = screen:getPixel(frameOnce(restored, second), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, center.g, "and green after it")
+        assert.are.equal(0, center.r)
         second:destroy()
     end)
 
@@ -1119,7 +1119,7 @@ describe("ecs.Renderer", function()
     end)
 
     it("keeps geometry that straddles the edge", function()
-        -- A quad half outside must still draw. Culling on centre alone would
+        -- A quad half outside must still draw. Culling on center alone would
         -- pop things out at the border, which reads as flicker rather than as
         -- a culling bug.
         local world, renderer = newScene()
@@ -1220,10 +1220,10 @@ describe("ecs.Renderer", function()
         )
 
         local pixels = frameOnce(world, renderer)
-        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
         local corner = screen:getPixel(pixels, 2, 2)
 
-        assert.are.equal(255, centre.r, "the middle of the circle is filled")
+        assert.are.equal(255, center.r, "the middle of the circle is filled")
         assert.are.equal(0, corner.r, "the quad's corner falls outside the circle and must be rejected")
         renderer:destroy()
     end)
@@ -1251,18 +1251,18 @@ describe("ecs.Renderer", function()
         world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1), PointLight(SIZE / 2, SIZE * 1.5, 1.0, 1.0, 1.0, 3.0))
 
         local pixels = frameOnce(world, renderer)
-        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2).r
+        local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2).r
         local out = screen:getPixel(pixels, SIZE / 2 + offset, SIZE / 2).r
         renderer:destroy()
-        return centre, out
+        return center, out
     end
 
     it("faces a flat material at the viewer", function()
         -- The default material is a picture on a quad, and a picture has no
         -- shape of its own to face with. So it stays flat, and what varies
         -- across it is only how far the light is.
-        local centre, out = litAt(nil, 0, 22)
-        assert.is_true(centre > 200, ("under the light, got %d"):format(centre))
+        local center, out = litAt(nil, 0, 22)
+        assert.is_true(center > 200, ("under the light, got %d"):format(center))
         assert.is_true(out > 180, ("a flat surface turns towards the light everywhere, got %d"):format(out))
     end)
 
@@ -1270,16 +1270,16 @@ describe("ecs.Renderer", function()
         -- The same quad, the same light, the same pixel. A circle is what a
         -- dome looks like from above, so two thirds of the way out its surface
         -- has turned far enough that the light rakes across it.
-        local flatCentre, flatOut = litAt(nil, 0, 22)
-        local centre, out = litAt("circle", 0, 22)
+        local flatCenter, flatOut = litAt(nil, 0, 22)
+        local center, out = litAt("circle", 0, 22)
 
-        assert.is_true(centre > 200, ("the top of the dome faces the light, got %d"):format(centre))
+        assert.is_true(center > 200, ("the top of the dome faces the light, got %d"):format(center))
         assert.is_true(out < 120, ("its flank should be raking, got %d"):format(out))
         assert.is_true(
             flatOut - out > 80,
             ("the shape has to be the difference: flat %d against domed %d"):format(flatOut, out)
         )
-        assert.is_true(math.abs(flatCentre - centre) < 8, "and the two agree where both face the viewer")
+        assert.is_true(math.abs(flatCenter - center) < 8, "and the two agree where both face the viewer")
     end)
 
     it("keeps a quad square when no Material is present", function()
@@ -1558,15 +1558,15 @@ describe("ecs.Renderer", function()
             )
         end
 
-        local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.b, "the highest-index entity must be the one on top")
-        assert.are.equal(0, centre.r)
+        local center = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, center.b, "the highest-index entity must be the one on top")
+        assert.are.equal(0, center.r)
         renderer:destroy()
     end)
 
     -- Depth rides in the fourth float of an instance's transform vector, which
     -- nothing on the host writes yet. So these two quads are spawned
-    -- identically and then have their depth and their colour written straight
+    -- identically and then have their depth and their color written straight
     -- into the instance buffer, which is exactly the memory the vertex shader
     -- reads. Instance one draws after instance zero, so without a depth
     -- attachment it wins every time and neither assertion below can hold.
@@ -1605,9 +1605,9 @@ describe("ecs.Renderer", function()
         })
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
 
-        local centre = screen:getPixel(screen:readback(), SIZE / 2, SIZE / 2)
+        local center = screen:getPixel(screen:readback(), SIZE / 2, SIZE / 2)
         renderer:destroy()
-        return centre
+        return center
     end
 
     it("lets the nearer instance win regardless of draw order", function()
@@ -1737,11 +1737,7 @@ describe("ecs.Renderer", function()
         )
 
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(
-            255,
-            screen:getPixel(pixels, 8, SIZE / 2).b,
-            "the kept half must draw in the material's colour"
-        )
+        assert.are.equal(255, screen:getPixel(pixels, 8, SIZE / 2).b, "the kept half must draw in the material's color")
         assert.are.equal(0, screen:getPixel(pixels, SIZE - 8, SIZE / 2).b, "and the discarded half must not")
         renderer:destroy()
         materials.reset()
@@ -1826,7 +1822,7 @@ describe("ecs.Renderer", function()
             return pixel
         end
 
-        assert.are.equal(255, draw("spec.unlit").r, "an unlit material keeps its own colour")
+        assert.are.equal(255, draw("spec.unlit").r, "an unlit material keeps its own color")
         assert.is_true(draw("spec.lit").r < 128, "a lit one is darkened by the dim ambient")
         materials.reset()
     end)
@@ -2018,9 +2014,9 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-    it("zooms about the centre of the view", function()
+    it("zooms about the center of the view", function()
         local world, renderer = newScene()
-        -- A quarter-size square at the centre, which zooming doubles.
+        -- A quarter-size square at the center, which zooming doubles.
         world:spawn(
             Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 0.25, SIZE * 0.25),
             Tint(1.0, 0.0, 0.0, 1.0),
@@ -2143,9 +2139,9 @@ describe("ecs.Renderer", function()
             quad(world, SIZE / 2, SIZE / 2, 1, 0, 1, 0, 0)
 
             local pixels = frameOnce(world, renderer)
-            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
-            assert.is_true(centre.b > 200, "the higher layer is what you see")
-            assert.is_true(centre.r < 50, "not the one drawn after it")
+            local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            assert.is_true(center.b > 200, "the higher layer is what you see")
+            assert.is_true(center.r < 50, "not the one drawn after it")
             renderer:destroy()
         end)
 
@@ -2214,7 +2210,7 @@ describe("ecs.Renderer", function()
             box(world, SIZE / 2, SIZE * 0.75, 3, SIZE / 4, 0, 0, 1)
 
             frameOnce(world, renderer)
-            -- The camera centres itself on the first frame it draws, so this
+            -- The camera centers itself on the first frame it draws, so this
             -- pans a quarter of the target to the right.
             renderer.camera.x = renderer.camera.x + SIZE / 4
             local pixels = frameOnce(world, renderer)
@@ -2235,14 +2231,14 @@ describe("ecs.Renderer", function()
         it("keeps an ignore-zoom layer its size while the view zooms", function()
             local world, renderer = newScene()
             layers.configure(4, { sort = "topdown", ignoreZoom = true })
-            -- Eight units each, above and below the camera's centre so zoom
+            -- Eight units each, above and below the camera's center so zoom
             -- moves them apart rather than over each other.
             box(world, SIZE / 2, SIZE * 0.375, 1, 8, 1, 0, 0)
             box(world, SIZE / 2, SIZE * 0.625, 4, 8, 0, 0, 1)
 
             local before = frameOnce(world, renderer)
             assert.is_true(screen:getPixel(before, 32, 24).r > 200, "the world layer starts eight pixels across")
-            assert.is_true(screen:getPixel(before, 26, 24).r < 50, "so nothing reaches six pixels out from its centre")
+            assert.is_true(screen:getPixel(before, 26, 24).r < 50, "so nothing reaches six pixels out from its center")
 
             renderer.camera.zoom = 2.0
             local pixels = frameOnce(world, renderer)
@@ -2264,7 +2260,7 @@ describe("ecs.Renderer", function()
             local world, renderer = newScene()
             layers.configure(5, { sort = "topdown", parallax = 0.5 })
             -- Placed so that both land in the middle of the target while the
-            -- camera is centred, one carried half as far as the other.
+            -- camera is centerd, one carried half as far as the other.
             box(world, SIZE / 4, 0, 5, 8, 0, 0, 1)
             box(world, SIZE / 2, SIZE * 0.75, 1, 8, 1, 0, 0)
 
@@ -2288,9 +2284,9 @@ describe("ecs.Renderer", function()
             renderer:destroy()
         end)
 
-        it("leaves an unlit layer at its own colour", function()
+        it("leaves an unlit layer at its own color", function()
             -- No ambient and no lights, so everything the lighting pass
-            -- resolves comes out black and only what bypasses it has a colour.
+            -- resolves comes out black and only what bypasses it has a color.
             local world, renderer = newScene({ 0.0, 0.0, 0.0 })
             layers.configure(6, { sort = "z", unlit = true })
             box(world, SIZE / 2, SIZE / 4, 1, SIZE / 4, 1, 0, 0)
@@ -2301,7 +2297,7 @@ describe("ecs.Renderer", function()
 
             assert.is_true(
                 screen:getPixel(pixels, SIZE / 2, SIZE * 0.75).r > 200,
-                "the unlit layer kept the colour it was tinted"
+                "the unlit layer kept the color it was tinted"
             )
             assert.is_true(
                 screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50,
@@ -2460,7 +2456,7 @@ describe("ecs.Renderer", function()
     -- string rewrites all of them, and spawning glyphs moves an archetype's
     -- length, which lays the whole scene out again.
     describe("instance producers", function()
-        --- Writes `count` quads in a row, each the colour it is told.
+        --- Writes `count` quads in a row, each the color it is told.
         local function stripe(count, r, g, b)
             local self = { written = {}, dirty = {} }
             function self:count()
@@ -2560,7 +2556,7 @@ describe("ecs.Renderer", function()
     describe("clip regions", function()
         local Clip = components.Clip
 
-        -- A quad covering the whole target, so where its colour lands is the
+        -- A quad covering the whole target, so where its color lands is the
         -- clip's decision and nothing else's.
         local function fill(world, r, g, b, clip)
             if clip == nil then
@@ -2782,11 +2778,11 @@ describe("ecs.Renderer", function()
             )
 
             local pixels = frameOnce(world, renderer)
-            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
 
             assert.is_true(renderer.count > 1, "the extent covers the room the run was given")
-            assert.are.equal(255, centre.r, "and the row still reaches the screen")
-            assert.are.equal(0, centre.g)
+            assert.are.equal(255, center.r, "and the row still reaches the screen")
+            assert.are.equal(0, center.g)
             renderer:destroy()
         end)
 
@@ -2856,7 +2852,7 @@ describe("ecs.Renderer", function()
         local nextSheet = 0
 
         -- Two texels side by side, one red and one green, cut into two frames
-        -- of one texel each. Which frame is showing is then a colour rather
+        -- of one texel each. Which frame is showing is then a color rather
         -- than a subpixel offset, so the assertion is exact.
         local function twoFrameSheet(renderer)
             nextSheet = nextSheet + 1
@@ -2884,7 +2880,7 @@ describe("ecs.Renderer", function()
                 :bind(sprite)
         end
 
-        -- Which frame the middle of the screen is showing, as its colour.
+        -- Which frame the middle of the screen is showing, as its color.
         local function shownAfter(steps, gpu)
             animation.useGPU(gpu)
             local world, renderer = newScene()
@@ -2902,10 +2898,10 @@ describe("ecs.Renderer", function()
             for _ = 1, steps do
                 pixels = frameAt(world, renderer, STEP)
             end
-            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
             renderer:destroy()
             animation.useGPU(false)
-            return centre
+            return center
         end
 
         -- Frames hold for a tenth of a second each by default, so six steps of
@@ -2921,7 +2917,7 @@ describe("ecs.Renderer", function()
         end)
 
         it("advances the frame without the host writing anything", function()
-            -- The two frames are different colours, so seeing both proves the
+            -- The two frames are different colors, so seeing both proves the
             -- shader moved between them; the frame table's spec is what proves
             -- nothing was written to get there.
             local first = shownAfter(1, true)

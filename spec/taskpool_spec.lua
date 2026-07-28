@@ -1,7 +1,7 @@
 -- The thread pool Box2D solves across.
 --
 -- Two things are worth pinning. The first is that adding workers does not
--- change the answer: Box2D's graph colouring makes the solve independent of
+-- change the answer: Box2D's graph coloring makes the solve independent of
 -- how the work was split, and a pool that handed out overlapping ranges or
 -- reused a worker slot on two threads at once would break that quietly rather
 -- than crash. The second is that shutdown joins, which is asked of the pool
@@ -16,7 +16,7 @@ local World = require("tecs.box2d.World")
 local TaskPool = require("tecs.box2d.TaskPool")
 
 -- A pile rather than a column of loose bodies: stacked contacts are what the
--- solver spreads over graph colours, so this is the scene where the workers
+-- solver spreads over graph colors, so this is the scene where the workers
 -- have anything to disagree about.
 local function build(workerCount)
     local world = World.create({
@@ -131,7 +131,7 @@ describe("box2d.TaskPool", function()
         local single = simulate(1, steps)
 
         -- Bit-exact, not within a tolerance. Box2D solves its constraint
-        -- graph colour by colour and each colour holds no two constraints
+        -- graph color by color and each color holds no two constraints
         -- that share a body, so the arithmetic every body sees is the same
         -- sequence of operations whichever worker performs it. A tolerance
         -- here would accept exactly the drift this test exists to catch.

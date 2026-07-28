@@ -171,8 +171,8 @@ end
 --- Acquires a command buffer and the swapchain texture for this frame.
 ---
 --- Returns nil when the window cannot be presented to, which happens while it
---- is minimised or occluded. Callers skip rendering that frame; the command
---- buffer is cancelled rather than leaked.
+--- is minimized or occluded. Callers skip rendering that frame; the command
+--- buffer is canceled rather than leaked.
 ---
 --- Waits for a frame to be available first, so this is where the loop is paced
 --- under vsync and where a CPU running ahead of `framesInFlight` is held back.
@@ -182,7 +182,7 @@ end
 --- Both failures below cancel, and both are before an acquisition: a call that
 --- returned false acquired nothing, and one that filled the handle with NULL
 --- did not either, which SDL says is not an error and happens while the window
---- is minimised. Cancelling is only legal there. Once a texture has come back,
+--- is minimized. Canceling is only legal there. Once a texture has come back,
 --- the command buffer's only way out is a submission, which is why the frame
 --- this returns carries that fact rather than leaving it to be worked out.
 --- @return A frame to record into, or nil to skip this one. The device's own

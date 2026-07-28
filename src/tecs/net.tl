@@ -268,7 +268,7 @@ local record net
     ---     empty, not a string, or containing a NUL raises.
     --- @return A future over an address the caller owns and closes. Already "failed" when SDL3_net
     ---     could not start or the lookup could not be begun, and otherwise pending until `net.poll` or
-    ---     `Future:wait` settles it. Cancelling it releases the lookup and drops it from `net.pending`.
+    ---     `Future:wait` settles it. Canceling it releases the lookup and drops it from `net.pending`.
     resolve: function(host: string): FutureType<Address>
     --- Begins connecting to a resolved address.
     --- @param address Must have come from `net.resolve`, `Stream:peer` or a received packet; nil or
@@ -276,7 +276,7 @@ local record net
     --- @param port From 1 to 65535. Outside that raises, zero included.
     --- @return A future over a stream the caller owns and closes. Already "failed" when the address is
     ---     closed, SDL3_net could not start, or the connection could not be begun, and otherwise
-    ---     pending until `net.poll` or `Future:wait` settles it. Cancelling it destroys the half-open
+    ---     pending until `net.poll` or `Future:wait` settles it. Canceling it destroys the half-open
     ---     socket.
     connect: function(address: Address, port: integer): FutureType<Stream>
     --- Binds a TCP listener. A nil address listens on all local interfaces.
@@ -301,10 +301,10 @@ local record net
     --- Advances every pending resolution and client connection without
     --- waiting. Call once per frame while asynchronous network work exists.
     --- @return How many futures settled on this call, failures counted, since a failure is a
-    ---     settlement. One cancelled between polls left the queue without being counted here.
+    ---     settlement. One canceled between polls left the queue without being counted here.
     poll: function(): integer
     --- Number of unresolved or connecting futures.
-    --- @return Zero once every resolution and connection has settled or been cancelled, which is when
+    --- @return Zero once every resolution and connection has settled or been canceled, which is when
     ---     `net.poll` has nothing left to advance and `net.quit` stops refusing over them.
     pending: function(): integer
 end

@@ -3,7 +3,7 @@
 # A development preset takes its dependencies from the system because building
 # the set from source is a long build that desktop work does not need. That is
 # only honest while the two agree. The spec suite runs against whatever is
-# installed here, and a spec that asserts on a library's behaviour proves
+# installed here, and a spec that asserts on a library's behavior proves
 # nothing about the library a release carries once the two have drifted: the
 # renderer specs read back pixels through SDL's GPU API, and the physics specs
 # assert positions out of Box2D's solver.

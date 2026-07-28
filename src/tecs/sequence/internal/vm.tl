@@ -269,7 +269,7 @@ local function run(world: World, state: WorldState, cursor: Cursor, budget: inte
             -- Nothing to wait for: either no playTween ran, its target was
             -- already gone, or it has finished and left its outcome behind.
             if cursor.tweenPlayback and not cursor.tweenOutcome then
-                cursor.tweenOutcome = "cancelled"
+                cursor.tweenOutcome = "canceled"
             end
             cursor.tweenPlayback = nil
         elseif op == seqprogram.CALL then
@@ -504,7 +504,7 @@ end
 
 -- Everything evaluating on this clock, stepped once. The walk is backwards so
 -- that a cursor leaving the set, which swaps the last entry into its place,
--- cannot make the walk skip its neighbour.
+-- cannot make the walk skip its neighbor.
 --
 -- The loop below is the one piece of this module that runs per playback per
 -- frame rather than per playback per wait, so it is written to touch nothing
@@ -598,7 +598,7 @@ function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?
         local slot = packed % SLOT_LIMIT
         local generation = (packed - slot) / SLOT_LIMIT
         local cursor = state.cursors[slot]
-        -- Stale entry: the cursor was cancelled, retired, or rescheduled.
+        -- Stale entry: the cursor was canceled, retired, or rescheduled.
         if cursor and cursor.generation == generation and cursor.alive and cursor.seq == seq then
             if cursor.state == "paused" then
                 -- Keep a paused cursor out of the heap; resume re-schedules.

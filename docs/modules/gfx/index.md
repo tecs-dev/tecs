@@ -17,7 +17,7 @@ below, with a page of its own.
 | Module                                         | What it is                                      |
 | ---------------------------------------------- | ----------------------------------------------- |
 | [`tecs.gfx.animation`](/modules/gfx/animation) | sprite sheets, and the playback that reads them |
-| [`tecs.gfx.layers`](/modules/gfx/layers)       | z-ordering and per-layer behaviour              |
+| [`tecs.gfx.layers`](/modules/gfx/layers)       | z-ordering and per-layer behavior               |
 | [`tecs.gfx.materials`](/modules/gfx/materials) | the material a draw dispatches to               |
 | [`tecs.gfx.particles`](/modules/gfx/particles) | emitters                                        |
 
@@ -57,13 +57,13 @@ a type its namespace owns.
 
 ## The camera
 
-A camera is what the view is looking at: a centre in world units, a zoom, a rotation, and a projection
+A camera is what the view is looking at: a center in world units, a zoom, a rotation, and a projection
 mode. It is one type rather than a 2D camera and a 3D one, because the only thing that would differ
 between them is how the matrix is built, and nothing reading the matrix, neither the vertex shader nor
 the cull, cares which built it.
 
-Position is the centre of the view rather than a corner, so a camera that has never been moved shows the
-world origin in the middle of the window. The renderer centres a default camera on the first frame it
+Position is the center of the view rather than a corner, so a camera that has never been moved shows the
+world origin in the middle of the window. The renderer centers a default camera on the first frame it
 draws, so a scene that never mentions a camera behaves as though world coordinates were screen
 coordinates. See [the renderer](#the-renderer) for how a camera reaches a frame.
 
@@ -87,8 +87,8 @@ function Camera.newCamera(options?: CameraOptions): Camera
 
 | Field        | Type     | Default          | Description                                                                               |
 | ------------ | -------- | ---------------- | ----------------------------------------------------------------------------------------- |
-| `x`          | `number` | `0`              | Centre of the view in world units.                                                        |
-| `y`          | `number` | `0`              | Centre of the view in world units.                                                        |
+| `x`          | `number` | `0`              | Center of the view in world units.                                                        |
+| `y`          | `number` | `0`              | Center of the view in world units.                                                        |
 | `zoom`       | `number` | `1`              | Above one magnifies. Zero or less is not rejected.                                        |
 | `rotation`   | `number` | `0`              | Radians.                                                                                  |
 | `projection` | `string` | `"orthographic"` | Any string is accepted and stored; the projection built is orthographic whatever it says. |
@@ -105,10 +105,10 @@ Every field is plain and assignable. A game moves a camera by writing to it, onc
 
 | Field        | Type     | Description                                                                                                                                                                                                             |
 | ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `x`          | `number` | Centre of the view, in world units.                                                                                                                                                                                     |
-| `y`          | `number` | Centre of the view, in world units.                                                                                                                                                                                     |
-| `zoom`       | `number` | Above one magnifies. Applied about the centre, so zooming does not move what is under the middle of the window.                                                                                                         |
-| `rotation`   | `number` | Radians. Positive turns the scene counter-clockwise on screen, which is the camera itself turning the other way: at a quarter turn, a point at +X from the camera in the world is drawn above the centre of the window. |
+| `x`          | `number` | Center of the view, in world units.                                                                                                                                                                                     |
+| `y`          | `number` | Center of the view, in world units.                                                                                                                                                                                     |
+| `zoom`       | `number` | Above one magnifies. Applied about the center, so zooming does not move what is under the middle of the window.                                                                                                         |
+| `rotation`   | `number` | Radians. Positive turns the scene counter-clockwise on screen, which is the camera itself turning the other way: at a quarter turn, a point at +X from the camera in the world is drawn above the center of the window. |
 | `projection` | `string` | `"orthographic"` today. Nothing reads it yet, so setting anything else changes what the camera reports about itself and not what it draws.                                                                              |
 
 The `projection` field exists so a perspective mode can be added without a second camera type, which is
@@ -264,7 +264,7 @@ the cull gives up on them rather than testing a world bound that does not descri
 
 ## The components a scene is drawn from
 
-The components the engine itself reads describe what an entity looks like: what colour it is, which
+The components the engine itself reads describe what an entity looks like: what color it is, which
 image it samples, which material shades it, whether it is clipped, whether it lights the scene, and
 whether it contributes geometry at all. None of them is required to use a world; an entity carrying none
 is a position and some game state.
@@ -334,7 +334,7 @@ moves. Adding the component is all that is needed; the physics plugin adds it to
 
 ### Tint
 
-Base colour, and how much of what is behind the entity survives it.
+Base color, and how much of what is behind the entity survives it.
 
 | Field | Type    | Default | Description                                 |
 | ----- | ------- | ------- | ------------------------------------------- |
@@ -368,7 +368,7 @@ still drawn opaque. This note goes when `src/tecs/Extractor.tl` marks the row.
 
 ### Sprite
 
-Samples a texture instead of drawing flat colour.
+Samples a texture instead of drawing flat color.
 
 | Field   | Type      | Default | Description                                                            |
 | ------- | --------- | ------- | ---------------------------------------------------------------------- |
@@ -430,7 +430,7 @@ A light resolved by the deferred lighting pass.
 | `r`         | `float` | `1`     | Red, 0 to 1.                    |
 | `g`         | `float` | `1`     | Green, 0 to 1.                  |
 | `b`         | `float` | `1`     | Blue, 0 to 1.                   |
-| `intensity` | `float` | `1`     | Multiplier on the colour.       |
+| `intensity` | `float` | `1`     | Multiplier on the color.        |
 
 At zero `height` the Lambert term vanishes and the light contributes nothing, which reads as the light being
 broken rather than as a value being wrong.
@@ -539,9 +539,9 @@ function tecs.gfx.imageId(name: string): integer
 **Returns:** an index, starting at one, so zero is the index of no image at all and that is what a `Sprite`
 carries until something names one.
 
-The name is normalised lexically first, so what an image is identified by is the path it names rather than the
+The name is normalized lexically first, so what an image is identified by is the path it names rather than the
 spelling it was named with: repeated separators, `.` segments and a trailing separator are dropped. Nothing here
-reads the filesystem, so a name normalises the same before its file exists as after. Three things are
+reads the filesystem, so a name normalizes the same before its file exists as after. Three things are
 deliberately left alone: `..`, because resolving it without the filesystem renames a path across a symlink;
 letter case, because folding it merges two files a case-sensitive filesystem keeps apart; and the asset root,
 because stripping it would make an identity depend on process state that `TECS_ASSETS` and
@@ -646,7 +646,7 @@ Four rules decide where a new pass goes and what it sees.
   swapchain, so anything added to the seam is declared above it.
 - **Inputs are validated when the graph is built.** A pass reading a target no pass declares, or reading one
   before any pass writes it, raises there rather than drawing black later.
-- **A colour clear comes from the target**, which is right while one pass writes a target and wrong as soon as
+- **A color clear comes from the target**, which is right while one pass writes a target and wrong as soon as
   two do, since the second would clear the first one's result away. A pass may name its own clear, which wins,
   and `PassGraph.LOAD` is how it says to load whatever the target holds. That is what a pass accumulating into a
   target an earlier pass filled needs.
@@ -729,7 +729,7 @@ Everything the renderer draws is an entity in a world. The components it reads a
 modules that produce them have pages of their own:
 
 - [`tecs.gfx.Camera`](#the-camera), the view it draws from
-- [`tecs.gfx.layers`](/modules/gfx/layers), z-ordering and per-layer behaviour
+- [`tecs.gfx.layers`](/modules/gfx/layers), z-ordering and per-layer behavior
 - [`tecs.gfx.animation`](/modules/gfx/animation), sprite sheets and playback
 - [`tecs.gfx`](/modules/gfx/), distance-field text drawn through an instance producer
 - [`tecs.gfx.particles`](/modules/gfx/particles), emitters
@@ -739,7 +739,7 @@ modules that produce them have pages of their own:
 
 | Field                | What it is                                                             |
 | -------------------- | ---------------------------------------------------------------------- |
-| `renderer.camera`    | The view. Centred on the viewport the first time a frame is drawn      |
+| `renderer.camera`    | The view. Centerd on the viewport the first time a frame is drawn      |
 | `renderer.capacity`  | Instances the buffers are sized for                                    |
 | `renderer.count`     | Instances the last sync left resident                                  |
 | `renderer.dropped`   | Instances the last sync could not fit                                  |
@@ -754,7 +754,7 @@ larger `capacity` in the [application config](/modules/application#the-world-and
 
 `rewritten` being zero is the dirty model working. A frame in which nothing moved rewrites nothing.
 
-The camera centres itself on the viewport the first time there is something to draw, because the size to centre
+The camera centers itself on the viewport the first time there is something to draw, because the size to center
 on is only known once there is a frame to draw into. A scene that never mentions a camera therefore sees world
 coordinates as screen coordinates.
 
@@ -788,7 +788,7 @@ given at registration, so every `Sprite`, `Sheet` and glyph already spawned from
 texels and the next frame simply draws the new pixels. Nothing in the world is touched and nothing has to be
 invalidated. The size has to match — a larger or smaller image needs a different rect, and the old rect is
 already copied into every instance that uses it, so a mismatch raises rather than silently drawing part of a
-neighbour. It also raises on a path nothing is registered under, since adding one would be `registerImage`.
+neighbor. It also raises on a path nothing is registered under, since adding one would be `registerImage`.
 
 `regionOf` answers what `registerImage` would without a decoded handle to answer it with. A caller that has lost
 its derived copy of a region, which a font atlas does when its metrics are re-read, would otherwise have to
@@ -1037,7 +1037,7 @@ end
 | `text`        | `""`     | The string laid out. A newline starts a line; nothing else breaks one           |
 | `font`        | none     | The font the glyphs come from. Without one the text draws nothing               |
 | `size`        | `16`     | Em size in world units                                                          |
-| `align`       | `"left"` | `"left"`, `"centre"` or `"right"`, within the widest line of the block          |
+| `align`       | `"left"` | `"left"`, `"center"` or `"right"`, within the widest line of the block          |
 | `lineSpacing` | `1.0`    | Multiplies the font's line height                                               |
 | `tracking`    | `0.0`    | Extra advance between glyphs, in world units                                    |
 | `width`       | `0.0`    | Extent of the last layout, written by the layout system; assigning does nothing |
@@ -1046,7 +1046,7 @@ end
 An `align` that is none of the three raises where the component is constructed.
 
 `Text` requires `Transform`, so one is never accidentally left off. The transform places the
-top-left corner of the text block and orients and scales the whole block; a `Tint` colours every
+top-left corner of the text block and orients and scales the whole block; a `Tint` colors every
 glyph; a `Clip` keeps the glyphs inside a rectangle exactly as it would any other quad. All three
 are ordinary components on an ordinary entity, so a text is moved, parented, tweened and layered
 like anything else. See [components](#the-renderer) for `Tint` and `Clip`.
@@ -1061,7 +1061,7 @@ world:spawn(
         text = "tecs\n1200 entities",
         font = tecs.gfx.defaultFont(),
         size = 28,
-        align = "centre",
+        align = "center",
     })
 )
 ```
@@ -1094,7 +1094,7 @@ What layout does not do: wrapping to a width, anchoring anywhere but the block's
 per-glyph styling, right-to-left or complex shaping, and any effect around the outline. Each of
 those is a decision rather than an omission of effort.
 
-Glyphs are drawn by the `glyph` material, which is unlit: text draws at its own colour rather than
+Glyphs are drawn by the `glyph` material, which is unlit: text draws at its own color rather than
 taking whatever the scene's lights leave it in. A label that should take the light is a material of
 its own; see [materials](/modules/gfx/materials).
 
@@ -1246,7 +1246,7 @@ which is how it survives review.
 </code></pre>
 
 Creates a camera. Everything defaults to an unrotated, unzoomed view at
-the world origin, which a renderer then recentres if the game never
+the world origin, which a renderer then recenters if the game never
 moves it.
 
 #### Parameters
@@ -1281,7 +1281,7 @@ else changes what the camera reports about itself and not what it draws.
 
 Radians. Positive turns the scene counter-clockwise on screen, which is
 the camera itself turning the other way: at a quarter turn, a point at
-+X from the camera in the world is drawn above the centre of the window.
++X from the camera in the world is drawn above the center of the window.
 <a id="tecs.gfx.Camera.toScreen"></a>
 
 ### tecs.gfx.Camera.toScreen
@@ -1376,7 +1376,7 @@ geometry that should have drawn, which is why the error goes this way.
 <pre><code v-pre><a href="#tecs.gfx.Camera.x">tecs.gfx.Camera.x</a>: number
 </code></pre>
 
-Centre of the view, in world units.
+Center of the view, in world units.
 <a id="tecs.gfx.Camera.y"></a>
 
 ### tecs.gfx.Camera.y
@@ -1393,7 +1393,7 @@ the bottom of the world.
 <pre><code v-pre><a href="#tecs.gfx.Camera.zoom">tecs.gfx.Camera.zoom</a>: number
 </code></pre>
 
-Above one magnifies. Applied about the centre, so zooming does not move
+Above one magnifies. Applied about the center, so zooming does not move
 what is under the middle of the window.
 
 <a id="tecs.gfx.Clip"></a>
@@ -1484,7 +1484,7 @@ is what most entities in a world are.
 <pre><code v-pre><a href="#tecs.gfx.Sprite">tecs.gfx.Sprite</a>: Sprite
 </code></pre>
 
-Samples a texture instead of drawing flat colour. `image` is an
+Samples a texture instead of drawing flat color. `image` is an
 `imageId` index, and 0 means no image; `u0, v0, u1, v1` select the
 region, defaulting to the whole of it, so an atlas entry and a whole
 image are the same thing. `slot` is the texture-array layer the
@@ -1499,7 +1499,7 @@ Only the image name survives a snapshot.
 <pre><code v-pre><a href="#tecs.gfx.Tint">tecs.gfx.Tint</a>: Tint
 </code></pre>
 
-Base colour and coverage, each channel 0 to 1, defaulting to opaque
+Base color and coverage, each channel 0 to 1, defaulting to opaque
 white. The alpha decides which pass draws the entity: exactly 1 goes
 through the G-buffer and is lit once for the whole scene, anything
 below 1 goes through the forward pass instead, writes no depth, and
@@ -1514,7 +1514,7 @@ meant to be solid.
 
 Index of an image name, assigning one the first time it is seen.
 
-The name is normalised lexically first, so `"a/b.png"` and
+The name is normalized lexically first, so `"a/b.png"` and
 `"a/./b.png"` are one image. Case, `..` and the asset root are
 deliberately left alone, and nothing here touches the filesystem.
 
@@ -1549,7 +1549,7 @@ Name an image index stands for.
 
 | Type                      | Description                                               |
 | ------------------------- | --------------------------------------------------------- |
-| <code v-pre>string</code> | The normalised name, or nil when the index names nothing. |
+| <code v-pre>string</code> | The normalized name, or nil when the index names nothing. |
 
 <a id="tecs.gfx.Renderer.ClipRegion"></a>
 
@@ -1628,7 +1628,7 @@ Adds a producer, laid out after the archetypes in the order added.
 <pre><code v-pre><a href="#tecs.gfx.Renderer.camera">tecs.gfx.Renderer.camera</a>: Camera
 </code></pre>
 
-What the view is looking at. Centred on the viewport the first time a
+What the view is looking at. Centerd on the viewport the first time a
 frame is drawn, so a scene that never mentions a camera sees world
 coordinates as screen coordinates.
 <a id="tecs.gfx.Renderer.capacity"></a>
@@ -1991,7 +1991,7 @@ pixels. Nothing in the world is touched and nothing has to be invalidated.
 
 The size has to match. A larger or smaller image needs a different rect, and
 the UVs of the old one are already copied into every instance that uses it,
-so this refuses rather than silently drawing part of a neighbour.
+so this refuses rather than silently drawing part of a neighbor.
 
 Fails on a path nothing is registered under, since there is no rect to write
 into and adding one would be `registerImage`.
@@ -2244,7 +2244,7 @@ text has no such glyph.
 
 | Type                      | Description                                                                                                                                                                                                                    |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre>number</code> | World x of the glyph's centre, then y, then its width and height in world units. All four are nil together when the plugin is not installed on the world, the entity carries no `Text`, or the index is past what it laid out. |
+| <code v-pre>number</code> | World x of the glyph's center, then y, then its width and height in world units. All four are nil together when the plugin is not installed on the world, the entity carries no `Text`, or the index is past what it laid out. |
 | <code v-pre>number</code> |                                                                                                                                                                                                                                |
 | <code v-pre>number</code> |                                                                                                                                                                                                                                |
 | <code v-pre>number</code> |                                                                                                                                                                                                                                |

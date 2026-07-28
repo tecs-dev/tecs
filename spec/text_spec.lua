@@ -58,7 +58,7 @@ describe("gfx.text", function()
     end)
 
     -- A world with a renderer and the text plugin. Ambient is full white so a
-    -- glyph's colour reaches the screen without a light in the way.
+    -- glyph's color reaches the screen without a light in the way.
     local function newScene()
         local world = tecs.ecs.newWorld()
         local renderer = Renderer.newRenderer(device.handle, FORMAT, {
@@ -95,7 +95,7 @@ describe("gfx.text", function()
     end
 
     -- Ink in the rectangle, counted as pixels whose green channel is lit. Text
-    -- is drawn green throughout so a lit pixel cannot be the clear colour.
+    -- is drawn green throughout so a lit pixel cannot be the clear color.
     local function ink(pixels, x0, y0, x1, y1)
         local count = 0
         for y = math.floor(y0), math.floor(y1) - 1 do
@@ -336,7 +336,7 @@ describe("gfx.text", function()
         renderer:destroy()
     end)
 
-    it("colours glyphs from the text's tint", function()
+    it("colors glyphs from the text's tint", function()
         local world, renderer = newScene()
         local entity = world:spawn(
             Transform(20, 60, 0, 1),
@@ -456,14 +456,14 @@ describe("gfx.text", function()
         local other = world:get(second, text.Text)
         assert.are.equal(4, item._spanCount)
         assert.are.equal(8, renderer.count)
-        local span, neighbour = item._span, other._span
+        local span, neighbor = item._span, other._span
 
         world:getMut(first, text.Text).text = "CCCC"
         frame(world, renderer)
 
         assert.are.equal(span, item._span, "the same span, rewritten")
         assert.are.equal(4, item._spanCount)
-        assert.are.equal(neighbour, other._span, "and nothing else moved")
+        assert.are.equal(neighbor, other._span, "and nothing else moved")
         assert.are.equal(8, renderer.count)
         renderer:destroy()
     end)

@@ -127,9 +127,9 @@ void main() {
     vec2 carried = vec2(emitters.value[emitter + EMITTER_X],
                         emitters.value[emitter + EMITTER_Y]);
     // What radial and tangential acceleration are measured from. In local
-    // space the state is already relative to the emitter, so the centre is the
+    // space the state is already relative to the emitter, so the center is the
     // origin; in world space it is wherever the emitter is now.
-    vec2 centre = follows != 0.0 ? vec2(0.0) : carried;
+    vec2 center = follows != 0.0 ? vec2(0.0) : carried;
 
     // A particle born this frame is integrated from its own step rather than
     // from the frame's, which is what stops a frame that fell behind ageing a
@@ -137,7 +137,7 @@ void main() {
     int count = int(min(min(emitters.value[emitter + EMITTER_STEPS], elapsed),
         params.timing.y));
     for (int step = 0; step < count; step++) {
-        vec2 offset = position - centre;
+        vec2 offset = position - center;
         float distance = length(offset);
         vec2 away = distance > 1e-6 ? offset / distance : vec2(0.0);
         velocity += (constant + away * radial
@@ -209,7 +209,7 @@ void main() {
         // The playback encoding the frame table already defines, and no second
         // table: the identifier negated, the step playback began on, the ticks
         // it advances per step, and no looping. The rate is the cycle divided
-        // by this particle's own life, so a randomised lifetime randomises the
+        // by this particle's own life, so a randomized lifetime randomizes the
         // playback speed and the animation lands on its last frame exactly as
         // the particle expires.
         //

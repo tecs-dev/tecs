@@ -15,7 +15,7 @@ MaterialOutput material(MaterialInput frag) {
     // normals are unit length, so the largest of the three is a distance.
     vec2 folded = vec2(abs(frag.local.x), frag.local.y);
     // The slanted side runs from the apex at (0, -0.5) to (0.5, 0.5), so its
-    // outward normal is (2, -1) normalised.
+    // outward normal is (2, -1) normalized.
     float side = dot(normalize(vec2(2.0, -1.0)), folded - vec2(0.0, -0.5));
     float base = folded.y - 0.5;
     result.coverage = -max(side, base);

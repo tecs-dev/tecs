@@ -393,8 +393,8 @@ describe("Application", function()
             assert.is_truthy(app:crashed():match("render boom"))
             local crashedFrame = app._frame
             assert.is_not_nil(crashedFrame, "the frame was not reachable from the application")
-            -- Submitted rather than cancelled: a swapchain texture had been
-            -- acquired on it, and SDL documents cancelling after that as an
+            -- Submitted rather than canceled: a swapchain texture had been
+            -- acquired on it, and SDL documents canceling after that as an
             -- error.
             assert.is_true(crashedFrame.acquired)
             assert.are.equal("submitted", crashedFrame.state)
@@ -541,7 +541,7 @@ describe("Application", function()
             assert.is_truthy(reason:find("none of debug, mcpPort or watch", 1, true))
             assert.is_truthy(app:crashed(), "the traceback was cleared anyway")
 
-            -- And it stays stopped, which is the behaviour the gate exists for.
+            -- And it stays stopped, which is the behavior the gate exists for.
             app:_iterate(nil, 0, nil)
             assert.are.equal(0, ran())
             app:_shutdown()
@@ -843,7 +843,7 @@ describe("Application", function()
 
     -- A game could not save state on being backgrounded at all: the host copied
     -- the event and returned, and there was no hook to call. The contract is
-    -- the interesting half. At this project's scale a world is not serialisable
+    -- the interesting half. At this project's scale a world is not serializable
     -- inside a platform callback, so the surface takes bytes the game already
     -- prepared and cannot be handed a function that would defer the expensive
     -- part into exactly the callback that cannot afford it.
@@ -1003,7 +1003,7 @@ describe("Application", function()
 
         -- The old default was 0.08, which renders a nearly black screen for a
         -- game that has not set up lighting. White shows sprites at their own
-        -- colour and lets lights add on top of them.
+        -- color and lets lights add on top of them.
         it("lights an unlit scene at full ambient", function()
             local app = build({})
             assert.is_true(app:_init())

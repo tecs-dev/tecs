@@ -22,7 +22,7 @@
 layout(local_size_x = 256) in;
 
 layout(set = 0, binding = 0) readonly buffer Bounds {
-    vec4 item[];   // xy centre, zw half extent
+    vec4 item[];   // xy center, zw half extent
 } bounds;
 
 layout(set = 1, binding = 0) writeonly buffer Slots { uint slot[]; } slots;

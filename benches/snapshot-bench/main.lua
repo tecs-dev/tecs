@@ -172,7 +172,7 @@ bench.suite({
 })
 
 -------------------------------------------------------------------------------
--- Load suite: time loadSnapshot from pre-serialised bytes.
+-- Load suite: time loadSnapshot from pre-serialized bytes.
 -------------------------------------------------------------------------------
 
 bench.suite({

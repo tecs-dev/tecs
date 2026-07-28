@@ -125,7 +125,7 @@ describe(
                 )
 
                 it(
-                    "releases a version when its last playback is cancelled",
+                    "releases a version when its last playback is canceled",
                     function()
                         local name = uniqueName()
                         local v1 = sequence.define(name, {sequence.waitSteps(20)})
@@ -451,7 +451,7 @@ describe(
                         luassert.is_true(sequence.cancel(world, handle))
                         stepWorld(world, 5)
                         luassert.equals(0, calls)
-                        luassert.equals("cancelled", sequence.status(world, handle).state)
+                        luassert.equals("canceled", sequence.status(world, handle).state)
                     end
                 )
             end
@@ -684,7 +684,7 @@ describe(
                 )
 
                 it(
-                    "cancels the whole tree when the root is cancelled",
+                    "cancels the whole tree when the root is canceled",
                     function()
                         local prog = sequence.define(
                             uniqueName(),
@@ -753,7 +753,7 @@ describe(
                         local handle = sequence.play(world, prog)
 
                         stepWorld(world, 3)
-                        luassert.same({"b", "done"}, order, "a cancelled branch leaves the join one short")
+                        luassert.same({"b", "done"}, order, "a canceled branch leaves the join one short")
                         luassert.equals("completed", sequence.status(world, handle).state)
                     end
                 )
@@ -981,7 +981,7 @@ describe(
                 )
 
                 it(
-                    "releases the channel when a blocked playback is cancelled",
+                    "releases the channel when a blocked playback is canceled",
                     function()
                         local handle = sequence.play(world, blockingProgram())
                         stepWorld(world, 1)
@@ -1256,7 +1256,7 @@ describe(
                 )
 
                 it(
-                    "releases the wait when a parked playback is cancelled",
+                    "releases the wait when a parked playback is canceled",
                     function()
                         local prog = sequence.define(
                             uniqueName(),
@@ -1423,7 +1423,7 @@ describe(
                         stepWorld(world, 5)
 
                         luassert.equals(0, calls)
-                        luassert.equals("cancelled", sequence.status(world, handle).state)
+                        luassert.equals("canceled", sequence.status(world, handle).state)
                     end
                 )
             end
@@ -1502,15 +1502,15 @@ describe(
                 )
 
                 it(
-                    "resumes when the playback is cancelled",
+                    "resumes when the playback is canceled",
                     function()
                         local handle = playAndWait(slide)
                         stepWorld(world, 2)
 
                         sequence.cancel(world, started(handle))
                         stepWorld(world, 2)
-                        luassert.equals(1, calls, "a cancelled timeline must not leave a waiter")
-                        luassert.equals("cancelled", sequence.status(world, handle).tweenOutcome)
+                        luassert.equals(1, calls, "a canceled timeline must not leave a waiter")
+                        luassert.equals("canceled", sequence.status(world, handle).tweenOutcome)
                     end
                 )
 
@@ -2004,7 +2004,7 @@ describe(
                 )
 
                 it(
-                    "stops evaluating when the playback is cancelled",
+                    "stops evaluating when the playback is canceled",
                     function()
                         local elapsed = accumulator("spec.forever", 1e9)
                         local prog = sequence.define(uniqueName(), {sequence.eval("spec.forever")})
@@ -2016,7 +2016,7 @@ describe(
 
                         sequence.cancel(world, handle)
                         stepWorld(world, 3)
-                        luassert.equals(before, elapsed[1], "a cancelled playback stops being stepped")
+                        luassert.equals(before, elapsed[1], "a canceled playback stops being stepped")
                     end
                 )
 
@@ -2476,7 +2476,7 @@ describe(
                         world:update(1 / 60)
                         world:despawn(entity)
                         world:update(1 / 60)
-                        luassert.equals("cancelled", sequence.status(world, handle).state)
+                        luassert.equals("canceled", sequence.status(world, handle).state)
                     end
                 )
 

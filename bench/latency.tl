@@ -66,7 +66,7 @@ local HEIGHT <const> = 540
 local TOTAL <const> = WARMUP + FRAMES
 
 --- The key the harness presses. Anything unbound would do; this one is easy to
---- recognise in a log.
+--- recognize in a log.
 local KEY <const> = "space"
 
 local function spawnField(world: tecs.World)
@@ -167,7 +167,7 @@ return tecs.application.create({
         --
         -- `First` rather than `Update`, so it stays where the loop used to
         -- call it from and the press still lands one iteration ahead of the
-        -- step that reacts to it. The one behavioural difference is that the
+        -- step that reacts to it. The one behavioral difference is that the
         -- warmup reset now happens after this iteration's arrival stamp was
         -- taken rather than before, so the sample straddling the cut is
         -- dropped instead of being counted against a cleared table. One of a

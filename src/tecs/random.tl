@@ -88,8 +88,8 @@ local GRAD2Y <const>: {number} = {
     -0.7071067811865476,
 }
 
---- The twelve edge midpoints of a cube, normalised. Sixteen entries, because
---- a 4-bit hash indexes them and rounding one down to twelve would favour the
+--- The twelve edge midpoints of a cube, normalized. Sixteen entries, because
+--- a 4-bit hash indexes them and rounding one down to twelve would favor the
 --- first four; the four repeats are Perlin's, chosen so the repetition adds no
 --- direction the set does not already have.
 local R2 <const> = 0.7071067811865476
@@ -290,7 +290,7 @@ local record random
         --- @param y As `x`.
         --- @param z As `x`.
         --- @param octaves One or more, as for `fbm2`, and one `noise3` call each.
-        --- @return A value in [-1, 1], normalised as `fbm2` normalises.
+        --- @return A value in [-1, 1], normalized as `fbm2` normalizes.
         fbm3: function(self: Noise, x: number, y: number, z: number, octaves: integer): number
     end
 
@@ -371,7 +371,7 @@ local function mul32(a: integer, b: integer): integer
     return tobit(lshift(hi * b, 16) + lo * b)
 end
 
---- SplitMix32's finaliser: one word in, one avalanched word out.
+--- SplitMix32's finalizer: one word in, one avalanched word out.
 local function mix32(z: integer): integer
     local r = mul32(bxor(z, rshift(z, 16)), 0x21F0AAAD)
     r = mul32(bxor(r, rshift(r, 15)), 0x735A2D97)

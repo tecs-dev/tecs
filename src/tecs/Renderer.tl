@@ -45,7 +45,7 @@ local DEFAULT_CAPACITY <const> = 65536
 
 --- Ambient light when none was asked for.
 ---
---- White, so a scene with no lights in it draws its own colours rather than a
+--- White, so a scene with no lights in it draws its own colors rather than a
 --- fraction of them. A dim default makes the first thing anyone builds look
 --- broken and makes lighting the price of seeing anything at all; at white,
 --- lights add on top of a scene that is already legible.
@@ -98,7 +98,7 @@ local record Renderer
     --- `addComputeStage`.
     type ComputeStage = ComputeStage
 
-    --- What the view is looking at. Centred on the viewport the first time a
+    --- What the view is looking at. Centerd on the viewport the first time a
     --- frame is drawn, so a scene that never mentions a camera sees world
     --- coordinates as screen coordinates.
     camera: Camera
@@ -139,7 +139,7 @@ local record Renderer
     --- Whether the camera has been put in the middle of the viewport yet. It
     --- happens on the first frame that has something to draw, once and never
     --- again, so a game that moves the camera itself is not moved back.
-    _centred: boolean
+    _centerd: boolean
 end
 
 local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
@@ -157,7 +157,7 @@ function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, opt
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
-    self._centred = false
+    self._centerd = false
     self._slot = 0
     self._packet = FramePacket.create()
 
@@ -271,7 +271,7 @@ end
 ---
 --- The size has to match. A larger or smaller image needs a different rect, and
 --- the UVs of the old one are already copied into every instance that uses it,
---- so this refuses rather than silently drawing part of a neighbour.
+--- so this refuses rather than silently drawing part of a neighbor.
 ---
 --- Fails on a path nothing is registered under, since there is no rect to write
 --- into and adding one would be `registerImage`.
@@ -463,12 +463,12 @@ end
 function Renderer:render(frame: Frame)
     local packet = self._packet
 
-    -- The camera centres itself the first time there is something to draw, and
-    -- the size to centre on is only known once there is a frame to draw into.
+    -- The camera centers itself the first time there is something to draw, and
+    -- the size to center on is only known once there is a frame to draw into.
     -- Written to the camera the game holds, since that is where a game reads it
     -- back from, and copied into the packet this frame is drawn from.
-    if not self._centred and packet.count > 0 then
-        self._centred = true
+    if not self._centerd and packet.count > 0 then
+        self._centerd = true
         self.camera.x = frame.width * 0.5
         self.camera.y = frame.height * 0.5
         packet:setCamera(self.camera)

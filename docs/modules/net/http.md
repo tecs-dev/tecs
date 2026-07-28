@@ -159,7 +159,7 @@ manifest is data rather than a mistake in the program, so a non-`http` scheme co
 ## A response is not a failure
 
 A 404 settles `"ready"` with `status` 404. `"failed"` means the transfer did not complete: the name did not
-resolve, the connection was refused, TLS did not verify, the deadline passed. `"cancelled"` means this process
+resolve, the connection was refused, TLS did not verify, the deadline passed. `"canceled"` means this process
 stopped it.
 
 This is the same reasoning [`proc`](/modules/system) applies to an exit code. A status code is the answer to the
@@ -212,7 +212,7 @@ tecs.net.http.newClient({ proxy = "http://cache.internal:3128", noProxy = "local
 
 A future is the right shape for a loading screen and the wrong one for a request you want to be a thing in the
 world. The plugin gives it an entity instead, so it is listed by the [debug server](/modules/mcp), reacted to by a
-system, and cancelled when whatever asked for it despawns.
+system, and canceled when whatever asked for it despawns.
 
 ```teal
 world:addPlugin(tecs.net.http.plugin.install)
@@ -229,13 +229,13 @@ The plugin owns one client per world, reachable as `http.plugin.clientOf(world)`
 `http.plugin.close(world)`. Build a second one with `tecs.net.http.newClient` if a chatty API and a downloader want
 different pools.
 
-## Cancelling
+## Canceling
 
 ```teal
 local pending = client:send({ url = url })
 pending:cancel()
 ```
 
-Cancelling the future is the way; it is reference counted, so a request two things are waiting on stops when the
+Canceling the future is the way; it is reference counted, so a request two things are waiting on stops when the
 second of them gives up. `Client:cancel(future)` is the same thing for a caller holding the client rather than the
 future, and `Client:close()` cancels everything in flight and releases the pool.

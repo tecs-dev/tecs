@@ -9,13 +9,13 @@
 ---
 --- ## Four states
 ---
---- `status` is `"pending"`, `"ready"`, `"failed"` or `"cancelled"`, and it is a
+--- `status` is `"pending"`, `"ready"`, `"failed"` or `"canceled"`, and it is a
 --- plain string field rather than a method, because several call sites read it
 --- once a frame and a field read plus a string compare is what that should
 --- cost.
 ---
---- `"cancelled"` is separate from `"failed"` because `recover` must not run for
---- it: a caller who cancelled a load did not ask for a fallback value. An
+--- `"canceled"` is separate from `"failed"` because `recover` must not run for
+--- it: a caller who canceled a load did not ask for a fallback value. An
 --- unwelcome answer is also not `"failed"`: a child process that exits 1 and an
 --- HTTP response that is 404 both settle `"ready"`, because the code is the
 --- answer rather than an error. `"failed"` means the work never produced one.
@@ -23,7 +23,7 @@
 --- ## One thread
 ---
 --- Futures are created and settled on the thread that pumps their source, and
---- there is no synchronisation anywhere below. That is what removes the atomics
+--- there is no synchronization anywhere below. That is what removes the atomics
 --- a general-purpose future library carries, so it is load-bearing rather than
 --- incidental: **a source must settle its futures on the thread that pumps
 --- it.** The only cross-thread boundary any source here has is
@@ -81,15 +81,15 @@ local DEFAULT_SLICE_MS <const> = 16
 
 --- A value that settles once, and the combinators over it.
 ---
---- `status` moves from "pending" to exactly one of "ready", "failed" or "cancelled" and
+--- `status` moves from "pending" to exactly one of "ready", "failed" or "canceled" and
 --- never moves again, so the first answer wins and every later settlement is dropped.
 --- Reading `value` is only meaningful on "ready" and `error` only on "failed" or
---- "cancelled".
+--- "canceled".
 ---
 --- Nothing settles itself. A future advances when its source is pumped, which a frame does
 --- through the subsystem that owns the source and a startup path does through `wait`.
 ---
---- There is no synchronisation here: a future is created, settled and read on one thread,
+--- There is no synchronization here: a future is created, settled and read on one thread,
 --- and a source must settle its futures on the thread that pumps it.
 local record Future<T>
     --- Where a future's settlements come from, and what a blocking wait spends
@@ -127,16 +127,16 @@ local record Future<T>
         --- Stops the work behind a root future whose last watcher has gone.
         ---
         --- Optional. A source with no hook leaves the work running and stops
-        --- caring, which is what a future over something uncancellable can
+        --- caring, which is what a future over something uncancelable can
         --- honestly do.
         cancel: function(self: Source, future: Future<any>)
     end
 
-    --- "pending", "ready", "failed", or "cancelled".
+    --- "pending", "ready", "failed", or "canceled".
     status: string
     --- What settled. Valid only on "ready".
     value: T
-    --- Why it did not. Set on "failed" and on "cancelled".
+    --- Why it did not. Set on "failed" and on "canceled".
     error: string
 
     --- Where settlements come from. Rewritten when a `flatMap` moves the chain
@@ -146,7 +146,7 @@ local record Future<T>
     --- Registered dependents, in registration order. Allocated on the first.
     _listeners: {function(Future<any>)}
     --- How many listeners have been registered. Counted rather than measured,
-    --- because cancelling a link clears its slot and `#` over an array with a
+    --- because canceling a link clears its slot and `#` over an array with a
     --- hole in it is not defined.
     _listenerCount: integer
     --- How many of them have run. A future already settled when a listener is
@@ -163,12 +163,12 @@ local record Future<T>
     --- knows what to advance. Without this a `map` link giving up would stop
     --- the decode its upstream is still waiting for.
     _owned: boolean
-    --- The future this one derives from, so cancelling a link can drop its
+    --- The future this one derives from, so canceling a link can drop its
     --- listener and decrement what it was watching.
     _upstream: Future<any>
     --- Index of this future's listener in `_upstream._listeners`.
     _upstreamAt: integer
-    --- Every input of a join, which has no single upstream. Cancelling the join
+    --- Every input of a join, which has no single upstream. Canceling the join
     --- decrements all of them.
     _upstreams: {Future<any>}
 
@@ -187,13 +187,13 @@ local record Future<T>
 
     --- A future carrying `transform` applied to this one's value.
     ---
-    --- `transform` runs only on "ready". A "failed" or "cancelled" upstream
+    --- `transform` runs only on "ready". A "failed" or "canceled" upstream
     --- propagates without calling it, and a raise inside it becomes this link's
     --- failure.
     ---
     --- @param transform Called at most once, with the upstream value. Nil raises here and
     ---     now rather than at settlement.
-    --- @return A new future watching this one. Cancelling it gives up this link's interest
+    --- @return A new future watching this one. Canceling it gives up this link's interest
     ---     in the upstream and does not settle the upstream unless nothing else wants it.
     map: function<U>(self: Future<T>, transform: function(T): U): Future<U>
 
@@ -202,19 +202,19 @@ local record Future<T>
     --- The one combinator that expresses a dependent second request. Two things
     --- follow from `transform` starting work rather than transforming work
     --- already done: the derived future's source becomes the inner future's, so
-    --- a chain can begin on a worker and end somewhere else; and cancelling
+    --- a chain can begin on a worker and end somewhere else; and canceling
     --- before the outer settles stops `transform` from ever being called, since
     --- there is nothing yet to cancel afterwards.
     ---
     --- @param transform Called at most once, on "ready" only. Returning nil rather than a
     ---     future fails this link; nil for `transform` itself raises here and now.
     --- @return A new future settling to whatever the inner one settles to, status and all,
-    ---     so an inner that is cancelled leaves this cancelled and not failed.
+    ---     so an inner that is canceled leaves this canceled and not failed.
     flatMap: function<U>(self: Future<T>, transform: function(T): Future<U>): Future<U>
 
     --- A future that turns this one's failure into a value.
     ---
-    --- `recovery` runs only on "failed". A "cancelled" upstream is not
+    --- `recovery` runs only on "failed". A "canceled" upstream is not
     --- recovered, which is the whole reason the two are distinct states.
     ---
     --- @param recovery Given the upstream's error string. Raising inside it fails this
@@ -241,13 +241,13 @@ local record Future<T>
     --- Gives up this consumer's interest in the work.
     ---
     --- Reference counted, because a shared root is real: two loads of one path
-    --- that overlap get the same future, and one of them cancelling must not
+    --- that overlap get the same future, and one of them canceling must not
     --- break the other. So this decrements, and only the last one settles the
-    --- future "cancelled" and asks the source to stop the work. Cancelling a
+    --- future "canceled" and asks the source to stop the work. Canceling a
     --- derived future drops its listener and decrements its upstream, which may
     --- in turn reach zero.
     ---
-    --- Cancelling a settled future is a no-op.
+    --- Canceling a settled future is a no-op.
     cancel: function(self: Future<T>)
 
     --- Settles this future with a value, if nothing has settled it yet.
@@ -268,7 +268,7 @@ local record Future<T>
     ---     so `error` is set on every failed future.
     fail: function(self: Future<T>, err: string)
 
-    --- Settles this future as cancelled, if nothing has settled it yet.
+    --- Settles this future as canceled, if nothing has settled it yet.
     ---
     --- The producer half of the third terminal state, and the counterpart of
     --- `cancel` rather than a spelling of it: `cancel` is a consumer saying it
@@ -277,7 +277,7 @@ local record Future<T>
     --- or at its deadline reaches its future through here, as does a transfer
     --- taken off the multi.
     ---
-    --- @param err Nil becomes "cancelled". No watcher counting happens here: this settles
+    --- @param err Nil becomes "canceled". No watcher counting happens here: this settles
     ---     the future outright, whoever else was waiting on it.
     abandon: function(self: Future<T>, err: string)
 
@@ -293,7 +293,7 @@ local record Future<T>
     --- and a `wait` on it returns at once.
     ---
     --- @return A future at "pending" with one watcher, so a single `cancel` on it settles
-    ---     it "cancelled" and calls the source's hook.
+    ---     it "canceled" and calls the source's hook.
     pending: function<U>(source?: Source): Future<U>
 
     --- A future already carrying a value.
@@ -313,7 +313,7 @@ local record Future<T>
     --- A future carrying every input's value, in input order.
     ---
     --- Settles when the last input does, whatever order they settle in. A
-    --- failed or cancelled input fails the join with that input's error; the
+    --- failed or canceled input fails the join with that input's error; the
     --- rest are left running, because an input shared with something outside
     --- the join is not this join's to stop.
     ---
@@ -545,7 +545,7 @@ function Future:map<U>(transform: function(T): U): Future<U>
         derived,
         upstreamOf,
         function(upstream: Future<any>)
-            -- Cancelled while the upstream was still going: this link is settled
+            -- Canceled while the upstream was still going: this link is settled
             -- and there is nothing left to transform for.
             if derived.status ~= "pending" then
                 return
@@ -575,7 +575,7 @@ function Future:flatMap<U>(transform: function(T): Future<U>): Future<U>
         upstreamOf,
         function(upstream: Future<any>)
             -- The window this combinator is alone in having. `transform` starts
-            -- work rather than transforming work already done, so a chain cancelled
+            -- work rather than transforming work already done, so a chain canceled
             -- before its outer settled has to stop the inner from ever existing;
             -- there is no inner to cancel afterwards. The settled status is that
             -- flag, checked here, before the call.
@@ -658,7 +658,7 @@ function Future:fail(err: string)
 end
 
 function Future:abandon(err: string)
-    settle(self as Future<any>, "cancelled", nil, err or "cancelled")
+    settle(self as Future<any>, "canceled", nil, err or "canceled")
 end
 
 -------------------------------------------------------------------------------
@@ -704,7 +704,7 @@ function Future:wait(timeoutMs?: number): Future<T>
 end
 
 -------------------------------------------------------------------------------
--- Cancelling
+-- Canceling
 -------------------------------------------------------------------------------
 
 --- Drops a link's listener from what it was watching.
@@ -728,8 +728,8 @@ function Future:cancel()
         return
     end
 
-    self.status = "cancelled"
-    self.error = "cancelled"
+    self.status = "canceled"
+    self.error = "canceled"
 
     local source = self._source
     if self._owned and source ~= nil and source.cancel ~= nil then
@@ -739,7 +739,7 @@ function Future:cancel()
     local upstream = self._upstream
     if upstream ~= nil then
         -- Dropped before decrementing, so an upstream that settles anyway does
-        -- not call back into a link that is already cancelled.
+        -- not call back into a link that is already canceled.
         unlisten(upstream, self._upstreamAt)
         self._upstream = nil
         self._upstreamAt = nil

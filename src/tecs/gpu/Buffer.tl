@@ -126,7 +126,7 @@ local BufferMT <const>: metatable<Buffer> = {__index = Buffer}
 -- SDL copies out of these during `SDL_UploadToGPUBuffer`, so they only have to
 -- hold still for that call, and only one flush may be walking them: the encode
 -- below runs to completion on the thread that owns the device, which is the
--- same constraint `RenderPass` records its colour targets under.
+-- same constraint `RenderPass` records its color targets under.
 local transferSource <const> = loader.newArray("SDL_GPUTransferBufferLocation[1]")
 local bufferDestination <const> = loader.newArray("SDL_GPUBufferRegion[1]")
 

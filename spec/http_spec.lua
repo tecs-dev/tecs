@@ -369,14 +369,14 @@ describe("http.newClient", function()
         assert.is_true(elapsed < 4000)
     end)
 
-    it("stops a transfer when it is cancelled", function()
-        local pending = client:send({ url = url("/cancelled") })
+    it("stops a transfer when it is canceled", function()
+        local pending = client:send({ url = url("/canceled") })
         client:pump()
         assert.are.equal("pending", pending.status)
         assert.are.equal(1, client:pending())
 
         pending:cancel()
-        assert.are.equal("cancelled", pending.status)
+        assert.are.equal("canceled", pending.status)
         assert.are.equal(0, client:pending())
 
         -- Gone rather than merely ignored. The listener is driven and allowed
@@ -392,7 +392,7 @@ describe("http.newClient", function()
             sdl.C.SDL_Delay(1)
         end
         assert.are.equal(0, settled)
-        assert.are.equal("cancelled", pending.status)
+        assert.are.equal("canceled", pending.status)
         assert.is_nil(pending.value)
     end)
 
@@ -402,8 +402,8 @@ describe("http.newClient", function()
         client:pump()
 
         client:close()
-        assert.are.equal("cancelled", one.status)
-        assert.are.equal("cancelled", two.status)
+        assert.are.equal("canceled", one.status)
+        assert.are.equal("canceled", two.status)
         assert.are.equal(0, client:pending())
         -- A closed client is useless rather than silently useless.
         assert.are.equal(0, client:pump())
@@ -564,7 +564,7 @@ describe("http.newClient", function()
             local pending = extra:send({ url = silentUrl("/never-answered") })
             extra:close()
             assert.are.equal(before, http.openClients())
-            assert.are.equal("cancelled", pending.status)
+            assert.are.equal("canceled", pending.status)
 
             -- And the list turns without it rather than reaching a closed
             -- client, which is what a stale entry would look like.

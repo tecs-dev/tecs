@@ -11,7 +11,7 @@
 ---
 --- The order is fixed by `assets/shaders/deferred.lighting.frag.glsl`: x, y and
 --- z of the position, then the radius, then red, green, blue and the intensity.
---- Position and colour are a `vec4` each in the shader's `Light` struct, which
+--- Position and color are a `vec4` each in the shader's `Light` struct, which
 --- is what makes the stride exactly eight floats with nothing padding it out.
 --- Position, height and radius are in world units. The lighting pass is handed
 --- the view through `Deferred:setView` and takes each fragment back out to the
@@ -36,7 +36,7 @@ local record lightlayout
     --- Raising it costs buffer bytes and shader time, and needs no shader edit.
     MAX: integer
 
-    --- Floats per light: vec4 position and radius, vec4 colour and intensity.
+    --- Floats per light: vec4 position and radius, vec4 color and intensity.
     FLOATS: integer
     --- Bytes per light, which is the stride a writer advances by and what
     --- `MAX` multiplies to give the buffer's size.

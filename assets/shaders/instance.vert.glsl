@@ -224,7 +224,7 @@ void main() {
     // frame. Both axes map the same way and neither is flipped: world Y runs
     // down the screen the way texture rows run down the image, and the one
     // negation between them is the camera's, applied to clip space after this.
-    // A flip here would compose with that one instead of cancelling it.
+    // A flip here would compose with that one instead of canceling it.
     vUV = vec3(mix(region.xy, region.zw, corner + 0.5), arrayLayer);
 
     vLocal = corner;

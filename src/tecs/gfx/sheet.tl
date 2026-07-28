@@ -3,7 +3,7 @@
 --- The model is Aseprite's, because that is what the art is authored in: a
 --- sheet is a list of frames each holding for its own duration, a set of named
 --- tags that play an inclusive span of them in a direction, and a set of named
---- slices carrying rectangles, nine-slice centres and pivots that move from
+--- slices carrying rectangles, nine-slice centers and pivots that move from
 --- frame to frame. Reading an Aseprite JSON sidecar is one function in front of
 --- that model rather than the model itself, so another reader for the binary
 --- format populates the same sheet without reshaping anything.
@@ -94,8 +94,8 @@ local record SliceKey
     y: number
     w: number
     h: number
-    --- Nine-slice centre, in the slice's own pixels. Nil for a slice with no
-    --- centre, which is every slice that is not a nine-patch.
+    --- Nine-slice center, in the slice's own pixels. Nil for a slice with no
+    --- center, which is every slice that is not a nine-patch.
     centerX: number
     centerY: number
     centerW: number
@@ -119,7 +119,7 @@ end
 
 --- Where an entity's quad turns and scales about.
 ---
---- A quad with no Pivot turns about its centre, so a character rotates about
+--- A quad with no Pivot turns about its center, so a character rotates about
 --- its waist and a scale grows it in both directions at once. A quad with one
 --- turns about the point the pivot names, and the entity's Transform position
 --- is where that point lands: a character pivoted at its feet stands at its
@@ -307,7 +307,7 @@ local record Sheet
     --- slice's origin and divides by the frame, which is the number a quad
     --- wants: nothing downstream has to know the sheet's pixel sizes.
     ---
-    --- A slice with a centre but no pivot answers the centre's middle, and a
+    --- A slice with a center but no pivot answers the center's middle, and a
     --- slice with neither answers the middle of its own rectangle. Zero, a
     --- slice the sheet does not carry, or a frame it has no key for all answer
     --- the middle of the frame, which is where a quad sits with no pivot at
@@ -373,7 +373,7 @@ local record GridOptions
     frameHeight: number
     --- Border between the image's edge and the first cell. Defaults to zero.
     margin: number
-    --- Gap between neighbouring cells. Defaults to zero.
+    --- Gap between neighboring cells. Defaults to zero.
     spacing: number
     --- Cells across and down. Derived from the image size when omitted.
     columns: integer
@@ -814,8 +814,8 @@ function Sheet:pivotOf(id: integer, frame: integer): number, number
 
     local x, y = key.pivotX, key.pivotY
     if x == nil then
-        -- A nine-patch names a centre rather than a pivot, and the middle of
-        -- that centre is the point the patch is anchored on. Failing both, the
+        -- A nine-patch names a center rather than a pivot, and the middle of
+        -- that center is the point the patch is anchored on. Failing both, the
         -- middle of the slice's own rectangle is the only point it names.
         if key.centerX ~= nil then
             x = key.centerX + key.centerW * 0.5
@@ -892,7 +892,7 @@ local sheetsByName: {string: Sheet} = {}
 --- The sheet a name held immediately before the one it holds now.
 ---
 --- Building under a taken name replaces what `byName` answers, which is the
---- documented behaviour and the wrong one for a file that was exported twice.
+--- documented behavior and the wrong one for a file that was exported twice.
 --- `replace` is the reverse of it and has to know what was displaced, and only
 --- registration is in a position to say.
 local displaced: {string: Sheet} = {}
@@ -1407,12 +1407,12 @@ function sheet.fromAseprite(options: AsepriteOptions): Sheet
                 w = bounds.w or 0.0,
                 h = bounds.h or 0.0,
             }
-            local centre = key.center as {string: number}
-            if centre ~= nil then
-                built.centerX = centre.x or 0.0
-                built.centerY = centre.y or 0.0
-                built.centerW = centre.w or 0.0
-                built.centerH = centre.h or 0.0
+            local center = key.center as {string: number}
+            if center ~= nil then
+                built.centerX = center.x or 0.0
+                built.centerY = center.y or 0.0
+                built.centerW = center.w or 0.0
+                built.centerH = center.h or 0.0
             end
             local pivot = key.pivot as {string: number}
             if pivot ~= nil then

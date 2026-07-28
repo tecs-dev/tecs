@@ -43,13 +43,13 @@ without anyone calling `resetPaths`.
 
 | Field          | Type     | Default  | Description                                                               |
 | -------------- | -------- | -------- | ------------------------------------------------------------------------- |
-| `organisation` | `string` | `"tecs"` | Organisation name the platform uses to build the writable directory path. |
+| `organization` | `string` | `"tecs"` | Organization name the platform uses to build the writable directory path. |
 | `application`  | `string` | `"tecs"` | Application name, used the same way.                                      |
 
 Set both before anything asks for `preferencePath`, since the answer is cached from the first call.
 
 ```teal
-tecs.filesystem.organisation = "Ex Nihilo"
+tecs.filesystem.organization = "Ex Nihilo"
 tecs.filesystem.application = "Starfarer"
 ```
 
@@ -74,7 +74,7 @@ The writable directory for this application, created if absent.
 function filesystem.preferencePath(): string
 ```
 
-**Returns:** the directory, with a trailing separator. Named from `organisation` and `application`.
+**Returns:** the directory, with a trailing separator. Named from `organization` and `application`.
 
 ::: warning The only place a build may write
 Everything else is read-only on at least one target, and finding that out at run time on a device is expensive.
@@ -159,7 +159,7 @@ function filesystem.setAssetRoot(root: string)
 
 - `root`: the directory to read content from. A trailing separator is added when it is missing.
 
-Synchronises with the platform generation first, so the override outlives a platform change that may have
+Synchronizes with the platform generation first, so the override outlives a platform change that may have
 preceded it rather than being dropped by the next read.
 
 ## Doing something with a path
@@ -204,7 +204,7 @@ answer comes back as plain data.
 
 ### Headless
 
-SDL's filesystem API needs no subsystem initialised, and neither this module nor its default backend initialises
+SDL's filesystem API needs no subsystem initialized, and neither this module nor its default backend initializes
 one. There is no `available()` and no video gate, unlike [`clipboard`](/modules/system), because there is
 nothing to gate on: with no window, no device and no `SDL_Init` at all, every function below answers for real.
 This is one of the few subsystems that is more useful without a window than with one.
@@ -903,14 +903,14 @@ assert(writer:close())
 | <code v-pre><a href="#tecs.filesystem.Writer">Writer</a></code> | The writer, or nil and the reason there is none. |
 | <code v-pre>string</code>                                       |                                                  |
 
-<a id="tecs.filesystem.organisation"></a>
+<a id="tecs.filesystem.organization"></a>
 
-### tecs.filesystem.organisation
+### tecs.filesystem.organization
 
-<pre><code v-pre><a href="#tecs.filesystem.organisation">tecs.filesystem.organisation</a>: string
+<pre><code v-pre><a href="#tecs.filesystem.organization">tecs.filesystem.organization</a>: string
 </code></pre>
 
-Organisation and application names, used to name the writable
+Organization and application names, used to name the writable
 directory. Set before anything asks for `preferencePath`.
 <a id="tecs.filesystem.preferencePath"></a>
 
@@ -925,7 +925,7 @@ Writable directory for this application, created if absent.
 
 | Type                      | Description                                                                                                                                                                                                                              |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>string</code> | The directory, with a trailing separator, named from `organisation` and `application`. The only place a build may write: everything else is read-only on at least one target, and finding that out at run time on a device is expensive. |
+| <code v-pre>string</code> | The directory, with a trailing separator, named from `organization` and `application`. The only place a build may write: everything else is read-only on at least one target, and finding that out at run time on a device is expensive. |
 
 <a id="tecs.filesystem.read"></a>
 

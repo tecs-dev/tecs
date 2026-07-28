@@ -6,7 +6,7 @@
 --- into changed instructions.
 ---
 --- A version is held by the playbacks running it and dropped when the last
---- one finishes, is cancelled, or is discarded by a snapshot load. The newest
+--- one finishes, is canceled, or is discarded by a snapshot load. The newest
 --- version of a name is never dropped: that is the one `play` resolves.
 ---
 --- Global rather than per world, because a program is code: two worlds

@@ -21,7 +21,7 @@
 --- for itself: a body that throws skips the `finish` written after it, and the
 --- command buffer is all a recovery path has to find the pass by.
 ---
---- Supports multiple colour attachments, which is what makes a deferred
+--- Supports multiple color attachments, which is what makes a deferred
 --- G-buffer one pass rather than one pass per channel.
 
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -30,9 +30,9 @@ local passscope <const> = require("tecs.gpu.passscope")
 
 local C <const> = sdl.C
 
---- Colour attachments the staging array holds, and so the most `begin` accepts.
+--- Color attachments the staging array holds, and so the most `begin` accepts.
 ---
---- Not the device's ceiling, which is lower: SDL documents four colour textures
+--- Not the device's ceiling, which is lower: SDL documents four color textures
 --- and one depth texture per pass. A pass begun with five to eight is rejected
 --- by SDL rather than by the check here.
 local MAX_COLOR_TARGETS <const> = 8
@@ -52,10 +52,10 @@ local MAX_BUFFER_BINDINGS <const> = 8
 --- kind on it. Every method here is only legal in that window, and the handle
 --- is nil outside it.
 local record RenderPass
-    --- A colour a pass clears an attachment to before it draws.
+    --- A color a pass clears an attachment to before it draws.
     record ClearColor
         --- In 0..1 per channel. A field left out is zero, except `a`, which is
-        --- one, so a colour given as rgb alone clears opaque.
+        --- one, so a color given as rgb alone clears opaque.
         r: number
         --- Green, in 0..1.
         g: number
@@ -65,16 +65,16 @@ local record RenderPass
         a: number
     end
 
-    --- One colour attachment, as `begin` takes them.
+    --- One color attachment, as `begin` takes them.
     ---
     --- Read during the `begin` call and not kept, so the record may be rewritten
     --- as soon as it returns.
     record Attachment
-        --- Texture handle to render into, created with the colour-target usage
+        --- Texture handle to render into, created with the color-target usage
         --- bit. Its format has to be the one the bound pipeline baked for this
         --- attachment's position in the list.
         texture: loader.CValue
-        --- Clears to this colour. Omit to load and preserve existing contents,
+        --- Clears to this color. Omit to load and preserve existing contents,
         --- which is only defined once something has written the texture: a load
         --- from a texture nothing has drawn to yet reads undefined memory
         --- rather than black.
@@ -106,7 +106,7 @@ local record RenderPass
     --- itself off the open list by, which is what lets a recovery path end a
     --- pass whose body threw.
     commandBuffer: loader.CValue
-    --- Number of colour attachments this pass was begun with.
+    --- Number of color attachments this pass was begun with.
     targetCount: integer
     --- Set by the first `finish`, so a second one ends nothing again and a
     --- recovery path may close a pass it cannot know the state of.
@@ -119,13 +119,13 @@ local record RenderPass
     --- @param handle An `SDL_GPURenderPass` that has been begun and not ended.
     --- @param commandBuffer The command buffer it was begun on, which uniform
     ---     pushes need and the handle does not carry.
-    --- @param targetCount Colour attachments it was begun with. Defaults to
+    --- @param targetCount Color attachments it was begun with. Defaults to
     ---     one; it is recorded, not enforced, so a wrong value misreports
     ---     rather than misbinds.
     --- @return A pass that owns the handle and will end it on `finish`.
     wrap: function(handle: loader.CPtr, commandBuffer: loader.CValue, targetCount?: integer): RenderPass
 
-    --- Begins a render pass over one or more colour attachments.
+    --- Begins a render pass over one or more color attachments.
     ---
     --- The depth attachment is optional and its absence is meaningful: a pass
     --- begun without one cannot test or write depth, and a pipeline bound in it
@@ -155,7 +155,7 @@ local record RenderPass
     ): RenderPass
 
     --- Binds a pipeline. All subsequent draws in this pass use its baked state.
-    --- @param pipeline An `SDL_GPUGraphicsPipeline` whose colour formats and
+    --- @param pipeline An `SDL_GPUGraphicsPipeline` whose color formats and
     ---     depth-stencil target match what this pass was begun with. A pipeline
     ---     must be bound before the pass's first draw.
     bindPipeline: function(self, pipeline: loader.CValue)
@@ -303,10 +303,10 @@ function RenderPass.begin(
 ): RenderPass
     local count = #attachments
     if count == 0 then
-        error("tecs: a render pass needs at least one colour attachment", 2)
+        error("tecs: a render pass needs at least one color attachment", 2)
     end
     if count > MAX_COLOR_TARGETS then
-        error(("tecs: %d colour attachments exceeds the limit of %d"):format(count, MAX_COLOR_TARGETS), 2)
+        error(("tecs: %d color attachments exceeds the limit of %d"):format(count, MAX_COLOR_TARGETS), 2)
     end
 
     for index, attachment in ipairs(attachments) do

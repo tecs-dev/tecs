@@ -13,7 +13,7 @@
 ---
 --- ## Capabilities
 ---
---- Read rather than inferred. Selecting behaviour from `ffi.os` guesses: it
+--- Read rather than inferred. Selecting behavior from `ffi.os` guesses: it
 --- cannot tell a build that linked a shader compiler from one that did not, or
 --- an interpreter-only LuaJIT from a jitting one, and both distinctions change
 --- what the engine is allowed to attempt.
@@ -74,7 +74,7 @@
 --- ## Encoding
 ---
 --- Clipboard text is UTF-8 and passes through byte for byte. Line endings are
---- not normalised, so text copied on Windows arrives as CRLF and stays CRLF,
+--- not normalized, so text copied on Windows arrives as CRLF and stays CRLF,
 --- and nothing is trimmed from either end. Text stops at the first NUL,
 --- because that is what terminates the C string SDL returns and what every
 --- producer of clipboard text intends; `data` uses the length SDL reports
@@ -161,13 +161,13 @@
 --- Reading that the other way would make every non-zero exit propagate as a
 --- failure through `map`, which is wrong for everything that shells out to a
 --- tool whose exit code is data. `"failed"` means the child never started and
---- `"cancelled"` means this process ended it, through `kill`, a timeout, or
+--- `"canceled"` means this process ended it, through `kill`, a timeout, or
 --- shutdown.
 ---
 --- ## Headless
 ---
---- SDL's process API needs no subsystem initialised, and nothing here
---- initialises one. No process call is made on this side: the whole binding is
+--- SDL's process API needs no subsystem initialized, and nothing here
+--- initializes one. No process call is made on this side: the whole binding is
 --- inside the worker's source, so a state that only ever queues runs starts no
 --- child of its own. That is the point, since this is one of the few
 --- subsystems more useful without a window than with one; it works under a
@@ -224,11 +224,11 @@ local record DialogOptions
 end
 
 local record DialogResult
-    --- Selected paths. Empty when the user cancelled.
+    --- Selected paths. Empty when the user canceled.
     paths: {string}
     --- One-based selected filter, or zero when no filter applies.
     filter: integer
-    cancelled: boolean
+    canceled: boolean
 end
 
 --- What this build of the engine can do on this target.
@@ -375,7 +375,7 @@ local record system
     --- @return A future that settles "ready" with the result when the child
     ---     ends, however it ended: a non-zero exit is still "ready", and
     ---     `succeeded` is what distinguishes them. It settles "failed" only
-    ---     when the child could not be started, and "cancelled" when it was
+    ---     when the child could not be started, and "canceled" when it was
     ---     killed.
     runProcess: function(options: ProcessOptions): Future<ProcessResult>
 
@@ -385,7 +385,7 @@ local record system
     --- cases where the future does not carry it. Before the child ends, so
     --- `pid` can be read as soon as it has started, which is the one thing
     --- about a run that means anything before there is an answer. And after a
-    --- child was killed, which settles "cancelled" with no value but does not
+    --- child was killed, which settles "canceled" with no value but does not
     --- throw away what the child managed to say first.
     ---
     --- The runner's bookkeeping rather than the caller's, which is why it is a
@@ -406,7 +406,7 @@ local record system
     --- Queued rather than immediate: every process call belongs to the worker,
     --- so this is picked up on its next pass. Gentle by default, which a child
     --- may ignore; `force` cannot be refused but leaves whatever it was writing
-    --- half written. The future settles "cancelled" when the child goes.
+    --- half written. The future settles "canceled" when the child goes.
     ---
     --- `run:cancel()` is the other spelling, and it counts holders: it ends the
     --- child only when the last consumer of the future has given it up. This
@@ -455,7 +455,7 @@ local record system
     --- thread running inside a library about to be unmapped, which this
     --- codebase has already paid for once.
     ---
-    --- Every future still in flight ends at "cancelled", including one whose
+    --- Every future still in flight ends at "canceled", including one whose
     --- child the kernel never reaped. Leaving those pending would be a handle
     --- that reads "still running" for the rest of the process against a runner
     --- that no longer exists.
@@ -807,7 +807,7 @@ local function finishDialog(entry: DialogEntry)
         entry.future:complete({
             paths = paths,
             filter = selected >= 0 and selected + 1 or 0,
-            cancelled = D.tecsDialogCancelled(handle) as boolean,
+            canceled = D.tecsDialogCancelled(handle) as boolean,
         })
     end
     D.tecsDialogDestroy(handle)

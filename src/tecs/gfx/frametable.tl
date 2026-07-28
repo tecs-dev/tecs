@@ -66,7 +66,7 @@ local DIRECTORY_FLOATS <const> = 4
 local ENTRY_FLOATS <const> = 8
 
 --- Where a quad sits when nothing names a point on it, which is its middle.
-local CENTRE <const> = 0.5
+local CENTER <const> = 0.5
 
 --- One registered playback, on the host side.
 local record Playback
@@ -265,7 +265,7 @@ local function resolvePivots(playback: Playback)
     local slice <const> = playback.slice
 
     if slice < 1 then
-        playback.midX, playback.midY = CENTRE, CENTRE
+        playback.midX, playback.midY = CENTER, CENTER
         playback.halfX, playback.halfY = 0.0, 0.0
         for step = 1, steps do
             pivotX[step], pivotY[step] = 0.0, 0.0
@@ -307,7 +307,7 @@ end
 function frametable.pivotOf(id: integer): number, number, number, number
     local playback <const> = playbacks[id]
     if playback == nil then
-        return CENTRE, CENTRE, 0.0, 0.0
+        return CENTER, CENTER, 0.0, 0.0
     end
     -- Assembled on demand, because a rebind or a re-export can move the slice
     -- since this was registered and a caller asking where the pivot is wants
@@ -372,8 +372,8 @@ function frametable.register(source: Sheet, tag: integer, slice?: integer): inte
         ticks = nil,
         pivotX = {},
         pivotY = {},
-        midX = CENTRE,
-        midY = CENTRE,
+        midX = CENTER,
+        midY = CENTER,
         halfX = 0.0,
         halfY = 0.0,
         entryBase = 0,

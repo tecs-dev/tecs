@@ -5,16 +5,16 @@
 -- The realistic way it breaks is small and plausible: someone wants an mp3
 -- decoder that handles a file dr_mp3 chokes on, finds `SDLMIXER_MP3_MPG123`
 -- sitting in `cmake/Pinned.cmake` set to OFF, flips it, and nothing anywhere
--- says no. So the options that decide a licence are declared here, each with
--- the licence behind it, and this holds `Pinned.cmake` to the declaration.
+-- says no. So the options that decide a license are declared here, each with
+-- the license behind it, and this holds `Pinned.cmake` to the declaration.
 --
--- Four checks, in increasing order of what they are good for:
+-- Five checks, in increasing order of what they are good for:
 --
 --  * Every option in the declaration is set in `Pinned.cmake` to the value the
 --    declaration requires. Flipping one fails here.
 --  * Every `SDLMIXER_` and `SDLIMAGE_` option `Pinned.cmake` sets appears in
 --    the declaration. Those are the two families where one option decides
---    which codec gets linked, so adding one means writing down its licence
+--    which codec gets linked, so adding one means writing down its license
 --    rather than only its value.
 --  * A denylist of option names that must never appear enabled, whichever
 --    dependency introduces them. This one is forward-looking: it names the
@@ -24,6 +24,8 @@
 --    `THIRD_PARTY_NOTICES.md`. Pinning a new one fails this until its notice
 --    is written, because a package that ships the code and not the notice is
 --    the one compliance failure this engine is capable of committing.
+--  * Every package pinned in Cargo.lock is named there too. Cargo is a second
+--    dependency graph, not an exception to the notice rule.
 --
 -- What this cannot catch, stated plainly, because a guard that overstates
 -- itself is worse than none:
@@ -34,8 +36,8 @@
 --    configuring the real thing and reading what it produced tells those
 --    apart, which is how the SDL_image block was verified and what
 --    `make check-package` does to binaries.
---  * It cannot read a licence out of a binary, because nothing can. The
---    licences below are what a person read in each project's own licence file
+--  * It cannot read a license out of a binary, because nothing can. The
+--    licenses below are what a person read in each project's own license file
 --    at the pinned revision. A revision bump that changed the terms passes
 --    this untouched.
 --  * It says nothing about a development build. Those resolve dependencies
@@ -52,8 +54,8 @@ local function readFile(path)
     return contents
 end
 
--- Each option that decides a licence or a shipped byte: the value it has to
--- hold, the licence that hangs on it, and why. The reason is the point of the
+-- Each option that decides a license or a shipped byte: the value it has to
+-- hold, the license that hangs on it, and why. The reason is the point of the
 -- table, because a value with no reason beside it is the one that gets flipped.
 local REQUIRED = {
     -- SDL_mixer. Four of these are LGPL; the permissive alternates beside them
@@ -114,7 +116,7 @@ local REQUIRED = {
 --
 -- libcurl is the live case, and its defaults are against you. GnuTLS is LGPL,
 -- and nettle and gmp behind it are LGPLv3-or-GPLv2 again. wolfSSL is GPL-3.0
--- with no linking exception, so linking it without the commercial licence puts
+-- with no linking exception, so linking it without the commercial license puts
 -- the whole game under GPLv3. libidn2 is dual GPL-2.0-or-later or
 -- LGPL-3.0-or-later, which means its best arm is still disqualifying, and it is
 -- auto-detected on, so it links wherever the build host happens to have it.
@@ -159,9 +161,10 @@ local NOTICE_NAMES = {
     MBEDTLS = "Mbed TLS",
 }
 
-describe("the licence position", function()
+describe("the license position", function()
     local pinned = readFile("cmake/Pinned.cmake")
     local revisions = readFile("cmake/Revisions.cmake")
+    local cargoLock = readFile("native/rust/Cargo.lock")
     local notices = readFile("THIRD_PARTY_NOTICES.md")
 
     -- What Pinned.cmake sets: option to value, read from the forced cache sets
@@ -171,7 +174,7 @@ describe("the licence position", function()
         settings[option] = value
     end
 
-    it("sets every option a licence hangs on, to the value it has to hold", function()
+    it("sets every option a license hangs on, to the value it has to hold", function()
         for option, entry in pairs(REQUIRED) do
             local wanted, license, why = entry[1], entry[2], entry[3]
             local actual = settings[option]
@@ -192,7 +195,7 @@ describe("the licence position", function()
                 assert.is_true(
                     REQUIRED[option] ~= nil,
                     ("cmake/Pinned.cmake sets %s, which this file does not declare. "):format(option)
-                        .. "Add it with the licence it decides and the reason for the value, "
+                        .. "Add it with the license it decides and the reason for the value, "
                         .. "or this declaration has stopped describing the build."
                 )
             end
@@ -229,6 +232,21 @@ describe("the licence position", function()
             "THIRD_PARTY_NOTICES.md does not name "
                 .. table.concat(missing, ", ")
                 .. ". A dependency whose notice is not written is a package that ships code without it."
+        )
+    end)
+
+    it("names every pinned Rust dependency in the notices", function()
+        local missing = {}
+        for name in cargoLock:gmatch('%[%[package%]%]%s+name = "([^"]+)"') do
+            if name ~= "tecs-native" and not notices:find("`" .. name .. "`", 1, true) then
+                table.insert(missing, name)
+            end
+        end
+        assert.is_true(
+            #missing == 0,
+            "THIRD_PARTY_NOTICES.md does not name "
+                .. table.concat(missing, ", ")
+                .. ". A Rust dependency whose notice is not written is a package that ships code without it."
         )
     end)
 end)

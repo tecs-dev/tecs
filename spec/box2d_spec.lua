@@ -1,4 +1,4 @@
--- Physics binding behaviour. Verifies that Box2D 3's value handles survive
+-- Physics binding behavior. Verifies that Box2D 3's value handles survive
 -- the FFI round trip and that the solver produces the motion it should, which
 -- together catch a mis-generated cdef in a way a smoke test would not.
 

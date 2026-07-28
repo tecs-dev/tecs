@@ -47,7 +47,7 @@ void main() {
 }
 ]]
 
--- Covers the target in a colour no clear under test uses, so a pixel read back
+-- Covers the target in a color no clear under test uses, so a pixel read back
 -- says which of the three wrote it.
 local RED_FS = [[
 #version 450
@@ -371,7 +371,7 @@ void main() {
         local dark = screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2)
         assert.are.equal(0, dark.r, "white albedo with no light must be black")
 
-        -- One light over the centre must brighten it and leave a far corner
+        -- One light over the center must brighten it and leave a far corner
         -- comparatively dark, which is what proves attenuation is applied.
         pipeline:setLights({
             { x = SIZE / 2, y = SIZE / 2, z = 12, radius = 28, r = 1, g = 1, b = 1, intensity = 4 },
@@ -381,7 +381,7 @@ void main() {
         local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
         local corner = screen:getPixel(pixels, 2, 2)
 
-        assert.is_true(center.r > 180, ("lit centre should be bright, got %d"):format(center.r))
+        assert.is_true(center.r > 180, ("lit center should be bright, got %d"):format(center.r))
         assert.is_true(corner.r < 40, ("beyond the radius should stay dark, got %d"):format(corner.r))
 
         geometryPipeline:destroy()
@@ -412,7 +412,7 @@ void main() {
         -- it on the swapchain, so anything wanting to run after compositing
         -- has a target to read and a pass to sit before. What must not change
         -- is the image, so the two are compared to each other rather than each
-        -- asserted against a colour: a flipped or offset copy fails here even
+        -- asserted against a color: a flipped or offset copy fails here even
         -- though both halves would look plausible alone.
         local sizeUniform = require("tecs.ffi.loader").newArray("float[4]")
         sizeUniform[0] = SIZE

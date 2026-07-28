@@ -121,7 +121,7 @@ Working today:
   environment and a working directory the caller chooses, and a teardown that
   ends a child rather than leaving it behind
 - The window: size, position, limits and aspect, fullscreen and the mode lists
-  behind it, visibility and minimisation, focus, opacity, borders, icon, safe
+  behind it, visibility and minimization, focus, opacity, borders, icon, safe
   area, taskbar attention and progress, pointer and keyboard confinement, and
   the displays underneath it all, every one of them also settable in the
   application's config
@@ -255,7 +255,7 @@ member's signature and every member's docblock: `init.tl` reached twelve hundred
 lines, two thirds of which were a second copy of documentation that already
 existed on the declaration it described, and nothing checked the copies against
 each other. And a write to a name on it had to be routed to whichever module
-below owned the name, because `tecs.filesystem.organisation` is assigned by a
+below owned the name, because `tecs.filesystem.organization` is assigned by a
 game and read back by `preferencePath`. Being the module answers both: the
 record that types it is the module's own, checked against the implementation by
 the compiler, and a write lands where the read looks.
@@ -387,7 +387,7 @@ frame recovering from one still draws.
 
 What happens to the rest is `fixedOverload`, and both answers are wrong in
 different ways. `drop` abandons the steps that did not fit, so wall time and
-simulated time resynchronise immediately and the simulation is now behind by
+simulated time resynchronize immediately and the simulation is now behind by
 however much was abandoned. `accumulate` abandons nothing, so the simulation
 stays exact and a replay of the same steps reproduces, and on a machine that is
 genuinely too slow the accumulator grows every frame and the spiral is back.
@@ -435,7 +435,7 @@ A raw cdata view onto SDL's own storage would save the conversion's stores as
 well, and it is the wrong trade. Wheel axes are negated when the platform
 reports natural scrolling and pen axes are folded the same way, so a plain cast
 to the SDL struct hands back values that are wrong in exactly the way a recent
-fix made right. Normalisation has to happen somewhere, and a metatype computing
+fix made right. Normalization has to happen somewhere, and a metatype computing
 it per access moves the cost rather than removing it.
 
 Where an observer sits in the frame is worth being plain about, because an
@@ -532,7 +532,7 @@ records its own passes from.
 How a broken frame is resolved is SDL's decision, not a preference.
 `SDL_CancelGPUCommandBuffer` is documented as an error once a swapchain texture
 has been acquired, and `Device:beginFrame` returns only after acquiring one, so
-cancelling was invalid on essentially every frame that existed. `Frame:cancel`
+canceling was invalid on essentially every frame that existed. `Frame:cancel`
 now refuses in that state and `Frame:abandon` is the recovery path: it ends the
 open pass and then submits when a texture was acquired and cancels when none
 was. What reaches the screen is what the frame drew before it threw, which for a
@@ -576,7 +576,7 @@ because there is nobody there to read the frame and carrying on with a world
 that is provably inconsistent is how one bug becomes a corrupted save. `watch`
 is in that list because the file watcher is the other caller below, and a
 watcher that could not pick the loop back up would be a notification rather than
-a tool. The second gate is severity, and it is narrow rather than a judgement
+a tool. The second gate is severity, and it is narrow rather than a judgment
 about how bad the throw looked: recovery reports whether it had to force-end a
 pass or cancel a frame instead of submitting it, and neither resumes at any
 setting, because the device is then not in the state the engine intended and the
@@ -632,7 +632,7 @@ took 27.8 seconds against the main state's 20.3 milliseconds, and
 `jit.status()` answered true throughout.
 
 So `native/mcodearena.c` holds 24MB of that window from the host's first
-instruction and gives it back once initialisation returns. Everything mapped in
+instruction and gives it back once initialization returns. Everything mapped in
 between goes elsewhere, because the block is already there, and what is
 released is free address space in reach that nothing else has taken. The same
 loop then runs in 23 milliseconds on a worker, within noise of the main state,
@@ -684,7 +684,7 @@ The application owns the pump. `assets.update` runs once per iteration and
 `assets.shutdown` runs at teardown, so a game that loads an image and does
 nothing else still sees its handle resolve and the decoding thread still stops.
 Subsystems that load assets of their own drain the same queue when they look at
-their own waiting lists, and that is an optimisation rather than the mechanism.
+their own waiting lists, and that is an optimization rather than the mechanism.
 
 A handle is a one-shot future, not a cache. Two image loads of one path that
 overlap share the decode and the surface, because decoding the same file twice
@@ -972,7 +972,7 @@ is capped at eight whatever the machine has, since the solver's stages are short
 enough that past a handful of workers the coordination costs more than the work,
 and a spinning worker on a core the stepping thread needs takes more than it
 contributes. Adding workers does not change the answer either way: the solver
-colours its constraint graph so no colour holds two constraints sharing a body,
+colors its constraint graph so no color holds two constraints sharing a body,
 and `spec/taskpool_spec.lua` steps a 256-body pile for 120 steps and asserts it
 lands bit-exactly where one worker left it whether two, three, four or eight
 solved it.
@@ -1031,7 +1031,7 @@ A game reads the stream by observing the kinds it wants, one ECS event type per
 kind, which is described under [One way in](#one-way-in) along with why
 delivery copies nothing.
 
-Unrecognised SDL events arrive as `unknown` carrying their numeric type instead
+Unrecognized SDL events arrive as `unknown` carrying their numeric type instead
 of being dropped, so upgrading SDL surfaces new input rather than silently
 losing it.
 
@@ -1040,7 +1040,7 @@ carried as an opaque string, and so is the touch device it belongs to.
 Reporting either as a number would round, and two distinct fingers could
 collapse into one.
 
-A recognised kind means usable fields. An event whose kind is named and whose
+A recognized kind means usable fields. An event whose kind is named and whose
 payload was left unread is worse than an unknown one, because the caller has
 every reason to trust it, so text, composition, candidates, drops, the
 clipboard, sensors, gamepad touchpads, displays, windows, pinches and user
@@ -1071,7 +1071,7 @@ engine cannot act on: the joystick family, because every pad is opened as a
 gamepad and forwarding both would report one device twice; camera devices and
 the 2D renderer's device-loss events, because neither subsystem is used; hit
 tests, because none is installed; and ICC profile and HDR state, because there
-is no colour-managed path for a game to respond through.
+is no color-managed path for a game to respond through.
 
 Every kind is drivable by name. `events.push` takes the engine's vocabulary
 rather than an SDL union and fills the payload for the key, mouse, wheel, pen,
@@ -1085,7 +1085,7 @@ A mouse event the platform synthesised from a touch or a pen is marked as such.
 Those arrive beside the finger events they were made from, and a game handling
 both would otherwise act on one gesture twice.
 
-Natural scrolling is normalised where the conversion happens, not left for each
+Natural scrolling is normalized where the conversion happens, not left for each
 reader to discover. SDL reports a flipped wheel by negating both axes and
 setting a flag, so a game that read the pair without the flag scrolls backwards
 on every machine with the setting on and nowhere else, which is the kind of
@@ -1096,7 +1096,7 @@ SDL accumulated against the platform's own threshold, so a menu stepping one
 item per notch does not re-derive them from the fractional pair and disagree
 with the rest of the machine about where a step begins.
 
-That normalisation is drivable rather than only unit-tested. A pushed wheel
+That normalization is drivable rather than only unit-tested. A pushed wheel
 carries its axes the way the platform sends them, and `flipped` sets the flag
 beside them, so a session or a test can scroll as a machine with the setting on
 does and watch the signs arrive undone. The round trip is the conversion, not
@@ -1173,7 +1173,7 @@ iteration at all, so a refusal there is reported instead.
 A backgrounding hook is dispatched once per backgrounding rather than once per
 event that mentions one, and the foreground rearms it. What it is for is
 flushing a checkpoint the game already prepared during a frame, not building
-one: at this engine's entity counts, serialising a world inside a platform
+one: at this engine's entity counts, serializing a world inside a platform
 callback cannot meet any deadline, and the host says so if the hook overruns.
 
 The event is queued as well as dispatched. The hook is where a game meets the
@@ -1219,7 +1219,7 @@ one whose first execution is on a player's phone.
 A game could not save state on being backgrounded at all, and the plumbing is
 the easy half. The contract is the part that decides whether it works.
 
-At this engine's entity counts a world is not serialisable inside a platform
+At this engine's entity counts a world is not serializable inside a platform
 callback. iOS allows roughly five seconds from the hook being entered and
 Android rather less, so the clock is running while the callback runs and a
 callback that walked four million entities would be killed part way through and
@@ -1229,7 +1229,7 @@ leave nothing behind. The host complains past 250 ms for that reason. So
 `app:stageCheckpoint(bytes)` is how it gets one, called from an ordinary system
 on an ordinary frame whenever the state worth keeping has changed. It takes
 bytes rather than a function that produces them, and that is the whole design.
-A function would let a game postpone the serialising into exactly the callback
+A function would let a game postpone the serializing into exactly the callback
 that cannot afford it while looking like it had prepared something; a string
 cannot, because by the time one exists the expensive half has already happened
 on a frame that could pay for it. The host times the hook and says so past
@@ -1239,7 +1239,7 @@ Staging again replaces what was staged: there is one checkpoint, not a queue.
 Staging once and backgrounding twice writes once, on the argument the host
 deduplicates backgroundings with, which is that the second write is the one that
 gets interrupted and it had nothing new to say. The write goes through a
-neighbouring file and a rename, so what is on disk is either the previous
+neighboring file and a rename, so what is on disk is either the previous
 checkpoint or this one and never half of either. `app:readCheckpoint()` is the
 other half, read while building the world; nil covers a first run, a game that
 staged nothing and a file the player deleted, and none of those is an error.
@@ -1294,7 +1294,7 @@ SDL, so a question that was never going to be answered does not overwrite the
 SDL error a caller is about to read for some other reason.
 
 Text is UTF-8 and passes through byte for byte. Line endings are not
-normalised, so text copied on Windows arrives as CRLF and stays CRLF, and
+normalized, so text copied on Windows arrives as CRLF and stays CRLF, and
 nothing is trimmed from either end. Text stops at the first NUL, because that
 is what terminates the C string SDL returns and what every producer of
 clipboard text intends; `clipboardData` uses the length SDL reports instead, so
@@ -1358,7 +1358,7 @@ and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,
 `rename`, `copy`, `write`, `currentDirectory` and `userFolder`. No virtual
 filesystem and no invented path scheme, so a failure is the platform's failure
 and the name says which call to read about. Like the process half it
-initialises no
+initializes no
 subsystem and is more useful with no window than with one.
 
 `openWrite` and `openRead` are the pair that is not one call, and they are the
@@ -1433,10 +1433,10 @@ tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
 ```
 
 **`status` is a plain field.** `"pending"`, `"ready"`, `"failed"` or
-`"cancelled"`, read directly rather than through a method, because several call
+`"canceled"`, read directly rather than through a method, because several call
 sites read it once a frame and a field read plus a string compare is what that
-should cost. `"cancelled"` is a state of its own rather than a kind of failure,
-because `recover` must not run for it: a caller who cancelled a load did not ask
+should cost. `"canceled"` is a state of its own rather than a kind of failure,
+because `recover` must not run for it: a caller who canceled a load did not ask
 for a fallback value.
 
 **A `Source` is the whole driver interface.** Two functions carry it: `poll`,
@@ -1480,7 +1480,7 @@ of one path that overlap get the same future, and one consumer giving up must
 not break the other. So `cancel` decrements, and only the last holder settles
 the future and asks the source to stop the work -- and only for a future the
 source made, since a derived link inherits the source to know what a wait
-advances and nothing else. Cancelling a `flatMap` before its outer settles stops
+advances and nothing else. Canceling a `flatMap` before its outer settles stops
 the inner from ever being created, which is the one place the rule needs a
 second sentence: there is no inner to cancel after the fact.
 
@@ -1555,7 +1555,7 @@ is the one shape a frame-driven client cannot take.
 A command line tool, a resource pipeline or an asset build wants to run another
 program, and a game wants to do it between two frames rather than instead of
 them. `tecs.system` is that, and it is one of the few subsystems that is more
-useful without a window than with one, so it initialises no SDL subsystem and
+useful without a window than with one, so it initializes no SDL subsystem and
 works under a plain interpreter.
 
 ```lua
@@ -1617,7 +1617,7 @@ about to unmap, which is the failure
 So `proc.shutdown`, which the application runs at teardown, asks every live
 child to stop, gives it a quarter second, and then forces it. A forced kill is
 not refusable, so the join that follows is bounded by the kernel reaping the
-child, and a run whose child was still going ends at `"cancelled"` rather than
+child, and a run whose child was still going ends at `"canceled"` rather than
 at a status that implies it finished. That includes a child the kernel never
 reaped: its future is settled on the way out rather than dropped, because the
 runner is about to stop and nothing would ever answer for it.
@@ -1901,7 +1901,7 @@ the staging the backend owns, and copying them into a packet would be the
 intermediate copy the design exists to avoid.
 
 `Renderer` is what still sees both. It owns the packet, rotates the staging
-slot, hands the backend's mapped addresses to the extractor, and centres the
+slot, hands the backend's mapped addresses to the extractor, and centers the
 camera on the first frame that draws, which is the one thing needing a target
 size on the side that has no device.
 
@@ -1932,7 +1932,7 @@ and so a run cannot grow without shifting every run after it. One spawn
 anywhere therefore lays the whole scene out again and rewrites every instance
 in it. `reserveRuns` on the renderer is the other layout: each archetype's
 run is given room to grow into, a run that outgrows its room is moved to the
-end rather than shifting its neighbours, and the slots nothing occupies are
+end rather than shifting its neighbors, and the slots nothing occupies are
 written once as hidden. Hidden is what `gfx.text` already does with a glyph
 slot it holds and is not drawing: the instance zeroed, the depth parked at the
 back of its band, and a cull bound out where no finite view overlaps it, which
@@ -2015,9 +2015,9 @@ between an image's height and its shelf's.
 
 Every placement carries a one-texel gutter on all four sides, written as a copy
 of the image's own edge rather than left undefined, so two images are two texels
-apart and a filter that reaches past an edge finds the colour that was already
+apart and a filter that reaches past an edge finds the color that was already
 there. The rect a caller samples is the image's own texels and never the gutter,
-so a neighbour packed beside it is unreachable however the sub-rect inside it is
+so a neighbor packed beside it is unreachable however the sub-rect inside it is
 narrowed. Nothing is reclaimed, which is the same bargain the unpacked path
 makes.
 
@@ -2037,11 +2037,11 @@ different image the moment the assets load in a different order. So a snapshot
 stores the name, `registerImage` keeps a registry from name to layer, and
 registering a name twice answers with the layer it already holds instead of
 consuming another. The name is the path rather than the spelling of it: a name
-is normalised before it becomes an identity, so `a/b.png` and `a/./b.png` are
+is normalized before it becomes an identity, so `a/b.png` and `a/./b.png` are
 one image and not two layers holding the same pixels. Only what a spelling
 cannot disagree about is dropped, which is repeated separators, `.` segments
 and a trailing separator. Nothing there reads the filesystem, so a name
-normalises the same before its file exists as after, and `..`, letter case and
+normalizes the same before its file exists as after, and `..`, letter case and
 the asset root are all left alone: resolving any of them lexically would merge
 two names that are two different files, or make an identity depend on where the
 process was looking when it was asked. The layer is cached in the `Sprite` when it is built, or on
@@ -2074,7 +2074,7 @@ is held for as little of the frame as possible.
 The model is Aseprite's, because that is what the art is authored in. A sheet
 is a list of frames, each holding for its own duration; a set of named tags,
 each an inclusive span of frames played forward, in reverse, or pingpong; and a
-set of named slices carrying rectangles, nine-slice centres and pivots that
+set of named slices carrying rectangles, nine-slice centers and pivots that
 move from frame to frame. Tag zero is the whole sheet, forward.
 
 Reading an Aseprite JSON export is one function in front of that model rather
@@ -2111,8 +2111,8 @@ Slices are where pivots come from, rather than an origin API invented beside
 them. A slice holds a key until the next one, so `Sheet:pivotOf` answers the
 key in force on a frame, adds the slice's own origin, and divides by the frame:
 what comes back is a fraction of the frame, so nothing downstream has to know
-the sheet's pixel sizes. A slice with a nine-slice centre but no pivot answers
-the middle of that centre, one with neither answers the middle of its own
+the sheet's pixel sizes. A slice with a nine-slice center but no pivot answers
+the middle of that center, one with neither answers the middle of its own
 rectangle, and no slice at all answers the middle of the frame, which is where
 a quad sits with no pivot.
 
@@ -2132,7 +2132,7 @@ extraction folds it into the origin and the shader is untouched. Sending it
 instead would need a fifth `vec4`, which is sixteen more bytes streamed for
 every instance in the world to say something almost none of them have anything
 to say about. Two things follow the quad and one deliberately does not: the
-cull bound is centred on the quad rather than on the entity, so it stays exactly
+cull bound is centerd on the quad rather than on the entity, so it stays exactly
 as big as it was instead of growing to cover a shift already known on the host;
 and the depth sort still runs on the entity's position, which is the whole
 reason a pivot at the feet is worth having, since two characters standing on
@@ -2449,7 +2449,7 @@ game moves and a stored one would go on answering for extents it no longer has.
 A log line on its own leaves the shortfall observable and unanswerable, and
 being answerable is the whole reason it is reported rather than raised.
 
-A colour clear comes from the target rather than from the pass, which is right
+A color clear comes from the target rather than from the pass, which is right
 while one pass writes a target and wrong as soon as two do: the second clears
 the first one's result away. A pass may name its own clear, which wins, and
 `PassGraph.LOAD` is how it says "load, whatever the target asks for". That is
@@ -2580,10 +2580,10 @@ The direction is chosen rather than incidental. Projecting lights on the host
 would be the same arithmetic once, but everything that comes after wants a
 world-space ray: an occluder mask is built with a world projection and a shadow
 march is a march through the world, so the projection would have to be undone
-again at the first of them. The view arrives as a centre and a rotation divided
+again at the first of them. The view arrives as a center and a rotation divided
 by the zoom, because an orthographic projection inverts to a 2x2 and an offset
 and a fragment should pay two multiply-adds rather than a 4x4 by a vec4. A
-pipeline nothing sets a view on centres one on its own target, which makes
+pipeline nothing sets a view on centers one on its own target, which makes
 world units target pixels and is the same default the renderer's camera takes.
 
 ### Materials say which way they face
@@ -2609,7 +2609,7 @@ how tall a shape is drawn and nothing about how far it stands out of the plane.
 A shape is taken to swell with itself, which makes the scale drop out.
 
 No attachment was added for this. The normal target already existed and was
-already being written, with a constant; four colour attachments is what a
+already being written, with a constant; four color attachments is what a
 render pass allows and the G-buffer is using two of them.
 
 ### Lights are binned into tiles
@@ -2683,7 +2683,7 @@ that cull's viewport and cannot express this.
 
 Overlap resolves by `min` and `max` rather than by an accumulate, and both
 commute, so what a pixel holds is a function of the set of fragments that
-covered it and not of their order; on an unsigned normalised target that is bit
+covered it and not of their order; on an unsigned normalized target that is bit
 exact. Nothing in the subsystem uses an atomic, for the same reason nothing else
 here does. The one cap that binds, four lights per caster, is applied by
 descending weight in a fixed comparison network rather than by buffer order: a
@@ -2959,8 +2959,8 @@ scan lane and never reaches the draw.
 
 Randomness is a counter-based hash of the seed, the emitter's generation, the
 particle's serial and a lane per property, rather than a generator carrying
-state. Two consequences follow. Adding a randomised property does not shift
-every other random choice, so an effect edited to randomise its rotation keeps
+state. Two consequences follow. Adding a randomized property does not shift
+every other random choice, so an effect edited to randomize its rotation keeps
 the sizes it had. And a particle's constants are recomputed each frame rather
 than stored, which is what keeps its state at eight floats: seven hash draws
 are cheaper than seven floats of memory traffic per particle per frame.
@@ -2975,7 +2975,7 @@ velocity, applied to the output and never to the state, so it cannot feed back.
 Animated particles are the frame table's second caller and build nothing new.
 Writing `rate = tickCount / (lifetime * stepsPerSecond)` with looping off makes
 a particle traverse its cycle exactly once over its own life and clamp at the
-end, so a randomised lifetime randomises the playback speed. Per-frame
+end, so a randomized lifetime randomizes the playback speed. Per-frame
 durations, reverse and pingpong all arrive already spent at build time, and
 there is no second registry, no second table and no second answer to which
 frame a thing is showing.
@@ -3015,7 +3015,7 @@ is a pipeline stall.
 particle-shaped reaches it: routing into it is extraction negating the first
 half extent of a cull bound, and the simulate pass writes every particle's bound
 with both extents positive. So a particle goes to the G-buffer, which is written
-with replace and has nowhere to put partial coverage, and a colour's alpha
+with replace and has nowhere to put partial coverage, and a color's alpha
 reaches the swapchain having blended against nothing. A gradient ending at
 transparent black writes opaque black over what was behind it, which is worse
 than not fading. Alpha is carried and it is inert, `render.blend` is accepted
@@ -3112,7 +3112,7 @@ there is nothing to invalidate. That is what makes it identity rather than a
 second upload, and it is also why the size has to match: a resize is a different
 rect, packed or not, and the instances already carrying the old one have no way
 to be told. Packed or not, only the image's own rectangle and the gutter around
-it are written, so the neighbours sharing its layer are untouched.
+it are written, so the neighbors sharing its layer are untouched.
 
 Sound re-reads through `reload_sound`, and identity is kept the same way: a
 clip's index is its path's, so an edited file comes back under the index every
@@ -3249,7 +3249,7 @@ installed tree runs from an unrelated directory with nothing in the environment.
 
 SDL covers every platform this engine can be built for openly. It does not
 cover the ones whose SDKs are licensed, and those cannot live in this repository
-even for someone who holds a licence, because their headers may not be
+even for someone who holds a license, because their headers may not be
 redistributed. So the engine names its platform seams instead. There are seven,
 and a port supplies these and touches nothing above them:
 
@@ -3481,6 +3481,14 @@ CMake is canonical. Make is a wrapper that forwards to it, so there is one
 description of how the engine is assembled rather than one per platform to keep
 in step.
 
+Rust native services live in one Cargo workspace under `native/rust`. CMake
+selects the Rust target that matches its own preset, asks Cargo for one static
+archive, and owns the final link. That keeps a single-file build single: Cargo,
+the crate graph, and the archive are build inputs, not files a game needs at
+run time. The image decode/encode ABI is present as build foundation, but the
+Teal image, screenshot, and window modules still use SDL_image until that
+runtime migration lands.
+
 ```
 make presets        list the platform matrix
 make build          build the selected preset
@@ -3516,7 +3524,7 @@ and that is the one check the make target turns off: it passes
 and that defaults to a development preset, which links one on purpose. Only a
 packaged install can pass the rest: a development one keeps its link paths on
 purpose, so what runs against one is the half that is about the tree rather than
-the preset, the licence position and the packaged types, and the rest is
+the preset, the license position and the packaged types, and the rest is
 reported as not run. A package that resolved a library from the build machine
 works there and nowhere else, and the failure only appears once someone else
 unpacks it.
@@ -3542,11 +3550,11 @@ a real window to completion.
 
 ## Requirements
 
-CMake 3.24+, LuaJIT, SDL3 (3.4, for SDL_GPU), SDL3_image, SDL3_mixer, SDL3_net,
-Box2D 3.x, shaderc, SPIRV-Cross, libcurl, zlib, and Teal (`tl`). The configure
-requires every one of them. `make deps` installs the ones Homebrew supplies;
-libcurl and zlib are not among them, because a development preset finds the
-host's.
+CMake 3.24+, Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU), SDL3_image,
+SDL3_mixer, SDL3_net, Box2D 3.x, shaderc, SPIRV-Cross, libcurl, zlib, and Teal
+(`tl`). `rust-toolchain.toml` selects the Rust toolchain. The configure requires
+every one of them. `make deps` installs the ones Homebrew supplies; libcurl and
+zlib are not among them, because a development preset finds the host's.
 
 A version is a requirement rather than a floor. The spec suite runs against
 whatever a development preset resolved, so a suite run against a different SDL,
@@ -3571,16 +3579,16 @@ a developer's machine is refused by a package built from `cmake/Pinned.cmake`,
 where PNG and JPEG are the whole list. Test an unfamiliar format against a
 packaged preset before shipping an asset in it.
 
-### Licences
+### Licenses
 
 Everything this engine links is permissive, and it stays that way. LGPL is the
 one rule with no exceptions, because a statically linked game cannot satisfy
 the relinking obligation and a shipped binary is what this is for. It is not
 left to a document: `cmake/Pinned.cmake` names every decoder option that would
 fetch one, `spec/licenses_spec.lua` holds those options to their values and
-fails on a name it does not recognise, and `scripts/checkpackage.py` holds the
-libraries an installed tree actually links against a list carrying a licence
-and a reason for each. Neither of those two checks reads a licence out of a
+fails on a name it does not recognize, and `scripts/checkpackage.py` holds the
+libraries an installed tree actually links against a list carrying a license
+and a reason for each. Neither of those two checks reads a license out of a
 binary, because that is not something a binary carries; what they prove is that
 nothing gets linked without somebody having written down what it is.
 

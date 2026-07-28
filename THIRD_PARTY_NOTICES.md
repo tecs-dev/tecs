@@ -53,6 +53,9 @@ of time gets these right first:
   distribution, which is what this file is.
 - **Apache-2.0**: SPIRV-Cross, shaderc, SPIRV-Tools. A distribution carries a
   copy of the licence and keeps the notices; nothing here modifies them.
+- **Apache-2.0 and MIT**: the Rust standard library and the Rust image crate
+  graph described below. This distribution elects one arm for each dual-
+  licensed crate and carries both licence texts.
 - **The curl licence**, when libcurl lands: "in all copies", again with no
   carve-out.
 - **David Gay's notice**, below, which asks for the entire notice rather than a
@@ -169,6 +172,22 @@ anything. `SDLIMAGE_BACKEND_IMAGEIO` is off because with it on `IMG_Load` is not
 SDL_image's function at all on Apple platforms: CoreGraphics answers it and
 reads WebP, AVIF, JPEG XL, TIFF, BMP and GIF whatever the format options say.
 `SDLIMAGE_BACKEND_WIC` is off for the same reason in the small on Windows.
+
+### Rust image build foundation
+
+The static native archive includes Rust's `image` crate with only its PNG and
+JPEG features. The existing Teal modules do not call this ABI yet; SDL3_image
+remains linked during the staged migration. Cargo still links the Rust code
+into the native registry, so its notices belong to the binary now rather than
+only after the call sites move.
+
+The exact versions are pinned in `native/rust/Cargo.lock`. This distribution
+elects **Apache-2.0** for the Rust standard library and for `adler2`, `autocfg`,
+`bitflags`, `bytemuck`, `cfg-if`, `crc32fast`, `fdeflate`, `flate2`, `image`,
+`miniz_oxide`, `moxcms`, `num-traits`, `png`, `pxfm`, `zune-core`, and
+`zune-jpeg`. It elects **MIT** for `byteorder-lite` and `simd-adler32`, whose
+other available arms do not include Apache-2.0. `LICENSE-APACHE` and
+`LICENSE-MIT` travel with the embedded payload and with an installed package.
 
 ### What SDL3_mixer decodes
 

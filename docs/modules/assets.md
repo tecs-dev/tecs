@@ -148,7 +148,7 @@ The auto case reads the file twice when it turns out to be short: once without d
 and once to decode it. That is a second read of a small file, off the main thread, against holding a decoded
 copy of a piece of music.
 
-A handle whose mixer could not be initialised comes back already `"failed"` rather than raising.
+A handle whose mixer could not be initialized comes back already `"failed"` rather than raising.
 [`Audio`](/modules/audio) is the normal caller; a game loads clips through it rather than through here.
 
 ## Handle
@@ -169,7 +169,7 @@ What a load hands back. It is a one-shot future, not a cache: it settles once an
 | `durationMs` | `integer` | Length in milliseconds, or `-1` when the file cannot say. Sounds only.                                  |
 | `error`      | `string`  | Set if loading failed.                                                                                  |
 
-Images are decoded to one normalised RGBA layout on the worker, so the upload path handles exactly one layout
+Images are decoded to one normalized RGBA layout on the worker, so the upload path handles exactly one layout
 and the conversion cost lands off the main thread with the decode.
 
 `"released"` is terminal and reached only through `release`, so something handed a handle whose decode it no
@@ -478,7 +478,7 @@ game has started the worker yet.
 
 | Type                       | Description                                                                                                                                                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | Whether the worker exists, which is a fact about the process rather than about any world. False means a load raises rather than queueing, so this is the guard rather than an optimisation. |
+| <code v-pre>boolean</code> | Whether the worker exists, which is a fact about the process rather than about any world. False means a load raises rather than queueing, so this is the guard rather than an optimization. |
 
 <a id="tecs.assets.loadImage"></a>
 
@@ -523,7 +523,7 @@ business rather than the caller's.
 `mode` is "resident", "stream", or "auto", and auto keeps anything shorter
 than `streamMs` resident.
 
-The library is initialised here rather than on the worker: `MIX_Init` is
+The library is initialized here rather than on the worker: `MIX_Init` is
 documented as not thread safe, and doing it before the task is sent puts it
 in order ahead of every decode without a lock.
 
@@ -541,7 +541,7 @@ Two overlapping loads of one path do not share, unlike images: each gets its own
 
 | Type                                                        | Description                                                                                                                                                  |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre><a href="#tecs.assets.Handle">Handle</a></code> | A handle at "loading", or one already at "failed" when the mixer could not be initialised, which is the one failure reported without waiting for the worker. |
+| <code v-pre><a href="#tecs.assets.Handle">Handle</a></code> | A handle at "loading", or one already at "failed" when the mixer could not be initialized, which is the one failure reported without waiting for the worker. |
 
 <a id="tecs.assets.pending"></a>
 

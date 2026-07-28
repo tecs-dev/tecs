@@ -187,7 +187,7 @@ filesystem with the game reads it far more cheaply and it persists for a human t
 
 ### sample_pixels
 
-Reads the colour of specific pixels from the last frame.
+Reads the color of specific pixels from the last frame.
 
 Read-only.
 
@@ -197,7 +197,7 @@ Read-only.
 
 **Returns:** `width`, `height` and `pixels`, one entry per point carrying `x`, `y` and either `r`, `g`, `b`,
 `a` or `outside` for a point off the frame. A screenshot answers what the frame looks like and needs eyes;
-this answers whether a pixel is the colour it should be, which is the question an agent can check.
+this answers whether a pixel is the color it should be, which is the question an agent can check.
 
 ### send_event
 
@@ -580,7 +580,7 @@ chunk that does not compile is retried with `return` in front of it before a syn
 returns `nil` and a diagnostic when neither form compiles. `reset` forgets everything a previous call stashed.
 `describe` converts a value into something JSON can carry, because encoding raises on a function, a coroutine
 or cdata, and an agent that returned one by accident should get a description of it rather than a failed call;
-it walks 6 levels deep and 256 entries per table before summarising.
+it walks 6 levels deep and 256 entries per table before summarizing.
 
 The environment carries `assert`, `error`, `ipairs`, `next`, `pairs`, `pcall`, `print`, `select`,
 `setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawequal`, `rawlen`, `tonumber`, `tostring`, `type`,

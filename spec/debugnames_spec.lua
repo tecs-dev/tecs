@@ -100,14 +100,14 @@ describe("gpu debug names", function()
     it("hands SDL the name a texture was created with", function()
         local named = recording(function(modules)
             local Texture = modules["tecs.gpu.Texture"]
-            local labelled = Texture.create(device.handle, {
+            local labeled = Texture.create(device.handle, {
                 width = SIZE,
                 height = SIZE,
                 format = FORMAT,
                 name = "readback",
             })
-            assert.are.equal("readback", labelled.name)
-            labelled:destroy()
+            assert.are.equal("readback", labeled.name)
+            labeled:destroy()
 
             local anonymous = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
             assert.is_nil(anonymous.name)
@@ -120,9 +120,9 @@ describe("gpu debug names", function()
     it("hands SDL the name a buffer was created with", function()
         local named = recording(function(modules)
             local Buffer = modules["tecs.gpu.Buffer"]
-            local labelled = Buffer.create(device.handle, { usage = { "storage" }, size = 256, name = "instances" })
-            assert.are.equal("instances", labelled.name)
-            labelled:destroy()
+            local labeled = Buffer.create(device.handle, { usage = { "storage" }, size = 256, name = "instances" })
+            assert.are.equal("instances", labeled.name)
+            labeled:destroy()
 
             local anonymous = Buffer.create(device.handle, { usage = { "storage" }, size = 256 })
             assert.is_nil(anonymous.name)

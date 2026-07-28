@@ -2,7 +2,7 @@
 ---
 --- Deferred passes read the previous pass's output one texel per fragment, so
 --- the default is nearest with clamped edges. Filtering a G-buffer bleeds
---- neighbouring surfaces together, which shows up as haloed edges in lighting
+--- neighboring surfaces together, which shows up as haloed edges in lighting
 --- rather than as anything that looks like a sampling problem.
 
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -17,7 +17,7 @@ local record SamplerOptions
     filter: string
     --- "clamp", "repeat", or "mirror". Defaults to clamp, and applies to all
     --- three axes. Clamp is what a texture array wants, where an image
-    --- occupying part of a cell would otherwise sample its neighbour's padding.
+    --- occupying part of a cell would otherwise sample its neighbor's padding.
     address: string
 end
 

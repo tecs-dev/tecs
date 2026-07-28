@@ -23,7 +23,7 @@ float starDistance(vec2 point, float outer, float inner) {
     vec2 edge = inner * vec2(cos(sector), sin(sector)) - tip;
     vec2 offset = folded - tip;
     float along = clamp(dot(offset, edge) / dot(edge, edge), 0.0, 1.0);
-    // The cross product is positive on the side the centre is on, so it is the
+    // The cross product is positive on the side the center is on, so it is the
     // sign the distance takes.
     float side = sign(edge.x * offset.y - edge.y * offset.x);
     return -side * length(offset - edge * along);

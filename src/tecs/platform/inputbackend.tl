@@ -32,7 +32,7 @@ local record GamepadInfo
     --- What the platform calls the device. For showing the player which pad is
     --- which, not for matching: `guid` is what survives a driver change.
     name: string
-    --- Device family, as the platform recognises it: "xboxOne", "ps5",
+    --- Device family, as the platform recognizes it: "xboxOne", "ps5",
     --- "switchPro", "standard", "unknown" and so on.
     kind: string
     --- Stable identity for the hardware, for matching saved bindings.

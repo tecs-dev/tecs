@@ -90,7 +90,7 @@ void main() { o = data.item[pick.index]; }
         C.SDL_Quit()
     end)
 
-    -- Renders element `index` of `buffer` and returns its colour.
+    -- Renders element `index` of `buffer` and returns its color.
     local function readElement(buffer, index)
         local pick = loader.newArray("int32_t[4]")
         pick[0] = index

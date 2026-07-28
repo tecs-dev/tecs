@@ -34,7 +34,7 @@
 --- ## Why SDL's own implementation is not `SDL_Storage`
 ---
 --- The SDL backend below calls `SDL_LoadFile`, `SDL_GlobDirectory` and their
---- neighbours directly, not `SDL_OpenFileStorage`. Storage has a readiness
+--- neighbors directly, not `SDL_OpenFileStorage`. Storage has a readiness
 --- model a path call does not: it opens immediately and is unusable until
 --- `SDL_StorageReady` says so, which on a console can be after a mount or a
 --- download completes. On a machine where every backing it can have is the

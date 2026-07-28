@@ -8,7 +8,7 @@ Thanks for your interest in contributing!
 - Add tests for new features, bug fixes, or edge cases when reasonable.
 - **Update `docs/` for any user-facing change.** A change a game can see is not
   done until its page says so. Prose is the one thing no test can check, so the
-  only defence is the person making the change. `make docs-dev` serves the site
+  only defense is the person making the change. `make docs-dev` serves the site
   with hot reload.
 - **`make docs-check` must pass.** It holds the module list against
   `src/tecs/init.tl` in three listings at once, resolves every link and anchor,

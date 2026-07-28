@@ -4,9 +4,9 @@
 --- only thing that differs between them is how the matrix is built; everything
 --- reading it, the vertex shader and the cull, does not care.
 ---
---- Position is the centre of the view rather than a corner, so a camera that
+--- Position is the center of the view rather than a corner, so a camera that
 --- has never been moved shows the world origin in the middle of the window. A
---- renderer with no camera set centres a default on the first frame it draws,
+--- renderer with no camera set centers a default on the first frame it draws,
 --- so a scene that never mentions a camera behaves as though world coordinates
 --- were screen coordinates.
 ---
@@ -27,7 +27,7 @@ local sin <const>, cos <const> = math.sin, math.cos
 
 --- What a camera is created with. Every field is optional.
 local record CameraOptions
-    --- Centre of the view, in world units. Both default to zero.
+    --- Center of the view, in world units. Both default to zero.
     x: number
     y: number
     --- Defaults to one. Zero or less divides through in every method here and
@@ -52,17 +52,17 @@ local record Camera
     --- passes without reaching into this file.
     type Options = CameraOptions
 
-    --- Centre of the view, in world units.
+    --- Center of the view, in world units.
     x: number
     --- The other half of it, running down: increasing y moves the view towards
     --- the bottom of the world.
     y: number
-    --- Above one magnifies. Applied about the centre, so zooming does not move
+    --- Above one magnifies. Applied about the center, so zooming does not move
     --- what is under the middle of the window.
     zoom: number
     --- Radians. Positive turns the scene counter-clockwise on screen, which is
     --- the camera itself turning the other way: at a quarter turn, a point at
-    --- +X from the camera in the world is drawn above the centre of the window.
+    --- +X from the camera in the world is drawn above the center of the window.
     rotation: number
     --- "orthographic" today. The field exists so a perspective mode can be
     --- added without a second camera type, which is the whole reason there is
@@ -78,7 +78,7 @@ local record Camera
     _view: {number}
 
     --- Creates a camera. Everything defaults to an unrotated, unzoomed view at
-    --- the world origin, which a renderer then recentres if the game never
+    --- the world origin, which a renderer then recenters if the game never
     --- moves it.
     --- @param options Omit for the default view. No field is validated; the
     ---     values are taken as given.
@@ -188,8 +188,8 @@ function Camera:matrix(width: number, height: number): loader.CArray
     -- vertex shader from the layer band rather than projected from world space.
     m[10] = 1.0
     m[15] = 1.0
-    -- Translation is the transformed camera position, negated, so the centre
-    -- of the view lands at the centre of clip space.
+    -- Translation is the transformed camera position, negated, so the center
+    -- of the view lands at the center of clip space.
     m[12] = -(m00 * self.x + m01 * self.y)
     m[13] = -(m10 * self.x + m11 * self.y)
 

@@ -441,7 +441,7 @@ end)
 
 -- The watcher's switch, which is the tool an agent reaches for rather than a
 -- fifth reload: what it turns on is the four above happening without being
--- asked. The watcher's own behaviour is asserted in `watch_spec`; what is here
+-- asked. The watcher's own behavior is asserted in `watch_spec`; what is here
 -- is that the tool reports it, steps it, and stops it.
 describe("mcp watch", function()
     local watch = require("tecs.platform.watch")

@@ -149,7 +149,7 @@ after the graphics driver has mapped its own memory can find nowhere at all and 
 with `jit.status()` still answering true.
 
 The host holds a block of that address space open from its first instruction and gives it back once
-initialisation returns, which is what makes a worker compile at all. Past what that block covers, a worker
+initialization returns, which is what makes a worker compile at all. Past what that block covers, a worker
 competes for whatever is left, and the only symptom is that it runs slowly.
 
 Setting `TECS_TRACEPROF` makes each worker report its trace aborts when its inbox closes, which is how that is

@@ -148,7 +148,7 @@ FetchContent_Declare(
 # Off, and why:
 #   GME           game-music-emu, LGPL, and no permissive alternative backend
 #   MOD           libxmp, which is MIT rather than LGPL as it is often called;
-#                 off because no format here needs it, not for its licence
+#                 off because no format here needs it, not for its license
 #   MIDI          FluidSynth, LGPL, and the bundled TiMidity with it, Artistic-1.0
 #   MP3_MPG123    LGPL; dr_mp3 decodes the same files under a permissive one
 #   VORBIS_VORBISFILE, FLAC_LIBFLAC
@@ -696,7 +696,7 @@ set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl
 # package. Naming them here does, and it makes the set enumerable: this list
 # and the link table of an installed binary have to agree, which is what
 # scripts/checkpackage.py reads and what its LINKED_LIBRARIES declares a
-# licence for.
+# license for.
 #
 # Everything absent is absent for a reason worth knowing. SPIRV-Cross, glslang,
 # SPIRV-Tools, libpng and SDL_mixer's four decoders are static, and are inside
@@ -704,7 +704,7 @@ set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl
 # by name, because its build is not one of these.
 #
 # A single-file build installs none of them, because every one is an archive
-# inside the executable and there is nothing left to put beside it. The licence
+# inside the executable and there is nothing left to put beside it. The license
 # obligation does not go away with the file: the notices travel in the payload,
 # and `tecs info --licenses` is where they are read.
 if(NOT TECS_SINGLE_FILE)

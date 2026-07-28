@@ -26,7 +26,7 @@ Names are qualified by what they act on. On a module that also runs programs and
 code is being generated, whether shaders can be compiled at run time, whether a touch device is attached, and
 how many cores a worker pool has to size itself against.
 
-It is read rather than inferred. Selecting behaviour from `ffi.os` guesses: it cannot tell a build that linked a
+It is read rather than inferred. Selecting behavior from `ffi.os` guesses: it cannot tell a build that linked a
 shader compiler from one that did not, or an interpreter-only LuaJIT from a jitting one, and both distinctions
 change what the engine is allowed to attempt.
 
@@ -271,7 +271,7 @@ function hasPrimarySelection(): boolean
 
 ### Encoding
 
-Clipboard text is UTF-8 and passes through byte for byte. Line endings are not normalised, so text copied on
+Clipboard text is UTF-8 and passes through byte for byte. Line endings are not normalized, so text copied on
 Windows arrives as CRLF and stays CRLF, and nothing is trimmed from either end. Text stops at the first NUL,
 because that is what terminates the C string SDL returns and what every producer of clipboard text intends;
 `data` uses the length SDL reports instead, so a blob keeps its NULs.
@@ -286,7 +286,7 @@ so neither happens on the main thread. A run goes out to a worker, the loop pump
 [`Future`](/modules/future) settles; that is the same shape [`assets`](/modules/assets) uses for a decode, for
 the same reason.
 
-It is one of the few subsystems more useful without a window than with one. No SDL subsystem is initialised and
+It is one of the few subsystems more useful without a window than with one. No SDL subsystem is initialized and
 no process call is made on this side at all, so it works under a plain interpreter with no video, no device and
 no host.
 
@@ -398,7 +398,7 @@ anything that is not a run from here.
 
 It is reachable in the two cases where the future does not carry it. Before the child ends, so `pid` can be read
 as soon as it has started, which is the one thing about a run that means anything before there is an answer. And
-after a child was killed, which settles `"cancelled"` with no value but does not throw away what the child
+after a child was killed, which settles `"canceled"` with no value but does not throw away what the child
 managed to say first.
 
 ### How a run ends
@@ -411,7 +411,7 @@ An exit code is not a failure. A child that ran and exited 1 settles `"ready"`, 
 asked to and the code is the answer; reading it the other way would make every non-zero exit propagate as a
 failure through `map`, which is wrong for everything that shells out to a tool whose exit code is data.
 
-`"cancelled"` means this process ended the child, through `kill`, a `timeoutMs` deadline, or `shutdown`.
+`"canceled"` means this process ended the child, through `kill`, a `timeoutMs` deadline, or `shutdown`.
 
 ### Pumping
 
@@ -450,7 +450,7 @@ function killProcess(run: Future<Result>, force?: boolean)
   a forced kill cannot be refused but leaves whatever the child was writing half written.
 
 Queued rather than immediate: every process call belongs to the worker, so this is picked up on its next pass.
-The future settles `"cancelled"` when the child goes.
+The future settles `"canceled"` when the child goes.
 
 `run:cancel()` is the other spelling, and it counts holders: it ends the child only when the last consumer of the
 future has given it up, and it forces the kill, because the last consumer of the output has just gone and there
@@ -473,7 +473,7 @@ teardown that waits forever deserves nothing. What it does not do is walk away: 
 process that started it, and the worker still blocked on it would be a thread running inside a library about to
 be unmapped.
 
-Every future still in flight ends at `"cancelled"`, including one whose child the kernel never reaped. Leaving
+Every future still in flight ends at `"canceled"`, including one whose child the kernel never reaped. Leaving
 those pending would be a handle that reads "still running" for the rest of the process against a runner that no
 longer exists.
 
@@ -598,8 +598,8 @@ local choice <const> = tecs.system.openFile({
 
 Every filter needs a non-empty `name` and `pattern`; invalid filters raise before a dialog opens.
 
-A ready future carries `paths`, `filter`, and `cancelled`. `filter` is one-based, or zero when no filter applies.
-Closing the picker without choosing is a successful result with `cancelled = true` and an empty path list;
+A ready future carries `paths`, `filter`, and `canceled`. `filter` is one-based, or zero when no filter applies.
+Closing the picker without choosing is a successful result with `canceled = true` and an empty path list;
 failure means the platform could not complete the dialog.
 
 SDL retains a callback for these pickers and may invoke it from a thread LuaJIT did not create.
@@ -1026,7 +1026,7 @@ Asks the worker to end a child.
 Queued rather than immediate: every process call belongs to the worker,
 so this is picked up on its next pass. Gentle by default, which a child
 may ignore; `force` cannot be refused but leaves whatever it was writing
-half written. The future settles "cancelled" when the child goes.
+half written. The future settles "canceled" when the child goes.
 
 `run:cancel()` is the other spelling, and it counts holders: it ends the
 child only when the last consumer of the future has given it up. This
@@ -1201,7 +1201,7 @@ The same object the future carries on "ready", reachable in the two
 cases where the future does not carry it. Before the child ends, so
 `pid` can be read as soon as it has started, which is the one thing
 about a run that means anything before there is an answer. And after a
-child was killed, which settles "cancelled" with no value but does not
+child was killed, which settles "canceled" with no value but does not
 throw away what the child managed to say first.
 
 The runner's bookkeeping rather than the caller's, which is why it is a
@@ -1266,9 +1266,9 @@ a `wait` on it, takes the worker's answer.
 
 #### Returns
 
-| Type                                                                                    | Description                                                                                                                                                                                                                                                          |
-| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Future&lt;<a href="#tecs.system.ProcessResult">ProcessResult</a>&gt;</code> | A future that settles "ready" with the result when the child ends, however it ended: a non-zero exit is still "ready", and `succeeded` is what distinguishes them. It settles "failed" only when the child could not be started, and "cancelled" when it was killed. |
+| Type                                                                                    | Description                                                                                                                                                                                                                                                         |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;<a href="#tecs.system.ProcessResult">ProcessResult</a>&gt;</code> | A future that settles "ready" with the result when the child ends, however it ended: a non-zero exit is still "ready", and `succeeded` is what distinguishes them. It settles "failed" only when the child could not be started, and "canceled" when it was killed. |
 
 <a id="tecs.system.saveFile"></a>
 
@@ -1355,7 +1355,7 @@ process that started it, and the worker still blocked on it would be a
 thread running inside a library about to be unmapped, which this
 codebase has already paid for once.
 
-Every future still in flight ends at "cancelled", including one whose
+Every future still in flight ends at "canceled", including one whose
 child the kernel never reaped. Leaving those pending would be a handle
 that reads "still running" for the rest of the process against a runner
 that no longer exists.

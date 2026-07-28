@@ -55,16 +55,16 @@ function content.basePath(): string
     return baseCache
 end
 
---- Writable directory for `organisation` and `application`, created if absent.
+--- Writable directory for `organization` and `application`, created if absent.
 ---
 --- The names are the caller's rather than this module's, because they are a
 --- value a game assigns and the place it assigns them is the public module.
-function content.prefPath(organisation: string, application: string): string
+function content.prefPath(organization: string, application: string): string
     fresh()
     if prefCache ~= nil then
         return prefCache
     end
-    prefCache = adapter.current().prefPath(organisation, application)
+    prefCache = adapter.current().prefPath(organization, application)
     return prefCache
 end
 
@@ -100,7 +100,7 @@ end
 
 --- Overrides the asset root, for a test or a tool.
 ---
---- Synchronises first, so the override outlives the platform change that may
+--- Synchronizes first, so the override outlives the platform change that may
 --- have preceded it rather than being dropped by the next read.
 function content.setAssetRoot(root: string)
     fresh()

@@ -136,13 +136,13 @@ local record Light
     --- below one are treated as one, and zoom scales what it covers on screen
     --- rather than what it covers in the world.
     radius: number
-    --- Colour, in 0..1 per channel.
+    --- Color, in 0..1 per channel.
     r: number
     g: number
     b: number
-    --- Multiplies the colour before it accumulates. Above one is useful: what
+    --- Multiplies the color before it accumulates. Above one is useful: what
     --- clamps is the target, once the sum has been applied to albedo, so a
-    --- bright light saturates towards the surface's own colour rather than
+    --- bright light saturates towards the surface's own color rather than
     --- being cut off on its way in.
     intensity: number
 end
@@ -205,7 +205,7 @@ local record DeferredOptions
     --- drawn here is built against `forwardFormat` and `forwardDepth` with
     --- blending on, and nothing here writes the G-buffer.
     forward: function(context: PassGraph.PassContext)
-    --- Ambient colour, added to every lit fragment before any light is.
+    --- Ambient color, added to every lit fragment before any light is.
     --- Defaults to a dim neutral. A fragment that asked not to be lit does not
     --- receive it, and neither does a pixel nothing drew over.
     ambient: {number}
@@ -264,7 +264,7 @@ local record Deferred
     --- Lights the lighting pass reads. Set by `setLights` and kept until it is
     --- called again, so a frame that says nothing lights as the last one did.
     lightCount: integer
-    --- Ambient colour in use, as three components. Written by `create` and
+    --- Ambient color in use, as three components. Written by `create` and
     --- read at the top of every lighting pass, so assigning to it takes effect
     --- on the next frame without rebuilding anything.
     ambient: {number}
@@ -361,7 +361,7 @@ local record Deferred
     --- rotation are kept folded into the two components the shader multiplies
     --- by, so the trig is paid once a frame rather than once a fragment.
     _viewX: number
-    --- Centre of the view in world units, with Y running down.
+    --- Center of the view in world units, with Y running down.
     _viewY: number
     --- Cosine of the view's rotation, already divided by the zoom.
     _viewCos: number
@@ -374,7 +374,7 @@ local record Deferred
     --- Radians, the sense the camera turns in.
     _viewRotation: number
     --- Whether anything has set a view. Until something does, the frame
-    --- centres one on its own target, so world units are target pixels and a
+    --- centers one on its own target, so world units are target pixels and a
     --- pipeline driven without a camera behaves as it reads.
     _viewSet: boolean
     --- The view as `render` resolved it for the frame being drawn, and the
@@ -384,13 +384,13 @@ local record Deferred
     --- light binned against one rectangle and looked up against another lands
     --- in a tile nothing reads.
     _frameViewX: number
-    --- The frame's view centre in world units, Y running down.
+    --- The frame's view center in world units, Y running down.
     _frameViewY: number
     --- The frame's rotation cosine over its zoom, as the shaders multiply by.
     _frameViewCos: number
     --- The frame's rotation sine over its zoom, as the shaders multiply by.
     _frameViewSin: number
-    --- The frame's view centre, zoom and rotation as the mask's projection
+    --- The frame's view center, zoom and rotation as the mask's projection
     --- takes them. Resolved with everything else, because the pass that draws
     --- the mask and the pass that inverts it have to agree exactly: a
     --- silhouette drawn against one projection and marched against another is
@@ -816,10 +816,10 @@ end
 --- shader applies it in two multiply-adds.
 ---
 --- Called every frame by whatever owns the camera. A pipeline nothing calls
---- this on centres a view on the target instead, which makes world units
+--- this on centers a view on the target instead, which makes world units
 --- target pixels.
---- @param x Centre of the view in world units.
---- @param y Centre of the view in world units, with Y running down.
+--- @param x Center of the view in world units.
+--- @param y Center of the view in world units, with Y running down.
 --- @param zoom Above one magnifies. Zero is treated as one rather than
 ---     dividing through, since a view that shows nothing is not what a caller
 ---     assigning a zoom of zero meant.
@@ -907,7 +907,7 @@ local function resolveView(self: Deferred, width: number, height: number)
         self._frameViewZoom = self._viewZoom
         self._frameViewRotation = self._viewRotation
     else
-        -- Centred on the target at zoom one, which puts a world unit on a
+        -- Centerd on the target at zoom one, which puts a world unit on a
         -- target pixel and the world origin in the corner. The size is only
         -- known here, which is why the default is applied per frame rather
         -- than at creation.
@@ -1060,9 +1060,9 @@ end
 --- Returns the two formats a geometry pipeline must be created against.
 ---
 --- In attachment order, so a pipeline passes them straight through as its
---- colour formats and cannot get albedo and normal the wrong way round.
---- @return The albedo target's format, which is colour attachment zero.
---- @return The normal target's format, which is colour attachment one.
+--- color formats and cannot get albedo and normal the wrong way round.
+--- @return The albedo target's format, which is color attachment zero.
+--- @return The normal target's format, which is color attachment one.
 function Deferred:geometryFormats(): integer, integer
     return self.graph:formatOf("albedo"), self.graph:formatOf("normal")
 end
@@ -1075,7 +1075,7 @@ function Deferred:geometryDepth(): GraphicsPipeline.DepthConfig
     return self.graph:depthOf("geometry")
 end
 
---- Returns the colour format a forward pipeline must be created against.
+--- Returns the color format a forward pipeline must be created against.
 ---
 --- One target rather than the G-buffer's two: the forward pass draws onto the
 --- composited image, which is a picture and not a description of a surface.
@@ -1153,7 +1153,7 @@ function Deferred:castsShadows(): boolean
     return self._shadows
 end
 
---- The colour format a pipeline drawing into the occluder mask must be created
+--- The color format a pipeline drawing into the occluder mask must be created
 --- against, and the one drawing into the drop-shadow target.
 ---
 --- Both from the graph rather than restated, so a pipeline cannot disagree with
@@ -1176,8 +1176,8 @@ end
 ---
 --- Valid only during a frame's passes: it is what `render` resolved for the
 --- frame being drawn.
---- @return Centre of the view in world units.
---- @return Centre of the view in world units, with Y running down.
+--- @return Center of the view in world units.
+--- @return Center of the view in world units, with Y running down.
 --- @return Zoom the mask is drawn at, which is not the camera's. It is meant
 ---     for a matrix built at the frame's size and not at the mask's: clip space
 ---     carries no resolution, so the mask's own scale is not in this and must

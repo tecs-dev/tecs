@@ -13,7 +13,7 @@
 struct TecsDialog {
     SDL_Mutex *lock;
     bool ready;
-    bool cancelled;
+    bool canceled;
     int filter;
     int pathCount;
     char **paths;
@@ -50,7 +50,7 @@ static void fileDialogCallback(void *userdata, const char *const *filelist, int 
     } else {
         int count = 0;
         while (filelist[count]) count++;
-        dialog->cancelled = count == 0;
+        dialog->canceled = count == 0;
         if (count > 0) {
             dialog->paths = (char **)SDL_calloc((size_t)count, sizeof(char *));
             if (!dialog->paths) {
@@ -151,7 +151,7 @@ bool tecsDialogReady(TecsDialog *dialog)
 
 bool tecsDialogCancelled(TecsDialog *dialog)
 {
-    return dialog ? dialog->cancelled : false;
+    return dialog ? dialog->canceled : false;
 }
 
 int tecsDialogFilter(TecsDialog *dialog)

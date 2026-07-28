@@ -94,9 +94,9 @@ if packet ~= nil then
 end
 ```
 
-`net.quit()` releases this module's SDL3_net initialisation. It refuses while an asynchronous operation or owned
+`net.quit()` releases this module's SDL3_net initialization. It refuses while an asynchronous operation or owned
 object remains live, so it cannot invalidate a handle behind its owner. Most games can leave the module
-initialised until process exit; the explicit call is useful to tests and hosts with a restartable runtime.
+initialized until process exit; the explicit call is useful to tests and hosts with a restartable runtime.
 
 ## Hostname resolution
 
@@ -239,7 +239,7 @@ real protocols should normally stay below the path MTU to avoid IP fragmentation
 packet and defaults to a zero-millisecond poll.
 
 UDP does not promise arrival, uniqueness or order. Sequence numbers, acknowledgements, retransmission and
-congestion behaviour belong to the game protocol rather than this transport wrapper.
+congestion behavior belong to the game protocol rather than this transport wrapper.
 
 ### Packet
 
@@ -853,9 +853,9 @@ Begins connecting to a resolved address.
 
 #### Returns
 
-| Type                                                                       | Description                                                                                                                                                                                                                                                                      |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>FutureType&lt;<a href="#tecs.net.Stream">Stream</a>&gt;</code> | A future over a stream the caller owns and closes. Already "failed" when the address is closed, SDL3_net could not start, or the connection could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Cancelling it destroys the half-open socket. |
+| Type                                                                       | Description                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>FutureType&lt;<a href="#tecs.net.Stream">Stream</a>&gt;</code> | A future over a stream the caller owns and closes. Already "failed" when the address is closed, SDL3_net could not start, or the connection could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Canceling it destroys the half-open socket. |
 
 <a id="tecs.net.http"></a>
 
@@ -920,9 +920,9 @@ Number of unresolved or connecting futures.
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                            |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code> | Zero once every resolution and connection has settled or been cancelled, which is when `net.poll` has nothing left to advance and `net.quit` stops refusing over them. |
+| Type                       | Description                                                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | Zero once every resolution and connection has settled or been canceled, which is when `net.poll` has nothing left to advance and `net.quit` stops refusing over them. |
 
 <a id="tecs.net.poll"></a>
 
@@ -936,9 +936,9 @@ waiting. Call once per frame while asynchronous network work exists.
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                      |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code> | How many futures settled on this call, failures counted, since a failure is a settlement. One cancelled between polls left the queue without being counted here. |
+| Type                       | Description                                                                                                                                                     |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | How many futures settled on this call, failures counted, since a failure is a settlement. One canceled between polls left the queue without being counted here. |
 
 <a id="tecs.net.quit"></a>
 
@@ -976,6 +976,6 @@ Begins resolving a hostname.
 
 #### Returns
 
-| Type                                                                         | Description                                                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>FutureType&lt;<a href="#tecs.net.Address">Address</a>&gt;</code> | A future over an address the caller owns and closes. Already "failed" when SDL3_net could not start or the lookup could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Cancelling it releases the lookup and drops it from `net.pending`. |
+| Type                                                                         | Description                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>FutureType&lt;<a href="#tecs.net.Address">Address</a>&gt;</code> | A future over an address the caller owns and closes. Already "failed" when SDL3_net could not start or the lookup could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Canceling it releases the lookup and drops it from `net.pending`. |

@@ -48,7 +48,7 @@ local record instancelayout
     --- Bytes per instance, which is the stride a writer advances by.
     BYTES: integer
 
-    --- Floats per cull bound: centre xy and half extent xy.
+    --- Floats per cull bound: center xy and half extent xy.
     ---
     --- Kept apart from the instance because the cull reads it for every entity
     --- every frame, drawn or not, while the instance is only read for what
@@ -63,7 +63,7 @@ local record instancelayout
     --- comparison stays arithmetic rather than a special case.
     UNBOUNDED: number
 
-    --- Centre for a slot nothing owns. No view overlaps a bound out here, so
+    --- Center for a slot nothing owns. No view overlaps a bound out here, so
     --- the cull drops it before the draw sees it.
     HIDDEN: number
 
@@ -162,7 +162,7 @@ end
 --- writer with a rotated extent and a writer with a per-axis one both take the
 --- same two numbers.
 --- @param role Anything outside the four raises: a bound written with a role
----     nothing recognises would be culled or drawn as some other role rather
+---     nothing recognizes would be culled or drawn as some other role rather
 ---     than reported.
 --- @return Sign for the first half extent, which is negative for a blended
 ---     instance and for a drop-shadow caster.
@@ -187,10 +187,10 @@ end
 --- cull can only keep something it might have dropped, never drop something it
 --- should have kept.
 ---
---- These are half extents about the quad's middle, so the centre written
+--- These are half extents about the quad's middle, so the center written
 --- beside them has to be the quad's middle too. That is not always the
 --- entity's position: a pivoted quad hangs off some other point of itself, and
---- the writer moves the centre with it rather than growing these to cover
+--- the writer moves the center with it rather than growing these to cover
 --- where the geometry went.
 --- @param rotation Radians. Exactly zero takes the tight per-axis answer;
 ---     anything else, however small, takes the looser rotation-proof one.

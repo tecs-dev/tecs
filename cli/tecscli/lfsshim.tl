@@ -3,7 +3,7 @@
 --- Teal and Cerulean both `require("lfs")`, and LuaFileSystem is a C module: a
 --- `.so` found on `package.cpath`, which is precisely what a single executable
 --- has none of. Vendoring its source would mean another C dependency, another
---- licence entry and another thing to build per platform, for three functions.
+--- license entry and another thing to build per platform, for three functions.
 ---
 --- SDL already answers all three, and the engine already reaches SDL through
 --- `tecs.filesystem`. So this is the shim, installed under the name the tools

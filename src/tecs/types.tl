@@ -608,7 +608,7 @@ local record types
     ---
     --- `drop` bounds the work one frame can be asked for: the steps that do
     --- not fit are abandoned and the simulated time they stood for is counted
-    --- as lost. Wall time and simulated time resynchronise immediately, at the
+    --- as lost. Wall time and simulated time resynchronize immediately, at the
     --- cost of a discontinuity anything integrating over the step can see.
     ---
     --- `accumulate` abandons nothing. The remainder stays in the accumulator

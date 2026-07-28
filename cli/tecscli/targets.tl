@@ -14,7 +14,7 @@
 --- Two different kinds of obstacle sit in that table and only one of them
 --- could ever be engineered away. Windows needs MSVC and there is no mingw
 --- toolchain in this tree; that is work nobody has done. macOS and iOS need the
---- Xcode SDK, whose licence forbids redistribution, so no non-Apple machine can
+--- Xcode SDK, whose license forbids redistribution, so no non-Apple machine can
 --- ship a toolchain that produces a Mach-O however much work is done. Saying
 --- "unsupported" for both would hide that difference.
 ---

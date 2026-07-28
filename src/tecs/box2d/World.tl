@@ -117,7 +117,7 @@ local BODY_TYPES <const>: {string: integer} = {
 ---     geometric mean.
 --- @param restitution Bounce, mixed with the other shape's as the larger of
 ---     the two.
---- @param offsetX The shape's centre in the body's frame, in meters.
+--- @param offsetX The shape's center in the body's frame, in meters.
 --- @param offsetY The same along y.
 --- @param categoryBits The categories this shape belongs to.
 --- @param maskBits The categories it collides with. Two shapes touch only when
@@ -314,7 +314,7 @@ end
 --- until `addBox` or `addCircle` is called on it.
 ---
 --- @param options May be nil. Position is meters and angle is radians. An
----     unrecognised `type` string is read as static rather than raising.
+---     unrecognized `type` string is read as static rather than raising.
 --- @return A `b2BodyId`, a value struct that is safe to copy and store. It
 ---     stays valid across steps and is invalidated only by destroying the body
 ---     or this world.
@@ -427,9 +427,9 @@ end
 function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number, options: ShapeOptions): loader.CValue
     local polygon = ffi.new("b2Polygon[1]") as loader.CArray
     local offset = ffi.new("b2Vec2[1]") as loader.CArray
-    local centre = offset[0] as loader.CStruct
-    centre.x = options.offsetX or 0.0
-    centre.y = options.offsetY or 0.0
+    local center = offset[0] as loader.CStruct
+    center.x = options.offsetX or 0.0
+    center.y = options.offsetY or 0.0
     local rotation = ffi.new("b2Rot[1]") as loader.CArray
     local angle = rotation[0] as loader.CStruct
     angle.c, angle.s = 1.0, 0.0
@@ -437,31 +437,31 @@ function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number
     return C.b2CreatePolygonShape(body, shapeDef(options), polygon) as loader.CValue
 end
 
---- Attaches a circle, centred by the offset in `options`.
+--- Attaches a circle, centerd by the offset in `options`.
 ---
 --- @param body The body to attach to.
 --- @param radius Meters.
 --- @param options Required, for the reason `addBox` gives. Its `offsetX` and
----     `offsetY` place the circle's centre in the body's frame, so an
----     off-centre circle needs no body positioned for it.
+---     `offsetY` place the circle's center in the body's frame, so an
+---     off-center circle needs no body positioned for it.
 --- @return A `b2ShapeId`, with the same lifetime as `addBox`'s.
 function World.addCircle(body: loader.CValue, radius: number, options: ShapeOptions): loader.CValue
     local circle = ffi.new("b2Circle[1]") as loader.CArray
     local shape = circle[0] as loader.CStruct
-    local centre = shape.center as loader.CStruct
-    centre.x = options.offsetX or 0.0
-    centre.y = options.offsetY or 0.0
+    local center = shape.center as loader.CStruct
+    center.x = options.offsetX or 0.0
+    center.y = options.offsetY or 0.0
     shape.radius = radius
     return C.b2CreateCircleShape(body, shapeDef(options), circle) as loader.CValue
 end
 
 --- Attaches a vertical capsule. `length` is the distance between the two end
---- centres, excluding the caps.
+--- centers, excluding the caps.
 ---
 --- @param body The body to attach to.
 --- @param radius The cap radius, in meters. It is also the capsule's
 ---     half-width, so the full width is twice this.
---- @param length Meters between the two end centres, so the full height is
+--- @param length Meters between the two end centers, so the full height is
 ---     this plus twice the radius. Zero makes a circle of `radius`.
 --- @param options Required, for the reason `addBox` gives. The offset places
 ---     the capsule's midpoint, and the two ends are put half a length either
@@ -470,12 +470,12 @@ end
 function World.addCapsule(body: loader.CValue, radius: number, length: number, options: ShapeOptions): loader.CValue
     local capsule = ffi.new("b2Capsule[1]") as loader.CArray
     local shape = capsule[0] as loader.CStruct
-    local centre1 = shape.center1 as loader.CStruct
-    local centre2 = shape.center2 as loader.CStruct
+    local center1 = shape.center1 as loader.CStruct
+    local center2 = shape.center2 as loader.CStruct
     local x = options.offsetX or 0.0
     local y = options.offsetY or 0.0
-    centre1.x, centre1.y = x, y - length * 0.5
-    centre2.x, centre2.y = x, y + length * 0.5
+    center1.x, center1.y = x, y - length * 0.5
+    center2.x, center2.y = x, y + length * 0.5
     shape.radius = radius
     return C.b2CreateCapsuleShape(body, shapeDef(options), capsule) as loader.CValue
 end
@@ -609,14 +609,14 @@ function World:raycast(
     ), point.x as number, point.y as number, normal.x as number, normal.y as number, hit.fraction as number
 end
 
---- Applies a force at the centre. Force uses Box2D's meter-based units.
+--- Applies a force at the center. Force uses Box2D's meter-based units.
 ---
 --- Box2D clears the accumulator at the end of every step, so a force has to be
 --- reapplied each step to keep acting.
 ---
 --- @param body The body to push. Wakes it, because a sleeping body accumulates
 ---     force and never moves.
---- @param x Newtons along x, applied at the centre of mass so it imparts no
+--- @param x Newtons along x, applied at the center of mass so it imparts no
 ---     spin.
 --- @param y Newtons along y.
 function World.applyForce(body: loader.CValue, x: number, y: number)
@@ -633,7 +633,7 @@ end
 --- @param y Newtons along y.
 --- @param pointX Where the force acts, in world meters rather than the body's
 ---     frame.
---- @param pointY The same along y. A point at the centre of mass makes this
+--- @param pointY The same along y. A point at the center of mass makes this
 ---     `applyForce`.
 function World.applyForceAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
     local vector = forceScratch[0] as loader.CStruct
@@ -649,7 +649,7 @@ end
 --- @param body The body to push, which this wakes.
 --- @param x The x impulse, in kilogram-meters per second.
 --- @param y The y impulse.
---- @param pointX Where the impulse lands, in world meters. Off the centre of
+--- @param pointX Where the impulse lands, in world meters. Off the center of
 ---     mass it becomes spin as well as travel.
 --- @param pointY The same along y.
 function World.applyImpulseAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
@@ -660,7 +660,7 @@ function World.applyImpulseAt(body: loader.CValue, x: number, y: number, pointX:
     C.b2Body_ApplyLinearImpulse(body, forceScratch[0], forcePointScratch[0], true)
 end
 
---- Applies torque about the centre of mass. Cleared each step, like the forces
+--- Applies torque about the center of mass. Cleared each step, like the forces
 --- above.
 ---
 --- @param body The body to turn, which this wakes.
@@ -712,7 +712,7 @@ end
 ---
 --- @param body The body to move.
 --- @param x The new origin x, in meters. The origin is what shapes are placed
----     relative to, not the centre of mass.
+---     relative to, not the center of mass.
 --- @param y The new origin y, in meters.
 --- @param angle Radians. Required here, unlike `physics.teleport`, which fills
 ---     it from the entity's transform.
@@ -744,7 +744,7 @@ end
 ---
 --- @return X in meters.
 --- @return Y in meters. The body's origin, which its shapes are placed
----     relative to, not its centre of mass.
+---     relative to, not its center of mass.
 function World.getPosition(body: loader.CValue): number, number
     local position = C.b2Body_GetPosition(body)
     return position.x as number, position.y as number

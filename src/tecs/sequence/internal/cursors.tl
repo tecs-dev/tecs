@@ -250,7 +250,7 @@ local function channelKey(owner: integer, channel: string): string
     return tostring(owner) .. "\0" .. channel
 end
 
---- Take the cursor's channel, cancelling whatever held it.
+--- Take the cursor's channel, canceling whatever held it.
 function cursors.claimChannel(state: WorldState, cursor: Cursor)
     local channel <const> = cursor.channel
     if not channel then
@@ -261,7 +261,7 @@ function cursors.claimChannel(state: WorldState, cursor: Cursor)
     if held then
         local previous = state.cursors[held]
         if previous and previous.alive and previous ~= cursor then
-            cursors.retire(state, previous, "cancelled", "replaced")
+            cursors.retire(state, previous, "canceled", "replaced")
         end
     end
     state.channelled[key] = cursor.slot
@@ -290,7 +290,7 @@ local function wakeAwaiter(state: WorldState, cursor: Cursor, finalState: Playba
     if not waiter or not waiter.alive or not waiter.waitingTween then
         return
     end
-    waiter.tweenOutcome = reason or (finalState == "completed" and "completed" or "cancelled")
+    waiter.tweenOutcome = reason or (finalState == "completed" and "completed" or "canceled")
     waiter.waitingTween = false
     waiter.tweenPlayback = nil
     cursors.schedule(state, waiter, cursors.clockOf(state, waiter).step)
@@ -356,7 +356,7 @@ local function detachFromParent(state: WorldState, cursor: Cursor, finalState: P
     end
 
     -- A faulted branch is a defect in the program, so it surfaces rather
-    -- than leaving a join quietly one branch short. A cancelled branch is
+    -- than leaving a join quietly one branch short. A canceled branch is
     -- deliberate, and the join simply proceeds without it.
     if finalState == "faulted" then
         cursors.fault(
@@ -393,7 +393,7 @@ function cursors.retire(state: WorldState, cursor: Cursor, finalState: PlaybackS
     unlinkOwner(state, cursor)
     seqregistry.release(cursor.program)
 
-    -- A subtree dies from the root down: branches are cancelled first, so
+    -- A subtree dies from the root down: branches are canceled first, so
     -- each one finds a parent already gone and reports nothing back up.
     local children = cursor.children
     if children and next(children) ~= nil then
@@ -401,7 +401,7 @@ function cursors.retire(state: WorldState, cursor: Cursor, finalState: PlaybackS
         for i = 1, #slots do
             local child = state.cursors[slots[i]]
             if child and child.alive then
-                cursors.retire(state, child, "cancelled")
+                cursors.retire(state, child, "canceled")
             end
         end
     end

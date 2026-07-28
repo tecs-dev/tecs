@@ -226,7 +226,7 @@ local record gfx
     --- Builds a view onto the world.
     ---
     --- @param options Omit for an unrotated, unzoomed view at the world origin,
-    ---     which a renderer recentres on its first drawn frame if the game
+    ---     which a renderer recenters on its first drawn frame if the game
     ---     never moves it. No field is validated.
     --- @return A camera whose fields are plain and meant to be assigned to
     ---     frame by frame. It is not attached to anything: a renderer draws
@@ -264,7 +264,7 @@ local record gfx
     --- layer change by assignment rather than by integration.
     PreviousTransform: components.PreviousTransform
 
-    --- Base colour and coverage, each channel 0 to 1, defaulting to opaque
+    --- Base color and coverage, each channel 0 to 1, defaulting to opaque
     --- white. The alpha decides which pass draws the entity: exactly 1 goes
     --- through the G-buffer and is lit once for the whole scene, anything
     --- below 1 goes through the forward pass instead, writes no depth, and
@@ -272,7 +272,7 @@ local record gfx
     --- meant to be solid.
     Tint: components.Tint
 
-    --- Samples a texture instead of drawing flat colour. `image` is an
+    --- Samples a texture instead of drawing flat color. `image` is an
     --- `imageId` index, and 0 means no image; `u0, v0, u1, v1` select the
     --- region, defaulting to the whole of it, so an atlas entry and a whole
     --- image are the same thing. `slot` is the texture-array layer the
@@ -323,7 +323,7 @@ local record gfx
 
     --- Index of an image name, assigning one the first time it is seen.
     ---
-    --- The name is normalised lexically first, so `"a/b.png"` and
+    --- The name is normalized lexically first, so `"a/b.png"` and
     --- `"a/./b.png"` are one image. Case, `..` and the asset root are
     --- deliberately left alone, and nothing here touches the filesystem.
     ---
@@ -337,7 +337,7 @@ local record gfx
     --- Name an image index stands for.
     ---
     --- @param id An index previously handed out by `imageId`.
-    --- @return The normalised name, or nil when the index names nothing.
+    --- @return The normalized name, or nil when the index names nothing.
     imageName: function(id: integer): string
 
     --- What `loadFont` answers with, and what a `Text` names.

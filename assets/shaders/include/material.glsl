@@ -1,6 +1,6 @@
 // The contract a material implements.
 //
-// A material decides what colour a fragment is and whether the fragment
+// A material decides what color a fragment is and whether the fragment
 // exists at all. It does not decide where the geometry is: that is the
 // instance's transform, which is the same for every material, which is why
 // they can all share one batch, one cull and one draw.
@@ -36,7 +36,7 @@ struct MaterialOutput {
     // which is a sidecar image and a different piece of work.
     vec3 normal;
     // Zero leaves the fragment out of the lighting pass entirely, so it draws
-    // at its own colour. Whether a thing emits is what it is rather than where
+    // at its own color. Whether a thing emits is what it is rather than where
     // it is, so the material answers here; the layer it sits on answers too,
     // and a fragment is lit only where both say it should be.
     float lit;

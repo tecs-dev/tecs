@@ -292,11 +292,11 @@ mcp.register({
 --- Reads specific pixels without writing a file.
 ---
 --- What a test asserts on. A screenshot answers "what does it look like" and
---- needs eyes; this answers "is that pixel the colour it should be" and does
+--- needs eyes; this answers "is that pixel the color it should be" and does
 --- not, which is the question an agent can actually check.
 mcp.register({
     name = "sample_pixels",
-    description = "Reads the colour of specific pixels from the last frame.",
+    description = "Reads the color of specific pixels from the last frame.",
     readOnly = true,
     inputSchema = {
         type = "object",

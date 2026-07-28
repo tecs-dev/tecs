@@ -17,11 +17,11 @@
 --- how a drop is handled. See `KindTypes` for why the vocabulary is a type per
 --- kind rather than one type carrying the kind.
 ---
---- Unrecognised SDL events arrive as `unknown` with their numeric type rather
+--- Unrecognized SDL events arrive as `unknown` with their numeric type rather
 --- than being dropped, so upgrading SDL surfaces new input instead of silently
 --- losing it.
 ---
---- A recognised kind means usable fields. An event whose kind is named here
+--- A recognized kind means usable fields. An event whose kind is named here
 --- and whose payload was left unread would be worse than an unknown one: the
 --- caller has every reason to trust it. Text, composition, drops and the
 --- clipboard carry pointers, and SDL recycles what they point at as soon as
@@ -92,8 +92,8 @@ local record Event is ecs.Event
     dx: number
     dy: number
     --- Pointer position as the platform reported it, in 0..1 across the
-    --- window. Touch is normalised at source, so it is carried through
-    --- unscaled as well as converted: a normalised position survives a resize
+    --- window. Touch is normalized at source, so it is carried through
+    --- unscaled as well as converted: a normalized position survives a resize
     --- and a window coordinate does not.
     normalX: number
     normalY: number
@@ -530,7 +530,7 @@ end
 local scratch: Event = {} as Event
 
 --- Window size in the units mouse positions arrive in, needed to convert SDL's
---- normalised touch coordinates.
+--- normalized touch coordinates.
 ---
 --- Logical window size, not pixels: a mouse position is in window coordinates,
 --- and scaling touch by the pixel size would put the two pointers in different
@@ -891,18 +891,18 @@ end
 --- are read.
 ---
 --- Payloads are filled for the key, mouse, wheel, pen, gamepad, device, pinch,
---- window and display kinds. Any other recognised kind is pushed carrying its
+--- window and display kinds. Any other recognized kind is pushed carrying its
 --- type and nothing else, which is what a kind whose payload nobody injects
 --- needs and is not what a caller expecting a full event would assume.
 ---
 --- A wheel payload is written the way the platform writes one, so `flipped`
 --- sets the direction and the axes beside it are left as given. The conversion
 --- then negates them, which is what a caller asking for a flipped scroll is
---- asking to see: the round trip is the normalisation, not the identity.
+--- asking to see: the round trip is the normalization, not the identity.
 ---
 --- SDL stamps the timestamp, so a pushed event arrives ordered against real
 --- ones rather than ahead of them.
---- @param kind One of `events.kinds()`. An unrecognised name raises.
+--- @param kind One of `events.kinds()`. An unrecognized name raises.
 function events.push(kind: string, fields: Event)
     local sdlType: integer = nil
     for value, name in pairs(KINDS) do
@@ -1029,7 +1029,7 @@ function events.push(kind: string, fields: Event)
     sdl.check(C.SDL_PushEvent(holder[0]) as boolean, "SDL_PushEvent")
 end
 
---- Every kind this build recognises, for tooling that enumerates them.
+--- Every kind this build recognizes, for tooling that enumerates them.
 function events.kinds(): {string}
     local out: {string} = {}
     for _, name in pairs(KINDS) do

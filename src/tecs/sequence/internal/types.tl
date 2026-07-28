@@ -33,8 +33,8 @@ end
 local enum TweenOutcome
     --- It played to the end.
     "completed"
-    --- Something cancelled it.
-    "cancelled"
+    --- Something canceled it.
+    "canceled"
     --- Another playback took over its channel.
     "replaced"
     --- Its entity died, or was never bound in the first place.
@@ -104,7 +104,7 @@ local enum PlaybackState
     "running"
     "paused"
     "completed"
-    "cancelled"
+    "canceled"
     "faulted"
 end
 
@@ -159,7 +159,7 @@ local type Argument = any
 --- Options for `play`.
 local record PlayOptions
     --- Entity whose lifetime governs the playback. When it despawns, the
-    --- playback is cancelled. Omit for a world-scoped sequence.
+    --- playback is canceled. Omit for a world-scoped sequence.
     owner: integer
 
     --- Entities the program acts on, addressed by `sequence.bind(name)`.

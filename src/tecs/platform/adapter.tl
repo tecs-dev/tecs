@@ -2,7 +2,7 @@
 ---
 --- SDL covers every platform this engine can be built for openly. It does not
 --- cover the ones whose SDKs are licensed, and those cannot be added here even
---- by someone who holds a licence: their headers may not be redistributed. So
+--- by someone who holds a license: their headers may not be redistributed. So
 --- the engine names its platform seams instead, and a licensed port supplies a
 --- platform through this module without touching anything above it.
 ---
@@ -75,7 +75,7 @@ local record adapter
         --- Directory this application may write to, ending in a separator.
         --- Created if absent. Raising here is correct if there is none: a build
         --- that cannot save should fail where that is discovered.
-        prefPath: function(organisation: string, application: string): string
+        prefPath: function(organization: string, application: string): string
 
         --- Reaching a file once one of the two roots above has named it.
         --- Leave nil to keep SDL's, which is right for any target where the
@@ -113,8 +113,8 @@ local sdlPlatform <const>: adapter.Platform = {
         return given == nil and "" or loader.toString(given)
     end,
 
-    prefPath = function(organisation: string, application: string): string
-        local given = C.SDL_GetPrefPath(organisation, application)
+    prefPath = function(organization: string, application: string): string
+        local given = C.SDL_GetPrefPath(organization, application)
         if given == nil then
             error(("tecs: no writable directory: %s"):format(sdl.error()), 2)
         end

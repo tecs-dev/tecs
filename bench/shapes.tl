@@ -43,7 +43,7 @@ local FRAMES <const> = math.floor(tonumber(os.getenv("BENCH_FRAMES")) or 300)
 local WIDTH <const> = 1280
 local HEIGHT <const> = 720
 
---- Fills the area, centred on the viewport so the visible fraction matches.
+--- Fills the area, centerd on the viewport so the visible fraction matches.
 local function spawnField(world: tecs.World)
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5

@@ -23,15 +23,15 @@ tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } })
 `status` is a plain string field rather than a method, because several call sites read it once a frame and a
 field read plus a string compare is what that should cost.
 
-| Status        | Meaning                                                       |
-| ------------- | ------------------------------------------------------------- |
-| `"pending"`   | Nothing has settled it yet. The state a future is created in. |
-| `"ready"`     | It settled with a value, which is in `value`.                 |
-| `"failed"`    | The work never produced an answer. `error` says why.          |
-| `"cancelled"` | The work was given up on or taken away. `error` says why.     |
+| Status       | Meaning                                                       |
+| ------------ | ------------------------------------------------------------- |
+| `"pending"`  | Nothing has settled it yet. The state a future is created in. |
+| `"ready"`    | It settled with a value, which is in `value`.                 |
+| `"failed"`   | The work never produced an answer. `error` says why.          |
+| `"canceled"` | The work was given up on or taken away. `error` says why.     |
 
-`"cancelled"` is separate from `"failed"` because [`recover`](#recover) must not run for it: a caller who
-cancelled a load did not ask for a fallback value.
+`"canceled"` is separate from `"failed"` because [`recover`](#recover) must not run for it: a caller who
+canceled a load did not ask for a fallback value.
 
 An unwelcome answer is not `"failed"` either. A child process that exits 1 and an HTTP response that is 404 both
 settle `"ready"`, because the code is the answer rather than an error. `"failed"` means the work never produced
@@ -39,11 +39,11 @@ one.
 
 ### Fields
 
-| Field    | Type     | Description                                             |
-| -------- | -------- | ------------------------------------------------------- |
-| `status` | `string` | `"pending"`, `"ready"`, `"failed"` or `"cancelled"`.    |
-| `value`  | `T`      | What settled. Valid only on `"ready"`.                  |
-| `error`  | `string` | Why it did not. Set on `"failed"` and on `"cancelled"`. |
+| Field    | Type     | Description                                            |
+| -------- | -------- | ------------------------------------------------------ |
+| `status` | `string` | `"pending"`, `"ready"`, `"failed"` or `"canceled"`.    |
+| `value`  | `T`      | What settled. Valid only on `"ready"`.                 |
+| `error`  | `string` | Why it did not. Set on `"failed"` and on `"canceled"`. |
 
 **Example:**
 
@@ -120,7 +120,7 @@ function Future:fail(err: string)
 
 ### abandon
 
-Settles this future as cancelled, if nothing has settled it yet.
+Settles this future as canceled, if nothing has settled it yet.
 
 ```teal
 function Future:abandon(err: string)
@@ -129,7 +129,7 @@ function Future:abandon(err: string)
 The producer half of the third terminal state, and the counterpart of [`cancel`](#cancel) rather than a spelling
 of it: `cancel` is a consumer saying it no longer wants the work and counts the others who might, while this
 states an outcome that has already happened. A child killed on request or at its deadline reaches its future
-through here, as does a transfer taken off the multi. `nil` becomes `"cancelled"`.
+through here, as does a transfer taken off the multi. `nil` becomes `"canceled"`.
 
 ## Listening
 
@@ -179,7 +179,7 @@ function Future:map<U>(transform: function(T): U): Future<U>
 
 - `transform`: run on `"ready"` only. Passing nothing raises.
 
-**Returns:** a future that settles `"ready"` with the transformed value. A `"failed"` or `"cancelled"` upstream
+**Returns:** a future that settles `"ready"` with the transformed value. A `"failed"` or `"canceled"` upstream
 propagates without calling `transform`, and a raise inside it becomes this link's failure.
 
 ### flatMap
@@ -199,7 +199,7 @@ function Future:flatMap<U>(transform: function(T): Future<U>): Future<U>
 
 The one combinator that expresses a dependent second request. Two things follow from `transform` starting work
 rather than transforming work already done: the derived future's source becomes the inner future's, so a chain
-can begin on a worker and end somewhere else; and cancelling before the outer settles stops `transform` from ever
+can begin on a worker and end somewhere else; and canceling before the outer settles stops `transform` from ever
 being called, since there is nothing yet to cancel afterwards.
 
 ### recover
@@ -214,7 +214,7 @@ function Future:recover(recovery: function(string): T): Future<T>
 
 - `recovery`: run on `"failed"` only, with the error string. Passing nothing raises.
 
-**Returns:** a future carrying either the upstream's value or the recovered one. A `"cancelled"` upstream is not
+**Returns:** a future carrying either the upstream's value or the recovered one. A `"canceled"` upstream is not
 recovered, which is the whole reason the two states are distinct, and a raise inside `recovery` becomes this
 link's failure.
 
@@ -233,7 +233,7 @@ function Future.all<U>(inputs: {Future<U>}): Future<{U}>
 
 **Returns:** a future that settles when the last input does, whatever order they settle in.
 
-A failed or cancelled input fails the join with that input's error; the rest are left running, because an input
+A failed or canceled input fails the join with that input's error; the rest are left running, because an input
 shared with something outside the join is not this join's to stop.
 
 Fan-in does not nest: each listener decrements a counter and only the last input settles the join, so a join over
@@ -262,16 +262,16 @@ worker channel, and an HTTP transfer is a curl multi handle whose poll is the sa
 
 The type is reachable as `tecs.future.Source`.
 
-| Field           | Type                                          | Default  | Description                                                                                                                                                                                           |
-| --------------- | --------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `poll`          | `function(self: Source): integer`             | required | Takes everything ready and settles what it belongs to, returning how many settled. Called once per frame per source, and costs a non-blocking receive on a frame where nothing finished.              |
-| `advance`       | `function(self: Source, ms: number): integer` | required | Blocks up to `ms` for one settlement and takes it, returning how many settled. It must not block for longer than it is asked to.                                                                      |
-| `sliceMs`       | `number`                                      | `16`     | Milliseconds one [`wait`](#wait) slice blocks for.                                                                                                                                                    |
-| `defaultWaitMs` | `number`                                      | `5000`   | Milliseconds `wait` spends when the caller names nothing. It lives here rather than on `wait` so a subprocess can keep a longer default than a decode without a second convention.                    |
-| `cancel`        | `function(self: Source, future: Future<any>)` | unset    | Stops the work behind a root future whose last watcher has gone. A source with no hook leaves the work running and stops caring, which is what a future over something uncancellable can honestly do. |
+| Field           | Type                                          | Default  | Description                                                                                                                                                                                          |
+| --------------- | --------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `poll`          | `function(self: Source): integer`             | required | Takes everything ready and settles what it belongs to, returning how many settled. Called once per frame per source, and costs a non-blocking receive on a frame where nothing finished.             |
+| `advance`       | `function(self: Source, ms: number): integer` | required | Blocks up to `ms` for one settlement and takes it, returning how many settled. It must not block for longer than it is asked to.                                                                     |
+| `sliceMs`       | `number`                                      | `16`     | Milliseconds one [`wait`](#wait) slice blocks for.                                                                                                                                                   |
+| `defaultWaitMs` | `number`                                      | `5000`   | Milliseconds `wait` spends when the caller names nothing. It lives here rather than on `wait` so a subprocess can keep a longer default than a decode without a second convention.                   |
+| `cancel`        | `function(self: Source, future: Future<any>)` | unset    | Stops the work behind a root future whose last watcher has gone. A source with no hook leaves the work running and stops caring, which is what a future over something uncancelable can honestly do. |
 
 ::: warning One thread
-Futures are created and settled on the thread that pumps their source, and there is no synchronisation anywhere
+Futures are created and settled on the thread that pumps their source, and there is no synchronization anywhere
 below. That is what removes the atomics a general-purpose future library carries, so it is load-bearing rather
 than incidental: **a source must settle its futures on the thread that pumps it.** If a second thread ever pumps
 a source, the answer is a queue handing settlements back to the pumping thread, not a lock-free stack.
@@ -311,7 +311,7 @@ if head.status == "ready" then
 end
 ```
 
-## Cancelling
+## Canceling
 
 ### cancel
 
@@ -322,9 +322,9 @@ function Future:cancel()
 ```
 
 Reference counted, because a shared root is real: two loads of one path that overlap get the same future, and one
-of them cancelling must not break the other. So this decrements, and only the last one settles the future
-`"cancelled"` and asks the source to stop the work. Cancelling a derived future drops its listener and decrements
-its upstream, which may in turn reach zero. Cancelling a settled future is a no-op.
+of them canceling must not break the other. So this decrements, and only the last one settles the future
+`"canceled"` and asks the source to stop the work. Canceling a derived future drops its listener and decrements
+its upstream, which may in turn reach zero. Canceling a settled future is a no-op.
 
 Only a future the source made carries work of its own, so only that one reaches the source's `cancel` hook; a
 derived link inherits the source to know what a wait advances and nothing else. Without that distinction a `map`
@@ -487,7 +487,7 @@ convention.
 Stops the work behind a root future whose last watcher has gone.
 
 Optional. A source with no hook leaves the work running and stops
-caring, which is what a future over something uncancellable can
+caring, which is what a future over something uncancelable can
 honestly do.
 
 #### Parameters
@@ -504,7 +504,7 @@ honestly do.
 <pre><code v-pre>function <a href="#tecs.future.Future.abandon">tecs.future.Future.abandon</a>(self: Future&lt;T&gt;, err: string)
 </code></pre>
 
-Settles this future as cancelled, if nothing has settled it yet.
+Settles this future as canceled, if nothing has settled it yet.
 
 The producer half of the third terminal state, and the counterpart of
 `cancel` rather than a spelling of it: `cancel` is a consumer saying it
@@ -515,10 +515,10 @@ taken off the multi.
 
 #### Parameters
 
-| Type                               | Name                    | Description                                                                                                                  |
-| ---------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Future&lt;T&gt;</code> | <code v-pre>self</code> |                                                                                                                              |
-| <code v-pre>string</code>          | <code v-pre>err</code>  | Nil becomes "cancelled". No watcher counting happens here: this settles the future outright, whoever else was waiting on it. |
+| Type                               | Name                    | Description                                                                                                                 |
+| ---------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;T&gt;</code> | <code v-pre>self</code> |                                                                                                                             |
+| <code v-pre>string</code>          | <code v-pre>err</code>  | Nil becomes "canceled". No watcher counting happens here: this settles the future outright, whoever else was waiting on it. |
 
 <a id="tecs.future.Future.all"></a>
 
@@ -530,7 +530,7 @@ taken off the multi.
 A future carrying every input's value, in input order.
 
 Settles when the last input does, whatever order they settle in. A
-failed or cancelled input fails the join with that input's error; the
+failed or canceled input fails the join with that input's error; the
 rest are left running, because an input shared with something outside
 the join is not this join's to stop.
 
@@ -566,13 +566,13 @@ deep rather than five hundred.
 Gives up this consumer's interest in the work.
 
 Reference counted, because a shared root is real: two loads of one path
-that overlap get the same future, and one of them cancelling must not
+that overlap get the same future, and one of them canceling must not
 break the other. So this decrements, and only the last one settles the
-future "cancelled" and asks the source to stop the work. Cancelling a
+future "canceled" and asks the source to stop the work. Canceling a
 derived future drops its listener and decrements its upstream, which may
 in turn reach zero.
 
-Cancelling a settled future is a no-op.
+Canceling a settled future is a no-op.
 
 #### Parameters
 
@@ -609,7 +609,7 @@ answer wins.
 <pre><code v-pre><a href="#tecs.future.Future.error">tecs.future.Future.error</a>: string
 </code></pre>
 
-Why it did not. Set on "failed" and on "cancelled".
+Why it did not. Set on "failed" and on "canceled".
 <a id="tecs.future.Future.fail"></a>
 
 ### tecs.future.Future.fail
@@ -665,7 +665,7 @@ A future carrying whatever the future `transform` starts settles to.
 The one combinator that expresses a dependent second request. Two things
 follow from `transform` starting work rather than transforming work
 already done: the derived future's source becomes the inner future's, so
-a chain can begin on a worker and end somewhere else; and cancelling
+a chain can begin on a worker and end somewhere else; and canceling
 before the outer settles stops `transform` from ever being called, since
 there is nothing yet to cancel afterwards.
 
@@ -684,9 +684,9 @@ there is nothing yet to cancel afterwards.
 
 #### Returns
 
-| Type                               | Description                                                                                                                                     |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Future&lt;U&gt;</code> | A new future settling to whatever the inner one settles to, status and all, so an inner that is cancelled leaves this cancelled and not failed. |
+| Type                               | Description                                                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;U&gt;</code> | A new future settling to whatever the inner one settles to, status and all, so an inner that is canceled leaves this canceled and not failed. |
 
 <a id="tecs.future.Future.map"></a>
 
@@ -697,7 +697,7 @@ there is nothing yet to cancel afterwards.
 
 A future carrying `transform` applied to this one's value.
 
-`transform` runs only on "ready". A "failed" or "cancelled" upstream
+`transform` runs only on "ready". A "failed" or "canceled" upstream
 propagates without calling it, and a raise inside it becomes this link's
 failure.
 
@@ -716,9 +716,9 @@ failure.
 
 #### Returns
 
-| Type                               | Description                                                                                                                                                |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Future&lt;U&gt;</code> | A new future watching this one. Cancelling it gives up this link's interest in the upstream and does not settle the upstream unless nothing else wants it. |
+| Type                               | Description                                                                                                                                               |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;U&gt;</code> | A new future watching this one. Canceling it gives up this link's interest in the upstream and does not settle the upstream unless nothing else wants it. |
 
 <a id="tecs.future.Future.onSettle"></a>
 
@@ -775,9 +775,9 @@ and a `wait` on it returns at once.
 
 #### Returns
 
-| Type                               | Description                                                                                                            |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Future&lt;U&gt;</code> | A future at "pending" with one watcher, so a single `cancel` on it settles it "cancelled" and calls the source's hook. |
+| Type                               | Description                                                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;U&gt;</code> | A future at "pending" with one watcher, so a single `cancel` on it settles it "canceled" and calls the source's hook. |
 
 <a id="tecs.future.Future.recover"></a>
 
@@ -788,7 +788,7 @@ and a `wait` on it returns at once.
 
 A future that turns this one's failure into a value.
 
-`recovery` runs only on "failed". A "cancelled" upstream is not
+`recovery` runs only on "failed". A "canceled" upstream is not
 recovered, which is the whole reason the two are distinct states.
 
 #### Parameters
@@ -838,7 +838,7 @@ A future already carrying a value.
 <pre><code v-pre><a href="#tecs.future.Future.status">tecs.future.Future.status</a>: string
 </code></pre>
 
-"pending", "ready", "failed", or "cancelled".
+"pending", "ready", "failed", or "canceled".
 <a id="tecs.future.Future.track"></a>
 
 ### tecs.future.Future.track

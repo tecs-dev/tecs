@@ -482,7 +482,7 @@ end
 --- because rumble is a garnish and a game should not have to guard it.
 ---
 --- A second call replaces the first rather than adding to it, so a long effect
---- is cancelled by a short one. Seconds are rounded to milliseconds, which is
+--- is canceled by a short one. Seconds are rounded to milliseconds, which is
 --- the resolution the platform takes.
 --- @param low The heavier, lower-frequency motor.
 --- @param high The lighter, higher-frequency one.

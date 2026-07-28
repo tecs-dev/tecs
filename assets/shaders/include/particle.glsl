@@ -2,7 +2,7 @@
 // that make particles happen.
 //
 // Three compute shaders read these records: one advances each emitter's
-// schedule, one initialises the particles that schedule asked for, and one
+// schedule, one initializes the particles that schedule asked for, and one
 // integrates every live particle and writes its instance. They have to agree
 // on every offset, so the offsets are stated once here rather than three
 // times.
@@ -182,7 +182,7 @@ const float SHAPE_CONE = 6.0;
 // Where a particle goes when the pool is full, as `EFFECT_OVERFLOW` holds it.
 const float OVERFLOW_DROP = 0.0;
 
-// Centre of a slot nothing is drawing. `instancelayout.HIDDEN` in
+// Center of a slot nothing is drawing. `instancelayout.HIDDEN` in
 // src/tecs/gpu/instancelayout.tl is the same number, and the mark pass rejects
 // a bound out here before the draw sees it.
 const float PARTICLE_HIDDEN = 1e30;
@@ -191,7 +191,7 @@ const float PARTICLE_UNBOUNDED = 1e30;
 
 // Lanes a particle's random draws come from. A lane per property, so adding a
 // property does not shift the numbers every other property draws: an effect
-// edited to randomise its rotation keeps the sizes it had.
+// edited to randomize its rotation keeps the sizes it had.
 const uint LANE_LIFETIME = 1u;
 const uint LANE_SPEED = 2u;
 const uint LANE_SPREAD = 3u;
@@ -263,7 +263,7 @@ int particleEmitterBase(int index) {
     return index * PARTICLE_EMITTER_FLOATS;
 }
 
-// A compiled curve at a normalised age.
+// A compiled curve at a normalized age.
 //
 // `base` is an absolute offset into the effect buffer, or negative for an
 // effect that named no curve, which reads as a flat one so the caller
@@ -277,7 +277,7 @@ float particleCurve(float base, float t) {
     return mix(effects.value[at + lo], effects.value[at + hi], x - float(lo));
 }
 
-// A compiled gradient at a normalised age, as straight RGBA.
+// A compiled gradient at a normalized age, as straight RGBA.
 //
 // Negative for an effect that named no gradient, which reads as white so the
 // caller multiplies by it either way. The alpha channel is carried and is

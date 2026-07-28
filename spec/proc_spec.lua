@@ -15,7 +15,7 @@
 -- twice is that an exit code is not a failure: a child that ran and exited 3
 -- settles "ready" carrying a result that says 3, because the code is the
 -- answer rather than an error. "failed" is a child that never started and
--- "cancelled" is one this process ended.
+-- "canceled" is one this process ended.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -201,7 +201,7 @@ describe("proc", function()
 
         for index = 1, 4 do
             runs[index]:wait(20000)
-            assert.are.equal("cancelled", runs[index].status)
+            assert.are.equal("canceled", runs[index].status)
         end
     end)
 
@@ -241,7 +241,7 @@ describe("proc", function()
         -- message, so ordering is the channel's rather than a sleep's.
         system.killProcess(run, true)
         run:wait(20000)
-        assert.are.equal("cancelled", run.status, "this process ended it")
+        assert.are.equal("canceled", run.status, "this process ended it")
         assert.are.equal("killed", run.error)
     end)
 
@@ -252,7 +252,7 @@ describe("proc", function()
         untilStarted(run)
 
         run:cancel()
-        assert.are.equal("cancelled", run.status)
+        assert.are.equal("canceled", run.status)
 
         -- And the kill really went out: the worker stops holding the child.
         local deadline = now() + 20000
@@ -282,7 +282,7 @@ describe("proc", function()
                 timeoutMs = 200,
             })
             :wait(20000)
-        assert.are.equal("cancelled", run.status)
+        assert.are.equal("canceled", run.status)
         assert.are.equal("timed out", run.error)
         assert.is_true(now() - started < 5000, "the timeout is what ended it")
     end)
@@ -297,7 +297,7 @@ describe("proc", function()
                 timeoutMs = 500,
             })
             :wait(20000)
-        assert.are.equal("cancelled", run.status)
+        assert.are.equal("canceled", run.status)
         assert.is_nil(run.value)
         assert.are.equal("spoke", trimmed(system.processResult(run).output))
     end)
@@ -327,7 +327,7 @@ describe("proc", function()
         system.shutdownProcesses()
         local elapsed = now() - started
 
-        assert.are.equal("cancelled", run.status, "teardown ends a child, it does not detach it")
+        assert.are.equal("canceled", run.status, "teardown ends a child, it does not detach it")
         assert.is_false(system.processRunnerInstalled(), "the worker is joined")
         assert.is_true(elapsed < 5000, "teardown is bounded: " .. elapsed .. "ms")
 
@@ -353,18 +353,18 @@ describe("proc", function()
         assert.are.equal(0, system.pendingProcesses())
         for index = 1, 3 do
             assert.are.equal(
-                "cancelled",
+                "canceled",
                 runs[index].status,
                 "a run outlived the runner still reading as though it were going"
             )
         end
     end)
 
-    it("runs a child with no SDL subsystem initialised", function()
+    it("runs a child with no SDL subsystem initialized", function()
         -- Proved from inside a fresh interpreter rather than from here, where
         -- another spec in this run has already brought up video. The child
         -- requires the whole surface, runs a child of its own, and then asks
-        -- what SDL has initialised; the answer has to be nothing.
+        -- what SDL has initialized; the answer has to be nothing.
         local script = os.tmpname()
         local file = assert(io.open(script, "w"))
         file:write(([[
@@ -430,7 +430,7 @@ describe("proc", function()
             untilStarted(run)
 
             assert.is_true(app:_shutdown())
-            assert.are.equal("cancelled", run.status, "the child outlived the application")
+            assert.are.equal("canceled", run.status, "the child outlived the application")
             assert.is_false(system.processRunnerInstalled(), "the runner thread outlived the application")
         end)
     end)

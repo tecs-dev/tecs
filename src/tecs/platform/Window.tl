@@ -32,7 +32,7 @@
 --- had focus fires no `windowFocusLost`, and a game that only listens has to
 --- assume an initial value and hope the platform agrees. The getters here are
 --- how the first frame learns where it stands, and how any later frame
---- resynchronises without keeping a mirror of the event stream.
+--- resynchronizes without keeping a mirror of the event stream.
 ---
 --- They agree with the events by construction: each one asks SDL rather than
 --- caching, so the flags a getter reads are the flags the event was derived
@@ -41,7 +41,7 @@
 ---
 --- ## What is not here
 ---
---- Pointer behaviour is `Input`'s: relative mouse mode, warping, capture and
+--- Pointer behavior is `Input`'s: relative mouse mode, warping, capture and
 --- cursor visibility all act through the window but are input modes, and
 --- `Input` already holds the handle for them. What is here instead is
 --- *confinement*, which is a property of the window's bargain with the window
@@ -69,10 +69,10 @@
 --- ## Changing a window a device has claimed
 ---
 --- Safe: size, position, minimum and maximum size, aspect ratio, fullscreen,
---- borders, opacity, visibility and minimisation. The pass graph sizes its
+--- borders, opacity, visibility and minimization. The pass graph sizes its
 --- targets from the swapchain texture it acquires each frame rather than from
 --- anything asked of the window, so a size change is picked up on the next
---- frame with no reconfiguration; a hidden or minimised window acquires no
+--- frame with no reconfiguration; a hidden or minimized window acquires no
 --- texture and the frame is skipped whole.
 ---
 --- Asynchronous: on some window systems a size, position or fullscreen change
@@ -512,7 +512,7 @@ function Window:setPosition(x: integer, y: integer): boolean
     return C.SDL_SetWindowPosition(self.handle, x, y) as boolean
 end
 
---- Centres the window on `display`, or on the display it is already on.
+--- Centers the window on `display`, or on the display it is already on.
 function Window:center(displayId?: integer): boolean
     if self.handle == nil then
         return false
@@ -643,7 +643,7 @@ function Window:hide(): boolean
 end
 
 --- Whether the window is mapped. False for a window created `hidden` and one
---- that `hide` was called on, and true for a minimised window, which is mapped
+--- that `hide` was called on, and true for a minimized window, which is mapped
 --- and not visible.
 function Window:isVisible(): boolean
     if self.handle == nil then
@@ -664,7 +664,7 @@ function Window:raise(): boolean
     return C.SDL_RaiseWindow(self.handle) as boolean
 end
 
---- Minimises the window to the taskbar or dock.
+--- Minimizes the window to the taskbar or dock.
 function Window:minimize(): boolean
     if self.handle == nil then
         return false
@@ -672,13 +672,13 @@ function Window:minimize(): boolean
     return C.SDL_MinimizeWindow(self.handle) as boolean
 end
 
---- Whether the window is minimised. `events.windowMinimized` reports that it
+--- Whether the window is minimized. `events.windowMinimized` reports that it
 --- became so; this is how the first frame after startup finds out.
 function Window:isMinimized(): boolean
     return hasFlag(self, K.SDL_WINDOW_MINIMIZED)
 end
 
---- Maximises the window to fill the display's usable bounds.
+--- Maximizes the window to fill the display's usable bounds.
 function Window:maximize(): boolean
     if self.handle == nil then
         return false
@@ -686,12 +686,12 @@ function Window:maximize(): boolean
     return C.SDL_MaximizeWindow(self.handle) as boolean
 end
 
---- Whether the window is maximised.
+--- Whether the window is maximized.
 function Window:isMaximized(): boolean
     return hasFlag(self, K.SDL_WINDOW_MAXIMIZED)
 end
 
---- Returns a minimised or maximised window to its previous size and position.
+--- Returns a minimized or maximized window to its previous size and position.
 function Window:restore(): boolean
     if self.handle == nil then
         return false
@@ -702,8 +702,8 @@ end
 --- Whether something is covering the window entirely.
 ---
 --- A frame drawn now is not seen, which is worth knowing before an expensive
---- one is built. Independent of minimisation: an occluded window is mapped and
---- not minimised, and both stop the swapchain handing out a texture.
+--- one is built. Independent of minimization: an occluded window is mapped and
+--- not minimized, and both stop the swapchain handing out a texture.
 function Window:isOccluded(): boolean
     return hasFlag(self, K.SDL_WINDOW_OCCLUDED)
 end

@@ -1,7 +1,7 @@
 --- The application the entry chunk returns.
 ---
 --- SDL drives the loop, so this is not a function that runs until done. It is
---- an object the host calls back into: once to initialise, once per iteration,
+--- an object the host calls back into: once to initialize, once per iteration,
 --- once to shut down. An entry file returns one instead of blocking, because
 --- on iOS there is no loop for it to block in.
 ---
@@ -19,7 +19,7 @@
 --- already had:
 ---
 ---   startup    `PreStartup`, `Startup`, `PostStartup`, run once by
----              `world:startup` at the end of initialisation
+---              `world:startup` at the end of initialization
 ---   per frame  the ordinary phases, run by `world:update`
 ---   per event  `world:observe(0, events.on.<kind>, handler)`
 ---   teardown   `PreShutdown`, `Shutdown`, `PostShutdown`, run once by
@@ -110,9 +110,9 @@ local record Application
         --- Light every surface receives before any light entity contributes,
         --- as red, green and blue. Defaults to white.
         ---
-        --- White rather than a dim grey, because a scene that has placed no
+        --- White rather than a dim gray, because a scene that has placed no
         --- lights is the first thing anyone builds and it should look like
-        --- what it is: sprites at their own colour, with lights adding on top
+        --- what it is: sprites at their own color, with lights adding on top
         --- of them. A game doing its own lighting turns this down to the
         --- level it wants the unlit parts of the scene to sit at.
         ambientLight: {number}
@@ -227,9 +227,9 @@ local record Application
 
         --- The game, as one function handed the world and this application.
         ---
-        --- Called at the end of initialisation, after every engine subsystem is
+        --- Called at the end of initialization, after every engine subsystem is
         --- installed and before the startup phases run, so it can register a
-        --- `Startup` system and have it run this initialisation rather than the
+        --- `Startup` system and have it run this initialization rather than the
         --- next one.
         ---
         --- One entry point rather than a list, because composing plugins is
@@ -274,7 +274,7 @@ local record Application
     _receive: function(self: Application, event: events.Event)
     --- The frame this iteration acquired, held so that recovery can resolve one
     --- the throw left open. It survives into the next iteration and is
-    --- harmless there: a frame that submitted or cancelled is already
+    --- harmless there: a frame that submitted or canceled is already
     --- resolved, and resolving it again does nothing.
     _frame: Frame
     --- Traceback of a gameplay crash. Once set, the loop stops simulating and
@@ -372,7 +372,7 @@ end
 --- It also records how clean the recovery was, which is what `clearCrash`
 --- reads. Putting a command buffer back is not the same as putting the device
 --- back: a pass that had to be force-ended recorded half of what it meant to,
---- and a frame that was cancelled rather than submitted never reached the GPU
+--- and a frame that was canceled rather than submitted never reached the GPU
 --- at all. Either way the device is in a state the engine did not intend, and
 --- resuming on top of that is guessing.
 function Application:_recover()
@@ -389,8 +389,8 @@ function Application:_recover()
             self._forcedRecovery = "the frame could not be resolved: " .. failure
         elseif passscope.openCount() < openBefore then
             self._forcedRecovery = "a pass was force-ended to resolve the frame"
-        elseif frame.state == "cancelled" then
-            self._forcedRecovery = "the frame was cancelled rather than submitted"
+        elseif frame.state == "canceled" then
+            self._forcedRecovery = "the frame was canceled rather than submitted"
         end
     end
 
@@ -447,7 +447,7 @@ end
 
 --- Writes the staged checkpoint, if there is one that has not been written.
 ---
---- Through a neighbouring file and a rename, so the checkpoint on disk is
+--- Through a neighboring file and a rename, so the checkpoint on disk is
 --- either the previous one or this one and never half of either. That is not
 --- fussiness: this runs when the platform is about to stop the process, and
 --- the write that gets interrupted is the one nobody was watching.
@@ -490,10 +490,10 @@ end
 --- What this takes is bytes rather than a function that produces them, and
 --- that is the whole design rather than an inconvenience. iOS allows roughly
 --- five seconds from the backgrounding callback returning and Android rather
---- less, and at this project's scale a world is not serialisable inside any of
+--- less, and at this project's scale a world is not serializable inside any of
 --- it: a callback that walked four million entities would be killed part way
 --- through and leave nothing behind. A function would let a game postpone the
---- serialising into exactly that callback while looking like it had prepared
+--- serializing into exactly that callback while looking like it had prepared
 --- something. A string cannot: by the time it exists, the expensive half has
 --- already happened on a frame that could afford it. The host times the hook
 --- and says so past 250 ms, which is the check on the rest.
@@ -634,7 +634,7 @@ function Application:_init(): boolean
     -- timelines silently never advancing.
     sequence.plugin(self.world)
 
-    -- Touch arrives normalised, so the converter needs the window size to
+    -- Touch arrives normalized, so the converter needs the window size to
     -- report it in the same units as a mouse position. That is the logical
     -- size: a mouse position is in window coordinates, and scaling touch by
     -- the pixel size would put the two pointers a device-density factor apart
@@ -796,7 +796,7 @@ function Application:_receive(event: events.Event)
     if kind == "quit" or kind == "windowCloseRequested" then
         self.quitRequested = true
     elseif kind == "windowResized" then
-        -- Touch is normalised to the window, so the conversion to window
+        -- Touch is normalized to the window, so the conversion to window
         -- coordinates has to follow the window rather than the size it had at
         -- startup.
         events.setTouchScale(event.data1, event.data2)
@@ -1022,11 +1022,11 @@ end
 --- the configuration that most wants this: a game running one is being edited,
 --- and reloading the file that threw is exactly the way back. A shipped build
 --- has none of the three, latches on the first crash and stays latched, which
---- is the right shipped behaviour:
+--- is the right shipped behavior:
 --- there is nobody there to read the frame, and carrying on with a world that
 --- is provably inconsistent is how one bug becomes a corrupted save.
 ---
---- The second is severity, and it is narrower rather than a judgement about
+--- The second is severity, and it is narrower rather than a judgment about
 --- how bad the throw looked. Recovery reports whether it had to force-end a
 --- pass or cancel a frame instead of submitting it, and in either case the
 --- device is not in the state the engine intended; see `_recover`. Those do

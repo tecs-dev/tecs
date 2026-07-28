@@ -22,7 +22,7 @@ written in pixels and one written in world units.
 | --------------- | --------- | ------- | ------------------------------------------------------------------------------------------ |
 | `MAX`           | `integer` | `16`    | Bands the depth range divides into, and the highest layer index.                           |
 | `maxZ`          | `number`  | `1000`  | Highest z a scene is expected to use, which sets the resolution of sorting within a band.  |
-| `maxY`          | `number`  | `10000` | Half the world extent a scene is expected to occupy, for normalising position into a band. |
+| `maxY`          | `number`  | `10000` | Half the world extent a scene is expected to occupy, for normalizing position into a band. |
 | `virtualWidth`  | `number`  | `1920`  | Width of the resolution a virtual-coordinate layer is authored in.                         |
 | `virtualHeight` | `number`  | `1080`  | Height of that resolution.                                                                 |
 
@@ -78,7 +78,7 @@ the layer held before. This says what a layer is rather than amending what it wa
 | `screenSpace`   | `boolean`     | `false`  | Contents are positioned in screen pixels and ignore the camera entirely. What a HUD wants.                                                              |
 | `ignoreZoom`    | `boolean`     | `false`  | Contents follow the camera's position but not its zoom, so they stay a constant size on screen while moving with the world.                             |
 | `virtualCoords` | `boolean`     | `false`  | Contents are positioned in `virtualWidth` by `virtualHeight`, which is scaled to fill the target. Cannot be combined with `screenSpace`.                |
-| `unlit`         | `boolean`     | `false`  | Contents bypass the lighting pass and appear at their own colour.                                                                                       |
+| `unlit`         | `boolean`     | `false`  | Contents bypass the lighting pass and appear at their own color.                                                                                        |
 | `parallax`      | `number`      | `1`      | How much the camera's position carries the contents. One moves them with the world; a half drifts them at half speed, which is what a background wants. |
 
 A material can also ask to be unlit, and a fragment is lit only where the material and the layer agree.
@@ -138,7 +138,7 @@ function layers.depthOf(layer: integer, z: number, x: number, y: number): number
 - `y`: world y, read by the topdown and isometric sorts, against `maxY`. Larger is lower on screen and so
   nearer.
 
-**Returns:** a depth inside the layer's own band, whatever the arguments were. Each of them is normalised
+**Returns:** a depth inside the layer's own band, whatever the arguments were. Each of them is normalized
 and then held to zero and one, so a scene reaching past what the module was told to expect stops sorting
 rather than spilling into the next layer.
 
@@ -307,7 +307,7 @@ combined with `screenSpace`.
 <pre><code v-pre><a href="#tecs.gfx.layers.Config.unlit">tecs.gfx.layers.Config.unlit</a>: boolean
 </code></pre>
 
-Contents bypass the lighting pass and appear at their own colour.
+Contents bypass the lighting pass and appear at their own color.
 Defaults to false. A material can ask for the same thing, and a
 fragment is lit only where the material and the layer agree.
 <a id="tecs.gfx.layers.Config.parallax"></a>
@@ -409,7 +409,7 @@ expecting.
 
 | Type                      | Description                                                                                                                                                                                                                                     |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>number</code> | A depth inside the layer's own band, whatever the arguments were: each of them is normalised and then held to zero and one, so a scene reaching past what the module was told to expect stops sorting rather than spilling into the next layer. |
+| <code v-pre>number</code> | A depth inside the layer's own band, whatever the arguments were: each of them is normalized and then held to zero and one, so a scene reaching past what the module was told to expect stops sorting rather than spilling into the next layer. |
 
 <a id="tecs.gfx.layers.depthResolution"></a>
 
@@ -473,7 +473,7 @@ when `revision` moves rather than every frame.
 <pre><code v-pre><a href="#tecs.gfx.layers.maxY">tecs.gfx.layers.maxY</a>: number
 </code></pre>
 
-Half the world extent a scene is expected to occupy, for normalising
+Half the world extent a scene is expected to occupy, for normalizing
 position into a band. A scene larger than this still sorts, with
 entities beyond the edge compressed against it.
 <a id="tecs.gfx.layers.maxZ"></a>

@@ -125,16 +125,16 @@ describe("platform.filesystem on the public surface", function()
     end)
 
     it("takes a write on the value that reads it back", function()
-        -- `organisation` is a value a game assigns and `preferencePath` reads
+        -- `organization` is a value a game assigns and `preferencePath` reads
         -- back. Being the module is what makes that plain: the write lands
         -- where the read looks, with nothing in between to route it.
         local tecs = require("tecs")
-        local previous = filesystem.organisation
-        tecs.filesystem.organisation = "Ex Nihilo"
-        assert.are.equal("Ex Nihilo", filesystem.organisation)
-        assert.are.equal("Ex Nihilo", tecs.filesystem.organisation)
-        tecs.filesystem.organisation = previous
-        assert.are.equal(previous, filesystem.organisation)
+        local previous = filesystem.organization
+        tecs.filesystem.organization = "Ex Nihilo"
+        assert.are.equal("Ex Nihilo", filesystem.organization)
+        assert.are.equal("Ex Nihilo", tecs.filesystem.organization)
+        tecs.filesystem.organization = previous
+        assert.are.equal(previous, filesystem.organization)
     end)
 
     it("reaches the watcher one level down", function()
@@ -624,10 +624,10 @@ describe("platform.filesystem with no video", function()
         end
     end)
 
-    it("does every one of its jobs with no video initialised", function()
+    it("does every one of its jobs with no video initialized", function()
         -- This is one of the few subsystems that is more useful without a
         -- window than with one, so it has no `available()` and no gate: with
-        -- nothing initialised it answers for real rather than answering empty.
+        -- nothing initialized it answers for real rather than answering empty.
         assert.are.equal(0, tonumber(C.SDL_WasInit(sdl.K.SDL_INIT_VIDEO)))
 
         assert.is_true(filesystem.createDirectory(base .. "/nested/deeper"))
@@ -645,7 +645,7 @@ describe("platform.filesystem with no video", function()
         assert.is_false(filesystem.exists(base .. "/nested/three.txt"))
     end)
 
-    it("initialises no subsystem of its own", function()
+    it("initializes no subsystem of its own", function()
         -- A gate that brought video up to answer a question about a path would
         -- make a headless tool open a display server. Nothing here calls
         -- SDL_Init, so the mask is the same on both sides of a full sweep.

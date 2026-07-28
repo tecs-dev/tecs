@@ -163,7 +163,7 @@
 --- ## Blocking, and what to do about it
 ---
 --- **Every function here is synchronous and blocks the calling thread.** That
---- is a different answer from the two neighbours that went the other way, so
+--- is a different answer from the two neighbors that went the other way, so
 --- here is why.
 ---
 --- `proc` runs children on a worker because a child blocks for another
@@ -190,8 +190,8 @@
 ---
 --- ## Headless
 ---
---- SDL's filesystem API needs no subsystem initialised, and neither this module
---- nor its default backend initialises one. There is no `available()` and no
+--- SDL's filesystem API needs no subsystem initialized, and neither this module
+--- nor its default backend initializes one. There is no `available()` and no
 --- video gate, unlike `clipboard`, because there is nothing to gate on: with no
 --- window, no device and no `SDL_Init` at all, every function below answers for
 --- real. This is one of the few subsystems that is more useful without a window
@@ -211,9 +211,9 @@ local record filesystem
     --- Polling for changed files, and dispatching what changed.
     watch: watch
 
-    --- Organisation and application names, used to name the writable
+    --- Organization and application names, used to name the writable
     --- directory. Set before anything asks for `preferencePath`.
-    organisation: string
+    organization: string
     application: string
 
     --- What a path is. Symbolic links are followed, so a link never reports as
@@ -256,7 +256,7 @@ local function required(value: string, what: string)
     end
 end
 
-filesystem.organisation = "tecs"
+filesystem.organization = "tecs"
 filesystem.application = "tecs"
 
 --- Directory the executable was loaded from, with a trailing separator.
@@ -270,12 +270,12 @@ end
 
 --- Writable directory for this application, created if absent.
 ---
---- @return The directory, with a trailing separator, named from `organisation`
+--- @return The directory, with a trailing separator, named from `organization`
 ---     and `application`. The only place a build may write: everything else is
 ---     read-only on at least one target, and finding that out at run time on a
 ---     device is expensive.
 function filesystem.preferencePath(): string
-    return content.prefPath(filesystem.organisation, filesystem.application)
+    return content.prefPath(filesystem.organization, filesystem.application)
 end
 
 --- Root the engine reads content from, with a trailing separator.

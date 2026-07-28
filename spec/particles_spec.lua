@@ -120,13 +120,13 @@ describe("tecs.gfx.particles", function()
         return pixels
     end
 
-    local function centre(pixels)
+    local function center(pixels)
         return screen:getPixel(pixels, SIZE / 2, SIZE / 2)
     end
 
     -- A still, slow, long-lived burst that fills the middle of the target.
     -- Speed zero and a full-target size mean any particle that exists at all
-    -- lands on the centre pixel, so these tests read "is there a particle"
+    -- lands on the center pixel, so these tests read "is there a particle"
     -- rather than "did it move the way I guessed".
     local function stillBurst(options)
         options = options or {}
@@ -166,7 +166,7 @@ describe("tecs.gfx.particles", function()
 
         assert.is_nil(particles.poolOf(world))
         assert.are.equal(1, renderer.count, "a world with no pool reserves no slots")
-        assert.are.equal(255, centre(pixels).r)
+        assert.are.equal(255, center(pixels).r)
         renderer:destroy()
     end)
 
@@ -180,8 +180,8 @@ describe("tecs.gfx.particles", function()
         assert.are.equal(1 + POOL, renderer.count, "the pool is laid out as its own run after the archetypes")
         -- Every slot of that run is hidden, so what reaches the target is the
         -- entity and nothing else.
-        assert.are.equal(0, centre(pixels).r)
-        assert.are.equal(255, centre(pixels).g)
+        assert.are.equal(0, center(pixels).r)
+        assert.are.equal(255, center(pixels).g)
         renderer:destroy()
     end)
 
@@ -211,8 +211,8 @@ describe("tecs.gfx.particles", function()
 
         local pixels = frames(world, renderer, 4)
 
-        assert.are.equal(255, centre(pixels).r, "the burst should reach the screen")
-        assert.are.equal(0, centre(pixels).g)
+        assert.are.equal(255, center(pixels).r, "the burst should reach the screen")
+        assert.are.equal(0, center(pixels).g)
         renderer:destroy()
     end)
 
@@ -223,8 +223,8 @@ describe("tecs.gfx.particles", function()
 
         local pixels = frames(world, renderer, 4)
 
-        assert.are.equal(0, centre(pixels).r)
-        assert.are.equal(255, centre(pixels).b, "the emitter's tint multiplies the effect's colour")
+        assert.are.equal(0, center(pixels).r)
+        assert.are.equal(255, center(pixels).b, "the emitter's tint multiplies the effect's color")
         renderer:destroy()
     end)
 
@@ -258,28 +258,28 @@ describe("tecs.gfx.particles", function()
         -- conservative bound around the emitter could not.
         local world, renderer = newScene(true)
         world:spawn(Transform(5000, 5000), ParticleEmitter({ effect = stillBurst({ size = SIZE * 0.3 }) }))
-        -- One frame first, because the camera centres itself on the viewport
+        -- One frame first, because the camera centers itself on the viewport
         -- the first time there is anything to draw.
         frame(world, renderer)
         renderer.camera.x = 5000
         renderer.camera.y = 5000
 
         local visible = frames(world, renderer, 4)
-        assert.are.equal(255, centre(visible).r, "a particle's bound is centred on the particle")
+        assert.are.equal(255, center(visible).r, "a particle's bound is centerd on the particle")
 
         -- And away again. The pool's run is still counted and still dispatched
         -- over; what changed is that no view overlaps the bound each live
         -- particle wrote.
         renderer.camera.x = 100000
         local hidden = frames(world, renderer, 2)
-        assert.are.equal(0, centre(hidden).r)
+        assert.are.equal(0, center(hidden).r)
         renderer:destroy()
     end)
 
     it("keeps a slot nothing owns out of the frame", function()
         -- The hidden-slot contract, and the reason a pool of sixty-four
         -- thousand costs a bounds read and a scan lane rather than a draw: a
-        -- slot with no live particle writes a centre no finite view overlaps,
+        -- slot with no live particle writes a center no finite view overlaps,
         -- and the mark pass rejects it before the draw sees it.
         local world, renderer = newScene(true)
         local entity = newEmitter(world, stillBurst({ lifetime = 0.05, size = SIZE * 2 }))
@@ -289,7 +289,7 @@ describe("tecs.gfx.particles", function()
         local pixels = frames(world, renderer, 12)
 
         assert.are.equal(POOL, renderer.count, "the slots are still resident")
-        assert.are.equal(0, centre(pixels).r, "and none of them reaches the draw")
+        assert.are.equal(0, center(pixels).r, "and none of them reaches the draw")
         renderer:destroy()
     end)
 
@@ -302,10 +302,10 @@ describe("tecs.gfx.particles", function()
         newEmitter(world, stillBurst({ lifetime = 0.1 }))
 
         local alive = frames(world, renderer, 3)
-        assert.are.equal(255, centre(alive).r)
+        assert.are.equal(255, center(alive).r)
 
         local gone = frames(world, renderer, 12)
-        assert.are.equal(0, centre(gone).r, "a particle past its lifetime writes the hidden bound")
+        assert.are.equal(0, center(gone).r, "a particle past its lifetime writes the hidden bound")
         renderer:destroy()
     end)
 
@@ -314,17 +314,17 @@ describe("tecs.gfx.particles", function()
         local entity = newEmitter(world, stillBurst({ lifetime = 10 }))
 
         frames(world, renderer, 4)
-        assert.are.equal(255, centre(screen:readback()).r)
+        assert.are.equal(255, center(screen:readback()).r)
 
         -- Stop ends emission and lets the field drain, so what is already
         -- alive is untouched.
         world:get(entity, ParticleEmitter):stop()
         local stopped = frames(world, renderer, 3)
-        assert.are.equal(255, centre(stopped).r, "stop should not remove live particles")
+        assert.are.equal(255, center(stopped).r, "stop should not remove live particles")
 
         world:get(entity, ParticleEmitter):clear()
         local cleared = frames(world, renderer, 3)
-        assert.are.equal(0, centre(cleared).r, "clear should remove them at once")
+        assert.are.equal(0, center(cleared).r, "clear should remove them at once")
         renderer:destroy()
     end)
 
@@ -345,7 +345,7 @@ describe("tecs.gfx.particles", function()
         -- Well past the lifetime in world time. The emitter's own clock stood
         -- still, so its particles did not age through it.
         local held = frames(world, renderer, 30)
-        assert.are.equal(255, centre(held).r, "a paused emitter's particles should not age")
+        assert.are.equal(255, center(held).r, "a paused emitter's particles should not age")
         renderer:destroy()
     end)
 
@@ -354,12 +354,12 @@ describe("tecs.gfx.particles", function()
         local entity = newEmitter(world, stillBurst({ lifetime = 0.05 }))
 
         frames(world, renderer, 3)
-        assert.are.equal(255, centre(screen:readback()).r)
+        assert.are.equal(255, center(screen:readback()).r)
 
         world:despawn(entity)
         local gone = frames(world, renderer, 12)
 
-        assert.are.equal(0, centre(gone).r, "a despawned emitter's particles drain and its slots come back")
+        assert.are.equal(0, center(gone).r, "a despawned emitter's particles drain and its slots come back")
         assert.are.equal(POOL, renderer.count, "the run itself does not move")
         renderer:destroy()
     end)
@@ -412,7 +412,7 @@ describe("tecs.gfx.particles", function()
         )
 
         local early = frames(world, renderer, 4)
-        assert.are.equal(255, centre(early).r)
+        assert.are.equal(255, center(early).r)
 
         -- Four tenths of the way through, still well inside the lifetime, so
         -- what removed it is the curve and not expiry. This is the only fade
@@ -420,11 +420,11 @@ describe("tecs.gfx.particles", function()
         -- says so: the curve takes the quad to no area rather than taking its
         -- alpha to zero, which would write opaque.
         local late = frames(world, renderer, 22)
-        assert.are.equal(0, centre(late).r, "a size curve reaching zero should take the particle off screen")
+        assert.are.equal(0, center(late).r, "a size curve reaching zero should take the particle off screen")
         renderer:destroy()
     end)
 
-    it("takes a colour gradient through to the particle", function()
+    it("takes a color gradient through to the particle", function()
         local world, renderer = newScene(true)
         newEmitter(
             world,
@@ -436,10 +436,10 @@ describe("tecs.gfx.particles", function()
         )
 
         local early = frames(world, renderer, 3)
-        assert.is_true(centre(early).r > centre(early).g, "the gradient starts red")
+        assert.is_true(center(early).r > center(early).g, "the gradient starts red")
 
         local late = frames(world, renderer, 40)
-        assert.is_true(centre(late).g > centre(late).r, "and ends green")
+        assert.is_true(center(late).g > center(late).r, "and ends green")
         renderer:destroy()
     end)
 
@@ -500,7 +500,7 @@ describe("tecs.gfx.particles", function()
 
         local pixels = frames(world, renderer, 4)
 
-        assert.are.equal(0, centre(pixels).r, "nothing is at the emitter itself")
+        assert.are.equal(0, center(pixels).r, "nothing is at the emitter itself")
         assert.are.equal(255, screen:getPixel(pixels, SIZE / 2 + 20, SIZE / 2).r, "it is out on the ring")
         renderer:destroy()
     end)
@@ -581,7 +581,7 @@ describe("tecs.gfx.particles", function()
         local world, renderer = newScene(true)
 
         -- Two texels side by side, red then green, cut as two frames of one
-        -- animation. Which colour reaches the centre says which frame the
+        -- animation. Which color reaches the center says which frame the
         -- playback resolved to.
         local pixels = loader.newArray("uint8_t[8]")
         pixels[0], pixels[1], pixels[2], pixels[3] = 255, 0, 0, 255
@@ -605,15 +605,15 @@ describe("tecs.gfx.particles", function()
         newEmitter(world, stillBurst({ lifetime = 1.0, color = "#ffffff", sheet = strip }))
 
         local first = frames(world, renderer, 3)
-        assert.are.equal(255, centre(first).r, "the cycle starts on its first frame")
-        assert.are.equal(0, centre(first).g)
+        assert.are.equal(255, center(first).r, "the cycle starts on its first frame")
+        assert.are.equal(0, center(first).g)
 
         -- Past the middle of the particle's life, which is where the cycle's
         -- second half falls: the rate is the cycle divided by the lifetime, so
         -- one pass covers the life exactly.
         local second = frames(world, renderer, 40)
-        assert.are.equal(0, centre(second).r, "and reaches its last one as the particle expires")
-        assert.are.equal(255, centre(second).g)
+        assert.are.equal(0, center(second).r, "and reaches its last one as the particle expires")
+        assert.are.equal(255, center(second).g)
         renderer:destroy()
     end)
 

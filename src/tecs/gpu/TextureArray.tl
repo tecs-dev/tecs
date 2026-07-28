@@ -35,9 +35,9 @@ local RGBA8 <const> = 4
 --- Texels of gutter around every packed image, on all four sides.
 ---
 --- Two placements are therefore twice this apart, which is what keeps a filter
---- that reaches past a texel edge from picking up its neighbour. The gutter is
+--- that reaches past a texel edge from picking up its neighbor. The gutter is
 --- written as a copy of the image's own edge rather than left undefined, so
---- what does reach into it is the colour that was already there.
+--- what does reach into it is the color that was already there.
 local PADDING <const> = 1
 
 --- A row of a layer that images are placed along, left to right.
@@ -294,7 +294,7 @@ end
 --- gutter around it.
 ---
 --- The gutter exists so a filter reaching past an image's edge finds the
---- image's own colour rather than the neighbour packed beside it. Repeating the
+--- image's own color rather than the neighbor packed beside it. Repeating the
 --- edge is what makes what it finds harmless; leaving the gutter undefined
 --- would only move the seam.
 local function stage(
@@ -403,7 +403,7 @@ function TextureArray:add(pixels: loader.CValue, width: integer, height: integer
     upload(self, layer, x, y, rowTexels, width + pad * 2, height + pad * 2)
 
     -- The rect the caller samples is the image's own texels and never the
-    -- gutter around them, so a neighbour packed one texel away is unreachable
+    -- gutter around them, so a neighbor packed one texel away is unreachable
     -- through this region however the sub-rect inside it is narrowed.
     local left <const> = x + pad
     local top <const> = y + pad
@@ -430,7 +430,7 @@ end
 --- touch.
 ---
 --- The gutter is rewritten too, since it is a copy of the image's own edge and
---- the new image's edge is a different colour.
+--- the new image's edge is a different color.
 ---
 --- Raises where the replacement is not the size the region was cut for. A
 --- different size is a different rect, packed or not, and the sprites holding

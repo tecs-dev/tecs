@@ -64,7 +64,7 @@ to the live body at the next fixed step.
 ## Colliders
 
 No radius selects a box using `halfWidth` and `halfHeight`, both defaulting to 8. A `radius` selects a circle.
-Supplying `radius` and `capsuleLength` selects a vertical capsule; the length is the distance between end centres,
+Supplying `radius` and `capsuleLength` selects a vertical capsule; the length is the distance between end centers,
 excluding the caps. `offsetX` and `offsetY` move any shape in the body's local frame.
 
 Material options are `density`, `friction`, and `restitution`. Filtering uses `categoryBits`, `maskBits`, and

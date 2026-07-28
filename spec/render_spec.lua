@@ -1,4 +1,4 @@
--- Rendering behaviour, asserted on real pixels.
+-- Rendering behavior, asserted on real pixels.
 --
 -- A draw that produces nothing still runs at full frame rate, so these tests
 -- render offscreen and read the result back. They exist mainly to pin the

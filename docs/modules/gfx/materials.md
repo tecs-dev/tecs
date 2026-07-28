@@ -69,7 +69,7 @@ dark fringe rather than as a soft edge. An image authored with a soft edge there
 where the artwork crosses half alpha.
 
 `glyph` is the material [text](/modules/gfx/) selects, and it is unlit, so a caption draws at its own
-colour rather than being left in the dark by a scene's lights.
+color rather than being left in the dark by a scene's lights.
 
 Only three of them claim a shape to the lighting pass: `circle` and `ellipse` return a dome, `capsule`
 returns a cylinder with hemispherical caps, and everything else is flat and facing the viewer. That is
@@ -84,7 +84,7 @@ works without the material knowing which.
 ## Authoring one
 
 A material file defines one function, `material`, taking a `MaterialInput` and answering a
-`MaterialOutput`. It decides what colour a fragment is and whether the fragment exists at all; it
+`MaterialOutput`. It decides what color a fragment is and whether the fragment exists at all; it
 does not decide where the geometry is, which is the instance's transform and the same for every
 material.
 
@@ -101,9 +101,9 @@ material.
 
 | Field      | Type    | What it is                                                                                    |
 | ---------- | ------- | --------------------------------------------------------------------------------------------- |
-| `albedo`   | `vec4`  | The fragment's colour                                                                         |
+| `albedo`   | `vec4`  | The fragment's color                                                                          |
 | `normal`   | `vec3`  | Which way the surface faces, in the quad's own space: X and Y along its axes and +Z out of it |
-| `lit`      | `float` | Zero leaves the fragment out of the lighting pass entirely, so it draws at its own colour     |
+| `lit`      | `float` | Zero leaves the fragment out of the lighting pass entirely, so it draws at its own color      |
 | `coverage` | `float` | At or below zero the fragment is discarded                                                    |
 
 Coverage rather than alpha, because the G-buffer pass writes with replace rather than blend: a partly

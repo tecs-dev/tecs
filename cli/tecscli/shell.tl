@@ -5,7 +5,7 @@
 --- `shell.run` starts a child, lets it inherit this process's terminal, waits,
 --- and answers its exit status. That is what a formatter or a compiler wants:
 --- its diagnostics belong on the user's screen unaltered, and capturing them
---- to print them again only loses the colours.
+--- to print them again only loses the colors.
 ---
 --- `shell.become` does not start anything. It replaces this process with the
 --- program named, so a game launched by `tecs run` is not a child of the CLI

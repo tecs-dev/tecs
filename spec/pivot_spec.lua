@@ -4,7 +4,7 @@
 -- basis the vertex shader already applies, so extraction folds it into the
 -- origin and what reaches the GPU is a quad drawn somewhere else. That makes
 -- these assertions about two numbers: the origin the instance carries, and the
--- centre of the bound the cull reads beside it.
+-- center of the bound the cull reads beside it.
 --
 -- A pivot is a fraction of the frame measured from its top left, and world Y
 -- runs down the screen, so both axes read the same way. A pivot at the foot of
@@ -70,7 +70,7 @@ describe("a pivoted quad", function()
         return instances[base + 4], instances[base + 5], instances[base + 3]
     end
 
-    -- The centre and half extents of the bound at `index`.
+    -- The center and half extents of the bound at `index`.
     local function boundAt(bounds, index)
         local base = index * BOUND_FLOATS
         return bounds[base], bounds[base + 1], bounds[base + 2], bounds[base + 3]
@@ -145,8 +145,8 @@ describe("a pivoted quad", function()
         -- the world's business, so each is found by where its bound sits.
         local pivotedRow, plainRow
         for index = 0, 1 do
-            local _, centreY = boundAt(bounds, index)
-            if math.abs(centreY - 170) < EPSILON then
+            local _, centerY = boundAt(bounds, index)
+            if math.abs(centerY - 170) < EPSILON then
                 pivotedRow = index
             else
                 plainRow = index
@@ -156,8 +156,8 @@ describe("a pivoted quad", function()
         assert.is_not_nil(plainRow)
 
         local px, py, pex, pey = boundAt(bounds, pivotedRow)
-        near(px, 100, "pivoted bound centre x")
-        near(py, 170, "pivoted bound centre y")
+        near(px, 100, "pivoted bound center x")
+        near(py, 170, "pivoted bound center y")
 
         local _, _, ex, ey = boundAt(bounds, plainRow)
         near(pex, ex, "half extent x is the quad's, whatever it hangs off")
@@ -180,8 +180,8 @@ describe("a pivoted quad", function()
         world:update(1 / 60)
 
         local cx, cy, ex, ey = boundAt(bounds, 0)
-        near(cx, 100, "the centre is still the middle pivot's")
-        near(cy, 170, "bound centre y")
+        near(cx, 100, "the center is still the middle pivot's")
+        near(cy, 170, "bound center y")
         near(ex, 24, "half the width plus the travel across")
         near(ey, 45, "half the height plus the travel down")
     end)

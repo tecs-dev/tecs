@@ -125,7 +125,7 @@ function WorldImpl.new(config?: types.World.Config): World
         -- DESPAWN (1/2/3) or 0 for unset. uint32 pendingArch holds the
         -- target Archetype.id (0 for unset). A slot's value is only valid
         -- when the parallel stamp equals `_transactionEpoch`. Starting
-        -- epoch is 1 so uninitialised memory (zero) compares unequal.
+        -- epoch is 1 so uninitialized memory (zero) compares unequal.
         _stateArr = C.new(UINT8_ARR_T, maxSlotCount + 1),
         _pendingArchArr = C.new(UINT32_ARR_T, maxSlotCount + 1),
         _slotStamp = C.new(UINT32_ARR_T, maxSlotCount + 1),

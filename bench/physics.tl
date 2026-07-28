@@ -6,12 +6,12 @@
 --- frame where a stack collapses costs far more than the one before it.
 ---
 --- That makes this the benchmark a frame-structure change has to be judged
---- against. Simulation and rendering are serialised, so physics adds directly
+--- against. Simulation and rendering are serialized, so physics adds directly
 --- to frame time and every spike in it lands on the frame. Neither effect
 --- shows up on a scene whose simulation is a loop.
 ---
 --- Run it before and after any change to the frame structure. The numbers to
---- compare are p50 and p95 together: an optimisation that improves the median
+--- compare are p50 and p95 together: an optimization that improves the median
 --- while worsening the tail has made the game feel worse, and physics is where
 --- that trade shows up.
 

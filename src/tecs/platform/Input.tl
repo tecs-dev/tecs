@@ -50,7 +50,7 @@ local record Touch
     --- Finger identity, as an opaque identity. A finger id is 64 bits and does
     --- not fit a double.
     finger: string
-    --- Position in window coordinates, converted from the normalised pair by
+    --- Position in window coordinates, converted from the normalized pair by
     --- the window size `events.setTouchScale` was last told about. Stale by
     --- one frame if the window resized without that being updated.
     x: number
@@ -526,7 +526,7 @@ end
 
 --- Folds one typed event into the state.
 ---
---- Unrecognised kinds are ignored, so this can be handed the whole stream.
+--- Unrecognized kinds are ignored, so this can be handed the whole stream.
 ---
 --- Nothing is retained: every field the state keeps is copied out here, so the
 --- caller is free to reuse the record, which the converter does.
@@ -561,7 +561,7 @@ function Input:handleEvent(event: eventStream.Event)
     elseif kind == "mouseWheel" then
         -- The wheel says which device it came from like every other mouse
         -- event, and a scroll the platform made out of a touch is exactly what
-        -- these two fields exist to let a game recognise.
+        -- these two fields exist to let a game recognize.
         self.mouseWhich = event.which
         self.mouseSynthetic = event.synthetic == true
         self.wheelX = self.wheelX + event.wheelX
@@ -694,7 +694,7 @@ end
 --- The name of a physical key, for showing a binding back to the player.
 ---
 --- The platform's own name for the position, which is not the character the
---- player's layout produces there: the key `scancode("Q")` names is labelled Q
+--- player's layout produces there: the key `scancode("Q")` names is labeled Q
 --- whatever a French keyboard prints on it.
 function Input:keyName(scancode: integer): string
     return self._backend.scancodeName(scancode)

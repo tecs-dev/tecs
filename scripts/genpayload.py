@@ -1,7 +1,7 @@
 """Packs the content root into a C array, so one executable carries everything.
 
 A `tecs` built as a single file has no directory beside it: no compiled Lua, no
-Teal type information, no shaders, no fonts, no templates, no licence notices.
+Teal type information, no shaders, no fonts, no templates, no license notices.
 This deflates all of it into one stream and emits it as a C source file the
 build compiles in.
 

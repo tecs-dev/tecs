@@ -558,7 +558,7 @@ describe(
                 )
 
                 it(
-                    "moves smoothly, with no step between neighbours",
+                    "moves smoothly, with no step between neighbors",
                     function()
                         local field <const> = random.noise(2024)
                         local previous = field:noise2(0.5, 0.5)

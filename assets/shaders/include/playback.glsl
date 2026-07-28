@@ -12,7 +12,7 @@
 // in one shader: resolve at the point of use, from the playback and the frame's
 // clock. Never carry a resolved region from one pass to another. A buffer of
 // regions written by one pass and read by the next is exactly the arrangement
-// that lags, and it is the obvious optimisation to reach for.
+// that lags, and it is the obvious optimization to reach for.
 //
 // The guarantee is then structural. Every caller reads the same four floats
 // from the same instance and is handed the same clock, published once per

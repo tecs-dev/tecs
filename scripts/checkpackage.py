@@ -13,11 +13,11 @@ Teal sources; if those are absent or incomplete, the failure lands on whoever
 unpacked the package, not on whoever built it. So a file using the `tecs`
 global is type-checked here against the package.
 
-The licence position is checked here too, because this is the only place that
+The license position is checked here too, because this is the only place that
 sees what a build actually linked. Every library an installed binary references
-has to be one somebody declared, with a licence and a reason beside it, and the
+has to be one somebody declared, with a license and a reason beside it, and the
 notices have to be installed alongside the binaries they describe. Neither of
-those reads a licence out of a binary, which is not something a binary carries;
+those reads a license out of a binary, which is not something a binary carries;
 `spec/licenses_spec.lua` holds the configure-time half of the same rule.
 
 The one thing the package is not asked to carry is the declarations for LuaJIT
@@ -53,9 +53,9 @@ SYSTEM_PREFIXES = (
 # silently on a target that was supposed to have none.
 COMPILER_NAMES = ("shaderc", "spirvcross", "spirv-cross", "dxcompiler")
 
-# What a package carries the notices for. Nothing here reads a licence out of a
+# What a package carries the notices for. Nothing here reads a license out of a
 # binary, because nothing can; this holds the libraries a package links against
-# a list somebody wrote down, with the licence and the reason beside each. Its
+# a list somebody wrote down, with the license and the reason beside each. Its
 # whole value is that a library nobody has thought about fails the check, so the
 # thinking happens before the package ships rather than after.
 #
@@ -64,7 +64,7 @@ COMPILER_NAMES = ("shaderc", "spirvcross", "spirv-cross", "dxcompiler")
 # that would fetch an LGPL codec. This is the link-time half: a library that
 # arrived some other way still has to be named.
 #
-# Matched against a normalised stem, so `libluajit-5.1.2.dylib`,
+# Matched against a normalized stem, so `libluajit-5.1.2.dylib`,
 # `libluajit.so.2` and `libluajit-5.1.dylib` are all `luajit`.
 LINKED_LIBRARIES = (
     (r"tecs\w*", "MIT OR Apache-2.0", "the engine's own"),
@@ -83,7 +83,7 @@ LINKED_LIBRARIES = (
 )
 
 # The notices travel with the binaries they describe. A package that carries the
-# code and not the notice is the one licence failure this engine is capable of
+# code and not the notice is the one license failure this engine is capable of
 # committing on its own, and it is invisible until someone else audits a
 # release, so it is checked on every install rather than only on a packaged one.
 REQUIRED_NOTICES = (
@@ -162,8 +162,8 @@ def checkLicenses(binary: Path, libs: list, problems: list):
     """Holds a binary's linked libraries against the declared set.
 
     What this proves is narrow and worth stating: that every library the
-    package links is one somebody named, with a licence beside it. It does not
-    read the licence, which is not something a binary carries. A dependency
+    package links is one somebody named, with a license beside it. It does not
+    read the license, which is not something a binary carries. A dependency
     that changed its terms between revisions passes here, and so does anything
     linked statically, since a static archive leaves no entry in a link table.
     """
@@ -174,7 +174,7 @@ def checkLicenses(binary: Path, libs: list, problems: list):
         if not any(re.fullmatch(pattern, stem) for pattern, _, _ in LINKED_LIBRARIES):
             problems.append(
                 f"{binary.name}: links {stem}, which is not a declared dependency. "
-                "Add it to LINKED_LIBRARIES with its licence and why it is here, "
+                "Add it to LINKED_LIBRARIES with its license and why it is here, "
                 "or take it out. This engine brings in no LGPL."
             )
 
@@ -214,7 +214,7 @@ def main():
     # self-contained half of this and no version of it could. Failing it would
     # say nothing about the tree and would train people to ignore the check, so
     # what runs against one is the part that is about the tree rather than the
-    # preset, the licence position and the packaged types. The rest is
+    # preset, the license position and the packaged types. The rest is
     # reported, and reported as not run rather than as passed.
     info = prefix / "share" / "tecs" / "build-info.txt"
     development = "systemDeps=ON" in info.read_text() if info.exists() else False
@@ -227,7 +227,7 @@ def main():
 
     # Kept apart from the list below for the same reason the type check is: what
     # a development install borrows from its machine is allowed to differ, but
-    # the licence position does not change with the preset. A Homebrew SDL3_image
+    # the license position does not change with the preset. A Homebrew SDL3_image
     # is still SDL3_image, and holding both kinds to this is what makes the
     # check run today rather than only when someone builds a packaged preset.
     licenseProblems = []
@@ -277,7 +277,7 @@ def main():
     print(f"checked {len(binaries)} binaries under {prefix}")
 
     if licenseProblems:
-        print(f"\n{len(licenseProblems)} problems with the licence position:")
+        print(f"\n{len(licenseProblems)} problems with the license position:")
         for problem in sorted(set(licenseProblems)):
             print(f"  {problem}")
         sys.exit(1)

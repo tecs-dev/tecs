@@ -11,7 +11,7 @@
 --- and so is the destination, so a row becomes a handful of float stores into
 --- driver memory rather than a copy between two buffers.
 ---
---- Instances pack as four vec4s: a 2x2 basis, an origin, a colour, and a UV
+--- Instances pack as four vec4s: a 2x2 basis, an origin, a color, and a UV
 --- rect. A precomputed basis costs less on the GPU than a per-vertex sincos.
 --- The origin is the quad's middle, which is the entity's position until a
 --- `Pivot` says the quad hangs off some other point of itself.
@@ -376,7 +376,7 @@ local function writeRun(
     -- fragments they produce never look at the region table.
     local clips = archetype:get(components.Clip)
     -- Absent on every archetype that turns about its middle, which is most of
-    -- them: the rows below then draw the quad centred on the entity.
+    -- them: the rows below then draw the quad centerd on the entity.
     local pivots = archetype:get(Pivot)
     -- Which of the two casting roles this archetype is, decided once for the
     -- run because the columns are per archetype: an entity either carries the
@@ -520,8 +520,8 @@ local function writeRun(
         -- vec4 in the instance, which is sixteen more bytes streamed for every
         -- instance in the world to say something almost none of them have
         -- anything to say about.
-        local centreX = originX
-        local centreY = originY
+        local centerX = originX
+        local centerY = originY
         -- What the bound has to cover beyond the quad itself, which is nothing
         -- unless a pivot follows a slice that moves between frames. Playback on
         -- the GPU resolves the frame after this is written, so the shader can
@@ -548,16 +548,16 @@ local function writeRun(
                 growX, growY = extentOf(angle, halfX * 2.0 * scaleX, halfY * 2.0 * scaleY)
             end
             if angle == 0.0 then
-                centreX = originX - px * scaleX
-                centreY = originY - py * scaleY
+                centerX = originX - px * scaleX
+                centerY = originY - py * scaleY
             else
                 -- The same basis `instance.vert.glsl` builds, column major:
                 -- the columns are (c * scaleX, s * scaleX) and
                 -- (-s * scaleY, c * scaleY).
                 local c <const> = cos(angle)
                 local s <const> = sin(angle)
-                centreX = originX - (c * scaleX * px - s * scaleY * py)
-                centreY = originY - (s * scaleX * px + c * scaleY * py)
+                centerX = originX - (c * scaleX * px - s * scaleY * py)
+                centerY = originY - (s * scaleX * px + c * scaleY * py)
             end
         end
 
@@ -575,8 +575,8 @@ local function writeRun(
         -- either drawing is.
         floats[base + 3] = layers.depthOf(entityLayer, transform.z, originX, originY)
 
-        floats[base + 4] = centreX
-        floats[base + 5] = centreY
+        floats[base + 4] = centerX
+        floats[base + 5] = centerY
         floats[base + 6] = packedSlot
         floats[base + 7] = material
 
@@ -604,7 +604,7 @@ local function writeRun(
             ey = ey + growY
         end
 
-        -- Centred on the quad and not on the entity, because the extents
+        -- Centerd on the quad and not on the entity, because the extents
         -- above are half extents about the quad's middle. A pivot moves the
         -- geometry within its bound, so the bound moves with it and stays
         -- exactly as big as it was: growing it instead would keep offscreen
@@ -613,8 +613,8 @@ local function writeRun(
         -- is the one case where the shift is not known here, and only that case
         -- pays for it, in `growX` and `growY` above.
         local bound = (offset + row - 1) * BOUND_FLOATS
-        bounds[bound] = centreX
-        bounds[bound + 1] = centreY
+        bounds[bound] = centerX
+        bounds[bound + 1] = centerY
         -- A half extent is a length and its sign carries nothing, so the two
         -- signs together are what tell the cull which of the four lanes a row
         -- belongs in. The cull takes the magnitudes for the view test and the
@@ -808,7 +808,7 @@ end
 --- Lays the archetypes out end to end, in query order.
 ---
 --- Returns the slots the runs cover, the rows past the ceiling, and whether
---- the layout moved. A run cannot grow without shifting its neighbours, so any
+--- the layout moved. A run cannot grow without shifting its neighbors, so any
 --- length or offset that changed rewrites every run this sync.
 local function layoutPacked(self: Extractor): integer, integer, boolean
     local runs <const> = self._runs

@@ -10,7 +10,7 @@ float pieDistance(vec2 point, float halfAperture, float radius) {
     vec2 folded = vec2(abs(point.x), -point.y);
     vec2 edge = vec2(sin(halfAperture), cos(halfAperture));
     float disc = length(folded) - radius;
-    // Distance to the straight side, which is the segment from the centre out
+    // Distance to the straight side, which is the segment from the center out
     // to the rim along the aperture.
     float side = length(folded - edge * clamp(dot(folded, edge), 0.0, radius));
     return max(disc, side * sign(edge.y * folded.x - edge.x * folded.y));

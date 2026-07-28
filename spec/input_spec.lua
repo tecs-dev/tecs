@@ -71,7 +71,7 @@ local function fakeBackend()
 
         openGamepad = function(id)
             calls.opened[#calls.opened + 1] = id
-            -- A handle the test can recognise, standing in for a pointer.
+            -- A handle the test can recognize, standing in for a pointer.
             return { device = id }
         end,
 
@@ -456,7 +456,7 @@ describe("platform.Input", function()
             synthetic = true,
         })
         assert.is_true(input:mouseDown("left"))
-        assert.is_true(input.mouseSynthetic, "a touch-generated click must be recognisable as one")
+        assert.is_true(input.mouseSynthetic, "a touch-generated click must be recognizable as one")
 
         input:beginFrame()
         input:handleEvent({
@@ -488,7 +488,7 @@ describe("platform.Input", function()
         assert.is_false(input:mouseDown("left"))
     end)
 
-    it("tracks touches by device and finger, keeping normalised positions", function()
+    it("tracks touches by device and finger, keeping normalized positions", function()
         input:handleEvent({
             kind = "fingerDown",
             touchDevice = "7",
@@ -523,7 +523,7 @@ describe("platform.Input", function()
         assert.are.equal(
             0.1,
             remaining[1].normalX,
-            "the normalised position survives, since a window coordinate " .. "does not survive a resize"
+            "the normalized position survives, since a window coordinate " .. "does not survive a resize"
         )
     end)
 
@@ -601,7 +601,7 @@ describe("platform.Input", function()
 
     it("says which device a wheel event came from", function()
         -- The platform scrolls by synthesising wheel events from a touch, and
-        -- a game handling touch itself has to recognise those or act on one
+        -- a game handling touch itself has to recognize those or act on one
         -- gesture twice. Reading the last button event's device instead is
         -- exactly the confusion these two fields exist to prevent.
         input:handleEvent({

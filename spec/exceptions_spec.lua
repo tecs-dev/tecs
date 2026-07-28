@@ -97,12 +97,12 @@ describe("exception safety", function()
     it("refuses to cancel a frame that acquired a swapchain texture", function()
         local frame = newFrame()
 
-        -- SDL documents cancelling after an acquisition as an error, so the
+        -- SDL documents canceling after an acquisition as an error, so the
         -- old spelling of "put this frame back" was invalid on essentially
         -- every frame that existed. It raises rather than making the call.
         local ok, reason = pcall(frame.cancel, frame)
         assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("cannot be cancelled", 1, true))
+        assert.is_truthy(tostring(reason):find("cannot be canceled", 1, true))
         assert.are.equal("recording", frame.state)
 
         assert.is_nil(frame:abandon())
@@ -115,7 +115,7 @@ describe("exception safety", function()
 
         assert.is_false(frame.acquired)
         assert.is_nil(frame:abandon())
-        assert.are.equal("cancelled", frame.state)
+        assert.are.equal("canceled", frame.state)
         assert.is_nil(frame.commandBuffer)
     end)
 

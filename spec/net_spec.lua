@@ -112,7 +112,7 @@ describe("tecs.net", function()
         local future = net.resolve("127.0.0.1")
         future:cancel()
 
-        assert.are.equal("cancelled", future.status)
+        assert.are.equal("canceled", future.status)
         assert.are.equal(0, net.pending())
     end)
 
@@ -122,7 +122,7 @@ describe("tecs.net", function()
         local future = net.connect(address, port)
 
         future:cancel()
-        assert.are.equal("cancelled", future.status)
+        assert.are.equal("canceled", future.status)
         assert.are.equal(0, net.pending())
 
         server:close()

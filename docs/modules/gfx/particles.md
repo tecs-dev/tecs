@@ -27,7 +27,7 @@ writes a hidden bound that costs a bounds read and never reaches the draw.
 The forward blended lane exists and nothing particle-shaped reaches it: a row is routed forward by
 extraction negating the first half extent of its cull bound, and the simulate pass writes every
 particle's bound with both extents positive. So a particle goes to the G-buffer, which is written
-with replace, and a colour's alpha channel reaches the swapchain having blended against nothing. A
+with replace, and a color's alpha channel reaches the swapchain having blended against nothing. A
 gradient ending at transparent black writes opaque black over whatever was behind it, which is worse
 than not fading at all. Alpha is carried, and it is inert.
 
@@ -87,7 +87,7 @@ local sparks <const> = particles.effect({
 })
 ```
 
-### Values, colours and ranges
+### Values, colors and ranges
 
 A property typed `Value` takes either a constant or a range: `300` and `{ min = 180, max = 420 }` are
 both accepted everywhere one appears, and cost the same, because the shader draws between two bounds
@@ -120,7 +120,7 @@ A muzzle flash is one burst at time zero. More than four bursts raises.
 | `rotation`        | `0`         | Turns the sampled area, independently of where particles are launched                                               |
 | `distribution`    | `"uniform"` | `"uniform"` or `"normal"`. A gaussian spread makes a column read as a column rather than as a slab                  |
 | `direction`       | `0`         | Launch direction in radians                                                                                         |
-| `spread`          | `0`         | The **full** cone centred on `direction`, so a particle leaves within plus or minus half of it                      |
+| `spread`          | `0`         | The **full** cone centerd on `direction`, so a particle leaves within plus or minus half of it                      |
 | `outward`         | `false`     | Launch along the shape's outward normal instead: disc, ring, cone and a rectangle's edge have one                   |
 | `space`           | `"world"`   | `"local"` particles follow the emitter's transform for their whole life; `"world"` particles read it once, at spawn |
 | `inheritVelocity` | `0`         | How much of the emitter's own velocity a particle leaves with, zero to one, in world space only                     |
@@ -140,7 +140,7 @@ An unknown `shape`, `distribution` or `space` raises.
 | `accelerationY`   | `0.0`   | `Value` |
 | `color`           | white   | `Color` |
 
-Acceleration is randomised per axis, because independent axes are what make a plume drift apart
+Acceleration is randomized per axis, because independent axes are what make a plume drift apart
 instead of translating as a block. `color` is multiplied by the update gradient and by the emitter's
 tint.
 
@@ -152,7 +152,7 @@ tint.
 | `radialAcceleration`     | `0`     | `Value`. Acceleration away from the emitter                                                                 |
 | `tangentialAcceleration` | `0`     | `Value`. Acceleration at right angles to that                                                               |
 | `size`                   | none    | `Curve` multiplying the particle's own size over its life                                                   |
-| `color`                  | none    | `Gradient` multiplying the particle's own colour over its life                                              |
+| `color`                  | none    | `Gradient` multiplying the particle's own color over its life                                               |
 
 Radial and tangential acceleration are the difference between a fountain and a vortex. An absent
 curve multiplies by one and an absent gradient by white, so leaving either out costs nothing.
@@ -175,7 +175,7 @@ curve multiplies by one and an absent gradient by white, so leaving either out c
 | `clip`          | `0`       | Which clip region the fragments are kept inside. Zero is no clipping                                                                            |
 
 An animated effect plays its cycle exactly once over each particle's own life and clamps at the end,
-so a randomised lifetime randomises the playback speed. Per-frame durations, reverse and pingpong
+so a randomized lifetime randomizes the playback speed. Per-frame durations, reverse and pingpong
 all arrive already spent, because this uses the same frame table an animated entity does; see
 [animation](/modules/gfx/animation). A `layer` outside one to [`layers.MAX`](/modules/gfx/layers), and an `alignment`
 that is neither of the two, both raise.
@@ -205,7 +205,7 @@ anything.
 
 ### curve
 
-Compiles keyframes into a curve over normalised age.
+Compiles keyframes into a curve over normalized age.
 
 ```teal
 function particles.curve(keys: {CurveKey}): Curve
@@ -221,7 +221,7 @@ evenly spaced values the shader indexes without searching.
 
 ### gradient
 
-Compiles keyframes into a colour gradient over normalised age.
+Compiles keyframes into a color gradient over normalized age.
 
 ```teal
 function particles.gradient(keys: {CurveKey}): Gradient
@@ -229,7 +229,7 @@ function particles.gradient(keys: {CurveKey}): Gradient
 
 **Parameters:**
 
-- `keys`: a list of `{ age, colour }`, where the colour is any `Color`.
+- `keys`: a list of `{ age, color }`, where the color is any `Color`.
 
 **Returns:** the gradient, sampled at the same resolution, four floats a sample.
 
@@ -252,7 +252,7 @@ every emitter would grow to hold a copy of one.
 | `rateScale` | `1.0`       | Multiplies the effect's rate                                      |
 | `sizeScale` | `1.0`       | Multiplies the effect's sizes                                     |
 | `timeScale` | `1.0`       | Multiplies how fast it runs                                       |
-| `tint`      | white       | `Color` multiplying every particle's colour                       |
+| `tint`      | white       | `Color` multiplying every particle's color                        |
 
 Constructing one without an effect raises, as does an unknown `state`. The component carries no
 capacity of its own: that belongs to the effect, because it decides a slot range in the pool and the
@@ -301,9 +301,9 @@ function ParticleEmitter:burst(count: number)
 An entity carrying the `Paused` builtin holds its emitter too: the clock stands still, so the field
 does not age through the pause while the world goes on drawing.
 
-Each randomised property draws from a lane of its own, which is what makes an effect safe to edit.
+Each randomized property draws from a lane of its own, which is what makes an effect safe to edit.
 Adding a range to a property that had a constant does not shift what every other property chose, so an
-effect edited to randomise its rotation keeps the sizes and the lifetimes it already had.
+effect edited to randomize its rotation keeps the sizes and the lifetimes it already had.
 
 ### finished
 
@@ -433,7 +433,7 @@ Samples one compiled curve or gradient holds.
 <pre><code v-pre>type <a href="#tecs.gfx.particles.Color">tecs.gfx.particles.Color</a> = Color
 </code></pre>
 
-Accepted wherever a colour is asked for.
+Accepted wherever a color is asked for.
 <a id="tecs.gfx.particles.Curve"></a>
 
 ### tecs.gfx.particles.Curve
@@ -576,7 +576,7 @@ Accepted wherever a property may vary per particle.
 <pre><code v-pre>function <a href="#tecs.gfx.particles.curve">tecs.gfx.particles.curve</a>(keys: {CurveKey}): <a href="#tecs.gfx.particles.Curve">Curve</a>
 </code></pre>
 
-Compiles keyframes into a curve over normalised age.
+Compiles keyframes into a curve over normalized age.
 
 #### Parameters
 
@@ -641,19 +641,19 @@ The effect registered under `name`, or nil when nothing has that name.
 <pre><code v-pre>function <a href="#tecs.gfx.particles.gradient">tecs.gfx.particles.gradient</a>(keys: {CurveKey}): <a href="#tecs.gfx.particles.Gradient">Gradient</a>
 </code></pre>
 
-Compiles keyframes into a colour gradient over normalised age.
+Compiles keyframes into a color gradient over normalized age.
 
 #### Parameters
 
-| Type                          | Name                    | Description                                                                                                      |
-| ----------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>{CurveKey}</code> | <code v-pre>keys</code> | `{age, colour}` pairs, on the same terms as `curve` takes its values. The alpha channel is carried and is inert. |
+| Type                          | Name                    | Description                                                                                                     |
+| ----------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{CurveKey}</code> | <code v-pre>keys</code> | `{age, color}` pairs, on the same terms as `curve` takes its values. The alpha channel is carried and is inert. |
 
 #### Returns
 
-| Type                                                                   | Description                                                                                                                                                                        |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.gfx.particles.Gradient">Gradient</a></code> | A gradient resampled like a curve, interpolating each channel separately, so two colours blend through whatever lies between them componentwise rather than around a colour wheel. |
+| Type                                                                   | Description                                                                                                                                                                      |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.gfx.particles.Gradient">Gradient</a></code> | A gradient resampled like a curve, interpolating each channel separately, so two colors blend through whatever lies between them componentwise rather than around a color wheel. |
 
 <a id="tecs.gfx.particles.names"></a>
 

@@ -16,7 +16,7 @@
  * Two things here are not merely plumbing. Events are copied into one of two
  * owned batches which swap at the top of an iteration, so an event arriving
  * while Lua is draining survives to the next one. And the six lifecycle events
- * SDL refuses to queue are recognised here and answered here, because the
+ * SDL refuses to queue are recognized here and answered here, because the
  * moment they arrive is the only moment a game has.
  */
 
@@ -229,7 +229,7 @@ static char **ownStrings(TecsEventBatch *batch, const char *const *items, int co
  * SDL keeps the strings on text, composition, drop and clipboard events in a
  * pool it recycles as soon as the callback returns, and the batch outlives that
  * call by a whole frame. Retaining the pointers would hand Lua a string that
- * had already been reused; copying here is what makes a recognised kind mean a
+ * had already been reused; copying here is what makes a recognized kind mean a
  * usable payload. Anything that fails to copy becomes an empty payload rather
  * than a dangling one, because a lost drop is recoverable and a freed pointer
  * read from Lua is not. */

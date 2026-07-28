@@ -57,8 +57,8 @@ DECLARATIONS = (
     "table/new.d.tl",
 )
 
-# Licences travel with the code they cover. A binary carrying the compiler and
-# not its notice is the one licence failure this is capable of committing.
+# Licenses travel with the code they cover. A binary carrying the compiler and
+# not its notice is the one license failure this is capable of committing.
 LICENSES = (
     ("teal/LICENSE", "teal-LICENSE"),
     ("cerulean/LICENSE", "cerulean-LICENSE"),

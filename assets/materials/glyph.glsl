@@ -51,7 +51,7 @@ MaterialOutput material(MaterialInput frag) {
     float edge = clamp(inside * screenRange + 0.5, 0.0, 1.0);
     result.albedo = vec4(frag.color.rgb, frag.color.a * edge);
     result.coverage = inside;
-    // Text draws at its own colour. A caption that a scene's lights happen to
+    // Text draws at its own color. A caption that a scene's lights happen to
     // leave in the dark reads as broken rather than as unlit, and text is
     // written to be read. A label that should take the light is a material of
     // its own, which is what `materials.addRoot` is for.

@@ -1566,7 +1566,7 @@ end
 
 -- TableReader: walks an in-memory `Snapshot`. Always reports mode=1 (row
 -- shape) regardless of how the writer ingested the data -- the table format
--- normalises everything to per-entity rows in `entities[i] = {id, c1, c2, ...}`.
+-- normalizes everything to per-entity rows in `entities[i] = {id, c1, c2, ...}`.
 local record TableReaderImpl is snapshot.Reader
     _snap: SnapshotTable
     _archCursor: integer

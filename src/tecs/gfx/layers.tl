@@ -31,7 +31,7 @@ local record layers
     --- each other.
     maxZ: number
 
-    --- Half the world extent a scene is expected to occupy, for normalising
+    --- Half the world extent a scene is expected to occupy, for normalizing
     --- position into a band. A scene larger than this still sorts, with
     --- entities beyond the edge compressed against it.
     maxY: number
@@ -76,7 +76,7 @@ local record layers
         --- is scaled to fill the target. Defaults to false, and cannot be
         --- combined with `screenSpace`.
         virtualCoords: boolean
-        --- Contents bypass the lighting pass and appear at their own colour.
+        --- Contents bypass the lighting pass and appear at their own color.
         --- Defaults to false. A material can ask for the same thing, and a
         --- fragment is lit only where the material and the layer agree.
         unlit: boolean
@@ -151,7 +151,7 @@ local record layers
     --- @param y World y, read by the topdown and isometric sorts, against
     ---     `maxY`. Larger is lower on screen and so nearer.
     --- @return A depth inside the layer's own band, whatever the arguments
-    ---     were: each of them is normalised and then held to zero and one, so
+    ---     were: each of them is normalized and then held to zero and one, so
     ---     a scene reaching past what the module was told to expect stops
     ---     sorting rather than spilling into the next layer.
     depthOf: function(layer: integer, z: number, x: number, y: number): number
@@ -193,8 +193,8 @@ local BAND_FILL <const> = 0.99
 --- character standing on a crate read as on top of it.
 local TOPDOWN_Z_SHARE <const> = 0.7
 local TOPDOWN_Y_SHARE <const> = 0.3
---- The range the isometric sum covers: a normalised x, a normalised y and a
---- normalised z, each zero to one.
+--- The range the isometric sum covers: a normalized x, a normalized y and a
+--- normalized z, each zero to one.
 local ISOMETRIC_RANGE <const> = 3.0
 
 local SORT_IDS <const>: {string: integer} = {
@@ -239,7 +239,7 @@ end
 --- table can tell whether its copy is still the answer.
 local revision = 0
 
---- A normalised sort term, with anything past either end resting on it.
+--- A normalized sort term, with anything past either end resting on it.
 ---
 --- Every sort divides a position by the extent the module was told to expect,
 --- and a scene that reaches past that extent has to stop sorting rather than
@@ -358,7 +358,7 @@ function layers.depthResolution(): number
     local span <const> = (1.0 / layers.MAX) * BAND_FILL
     -- One term per input each sort reads, in the order `depthOf` applies them,
     -- and each the depth a unit of that input is worth. A sort's own weight
-    -- divided by the range it normalises over.
+    -- divided by the range it normalizes over.
     local steps <const>: {number} = {
         span * TOPDOWN_Z_SHARE / layers.maxZ,
         span * TOPDOWN_Y_SHARE / (2.0 * layers.maxY),

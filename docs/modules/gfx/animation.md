@@ -11,7 +11,7 @@ playing lived in different modules bought it nothing.
 
 The sheet model is Aseprite's, because that is what the art is authored in: a list of frames each holding
 for its own duration, a set of named tags that play an inclusive span of them in a direction, and a set of
-named slices carrying rectangles, nine-slice centres and pivots that move from frame to frame. Reading an
+named slices carrying rectangles, nine-slice centers and pivots that move from frame to frame. Reading an
 Aseprite JSON sidecar is one function in front of that model rather than the model itself, so another
 reader for the binary format populates the same sheet without reshaping anything. `animation.grid` and
 `animation.rects` are the same builder with a loop in front.
@@ -89,7 +89,7 @@ between its cells. Frames come out in row-major order.
 | `frameWidth`  | `number`        | required                    | Size of one cell, in pixels.                                                                                                              |
 | `frameHeight` | `number`        | required                    | Size of one cell, in pixels.                                                                                                              |
 | `margin`      | `number`        | `0`                         | Border between the image's edge and the first cell.                                                                                       |
-| `spacing`     | `number`        | `0`                         | Gap between neighbouring cells.                                                                                                           |
+| `spacing`     | `number`        | `0`                         | Gap between neighboring cells.                                                                                                            |
 | `columns`     | `integer`       | derived from the image size | Cells across.                                                                                                                             |
 | `rows`        | `integer`       | derived from the image size | Cells down.                                                                                                                               |
 | `count`       | `integer`       | `columns * rows`            | Frames to take, counting across rows. The default is wrong only for a sheet whose last row is short.                                      |
@@ -472,7 +472,7 @@ A slice holds a key until the next one, so a slice that never moves is one key a
 | ------------------------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `frame`                                    | `integer` | Frame this key takes effect from, counting from one.                                                                         |
 | `x`, `y`, `w`, `h`                         | `number`  | The slice's rectangle, in the pixels of the frame it sits on.                                                                |
-| `centerX`, `centerY`, `centerW`, `centerH` | `number`  | Nine-slice centre, in the slice's own pixels. Nil for a slice with no centre, which is every slice that is not a nine-patch. |
+| `centerX`, `centerY`, `centerW`, `centerH` | `number`  | Nine-slice center, in the slice's own pixels. Nil for a slice with no center, which is every slice that is not a nine-patch. |
 | `pivotX`, `pivotY`                         | `number`  | Pivot, in the slice's own pixels. Nil for a slice with no pivot.                                                             |
 
 ### Sheet:slice
@@ -536,7 +536,7 @@ What is answered when the key names no pivot:
 | Case                                                                       | Answer                                                                                |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | A key with a pivot                                                         | The pivot.                                                                            |
-| A key with a nine-slice centre but no pivot                                | The middle of that centre.                                                            |
+| A key with a nine-slice center but no pivot                                | The middle of that center.                                                            |
 | A key with neither                                                         | The middle of the slice's rectangle.                                                  |
 | Slice zero, a slice the sheet does not carry, or a frame it has no key for | `0.5, 0.5`, the middle of the frame, which is where a quad sits with no pivot at all. |
 
@@ -563,7 +563,7 @@ than leaving it where the frame it was built from put it.
 ## The Pivot component
 
 `animation.Pivot` is where an entity's quad turns and scales about. A quad with no `Pivot` turns about its
-centre, so a character rotates about its waist and a scale grows it in both directions at once. A quad
+center, so a character rotates about its waist and a scale grows it in both directions at once. A quad
 with one turns about the point the pivot names, and the entity's `Transform` position is where that point
 lands: a character pivoted at its feet stands at its position instead of hovering half a body above it.
 

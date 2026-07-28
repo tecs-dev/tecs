@@ -175,7 +175,7 @@ end
 --- `capacity` has no default at this level and the renderer above always
 --- supplies one.
 local record BackendOptions
-    --- Ambient colour applied everywhere, as red, green and blue.
+    --- Ambient color applied everywhere, as red, green and blue.
     ambient: {number}
     --- Instances the buffers are sized for. A ceiling: nothing grows to admit
     --- a row past it.
@@ -226,7 +226,7 @@ local record Backend
     --- region of the device side directly instead.
     instances: Buffer
     --- Draws the compacted opaque list into the G-buffer, depth written and
-    --- colour replaced. Swapped in place by `rebuildPipelines`, so nothing may
+    --- color replaced. Swapped in place by `rebuildPipelines`, so nothing may
     --- hold it across a reload.
     pipeline: GraphicsPipeline
     --- Draws the forward list over the composited image, with blending baked
@@ -278,7 +278,7 @@ local record Backend
     --- Reads the bases the bucket scan left and writes each entry where its
     --- bucket and its rank put it.
     _place: ComputePipeline
-    --- Centre xy and half extent xy per instance, and the only buffer the view
+    --- Center xy and half extent xy per instance, and the only buffer the view
     --- test reads. Apart from the instance because it is read for every entity
     --- every frame, drawn or not; the sign of the first half extent is also
     --- where the lane is read from.
@@ -497,7 +497,7 @@ end
 
 local BackendMT <const>: metatable<Backend> = {__index = Backend}
 
---- Fills the uniform the vertex shader reads a layer's behaviour from.
+--- Fills the uniform the vertex shader reads a layer's behavior from.
 ---
 --- The camera's parameters rather than a matrix for each mode. Parallax
 --- multiplies the camera's position, so a matrix per mode would have to be a
@@ -624,7 +624,7 @@ end
 ---
 --- The same vertex shader the G-buffer pass uses, because a blended instance is
 --- placed exactly as an opaque one is and only its shading and its blend
---- differ. What differs here is one colour target instead of two, straight
+--- differ. What differs here is one color target instead of two, straight
 --- alpha instead of replace, and depth tested but not written.
 local function buildForward(self: Backend): GraphicsPipeline
     local device <const> = self._device

@@ -66,7 +66,7 @@ void main() {
     // pass works. Only the two in-plane axes turn: the quad lies in the XY
     // plane, so its perpendicular is unaffected by anything a 2x2 can do, and
     // the basis is a rotation, so what arrives unit length leaves unit length
-    // and nothing has to be renormalised.
+    // and nothing has to be renormalized.
     mat2 turn = mat2(vNormalBasis.x, vNormalBasis.y,
                      vNormalBasis.z, vNormalBasis.w);
     vec3 faced = vec3(turn * shaded.normal.xy, shaded.normal.z);

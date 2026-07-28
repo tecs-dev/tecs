@@ -95,7 +95,7 @@ local byName: {string: timing.Stage} = {}
 --- returns a handle, so a caller holds one unconditionally and branches on
 --- `timing.enabled` at the point of measurement rather than at setup.
 ---
---- @param name What a report row is labelled with. Registering a name twice returns the
+--- @param name What a report row is labeled with. Registering a name twice returns the
 ---     first stage rather than making a second, so two callers timing the same thing share
 ---     one distribution.
 --- @return The same object on every call for a name, and it lives as long as the process.

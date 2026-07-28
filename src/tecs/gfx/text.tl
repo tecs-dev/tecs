@@ -173,7 +173,7 @@ end
 --- A string laid out into glyph instances.
 ---
 --- The entity's Transform places the top-left corner of the text block and
---- orients and scales the whole block, and its Tint, if it has one, colours
+--- orients and scales the whole block, and its Tint, if it has one, colors
 --- every glyph. Both are ordinary components on an ordinary entity, so a text
 --- is moved, parented, tweened and layered like anything else, and a `Clip`
 --- keeps its glyphs inside a rectangle exactly as it would any other quad.
@@ -187,7 +187,7 @@ local record Text is Component
     font: Font
     --- Em size in world units.
     size: number
-    --- "left", "centre" or "right", within the widest line of the block.
+    --- "left", "center" or "right", within the widest line of the block.
     align: string
     --- Multiplies the font's line height.
     lineSpacing: number
@@ -911,7 +911,7 @@ local function codepointAt(source: string, index: integer): integer, integer
     return value, index + length
 end
 
---- The laid-out glyphs, four numbers each: centre x and y, then width and
+--- The laid-out glyphs, four numbers each: center x and y, then width and
 --- height, all in world units relative to the text's transform. Reused, so a
 --- layout allocates nothing.
 local placements <const>: {number} = {}
@@ -925,7 +925,7 @@ local lineWidth <const>: {number} = {}
 --- How far a line moves within the block, as a fraction of the room left over.
 local ALIGNMENTS <const>: {string: number} = {
     left = 0.0,
-    centre = 0.5,
+    center = 0.5,
     right = 1.0,
 }
 
@@ -1201,7 +1201,7 @@ end
 --- @param index One-based over the glyphs the layout produced, which is not
 ---     the string's byte index: a newline, a space, and a codepoint the font
 ---     has no metrics for each move the pen and take no slot.
---- @return World x of the glyph's centre, then y, then its width and height in
+--- @return World x of the glyph's center, then y, then its width and height in
 ---     world units. All four are nil together when the plugin is not installed
 ---     on the world, the entity carries no `Text`, or the index is past what
 ---     it laid out.
@@ -1601,7 +1601,7 @@ text.Text = ecs.newComponent({
             item.tracking = 0.0
         end
         if ALIGNMENTS[item.align] == nil then
-            error(("tecs: '%s' is not an alignment; use left, centre or right"):format(tostring(item.align)), 3)
+            error(("tecs: '%s' is not an alignment; use left, center or right"):format(tostring(item.align)), 3)
         end
         item.width = 0.0
         item.height = 0.0

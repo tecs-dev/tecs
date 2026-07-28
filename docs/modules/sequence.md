@@ -13,7 +13,7 @@ state.
 
 The tween runtime is inside it rather than beside it. A timeline compiles to a program with one instruction, so
 an animation is a playback like any other: it is owned by an entity, it holds a channel, it can be paused,
-cancelled and waited on, and it comes back from a snapshot where it was.
+canceled and waited on, and it comes back from a snapshot where it was.
 
 ```teal
 local sequence <const> = tecs.sequence
@@ -138,23 +138,23 @@ function sequence.disassemble(program: Program, pc?: integer): string
 
 ## Steps
 
-| Constructor                            | Effect                                                         |
-| -------------------------------------- | -------------------------------------------------------------- |
-| `call(action, ...)`                    | Run a registered action with constant arguments.               |
-| `wait(seconds)`                        | Wait a duration.                                               |
-| `waitSteps(steps)`                     | Wait a whole number of ticks.                                  |
-| `waitSignal(name)`                     | Block until a named signal is raised.                          |
-| `waitQuery(name, condition)`           | Block until a registered query matches, or stops matching.     |
-| `emit(event, ...)`                     | Emit a `sequence.Event` at address 0.                          |
-| `loop(count, nodes)`                   | Repeat a block, or repeat until cancelled when `count` is nil. |
-| `fork(nodes)`                          | Start a branch alongside the rest of the program.              |
-| `join()`                               | Wait for every branch forked and not yet joined.               |
-| `parallel(...)`                        | Fork several blocks and wait for all of them.                  |
-| `playTween(timeline, target, params?)` | Play a registered timeline on a bound entity.                  |
-| `waitTween()`                          | Wait for the playback the most recent `playTween` started.     |
-| `await(provider, target, key?)`        | Wait for something outside the sequencer to finish.            |
-| `eval(evaluator, data?)`               | Evaluate a registered evaluator every tick until it finishes.  |
-| `bind(name)`                           | Not a step: a reference to an entity supplied at `play` time.  |
+| Constructor                            | Effect                                                        |
+| -------------------------------------- | ------------------------------------------------------------- |
+| `call(action, ...)`                    | Run a registered action with constant arguments.              |
+| `wait(seconds)`                        | Wait a duration.                                              |
+| `waitSteps(steps)`                     | Wait a whole number of ticks.                                 |
+| `waitSignal(name)`                     | Block until a named signal is raised.                         |
+| `waitQuery(name, condition)`           | Block until a registered query matches, or stops matching.    |
+| `emit(event, ...)`                     | Emit a `sequence.Event` at address 0.                         |
+| `loop(count, nodes)`                   | Repeat a block, or repeat until canceled when `count` is nil. |
+| `fork(nodes)`                          | Start a branch alongside the rest of the program.             |
+| `join()`                               | Wait for every branch forked and not yet joined.              |
+| `parallel(...)`                        | Fork several blocks and wait for all of them.                 |
+| `playTween(timeline, target, params?)` | Play a registered timeline on a bound entity.                 |
+| `waitTween()`                          | Wait for the playback the most recent `playTween` started.    |
+| `await(provider, target, key?)`        | Wait for something outside the sequencer to finish.           |
+| `eval(evaluator, data?)`               | Evaluate a registered evaluator every tick until it finishes. |
+| `bind(name)`                           | Not a step: a reference to an entity supplied at `play` time. |
 
 ### call
 
@@ -229,7 +229,7 @@ Emits a [`sequence.Event`](#events) at address 0, with the bindings among its ar
 function sequence.loop(count: integer, nodes: {Node}): Node
 ```
 
-Repeats a block `count` times, or until the playback is cancelled when `count` is nil. The count must be a
+Repeats a block `count` times, or until the playback is canceled when `count` is nil. The count must be a
 positive whole number and the block must not be empty.
 
 ### fork, join, parallel
@@ -244,9 +244,9 @@ A branch is a playback of its own running the same program at a different instru
 owner, bindings and instruction budget of the playback that forked it. It starts once that playback next waits,
 joins or ends, within the same tick.
 
-A branch never outlives the playback that forked it: finishing or cancelling that playback cancels the branches
+A branch never outlives the playback that forked it: finishing or canceling that playback cancels the branches
 it has not joined. A branch that faults faults its parent with `branchFaulted`, because that is a defect in the
-program; a branch that is cancelled is deliberate, and a `join` simply proceeds without it.
+program; a branch that is canceled is deliberate, and a `join` simply proceeds without it.
 
 `join` falls straight through when there are no branches. When the last branch finishes, the waiting playback
 resumes within that same tick. `parallel` is sugar for a `fork` per block followed by one `join`, and blocks
@@ -264,7 +264,7 @@ a playback of its own: the bound entity is its owner, `params` is what it runs w
 started it holds its handle. An unregistered name faults with `unregisteredTween`. A binding that is missing or
 dead is not a fault: nothing plays, and a following `waitTween` resumes at once reporting `targetLost`.
 
-`waitTween` resumes when that specific playback completes, is cancelled, is replaced on its channel, or loses
+`waitTween` resumes when that specific playback completes, is canceled, is replaced on its channel, or loses
 its entity, so it never waits forever. Which of those happened is `status.tweenOutcome`.
 
 ```teal
@@ -459,7 +459,7 @@ function sequence.play(world: World, program: Program, options?: PlayOptions): H
 
 | Option     | Type                | Default            | Description                                                                                                                    |
 | ---------- | ------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `owner`    | `integer`           | `0`                | Entity whose lifetime governs the playback. When it despawns the playback is cancelled. Omit for a world-scoped sequence.      |
+| `owner`    | `integer`           | `0`                | Entity whose lifetime governs the playback. When it despawns the playback is canceled. Omit for a world-scoped sequence.       |
 | `bindings` | `{string: integer}` | none               | Entities the program acts on, addressed by `sequence.bind(name)`.                                                              |
 | `params`   | `{string: any}`     | none               | Constants this playback runs with, readable by its actions and its evaluators. Plain data, because it travels with a snapshot. |
 | `budget`   | `integer`           | the world's budget | Per-step instruction budget for this playback.                                                                                 |
@@ -482,7 +482,7 @@ on and so holds none. That is how a second fade replaces the first rather than f
 function sequence.cancel(world: World, handle: Handle): boolean
 ```
 
-Stops a playback and releases its cursor, cancelling its branches and anything it started. Safe on a finished
+Stops a playback and releases its cursor, canceling its branches and anything it started. Safe on a finished
 handle, which answers false.
 
 ### pause, resume
@@ -513,7 +513,7 @@ function sequence.status(world: World, handle: Handle): Status
 
 | Field                    | Type             | Description                                                                  |
 | ------------------------ | ---------------- | ---------------------------------------------------------------------------- |
-| `state`                  | `PlaybackState`  | `"running"`, `"paused"`, `"completed"`, `"cancelled"` or `"faulted"`.        |
+| `state`                  | `PlaybackState`  | `"running"`, `"paused"`, `"completed"`, `"canceled"` or `"faulted"`.         |
 | `program`                | `string`         | Program name this playback is running.                                       |
 | `version`                | `integer`        | Program version it started with.                                             |
 | `pc`                     | `integer`        | Instruction index, for disassembly and debugging.                            |
@@ -547,7 +547,7 @@ Cancels every playback owned by an entity, in a stable order.
 - `reason`: what anything waiting on one of them is told. The owner despawning reports `targetLost`, which is
   what a waiter needs to tell "it was stopped" from "what it was moving is gone".
 
-**Returns:** how many were cancelled.
+**Returns:** how many were canceled.
 
 ### activeCount, playbacks
 
@@ -693,7 +693,7 @@ function sequence.tweenParallel(...: TimelineNode): TimelineNode
 `duration` must be greater than zero for the three interpolating nodes, and at least zero for `tweenWait`.
 `curve` is an easing name or one of the built-in easing values. `target` is a built-in target name or a target
 value. The `t1` to `t4` numbers are the destination, and how many of them mean anything depends on the target:
-one for a scalar field, two for a pair, four for a colour.
+one for a scalar field, two for a pair, four for a color.
 
 `RunOptions` takes `mode` and `count`, with the same meanings as the playback params. A nested run must be
 finite: `loop` or `pingPong` without a count raises, because a nested timeline occupies a window of its parent
@@ -813,7 +813,7 @@ A playback that faults is retired in the `"faulted"` state, and the reason is on
 | `unregisteredTween`     | A `playTween` named a timeline that is not defined.               |
 
 `TweenOutcome`, which is what a `waitTween` reports and what `cancelOwnedBy` can send, is `"completed"`,
-`"cancelled"`, `"replaced"` or `"targetLost"`.
+`"canceled"`, `"replaced"` or `"targetLost"`.
 
 ## Installing it
 
@@ -1242,9 +1242,9 @@ Run a registered action.
 Stop a playback and release its cursor. Safe on a finished handle.
 
 It takes the branches it forked with it, and a playback parked in a
-`waitTween` on the one cancelled is told `cancelled` and resumes. What
+`waitTween` on the one canceled is told `canceled` and resumes. What
 a `playTween` started is a playback in its own right and is not
-cancelled with the one that started it, unlike a pause, which cascades
+canceled with the one that started it, unlike a pause, which cascades
 to it: stop it through its owner with `cancelOwnedBy`.
 
 #### Parameters
@@ -1256,9 +1256,9 @@ to it: stop it through its owner with `cancelOwnedBy`.
 
 #### Returns
 
-| Type                       | Description                                                                                        |
-| -------------------------- | -------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | false when the handle names nothing running, whether it already finished or was already cancelled. |
+| Type                       | Description                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | false when the handle names nothing running, whether it already finished or was already canceled. |
 
 <a id="tecs.sequence.cancelOwnedBy"></a>
 
@@ -1278,14 +1278,14 @@ despawning reports `targetLost`, which is what a waiter needs to tell
 | Type                                                                      | Name                      | Description                                                                                                                                                         |
 | ------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>World</code>                                                  | <code v-pre>owner</code>  | An entity id. A playback started without an owner is owned by nothing rather than by entity 0, so no argument reaches one and only `cancel` on its handle stops it. |
-| <code v-pre>integer</code>                                                | <code v-pre>reason</code> | What a playback parked in a `waitTween` on one of these is told, and what its `status` reports afterwards as `tweenOutcome`. Omitted, a waiter is told `cancelled`. |
+| <code v-pre>integer</code>                                                | <code v-pre>reason</code> | What a playback parked in a `waitTween` on one of these is told, and what its `status` reports afterwards as `tweenOutcome`. Omitted, a waiter is told `canceled`.  |
 | <code v-pre><a href="#tecs.sequence.TweenOutcome">TweenOutcome</a></code> |                           |                                                                                                                                                                     |
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code> | How many were running and are now cancelled; 0 when the entity owns none. A branch carries the owner of the playback that forked it, so it is reached by the same call, and each cursor is counted once however it was reached. |
+| Type                       | Description                                                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>integer</code> | How many were running and are now canceled; 0 when the entity owns none. A branch carries the owner of the playback that forked it, so it is reached by the same call, and each cursor is counted once however it was reached. |
 
 <a id="tecs.sequence.currentStep"></a>
 
@@ -1488,7 +1488,7 @@ instruction budget of the playback that forked it. It starts once
 that playback next waits, joins, or ends, within the same tick.
 
 A branch never outlives the playback that forked it: finishing or
-cancelling that playback cancels the branches it has not joined. A
+canceling that playback cancels the branches it has not joined. A
 branch that faults takes its parent with it, faulted `branchFaulted`,
 rather than leaving a `join` one branch short forever.
 
@@ -1579,7 +1579,7 @@ Repeat a block.
 
 | Type                                                        | Name                     | Description                                                                                                                                                                                                                                           |
 | ----------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code>                                  | <code v-pre>count</code> | Iterations, or nil to repeat until cancelled. A positive whole number; zero and a fraction are rejected here.                                                                                                                                         |
+| <code v-pre>integer</code>                                  | <code v-pre>count</code> | Iterations, or nil to repeat until canceled. A positive whole number; zero and a fraction are rejected here.                                                                                                                                          |
 | <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> | <code v-pre>nodes</code> | The block, run in order and started again from its first node. Must be non-empty. A block with no wait in it spends the playback's per-step instruction budget within one tick and faults it with `budgetExceeded`, which is what that budget is for. |
 
 #### Returns
@@ -1686,11 +1686,11 @@ holding this playback's instruction budget.
 
 #### Parameters
 
-| Type                                                                | Name                        | Description                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre>string</code>                                           | <code v-pre>timeline</code> | Resolved when the instruction runs, and always to the newest version of the name; any program defined under it will do, though `timeline` is what normally publishes one. A name that is not defined faults the playback with `unregisteredTween`.                 |
-| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> | <code v-pre>target</code>   | A `bind` reference and nothing else: an entity id raises here, for the same reason `define` rejects one as a constant.                                                                                                                                             |
-| <code v-pre>{string : &lt;any type&gt;}</code>                      | <code v-pre>params</code>   | The started playback's `params`, so `mode`, `count`, `speed` and `delay` shape it as they do for `play`. A `channel` in it names the slot the playback takes on that entity, cancelling whatever held the slot and reporting `replaced` to anything waiting on it. |
+| Type                                                                | Name                        | Description                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                           | <code v-pre>timeline</code> | Resolved when the instruction runs, and always to the newest version of the name; any program defined under it will do, though `timeline` is what normally publishes one. A name that is not defined faults the playback with `unregisteredTween`.                |
+| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> | <code v-pre>target</code>   | A `bind` reference and nothing else: an entity id raises here, for the same reason `define` rejects one as a constant.                                                                                                                                            |
+| <code v-pre>{string : &lt;any type&gt;}</code>                      | <code v-pre>params</code>   | The started playback's `params`, so `mode`, `count`, `speed` and `delay` shape it as they do for `play`. A `channel` in it names the slot the playback takes on that entity, canceling whatever held the slot and reporting `replaced` to anything waiting on it. |
 
 #### Returns
 
@@ -2150,15 +2150,15 @@ timeline played on two entities starts from wherever each of them is.
 
 #### Parameters
 
-| Type                                                                                                                                | Name                        | Description                                                                                                                                                                                                                                          |
-| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>number</code>                                                                                                           | <code v-pre>duration</code> | Seconds, and strictly positive: a zero is rejected at compile time. Use `tweenWait` for a gap that moves nothing.                                                                                                                                    |
-| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>curve</code>    | A name from `sequence.easing`, or one of those functions itself. A curve of your own is rejected when the timeline compiles: a compiled slot carries the curve's name so it can travel in a const pool, and a function it cannot name has none.      |
-| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>target</code>   | Which component fields move, and in which order `t1` through `t4` line up with them.                                                                                                                                                                 |
-| <code v-pre>number</code>                                                                                                           | <code v-pre>t1</code>       | Destination for the target's first field, in that field's own units: pixels for a translate, radians for a rotation, 0 to 1 for a colour channel. A shortest-path rotation target still takes an absolute angle and picks the short way round to it. |
-| <code v-pre>number</code>                                                                                                           | <code v-pre>t2</code>       | Destination for the second field, for a target that has one.                                                                                                                                                                                         |
-| <code v-pre>number</code>                                                                                                           | <code v-pre>t3</code>       | Destination for the third field, for a four-field target.                                                                                                                                                                                            |
-| <code v-pre>number</code>                                                                                                           | <code v-pre>t4</code>       | Destination for the fourth field, for a four-field target. An argument past the target's field count is ignored; one the target has and you omit counts as a destination of zero.                                                                    |
+| Type                                                                                                                                | Name                        | Description                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>duration</code> | Seconds, and strictly positive: a zero is rejected at compile time. Use `tweenWait` for a gap that moves nothing.                                                                                                                                   |
+| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>curve</code>    | A name from `sequence.easing`, or one of those functions itself. A curve of your own is rejected when the timeline compiles: a compiled slot carries the curve's name so it can travel in a const pool, and a function it cannot name has none.     |
+| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>target</code>   | Which component fields move, and in which order `t1` through `t4` line up with them.                                                                                                                                                                |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t1</code>       | Destination for the target's first field, in that field's own units: pixels for a translate, radians for a rotation, 0 to 1 for a color channel. A shortest-path rotation target still takes an absolute angle and picks the short way round to it. |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t2</code>       | Destination for the second field, for a target that has one.                                                                                                                                                                                        |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t3</code>       | Destination for the third field, for a four-field target.                                                                                                                                                                                           |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t4</code>       | Destination for the fourth field, for a four-field target. An argument past the target's field count is ignored; one the target has and you omit counts as a destination of zero.                                                                   |
 
 #### Returns
 
@@ -2365,7 +2365,7 @@ rather than continuing within the current one.
 
 Wait for the tween the most recent `playTween` started.
 
-Resumes when that specific playback completes, is cancelled, is
+Resumes when that specific playback completes, is canceled, is
 replaced on its channel, or loses its entity, so it never waits
 forever. `status` reports which of those happened, as `tweenOutcome`.
 
@@ -2396,6 +2396,6 @@ Playbacks currently blocked on a signal name.
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code> | 0 for a name nothing waits on, including one never signalled. Counts what is parked right now, so a signal already raised this step is still counted until the next step delivers it. |
+| Type                       | Description                                                                                                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>integer</code> | 0 for a name nothing waits on, including one never signaled. Counts what is parked right now, so a signal already raised this step is still counted until the next step delivers it. |

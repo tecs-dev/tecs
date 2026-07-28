@@ -1,6 +1,6 @@
 -- What a depth is allowed to be, whatever a scene puts in front of it.
 --
--- The rendered behaviour of a layer is asserted in renderer_spec, which needs a
+-- The rendered behavior of a layer is asserted in renderer_spec, which needs a
 -- device to say anything. This is the arithmetic underneath it, and the one
 -- thing that arithmetic must never do: a depth belongs to exactly one band,
 -- because the vertex shader recovers the layer index by multiplying the depth

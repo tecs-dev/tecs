@@ -6,7 +6,7 @@ MaterialOutput material(MaterialInput frag) {
     MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
 
-    // Distance to the segment the caps are centred on. Folding X collapses the
+    // Distance to the segment the caps are centerd on. Folding X collapses the
     // two caps into one and leaves the flat middle at zero, so a single length
     // covers all three parts of the shape.
     float radius = 0.5 * frag.param;

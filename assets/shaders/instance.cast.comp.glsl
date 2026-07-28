@@ -30,7 +30,7 @@ layout(set = 0, binding = 2) readonly buffer Bounds { vec4 item[]; } bounds;
 
 struct Light {
     vec4 position;   // xy in world units, z height, w radius
-    vec4 color;      // rgb colour, a intensity
+    vec4 color;      // rgb color, a intensity
 };
 
 layout(set = 0, binding = 3) readonly buffer Lights { Light item[]; } lights;

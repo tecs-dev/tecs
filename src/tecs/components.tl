@@ -47,7 +47,7 @@ ecs.newFFIComponent({
     defaults = {0, 0, 0},
 })
 
---- Base colour, and how much of what is behind the entity survives it.
+--- Base color, and how much of what is behind the entity survives it.
 ---
 --- The alpha is what decides which pass draws the entity. At one the entity is
 --- opaque and goes through the G-buffer, where lighting resolves it once for
@@ -144,7 +144,7 @@ local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
 --- information: repeated separators, `.` segments, and a trailing separator.
 ---
 --- Lexical, and only lexical. Nothing here reads the filesystem, so a name
---- normalises the same before its file exists as after, and the same on a
+--- normalizes the same before its file exists as after, and the same on a
 --- platform whose asset root is not a directory at all. Three things are
 --- deliberately left alone for that reason:
 ---
@@ -159,7 +159,7 @@ local SCHEME_PREFIX <const> = "^(%a[%w+.-]*://)(.*)$"
 ---
 --- A leading run of separators is kept as it was written: one leads an
 --- absolute path and two lead a UNC share.
-local function normalisePath(name: string): string
+local function normalizePath(name: string): string
     -- Nothing to drop is the common case, and it is answered without building
     -- a string. An interior `//` or `/./`, a leading `./` and a trailing
     -- separator are the whole of what the walk below removes.
@@ -183,7 +183,7 @@ end
 
 --- Index of the given image name, assigning one the first time it is seen.
 ---
---- The name is normalised first, so what an image is identified by is the path
+--- The name is normalized first, so what an image is identified by is the path
 --- it names rather than the spelling it was named with. Every way in goes
 --- through here: registering an image, resolving a sprite by name, reloading
 --- one, and reading a name back out of a snapshot.
@@ -194,7 +194,7 @@ local function imageId(name: string): integer
     if name == nil or name == "" then
         error("tecs: an image name cannot be empty", 2)
     end
-    name = normalisePath(name)
+    name = normalizePath(name)
     local id = imageIds[name]
     if id ~= nil then
         return id
@@ -210,7 +210,7 @@ local function imageName(id: integer): string
     return imageNames[id]
 end
 
---- Samples a texture instead of drawing flat colour.
+--- Samples a texture instead of drawing flat color.
 ---
 --- `image` is an index from `imageId`, which names the image; `slot` is the
 --- texture-array layer the renderer resolved that name to. Both are here
@@ -449,7 +449,7 @@ local record components
     --- layer change by assignment rather than by integration.
     PreviousTransform: PreviousTransform
 
-    --- Base colour and coverage, each channel 0 to 1, defaulting to opaque
+    --- Base color and coverage, each channel 0 to 1, defaulting to opaque
     --- white. The alpha decides which pass draws the entity: exactly 1 goes
     --- through the G-buffer and is lit once for the whole scene, anything
     --- below 1 goes through the forward pass instead, writes no depth, and
@@ -457,7 +457,7 @@ local record components
     --- meant to be solid.
     Tint: Tint
 
-    --- Samples a texture instead of drawing flat colour. `image` is an
+    --- Samples a texture instead of drawing flat color. `image` is an
     --- `imageId` index, and 0 means no image; `u0, v0, u1, v1` select the
     --- region, defaulting to the whole of it, so an atlas entry and a whole
     --- image are the same thing. `slot` is the texture-array layer the
@@ -508,7 +508,7 @@ local record components
 
     --- Index of an image name, assigning one the first time it is seen.
     ---
-    --- The name is normalised lexically first, so `"a/b.png"` and
+    --- The name is normalized lexically first, so `"a/b.png"` and
     --- `"a/./b.png"` are one image. Case, `..` and the asset root are
     --- deliberately left alone, and nothing here touches the filesystem.
     ---
@@ -522,7 +522,7 @@ local record components
     --- Name an image index stands for.
     ---
     --- @param id An index previously handed out by `imageId`.
-    --- @return The normalised name, or nil when the index names nothing.
+    --- @return The normalized name, or nil when the index names nothing.
     imageName: function(id: integer): string
 end
 

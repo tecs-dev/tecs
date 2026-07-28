@@ -215,7 +215,7 @@ return tecs.application.create({
                         total = total + transforms[row].x
                     end
                 end
-                -- Kept so the loop cannot be optimised away entirely.
+                -- Kept so the loop cannot be optimized away entirely.
                 if total ~= total then
                     error("unreachable")
                 end

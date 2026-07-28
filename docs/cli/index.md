@@ -28,7 +28,7 @@ CMake, Make, LuaRocks or a C compiler. It links nothing on a user's machine and 
 | `tecs dist`        | Package the game for players, for the host platform only             |
 | `tecs mcp`         | Serve the debug server to agent clients over stdio                   |
 | `tecs call`        | Call a tool on a running game                                        |
-| `tecs info`        | Versions, project status, next step, and third-party licence notices |
+| `tecs info`        | Versions, project status, next step, and third-party license notices |
 | `tecs clean`       | Remove build output                                                  |
 | `tecs completions` | Print a bash, zsh or fish completion script                          |
 | `tecs help`        | Command overview, plus `--version` and `--quiet` as global flags     |

@@ -221,7 +221,7 @@ function plugin.install(world: World, options?: Options)
     })
 
     -- An entity that asked for something and then died wanted the answer, and
-    -- nothing is left to give it to. Cancelling is reference counted, so this
+    -- nothing is left to give it to. Canceling is reference counted, so this
     -- stops the transfer only if nothing else is waiting on the same future.
     world:observe(
         0,

@@ -43,7 +43,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.future`](/modules/future)                     | a value that settles once                                                  |
 | [`tecs.gfx`](/modules/gfx/)                          | the camera, the components, the renderer, text, and the vocabularies below |
 | [`tecs.gfx.animation`](/modules/gfx/animation)       | sprite sheets, and the playback that reads them                            |
-| [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behaviour                                         |
+| [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behavior                                          |
 | [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to                                          |
 | [`tecs.gfx.particles`](/modules/gfx/particles)       | emitters                                                                   |
 | [`tecs.input`](/modules/input)                       | gameplay input, the gamepads on it, and standalone sensors                 |
@@ -74,7 +74,7 @@ What follows are the concepts behind those names, which are pages rather than na
 - [Builtins](/ecs/builtins) -- names, transforms, hierarchy, TTL, pause, disable, state events
 - [Bundles](/ecs/components/bundles) -- reusable entity templates and batch spawning
 - [Components](/ecs/components/) -- table, tag, scalar and FFI data containers
-- [Dirty tracking](/ecs/components/dirty-tracking) -- change-gated systems and GPU synchronisation
+- [Dirty tracking](/ecs/components/dirty-tracking) -- change-gated systems and GPU synchronization
 - [Events](/ecs/events) -- type-safe pub/sub and entity lifecycle events
 - [Mutation model](/ecs/mutation-model) -- the normative rules for reads, writes and dirty bits
 - [Phases](/ecs/phases) -- ordered phase scheduling

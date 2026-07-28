@@ -33,7 +33,7 @@ local REQUEST_TIMEOUT <const> = 10.0
 --- One HTTP request at a time, framed out of a non-blocking socket.
 ---
 --- Nothing here waits, so a `Server` is driven by calling `poll` once a frame
---- from the phase that owns it. The per-connection state is unsynchronised, so
+--- from the phase that owns it. The per-connection state is unsynchronized, so
 --- one thread has to own a given server; none of this is reached from a worker.
 local record transport
     --- A complete request. Nothing is exposed until the whole body has

@@ -279,7 +279,7 @@ describe("reserved instance runs", function()
 
         assert.are.equal(20, packet.count)
         for slot = 4, 19 do
-            assert.is_true(isHidden(bounds, slot), "a centre no view reaches")
+            assert.is_true(isHidden(bounds, slot), "a center no view reaches")
             assert.are.equal(0, bounds[slot * 4 + 2], "and no extent to overlap a view with")
             assert.are.equal(0, bounds[slot * 4 + 3])
 
@@ -525,9 +525,9 @@ describe("render backend", function()
         packet.cameraY = SIZE / 2
         packet.cameraZoom = 1.0
 
-        local centre = screen:getPixel(consume(backend, packet), SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.r, "the packet's instance reached the screen")
-        assert.are.equal(0, centre.g)
+        local center = screen:getPixel(consume(backend, packet), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, center.r, "the packet's instance reached the screen")
+        assert.are.equal(0, center.g)
         backend:destroy()
     end)
 

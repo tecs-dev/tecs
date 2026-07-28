@@ -27,7 +27,7 @@ layout(set = 2, binding = 0) uniform sampler2DArray images;
 
 struct Light {
     vec4 position;   // xy in world units, z height, w radius
-    vec4 color;      // rgb colour, a intensity
+    vec4 color;      // rgb color, a intensity
 };
 
 layout(set = 2, binding = 1) readonly buffer Lights {
@@ -137,8 +137,8 @@ void main() {
         color *= accumulated;
     }
 
-    // Straight alpha, not premultiplied: the pipeline multiplies the colour by
-    // this alpha and the target by one minus it, so a colour scaled here would
+    // Straight alpha, not premultiplied: the pipeline multiplies the color by
+    // this alpha and the target by one minus it, so a color scaled here would
     // be scaled twice.
     outColor = vec4(color, clamp(shaded.albedo.a, 0.0, 1.0));
 }

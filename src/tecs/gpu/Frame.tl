@@ -9,7 +9,7 @@
 --- pool and, once a swapchain texture has been acquired on it, the texture the
 --- presenter is waiting for. It leaves that state exactly once, through
 --- `submit` or `cancel`, and which of the two is legal is not a preference.
---- SDL documents cancelling after a swapchain texture has been acquired as an
+--- SDL documents canceling after a swapchain texture has been acquired as an
 --- error, so an acquired frame can only be submitted. `state` and `acquired`
 --- are here so that a recovery path with nothing but the frame can work out
 --- which it is looking at.
@@ -23,7 +23,7 @@ local passscope <const> = require("tecs.gpu.passscope")
 local C <const> = sdl.C
 
 local record RenderPassOptions
-    --- Clears the target to this colour. Omit to load and preserve existing
+    --- Clears the target to this color. Omit to load and preserve existing
     --- contents.
     clear: RenderPass.ClearColor
 end
@@ -36,7 +36,7 @@ end
 local enum FrameState
     "recording"
     "submitted"
-    "cancelled"
+    "canceled"
 end
 
 --- One frame's command buffer and its swapchain target, as `Device:beginFrame`
@@ -51,7 +51,7 @@ local record Frame
     type State = FrameState
 
     --- This frame's command buffer. Passed to anything that records work. Nil
-    --- once the frame has been submitted or cancelled.
+    --- once the frame has been submitted or canceled.
     commandBuffer: loader.CPtr
     --- The acquired swapchain texture.
     swapchainTexture: loader.CPtr
@@ -63,7 +63,7 @@ local record Frame
     --- Whether a swapchain texture was acquired on this command buffer.
     ---
     --- Stated rather than inferred, because it is what decides how a frame that
-    --- cannot finish is resolved and the rule it encodes is SDL's: cancelling
+    --- cannot finish is resolved and the rule it encodes is SDL's: canceling
     --- after an acquisition is an error, and the texture is only handed back by
     --- a submission.
     acquired: boolean
@@ -77,7 +77,7 @@ local FrameMT <const>: metatable<Frame> = {__index = Frame}
 --- Wraps an acquired command buffer and swapchain texture.
 ---
 --- A nil `swapchainTexture` is a command buffer that acquired nothing, which is
---- the only kind that may still be cancelled.
+--- the only kind that may still be canceled.
 --- @param commandBuffer An acquired command buffer, which the frame takes
 ---     ownership of: resolving the frame is what resolves it.
 --- @param swapchainTexture The texture acquired on that command buffer, or nil
@@ -105,7 +105,7 @@ end
 
 --- Begins a render pass targeting the swapchain.
 ---
---- One colour attachment and no depth, so a pipeline bound in it must bake the
+--- One color attachment and no depth, so a pipeline bound in it must bake the
 --- swapchain's format and declare no depth-stencil target.
 --- @param options Nil loads the swapchain's existing contents, which no frame
 ---     has necessarily written.
@@ -135,7 +135,7 @@ end
 --- Submits the frame's recorded work for execution and presentation.
 ---
 --- Does not wait: the work is queued, and only the frames-in-flight limit on
---- the next acquire holds the CPU back. A frame already submitted or cancelled
+--- the next acquire holds the CPU back. A frame already submitted or canceled
 --- does nothing here. Every pass must be finished first.
 function Frame:submit()
     if self.state ~= "recording" then
@@ -150,7 +150,7 @@ end
 --- Discards the frame without presenting, releasing the command buffer.
 ---
 --- Only legal before a swapchain texture has been acquired. SDL documents
---- cancelling after one has been as an error, and this refuses rather than
+--- canceling after one has been as an error, and this refuses rather than
 --- makes the call: the frame is still recoverable at that point, and
 --- `abandon` is what recovers it.
 function Frame:cancel()
@@ -160,11 +160,11 @@ function Frame:cancel()
     if self.acquired then
         error(
             "tecs: a frame that acquired a swapchain texture cannot be "
-                .. "cancelled; submit it, or use abandon to resolve it either way",
+                .. "canceled; submit it, or use abandon to resolve it either way",
             2
         )
     end
-    self.state = "cancelled"
+    self.state = "canceled"
     local commandBuffer <const> = self.commandBuffer
     self.commandBuffer = nil
     C.SDL_CancelGPUCommandBuffer(commandBuffer)
@@ -175,7 +175,7 @@ end
 --- The recovery path, and the only caller that should exist: a frame that
 --- recorded to the end submits and says so. What is put back is the pass left
 --- open by a body that threw, and then the command buffer itself, submitted or
---- cancelled by whether a swapchain texture was acquired on it. Doing nothing
+--- canceled by whether a swapchain texture was acquired on it. Doing nothing
 --- is not an option, because the pool the buffer came from is finite and the
 --- presenter is waiting on the texture.
 ---
