@@ -7,10 +7,15 @@
 #
 # The names come out of `src/tecs/init.tl`, which is the definition of what is
 # public rather than a list kept beside it. The value fields of `record tecs`
-# are the whole of it: the modules resolved through the ENGINE map, the class
-# namespaces resolved through CLASSES, and `tecs.ecs` beside them. A type field
-# is not checked, since a type is written in an annotation rather than looked up
-# in an index.
+# are the top of it: the modules and namespaces resolved through SURFACE, and
+# `tecs.ecs` beside them. A type field is not checked, since a type is written
+# in an annotation rather than looked up in an index.
+#
+# A module may sit inside another, one level and no deeper, and is written the
+# way a game writes it: `tecs.gfx.layers`. Those come from the record the parent
+# field names, and only its lowercase non-function fields, which is the split
+# the tree already keeps: a module is luacase and gets a page of its own, a type
+# is PascalCase and belongs on its owner's page, and a function is neither.
 #
 # Set equality both ways, because one direction is not enough. Checking only
 # that a name has a page lets pages for things that no longer exist pile up,
@@ -43,14 +48,31 @@ if [ ! -f "$init" ]; then
     exit 1
 fi
 
-# Value fields of `record tecs`, in declaration order. A `type X = ...` line
-# starts with "type" and is skipped; a doc comment starts with "---".
+# Value fields of `record tecs`, then the subordinate modules of each. A
+# `type X = ...` line starts with "type" and is skipped; a doc comment starts
+# with "---". Every top-level record is read, since a field of `record tecs` may
+# name one of them and the modules below it are that record's own fields.
 public=$(awk '
-    /^local record tecs$/ { inside = 1; next }
-    inside && /^end$/ { exit }
-    inside && /^    [A-Za-z_][A-Za-z0-9_]*: / {
+    /^local record [A-Za-z_][A-Za-z0-9_]*$/ { record = $3; next }
+    record != "" && /^end$/ { record = ""; next }
+    record != "" && /^    [A-Za-z_][A-Za-z0-9_]*: / {
         split($1, parts, ":")
-        print parts[1]
+        fields[record] = fields[record] " " parts[1]
+        declared[record "." parts[1]] = $2
+    }
+    END {
+        count = split(fields["tecs"], top, " ")
+        for (i = 1; i <= count; i++) {
+            name = top[i]
+            print name
+            below = split(fields[name], members, " ")
+            for (j = 1; j <= below; j++) {
+                member = members[j]
+                if (member ~ /^[a-z]/ && declared[name "." member] !~ /^function/) {
+                    print name "." member
+                }
+            }
+        }
     }
 ' "$init")
 
@@ -58,10 +80,6 @@ if [ -z "$public" ]; then
     echo "no public names were found in $init; the record shape must have changed" >&2
     exit 1
 fi
-
-# The index, which names every module by construction and so proves nothing
-# about coverage.
-notAModulePage="index"
 
 missing=()
 for name in $public; do
@@ -74,16 +92,26 @@ for name in $public; do
     fi
 done
 
+# The other direction, and it recurses, because a subordinate module has a page
+# in a directory named for its parent. A page's path under docs/modules is the
+# name it documents with the dots written as slashes, so `gfx/layers.md` is
+# `tecs.gfx.layers` and the `index.md` beside it is `tecs.gfx`. The one at the
+# top, `docs/modules/index.md`, is the list of names rather than one of them,
+# and it names every module by construction, so it proves nothing about
+# coverage.
 orphans=()
-for page in docs/modules/*.md; do
-    name=$(basename "$page" .md)
-    case " $notAModulePage " in
-    *" $name "*) continue ;;
-    esac
-    if ! printf '%s\n' $public | grep -qx "$name"; then
-        orphans+=("$name")
+while IFS= read -r page; do
+    name=${page#docs/modules/}
+    name=${name%.md}
+    name=${name%/index}
+    if [ "$name" = "index" ]; then
+        continue
     fi
-done
+    name=${name//\//.}
+    if ! printf '%s\n' $public | grep -qx "$name"; then
+        orphans+=("$page")
+    fi
+done < <(find docs/modules -name '*.md' | LC_ALL=C sort)
 
 # Stubs are a legitimate state: a page that says "this module is being
 # replaced, here is what will still be true" is more honest than a reference
@@ -109,17 +137,25 @@ expected=$(printf '%s\n' $public | LC_ALL=C sort -f)
 # may list either way. Both are matched at the start of a line, so a name
 # mentioned in prose is not mistaken for a list entry.
 listOf() {
-    sed -n -e 's/^- \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' \
-           -e 's/^| \[`tecs\.\([A-Za-z_][A-Za-z0-9_]*\)`\].*/\1/p' "$1"
+    sed -n -e 's/^- \[`tecs\.\([A-Za-z_][A-Za-z0-9_.]*\)`\].*/\1/p' \
+           -e 's/^| \[`tecs\.\([A-Za-z_][A-Za-z0-9_.]*\)`\].*/\1/p' "$1"
 }
 
 status=0
 
+# `diff` answers 1 when its inputs differ, which is the case every one of these
+# is reached in, and `set -e` would take that as the script failing and stop
+# here. So each is allowed to answer, and the run ends at the status collected
+# below instead: a reader fixing one of these wants all of them at once rather
+# than one per run.
+report() {
+    diff -u <(printf '%s\n' "$1") <(printf '%s\n' "$2") | sed -e '1,2d' -e 's/^/  /' >&2 || true
+}
+
 for listing in docs/modules/index.md docs/index.md; do
     if [ "$(listOf "$listing")" != "$expected" ]; then
         echo "$listing does not list the modules in the expected order:" >&2
-        diff -u <(printf '%s\n' "$expected") <(listOf "$listing") |
-            sed -e '1,2d' -e 's/^/  /' >&2
+        report "$expected" "$(listOf "$listing")"
         echo >&2
         echo "One alphabetical list, ignoring case, in both places. Lines" >&2
         echo "starting - or + above are what that file has wrong." >&2
@@ -153,8 +189,7 @@ pageLinks=$(find docs -name '*.md' \
 
 if [ "$sidebarLinks" != "$pageLinks" ]; then
     echo "docs/.vitepress/config.mts does not have one sidebar row per page:" >&2
-    diff -u <(printf '%s\n' "$pageLinks") <(printf '%s\n' "$sidebarLinks") |
-        sed -e '1,2d' -e 's/^/  /' >&2
+    report "$pageLinks" "$sidebarLinks"
     echo >&2
     echo "A line starting - is a page nothing navigates to; one starting + is a" >&2
     echo "sidebar row pointing at no page." >&2
@@ -174,7 +209,7 @@ fi
 
 if [ "${#orphans[@]}" -gt 0 ]; then
     echo "Pages under docs/modules/ naming nothing public: ${#orphans[@]}" >&2
-    printf '  docs/modules/%s.md\n' "${orphans[@]}" >&2
+    printf '  %s\n' "${orphans[@]}" >&2
     echo >&2
     echo "The module moved and the page did not. Delete it, or rename it to" >&2
     echo "the field that replaced it." >&2

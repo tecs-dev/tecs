@@ -73,7 +73,7 @@ entity where a parent transform or a tween had not put it.
 | `scaleX`   | `float`   | `1`     | X scale.                                                                 |
 | `scaleY`   | `float`   | `1`     | Y scale.                                                                 |
 
-Which band a `layer` names, and how that band sorts and projects, is [`layers`](/modules/layers).
+Which band a `layer` names, and how that band sorts and projects, is [`layers`](/modules/gfx/layers).
 
 ## PreviousTransform
 

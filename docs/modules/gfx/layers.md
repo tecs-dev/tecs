@@ -3,7 +3,7 @@ description: "Layer bands, the depth they resolve to, and what a layer does to i
 outline: deep
 ---
 
-# tecs.layers
+# tecs.gfx.layers
 
 A layer is a band of the depth range. Everything drawn on a layer sorts within that band and never
 against another one, so a HUD on layer 8 covers a world on layer 1 whatever the two contain. A layer is
@@ -86,9 +86,9 @@ A material can also ask to be unlit, and a fragment is lit only where the materi
 **Example:**
 
 ```teal
-tecs.layers.configure(1, { sort = "topdown", parallax = 0.5 })
-tecs.layers.configure(2, { sort = "topdown" })
-tecs.layers.configure(8, { sort = "z", screenSpace = true, unlit = true })
+tecs.gfx.layers.configure(1, { sort = "topdown", parallax = 0.5 })
+tecs.gfx.layers.configure(2, { sort = "topdown" })
+tecs.gfx.layers.configure(8, { sort = "z", screenSpace = true, unlit = true })
 ```
 
 ## Culling
@@ -252,79 +252,79 @@ worth doing with a layer or a position rather than with a large region.
 
 Every function and type this module carries, rendered from `src/tecs/gfx/layers.tl`.
 
-<a id="tecs.layers.Config"></a>
+<a id="tecs.gfx.layers.Config"></a>
 
-### tecs.layers.Config
+### tecs.gfx.layers.Config
 
-<pre><code v-pre>record <a href="#tecs.layers.Config">tecs.layers.Config</a>
+<pre><code v-pre>record <a href="#tecs.gfx.layers.Config">tecs.gfx.layers.Config</a>
 </code></pre>
 
 Everything a layer decides about its contents. A field left out takes
 its default, so this says what a layer is rather than amending what it
 was.
-<a id="tecs.layers.Config.sort"></a>
+<a id="tecs.gfx.layers.Config.sort"></a>
 
-### tecs.layers.Config.sort
+### tecs.gfx.layers.Config.sort
 
-<pre><code v-pre><a href="#tecs.layers.Config.sort">tecs.layers.Config.sort</a>: <a href="#tecs.layers.Sort">Sort</a>
+<pre><code v-pre><a href="#tecs.gfx.layers.Config.sort">tecs.gfx.layers.Config.sort</a>: <a href="#tecs.gfx.layers.Sort">Sort</a>
 </code></pre>
 
 How contents sort within the layer's band. Required: a sort is the
 one thing every layer has an opinion about.
-<a id="tecs.layers.Config.screenSpace"></a>
+<a id="tecs.gfx.layers.Config.screenSpace"></a>
 
-### tecs.layers.Config.screenSpace
+### tecs.gfx.layers.Config.screenSpace
 
-<pre><code v-pre><a href="#tecs.layers.Config.screenSpace">tecs.layers.Config.screenSpace</a>: boolean
+<pre><code v-pre><a href="#tecs.gfx.layers.Config.screenSpace">tecs.gfx.layers.Config.screenSpace</a>: boolean
 </code></pre>
 
 Contents are positioned in screen pixels and ignore the camera
 entirely. What a HUD wants. Defaults to false.
-<a id="tecs.layers.Config.ignoreZoom"></a>
+<a id="tecs.gfx.layers.Config.ignoreZoom"></a>
 
-### tecs.layers.Config.ignoreZoom
+### tecs.gfx.layers.Config.ignoreZoom
 
-<pre><code v-pre><a href="#tecs.layers.Config.ignoreZoom">tecs.layers.Config.ignoreZoom</a>: boolean
+<pre><code v-pre><a href="#tecs.gfx.layers.Config.ignoreZoom">tecs.gfx.layers.Config.ignoreZoom</a>: boolean
 </code></pre>
 
 Contents follow the camera's position but not its zoom, so they
 stay a constant size on screen while moving with the world.
 Defaults to false.
-<a id="tecs.layers.Config.virtualCoords"></a>
+<a id="tecs.gfx.layers.Config.virtualCoords"></a>
 
-### tecs.layers.Config.virtualCoords
+### tecs.gfx.layers.Config.virtualCoords
 
-<pre><code v-pre><a href="#tecs.layers.Config.virtualCoords">tecs.layers.Config.virtualCoords</a>: boolean
+<pre><code v-pre><a href="#tecs.gfx.layers.Config.virtualCoords">tecs.gfx.layers.Config.virtualCoords</a>: boolean
 </code></pre>
 
 Contents are positioned in `virtualWidth` by `virtualHeight`, which
 is scaled to fill the target. Defaults to false, and cannot be
 combined with `screenSpace`.
-<a id="tecs.layers.Config.unlit"></a>
+<a id="tecs.gfx.layers.Config.unlit"></a>
 
-### tecs.layers.Config.unlit
+### tecs.gfx.layers.Config.unlit
 
-<pre><code v-pre><a href="#tecs.layers.Config.unlit">tecs.layers.Config.unlit</a>: boolean
+<pre><code v-pre><a href="#tecs.gfx.layers.Config.unlit">tecs.gfx.layers.Config.unlit</a>: boolean
 </code></pre>
 
 Contents bypass the lighting pass and appear at their own colour.
 Defaults to false. A material can ask for the same thing, and a
 fragment is lit only where the material and the layer agree.
-<a id="tecs.layers.Config.parallax"></a>
+<a id="tecs.gfx.layers.Config.parallax"></a>
 
-### tecs.layers.Config.parallax
+### tecs.gfx.layers.Config.parallax
 
-<pre><code v-pre><a href="#tecs.layers.Config.parallax">tecs.layers.Config.parallax</a>: number
+<pre><code v-pre><a href="#tecs.gfx.layers.Config.parallax">tecs.gfx.layers.Config.parallax</a>: number
 </code></pre>
 
 How much the camera's position carries the contents. One moves them
 with the world; a half drifts them at half speed, which is what a
 background wants. Defaults to one.
-<a id="tecs.layers.MAX"></a>
+<a id="tecs.gfx.layers.MAX"></a>
 
-### tecs.layers.MAX
+### tecs.gfx.layers.MAX
 
-<pre><code v-pre><a href="#tecs.layers.MAX">tecs.layers.MAX</a>: integer
+<pre><code v-pre><a href="#tecs.gfx.layers.MAX">tecs.gfx.layers.MAX</a>: integer
 </code></pre>
 
 Bands the depth range divides into.
@@ -334,37 +334,37 @@ vertex shader reads is sized to it, and the shader recovers a layer by
 multiplying a depth by it. `LAYER_BANDS` in
 `assets/shaders/instance.vert.glsl` is the same number, and the two only
 work while they agree. Raising it is not a constant change.
-<a id="tecs.layers.Sort"></a>
+<a id="tecs.gfx.layers.Sort"></a>
 
-### tecs.layers.Sort
+### tecs.gfx.layers.Sort
 
-<pre><code v-pre>enum <a href="#tecs.layers.Sort">tecs.layers.Sort</a>
+<pre><code v-pre>enum <a href="#tecs.gfx.layers.Sort">tecs.gfx.layers.Sort</a>
 </code></pre>
 
-<a id="tecs.layers.Sort.&quot;isometric&quot;"></a>
+<a id="tecs.gfx.layers.Sort.&quot;isometric&quot;"></a>
 
-### tecs.layers.Sort.&quot;isometric&quot;
+### tecs.gfx.layers.Sort.&quot;isometric&quot;
 
 X plus Y plus z, for a diamond grid where both axes move an entity
 towards the viewer.
-<a id="tecs.layers.Sort.&quot;topdown&quot;"></a>
+<a id="tecs.gfx.layers.Sort.&quot;topdown&quot;"></a>
 
-### tecs.layers.Sort.&quot;topdown&quot;
+### tecs.gfx.layers.Sort.&quot;topdown&quot;
 
 Lower on the screen draws in front, with z breaking ties. What a
 top-down or side-on game wants: a character below a crate is in
 front of it.
-<a id="tecs.layers.Sort.&quot;z&quot;"></a>
+<a id="tecs.gfx.layers.Sort.&quot;z&quot;"></a>
 
-### tecs.layers.Sort.&quot;z&quot;
+### tecs.gfx.layers.Sort.&quot;z&quot;
 
 Only z decides. What a HUD wants, where position means nothing and
 the author has said what covers what.
-<a id="tecs.layers.configure"></a>
+<a id="tecs.gfx.layers.configure"></a>
 
-### tecs.layers.configure
+### tecs.gfx.layers.configure
 
-<pre><code v-pre>function <a href="#tecs.layers.configure">tecs.layers.configure</a>(layer: integer, config: layers.Config)
+<pre><code v-pre>function <a href="#tecs.gfx.layers.configure">tecs.gfx.layers.configure</a>(layer: integer, config: layers.Config)
 </code></pre>
 
 Sets what a layer does with its contents.
@@ -380,11 +380,11 @@ default and not whatever the layer held before.
 | <code v-pre>integer</code>       | <code v-pre>layer</code>  | One to `MAX`. Anything else raises.                                                                  |
 | <code v-pre>layers.Config</code> | <code v-pre>config</code> | Raises on a missing or unknown `sort`, and on asking for `screenSpace` and `virtualCoords` together. |
 
-<a id="tecs.layers.depthOf"></a>
+<a id="tecs.gfx.layers.depthOf"></a>
 
-### tecs.layers.depthOf
+### tecs.gfx.layers.depthOf
 
-<pre><code v-pre>function <a href="#tecs.layers.depthOf">tecs.layers.depthOf</a>(layer: integer, z: number, x: number, y: number): number
+<pre><code v-pre>function <a href="#tecs.gfx.layers.depthOf">tecs.gfx.layers.depthOf</a>(layer: integer, z: number, x: number, y: number): number
 </code></pre>
 
 Depth for one entity, in zero to one with zero nearest.
@@ -411,11 +411,11 @@ expecting.
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>number</code> | A depth inside the layer's own band, whatever the arguments were: each of them is normalised and then held to zero and one, so a scene reaching past what the module was told to expect stops sorting rather than spilling into the next layer. |
 
-<a id="tecs.layers.depthResolution"></a>
+<a id="tecs.gfx.layers.depthResolution"></a>
 
-### tecs.layers.depthResolution
+### tecs.gfx.layers.depthResolution
 
-<pre><code v-pre>function <a href="#tecs.layers.depthResolution">tecs.layers.depthResolution</a>(): number
+<pre><code v-pre>function <a href="#tecs.gfx.layers.depthResolution">tecs.gfx.layers.depthResolution</a>(): number
 </code></pre>
 
 The smallest depth difference `depthOf` produces between two entities
@@ -438,11 +438,11 @@ extent moves this with it.
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>number</code> | A depth difference, in the input that moves depth least. That is the topdown sort's y at the defaults, which spends the smallest share of a band on the widest range. |
 
-<a id="tecs.layers.entryOf"></a>
+<a id="tecs.gfx.layers.entryOf"></a>
 
-### tecs.layers.entryOf
+### tecs.gfx.layers.entryOf
 
-<pre><code v-pre>function <a href="#tecs.layers.entryOf">tecs.layers.entryOf</a>(layer: integer): number, number, number, number
+<pre><code v-pre>function <a href="#tecs.gfx.layers.entryOf">tecs.gfx.layers.entryOf</a>(layer: integer): number, number, number, number
 </code></pre>
 
 The four floats the vertex shader reads for one layer: its mode, its
@@ -466,32 +466,32 @@ when `revision` moves rather than every frame.
 | <code v-pre>number</code> |                                                                                                                             |
 | <code v-pre>number</code> |                                                                                                                             |
 
-<a id="tecs.layers.maxY"></a>
+<a id="tecs.gfx.layers.maxY"></a>
 
-### tecs.layers.maxY
+### tecs.gfx.layers.maxY
 
-<pre><code v-pre><a href="#tecs.layers.maxY">tecs.layers.maxY</a>: number
+<pre><code v-pre><a href="#tecs.gfx.layers.maxY">tecs.gfx.layers.maxY</a>: number
 </code></pre>
 
 Half the world extent a scene is expected to occupy, for normalising
 position into a band. A scene larger than this still sorts, with
 entities beyond the edge compressed against it.
-<a id="tecs.layers.maxZ"></a>
+<a id="tecs.gfx.layers.maxZ"></a>
 
-### tecs.layers.maxZ
+### tecs.gfx.layers.maxZ
 
-<pre><code v-pre><a href="#tecs.layers.maxZ">tecs.layers.maxZ</a>: number
+<pre><code v-pre><a href="#tecs.gfx.layers.maxZ">tecs.gfx.layers.maxZ</a>: number
 </code></pre>
 
 Highest z a scene is expected to use, which sets the resolution of
 sorting within a band. A scene reaching past this still draws, with
 entities beyond the edge resting on it and no longer sorting against
 each other.
-<a id="tecs.layers.revision"></a>
+<a id="tecs.gfx.layers.revision"></a>
 
-### tecs.layers.revision
+### tecs.gfx.layers.revision
 
-<pre><code v-pre>function <a href="#tecs.layers.revision">tecs.layers.revision</a>(): integer
+<pre><code v-pre>function <a href="#tecs.gfx.layers.revision">tecs.gfx.layers.revision</a>(): integer
 </code></pre>
 
 How many times the table has been configured.
@@ -502,11 +502,11 @@ How many times the table has been configured.
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | <code v-pre>integer</code> | A count that starts at zero and only rises. A consumer compares it against the value it packed at, so the number itself means nothing beyond having changed. |
 
-<a id="tecs.layers.sortOf"></a>
+<a id="tecs.gfx.layers.sortOf"></a>
 
-### tecs.layers.sortOf
+### tecs.gfx.layers.sortOf
 
-<pre><code v-pre>function <a href="#tecs.layers.sortOf">tecs.layers.sortOf</a>(layer: integer): integer
+<pre><code v-pre>function <a href="#tecs.gfx.layers.sortOf">tecs.gfx.layers.sortOf</a>(layer: integer): integer
 </code></pre>
 
 How a layer sorts, as the identifier `depthOf` takes.
@@ -523,11 +523,11 @@ How a layer sorts, as the identifier `depthOf` takes.
 | -------------------------- | ----------------------------------------------------------------------------------- |
 | <code v-pre>integer</code> | The sort identifier, which is an internal number and not one of the `Sort` strings. |
 
-<a id="tecs.layers.viewCulled"></a>
+<a id="tecs.gfx.layers.viewCulled"></a>
 
-### tecs.layers.viewCulled
+### tecs.gfx.layers.viewCulled
 
-<pre><code v-pre>function <a href="#tecs.layers.viewCulled">tecs.layers.viewCulled</a>(layer: integer): boolean
+<pre><code v-pre>function <a href="#tecs.gfx.layers.viewCulled">tecs.gfx.layers.viewCulled</a>(layer: integer): boolean
 </code></pre>
 
 Whether the camera's view rectangle decides if this layer is drawn.
@@ -552,18 +552,18 @@ asks for one of these, and kept exactly on every layer that does not.
 | -------------------------- | ------------------------------------------------------------ |
 | <code v-pre>boolean</code> | Whether extraction should write this row's real world bound. |
 
-<a id="tecs.layers.virtualHeight"></a>
+<a id="tecs.gfx.layers.virtualHeight"></a>
 
-### tecs.layers.virtualHeight
+### tecs.gfx.layers.virtualHeight
 
-<pre><code v-pre><a href="#tecs.layers.virtualHeight">tecs.layers.virtualHeight</a>: number
+<pre><code v-pre><a href="#tecs.gfx.layers.virtualHeight">tecs.gfx.layers.virtualHeight</a>: number
 </code></pre>
 
-<a id="tecs.layers.virtualWidth"></a>
+<a id="tecs.gfx.layers.virtualWidth"></a>
 
-### tecs.layers.virtualWidth
+### tecs.gfx.layers.virtualWidth
 
-<pre><code v-pre><a href="#tecs.layers.virtualWidth">tecs.layers.virtualWidth</a>: number
+<pre><code v-pre><a href="#tecs.gfx.layers.virtualWidth">tecs.gfx.layers.virtualWidth</a>: number
 </code></pre>
 
 The resolution a virtual-coordinate layer is authored in.

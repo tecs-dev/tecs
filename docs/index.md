@@ -235,11 +235,12 @@ behind each one.
 - [`tecs.filesystem`](/modules/filesystem) - touching the filesystem
 - [`tecs.future`](/modules/future) - a value that settles once
 - [`tecs.gamepad`](/modules/gamepad) - identity, lifetime, metadata and outputs
+- [`tecs.gfx`](/modules/gfx/) - drawing, and the modules a scene is described in
+- [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
 - [`tecs.hash`](/modules/hash) - hashing
 - [`tecs.http`](/modules/http) - fetching over HTTP without stopping the frame
 - [`tecs.input`](/modules/input) - three tiers behind a layer stack
 - [`tecs.json`](/modules/json) - JSON, with the build's own copy of the C parser found
-- [`tecs.layers`](/modules/layers) - z-ordering and per-layer behaviour
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
 - [`tecs.materials`](/modules/materials) - one fragment shader, compiled from the material set
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through

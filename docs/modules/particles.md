@@ -177,7 +177,7 @@ curve multiplies by one and an absent gradient by white, so leaving either out c
 An animated effect plays its cycle exactly once over each particle's own life and clamps at the end,
 so a randomised lifetime randomises the playback speed. Per-frame durations, reverse and pingpong
 all arrive already spent, because this uses the same frame table an animated entity does; see
-[animation](/modules/animation). A `layer` outside one to [`layers.MAX`](/modules/layers), and an `alignment`
+[animation](/modules/animation). A `layer` outside one to [`layers.MAX`](/modules/gfx/layers), and an `alignment`
 that is neither of the two, both raise.
 
 One depth is taken for the whole effect rather than one per particle: an effect names one layer, so

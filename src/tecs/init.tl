@@ -62,6 +62,11 @@ local type platformAudio = require("tecs.platform.audio")
 -- other is the type, so no name is both at once. The satellite records each
 -- class carries are named here too, so a game reaches `tecs.window.Options`
 -- without going through `Window` first.
+--
+-- A module may also sit inside another module, one level and no deeper:
+-- `tecs.gfx.layers`. A record here is what declares that, and its lowercase
+-- fields are the modules under it while its capitalised ones are the types the
+-- parent owns.
 
 --- The object an entry file returns, and what builds one.
 local record application
@@ -142,23 +147,32 @@ end
 --- Gameplay input in three tiers, behind a layer stack.
 local record input
     Input: Input
-    Layer: Input.Layer
-    Touch: Input.Touch
-    TextArea: Input.TextArea
-    TextOptions: Input.TextOptions
-    Options: Input.Options
+    type Layer = Input.Layer
+    type Touch = Input.Touch
+    type TextArea = Input.TextArea
+    type TextOptions = Input.TextOptions
+    type Options = Input.Options
 end
 
 --- A pad's identity, lifetime, metadata and outputs.
 local record gamepad
     Gamepad: Gamepad
-    TouchpadFinger: Gamepad.TouchpadFinger
+    type TouchpadFinger = Gamepad.TouchpadFinger
 end
 
 --- A value that settles once.
 local record future
     Future: Future
     type Source = Future.Source
+end
+
+--- Drawing, and the vocabularies a scene is described in.
+---
+--- Each of those is its own module a level down rather than a section of this
+--- one, because they share a subject and nothing else: a game that positions
+--- bands never reads a glyph, and loading one has no reason to load the rest.
+local record gfx
+    layers: layers
 end
 
 local record tecs
@@ -220,11 +234,11 @@ local record tecs
     filesystem: filesystem
     future: future
     gamepad: gamepad
+    gfx: gfx
     hash: hash
     http: http
     input: input
     json: json
-    layers: layers
     log: log
     materials: materials
     mcp: mcp
@@ -248,79 +262,98 @@ end
 
 tecs.ecs = ecs
 
---- Module paths resolved on first use: everything that reaches native code,
---- which is the engine and JSON, whose parser is C, plus the byte facilities,
---- which cost nothing to skip and which most programs never ask for.
+--- How one public name resolves, at whatever depth it is written.
+---
+--- A descriptor naming only `module` answers with that module's own table, so
+--- `tecs.gfx.layers` and `require("tecs.gfx.layers")` are one value rather than
+--- a copy of one. A descriptor naming anything else answers with a table built
+--- here, which fills a member at a time.
+local record Namespace
+    --- The module a member comes off when nothing above it answered.
+    module: string
+    --- The member name that answers with `module` itself, which is how a class
+    --- sits inside a namespace named for it.
+    class: string
+    --- Further modules read at this level, searched before `module`.
+    beside: {string}
+    --- The names one level down, each described the same way and each resolved
+    --- on the first read of its own name.
+    within: {string: Namespace}
+end
+
+--- What every public name resolves to, described once and used at both levels.
+---
+--- Everything here is resolved on first use: the engine, which reaches SDL,
+--- Box2D and the worker library through the FFI, JSON, whose parser is C, and
+--- the byte facilities, which cost nothing to skip and which most programs
+--- never ask for. A tool that names none of them loads none of them, and that
+--- holds a level down too: reading `tecs.gfx.layers` loads layers and nothing
+--- else under `gfx`.
 ---
 --- Listed rather than discovered, so `tecs.anmation` is an error where it is
 --- written instead of a nil where it is called.
-local ENGINE <const>: {string: string} = {
-    animation = "tecs.gfx.animation",
-    clock = "tecs.platform.clock",
-    events = "tecs.platform.events",
-    clipboard = "tecs.platform.clipboard",
-    proc = "tecs.platform.proc",
-    net = "tecs.net",
-    capabilities = "tecs.platform.capabilities",
-    paths = "tecs.platform.paths",
-    filesystem = "tecs.platform.filesystem",
-    watch = "tecs.platform.watch",
-    layers = "tecs.gfx.layers",
-    sequence = "tecs.sequence",
-    components = "tecs.components",
-    text = "tecs.gfx.text",
-    particles = "tecs.gfx.particles",
-    materials = "tecs.gpu.materials",
-    assets = "tecs.assets",
-    workers = "tecs.workers",
-    physics = "tecs.physics",
-    http = "tecs.http",
-    log = "tecs.log",
-    mcp = "tecs.mcp",
-    json = "tecs.json",
-    hash = "tecs.hash",
-    compress = "tecs.compress",
-    system = "tecs.platform.system",
-    sensors = "tecs.platform.sensors",
-}
-
---- What one of those namespaces is made of.
-local record Namespace
-    --- The module the class comes from.
-    module: string
-    --- The member name that answers with the module itself.
-    class: string
-    --- Further modules named at this level, searched before the class's own.
-    beside: {string}
-end
-
---- Namespaces whose members come off one module: the class itself under its
---- own name, and everything else read off the module table beside it.
 ---
---- Resolved on first use like the modules above, and for the same reason: each
---- of these reaches SDL through the FFI, so a tool that never names one never
---- loads a graphics stack.
----
---- `audio` is the one with a second module under it. The mixer and the device
---- it opens are one subject at two levels, and a game asking about sound
---- should find one module rather than pick between two.
-local CLASSES <const>: {string: Namespace} = {
+--- `audio` is the one namespace reading two modules at one level. The mixer and
+--- the device it opens are one subject at two levels, and a game asking about
+--- sound should find one module rather than pick between two.
+local SURFACE <const>: {string: Namespace} = {
+    animation = {module = "tecs.gfx.animation"},
     application = {module = "tecs.Application", class = "Application"},
-    renderer = {module = "tecs.Renderer", class = "Renderer"},
+    assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
     camera = {module = "tecs.gfx.Camera", class = "Camera"},
-    window = {module = "tecs.platform.Window", class = "Window"},
-    input = {module = "tecs.platform.Input", class = "Input"},
-    gamepad = {module = "tecs.platform.Gamepad", class = "Gamepad"},
+    capabilities = {module = "tecs.platform.capabilities"},
+    clipboard = {module = "tecs.platform.clipboard"},
+    clock = {module = "tecs.platform.clock"},
+    components = {module = "tecs.components"},
+    compress = {module = "tecs.compress"},
+    events = {module = "tecs.platform.events"},
+    filesystem = {module = "tecs.platform.filesystem"},
     future = {module = "tecs.Future", class = "Future"},
+    gamepad = {module = "tecs.platform.Gamepad", class = "Gamepad"},
+    gfx = {within = {layers = {module = "tecs.gfx.layers"}}},
+    hash = {module = "tecs.hash"},
+    http = {module = "tecs.http"},
+    input = {module = "tecs.platform.Input", class = "Input"},
+    json = {module = "tecs.json"},
+    log = {module = "tecs.log"},
+    materials = {module = "tecs.gpu.materials"},
+    mcp = {module = "tecs.mcp"},
+    net = {module = "tecs.net"},
+    particles = {module = "tecs.gfx.particles"},
+    paths = {module = "tecs.platform.paths"},
+    physics = {module = "tecs.physics"},
+    proc = {module = "tecs.platform.proc"},
+    renderer = {module = "tecs.Renderer", class = "Renderer"},
+    sensors = {module = "tecs.platform.sensors"},
+    sequence = {module = "tecs.sequence"},
+    system = {module = "tecs.platform.system"},
+    text = {module = "tecs.gfx.text"},
+    watch = {module = "tecs.platform.watch"},
+    window = {module = "tecs.platform.Window", class = "Window"},
+    workers = {module = "tecs.workers"},
 }
 
---- Builds one of those namespaces. The module loads on the first member read
---- rather than when the namespace itself is, so naming `tecs.window` costs
---- nothing until something is taken out of it.
+--- Answers what one descriptor describes, at the root and one level down
+--- alike. Declared ahead of `namespace` because the two call each other: a
+--- namespace resolves the descriptors under it, and each of those is a
+--- descriptor like any other.
 ---
---- A `beside` module is searched first, because it is the cheaper one to load
---- and no name is in both: listing a sound device does not open a mixer.
+--- @param spec What the name resolves through. A descriptor naming only a
+---     module answers with that module and loads it now; anything else answers
+---     with a table that loads nothing until a member is read.
+--- @return The module or the namespace, which is what the name is from here on:
+---     the caller memoizes it, so this runs once per name.
+local resolve: function(spec: Namespace): any
+
+--- Builds the table a namespace answers with. Nothing under it loads until a
+--- member is read, so naming `tecs.window` or `tecs.gfx` costs nothing until
+--- something is taken out of it.
+---
+--- `within` is searched first and `beside` second, both ahead of `module`,
+--- because they are the cheaper ones to load and no name is in more than one: a
+--- module below is its own file, and listing a sound device does not open a
+--- mixer.
 local function namespace(spec: Namespace): {string: any}
     local members: {string: any} = {}
     return setmetatable(
@@ -328,7 +361,10 @@ local function namespace(spec: Namespace): {string: any}
         {
             __index = function(self: {string: any}, name: string): any
                 local member: any = nil
-                if spec.beside ~= nil then
+                if spec.within ~= nil and spec.within[name] ~= nil then
+                    member = resolve(spec.within[name])
+                end
+                if member == nil and spec.beside ~= nil then
                     for _, path in ipairs(spec.beside) do
                         member = (require(path) as {string: any})[name]
                         if member ~= nil then
@@ -336,7 +372,7 @@ local function namespace(spec: Namespace): {string: any}
                         end
                     end
                 end
-                if member == nil then
+                if member == nil and spec.module ~= nil then
                     local module = require(spec.module) as {string: any}
                     member = name == spec.class and module or module[name]
                 end
@@ -350,23 +386,25 @@ local function namespace(spec: Namespace): {string: any}
     )
 end
 
+resolve = function(spec: Namespace): any
+    local plain = spec.class == nil and spec.beside == nil and spec.within == nil
+    if plain then
+        return require(spec.module)
+    end
+    return namespace(spec)
+end
+
 setmetatable(
     tecs as {string: any},
     {
         __index = function(self: {string: any}, name: string): any
-            local module = ENGINE[name]
-            if module ~= nil then
-                local resolved = require(module)
-                rawset(self, name, resolved)
-                return resolved
-            end
-            local class = CLASSES[name]
-            if class == nil then
+            local spec = SURFACE[name]
+            if spec == nil then
                 return nil
             end
-            local built = namespace(class)
-            rawset(self, name, built)
-            return built
+            local resolved = resolve(spec)
+            rawset(self, name, resolved)
+            return resolved
         end,
     }
 )

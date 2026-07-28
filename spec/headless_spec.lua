@@ -127,6 +127,47 @@ describe("tecs headless", function()
             assert.are.equal("none\n", output)
         end)
 
+        -- The same property one level down, which is where it stops being
+        -- free. A module inside another module is reached through a table
+        -- named for the parent, and the obvious way to build that table is to
+        -- require its members as it is built. That would load the whole of
+        -- `tecs.gfx` the moment a tool asked about layer bands, and every one
+        -- of the others reaches SDL through the FFI.
+        it("loads one module under a namespace and none of its siblings", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local named = tecs.gfx
+                local eager = package.loaded["tecs.gfx.layers"] ~= nil
+                local layers = tecs.gfx.layers
+
+                -- Everything else that lives under src/tecs/gfx, plus the two
+                -- modules a graphics stack starts with.
+                local siblings = {
+                    "tecs.gfx.Camera", "tecs.gfx.animation", "tecs.gfx.particles",
+                    "tecs.gfx.text", "tecs.Renderer", "tecs.ffi.sdl3",
+                }
+                local loaded = {}
+                for _, name in ipairs(siblings) do
+                    if package.loaded[name] ~= nil then
+                        loaded[#loaded + 1] = name
+                    end
+                end
+
+                print(("%s %s %s %s"):format(
+                    type(named),
+                    tostring(eager),
+                    tostring(rawequal(layers, require("tecs.gfx.layers"))),
+                    #loaded == 0 and "none" or table.concat(loaded, " ")))
+            ]],
+                false
+            )
+            -- Naming the namespace loads nothing, reading one member loads
+            -- that member and answers with the module itself, and no sibling
+            -- came with it.
+            assert.are.equal("table false true none\n", output)
+        end)
+
         it("reports a mistyped engine name as nil", function()
             -- The names are listed rather than derived from a module path, so a
             -- typo answers nil here instead of raising out of `require` about a

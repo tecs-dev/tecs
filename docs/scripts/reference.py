@@ -48,11 +48,20 @@ Every function and type this module carries, rendered from {sources}."""
 # `tecs.audio` is the one page with two sources, the mixer and the devices it
 # opens, because they are one module to a game and two files here.
 #
-# `tecs.version` is a string and has no source to render. `tecs.http` and
-# `tecs.physics` are left out on purpose: the first is being rewritten and the
-# second is a stub whose module is mid-replacement, so a rendered reference
-# would describe something that is about to move. Both come back here when they
-# settle.
+# A module that sits inside another module has its own page in a directory
+# named for the parent, rather than a section of the parent's page. One page per
+# module keeps a page the size of the module it documents: the sheet fold into
+# `tecs.animation` already produced thirteen hundred lines, and a parent holding
+# several of those would produce a page nobody scrolls through. It also keeps
+# one source per page, so the name each member is rendered under is the name a
+# game writes it as, with nothing to disambiguate.
+#
+# `tecs.version` is a string and has no source to render, and neither has a
+# namespace that carries only other modules: `docs/modules/gfx/index.md` is
+# prose and a list of what is under it. `tecs.http` and `tecs.physics` are left
+# out on purpose: the first is being rewritten and the second is a stub whose
+# module is mid-replacement, so a rendered reference would describe something
+# that is about to move. Both come back here when they settle.
 MODULES = [
     ("docs/ecs/index.md", [("src/tecs/ecs.tl", "tecs.ecs")]),
     ("docs/modules/animation.md", [("src/tecs/gfx/animation.tl", "tecs.animation")]),
@@ -72,10 +81,10 @@ MODULES = [
     ("docs/modules/filesystem.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
     ("docs/modules/gamepad.md", [("src/tecs/platform/Gamepad.tl", "tecs.gamepad.Gamepad")]),
+    ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),
     ("docs/modules/hash.md", [("src/tecs/hash.tl", "tecs.hash")]),
     ("docs/modules/input.md", [("src/tecs/platform/Input.tl", "tecs.input.Input")]),
     ("docs/modules/json.md", [("src/tecs/json.tl", "tecs.json")]),
-    ("docs/modules/layers.md", [("src/tecs/gfx/layers.tl", "tecs.layers")]),
     ("docs/modules/log.md", [("src/tecs/log.tl", "tecs.log")]),
     ("docs/modules/materials.md", [("src/tecs/gpu/materials.tl", "tecs.materials")]),
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),

@@ -84,11 +84,18 @@ export default defineConfig({
             // land in the same place teach a reader that the sidebar does not
             // know where things are.
             //
-            // Flat, alphabetical ignoring case, and spelled the way a game
-            // writes it. A reader looking for `tecs.watch` scans for that
-            // string; a thematic grouping makes them guess which of four
-            // headings somebody filed it under first, and a collapsed group
-            // hides the name entirely until they guess right.
+            // Alphabetical ignoring case, and spelled the way a game writes it.
+            // A reader looking for `tecs.watch` scans for that string; a
+            // thematic grouping makes them guess which of four headings
+            // somebody filed it under first, and a collapsed group hides the
+            // name entirely until they guess right.
+            //
+            // The one nesting is the real one. A module that sits inside
+            // another module is a row inside its parent's group, because that
+            // is where its name puts it: a reader holding `tecs.gfx.layers`
+            // reads it left to right and finds `tecs.gfx` first. The group is
+            // open, so nothing is hidden behind a guess, and it is not a theme
+            // somebody invented: the parent is a name a game writes.
             //
             // `tecs.ecs` is the group below rather than a row here, and
             // `tecs.version` is a string with no page of its own; both are in
@@ -113,11 +120,18 @@ export default defineConfig({
                     { text: "tecs.filesystem", link: "/modules/filesystem" },
                     { text: "tecs.future", link: "/modules/future" },
                     { text: "tecs.gamepad", link: "/modules/gamepad" },
+                    {
+                        text: "tecs.gfx",
+                        collapsed: false,
+                        items: [
+                            { text: "Overview", link: "/modules/gfx/" },
+                            { text: "tecs.gfx.layers", link: "/modules/gfx/layers" },
+                        ],
+                    },
                     { text: "tecs.hash", link: "/modules/hash" },
                     { text: "tecs.http", link: "/modules/http" },
                     { text: "tecs.input", link: "/modules/input" },
                     { text: "tecs.json", link: "/modules/json" },
-                    { text: "tecs.layers", link: "/modules/layers" },
                     { text: "tecs.log", link: "/modules/log" },
                     { text: "tecs.materials", link: "/modules/materials" },
                     { text: "tecs.mcp", link: "/modules/mcp" },

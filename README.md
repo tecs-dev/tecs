@@ -215,6 +215,45 @@ reason the global would quietly undo. So `make check` runs with no declaration
 loaded, and a module that reached for `tecs` without requiring it is an error
 here rather than a cycle later.
 
+### A module may sit inside a module, one level and no deeper
+
+`tecs.gfx.layers` is a module reached through a name that is only a namespace.
+The alternative was a flat surface where every module is one segment, which is
+what this was until layers moved, and it fails on the count rather than on any
+one name: a root holding several dozen unrelated names is looked up by
+scrolling, and grouping the ones that share a subject is what makes a name
+guessable from what a game is doing.
+
+Two levels and no more. `tecs.gfx.layers.configure` is a namespace, a module
+and a function, read left to right, and there is nothing to work out about
+where one stops and the next begins. A third level would put that back:
+`tecs.net.http.client.Response` reads as four guesses.
+
+The constraint that shaped the mechanism is laziness, not depth. A plain
+`require("tecs")` must not demand a graphics stack, because that is what lets a
+resource pipeline, a simulation server and a spec use the same table a game
+does, and the obvious way to build `tecs.gfx` defeats it: a `gfx/init.tl` that
+requires its members loads all of them the moment anything reads one, and every
+one of them reaches SDL through the FFI. So a namespace is a table whose
+members arrive one at a time, and a name inside one is described exactly as a
+name at the root is, by the same table and resolved by the same function.
+`spec/headless_spec.lua` holds that: naming `tecs.gfx` loads nothing, and
+reading `tecs.gfx.layers` loads layers and no sibling.
+
+A name that resolves to a module resolves to the module itself rather than a
+copy of it, so `tecs.gfx.layers` and `require("tecs.gfx.layers")` are one
+table. That is not a detail: `layers.maxY` and `layers.maxZ` are assigned by a
+game, and two tables would mean a write through one that nothing reads.
+
+`spec/surface_spec.lua` walks the whole of it. The record in `init.tl` is what
+a game is type-checked against and the descriptor table beneath it is what a
+name resolves through, nothing in Teal connects the two, and a descriptor
+pointing at the wrong module resolves to a table full of functions that are not
+the ones promised. So the spec reads the record, resolves every name it
+declares, and holds each to the module whose path ends in the name it was
+reached by. It found six declarations claiming a value that was never assigned
+the first time it ran.
+
 ## One way in
 
 Because the host reaches into an object rather than being handed a loop,

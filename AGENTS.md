@@ -92,8 +92,16 @@ tecs/
 ### The dependency rule
 
 `tecs` is what a game reaches, and every public name on it is `tecs.<module>.<thing>`: `tecs.ecs.newWorld`,
-`tecs.camera.Camera`, `tecs.application.create`. The host loads `tecs` before a game's first line, so a game
-writes no require; a headless tool or a spec writes `require("tecs")` and gets the same table.
+`tecs.camera.Camera`, `tecs.application.create`. A module may sit inside another module, one level and no
+deeper, so `tecs.gfx.layers.configure` is also a public name and nothing goes past it. The host loads `tecs`
+before a game's first line, so a game writes no require; a headless tool or a spec writes `require("tecs")`
+and gets the same table.
+
+`src/tecs/init.tl` says that twice and the two are checked against each other. The records are the
+declaration a game is type-checked against; `SURFACE` beneath them is what a name resolves through, one
+descriptor per name at either level. `spec/surface_spec.lua` walks the first and holds the second to it,
+and `spec/headless_spec.lua` holds the laziness that makes the resolver worth having: naming a namespace
+loads nothing, and reading one module under it loads no sibling.
 
 Engine modules require `tecs.ecs` rather than `tecs`, because `tecs` is the aggregator that pulls every engine
 module in and a module `tecs` exports cannot also depend on `tecs` without making a cycle, which Teal rejects

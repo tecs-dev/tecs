@@ -102,8 +102,8 @@ extents by, after which it answers zero and the scene sorts again inside a world
 ```teal
 local collapse <const> = renderer:depthSortCollapse()
 if collapse > 0 then
-    tecs.layers.maxY = tecs.layers.maxY / collapse
-    tecs.layers.maxZ = tecs.layers.maxZ / collapse
+    tecs.gfx.layers.maxY = tecs.gfx.layers.maxY / collapse
+    tecs.gfx.layers.maxZ = tecs.gfx.layers.maxZ / collapse
 end
 ```
 
@@ -161,7 +161,7 @@ Everything the renderer draws is an entity in a world. The components it reads a
 own pages:
 
 - [`tecs.camera.Camera`](/modules/camera), the view it draws from
-- [`tecs.layers`](/modules/layers), z-ordering and per-layer behaviour
+- [`tecs.gfx.layers`](/modules/gfx/layers), z-ordering and per-layer behaviour
 - [`tecs.animation`](/modules/animation), sprite sheets and playback
 - [`tecs.text`](/modules/text), distance-field text drawn through an instance producer
 - [`tecs.particles`](/modules/particles), emitters

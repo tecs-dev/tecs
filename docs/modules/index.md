@@ -14,8 +14,14 @@ Each module is one namespace, and the thing inside it carries its own name: `tec
 `tecs.camera` is where it lives. So no name is a type and a namespace at once, and a satellite record sits
 beside the class rather than under it -- `tecs.window.Options`, not `tecs.window.Window.Options`.
 
+A module may also sit inside another module, one level and no deeper: `tecs.gfx.layers` is a module, and there
+is no third namespace under it. A subordinate module is listed here under its own full name and has a page of
+its own, because it is a module rather than a section of its parent; a type its parent owns stays on the
+parent's page.
+
 The list is alphabetical, ignoring case, because that is how a name is looked up. A reader arrives holding
 `tecs.watch` and wants the line that says `tecs.watch`, not a category somebody else chose to file it under.
+A subordinate module sorts directly after its parent, since that is where its full name puts it.
 
 This list is the index; the pages behind it are the reference. For signatures, parameters and returns of
 everything at once, see [the generated reference](/modules/), which is rendered from `src/tecs/init.tl`
@@ -40,11 +46,12 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.filesystem`](/modules/filesystem)     | touching the filesystem                                                   |
 | [`tecs.future`](/modules/future)             | a value that settles once                                                 |
 | [`tecs.gamepad`](/modules/gamepad)           | a pad's identity, lifetime, metadata and outputs                          |
+| [`tecs.gfx`](/modules/gfx/)                  | drawing, and the modules a scene is described in                          |
+| [`tecs.gfx.layers`](/modules/gfx/layers)     | z-ordering and per-layer behaviour                                        |
 | [`tecs.hash`](/modules/hash)                 | hashing                                                                   |
 | [`tecs.http`](/modules/http)                 | fetching over HTTP without stopping the frame                             |
 | [`tecs.input`](/modules/input)               | gameplay input in three tiers, behind a layer stack                       |
 | [`tecs.json`](/modules/json)                 | JSON, with the build's own copy of the C parser found                     |
-| [`tecs.layers`](/modules/layers)             | z-ordering and per-layer behaviour                                        |
 | [`tecs.log`](/modules/log)                   | SDL's logging, per platform, with a named logger as the unit of filtering |
 | [`tecs.materials`](/modules/materials)       | the material a draw dispatches to                                         |
 | [`tecs.mcp`](/modules/mcp)                   | the debug server: transport, tools, sandbox                               |
