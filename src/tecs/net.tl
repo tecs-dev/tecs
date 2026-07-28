@@ -51,6 +51,8 @@ local record net
         _closed: boolean
 
         --- Whether this address has been closed.
+        --- @return True once `close` has run. `connect`, `listen`, `bind` and `DatagramSocket:send`
+        ---     then refuse this address with a reason rather than raising.
         isClosed: function(self: Address): boolean
         --- Releases the address. Safe to call repeatedly.
         close: function(self: Address)
@@ -64,32 +66,67 @@ local record net
         _closed: boolean
 
         --- Whether this stream has been closed.
+        --- @return True once `close` has run. Every other method then answers `"stream is closed"`
+        ---     rather than reaching SDL.
         isClosed: function(self: Stream): boolean
         --- A newly owned address for the remote peer.
         ---
         --- The caller closes the returned address.
+        --- @return A reference of its own, separate from the one the stream holds, so it stays valid
+        ---     after the stream is closed. Nil when the stream is closed or SDL could not report the
+        ---     peer, and nil here always carries a reason.
+        --- @return Why there is no address.
         peer: function(self: Stream): Address, string
         --- Reads up to `maxBytes` without waiting.
         ---
         --- Returns nil with no error when no bytes are ready. Returns nil with
         --- an error after the peer disconnects or the read fails. A successful
         --- read may contain fewer bytes than requested.
+        --- @param maxBytes A ceiling rather than a request: 16384 by default, and from 1 to 65536,
+        ---     outside which this raises rather than clamping.
+        --- @return Whatever had already arrived, copied out of the stream's own reusable buffer into a
+        ---     fresh string. Nil means one of two things, which the second return tells apart: nothing
+        ---     has arrived yet, or the read failed.
+        --- @return Set only when the read failed or the peer disconnected. Nothing having arrived is
+        ---     not a failure and leaves this nil.
         read: function(self: Stream, maxBytes?: integer): string, string
         --- Queues one chunk for reliable ordered delivery.
         ---
         --- This accepting the bytes does not mean the peer has received them;
         --- use `pendingWrites` or `drain` when that distinction matters.
+        --- @param bytes At most 16777216 in one call; larger, or not a string, raises. An empty string
+        ---     succeeds and queues nothing.
+        --- @return True when SDL has taken the whole chunk; there is no partial acceptance. False when
+        ---     the stream is closed or SDL refused it.
+        --- @return Why not. Set on every false return, unlike `drain` and `wait`, where false is also
+        ---     how a timeout reads.
         write: function(self: Stream, bytes: string): boolean, string
         --- Bytes SDL has accepted but not yet sent.
+        --- @return Zero once the queue has gone to the operating system, which is what `drain` waits
+        ---     for. Nil rather than a count when the stream is closed or the query failed.
+        --- @return Why there is no count.
         pendingWrites: function(self: Stream): integer, string
         --- Waits up to `timeoutMs` for queued writes to be sent.
         ---
         --- Returns false without an error on timeout.
+        --- @param timeoutMs Milliseconds, 5000 by default and 0 to test the queue without blocking.
+        ---     From 0 to 2147483647, outside which this raises. Anything positive blocks the calling
+        ---     thread for that long.
+        --- @return True when the queue reached zero inside the budget. The queue that drains is the
+        ---     local one: the bytes are with the operating system, not read by the peer.
+        --- @return Set only when the stream is closed or the wait itself failed; a timeout is false
+        ---     with no reason.
         drain: function(self: Stream, timeoutMs?: integer): boolean, string
         --- Waits up to `timeoutMs` for input or disconnection.
         ---
         --- Returns false without an error on timeout. This does not consume
         --- input; call `read` afterwards.
+        --- @param timeoutMs Milliseconds, 0 by default, which polls without blocking. From 0 to
+        ---     2147483647, outside which this raises. A frame passes 0; anything positive blocks the
+        ---     calling thread for that long.
+        --- @return True when the stream has input or has disconnected. The two are not told apart
+        ---     here, and `read` is what distinguishes them.
+        --- @return Set only when the stream is closed or the wait itself failed.
         wait: function(self: Stream, timeoutMs?: integer): boolean, string
         --- Releases the stream. Queued writes may be discarded; drain first
         --- when delivery matters. Safe to call repeatedly.
@@ -98,22 +135,33 @@ local record net
 
     --- A TCP listener.
     record Server
+        --- The port passed to `listen`, unchanged. Zero stays zero rather than becoming the port the
+        --- operating system chose, which SDL3_net does not report back.
         port: integer
         _handle: loader.CPtr
         _wait: loader.CArray
         _closed: boolean
 
         --- Whether this listener has been closed.
+        --- @return True once `close` has run. `accept` and `wait` then answer `"server is closed"`.
         isClosed: function(self: Server): boolean
         --- Takes one pending client without waiting.
         ---
         --- Returns nil with no error when nobody is waiting. The returned
         --- stream is owned by the caller.
+        --- @return One client, and at most one per call. It outlives this listener, so closing the
+        ---     server does not close it. Nil with no reason means nobody was waiting.
+        --- @return Set only when the server is closed or the accept failed.
         accept: function(self: Server): Stream, string
         --- Waits up to `timeoutMs` for a client to become ready to accept.
         ---
         --- Returns false without an error on timeout. This does not accept the
         --- client; call `accept` afterwards.
+        --- @param timeoutMs Milliseconds, 0 by default, which polls without blocking. From 0 to
+        ---     2147483647, outside which this raises. A frame passes 0; anything positive blocks the
+        ---     calling thread for that long.
+        --- @return True when at least one client is waiting; it says nothing about how many.
+        --- @return Set only when the server is closed or the wait itself failed.
         wait: function(self: Server, timeoutMs?: integer): boolean, string
         --- Stops listening. Existing accepted streams are unaffected. Safe to
         --- call repeatedly.
@@ -125,7 +173,10 @@ local record net
         --- Source address. Owned by this record; close it when the packet is no
         --- longer needed.
         address: Address
+        --- The remote port the datagram came from, which is where a reply goes.
         port: integer
+        --- One whole datagram, already copied out of SDL's packet. A zero-length datagram reads as an
+        --- empty string rather than nil.
         bytes: string
 
         --- Releases the packet's source address. Safe to call repeatedly.
@@ -134,49 +185,109 @@ local record net
 
     --- One bound UDP socket.
     record DatagramSocket
+        --- The port passed to `bind`, unchanged. Zero stays zero rather than becoming the port the
+        --- operating system chose, which SDL3_net does not report back.
         port: integer
         _handle: loader.CPtr
         _wait: loader.CArray
         _closed: boolean
 
         --- Whether this socket has been closed.
+        --- @return True once `close` has run. `send`, `receive` and `wait` then answer
+        ---     `"datagram socket is closed"`.
         isClosed: function(self: DatagramSocket): boolean
         --- Sends one packet without waiting.
+        --- @param address Must be open, and must have come from `net.resolve`, `Stream:peer` or a
+        ---     received packet; anything else raises. A closed one returns false with a reason.
+        --- @param port The remote port, from 1 to 65535. Outside that raises, zero included.
+        --- @param bytes One datagram, at most 65507 bytes, which is the largest a UDP payload can be.
+        ---     Larger, or not a string, raises. An empty string sends a zero-length datagram.
+        --- @return True when SDL took the datagram. That is handing it to the network rather than
+        ---     delivering it: it may still be lost, duplicated or reordered.
+        --- @return Why not. Set on every false return.
         send: function(self: DatagramSocket, address: Address, port: integer, bytes: string): boolean, string
         --- Takes one packet without waiting.
         ---
         --- Returns nil with no error when no packet is ready. The packet owns
         --- its source address, which the caller closes.
+        --- @return One whole datagram, never part of one and never two joined. Its bytes are copied and
+        ---     its address referenced before SDL's own packet is released inside this call, so the
+        ---     result outlives both that packet and this socket.
+        --- @return Set only when the socket is closed or the receive failed; nothing having arrived
+        ---     leaves this nil.
         receive: function(self: DatagramSocket): Packet, string
         --- Waits up to `timeoutMs` for a packet.
         ---
         --- Returns false without an error on timeout. This does not consume a
         --- packet; call `receive` afterwards.
+        --- @param timeoutMs Milliseconds, 0 by default, which polls without blocking. From 0 to
+        ---     2147483647, outside which this raises. A frame passes 0; anything positive blocks the
+        ---     calling thread for that long.
+        --- @return True when at least one packet is waiting; it says nothing about how many.
+        --- @return Set only when the socket is closed or the wait itself failed.
         wait: function(self: DatagramSocket, timeoutMs?: integer): boolean, string
         --- Releases the socket. Safe to call repeatedly.
         close: function(self: DatagramSocket)
     end
 
     --- Starts SDL3_net for this module. Safe to call repeatedly.
+    ---
+    --- `resolve`, `connect`, `listen` and `bind` each start it themselves, so a caller reaches for
+    --- this only to learn early whether the library is there.
+    --- @return True when SDL3_net is running, including when this module had already started it.
+    --- @return Why it could not start. Nothing here changed in that case.
     init: function(): boolean, string
     --- Stops this module's SDL3_net instance.
     ---
     --- Refuses while a public object or asynchronous operation is live, so no
     --- native handle is invalidated behind its owner.
+    --- @return True when SDL3_net has been stopped, and also when this module never started it. False
+    ---     releases nothing and leaves the module started.
+    --- @return Which held it back, a pending operation or an open object, and how many of them.
     quit: function(): boolean, string
     --- Begins resolving a hostname.
+    --- @param host A DNS name or a numeric address such as "127.0.0.1" or "::1". At most 253 bytes;
+    ---     empty, not a string, or containing a NUL raises.
+    --- @return A future over an address the caller owns and closes. Already "failed" when SDL3_net
+    ---     could not start or the lookup could not be begun, and otherwise pending until `net.poll` or
+    ---     `Future:wait` settles it. Cancelling it releases the lookup and drops it from `net.pending`.
     resolve: function(host: string): FutureType<Address>
     --- Begins connecting to a resolved address.
+    --- @param address Must have come from `net.resolve`, `Stream:peer` or a received packet; nil or
+    ---     anything else raises. A closed one gives an already-failed future instead.
+    --- @param port From 1 to 65535. Outside that raises, zero included.
+    --- @return A future over a stream the caller owns and closes. Already "failed" when the address is
+    ---     closed, SDL3_net could not start, or the connection could not be begun, and otherwise
+    ---     pending until `net.poll` or `Future:wait` settles it. Cancelling it destroys the half-open
+    ---     socket.
     connect: function(address: Address, port: integer): FutureType<Stream>
     --- Binds a TCP listener. A nil address listens on all local interfaces.
+    --- @param port From 0 to 65535. Zero asks the operating system to choose one, which SDL3_net does
+    ---     not report back, so `Server.port` stays zero and the listener cannot advertise itself.
+    --- @param address A local address to bind to. A closed one returns nil with a reason; anything
+    ---     that is not an address from this module raises.
+    --- @return An open listener the caller closes, or nil when the address is closed, SDL3_net could
+    ---     not start, or the bind failed.
+    --- @return Why there is no listener.
     listen: function(port: integer, address?: Address): Server, string
     --- Binds a UDP socket. A nil address listens on all local interfaces.
+    --- @param port From 0 to 65535. Zero asks the operating system to choose one, which suits a socket
+    ---     that only receives replies; SDL3_net does not report the choice back, so
+    ---     `DatagramSocket.port` stays zero.
+    --- @param address A local address to bind to. A closed one returns nil with a reason; anything
+    ---     that is not an address from this module raises.
+    --- @return An open socket the caller closes, or nil when the address is closed, SDL3_net could not
+    ---     start, or the bind failed.
+    --- @return Why there is no socket.
     bind: function(port: integer, address?: Address): DatagramSocket, string
     --- Advances every pending resolution and client connection without
     --- waiting. Call once per frame while asynchronous network work exists.
-    --- @return How many futures settled.
+    --- @return How many futures settled on this call, failures counted, since a failure is a
+    ---     settlement. One cancelled between polls left the queue without being counted here.
     poll: function(): integer
     --- Number of unresolved or connecting futures.
+    --- @return Zero once every resolution and connection has settled or been cancelled, which is when
+    ---     `net.poll` has nothing left to advance and `net.quit` stops refusing over them.
     pending: function(): integer
 end
 

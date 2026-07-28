@@ -177,7 +177,9 @@ local record random
         --- the one state xoshiro cannot leave.
         _s3: integer
 
-        --- The next value, in [0, 1). Advances the generator.
+        --- The next value off the generator, and one round of its state.
+        ---
+        --- @return A multiple of 2^-32 in [0, 1). Zero is a value it takes; one is not.
         next: function(self: Random): number
 
         --- The next integer in [1, m], or in [m, n] when both are given.
@@ -185,17 +187,41 @@ local record random
         ---
         --- Errors on an empty range, because a caller asking for a number
         --- between 5 and 3 has a bug and a silent 5 hides it.
+        ---
+        --- @param m The upper end when it is the only argument, and the lower end when `n`
+        ---     follows it. The one-argument form counts from 1, so `integer(0)` is the
+        ---     empty range [1, 0] and raises.
+        --- @param n The upper end, included. Nil takes the one-argument form.
+        --- @return An integer in the range, off a single draw whatever the range is: the
+        ---     draw is scaled and floored rather than resampled, so a width that does not
+        ---     divide 2^32 is biased by about one part in 2^32.
         integer: function(self: Random, m: integer, n?: integer): integer
 
         --- The next value in [lo, hi). Advances the generator.
-        --- A reversed pair is not an error here; it draws from [hi, lo).
+        ---
+        --- @param lo The included end, whether or not it is the smaller of the two.
+        --- @param hi The excluded end. A reversed pair is not an error and is not swapped
+        ---     either: the draw is `lo + next() * (hi - lo)` and `next` never reaches one,
+        ---     so `range(7, 3)` draws from (3, 7] rather than [3, 7).
+        --- @return A value between the two ends, and `lo` exactly when the two are equal.
         range: function(self: Random, lo: number, hi: number): number
 
         --- Fisher-Yates, in place, returning the same table. Advances the
         --- generator once per element past the first.
+        ---
+        --- @param list Reordered over `1..#list`. A list of one or of none is left alone and
+        ---     draws nothing, so how far a shared generator has moved afterwards depends on
+        ---     the lengths it was given.
+        --- @return `list` itself rather than a copy, so the caller's own reference is
+        ---     already shuffled and the return is a convenience.
         shuffle: function<T>(self: Random, list: {T}): {T}
 
-        --- Restarts the sequence from `seed`, in place.
+        --- Restarts the sequence from `seed`, in place: nothing is replaced, so anything
+        --- already holding this generator draws from the restart.
+        ---
+        --- @param seed Read as a 32-bit word, as `new` reads one, so 2^31 and -2^31 restart
+        ---     the same sequence. Zero is a seed like any other and is expanded, not
+        ---     rejected.
         reseed: function(self: Random, seed: integer)
 
         --- The four state words. Plain integers, so a snapshot, a log line or
@@ -209,8 +235,9 @@ local record random
         --- Puts four state words back, in place, so anything already holding
         --- this generator draws from what was put back.
         ---
-        --- @param words Exactly four, in the order `state` gives them. Any
-        ---     other length raises, as does all four being zero.
+        --- @param words Exactly four, in the order `state` gives them, and each read as a
+        ---     32-bit word, so a `state` result round-trips unchanged. Any other length
+        ---     raises, as does nil, as does all four being zero.
         setState: function(self: Random, words: {integer})
     end
 
@@ -226,23 +253,44 @@ local record random
         --- lookup that steps one past the end wraps without a mask.
         _perm: {integer}
 
-        --- Noise at (x, y), in [-1, 1]. Exactly zero at integer coordinates,
-        --- which is a property of gradient noise rather than a quirk here.
+        --- Noise at (x, y).
+        ---
+        --- @param x A lattice coordinate: one unit is one cell of the grid the gradients sit
+        ---     on, and the permutation wraps every 256 of them, so the field repeats on a
+        ---     256 by 256 tile. A caller scales its coordinates to choose a feature size.
+        --- @param y As `x`.
+        --- @return A value in [-1, 1], and exactly zero wherever both coordinates are whole
+        ---     numbers, which is a property of gradient noise rather than a quirk here.
         noise2: function(self: Noise, x: number, y: number): number
 
-        --- Noise at (x, y, z), in [-1, 1]. Zero at integer coordinates.
+        --- Noise at (x, y, z).
+        ---
+        --- @param x A lattice coordinate, as for `noise2`, wrapping every 256 units.
+        --- @param y As `x`.
+        --- @param z As `x`.
+        --- @return A value in [-1, 1], and exactly zero at whole coordinates.
         noise3: function(self: Noise, x: number, y: number, z: number): number
 
         --- Fractional Brownian motion: `octaves` layers of `noise2`, each
-        --- twice as fine and half as loud, normalised back into [-1, 1].
+        --- twice as fine and half as loud.
         ---
+        --- @param x The first octave's coordinate; each octave after it doubles the
+        ---     coordinate rather than moving it, so the layers share an origin.
+        --- @param y As `x`.
         --- @param octaves One or more. Zero or a negative count raises rather
-        ---     than returning a flat field, since it has no meaning here.
+        ---     than returning a flat field, since it has no meaning here. Each octave is
+        ---     one more `noise2` call, twice as fine as the last and half as loud.
+        --- @return A value in [-1, 1]: the layers are divided by the sum of their
+        ---     amplitudes, so one octave is `noise2` itself and not a scaled version of it.
         fbm2: function(self: Noise, x: number, y: number, octaves: integer): number
 
         --- The same, over `noise3`.
         ---
-        --- @param octaves One or more, as for `fbm2`.
+        --- @param x The first octave's coordinate, as for `fbm2`.
+        --- @param y As `x`.
+        --- @param z As `x`.
+        --- @param octaves One or more, as for `fbm2`, and one `noise3` call each.
+        --- @return A value in [-1, 1], normalised as `fbm2` normalises.
         fbm3: function(self: Noise, x: number, y: number, z: number, octaves: integer): number
     end
 
@@ -253,12 +301,16 @@ local record random
     ---
     --- @param seed Omitted takes a fixed constant, not a clock, so an unseeded
     ---     generator still repeats run to run.
+    --- @return A generator nothing else holds and nothing else knows about: two calls on one
+    ---     seed give two objects that draw the same sequence, each at its own pace.
     new: function(seed?: integer): Random
 
     --- A noise field from `seed`, read the same way `new` reads one.
     ---
     --- @param seed Omitted takes the same fixed constant `new` does, so two
     ---     unseeded fields are the same field.
+    --- @return A field with a permutation of its own. Building it draws 255 values from a
+    ---     generator made for the purpose, so no stream and no other generator moves.
     noise: function(seed?: integer): Noise
 
     --- The generator named `name` in `world`, made on the first ask and the
@@ -268,6 +320,9 @@ local record random
     --- uses `tecs.audio` and `tecs.runif`, so a game's own names should carry
     --- its own prefix.
     ---
+    --- @param world The first ask installs a snapshot handler named `tecs.random` on it. A
+    ---     world that loads a snapshot before anything has asked for a stream has no
+    ---     handler yet and drops the saved seed, which `random.seed` during setup avoids.
     --- @param name Nil or empty raises. Names are compared byte for byte, so
     ---     two spellings of the same idea are two independent streams.
     --- @return The world's generator for this name, not a copy: two callers
@@ -280,6 +335,9 @@ local record random
     --- Call it during setup. Calling it mid-run is well defined and rewinds
     --- everything, which is rarely what a caller means.
     ---
+    --- @param world Each stream it already handed out is reseeded in place, so a caller
+    ---     holding one keeps the object. Calling this also installs the snapshot handler,
+    ---     which is why it is what a game that loads snapshots calls during setup.
     --- @param seed Read as a 32-bit word, as `new` reads one. There is no way
     ---     to ask a world for its seed back; take it from a snapshot instead.
     seed: function(world: types.World, seed: integer)

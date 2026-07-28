@@ -14,25 +14,31 @@ local max <const> = math.max
 --- FFI-backed bitset with zero-based indexes.
 ---
 --- Indexes are bit positions counting from 0 and are never negative; the shifts that turn
---- one into a word are unsigned, so a negative index is read as an enormous positive one
---- rather than rejected. Capacity grows on its own when a bit is set past the end, so only
---- `set` and `setRange` ever allocate. Nothing else does: reading, clearing or testing past
---- the end is defined and cheap, and a `clear` never gives storage back.
+--- one into a word are unsigned, so a negative index is read as a word index near 2^27
+--- rather than rejected. `get`, `clear` and `beginScan` see that as past the end and do
+--- nothing, but `set` and `setRange` take it as real and either write outside the array or
+--- allocate half a gigabyte reaching for it, so do not pass one.
 ---
---- Not thread-safe, and holding one across a `set` is not either: growing replaces the
---- backing array, so a caller that cached `_data` is left looking at the old one.
+--- Capacity grows on its own when a bit is set past the end, and the calls that can
+--- allocate are `set`, `setRange`, `setOnly`, `ensureCapacity`, `copyFrom` and `orWith`.
+--- Nothing else does: reading, clearing or testing past the end is defined and cheap, and
+--- nothing here ever gives storage back.
+---
+--- Not thread-safe, and holding one across a call that grows is not either: growing
+--- replaces the backing array, so a caller that cached `_data` is left looking at the old one.
 local record Bitset
     --- The underlying uint32 array (each uint32 holds 32 bits)
     ---
     --- Private. Zero-based, and every word from `usedWordCount` up to `wordCount` is zero,
     --- which is the invariant the word-at-a-time paths rely on. Replaced wholesale when
-    --- capacity grows, so it must not be cached across a `set`.
+    --- capacity grows, so it must not be cached across a call that grows.
     _data: {integer}
 
     --- Number of uint32 words allocated
     wordCount: integer
 
-    --- Number of words currently in use (i.e. highest set bit index / 32 + 1)
+    --- Number of words currently in use (i.e. highest set bit index / 32 + 1), and 0 when
+    --- nothing is set.
     usedWordCount: integer
 
     --- Number of set bits.
@@ -56,23 +62,32 @@ local record Bitset
     ---
     --- @param initialCapacity Bits, not words, and only a starting size: setting a bit past
     ---     it grows rather than failing. Defaults to 64, and one word is always allocated.
+    --- @return A set with nothing in it: `count` and `getWordCount` are both 0 whatever
+    ---     capacity was asked for, and `wordCount` carries that capacity rounded up to
+    ---     whole words.
     new: function(initialCapacity?: integer): Bitset
 
     --- Set bit at index (0-based)
     ---
     --- Grows the backing array when `index` is past the end. Setting a bit that is already
     --- set changes nothing, so `count` counts distinct bits and not calls.
+    ---
+    --- @param index A bit position counting from 0, and never negative. Past the end it
+    ---     grows, which replaces `_data`. An active scan is left running, and reports the
+    ---     new bit only when its word is one the scan has yet to reach and is inside the
+    ---     bound the scan captured.
     set: function(self, index: integer)
 
     --- Set all bits in the inclusive range [lo, hi] (0-based).
     --- Equivalent to `for i = lo, hi do set(i) end` but uses word-
-    --- aligned OR-mask writes (3 cases: head-partial-word + full-
-    --- middle-words + tail-partial-word), turning a 1000-bit set
-    --- from ~1000 bit-level ops into ~32 word-level ops while
-    --- preserving an exact `count`. Each word write also pays for
-    --- one popcount delta, so per-call overhead remains word-linear.
+    --- aligned OR-mask writes (a range inside one word, else a
+    --- head-partial-word + full-middle-words + tail-partial-word),
+    --- turning a 1000-bit set from ~1000 bit-level ops into ~32
+    --- word-level ops while preserving an exact `count`. Each word
+    --- write also pays for one popcount delta, so per-call overhead
+    --- remains word-linear.
     ---
-    --- @param lo The first bit set, included.
+    --- @param lo The first bit set, included, counting from 0 and never negative.
     --- @param hi The last bit set, also included. Below `lo` is not an error and sets
     ---     nothing, so an empty range needs no guard at the call site.
     setRange: function(self, lo: integer, hi: integer)
@@ -81,10 +96,17 @@ local record Bitset
     ---
     --- Never allocates and never shrinks the backing array; only `usedWordCount` falls.
     --- An index past the end is a no-op rather than an error.
+    ---
+    --- @param index A bit position counting from 0. Anything in a word at or above
+    ---     `getWordCount` is a no-op, a negative index included, since that reads as a word
+    ---     far past the end. Clearing the highest set bit lowers `getWordCount`.
     clear: function(self, index: integer)
 
     --- Check if bit at index is set
     ---
+    --- @param index A bit position counting from 0. One in a word at or above
+    ---     `getWordCount` is answered from that count alone and never reads the array, so a
+    ---     negative index answers false rather than reading out of bounds.
     --- @return False for any index past the end, so a caller need not bound-check first.
     get: function(self, index: integer): boolean
 
@@ -97,19 +119,31 @@ local record Bitset
     --- Clear all bits, then set exactly one bit.
     ---
     --- Ends any active scan, since it clears first.
+    ---
+    --- @param index The one bit left set, counting from 0 and set exactly as `set` sets it,
+    ---     so one past the end grows here too and `count` is 1 either way.
     setOnly: function(self, index: integer)
 
     --- Returns true when every bit set in `other` is also set in `self`.
     ---
-    --- An empty `other` is contained by anything, including an empty `self`.
+    --- @param other Read and not modified. Only the words it uses are compared, so the two
+    ---     need not have the same capacity and a longer `self` costs nothing.
+    --- @return True when `other` is a subset of `self`. An empty `other` is contained by
+    ---     anything, an empty `self` included.
     containsAll: function(self, other: Bitset): boolean
 
     --- Returns true when `self` and `other` share at least one set bit.
     ---
-    --- False when either side is empty. Reads both, writes neither.
+    --- @param other Read and not modified, as is `self`. Only the words both use are
+    ---     compared.
+    --- @return True when at least one bit is set in both, false when either side is empty.
     overlaps: function(self, other: Bitset): boolean
 
     --- Returns true when `self` and `other` share no set bits.
+    ---
+    --- @param other Read and not modified, as is `self`.
+    --- @return The negation of `overlaps`, so an empty set is disjoint from everything,
+    ---     itself included.
     disjoint: function(self, other: Bitset): boolean = macroexp(self: Bitset, other: Bitset): boolean
         return not self:overlaps(other)
     end
@@ -119,30 +153,49 @@ local record Bitset
     --- The bits are copied, not shared, so the two sets are independent afterwards.
     --- `self` keeps its own capacity when that is the larger of the two. An active scan on
     --- `self` is not valid after this.
+    ---
+    --- @param other Read and not modified. Only the words it uses are copied and the rest of
+    ---     `self` is zeroed, so `self` ends with `other`'s exact `count` and
+    ---     `getWordCount` whatever either held before.
     copyFrom: function(self, other: Bitset)
 
     --- In-place set union.
     ---
     --- Grows `self` when `other` reaches further. An active scan on `self` is not valid
     --- after this.
+    ---
+    --- @param other Read and not modified. An empty `other` returns without touching `self`,
+    ---     scan included; anything else is the call that may allocate.
     orWith: function(self, other: Bitset)
 
     --- In-place set intersection.
     ---
     --- An active scan on `self` is not valid after this.
+    ---
+    --- @param other Read and not modified. Words of `self` above the ones `other` uses are
+    ---     cleared rather than kept, so an empty `other` empties `self`.
     andWith: function(self, other: Bitset)
 
     --- In-place set difference (`self = self & ~other`).
     ---
     --- An active scan on `self` is not valid after this.
+    ---
+    --- @param other Read and not modified. Words of `self` beyond it keep their bits, and an
+    ---     empty `other` returns leaving `self` and its scan alone.
     andNotWith: function(self, other: Bitset)
 
     --- Returns true when no bits are set.
+    ---
+    --- @return True when `count` is zero. It says nothing about capacity: a set that grew
+    ---     and was cleared is empty and still holds its words.
     isEmpty: function(self): boolean = macroexp(self: Bitset): boolean
         return self.count == 0
     end
 
     --- Return the number of words with any possible set bit.
+    ---
+    --- @return Words, not bits: one past the word holding the highest set bit, and 0 for an
+    ---     empty set. Not the allocated capacity, which is `wordCount`.
     getWordCount: function(self): integer = macroexp(self: Bitset): integer
         return self.usedWordCount
     end
@@ -151,6 +204,8 @@ local record Bitset
     ---
     --- Word `w` holds bits `w * 32` to `w * 32 + 31`, lowest bit first.
     ---
+    --- @param index A word index counting from 0, not a bit index, and bounded by
+    ---     `getWordCount` rather than by `wordCount`.
     --- @return The word as a signed 32-bit value, so a word with the top bit set reads
     ---     negative. Zero for an index outside `getWordCount`, negative ones included.
     getWord: function(self, index: integer): integer
@@ -158,7 +213,9 @@ local record Bitset
     --- Ensure capacity for at least n bits
     ---
     --- @param n Bits, not words. Only grows: a smaller `n` than the current capacity does
-    ---     nothing, and no call here ever frees storage.
+    ---     nothing, and no call here ever frees storage. A growth allocates at least twice
+    ---     the current capacity, so repeated calls that each add a little stay amortised,
+    ---     and every one of them replaces `_data`.
     ensureCapacity: function(self, n: integer)
 
     --- Begin a resumable scan at or after `start`.
@@ -181,6 +238,11 @@ local record Bitset
     ---
     --- This begins a scan, so it replaces any scan already running on this bitset rather
     --- than answering alongside it.
+    ---
+    --- @param start The lowest index that may be returned, included, as for `beginScan`.
+    --- @return The first set bit at or after `start`, or nil when there is none. Walking a
+    ---     set by calling this with the last answer plus one re-enters the scan from that
+    ---     word each time; `beginScan` with `nextScan` is the walk that carries on.
     nextSetBit: function(self, start: integer): integer
 end
 

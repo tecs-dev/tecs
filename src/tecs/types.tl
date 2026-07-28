@@ -72,9 +72,10 @@ local record types
             init: function(instance: self, ...: any)
 
             --- Creates an instance of the component from the container using positional arguments.
-            --- @param value The component container to create the component instance from.
-            --- @param ... Arguments used to create the component.
-            --- @return the created component.
+            --- @param ... Field values in declaration order. One left nil takes the
+            ---     field's registered default, so trailing arguments may be omitted.
+            --- @return A new instance, not a shared one, so two calls with the same
+            ---     arguments answer two values.
             metamethod __call: function(self, ...: any): self
         end
 
@@ -301,14 +302,25 @@ local record types
         --- the given component type, or nil if the archetype doesn't
         --- carry it. Does NOT mark the component dirty.
         ---
-        --- @param component The component type to retrieve.
+        --- @return The archetype's live column, indexed from one and not a
+        ---     copy, so it is valid only until something moves an entity in or
+        ---     out of this archetype. Nil only when this archetype does not
+        ---     carry the component at all. A sparse relationship answers with a
+        ---     row-indexed proxy rather than a stored column, which reads the
+        ---     same and is not writable. Writing through this leaves the column
+        ---     clean, and on an FFI component that means the GPU never
+        ---     re-syncs.
         get: function<T is components.Component>(self, component: T): {T}
 
         --- Mutable column access. Returns the row-indexed column AND
         --- marks the component dirty on this archetype. Use this at
         --- every site where you intend to write into the column.
         ---
-        --- @param component The component type to retrieve.
+        --- @return The same column `get` answers with, dirty-marked before it
+        ---     is handed over. Marked whether or not anything is then written,
+        ---     so calling this in a loop that might not write defeats every
+        ---     dirty-gated consumer; take it on the first row that actually
+        ---     changes instead.
         getMut: function<T is components.Component>(self, component: T): {T}
 
         --- Set a component value at a row and mark it dirty. Use for
@@ -316,14 +328,17 @@ local record types
         ---
         --- @param row 1-based row position.
         --- @param value New component value (must carry a `componentType`).
+        ---     Stored as given rather than copied field by field, so a table
+        ---     component holds the caller's table afterwards.
         set: function<C is components.Component>(self, row: integer, value: C)
 
         --- Iterate all relationship instances of the given container
         --- for the entity at `row`.
         ---
-        --- @param relationshipContainer The relationship container.
         --- @param row 1-based row position.
-        --- @param callback Called once per matching relationship instance.
+        --- @param callback Called once per matching relationship instance, in no
+        ---     defined order. Adding or removing relationships on this entity
+        ---     from inside it is not safe.
         forEachRelationship: function<T is components.Relationship>(
             self, relationshipContainer: T, row: integer, callback: function(T)
         )
@@ -331,8 +346,11 @@ local record types
         --- Get the first relationship instance of the given container
         --- for the entity at `row`, or nil if none exists.
         ---
-        --- @param relationshipContainer The relationship container.
         --- @param row 1-based row position.
+        --- @return The one instance for an exclusive relationship, and an
+        ---     arbitrary one of several for a relationship that is not: "first"
+        ---     is storage order rather than the order they were added. Nil when
+        ---     the entity has none.
         getFirstRelationship: function<T is components.Relationship>(self, relationshipContainer: T, row: integer): T
 
         --- True if the given component's column on this archetype is
@@ -524,6 +542,14 @@ local record types
         --- to retrieve component data.
         ---
         --- Usage: `for archetype, length, entities in query:iter() do ... end`
+        ---
+        --- @return The three values a generic `for` takes. Iteration opens a
+        ---     deferred scope on the world and closes it when the loop runs out
+        ---     of archetypes, so a `break` or an early `return` leaves the world
+        ---     deferred and every later spawn silently queues. Use `cursor` for
+        ---     a loop that may stop early. The `entities` table and the columns
+        ---     are the archetype's own and are valid only for that turn of the
+        ---     loop.
         iter: function(self): (IterFn, Query, any)
 
         --- Create an opt-in cursor for a traversal that may stop early.
@@ -533,6 +559,10 @@ local record types
         --- When breaking or returning early, retain the cursor and call
         --- `cursor:close()` to close its deferred scope and drain staged
         --- mutations.
+        ---
+        --- @return A cursor the caller has to `close`, once, on every path out
+        ---     of the loop including an early return. Closing it twice is
+        ---     harmless; never closing it leaves the world deferred for good.
         cursor: function(self): Cursor
 
         --- Iterate over active group IDs in sorted order.
@@ -1291,8 +1321,13 @@ local record types
         --- `archetype:getMut(Foo)` inside the iter loop, which
         --- marks just that component dirty on the archetype.
         ---
-        --- @param descriptor The query descriptor to create the query from.
-        --- @return the created query.
+        --- @param descriptor Read here and not retained, so editing it afterwards
+        ---     does not change the query. Give it a `name` for anything that
+        ---     outlives a call: the debugger and the profiles address queries by
+        ---     name.
+        --- @return A query that keeps itself current as archetypes appear, so it
+        ---     is built once during plugin setup and reused. Building one inside
+        ---     a system's `run` pays the match cost every frame.
         query: function(self, descriptor: Query.Descriptor): Query
 
         --- Find archetypes that have the given component.
