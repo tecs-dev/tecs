@@ -1,7 +1,11 @@
 """Formats every language in the tree that has a formatter worth running.
 
-One description of what gets formatted and by what, so the Makefile and CMake
-both call this rather than each carrying a copy of the file list.
+One description of what gets formatted and by what, so the Makefile, CMake and
+`tecs format` all call this rather than each carrying a copy of the file list.
+The CLI cannot call it, because a user's machine has this repository nowhere on
+it, so `--describe` prints the tables below as JSON and the build bakes that
+answer into the binary. There is still one description; the second consumer
+reads it rather than restating it.
 
 Files come from `git ls-files`, which is how nothing ignored is ever reached:
 the ignore rules are already written down in .gitignore and this does not get a
@@ -18,6 +22,7 @@ See STYLE.md.
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -72,22 +77,32 @@ SUFFIXES = {
 }
 NAMES = {"CMakeLists.txt": "cmake"}
 
-# language -> (tool, apply argv, check argv). The tool is named separately so a
-# missing one is reported as itself rather than as whatever the shell said.
+# language -> (tool, apply argv, check argv, module the CLI runs in process).
+# The tool is named separately so a missing one is reported as itself rather
+# than as whatever the shell said.
+#
+# The fourth entry is what `tecs format` carries inside itself. Cerulean is
+# pure Lua and is pinned by commit in cmake/Revisions.cmake, so the binary runs
+# the exact formatter this tree was formatted by rather than resolving one on a
+# user's machine. Every other language names None: those formatters are C++,
+# Rust and Node programs, and the CLI reports a missing one the same way this
+# script does rather than pretending to have it.
 TOOLS = {
-    "c": ("clang-format", ["clang-format", "-i"], ["clang-format", "--dry-run", "--Werror"]),
-    "lua": ("stylua", ["stylua"], ["stylua", "--check"]),
+    "c": ("clang-format", ["clang-format", "-i"], ["clang-format", "--dry-run", "--Werror"], None),
+    "lua": ("stylua", ["stylua"], ["stylua", "--check"], None),
     "teal": (
         "vendor/bin/ceru",
         ["vendor/bin/ceru"],
         ["vendor/bin/ceru", "--check"],
+        "cerulean.cli",
     ),
-    "python": ("ruff", ["ruff", "format", "-q"], ["ruff", "format", "-q", "--check"]),
-    "cmake": ("gersemi", ["gersemi", "-i"], ["gersemi", "--check"]),
+    "python": ("ruff", ["ruff", "format", "-q"], ["ruff", "format", "-q", "--check"], None),
+    "cmake": ("gersemi", ["gersemi", "-i"], ["gersemi", "--check"], None),
     "prettier": (
         "prettier",
         ["prettier", "--write", "--log-level", "warn"],
         ["prettier", "--check", "--log-level", "warn"],
+        None,
     ),
 }
 
@@ -127,11 +142,32 @@ def collect(paths):
     return grouped
 
 
+def describe():
+    """The tables above, as JSON, for a consumer that cannot import this."""
+    return {
+        "excluded": list(EXCLUDED),
+        "generatedMarkers": list(GENERATED_MARKERS),
+        "generatedScanLines": GENERATED_SCAN_LINES,
+        "suffixes": dict(SUFFIXES),
+        "names": dict(NAMES),
+        "tools": {
+            language: {"tool": tool, "apply": apply, "check": check, "module": module}
+            for language, (tool, apply, check, module) in TOOLS.items()
+        },
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="report what would change; write nothing")
+    parser.add_argument("--describe", action="store_true", help="print the tables as JSON; format nothing")
     parser.add_argument("paths", nargs="*", default=["."], help="limit to these paths (default: the whole tree)")
     args = parser.parse_args()
+
+    if args.describe:
+        json.dump(describe(), sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return
 
     grouped = collect(args.paths or ["."])
     missing = sorted({TOOLS[lang][0] for lang in grouped if not shutil.which(TOOLS[lang][0])})
@@ -140,7 +176,7 @@ def main():
 
     failed = []
     for language in sorted(grouped):
-        _, apply, check = TOOLS[language]
+        _, apply, check, _module = TOOLS[language]
         argv = (check if args.check else apply) + sorted(grouped[language])
         if subprocess.run(argv, cwd=REPO).returncode != 0:
             failed.append(language)

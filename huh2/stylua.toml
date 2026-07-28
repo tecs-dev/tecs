@@ -1,0 +1,20 @@
+# Lua, for the two files in a project that are Lua rather than Teal: this one's
+# neighbours `tecs.lua` and `tlconfig.lua`. `tecs format` runs StyLua over them
+# when it is installed, and reports it by name when it is not.
+#
+# The settings match the Teal side, so a project reads the same whichever
+# language a file happens to be in. Cerulean's own width and indent are set in
+# `tlconfig.lua`, because that is where Cerulean looks.
+column_width = 120
+indent_type = "Spaces"
+indent_width = 4
+quote_style = "AutoPreferDouble"
+
+# Keep the call syntax the author wrote. `require("tecs")` is a call and
+# `ffi.cdef[[ ... ]]` is a block of C; adding parentheses to the second turns a
+# declaration back into a call.
+call_parentheses = "Input"
+
+# Require order is load order. Sorting it is a behaviour change wearing a
+# formatter's clothes.
+sort_requires = { enabled = false }

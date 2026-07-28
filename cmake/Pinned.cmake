@@ -11,6 +11,26 @@ include(ExternalProject)
 include(FetchContent)
 include(${CMAKE_CURRENT_LIST_DIR}/Revisions.cmake)
 
+# Whether these are built as libraries to load or as archives to link.
+#
+# The engine reaches every one of them through the FFI, which loads a library by
+# name, so the default is shared and a static archive would leave every way of
+# running this tree that is not the host with nothing to load. TECS_SINGLE_FILE
+# is the configuration that gives that up deliberately: under the host the FFI
+# reaches a library through native/registry.c, which holds addresses taken at
+# build time, so nothing is loaded by name and there is nothing to leave behind.
+#
+# Two spellings of the same answer, because these projects disagree about which
+# variable decides. Most read BUILD_SHARED_LIBS; SDL and its satellites, Mbed
+# TLS and curl each name their own.
+if(TECS_SINGLE_FILE)
+    set(TECS_DEPS_SHARED OFF)
+    set(TECS_DEPS_STATIC ON)
+else()
+    set(TECS_DEPS_SHARED ON)
+    set(TECS_DEPS_STATIC OFF)
+endif()
+
 # Everything here ends up inside a shared object, so it is all compiled to be
 # placeable. Stated once rather than left to each dependency's own opinion,
 # because a static archive built without it links into a library only on the
@@ -195,7 +215,7 @@ FetchContent_Declare(
 # and leaves no second zlib beside it. The tests build example programs that
 # nothing runs.
 set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(ZLIB_BUILD_SHARED ON CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_SHARED ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
 # No install rules of its own. The package installs the one component it names,
 # and zlib's export set is not exportable from where SDL_image adds it: the
@@ -265,8 +285,8 @@ FetchContent_Declare(
 # the real shape of this is a few forced upgrades a year rather than a stream.
 set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(USE_SHARED_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
-set(USE_STATIC_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
+set(USE_SHARED_MBEDTLS_LIBRARY ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
+set(USE_STATIC_MBEDTLS_LIBRARY ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
 # Mbed TLS compiles itself with warnings as errors, which makes a compiler
 # newer than the pin a build failure in a dependency rather than a warning.
 set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -330,7 +350,7 @@ FetchContent_Declare(
 set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
-set(BUILD_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
 set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
 set(CURL_USE_MBEDTLS ON CACHE BOOL "" FORCE)
 set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
@@ -395,8 +415,18 @@ message(STATUS "tecs: fetching pinned dependencies")
 # engine reaches both through the FFI, which loads a library by name rather
 # than linking one. A static archive would link into the host and leave every
 # other way of running this tree, a spec under a plain interpreter among them,
-# with nothing to load.
-set(BUILD_SHARED_LIBS ON)
+# with nothing to load. A single-file build gives that up on purpose; see the
+# reasoning at the top of this file.
+set(BUILD_SHARED_LIBS ${TECS_DEPS_SHARED})
+
+# SDL and its three satellites each decide for themselves rather than reading
+# BUILD_SHARED_LIBS, so each is told. Static SDL on Apple carries the frameworks
+# it needs as interface link libraries, so nothing here has to name them.
+set(SDL_SHARED ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
+set(SDL_STATIC ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
+set(SDLIMAGE_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
+set(SDLMIXER_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
+set(SDLNET_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 
 # zlib first and alone. It is only fetched here, and it has to be on disk
 # before SDL_image is, because SDL_image's patch step copies it into place.
@@ -444,14 +474,20 @@ set(TECS_LUAJIT_PREFIX "${CMAKE_BINARY_DIR}/luajit")
 set(TECS_LUAJIT_INCLUDE_DIRS "${TECS_LUAJIT_PREFIX}/include/luajit-2.1")
 
 # What LuaJIT's own Makefile calls these: ABIVER is 5.1, and its install leaves
-# an unversioned link beside the file the version number is in.
+# an unversioned link beside the file the version number is in. Its `make
+# install` produces both kinds whatever this asks for, so a single-file build
+# simply names the archive and leaves the library where it was built.
 if(APPLE)
-    set(tecsLuajitLibrary "${TECS_LUAJIT_PREFIX}/lib/libluajit-5.1.dylib")
+    set(tecsLuajitSoname "libluajit-5.1.dylib")
 else()
-    set(tecsLuajitLibrary "${TECS_LUAJIT_PREFIX}/lib/libluajit-5.1.so")
+    set(tecsLuajitSoname "libluajit-5.1.so")
 endif()
 
-cmake_path(GET tecsLuajitLibrary FILENAME tecsLuajitSoname)
+if(TECS_SINGLE_FILE)
+    set(tecsLuajitLibrary "${TECS_LUAJIT_PREFIX}/lib/libluajit-5.1.a")
+else()
+    set(tecsLuajitLibrary "${TECS_LUAJIT_PREFIX}/lib/${tecsLuajitSoname}")
+endif()
 
 # The versioned file that link points at. Its name carries the rolling version,
 # which is the other half of what Revisions.cmake pins, so a commit raised
@@ -509,13 +545,16 @@ add_library(tecs::luajit ALIAS tecs_luajit)
 # The versioned file, under the unversioned name its install name announces.
 # Installing the link instead copies a link, and the file it points at is not
 # one of the two this package wants, so what would arrive is a name resolving
-# to nothing.
-install(
-    FILES "${TECS_LUAJIT_PREFIX}/lib/${tecsLuajitVersioned}"
-    DESTINATION lib
-    COMPONENT tecs
-    RENAME ${tecsLuajitSoname}
-)
+# to nothing. A single-file build installs no library at all: the archive is
+# inside the executable.
+if(NOT TECS_SINGLE_FILE)
+    install(
+        FILES "${TECS_LUAJIT_PREFIX}/lib/${tecsLuajitVersioned}"
+        DESTINATION lib
+        COMPONENT tecs
+        RENAME ${tecsLuajitSoname}
+    )
+endif()
 
 # ------------------------------------------------------------------- shaderc
 
@@ -596,20 +635,30 @@ set(TECS_SHADERC_INCLUDE_DIRS "${shaderc_SOURCE_DIR}/libshaderc/include")
 #
 # Wrapped rather than aliased, because most of what these name is itself an
 # alias its project publishes and CMake will not alias one of those again.
-function(tecs_pinned_library name target)
-    add_library(tecs_${name} INTERFACE)
-    target_link_libraries(tecs_${name} INTERFACE ${target})
-    add_library(tecs::${name} ALIAS tecs_${name})
+# Several of these publish one name for a shared build and another for a static
+# one, so each is given both and the first that exists is taken. Asking which
+# kind of build this is at every call site would be the same test written eight
+# times, and would be wrong the day one of these projects renamed a target.
+function(tecs_pinned_library name)
+    foreach(candidate IN LISTS ARGN)
+        if(TARGET ${candidate})
+            add_library(tecs_${name} INTERFACE)
+            target_link_libraries(tecs_${name} INTERFACE ${candidate})
+            add_library(tecs::${name} ALIAS tecs_${name})
+            return()
+        endif()
+    endforeach()
+    message(FATAL_ERROR "tecs: none of these targets exist for ${name}: ${ARGN}")
 endfunction()
 
-tecs_pinned_library(sdl3 SDL3::SDL3)
-tecs_pinned_library(sdl3image SDL3_image::SDL3_image)
-tecs_pinned_library(sdl3mixer SDL3_mixer::SDL3_mixer)
-tecs_pinned_library(sdl3net SDL3_net::SDL3_net)
+tecs_pinned_library(sdl3 SDL3::SDL3 SDL3::SDL3-static)
+tecs_pinned_library(sdl3image SDL3_image::SDL3_image SDL3_image::SDL3_image-static)
+tecs_pinned_library(sdl3mixer SDL3_mixer::SDL3_mixer SDL3_mixer::SDL3_mixer-static)
+tecs_pinned_library(sdl3net SDL3_net::SDL3_net SDL3_net::SDL3_net-static)
 tecs_pinned_library(box2d box2d)
-tecs_pinned_library(curl CURL::libcurl)
-tecs_pinned_library(zlib ZLIB::ZLIB)
-tecs_pinned_library(shaderc shaderc_shared)
+tecs_pinned_library(curl CURL::libcurl CURL::libcurl_static)
+tecs_pinned_library(zlib ZLIB::ZLIB zlibstatic)
+tecs_pinned_library(shaderc shaderc_shared shaderc)
 
 # Header directories, for the binding generator. It runs the preprocessor
 # itself rather than compiling through a target, so it is given directories
@@ -642,18 +691,25 @@ set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl
 # SPIRV-Tools, libpng and SDL_mixer's four decoders are static, and are inside
 # the libraries above rather than beside them. LuaJIT is installed further up,
 # by name, because its build is not one of these.
-install(
-    TARGETS
-        SDL3-shared
-        SDL3_image-shared
-        SDL3_mixer-shared
-        SDL3_net-shared
-        box2d
-        libcurl_shared
-        zlib
-        mbedtls
-        mbedx509
-        tfpsacrypto
-        shaderc_shared
-    LIBRARY DESTINATION lib COMPONENT tecs
-)
+#
+# A single-file build installs none of them, because every one is an archive
+# inside the executable and there is nothing left to put beside it. The licence
+# obligation does not go away with the file: the notices travel in the payload,
+# and `tecs info --licenses` is where they are read.
+if(NOT TECS_SINGLE_FILE)
+    install(
+        TARGETS
+            SDL3-shared
+            SDL3_image-shared
+            SDL3_mixer-shared
+            SDL3_net-shared
+            box2d
+            libcurl_shared
+            zlib
+            mbedtls
+            mbedx509
+            tfpsacrypto
+            shaderc_shared
+        LIBRARY DESTINATION lib COMPONENT tecs
+    )
+endif()

@@ -14,8 +14,45 @@ option(TECS_SYSTEM_DEPS "Resolve dependencies from the system rather than pinned
 option(TECS_BUILD_LUA "Generate FFI bindings and compile the Teal sources" ON)
 option(TECS_RUNTIME_SHADERS "Link a shader compiler, for development. Releases use packaged artifacts." ON)
 
+# One executable and nothing beside it.
+#
+# Two things happen together and neither is useful alone: every dependency is
+# linked as an archive rather than loaded as a library, and the whole content
+# root is deflated into an array compiled in. The first is possible because the
+# engine already never calls `ffi.load` under its own host: native/registry.c
+# installs a table of function pointers taken at build time and
+# src/tecs/ffi/loader.tl prefers it, so static linking here is a link
+# configuration rather than a design change.
+#
+# What it costs is the ways of running this tree that are not the host. A spec
+# under a plain interpreter loads libraries by name and there are none to load,
+# so this is its own preset rather than a flag on the packaged one, and
+# `make test` and `make test-package` go on testing what they tested.
+option(TECS_SINGLE_FILE "Link everything into one executable and carry the content root inside it" OFF)
+
+if(TECS_SINGLE_FILE AND TECS_SYSTEM_DEPS)
+    message(
+        FATAL_ERROR
+        "tecs: TECS_SINGLE_FILE needs pinned sources. A package manager installs shared libraries, and "
+        "there is nothing to link statically. Configure the macos-arm64-single preset."
+    )
+endif()
+
 set(TECS_SPEC_OUT "${CMAKE_BINARY_DIR}/spec" CACHE PATH "Where compiled Teal specs are written")
 set(TECS_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH "Where compiled Lua and generated bindings are written")
+
+# The Teal sources are a build artifact too, even though nothing compiles them.
+# `tl` reads types out of `.tl` and a compiled `.lua` carries none, so a game
+# type-checking against an installed tecs needs these on its include path. They
+# are staged beside the compiled Lua rather than left in the source tree so the
+# CLI finds them at the same place in a build tree and in an installed one: the
+# content root's sibling, in both.
+set(TECS_TEAL_OUT "${CMAKE_BINARY_DIR}/teal" CACHE PATH "Where the Teal type information is staged")
+
+# Which chunk the host loads when it is not given one. A release of the command
+# line tool bakes in the CLI; everything else bakes in the demo and reaches the
+# CLI through `--entry`, which is the seam that already existed for benchmarks.
+set(TECS_ENTRY "main.lua" CACHE STRING "Entry chunk, relative to the content root")
 
 # ---------------------------------------------------------------- dependencies
 
@@ -146,15 +183,29 @@ target_compile_definitions(tecs_cjson PRIVATE ${TECS_CJSON_DEFINES})
 target_link_libraries(tecs_cjson PRIVATE tecs::luajit)
 set_target_properties(tecs_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_library(cjson MODULE ${TECS_CJSON_SOURCES})
-target_compile_definitions(cjson PRIVATE ${TECS_CJSON_DEFINES})
-set_target_properties(
-    cjson
-    PROPERTIES PREFIX "" SUFFIX ".so" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-)
-target_link_libraries(cjson PRIVATE tecs::luajit)
+# The loadable copy exists for the ways of running this tree that are not the
+# host: a spec or a tool under a plain interpreter requires `cjson` the ordinary
+# way. A single-file build has no such way, and a `.so` beside a binary that is
+# meant to be the only file is the thing it is meant not to have.
+if(NOT TECS_SINGLE_FILE)
+    add_library(cjson MODULE ${TECS_CJSON_SOURCES})
+    target_compile_definitions(cjson PRIVATE ${TECS_CJSON_DEFINES})
+    set_target_properties(
+        cjson
+        PROPERTIES PREFIX "" SUFFIX ".so" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    )
+    target_link_libraries(cjson PRIVATE tecs::luajit)
+endif()
 
-add_library(tecs_worker SHARED native/worker.c native/logsink.c native/taskpool.c native/luamods.c)
+# Shared everywhere but a single-file build, where every library the FFI would
+# have loaded by name is an archive inside the executable instead.
+if(TECS_SINGLE_FILE)
+    set(TECS_LIBRARY_KIND STATIC)
+else()
+    set(TECS_LIBRARY_KIND SHARED)
+endif()
+
+add_library(tecs_worker ${TECS_LIBRARY_KIND} native/worker.c native/logsink.c native/taskpool.c native/luamods.c)
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit)
 # Box2D's headers, for the task callback types the pool is declared with. No
@@ -165,7 +216,11 @@ target_include_directories(tecs_worker PRIVATE ${TECS_BOX2D_INCLUDE_DIRS})
 # SPIRV-Cross ships static archives only, and the FFI needs a shared object.
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
 # from this stub, so without it the linker would discard all of them.
-add_library(tecs_spirvcross SHARED native/spirvcross.c)
+#
+# A single-file build needs no shared object, because the FFI reaches the C API
+# through the registry rather than through a handle it had to resolve. The stub
+# collapses into the executable and the whole-archive options move with it.
+add_library(tecs_spirvcross ${TECS_LIBRARY_KIND} native/spirvcross.c)
 set_target_properties(
     tecs_spirvcross
     PROPERTIES OUTPUT_NAME spirvcrossc LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -199,14 +254,22 @@ foreach(archive IN LISTS TECS_SPVC_ARCHIVES)
     list(APPEND TECS_SPVC_WHOLE "${SPVC_${archive}_LIB}")
 endforeach()
 
-if(APPLE)
-    target_link_options(tecs_spirvcross PRIVATE -Wl,-all_load)
+# Whole-archive linking only applies where something is actually being linked.
+# A static `tecs_spirvcross` is an archive of one object file and the eight
+# below stay separate archives, so the options move to the executable that
+# joins them, which is the only place a linker sees them all at once.
+if(NOT TECS_SINGLE_FILE)
+    if(APPLE)
+        target_link_options(tecs_spirvcross PRIVATE -Wl,-all_load)
+    else()
+        target_link_options(tecs_spirvcross PRIVATE -Wl,--whole-archive)
+    endif()
+    target_link_libraries(tecs_spirvcross PRIVATE ${TECS_SPVC_WHOLE})
+    if(NOT APPLE)
+        target_link_options(tecs_spirvcross PRIVATE -Wl,--no-whole-archive)
+    endif()
 else()
-    target_link_options(tecs_spirvcross PRIVATE -Wl,--whole-archive)
-endif()
-target_link_libraries(tecs_spirvcross PRIVATE ${TECS_SPVC_WHOLE})
-if(NOT APPLE)
-    target_link_options(tecs_spirvcross PRIVATE -Wl,--no-whole-archive)
+    target_link_libraries(tecs_spirvcross PUBLIC ${TECS_SPVC_WHOLE})
 endif()
 set_target_properties(tecs_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
 
@@ -219,7 +282,7 @@ add_executable(tecs native/host.c native/luamods.c native/mcodearena.c)
 # against it, so the layout is described once here instead of being sniffed for
 # at run time.
 set(TECS_CONTENT "../share/tecs/lua/" CACHE STRING "Content directory relative to the installed executable")
-target_compile_definitions(tecs PRIVATE TECS_CONTENT="${TECS_CONTENT}")
+target_compile_definitions(tecs PRIVATE TECS_CONTENT="${TECS_CONTENT}" TECS_ENTRY="${TECS_ENTRY}")
 set_target_properties(tecs PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 target_link_libraries(tecs PRIVATE tecs::sdl3 tecs::luajit)
 
@@ -227,6 +290,14 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     # LuaJIT on x64 macOS needs its allocations below 2GB.
     target_link_options(tecs PRIVATE -pagezero_size 10000 -image_base 100000000)
 endif()
+
+# A single-file build needs no whole-archive option anywhere, and the reason is
+# the registry. `-all_load` exists on the shared stub because native/spirvcross.c
+# references none of the C API's symbols, so a linker resolving normally would
+# discard all of them. Here the generated `spvcapi.c` takes the address of every
+# one by name, which is exactly the reference ordinary archive resolution needs.
+# The same holds for SDL, Box2D, curl and the rest: the registry is what makes
+# them reachable, and it is what makes them linkable.
 
 # ------------------------------------------------------- generated bindings
 
@@ -503,6 +574,156 @@ if(TECS_BUILD_LUA)
         VERBATIM
     )
 
+    # ------------------------------------------------------------------- CLI
+    #
+    # The command line tool is Teal like everything else, compiled by the same
+    # compiler into the same content root, and it is reached the same way a
+    # game is: the host loads an entry chunk that returns an application. So
+    # `tecs check` and a running game are one binary with two entry chunks, and
+    # nothing here is a second program.
+    #
+    # `cli/tecscli.tl` is that chunk and `cli/tecscli/` is everything under it.
+    # Templates are excluded from compilation because they are a project's
+    # sources, not this one's: they name a `tecs` global this tree's `tl check`
+    # does not declare, and they are written out verbatim rather than run.
+    file(GLOB_RECURSE TECS_CLI_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/cli/*.tl")
+    list(FILTER TECS_CLI_TL EXCLUDE REGEX "/templates/")
+    list(FILTER TECS_CLI_TL EXCLUDE REGEX "\\.d\\.tl$")
+    add_custom_target(
+        tecs_cli_lua
+        ALL
+        COMMAND
+            tl -q gen -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1" -I "${CMAKE_SOURCE_DIR}/vendor/tl" -I
+            "${CMAKE_SOURCE_DIR}/src" -I "${CMAKE_SOURCE_DIR}/cli" --root "${CMAKE_SOURCE_DIR}/cli" --output-dir
+            "${TECS_LUA_OUT}" ${TECS_CLI_TL}
+        DEPENDS ${TECS_CLI_TL} tecs_lua
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Compiling the CLI"
+        VERBATIM
+    )
+
+    # What `tecs new` writes out. Inside the binary rather than fetched, which
+    # is what makes a cold install able to scaffold with no network.
+    file(GLOB_RECURSE TECS_CLI_TEMPLATES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/cli/tecscli/templates/*")
+    add_custom_target(
+        tecs_cli_templates
+        ALL
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/cli/tecscli/templates"
+            "${TECS_LUA_OUT}/tecscli/templates"
+        DEPENDS ${TECS_CLI_TEMPLATES}
+        COMMENT "Copying project templates"
+        VERBATIM
+    )
+
+    # The pinned type checker and formatter, staged out of the vendor tree.
+    # Both are pure Lua and both are dependencies in the same sense as SDL:
+    # cmake/Revisions.cmake names the commit, and a tree checked by one
+    # revision and formatted by another is what the pin exists to prevent.
+    add_custom_command(
+        OUTPUT "${TECS_LUA_OUT}/tecstools/tl.lua"
+        COMMAND
+            ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/stagetools.py" --vendor
+            "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1" --licenses "${CMAKE_SOURCE_DIR}/vendor/licenses" --out
+            "${TECS_LUA_OUT}/tecstools"
+        DEPENDS "${CMAKE_SOURCE_DIR}/scripts/stagetools.py"
+        COMMENT "Staging the pinned Teal and Cerulean"
+        VERBATIM
+    )
+
+    # What gets formatted and by what, taken from scripts/format.py rather than
+    # restated, plus the two revisions above. `tecs format` reads this, so the
+    # repository's own `make format` and a user's `tecs format` cannot disagree
+    # about one file.
+    include(cmake/Revisions.cmake)
+    add_custom_command(
+        OUTPUT "${TECS_LUA_OUT}/tecscli/toolchain.lua"
+        COMMAND
+            ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/gentooling.py" --teal-ref "${TECS_TL_REF}" --cerulean-ref
+            "${TECS_CERULEAN_REF}" --out "${TECS_LUA_OUT}/tecscli/toolchain.lua"
+        DEPENDS
+            "${CMAKE_SOURCE_DIR}/scripts/gentooling.py"
+            "${CMAKE_SOURCE_DIR}/scripts/format.py"
+            "${CMAKE_SOURCE_DIR}/cmake/Revisions.cmake"
+        COMMENT "Generating the toolchain table"
+        VERBATIM
+    )
+
+    add_custom_target(
+        tecs_cli_tools
+        ALL
+        DEPENDS "${TECS_LUA_OUT}/tecstools/tl.lua" "${TECS_LUA_OUT}/tecscli/toolchain.lua"
+    )
+
+    # The notices, staged as a directory so they can be packed like everything
+    # else. A statically linked binary has no adjacent file to put them in, and
+    # permissive still means the notice travels with the code: a package
+    # carrying the code and not the notice is the only licence failure this
+    # engine is capable of committing on its own. `tecs info --licenses` prints
+    # what lands here.
+    add_custom_target(
+        tecs_notices
+        ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/notices"
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            "${CMAKE_SOURCE_DIR}/LICENSE-MIT" "${CMAKE_SOURCE_DIR}/LICENSE-APACHE" "${CMAKE_BINARY_DIR}/notices"
+        COMMENT "Staging licence notices"
+        VERBATIM
+    )
+
+    # Type information, staged beside the compiled Lua. `tl` reads types out of
+    # `.tl` and a compiled `.lua` carries none, so a game checking against an
+    # installed tecs needs these; the CLI's own go too, because a spec requires
+    # `tecscli.testing` and a require that cannot be typed is a spec that
+    # cannot be checked. Staged rather than read from `src/` so the CLI finds
+    # them at the content root's sibling in a build tree and in an install
+    # alike, and there is one rule rather than two.
+    add_custom_target(
+        tecs_teal
+        ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src" "${TECS_TEAL_OUT}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/cli/tecscli" "${TECS_TEAL_OUT}/tecscli"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${TECS_TEAL_OUT}/tecscli/templates"
+        DEPENDS ${TECS_TL} ${TECS_CLI_TL}
+        COMMENT "Staging Teal type information"
+        VERBATIM
+    )
+
+    # ------------------------------------------------------------- payload
+    #
+    # Everything above, deflated into an array the executable carries. Only a
+    # single-file build generates it; every other configuration has the same
+    # files in a directory beside the binary and compiles none of this.
+    #
+    # The command depends on the targets rather than on their outputs, because
+    # what it packs is two whole directory trees and naming every file in them
+    # here would be a second description of what the build produces.
+    if(TECS_SINGLE_FILE)
+        set(TECS_PAYLOAD_SOURCE "${CMAKE_BINARY_DIR}/generated/payload_data.c")
+        add_custom_command(
+            OUTPUT "${TECS_PAYLOAD_SOURCE}"
+            COMMAND
+                ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/genpayload.py" --root "lua=${TECS_LUA_OUT}" --root
+                "teal=${TECS_TEAL_OUT}" --root "notices=${CMAKE_BINARY_DIR}/notices" --out "${TECS_PAYLOAD_SOURCE}"
+            DEPENDS
+                "${CMAKE_SOURCE_DIR}/scripts/genpayload.py"
+                tecs_lua
+                tecs_assets
+                tecs_cli_lua
+                tecs_cli_templates
+                tecs_cli_tools
+                tecs_teal
+                tecs_notices
+            COMMENT "Packing the content root"
+            VERBATIM
+        )
+        target_sources(tecs PRIVATE "${TECS_PAYLOAD_SOURCE}" "${CMAKE_SOURCE_DIR}/cli/payload.c")
+        target_include_directories(tecs PRIVATE "${CMAKE_SOURCE_DIR}/cli" ${TECS_ZLIB_INCLUDE_DIRS})
+        target_compile_definitions(tecs PRIVATE TECS_PAYLOAD=1)
+        target_link_libraries(tecs PRIVATE tecs::zlib)
+    endif()
+
     # Specs written in Teal, compiled the same way. The ECS suites are written
     # in Teal and the engine's in Lua, so both forms are built and Busted is
     # pointed at both trees.
@@ -574,20 +795,28 @@ install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs COMPON
 # licence failure this engine is actually capable of committing. The engine's
 # own two licences go for the same reason, since MIT asks the same thing.
 # `scripts/checkpackage.py` fails an install that is missing any of them.
-install(
-    FILES
-        "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
-        "${CMAKE_SOURCE_DIR}/LICENSE-MIT"
-        "${CMAKE_SOURCE_DIR}/LICENSE-APACHE"
-    DESTINATION share/tecs
-    COMPONENT tecs
-)
+if(NOT TECS_SINGLE_FILE)
+    install(
+        FILES
+            "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            "${CMAKE_SOURCE_DIR}/LICENSE-MIT"
+            "${CMAKE_SOURCE_DIR}/LICENSE-APACHE"
+        DESTINATION share/tecs
+        COMPONENT tecs
+    )
+endif()
 
 install(TARGETS tecs RUNTIME DESTINATION bin COMPONENT tecs)
-install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib COMPONENT tecs)
-install(TARGETS cjson LIBRARY DESTINATION lib COMPONENT tecs)
-if(TECS_BUILD_LUA)
-    install(DIRECTORY "${TECS_LUA_OUT}/" DESTINATION share/tecs/lua COMPONENT tecs)
+
+# One file means one file. A single-file install is the executable and nothing
+# else: no libraries to sit beside it, no content root to resolve against, and
+# no notices file, because all three are inside it.
+if(NOT TECS_SINGLE_FILE)
+    install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib COMPONENT tecs)
+    install(TARGETS cjson LIBRARY DESTINATION lib COMPONENT tecs)
+    if(TECS_BUILD_LUA)
+        install(DIRECTORY "${TECS_LUA_OUT}/" DESTINATION share/tecs/lua COMPONENT tecs)
+    endif()
 endif()
 
 # The Teal sources are the package's type information. `tl` reads types out of
@@ -596,4 +825,21 @@ endif()
 # them. `tecs/global.d.tl` is among them, and is what declares the `tecs`
 # global; it derives its type from `tecs/init.tl` rather than restating it, so
 # it only works with the rest of the tree beside it.
-install(DIRECTORY "${CMAKE_SOURCE_DIR}/src/" DESTINATION share/tecs/teal COMPONENT tecs FILES_MATCHING PATTERN "*.tl")
+#
+# Taken from the staged tree rather than from `src/`, because the CLI's own
+# `.tl` go here too and they come from a second directory. Staging is what
+# makes the answer one directory in both trees.
+if(TECS_SINGLE_FILE)
+    # In the payload with everything else, under the same `teal` name, so the
+    # CLI reaches it the same way in all three trees.
+elseif(TECS_BUILD_LUA)
+    install(DIRECTORY "${TECS_TEAL_OUT}/" DESTINATION share/tecs/teal COMPONENT tecs FILES_MATCHING PATTERN "*.tl")
+else()
+    install(
+        DIRECTORY "${CMAKE_SOURCE_DIR}/src/"
+        DESTINATION share/tecs/teal
+        COMPONENT tecs
+        FILES_MATCHING
+        PATTERN "*.tl"
+    )
+endif()

@@ -55,3 +55,24 @@ set(TECS_SPVC_TAG "vulkan-sdk-1.4.313.0" CACHE STRING "SPIRV-Cross revision")
 set(TECS_ZLIB_TAG "v1.3.2" CACHE STRING "zlib revision")
 set(TECS_CURL_TAG "curl-8_21_0" CACHE STRING "libcurl revision")
 set(TECS_MBEDTLS_TAG "mbedtls-4.1.1" CACHE STRING "Mbed TLS revision, curl's TLS backend")
+
+# The type checker and the formatter, which are dependencies in the same sense
+# as the rest of this file even though neither is linked. Both are pure Lua,
+# both are installed into the ignored vendor tree by `make dev-tools`, and both
+# are compiled into the `tecs` binary so a user runs the same two programs this
+# tree is checked and formatted by.
+#
+# Exact commits rather than releases, because both move ahead of their last
+# release and this tree uses syntax the releases do not understand. That is not
+# an inconvenience to be worked around later: a formatter resolved at run time
+# is a formatter that can change under a user, and one did. A floating Cerulean
+# dropped the bodies of three `= macroexp(...)` declarations while `tl check`
+# still passed, because what survives such a rewrite is the declaration and
+# what vanishes is only the implementation. A pinned formatter inside the
+# binary is the fix, and the pin is the feature.
+#
+# The Makefile reads both out of this file rather than declaring them again,
+# so `make dev-tools` installs what the build bakes in.
+set(TECS_TL_REF "1326d829790b92e23defe69fcf40460103b60d1d" CACHE STRING "Teal revision")
+set(TECS_CERULEAN_REF "ae9c61af4747d3db0a3fa99fde7157ed6c39bf65" CACHE STRING "Cerulean revision")
+set(TECS_TEALDOC_REF "d9f3a9ef820c7a2d5751cbae66e49f85c4c423a1" CACHE STRING "tealdoc revision")

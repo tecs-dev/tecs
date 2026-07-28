@@ -35,6 +35,14 @@
 #include "luamods.h"
 #include "mcodearena.h"
 
+/* A single-file build has no directory beside the executable, so the entry
+ * chunk and everything under it come out of an array compiled in. Everything
+ * else has a content root on disk and does not compile this at all, which is
+ * why the two calls below are the whole of the difference. */
+#ifdef TECS_PAYLOAD
+#include "payload.h"
+#endif
+
 typedef struct TecsHost TecsHost;
 
 #ifndef TECS_ENTRY
@@ -550,6 +558,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
      * libraries through it rather than trying to load them by name. */
     tecsRegistryInstall(host->L);
     tecsLuaModulesInstall(host->L);
+#ifdef TECS_PAYLOAD
+    tecsPayloadInstall(host->L);
+#endif
 
     lua_State *L = host->L;
     lua_newtable(L);
@@ -601,6 +612,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
     SDL_free(content);
 
+    /* From the payload where there is one and the name is in it, and from a
+     * file otherwise. A payload build still honours `--entry`, because that is
+     * how `tecs run` hands off to a game whose chunk is on disk and could not
+     * have been compiled in. */
+    int compiled = -1;
+#ifdef TECS_PAYLOAD
+    compiled = tecsPayloadLoadChunk(L, entry);
+#endif
+    if (compiled < 0) compiled = luaL_loadfile(L, entry);
+
+    lua_pushcfunction(L, traceback);
     /* The engine is loaded before a game's first line, so `tecs` is simply
      * there. Requiring it is what sets the global, and asking every file to do
      * that is ceremony a game should never have to think about: a game writes
@@ -609,7 +631,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
      * A tool running under a plain interpreter never reaches this, so the
      * headless property holds: nothing outside the host pays for the engine
      * unless it asks. */
-    lua_pushcfunction(L, traceback);
     lua_getglobal(L, "require");
     lua_pushstring(L, "tecs");
     if (lua_pcall(L, 1, 0, -3) != 0) {
@@ -618,7 +639,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
 
-    int loaded = luaL_loadfile(L, entry) == 0 && lua_pcall(L, 0, 1, -2) == 0;
+    lua_insert(L, -2);
+    int loaded = compiled == 0 && lua_pcall(L, 0, 1, -2) == 0;
     if (!loaded) {
         SDL_Log("tecs: %s", lua_tostring(L, -1));
         SDL_free(resolved);

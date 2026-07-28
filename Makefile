@@ -14,12 +14,21 @@ TL     := $(CURDIR)/vendor/bin/tl
 # Development tools are installed into the ignored vendor rock tree at exact
 # commits. Teal and Cerulean both move ahead of releases that understand the
 # syntax used here, so floating development rocks are not reproducible.
-TL_REF        ?= 1326d829790b92e23defe69fcf40460103b60d1d
-CERULEAN_REF  ?= ae9c61af4747d3db0a3fa99fde7157ed6c39bf65
-# Renders docs/modules/surface.md, which is committed and diffed against a
-# fresh render, so an unpinned tealdoc would fail the diff on somebody else's
-# machine rather than on the change that moved the surface.
-TEALDOC_REF   ?= d9f3a9ef820c7a2d5751cbae66e49f85c4c423a1
+#
+# Read out of cmake/Revisions.cmake rather than declared here, because the same
+# two commits are compiled into the `tecs` binary and a tree formatted by one
+# version and checked by another is the failure this pin exists to prevent.
+#
+# Matched on the variable name alone and split on the quotes, because make
+# counts parentheses inside `$(shell ...)` and a regex holding one does not
+# survive being written here.
+REVISIONS     := cmake/Revisions.cmake
+TL_REF        ?= $(shell grep TECS_TL_REF $(REVISIONS) | cut -d'"' -f2)
+CERULEAN_REF  ?= $(shell grep TECS_CERULEAN_REF $(REVISIONS) | cut -d'"' -f2)
+# Renders the generated reference page, which is committed and diffed against a
+# fresh render, so an unpinned tealdoc fails that diff on somebody else's
+# machine rather than on the change that moved a signature.
+TEALDOC_REF   ?= $(shell grep TECS_TEALDOC_REF $(REVISIONS) | cut -d'"' -f2)
 
 # The build system owns these locations, so it passes them rather than having
 # the engine guess where its own output went.
@@ -67,8 +76,12 @@ PACKAGE_ENV  = TECS_LUA=$(PACKAGE_LUA) TECS_LIB=$(PACKAGE_LIB) \
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
 SPEC_TL   := $(shell find spec -name '*.tl' 2>/dev/null)
 BENCH_TL  := $(shell find bench -name '*.tl' 2>/dev/null)
+# The CLI, minus its templates. Those are a generated project's sources rather
+# than this tree's: they are written against the `tecs` global, which this
+# tree's own check does not declare, and nothing here ever runs them.
+CLI_TL    := $(shell find cli -name '*.tl' -not -path 'cli/tecscli/templates/*' 2>/dev/null)
 # tl searches include paths last-first, so ours come last and win.
-TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
+TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl -I $(CURDIR)/cli
 
 .PHONY: help all configure build check test test-package abi-check run clean \
         rebuild deps dev-tools package check-package presets shaders \
@@ -108,7 +121,7 @@ build: ## Build the selected preset
 	@cmake --build --preset $(PRESET)
 
 check: ## Type-check Teal sources
-	@$(TL) check $(TL_FLAGS) $(SOURCE_TL) $(BENCH_TL) main.tl
+	@$(TL) check $(TL_FLAGS) $(SOURCE_TL) $(BENCH_TL) $(CLI_TL) main.tl
 
 # Formatting needs no build, so these call the script rather than going through
 # CMake. It is the same script the CMake targets of these names run, so there is
