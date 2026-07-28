@@ -5,403 +5,169 @@
 --- nothing in this tree writes a compressed byte. Shader packs are LuaJIT's own
 --- serialization, snapshots go through JSON, and a screenshot is compressed
 --- inside `IMG_SavePNG` where SDL_image owns the encoder. So there is no
---- `deflate` here, and adding one before something needs it would be shipping a
---- second implementation of a format to have no callers verify it.
+--- `deflate` here. zlib puts one within reach of a single call, which changes
+--- what an encoder would cost to write and not what it would cost to trust: one
+--- with no caller is one nothing exercises, and the caller that wants it is what
+--- should bring it.
 ---
---- **Why this is still Lua.** Not because zlib is out of reach. It is pinned,
---- generated into `tecs.ffi.zlib`, carried through the ABI check and loaded the
---- same way every other native library is, because libcurl needs it to answer a
---- `Content-Encoding`. `zlib.C.inflate` is two lines away.
+--- **zlib decodes.** It is pinned, generated into `tecs.ffi.zlib`, carried
+--- through the ABI check and loaded the same way every other native library is,
+--- because libcurl needs it to answer a `Content-Encoding`. Once it is in the
+--- process for that, a decoder written here would be a second implementation of
+--- the format to keep correct, and the slower one. It loads on a worker the way
+--- every other binding does: `loader.declare` installs the cdef once per
+--- `lua_State`, so a worker that requires this module gets it there rather than
+--- inheriting anything from the thread that spawned it.
 ---
---- What is left is the cost of the change rather than the cost of the
---- dependency. This decoder is checked against a corpus and against the failure
---- modes below, and swapping it means proving the replacement rejects the same
---- malformed streams in the same way, holds the same contract about how much
---- output it will produce for a given input, and behaves the same on a worker
---- thread. That is its own piece of work with its own evidence, and nothing is
---- waiting on it: decompressing an asset happens once, when the asset loads, on
---- a worker, off the frame. When it is worth doing, the functions below keep
---- their names and their signatures and something else answers them.
----
---- **What it costs.** Symbols are decoded a bit at a time against the canonical
---- code, which is the small, checkable form rather than the fast one. A
---- table-driven decoder is the upgrade if a caller ever needs it, and it is a
---- change to `decode` alone.
+--- **`inflate` over a stream rather than `uncompress`.** `uncompress` wants the
+--- decompressed size up front and treats a wrong one as a failure, and no caller
+--- here has that number: `sizeHint` is a hint whose entire contract is that
+--- being wrong costs a copy. It also reads only the wrapped form, so the raw
+--- entry point would need a second mechanism regardless. `inflateInit2_` takes
+--- the window size instead, and negating that selects the raw form, so one loop
+--- answers both.
 ---
 --- Streams are validated rather than trusted: an over-subscribed code table, a
 --- distance reaching before the start of the output, a stored block whose
---- length disagrees with its complement, a truncated stream, and a zlib
---- trailer that does not match what came out all raise. A corrupt asset is a
---- file that fails to load, not a decoder that reads past its buffer.
+--- length disagrees with its complement, a truncated stream, and a zlib trailer
+--- that does not match what came out all raise. A corrupt asset is a file that
+--- fails to load, not a decoder that reads past its buffer. zlib decides every
+--- one of those except the truncation, which is decided here: all of the input
+--- is handed over at once, so a call that stops with output room to spare is
+--- asking for more of a stream that has no more.
+---
+--- Failures carry zlib's own sentence where it wrote one, because it says which
+--- structure was invalid rather than that one was. They are diagnostics and not
+--- an interface; nothing should match against them.
 
+local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")
-local hash <const> = require("tecs.hash")
+local zlib <const> = require("tecs.ffi.zlib")
 
-local sbyte <const> = string.byte
+local C <const> = zlib.C
+local K <const> = zlib.K
 
---- The longest Huffman code DEFLATE permits.
-local MAX_BITS <const> = 15
+--- The three entry points, typed. The bindings are open namespaces, so the
+--- signature is declared here rather than inferred, the way `tecs.hash` does it.
+local inflateInit2 <const> = C.inflateInit2_
+    as function(stream: loader.CValue, windowBits: integer, version: string,
+                size: integer): integer
+local inflate <const> = C.inflate
+    as function(stream: loader.CValue, flush: integer): integer
+local inflateEnd <const> = C.inflateEnd
+    as function(stream: loader.CValue): integer
 
---- Symbols in the code-length alphabet, and the order RFC 1951 stores their
---- lengths in. Least-used lengths go last, so a table that does not use them
---- can stop early.
-local CODE_ORDER <const>: {integer} = {
-    16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
-}
-local CODE_COUNT <const> = 19
+--- What `inflateInit2_` checks itself against, and what it is checked against.
+---
+--- The version is the one the cdefs were generated from, and zlib compares its
+--- major digit; the size is this build's `z_stream`, and zlib compares it
+--- exactly. Together they are how a binding generated against one zlib and
+--- linked against another fails at the call instead of corrupting memory
+--- through a struct of the wrong shape.
+local VERSION <const> = loader.textConstants("zlib").ZLIB_VERSION
+local STREAM_SIZE <const> = ffi.sizeof("z_stream") as integer
 
---- Copy length for symbols 257 to 285, and how many extra bits follow each.
-local LENGTH_BASE <const>: {integer} = {
-    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51,
-    59, 67, 83, 99, 115, 131, 163, 195, 227, 258,
-}
-local LENGTH_EXTRA <const>: {integer} = {
-    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3,
-    3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
-}
+--- DEFLATE's largest window, 32 KB. Negated, it asks `inflateInit2_` for the
+--- raw form: no header, no trailer, and no checksum.
+local WINDOW_BITS <const> = 15
 
---- Copy distance for symbols 0 to 29, and how many extra bits follow each.
-local DISTANCE_BASE <const>: {integer} = {
-    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513,
-    769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
-}
-local DISTANCE_EXTRA <const>: {integer} = {
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8,
-    8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
-}
-
---- Powers of two, indexed by exponent plus one. The bit reader shifts by
---- multiplying, because `bit.lshift` works in signed 32-bit and the buffer can
---- hold a value that reads negative there.
-local POW2 <const>: {number} = {}
-for exponent = 0, 32 do POW2[exponent + 1] = 2 ^ exponent end
-
---- Bytes the output starts with. It doubles from here, so a caller that knows
---- the answer's size should say so and skip the copies entirely.
+--- Bytes the output starts with when the caller does not say. It doubles from
+--- here, so a caller that knows the answer's size should say so and skip the
+--- copies entirely.
 local INITIAL_CAPACITY <const> = 4096
+
+--- Most output offered to one `inflate` call. `avail_out` is a `uInt`, so a
+--- size hint larger than one holds is answered in pieces rather than wrapped.
+local MAX_CHUNK <const> = 0x40000000
+
+--- What the return codes zlib writes no message for mean.
+local CODE_NAMES <const>: {integer: string} = {
+    [K.Z_STREAM_ERROR] = "its state is inconsistent",
+    [K.Z_DATA_ERROR] = "it is corrupt",
+    [K.Z_MEM_ERROR] = "zlib could not allocate",
+    [K.Z_VERSION_ERROR] = "the zlib in this process is not the one these "
+        .. "bindings were generated against",
+}
 
 local record compress
 end
 
---- A canonical Huffman code, in the form a bit-at-a-time walk consumes.
-local record Huffman
-    --- How many codes there are of each length, indexed by the length itself.
-    counts: {integer: integer}
-    --- Every symbol that has a code, ordered by that code, so a code's rank
-    --- within its length indexes straight into this.
-    symbols: {integer}
-end
-
---- Everything one call is decoding: where it is in the input, what bits it has
---- left over, and the output it is building.
-local record State
-    input: string
-    --- Last input byte this call may read, so a zlib trailer is excluded
-    --- without copying the body out of the stream.
-    last: integer
-    --- Next input byte to pull into the bit buffer, one-based.
-    at: integer
-    --- Bits read and not yet consumed, earliest in the low position. Carried
-    --- as a number because consuming from it is a division.
-    bits: number
-    held: integer
-    --- Output bytes, zero-indexed, in an FFI array that doubles when it fills.
-    out: loader.CArray
-    capacity: integer
-    length: integer
-end
-
---- Reads `want` bits, least significant first, which is the order DEFLATE
---- packs them in. `want` may be zero, which reads nothing and returns zero.
-local function takeBits(state: State, want: integer): integer
-    local bits = state.bits
-    local held = state.held
-    while held < want do
-        if state.at > state.last then
-            error("tecs: the compressed stream ends inside a block", 2)
-        end
-        bits = bits + sbyte(state.input, state.at) * POW2[held + 1]
-        state.at = state.at + 1
-        held = held + 8
-    end
-    local taken = bits % POW2[want + 1]
-    state.bits = (bits - taken) / POW2[want + 1]
-    state.held = held - want
-    -- Whole by construction: a remainder of a sum of scaled bytes.
-    return taken as integer
-end
-
---- Builds a canonical code from one length per symbol, zero meaning unused.
+--- Why a stream did not decode.
 ---
---- Over-subscription raises: a set of lengths that describes more codes than
---- the tree has room for is a corrupt table, and decoding against it would
---- return whichever symbol the walk reached first. Under-subscription is
---- allowed, because a stream whose distance alphabet has a single symbol is
---- legal and common; a code the table leaves undefined raises when it is met,
---- in `decode`.
-local function build(lengths: {integer}, count: integer): Huffman
-    local counts: {integer: integer} = {}
-    for length = 0, MAX_BITS do counts[length] = 0 end
-    for symbol = 1, count do
-        local length = lengths[symbol]
-        counts[length] = counts[length] + 1
+--- Called before the stream is ended, which is the order that does not depend
+--- on what `inflateEnd` leaves behind it. The reason is named rather than
+--- raised so the public functions can blame their own caller rather than a
+--- frame inside this file.
+local function describe(fields: loader.CStruct, status: integer): string
+    if status == K.Z_NEED_DICT then
+        return "tecs: this zlib stream needs a preset dictionary, which is "
+            .. "not carried in the stream and is not supported"
     end
 
-    local room = 1
-    for length = 1, MAX_BITS do
-        room = room * 2 - counts[length]
-        if room < 0 then
-            error("tecs: the compressed stream has an over-subscribed code table", 2)
-        end
+    local message = fields.msg
+    if message ~= nil then
+        return ("tecs: the compressed stream is not valid: %s")
+            :format(loader.toString(message as loader.CValue))
     end
-
-    local offsets: {integer: integer} = {}
-    offsets[1] = 0
-    for length = 1, MAX_BITS - 1 do
-        offsets[length + 1] = offsets[length] + counts[length]
-    end
-
-    local symbols: {integer} = {}
-    for symbol = 1, count do
-        local length = lengths[symbol]
-        if length ~= 0 then
-            symbols[offsets[length] + 1] = symbol - 1
-            offsets[length] = offsets[length] + 1
-        end
-    end
-
-    return { counts = counts, symbols = symbols }
+    local named = CODE_NAMES[status] or ("zlib returned %d"):format(status)
+    return ("tecs: the compressed stream is not valid: %s"):format(named)
 end
 
---- Reads one symbol.
----
---- The walk lengthens a candidate code a bit at a time and asks whether it has
---- fallen inside the range of codes of that length. Canonical codes are
---- assigned in increasing order within each length, so that range is
---- contiguous and the answer is one comparison and one index.
-local function decode(state: State, huffman: Huffman): integer
-    local counts = huffman.counts
-    local symbols = huffman.symbols
-    local code, first, index = 0, 0, 0
-    for length = 1, MAX_BITS do
-        code = code + takeBits(state, 1)
-        local available = counts[length]
-        if code - first < available then
-            return symbols[index + code - first + 1]
-        end
-        index = index + available
-        first = (first + available) * 2
-        code = code * 2
-    end
-    error("tecs: the compressed stream uses a code its table does not define", 2)
-end
-
---- Makes room for `extra` more output bytes.
-local function reserve(state: State, extra: integer)
-    local needed = state.length + extra
-    if needed <= state.capacity then return end
-
-    local capacity = state.capacity
-    while capacity < needed do capacity = capacity * 2 end
-    local grown = loader.newArray("uint8_t[?]", capacity)
-    loader.copyBytes(grown, state.out as loader.CValue, state.length)
-    state.out = grown
-    state.capacity = capacity
-end
-
---- Copies a block that was not compressed.
----
---- The bit buffer is discarded first: a stored block starts on a byte boundary,
---- and whatever is left over from the block header is padding.
-local function stored(state: State)
-    state.bits = 0
-    state.held = 0
-    if state.at + 3 > state.last then
-        error("tecs: the compressed stream ends inside a stored block header", 2)
-    end
-
-    local input = state.input
-    local size = sbyte(input, state.at) + sbyte(input, state.at + 1) * 256
-    local complement = sbyte(input, state.at + 2) + sbyte(input, state.at + 3) * 256
-    if complement ~= 65535 - size then
-        error("tecs: a stored block's length disagrees with its complement", 2)
-    end
-    state.at = state.at + 4
-
-    if state.at + size - 1 > state.last then
-        error("tecs: a stored block runs past the end of the stream", 2)
-    end
-    reserve(state, size)
-    local out = state.out
-    local write = state.length
-    local read = state.at
-    for offset = 0, size - 1 do
-        out[write + offset] = sbyte(input, read + offset)
-    end
-    state.length = write + size
-    state.at = read + size
-end
-
---- Decodes symbols until the end-of-block code, writing what they mean.
-local function codes(state: State, literals: Huffman, distances: Huffman)
-    while true do
-        local symbol = decode(state, literals)
-
-        if symbol < 256 then
-            reserve(state, 1)
-            state.out[state.length] = symbol
-            state.length = state.length + 1
-        elseif symbol == 256 then
-            return
-        else
-            local lengthCode = symbol - 256
-            if lengthCode > 29 then
-                error("tecs: the compressed stream uses an undefined length code", 2)
-            end
-            local size = LENGTH_BASE[lengthCode]
-                + takeBits(state, LENGTH_EXTRA[lengthCode])
-
-            local distanceCode = decode(state, distances) + 1
-            if distanceCode > 30 then
-                error("tecs: the compressed stream uses an undefined distance code", 2)
-            end
-            local distance = DISTANCE_BASE[distanceCode]
-                + takeBits(state, DISTANCE_EXTRA[distanceCode])
-
-            local from = state.length - distance
-            if from < 0 then
-                error("tecs: a copy reaches before the start of the output", 2)
-            end
-
-            -- Forward, byte by byte, and deliberately so. A copy is allowed to
-            -- overlap what it is writing, which is how DEFLATE spells a run:
-            -- distance one and length two hundred is one byte repeated.
-            reserve(state, size)
-            local out = state.out
-            local write = state.length
-            for offset = 0, size - 1 do
-                out[write + offset] = out[from + offset]
-            end
-            state.length = write + size
-        end
-    end
-end
-
---- The code every fixed-Huffman block uses, built once and shared.
-local fixedLiterals: Huffman = nil
-local fixedDistances: Huffman = nil
-
-local function fixed(): Huffman, Huffman
-    if fixedLiterals ~= nil then return fixedLiterals, fixedDistances end
-
-    local lengths: {integer} = {}
-    for symbol = 1, 144 do lengths[symbol] = 8 end
-    for symbol = 145, 256 do lengths[symbol] = 9 end
-    for symbol = 257, 280 do lengths[symbol] = 7 end
-    for symbol = 281, 288 do lengths[symbol] = 8 end
-    fixedLiterals = build(lengths, 288)
-
-    local distances: {integer} = {}
-    for symbol = 1, 32 do distances[symbol] = 5 end
-    fixedDistances = build(distances, 32)
-
-    return fixedLiterals, fixedDistances
-end
-
---- Reads the two code tables a dynamic block carries ahead of its data.
----
---- The lengths are themselves Huffman-coded, by a third table whose own lengths
---- are three bits each, so this reads a code to read a code to read the data.
-local function dynamic(state: State): Huffman, Huffman
-    local literalCount = takeBits(state, 5) + 257
-    local distanceCount = takeBits(state, 5) + 1
-    local codeCount = takeBits(state, 4) + 4
-    if literalCount > 286 or distanceCount > 30 then
-        error("tecs: the compressed stream declares too many codes", 2)
-    end
-
-    local codeLengths: {integer} = {}
-    for symbol = 1, CODE_COUNT do codeLengths[symbol] = 0 end
-    for index = 1, codeCount do
-        codeLengths[CODE_ORDER[index] + 1] = takeBits(state, 3)
-    end
-    local lengthCode = build(codeLengths, CODE_COUNT)
-
-    local total = literalCount + distanceCount
-    local lengths: {integer} = {}
-    local index = 1
-    while index <= total do
-        local symbol = decode(state, lengthCode)
-        if symbol < 16 then
-            lengths[index] = symbol
-            index = index + 1
-        else
-            local value = 0
-            local repeats: integer
-            if symbol == 16 then
-                if index == 1 then
-                    error("tecs: a code length repeats with nothing before it", 2)
-                end
-                value = lengths[index - 1]
-                repeats = 3 + takeBits(state, 2)
-            elseif symbol == 17 then
-                repeats = 3 + takeBits(state, 3)
-            else
-                repeats = 11 + takeBits(state, 7)
-            end
-            if index + repeats - 1 > total then
-                error("tecs: the code lengths overrun their alphabet", 2)
-            end
-            for _ = 1, repeats do
-                lengths[index] = value
-                index = index + 1
-            end
-        end
-    end
-
-    local literals: {integer} = {}
-    for symbol = 1, literalCount do literals[symbol] = lengths[symbol] end
-    local distances: {integer} = {}
-    for symbol = 1, distanceCount do
-        distances[symbol] = lengths[literalCount + symbol]
-    end
-
-    return build(literals, literalCount), build(distances, distanceCount)
-end
-
---- Runs the block loop over `input` between `from` and `last`, inclusive.
-local function run(input: string, from: integer, last: integer,
-                   sizeHint?: integer): string
+--- Inflates all of `bytes` under `windowBits`, which is what selects the
+--- wrapper. Returns the bytes, or nil and what went wrong.
+local function run(bytes: string, windowBits: integer,
+                   sizeHint?: integer): string, string
     local capacity = sizeHint
     if capacity == nil or capacity < 1 then capacity = INITIAL_CAPACITY end
 
-    local state: State = {
-        input = input,
-        last = last,
-        at = from,
-        bits = 0,
-        held = 0,
-        out = loader.newArray("uint8_t[?]", capacity),
-        capacity = capacity,
-        length = 0,
-    }
+    local stream <const> = loader.newStruct("z_stream")
+    local fields <const> = stream as loader.CStruct
 
-    local final = 0
-    repeat
-        final = takeBits(state, 1)
-        local kind = takeBits(state, 2)
-        if kind == 0 then
-            stored(state)
-        elseif kind == 1 then
-            codes(state, fixed())
-        elseif kind == 2 then
-            codes(state, dynamic(state))
-        else
-            error("tecs: the compressed stream has a block of no known type", 2)
+    local status = inflateInit2(stream, windowBits, VERSION, STREAM_SIZE)
+    if status ~= K.Z_OK then
+        -- Nothing to end: an init that failed allocated nothing.
+        return nil, describe(fields, status)
+    end
+
+    -- The pointer does not keep the string alive, but `bytes` is a parameter
+    -- and stays reachable for as long as zlib is reading through it.
+    fields.next_in = ffi.cast("uint8_t *", bytes)
+    fields.avail_in = #bytes
+
+    local out = loader.newArray("uint8_t[?]", capacity)
+    local produced = 0
+
+    while true do
+        if produced == capacity then
+            capacity = capacity * 2
+            local grown = loader.newArray("uint8_t[?]", capacity)
+            loader.copyBytes(grown, out as loader.CValue, produced)
+            out = grown
         end
-    until final == 1
 
-    return loader.toBytes(state.out as loader.CValue, state.length)
+        local room = capacity - produced
+        if room > MAX_CHUNK then room = MAX_CHUNK end
+        fields.next_out = loader.bytePointer(out as loader.CValue) + produced
+        fields.avail_out = room
+
+        status = inflate(stream, K.Z_NO_FLUSH)
+        local spare = fields.avail_out as integer
+        produced = produced + room - spare
+
+        if status == K.Z_STREAM_END then
+            inflateEnd(stream)
+            return loader.toBytes(out as loader.CValue, produced)
+        end
+        if status ~= K.Z_OK and status ~= K.Z_BUF_ERROR then
+            local reason = describe(fields, status)
+            inflateEnd(stream)
+            return nil, reason
+        end
+        if spare ~= 0 then
+            inflateEnd(stream)
+            return nil, "tecs: the compressed stream ends inside a block"
+        end
+    end
 end
 
 --- Decompresses a raw DEFLATE stream, the form RFC 1951 defines.
@@ -416,56 +182,33 @@ function compress.inflateRaw(bytes: string, sizeHint?: integer): string
     if #bytes == 0 then
         error("tecs: an empty string is not a DEFLATE stream", 2)
     end
-    return run(bytes, 1, #bytes, sizeHint)
+    local result, reason = run(bytes, -WINDOW_BITS, sizeHint)
+    if result == nil then error(reason, 2) end
+    return result
 end
 
 --- Decompresses a zlib stream, the form RFC 1950 defines.
 ---
 --- The header is checked before anything is decoded and the Adler-32 trailer
---- after, so bytes that are not a zlib stream are named as such rather than
---- surfacing as a decode failure from somewhere inside a block, and a stream
---- that decoded into something other than what was compressed does not return.
+--- after, both inside zlib, so bytes that are not a zlib stream are named as
+--- such rather than surfacing as a decode failure from somewhere inside a
+--- block, and a stream that decoded into something other than what was
+--- compressed does not return.
 ---
 --- A preset dictionary is refused rather than ignored. The flag means the
 --- compressor started from bytes that are not in the stream, so decoding
 --- without them produces plausible-looking wrong output, which is the one
---- failure worth never returning.
+--- failure worth never returning. zlib stops and asks for the dictionary, and
+--- since there is nowhere to get one, the ask is the refusal.
 ---
 --- @param sizeHint The decompressed size, when the caller's format records it.
 ---     Only an allocation hint: a wrong one costs a copy, never an error.
 function compress.inflate(bytes: string, sizeHint?: integer): string
-    local size = #bytes
-    -- Two header bytes, four trailer bytes, and a block of at least one.
-    if size < 7 then
-        error("tecs: a zlib stream is longer than this", 2)
+    if #bytes == 0 then
+        error("tecs: an empty string is not a zlib stream", 2)
     end
-
-    local method = sbyte(bytes, 1)
-    local flags = sbyte(bytes, 2)
-    if method % 16 ~= 8 then
-        error(("tecs: this is not a zlib stream; its compression method is %d, "
-            .. "not 8"):format(method % 16), 2)
-    end
-    if (method * 256 + flags) % 31 ~= 0 then
-        error("tecs: this is not a zlib stream; its header check fails", 2)
-    end
-    if (flags / 32) % 2 >= 1 then
-        error("tecs: this zlib stream needs a preset dictionary, which is not "
-            .. "carried in the stream and is not supported", 2)
-    end
-
-    local result = run(bytes, 3, size - 4, sizeHint)
-
-    local trailer = sbyte(bytes, size - 3) * 16777216
-        + sbyte(bytes, size - 2) * 65536
-        + sbyte(bytes, size - 1) * 256
-        + sbyte(bytes, size)
-    local checksum = hash.adler32(result)
-    if checksum ~= trailer then
-        error(("tecs: the zlib stream decompressed to something else; its "
-            .. "checksum is %08x and this is %08x"):format(trailer, checksum), 2)
-    end
-
+    local result, reason = run(bytes, WINDOW_BITS, sizeHint)
+    if result == nil then error(reason, 2) end
     return result
 end
 

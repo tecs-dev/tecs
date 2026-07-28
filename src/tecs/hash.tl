@@ -11,11 +11,13 @@
 --- a tree the person running it already controls.
 ---
 --- A compressed stream carries a checksum of what it decompresses to, and the
---- checksum is fixed by the format rather than chosen. `tecs.compress` verifies
---- a zlib stream against the Adler-32 in its trailer, so Adler-32 lives here:
---- it is a hash function, and a caller that inflated by some other route still
---- wants a way to check one. It is zlib's implementation, since zlib is a
---- pinned dependency of this tree and is thirteen times faster over the same
+--- checksum is fixed by the format rather than chosen. `tecs.compress` hands
+--- zlib whole streams, so the trailer is verified inside zlib and nothing here
+--- sits on that path. Adler-32 lives here anyway, because it is a hash function
+--- and it is the one RFC 1950 names: a caller holding a stream it has not
+--- inflated, or bytes that came out of one by some other route, wants a way to
+--- check the two against each other. It is zlib's implementation, since zlib is
+--- a pinned dependency of this tree and is thirteen times faster over the same
 --- bytes.
 ---
 --- **`fnv1a64` is not an integrity primitive.** Sixty-four bits puts an

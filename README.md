@@ -534,12 +534,10 @@ the file watcher polls instead of walking the content tree.
 ## Hashing and decompression
 
 `tecs.hash` and `tecs.compress` are two modules rather than one, because
-"operations over bytes" is a category and not a concern: they share no code and
-no state, and a tool that wants a shader's identity has no reason to load a
-DEFLATE decoder. What they do share runs one way, which is the evidence they
-are two: `compress` verifies a zlib stream against the Adler-32 in its trailer,
-and Adler-32 is a hash, so it lives in `hash` and `compress` requires it. Both
-resolve lazily off the surface, the way `json` and `log` do.
+"operations over bytes" is a category and not a concern: a tool that wants a
+shader's identity has no reason to load a decompressor. They share no code, no
+state and, since zlib checks a stream's trailer itself, no dependency on each
+other either. Both resolve lazily off the surface, the way `json` and `log` do.
 
 `hash.fnv1a64` is what identifies content: the shader pack carries one per
 source so a pack built before an edit is detected rather than trusted. It is
@@ -552,14 +550,31 @@ be a rename that every caller is rechecked against rather than a silent change
 of meaning. `hash.adler32` is there for the format that specifies it.
 
 `compress.inflate` reads zlib streams and `compress.inflateRaw` reads the
-DEFLATE inside them. Nothing writes, so there is no `deflate`: packs are
-LuaJIT's own serialization, snapshots are JSON, and a screenshot is compressed
-inside SDL_image. It is Lua rather than the zlib already in the process as a
-dependency of SDL3_image, which is neither bound nor linked by name. Binding it
-would mean cdefs, the ABI check, and a pinned source build on every packaged
-preset; decompressing happens once per asset, on a worker, off the frame, so
-what that buys is milliseconds nothing waits on. If a profile ever disagrees,
-the two functions keep their names and something else answers them.
+DEFLATE inside them. zlib decodes both: it is pinned, bound, carried through the
+ABI check and already in the process because libcurl needs it to answer a
+`Content-Encoding`, so a decoder written in Lua beside it would be a second
+implementation of the format to keep correct, and the slower one. Both entry
+points go through `inflate` over a `z_stream` rather than `uncompress`, because
+`uncompress` wants the decompressed size up front and treats a wrong one as a
+failure while `sizeHint` is a hint whose whole contract is that being wrong
+costs a copy, and because `inflateInit2_` takes the window size, so negating it
+selects the raw form and one loop answers both.
+
+Nothing writes, so there is still no `deflate`: packs are LuaJIT's own
+serialization, snapshots are JSON, and a screenshot is compressed inside
+SDL_image. zlib puts a compressor one call away, which changes what one would
+cost to write and not what it would cost to trust, and the caller that wants one
+is what should bring it.
+
+A malformed stream raises rather than returning: an over-subscribed code table,
+a copy reaching before the start of the output, a stored block whose length
+disagrees with its complement, a truncated stream, and a trailer that does not
+match what came out. zlib decides all of those but the truncation, which
+`compress` decides by handing over the whole input at once and reading a call
+that stopped with output room to spare as a stream that ended early. The
+messages are zlib's own, so `spec/compress_spec.lua` asserts that each of those
+raises and never which sentence it raised; pinning a suite to one
+implementation's strings is what makes the next swap expensive.
 
 ## Sound
 

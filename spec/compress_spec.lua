@@ -1,28 +1,40 @@
 -- Decompression.
 --
--- A decoder cannot be tested against itself. There is no encoder here to round
--- trip through, and there should not be: a bug an encoder and a decoder written
--- together share is exactly the bug a round trip cannot see. So every stream
--- below was produced by something else.
+-- zlib does the decoding, so what a test here can establish divides in two, and
+-- both halves are wanted.
 --
--- The PNG is a fixture already committed to this tree for another spec. Its
--- IDAT chunk is a zlib stream, written by whatever wrote the file, and what it
--- decompresses to is fixed by the image's own header rather than by anything
--- here: four rows of a four by four RGBA image, each preceded by a filter byte,
--- which is sixty-eight bytes. That one is the strongest evidence in this file,
--- because nothing about it was chosen to make this pass.
+-- The corpus is what says the format is read correctly, and none of it was
+-- produced by this tree. The PNG is a fixture already committed for another
+-- spec. Its IDAT chunk is a zlib stream, written by whatever wrote the file,
+-- and what it decompresses to is fixed by the image's own header rather than by
+-- anything here: four rows of a four by four RGBA image, each preceded by a
+-- filter byte, which is sixty-eight bytes. The hex literals are streams emitted
+-- by CPython's zlib module, and they are here because one file cannot cover the
+-- three block types DEFLATE defines: the PNG uses fixed Huffman codes, and
+-- stored and dynamic blocks have to be asked for. Each is asserted against text
+-- this file builds for itself, so what is checked is agreement with the
+-- compressor's input rather than with a blob somebody pasted.
 --
--- The hex literals are streams emitted by CPython's zlib module, which is zlib.
--- They are here because one file cannot cover the three block types DEFLATE
--- defines: the PNG uses fixed Huffman codes, and stored and dynamic blocks have
--- to be asked for. Each is asserted against text this file builds for itself,
--- so what is being checked is agreement with the compressor's input rather than
--- with a blob somebody pasted.
+-- The round trips are what says this module's own arithmetic is correct. They
+-- establish nothing about the format, since zlib is on both ends of them; what
+-- they exercise is the output buffer, which belongs to this module and not to
+-- zlib, at the sizes where it starts, fills exactly, doubles repeatedly, and is
+-- given a hint that is right, far too small, and far too large.
+--
+-- The refusals assert that a malformed stream raises, and deliberately not what
+-- it raises. Every message now comes out of zlib's own taxonomy, and a suite
+-- pinned to one implementation's strings is a suite that has to be rewritten
+-- before the implementation can be, which is most of what made swapping this
+-- decoder look expensive in the first place. What is being defended is that a
+-- corrupt stream is a load that fails, not a decoder that reads past its
+-- buffer; which sentence says so is not part of that.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
+local ffi = require("ffi")
 local compress = require("tecs.compress")
+local zlib = require("tecs.ffi.zlib")
 
 -- Streams are carried as hex so this file stays text and diffs like text.
 local function bytes(hex)
@@ -72,6 +84,12 @@ local GROW = bytes(
 local RAW = bytes("2b4a2c5748494dcb492c4955c8482c56c8cb57282f4a2c28482d0200")
 local RAW_TEXT = "raw deflate has no wrapper"
 
+-- Three bytes assembled bit by bit rather than compressed, because no
+-- compressor emits this. A final fixed-Huffman block, one literal, and then a
+-- copy of length three from distance two, when a single byte has been written.
+-- Honoured, it would read whatever sat in memory before the output.
+local TOO_FAR = bytes("730442")
+
 --- The zlib stream inside a PNG's first IDAT chunk.
 ---
 --- Past the eight-byte signature a PNG is chunks, and a chunk is a big-endian
@@ -104,6 +122,28 @@ local function withPresetDictionary()
         end
     end
     return nil
+end
+
+--- `text` as a zlib stream, compressed by zlib itself.
+local function deflated(text, level)
+    local bound = tonumber(zlib.C.compressBound(#text))
+    local buffer = ffi.new("uint8_t[?]", bound)
+    local size = ffi.new("unsigned long[1]", bound)
+    assert.are.equal(0, tonumber(zlib.C.compress2(buffer, size, text, #text, level)))
+    return ffi.string(buffer, tonumber(size[0]))
+end
+
+--- Bytes that neither compress away to nothing nor resist compression, so a
+--- round trip over them meets literals, matches and a non-trivial code table.
+local function mixture(size)
+    local pieces = {}
+    local at = 0
+    while at < size do
+        pieces[#pieces + 1] = ("chunk %d of a mixture, "):format(at % 97)
+        pieces[#pieces + 1] = string.char(at % 251, (at * 7 + 11) % 251)
+        at = at + 1
+    end
+    return table.concat(pieces):sub(1, size)
 end
 
 describe("compress.inflate", function()
@@ -139,12 +179,55 @@ describe("compress.inflate", function()
         assert.are.equal(expected, compress.inflate(GROW))
     end)
 
+    it("returns the original bytes at every size around its buffer", function()
+        -- The buffer starts at four kilobytes and doubles. These sit on both
+        -- sides of that boundary and well past several of them, which is where
+        -- an off-by-one in the growth arithmetic shows up as a short answer or
+        -- a copy of the wrong length rather than as a failure.
+        for _, size in ipairs({ 0, 1, 2, 4095, 4096, 4097, 8192, 100000 }) do
+            local text = mixture(size)
+            assert.are.equal(size, #text)
+            assert.are.equal(text, compress.inflate(deflated(text, 6)))
+        end
+    end)
+
+    it("returns the original bytes whatever the stream is made of", function()
+        -- Three shapes with nothing in common: incompressible bytes, which
+        -- become stored or near-stored blocks; one byte repeated, which is a
+        -- single long run of overlapping copies; and text, which is what a
+        -- dynamic code table is for.
+        local noise = {}
+        local seed = 12345
+        for index = 1, 20000 do
+            seed = (seed * 1103515245 + 12345) % 2147483648
+            noise[index] = string.char(math.floor(seed / 65536) % 256)
+        end
+        for _, text in ipairs({
+            table.concat(noise),
+            string.rep("\0", 70000),
+            string.rep(DYNAMIC_TEXT, 40),
+        }) do
+            for _, level in ipairs({ 0, 1, 6, 9 }) do
+                assert.are.equal(text, compress.inflate(deflated(text, level)))
+            end
+        end
+    end)
+
     it("gets the same answer whatever the size hint says", function()
         -- The hint is an allocation and never a limit: too small still grows,
         -- and too large still stops where the stream does.
         assert.are.equal(STORED_TEXT, compress.inflate(STORED, 1))
         assert.are.equal(STORED_TEXT, compress.inflate(STORED, #STORED_TEXT))
         assert.are.equal(STORED_TEXT, compress.inflate(STORED, 1000000))
+
+        -- And the same at a size that fills the hint exactly rather than
+        -- stopping inside it, which is the case an exact hint gets wrong by
+        -- deciding the stream ended when only the buffer did.
+        local text = mixture(9000)
+        local stream = deflated(text, 6)
+        assert.are.equal(text, compress.inflate(stream, #text))
+        assert.are.equal(text, compress.inflate(stream, #text - 1))
+        assert.are.equal(text, compress.inflate(stream, #text + 1))
     end)
 
     it("refuses a stored block whose two lengths disagree", function()
@@ -153,38 +236,29 @@ describe("compress.inflate", function()
         -- the inverted copy is a corrupt block that would otherwise be copied
         -- out at whatever length the first copy claimed.
         local broken = STORED:sub(1, 5) .. "\214" .. STORED:sub(7)
-        local ok, reason = pcall(compress.inflate, broken)
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("complement", 1, true))
+        assert.is_false(pcall(compress.inflate, broken))
     end)
 
-    it("names bytes that are not a zlib stream as such", function()
-        local ok, reason = pcall(compress.inflate, "not compressed at all")
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("not a zlib stream", 1, true))
+    it("refuses bytes that are not a zlib stream", function()
+        assert.is_false(pcall(compress.inflate, "not compressed at all"))
     end)
 
     it("refuses a stream too short to be one", function()
-        local ok, reason = pcall(compress.inflate, "\1\2\3")
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("longer than this", 1, true))
+        assert.is_false(pcall(compress.inflate, "\1\2\3"))
+        assert.is_false(pcall(compress.inflate, ""))
     end)
 
     it("refuses a header whose check word does not add up", function()
         -- Compression method still 8, flag byte adjusted so the two together
         -- are no longer a multiple of thirty-one.
-        local ok, reason = pcall(compress.inflate, "\120\2" .. STORED:sub(3))
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("header check", 1, true))
+        assert.is_false(pcall(compress.inflate, "\120\2" .. STORED:sub(3)))
     end)
 
     it("does not return output the checksum disagrees with", function()
         -- The last four bytes are the Adler-32 of what was compressed. A
         -- stream that decodes cleanly but came from different bytes is what
         -- the trailer exists to catch, so a mismatch must not return.
-        local ok, reason = pcall(compress.inflate, STORED:sub(1, #STORED - 1) .. "\0")
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("checksum", 1, true))
+        assert.is_false(pcall(compress.inflate, STORED:sub(1, #STORED - 1) .. "\0"))
     end)
 
     it("refuses a preset dictionary rather than decoding without it", function()
@@ -192,16 +266,14 @@ describe("compress.inflate", function()
         -- anyway produces wrong output that looks like output.
         local stream = withPresetDictionary()
         assert.is_not_nil(stream, "a valid header with FDICT set exists")
-
-        local ok, reason = pcall(compress.inflate, stream)
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("preset dictionary", 1, true))
+        assert.is_false(pcall(compress.inflate, stream))
     end)
 
     it("stops on a truncated stream instead of returning what it has", function()
-        local ok, reason = pcall(compress.inflate, DYNAMIC:sub(1, 40))
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("ends inside", 1, true))
+        assert.is_false(pcall(compress.inflate, DYNAMIC:sub(1, 40)))
+        -- And at the other end: a whole stream missing only its trailer, which
+        -- is the truncation a decoder is likeliest to accept by accident.
+        assert.is_false(pcall(compress.inflate, STORED:sub(1, #STORED - 4)))
     end)
 end)
 
@@ -210,12 +282,23 @@ describe("compress.inflateRaw", function()
         assert.are.equal(RAW_TEXT, compress.inflateRaw(RAW))
     end)
 
+    it("reads the DEFLATE inside a zlib stream", function()
+        -- A zlib stream is two header bytes, the raw form, and four bytes of
+        -- checksum, so stripping the wrapper off one zlib wrote is a raw
+        -- stream that no separate compressor had to be arranged to produce.
+        for _, size in ipairs({ 1, 4096, 50000 }) do
+            local text = mixture(size)
+            local stream = deflated(text, 6)
+            local raw = stream:sub(3, #stream - 4)
+            assert.are.equal(text, compress.inflateRaw(raw))
+            assert.are.equal(text, compress.inflateRaw(raw, #text))
+        end
+    end)
+
     it("does not read a wrapped stream as a raw one", function()
         -- The two header bytes are not a block header, so this fails inside
         -- the first block rather than producing something.
-        local ok, reason = pcall(compress.inflateRaw, STORED)
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("tecs:", 1, true))
+        assert.is_false(pcall(compress.inflateRaw, STORED))
     end)
 
     it("refuses a code table with more codes than it has room for", function()
@@ -224,13 +307,14 @@ describe("compress.inflateRaw", function()
         -- distance counts, and a code-length alphabet declaring four one-bit
         -- codes, which is two more than one bit can distinguish. Decoding
         -- against it would return whichever symbol the walk reached first.
-        local ok, reason = pcall(compress.inflateRaw, "\5\0\146\4")
-        assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("over-subscribed", 1, true))
+        assert.is_false(pcall(compress.inflateRaw, "\5\0\146\4"))
+    end)
+
+    it("refuses a copy reaching before the start of the output", function()
+        assert.is_false(pcall(compress.inflateRaw, TOO_FAR))
     end)
 
     it("refuses an empty string", function()
-        local ok = pcall(compress.inflateRaw, "")
-        assert.is_false(ok)
+        assert.is_false(pcall(compress.inflateRaw, ""))
     end)
 end)
