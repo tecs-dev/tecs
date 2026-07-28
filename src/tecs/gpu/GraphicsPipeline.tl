@@ -78,8 +78,20 @@ local record PipelineOptions
     cull: string
     --- Straight alpha blending, applied to every colour target rather than to
     --- one of them. Defaults to false, which writes the fragment's colour and
-    --- alpha through unmodified.
+    --- alpha through unmodified. Ignored when `blendMode` is given.
     blend: boolean
+    --- Which blend to bake, for the cases a boolean cannot say.
+    ---
+    --- `"alpha"` is what `blend = true` means. `"min"` and `"max"` take the
+    --- smaller or the larger of the fragment and what is already there, per
+    --- channel, and both ignore the two factors entirely. They are what a
+    --- target resolving by coverage rather than by order needs: the value in a
+    --- pixel becomes a function of the set of fragments that covered it and not
+    --- of their order, which on an unsigned normalised target is bit exact. An
+    --- occluder mask wants the tallest occluder to win and a shadow target
+    --- wants the darkest shadow to, and neither may depend on which of them the
+    --- device rasterised first.
+    blendMode: string
     --- Depth state. Omit for a pipeline with no depth-stencil target, which is
     --- also the only kind that can be bound in a pass begun without one.
     depth: DepthConfig
@@ -167,6 +179,16 @@ local BLEND_FACTOR_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_SRC_ALPHA)
 local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA) as integer
 local BLEND_FACTOR_ONE <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE) as integer
 local BLEND_OP_ADD <const> = tonumber(C.SDL_GPU_BLENDOP_ADD) as integer
+local BLEND_OP_MIN <const> = tonumber(C.SDL_GPU_BLENDOP_MIN) as integer
+local BLEND_OP_MAX <const> = tonumber(C.SDL_GPU_BLENDOP_MAX) as integer
+
+--- The op a named blend mode resolves overlap with, for the two that take the
+--- fragment and the target as they are. Alpha is not here: it needs four
+--- factors as well as an op, so it stays a branch rather than a table entry.
+local EXTREME_OPS <const>: {string: integer} = {
+    min = BLEND_OP_MIN,
+    max = BLEND_OP_MAX,
+}
 
 function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
     local primitive = PRIMITIVES[options.primitive or "triangleList"]
@@ -186,13 +208,35 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         formats = {options.colorFormat}
     end
 
+    local mode = options.blendMode or (options.blend and "alpha" or nil)
+    local extreme: integer = nil
+    if mode ~= nil and mode ~= "alpha" then
+        extreme = EXTREME_OPS[mode]
+        if extreme == nil then
+            error(("tecs: unknown blend mode '%s'"):format(tostring(mode)), 2)
+        end
+    end
+
     local targets = loader.newArray("SDL_GPUColorTargetDescription[?]", #formats)
     for index, format in ipairs(formats) do
         local target = targets[index - 1] as loader.CStruct
         target.format = format
 
         local blend = target.blend_state as loader.CStruct
-        if options.blend then
+        if mode == nil then
+            blend.enable_blend = false
+        elseif extreme ~= nil then
+            -- SDL still wants factors on a min or max op and the op ignores
+            -- them, so they are set to one rather than left at the enum's
+            -- invalid member, which some backends reject at creation.
+            blend.enable_blend = true
+            blend.src_color_blendfactor = BLEND_FACTOR_ONE
+            blend.dst_color_blendfactor = BLEND_FACTOR_ONE
+            blend.color_blend_op = extreme
+            blend.src_alpha_blendfactor = BLEND_FACTOR_ONE
+            blend.dst_alpha_blendfactor = BLEND_FACTOR_ONE
+            blend.alpha_blend_op = extreme
+        else
             blend.enable_blend = true
             blend.src_color_blendfactor = BLEND_FACTOR_SRC_ALPHA
             blend.dst_color_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
@@ -200,8 +244,6 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
             blend.src_alpha_blendfactor = BLEND_FACTOR_ONE
             blend.dst_alpha_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
             blend.alpha_blend_op = BLEND_OP_ADD
-        else
-            blend.enable_blend = false
         end
     end
 

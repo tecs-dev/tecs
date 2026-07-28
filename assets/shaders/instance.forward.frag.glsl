@@ -52,12 +52,18 @@ layout(set = 3, binding = 0) uniform Clips {
 
 // The same block the resolve reads, pushed by the same code, so a blended
 // fragment and the opaque one behind it are lit by one description of the
-// scene rather than by two that have to be kept in step.
+// scene rather than by two that have to be kept in step. The last two are the
+// mask transform, which this pass is handed and does not use: blended geometry
+// is neither shadowed nor an occluder, because it never reaches the G-buffer
+// and a hard silhouette of something half transparent would be a lie. Declared
+// so the block is one description rather than two of different lengths.
 layout(set = 3, binding = 1) uniform Scene {
     vec4 ambient;
     vec4 viewport;
     vec4 view;
     vec4 bounds;
+    vec4 maskXform;
+    vec4 maskParams;
 } scene;
 
 #include "lighting.glsl"

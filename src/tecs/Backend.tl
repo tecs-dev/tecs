@@ -63,11 +63,29 @@ local QUAD_INDICES <const> = 6
 --- Threads per cull workgroup, matching the scan shaders' local size.
 local CULL_GROUP <const> = 256
 
---- Which lane's rank the compaction reads out of a packed slot. `LANE_OPAQUE`
---- and `LANE_BLEND` in `assets/shaders/include/cull.glsl` are the same two
---- shifts, and the pair only works while they agree.
+--- Bytes every cull dispatch is pushed: three vec4s, and the same block every
+--- one of the shaders declares.
+local CULL_BYTES <const> = 48
+
+--- Which lane's rank a compaction reads out of a packed slot. `LANE_OPAQUE`,
+--- `LANE_BLEND` and `LANE_CAST` in `assets/shaders/include/cull.glsl` are the
+--- same three indices, and the set only works while they agree.
 local LANE_OPAQUE <const> = 0
-local LANE_BLEND <const> = 16
+local LANE_BLEND <const> = 1
+local LANE_CAST <const> = 2
+
+--- Entries the shadow lane emits per caster, and `instancelayout.CAST_FANOUT`.
+local CAST_FANOUT <const> = instancelayout.CAST_FANOUT
+
+--- Casters the shadow lane holds, whatever the instance buffer holds.
+---
+--- A ceiling rather than a hint, for the reason `MAX_BLEND` is one. A shadow
+--- list as long as a four million instance world times the fan-out would be
+--- sixty-four megabytes to describe a scene whose casters are a handful of
+--- walls and a crowd, and past this the remainder is dropped rather than
+--- reported: a caster's whole run is dropped rather than half of it, since half
+--- a run would leave the rest holding an earlier frame's entries.
+local MAX_CAST <const> = 16384
 
 --- Depth buckets the forward list is sorted into, and the same number as
 --- `BUCKETS` in `assets/shaders/instance.rank.comp.glsl`. It is also that
@@ -172,6 +190,15 @@ local record BackendOptions
     layers: integer
     --- Fit many images into each layer rather than one. Defaults to false.
     packImages: boolean
+    --- Build the occluder mask and the drop-shadow target, and the shadow lane
+    --- that fills them. Defaults to false, and off costs three targets, four
+    --- passes, three pipelines, two compute dispatches and a list.
+    ---
+    --- What it does not gate is the lane's share of the mark pass, which is one
+    --- more count in a scan that is already running and no more memory traffic
+    --- than the two lanes beside it. A world that never casts pays for that and
+    --- for nothing else.
+    shadows: boolean
 end
 
 --- The device half of the renderer, as one object.
@@ -215,6 +242,9 @@ local record Backend
     --- Instances the forward list holds, which is `MAX_BLEND` or the whole
     --- buffer where that is smaller.
     blendCapacity: integer
+    --- Entries the shadow list holds: `MAX_CAST` casters, or the whole buffer
+    --- where that is smaller, times the fan-out.
+    castCapacity: integer
     --- Copied from the packet at each `consume`, and what the geometry and
     --- forward passes test before they record anything: at zero both return
     --- without binding, and no cull is dispatched.
@@ -293,6 +323,33 @@ local record Backend
     _blendCounts: Buffer
     --- Back to front, and the only forward list the draw walks.
     _blendSorted: Buffer
+    --- Fills the shadow list, one run of `CAST_FANOUT` entries per caster, and
+    --- the only compaction that chooses what an entry says rather than copying
+    --- an index. Nil while shadows are off.
+    _castCompact: ComputePipeline
+    --- Survivors of the shadow lane per block, allocated whatever the pipeline
+    --- was configured with, because the mark pass writes it for every world.
+    _castBlocks: Buffer
+    --- The shadow list: an instance and a light per entry, four bytes each,
+    --- against the hundred and twenty-eight byte record the previous engine
+    --- wrote per shadow. Nil while shadows are off.
+    _castList: Buffer
+    --- Its draw arguments, shared by all three shadow draws: each walks the
+    --- whole list and rejects what is not its own, so all three have the same
+    --- instance count and it is the one the scan wrote.
+    _castArgs: Buffer
+    --- Draws a caster's silhouette into the occluder mask, resolving overlap by
+    --- max so the tallest occluder wins. Nil while shadows are off.
+    _maskPipeline: GraphicsPipeline
+    --- Draws a stretched copy of a caster into the drop-shadow target,
+    --- resolving overlap by min so the darkest shadow wins.
+    _shadowPipeline: GraphicsPipeline
+    --- Draws the caster back over its own shadow at full brightness, by max.
+    _stampPipeline: GraphicsPipeline
+    --- The camera the mask is drawn with, which is the scene's at another zoom.
+    --- A second one rather than the scene's, because both are live within one
+    --- frame and one of them would have to be put back.
+    _maskView: Camera
     --- Blocks the forward list's own dispatches cover, which is its capacity
     --- rather than the frame's count: every block of the counts table has to be
     --- written every frame or the scan folds a stale one.
@@ -387,6 +444,19 @@ local record Backend
     _placeWrites: {loader.CValue}
     --- Everything the two passes before it produced, plus the entry count.
     _placeReads: {loader.CValue}
+    --- The shadow lane's block counts, rewritten in place as bases, and its
+    --- draw arguments.
+    _castScanWrites: {loader.CValue}
+    --- The shadow list.
+    _castCompactWrites: {loader.CValue}
+    --- The slot table, the lane's bases, the bounds a role is read from, and
+    --- the lights a caster chooses between.
+    _castCompactReads: {loader.CValue}
+    --- The instances, the shadow list, the frame tables and the lights, which
+    --- is what places one entry.
+    _castBuffers: {loader.CValue}
+    --- The image array, for the coverage test a silhouette comes from.
+    _castTextures: {loader.CValue}
     --- The cull passes, begun again each frame rather than allocated per
     --- frame; see `ComputePass.begin` for what that asks of a caller. Nil
     --- until the first frame that culls anything.
@@ -410,6 +480,12 @@ local record Backend
     _bucketScanPass: ComputePass
     --- Over the forward list's blocks again, as the rank pass was.
     _placePass: ComputePass
+    --- The shadow lane's two, and nil until the first frame a pipeline with
+    --- shadows on culls anything.
+    _castScanPass: ComputePass
+    --- Dispatched over every resident instance, as both other compactions are:
+    --- all three lanes are packed into the one slot table.
+    _castCompactPass: ComputePass
     --- The `SDL_GPUDevice` every handle here was created against. Not owned:
     --- `destroy` releases what was built on it and never the device itself.
     _device: loader.CPtr
@@ -485,6 +561,62 @@ local function buildGeometry(self: Backend): GraphicsPipeline
     return pipeline
 end
 
+--- Builds one of the three pipelines a shadow draw binds.
+---
+--- One vertex shader and one fragment shader for all three, because all three
+--- place a quad from the same instance against the same list and read the same
+--- coverage out of the same material dispatch. What differs is the target and
+--- the blend, which is what a pipeline is.
+--- @param format The attachment's format, from `Deferred:castFormats`.
+--- @param mode "max" for the mask and the stamp, "min" for the shadows
+---     themselves, and neither may depend on which fragment the device
+---     rasterised first.
+local function buildCast(self: Backend, format: integer, mode: string, name: string): GraphicsPipeline
+    local device <const> = self._device
+    local vertex = Shader.load(device, "cast.vert", {})
+    local fragment = Shader.load(device, "cast.frag", {})
+    local pipeline = GraphicsPipeline.create(
+        device,
+        {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormat = format,
+            blendMode = mode,
+            name = name,
+        }
+    )
+    vertex:destroy()
+    fragment:destroy()
+    return pipeline
+end
+
+--- Records one shadow draw: the whole list, at the projection and the mode the
+--- draw is.
+---
+--- The three differ in a pipeline and a number, so they are one function. Every
+--- draw walks the whole list because an entry says which of the three it is
+--- for, and the two it is not for reject it in the vertex shader at the cost of
+--- four invocations that return an off-screen position.
+local function recordCast(
+    self: Backend, context: Deferred.PassContext, pipeline: GraphicsPipeline, matrix: loader.CArray, mode: integer
+)
+    context.pass:bindPipeline(pipeline.handle)
+    context.pass:pushVertexUniform(0, self.deferred:castUniform(matrix, mode), Deferred.castUniformSize())
+
+    local buffers <const> = self._castBuffers
+    buffers[1] = self.instances.handle
+    buffers[2] = self._castList.handle
+    buffers[3] = self._playbacks.handle
+    buffers[4] = self.deferred:lightHandle()
+    context.pass:bindVertexStorageBuffers(0, buffers)
+
+    local textures <const> = self._castTextures
+    textures[1] = self.images.handle
+    context.pass:bindTextures(0, textures, self.sampler.handle)
+    context.pass:bindIndexBuffer(self._indices.handle)
+    context.pass:drawIndexedIndirect(self._castArgs.handle, 0, 1)
+end
+
 --- Builds the forward pipeline against the target the composite pass wrote.
 ---
 --- The same vertex shader the G-buffer pass uses, because a blended instance is
@@ -522,8 +654,10 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     self._device = device
     self.capacity = options.capacity
     self.blendCapacity = math.min(self.capacity, MAX_BLEND)
+    self.castCapacity = math.min(self.capacity, MAX_CAST) * CAST_FANOUT
     self._blendGroups = math.ceil(self.blendCapacity / CULL_GROUP)
     self._blending = false
+    local shadows <const> = options.shadows == true
     self.count = 0
     self._destroyed = false
 
@@ -668,6 +802,37 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
             name = "tecs.blendSorted",
         }
     )
+    -- The shadow lane. Its per-block counts exist whatever the pipeline was
+    -- configured with, because the mark pass writes every block of them every
+    -- frame and a buffer it wrote into that nothing allocated is not a pass
+    -- that quietly does less.
+    self._castBlocks = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = math.ceil(self.capacity / CULL_GROUP) * 4,
+            name = "tecs.castBlocks",
+        }
+    )
+    if shadows then
+        self._castList = Buffer.create(
+            device,
+            {
+                usage = {"storage", "computeWrite"},
+                size = self.castCapacity * 4,
+                name = "tecs.castList",
+            }
+        )
+        self._castArgs = Buffer.create(
+            device,
+            {
+                usage = {"indirect", "computeWrite"},
+                size = 32,
+                name = "tecs.castArgs",
+            }
+        )
+    end
+
     self._playbacks = Buffer.create(
         device,
         {
@@ -695,6 +860,11 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     -- first frame fills them: the pass runs whether or not the lane does, so
     -- an instance count of zero is what it has to find there.
     self._blendArgs:upload(args, 32)
+    if shadows then
+        -- And the shadow draws', for the same reason: their passes run on a
+        -- frame that culls nothing at all, when no dispatch has written these.
+        self._castArgs:upload(args, 32)
+    end
 
     -- Two triangles over four corners, uploaded once and never touched again.
     self._indices = Buffer.create(
@@ -710,8 +880,10 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     self._indices:upload(quad, QUAD_INDICES * 2)
 
     self._view = Camera.create()
-    -- Two vec4s: the world rectangle the camera sees, then the counts.
-    self._cullUniform = loader.newArray("float[8]")
+    self._maskView = Camera.create()
+    -- Three vec4s: the world rectangle the camera sees, the counts, and what
+    -- the shadow lane needs that the other two do not.
+    self._cullUniform = loader.newArray("float[12]")
     self._layerUniform = loader.newArray("float[?]", LAYER_FLOATS)
     -- Below every revision the table can hold, so the first frame packs it.
     self._layerRevision = -1
@@ -734,6 +906,9 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
     self._rank = ComputePipeline.load(device, "instance.rank.comp", {})
     self._place = ComputePipeline.load(device, "instance.place.comp", {})
+    if shadows then
+        self._castCompact = ComputePipeline.load(device, "instance.cast.comp", {})
+    end
 
     -- Seeded with what the buffers hold now, which gives each list its length,
     -- and rewritten wherever it is used.
@@ -741,7 +916,7 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     self._geometryTextures = {self.images.handle}
     self._forwardBuffers = {self.instances.handle, self._blendSorted.handle, self._playbacks.handle}
     self._forwardTextures = {self.images.handle}
-    self._markWrites = {self._slots.handle, self._blocks.handle, self._blendBlocks.handle}
+    self._markWrites = {self._slots.handle, self._blocks.handle, self._blendBlocks.handle, self._castBlocks.handle}
     self._markReads = {self._bounds.handle}
     self._scanWrites = {self._blocks.handle, self._drawArgs.handle}
     self._compactWrites = {self._visible.handle}
@@ -766,6 +941,43 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
         swapchainFormat,
         {
             ambient = options.ambient,
+            shadows = shadows,
+            occluders = function(context: Deferred.PassContext)
+                if self.count == 0 then
+                    return
+                end
+                -- The mask's own projection rather than the scene's: it is the
+                -- same camera at a wider zoom, so an occluder just off the edge
+                -- of the view lands inside the mask and casts across the pixels
+                -- that can see it. The resolve inverts exactly this, which is
+                -- what makes one transform serve both directions.
+                local view <const> = self._maskView
+                view.x, view.y, view.zoom, view.rotation = self.deferred:maskView()
+                -- Built at the frame's size rather than the mask's, because the
+                -- resolve's inverse is and clip space carries no resolution: a
+                -- matrix built at the mask's size would apply the mask's scale
+                -- a second time and put every silhouette in the wrong place.
+                local frame <const> = context.frame
+                recordCast(self, context, self._maskPipeline, view:matrix(frame.width, frame.height), Deferred.MASK)
+            end,
+            dropShadows = function(context: Deferred.PassContext)
+                if self.count == 0 then
+                    return
+                end
+                -- The scene's own camera, because what this writes is read at
+                -- the fragment's own pixel rather than marched across, and at
+                -- the frame's size for the reason the mask is: the target is
+                -- half sized and covers the same world.
+                local frame <const> = context.frame
+                local matrix <const> = self._view:matrix(frame.width, frame.height)
+                -- The shadows first and the casters after: min then max, which
+                -- commute, so what a pixel ends up holding is a function of the
+                -- set of fragments that covered it rather than of their order.
+                -- The order here is only about which of the two answers wins
+                -- where they overlap, and the caster does.
+                recordCast(self, context, self._shadowPipeline, matrix, Deferred.SHADOW)
+                recordCast(self, context, self._stampPipeline, matrix, Deferred.STAMP)
+            end,
             geometry = function(context: Deferred.PassContext)
                 if self.count == 0 then
                     return
@@ -826,6 +1038,31 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
 
     self.pipeline = buildGeometry(self)
     self.blendPipeline = buildForward(self)
+
+    if shadows then
+        local maskFormat, shadowFormat = self.deferred:castFormats()
+        self._maskPipeline = buildCast(self, maskFormat, "max", "ecs.occluders")
+        self._shadowPipeline = buildCast(self, shadowFormat, "min", "ecs.dropShadows")
+        self._stampPipeline = buildCast(self, shadowFormat, "max", "ecs.dropShadowStamp")
+
+        -- Seeded here rather than above because one of them is the light
+        -- buffer, which the deferred pipeline owns and had not been built yet.
+        self._castScanWrites = {self._castBlocks.handle, self._castArgs.handle}
+        self._castCompactWrites = {self._castList.handle}
+        self._castCompactReads = {
+            self._slots.handle,
+            self._castBlocks.handle,
+            self._bounds.handle,
+            self.deferred:lightHandle(),
+        }
+        self._castBuffers = {
+            self.instances.handle,
+            self._castList.handle,
+            self._playbacks.handle,
+            self.deferred:lightHandle(),
+        }
+        self._castTextures = {self.images.handle}
+    end
 
     return self
 end
@@ -907,6 +1144,10 @@ function Backend:rebuildPipelines()
     local compact: ComputePipeline = nil
     local rank: ComputePipeline = nil
     local place: ComputePipeline = nil
+    local castCompact: ComputePipeline = nil
+    local mask: GraphicsPipeline = nil
+    local shadow: GraphicsPipeline = nil
+    local stamp: GraphicsPipeline = nil
     local built, reason = pcall(function(): string
         pipeline = buildGeometry(self)
         blend = buildForward(self)
@@ -915,6 +1156,13 @@ function Backend:rebuildPipelines()
         compact = ComputePipeline.load(device, "instance.compact.comp", {})
         rank = ComputePipeline.load(device, "instance.rank.comp", {})
         place = ComputePipeline.load(device, "instance.place.comp", {})
+        if self._castCompact ~= nil then
+            castCompact = ComputePipeline.load(device, "instance.cast.comp", {})
+            local maskFormat, shadowFormat = self.deferred:castFormats()
+            mask = buildCast(self, maskFormat, "max", "ecs.occluders")
+            shadow = buildCast(self, shadowFormat, "min", "ecs.dropShadows")
+            stamp = buildCast(self, shadowFormat, "max", "ecs.dropShadowStamp")
+        end
     end)
     if not built then
         if pipeline ~= nil then
@@ -937,6 +1185,18 @@ function Backend:rebuildPipelines()
         end
         if place ~= nil then
             place:destroy()
+        end
+        if castCompact ~= nil then
+            castCompact:destroy()
+        end
+        if mask ~= nil then
+            mask:destroy()
+        end
+        if shadow ~= nil then
+            shadow:destroy()
+        end
+        if stamp ~= nil then
+            stamp:destroy()
         end
         error(reason, 0)
     end
@@ -962,6 +1222,21 @@ function Backend:rebuildPipelines()
     oldCompact:destroy()
     oldRank:destroy()
     oldPlace:destroy()
+
+    if castCompact ~= nil then
+        local oldCastCompact <const> = self._castCompact
+        local oldMask <const> = self._maskPipeline
+        local oldShadow <const> = self._shadowPipeline
+        local oldStamp <const> = self._stampPipeline
+        self._castCompact = castCompact
+        self._maskPipeline = mask
+        self._shadowPipeline = shadow
+        self._stampPipeline = stamp
+        oldCastCompact:destroy()
+        oldMask:destroy()
+        oldShadow:destroy()
+        oldStamp:destroy()
+    end
 
     -- Last, because a failure above must leave the lighting and composite
     -- pipelines alone as well: half a reload is harder to reason about than
@@ -1063,7 +1338,7 @@ local function sortForward(self: Backend, frame: Frame, groups: integer, cull: l
     local scan = ComputePass.begin(commandBuffer, scanWrites, self._blendScanPass)
     self._blendScanPass = scan
     scan:bindPipeline(self._scan.handle)
-    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
     scan:dispatch(1)
     scan:finish()
 
@@ -1078,7 +1353,7 @@ local function sortForward(self: Backend, frame: Frame, groups: integer, cull: l
     self._blendCompactPass = compact
     compact:bindPipeline(self._compact.handle)
     compact:bindStorageBuffers(0, compactReads)
-    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
     compact:dispatch(groups)
     compact:finish()
 
@@ -1100,7 +1375,7 @@ local function sortForward(self: Backend, frame: Frame, groups: integer, cull: l
     self._rankPass = rank
     rank:bindPipeline(self._rank.handle)
     rank:bindStorageBuffers(0, rankReads)
-    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
     rank:dispatch(blendGroups)
     rank:finish()
 
@@ -1114,7 +1389,7 @@ local function sortForward(self: Backend, frame: Frame, groups: integer, cull: l
     local buckets = ComputePass.begin(commandBuffer, bucketWrites, self._bucketScanPass)
     self._bucketScanPass = buckets
     buckets:bindPipeline(self._scan.handle)
-    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
     buckets:dispatch(1)
     buckets:finish()
 
@@ -1132,9 +1407,54 @@ local function sortForward(self: Backend, frame: Frame, groups: integer, cull: l
     self._placePass = place
     place:bindPipeline(self._place.handle)
     place:bindStorageBuffers(0, placeReads)
-    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, 32)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
     place:dispatch(blendGroups)
     place:finish()
+end
+
+--- Compacts the shadow lane into the list the three shadow draws walk.
+---
+--- Two dispatches after the opaque lane's three, and no mark pass of its own:
+--- the lane was scanned in the same dispatch the other two were, over the one
+--- bound read that pass already pays for. What the compaction does that the
+--- other two do not is choose, once per caster, which lights it throws a copy
+--- by, and write a fixed run of entries whether or not it found that many.
+--- @param groups Workgroups covering every resident instance, as the opaque
+---     lane's dispatches used.
+--- @param cull The uniform every lane is pushed from, rewritten here.
+local function compactCasters(self: Backend, frame: Frame, groups: integer, cull: loader.CArray)
+    local commandBuffer <const> = frame.commandBuffer
+
+    cull[5] = groups
+    cull[6] = self.castCapacity
+    cull[7] = LANE_CAST
+
+    local scanWrites <const> = self._castScanWrites
+    scanWrites[1] = self._castBlocks.handle
+    scanWrites[2] = self._castArgs.handle
+
+    local scan = ComputePass.begin(commandBuffer, scanWrites, self._castScanPass)
+    self._castScanPass = scan
+    scan:bindPipeline(self._scan.handle)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
+    scan:dispatch(1)
+    scan:finish()
+
+    local compactWrites <const> = self._castCompactWrites
+    compactWrites[1] = self._castList.handle
+    local compactReads <const> = self._castCompactReads
+    compactReads[1] = self._slots.handle
+    compactReads[2] = self._castBlocks.handle
+    compactReads[3] = self._bounds.handle
+    compactReads[4] = self.deferred:lightHandle()
+
+    local compact = ComputePass.begin(commandBuffer, compactWrites, self._castCompactPass)
+    self._castCompactPass = compact
+    compact:bindPipeline(self._castCompact.handle)
+    compact:bindStorageBuffers(0, compactReads)
+    C.SDL_PushGPUComputeUniformData(commandBuffer, 0, cull, CULL_BYTES)
+    compact:dispatch(groups)
+    compact:finish()
 end
 
 --- Uploads what a packet describes, culls, and runs the pipeline.
@@ -1204,6 +1524,15 @@ function Backend:consume(packet: FramePacket, frame: Frame)
     -- spaces drifting apart.
     self.deferred:setView(view.x, view.y, view.zoom, view.rotation)
     self.deferred:setLightData(packet.lights, packet.lightCount)
+    -- The clock the shadow passes resolve a caster's playback against, so an
+    -- animated caster's silhouette is the frame the geometry pass drew.
+    self.deferred:setStepClock(packet.stepClock)
+    -- Ahead of the cull rather than inside the deferred pipeline's own render,
+    -- because the shadow lane's compaction reads the lights to decide which
+    -- ones a caster throws a copy by. A pass reading a buffer whose upload has
+    -- not been recorded reads the frame before, and a shadow one frame behind
+    -- its light is a shadow that lags every time a light moves.
+    self.deferred:flushLights(frame)
 
     -- Nothing routes into the forward lane unless extraction said something is
     -- blended, and the whole lane is skipped when nothing is: five compute
@@ -1223,6 +1552,12 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         cull[5] = groups
         cull[6] = self.capacity
         cull[7] = LANE_OPAQUE
+        -- What only the shadow lane reads: how far outside the view a caster is
+        -- still kept, and how many lights it chooses between.
+        cull[8] = self.deferred:shadowMargin()
+        cull[9] = self.deferred.lightCount
+        cull[10] = 0.0
+        cull[11] = 0.0
 
         -- Mark, scan, compact. Each pass reads what the one before it wrote,
         -- and SDL orders them because each declares what it writes. The buffer
@@ -1232,6 +1567,7 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         markWrites[1] = self._slots.handle
         markWrites[2] = self._blocks.handle
         markWrites[3] = self._blendBlocks.handle
+        markWrites[4] = self._castBlocks.handle
         local markReads <const> = self._markReads
         markReads[1] = self._bounds.handle
 
@@ -1239,7 +1575,7 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._markPass = mark
         mark:bindPipeline(self._mark.handle)
         mark:bindStorageBuffers(0, markReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, CULL_BYTES)
         mark:dispatch(groups)
         mark:finish()
 
@@ -1250,7 +1586,7 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         local scan = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
         self._scanPass = scan
         scan:bindPipeline(self._scan.handle)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, CULL_BYTES)
         scan:dispatch(1)
         scan:finish()
 
@@ -1264,12 +1600,19 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._compactPass = compact
         compact:bindPipeline(self._compact.handle)
         compact:bindStorageBuffers(0, compactReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, cull, CULL_BYTES)
         compact:dispatch(groups)
         compact:finish()
 
         if self._blending then
             sortForward(self, frame, groups, cull)
+        end
+        -- Last, because both of the above rewrite the uniform's back half and
+        -- this rewrites it again for a lane of its own. Gated on the pipeline
+        -- rather than on the frame: a backend built without shadows has no list
+        -- to compact into and no pass that would read one.
+        if self._castCompact ~= nil then
+            compactCasters(self, frame, groups, cull)
         end
     end
 
@@ -1325,6 +1668,15 @@ function Backend:destroy()
     self._compact:destroy()
     self._rank:destroy()
     self._place:destroy()
+    self._castBlocks:destroy()
+    if self._castCompact ~= nil then
+        self._castCompact:destroy()
+        self._castList:destroy()
+        self._castArgs:destroy()
+        self._maskPipeline:destroy()
+        self._shadowPipeline:destroy()
+        self._stampPipeline:destroy()
+    end
 end
 
 return Backend

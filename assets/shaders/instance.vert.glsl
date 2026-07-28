@@ -25,12 +25,10 @@ layout(set = 1, binding = 0) uniform View { mat4 viewProjection; } view;
 // agree.
 const int LAYER_BANDS = 16;
 
-// Texture-array layers `origin.z` addresses, and the stride the clip region
-// index sits above them at. `LAYER_SLOTS` in src/tecs/gpu/instancelayout.tl is
-// the same number and the pair only works while they agree. Every value the
-// packing produces is a whole number well inside the range a float represents
-// integers exactly over, so both halves come back out exactly.
-const float LAYER_SLOTS = 64.0;
+// What `origin.z` packs, and the arithmetic that takes it apart again. Shared
+// with the two passes that draw a caster, so a field cannot be read one way
+// here and another way there.
+#include "slot.glsl"
 
 // The space a layer positions its contents in, held in an entry's first
 // component.
@@ -211,11 +209,12 @@ void main() {
     vColor = self.color;
     vLit = entry.w;
 
-    // The array layer and the clip region share origin.z: the region is the
-    // number of whole strides in it and the layer is what is left over.
+    // The array layer, the clip region and the cast height share origin.z. Only
+    // the first two are read here: what a caster's height means is the mask
+    // pass's business and the drop-shadow pass's, and neither is this one.
     float packedSlot = self.origin.z;
-    float arrayLayer = mod(packedSlot, LAYER_SLOTS);
-    vClip = int(floor(packedSlot / LAYER_SLOTS));
+    float arrayLayer = slotLayer(packedSlot);
+    vClip = slotClip(packedSlot);
 
     // A sheet bound to no image names no layer, and the instance keeps the one
     // it was written with.

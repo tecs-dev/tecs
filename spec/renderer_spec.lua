@@ -731,7 +731,7 @@ describe("ecs.Renderer", function()
             redQuad(world)
             assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
 
-            patch("instance.mark.comp", "keep = outside %? 0u : 1u;", "keep = 0u;")
+            patch("instance.mark.comp", "keep%.x = outside %? 0u : 1u;", "keep.x = 0u;")
             renderer:rebuildPipelines()
             local pixels = frameOnce(world, renderer)
             shaders.override("instance.mark.comp", nil)

@@ -49,6 +49,7 @@ layout(set = 2, binding = 0) uniform Cull {
     // count is not here: what bounds this pass is the number the scan wrote
     // into the draw arguments, which the CPU never learns.
     vec4 params;
+    vec4 extra;
 } cull;
 
 shared uint bucketOf[256];

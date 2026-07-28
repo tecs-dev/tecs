@@ -1,10 +1,11 @@
 #version 450
 // Writes each survivor of one lane at the offset the scan assigned it.
 //
-// Run once per lane, over the same slots the mark pass packed both into. Which
-// lane is being filled arrives in the uniform rather than being compiled in,
-// so the opaque list and the forward list come out of one shader and cannot
-// drift apart.
+// Run once per drawing lane, over the same slots the mark pass packed all three
+// into. Which lane is being filled arrives in the uniform rather than being
+// compiled in, so the opaque list and the forward list come out of one shader
+// and cannot drift apart. The shadow lane has a compaction of its own, because
+// what it writes is not an instance index.
 layout(local_size_x = 256) in;
 
 layout(set = 0, binding = 0) readonly buffer Slots { uint slot[]; } slots;
@@ -15,6 +16,7 @@ layout(set = 2, binding = 0) uniform Cull {
     // x instance count, y workgroup count, z the destination list's capacity,
     // w which lane's rank to read out of a slot.
     vec4 params;
+    vec4 extra;
 } cull;
 
 #include "cull.glsl"
@@ -22,7 +24,7 @@ layout(set = 2, binding = 0) uniform Cull {
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= uint(cull.params.x)) { return; }
-    uint offset = (slots.slot[i] >> uint(cull.params.w)) & LANE_MASK;
+    uint offset = (slots.slot[i] >> laneShift(uint(cull.params.w))) & LANE_MASK;
     if (offset == CULLED) { return; }
     uint at = bases.base[gl_WorkGroupID.x] + offset;
     // Past the end is dropped rather than wrapped. The scan held the draw to

@@ -22,6 +22,7 @@ layout(set = 2, binding = 0) uniform Cull {
     // be the one the ranking pass wrote against or an entry lands in another
     // bucket's run.
     vec4 params;
+    vec4 extra;
 } cull;
 
 void main() {

@@ -7,6 +7,23 @@
 --- callbacks because what to draw is the caller's problem; everything else is
 --- the engine's opinion and is built in.
 ---
+--- Four more when `shadows` is set, all of them between geometry and lighting,
+--- because a shadow is not something done to a finished image. Three build the
+--- occluder mask: one draw of every occluder's silhouette, then a separable
+--- blur across and down. The fourth fills the drop-shadow target. Lighting
+--- reads both, and reads them as one mask marched by every light rather than as
+--- a pass per light, which is what makes the cost independent of how many
+--- lights the scene holds.
+---
+--- The two are not the same feature at different strengths. The mask is inside
+--- the light loop and blocks a light's own contribution; the drop-shadow target
+--- multiplies the sum, ambient included, so in a scene lit mostly by ambient
+--- the mask has no output at all and the other one is the whole effect. That is
+--- also why an occluder and a drop-shadow caster are exclusive roles rather
+--- than two flags: a thing that wants to be grounded is exactly the thing that
+--- must not put a light-blocking silhouette in the mask, because a crowd of
+--- them merges under the mask's max blend into one flat mat of darkness.
+---
 --- Composite and present are two passes rather than one because a pass writing
 --- the swapchain is the end of the frame: the swapchain texture belongs to the
 --- presenter once submitted, is not created with the sampled usage bit, and is
@@ -62,6 +79,11 @@ local C <const> = sdl.C
 --- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local RGBA8 <const> = 4
 
+--- One channel, which is all the drop-shadow target has to say. Read from the
+--- generated cdef rather than copied out of the header, for the reason the
+--- blend factors are.
+local R8 <const> = tonumber(C.SDL_GPU_TEXTUREFORMAT_R8_UNORM) as integer
+
 local MAX_LIGHTS <const> = lightlayout.MAX
 local LIGHT_FLOATS <const> = lightlayout.FLOATS
 local LIGHT_STRIDE <const> = lightlayout.BYTES
@@ -70,6 +92,27 @@ local TILE_SLOTS <const> = lightlayout.TILE_SLOTS
 
 --- Threads per binning workgroup, matching the shader's local size.
 local BIN_GROUP <const> = 64
+
+--- Floats the block a pass shading against the lights reads the scene from
+--- holds: ambient, target size, view, the tile grid's rectangle, and the
+--- transform from the world into the occluder mask, each padded to a vec4.
+local SCENE_FLOATS <const> = 24
+local SCENE_BYTES <const> = SCENE_FLOATS * 4
+
+--- Floats the block a shadow draw is placed from holds: a matrix and four
+--- parameters.
+local CAST_FLOATS <const> = 20
+local CAST_BYTES <const> = CAST_FLOATS * 4
+
+--- Which of the three shadow draws a caster pass is recording, as
+--- `assets/shaders/cast.vert.glsl` reads them.
+---
+--- One shader places all three because all three place a quad from the same
+--- instance against the same list. What differs is where it goes and what it
+--- rejects, and that is one number rather than three shaders.
+local MASK <const> = 0
+local SHADOW <const> = 1
+local STAMP <const> = 2
 
 --- One point light, positioned in the world the camera is looking at.
 ---
@@ -125,6 +168,60 @@ local record DeferredOptions
     --- Defaults to a dim neutral. A fragment that asked not to be lit does not
     --- receive it, and neither does a pixel nothing drew over.
     ambient: {number}
+
+    --- Whether to build the occluder mask and the drop-shadow target at all.
+    ---
+    --- Defaults to false, and off it costs a pipeline nothing: three targets go
+    --- unallocated, four passes go undeclared, and the resolve is built from
+    --- the variant of its shader that samples neither. On it, a scene that
+    --- casts nothing still pays the four passes, which draw no instances over
+    --- targets that clear to "no occluder" and "nothing shadowed".
+    ---
+    --- A knob rather than a count taken off a frame, because the alternative is
+    --- a pass graph whose shape depends on what a world happens to hold this
+    --- frame, and a resolve pipeline rebuilt the first time something casts.
+    shadows: boolean
+    --- Draws the shadow lane's list into the occluder mask, at the mask's own
+    --- widened projection. Called with the pass begun; `castUniform` is what
+    --- says where to put a caster. Ignored unless `shadows` is set.
+    occluders: function(context: PassGraph.PassContext)
+    --- Draws the same list into the drop-shadow target, twice: the stretched
+    --- copies with min blending, then the casters themselves with max, which is
+    --- what puts a caster back on top of the shadow it threw across its own
+    --- feet. Ignored unless `shadows` is set.
+    dropShadows: function(context: PassGraph.PassContext)
+    --- Size of the occluder mask relative to the frame. Defaults to one.
+    --- Halving it quarters two full targets and costs a shadow its crisp edge,
+    --- since the mask is sampled at the resolution it was written.
+    shadowMaskScale: number
+    --- Samples a shadow march takes at full attenuation, and the ceiling the
+    --- adaptive count is clamped to. Defaults to 24, which is the number the
+    --- previous engine settled on.
+    shadowSteps: number
+    --- How far outside the view, in world units, a caster is still kept.
+    --- Defaults to 200. A wall just off the left edge throws a shadow that
+    --- falls on screen, and this is what stops the cull dropping it. It also
+    --- widens the mask's projection by the same amount, so what is kept lands
+    --- inside the mask rather than off its edge.
+    shadowMargin: number
+    --- World height a full-height occluder stands, which is the one number
+    --- that puts a light's height and a mask's zero-to-one height in the same
+    --- space. Defaults to 64, which is `PointLight`'s own default height, so an
+    --- occluder at height one and a light at its default are level and the
+    --- shadow runs to the horizon.
+    shadowHeight: number
+    --- Size of the drop-shadow target relative to the frame. Defaults to a
+    --- half: it holds one soft channel, so the resolution it is read at is not
+    --- the resolution it has to be drawn at.
+    dropShadowScale: number
+    --- How dark a drop shadow is where the light throwing it is at full
+    --- strength. Defaults to 0.4, which is the previous engine's own default.
+    dropShadowOpacity: number
+    --- Longest a drop shadow may be, in world units. Defaults to 512. The
+    --- projection that places the tip divides by the light's height above the
+    --- caster's, so a light barely clearing a tall caster throws a shadow to
+    --- the horizon, and this is what bounds it.
+    dropShadowLength: number
 end
 
 --- The deferred pipeline: its pass graph, the pipelines it binds, and the
@@ -137,6 +234,15 @@ end
 local record Deferred
     --- One light, as `setLights` takes them.
     Light: Light
+    --- The occluder mask draw, which puts a caster's own silhouette into the
+    --- mask every light marches against.
+    MASK: integer
+    --- The drop-shadow draw, which puts a stretched copy of a caster along the
+    --- ground away from one light.
+    SHADOW: integer
+    --- The draw that puts a caster back over its own shadow at full
+    --- brightness.
+    STAMP: integer
     --- What a geometry callback receives. Re-exported so callers need not
     --- reach into PassGraph for it.
     PassContext: PassGraph.PassContext
@@ -197,11 +303,48 @@ local record Deferred
     --- Copies the scene target to the swapchain, and so the only pipeline here
     --- built against the swapchain's format.
     _presentPipeline: GraphicsPipeline
-    --- Sixteen floats pushed to the lighting fragment stage: ambient, then
-    --- the target size, then the view, then the grid's world rectangle, each
-    --- padded out to a vec4. Held rather than allocated per frame, since the
-    --- pass runs every frame.
+    --- Blurs the occluder mask along one axis, bound by both blur passes and
+    --- told which axis by the four floats it is pushed. Nil while shadows are
+    --- off.
+    _blurPipeline: GraphicsPipeline
+    --- `SCENE_FLOATS` pushed to the lighting fragment stage: ambient, then the
+    --- target size, then the view, then the grid's world rectangle, then the
+    --- transform into the occluder mask, each padded out to a vec4. Held rather
+    --- than allocated per frame, since the pass runs every frame.
     _sceneUniform: loader.CArray
+    --- One step along the axis a blur pass is blurring, in mask UV. Rewritten
+    --- between the two passes, so it is one array and a push each.
+    _blurUniform: loader.CArray
+    --- The matrix and four parameters a shadow draw is placed from, rewritten
+    --- for each of the three.
+    _castUniform: loader.CArray
+    --- Whether the mask and the drop-shadow target exist at all, as `create`
+    --- was told. Read by everything that would otherwise have to test for a
+    --- target that is not there.
+    _shadows: boolean
+    --- Size of the mask relative to the frame, as the targets were declared
+    --- with. Kept because the mask's projection is derived from it.
+    _shadowMaskScale: number
+    --- Samples a march takes at full attenuation, pushed to the resolve.
+    _shadowSteps: number
+    --- How far outside the view a caster is kept, in world units, and how much
+    --- wider than the view the mask's projection is.
+    _shadowMargin: number
+    --- World height a full-height occluder stands.
+    _shadowHeight: number
+    --- How dark a drop shadow is at full weight.
+    _dropShadowOpacity: number
+    --- Longest a drop shadow may be, in world units.
+    _dropShadowLength: number
+    --- Zoom the mask's projection uses, resolved with the view each frame. The
+    --- camera's own, scaled so the margin lands inside the mask and so the
+    --- mask's own size is covered rather than the frame's.
+    _maskZoom: number
+    --- The animation clock a caster's playback resolves against, as
+    --- `setStepClock` left it. Here as well as in the layer uniform the geometry
+    --- pass pushes, because a caster's silhouette is placed by a pass of its own
+    --- and has to be showing the frame the geometry pass drew.
+    _stepClock: number
     --- The view lights are placed against, as `setView` left it. Zoom and
     --- rotation are kept folded into the two components the shader multiplies
     --- by, so the trig is paid once a frame rather than once a fragment.
@@ -212,6 +355,12 @@ local record Deferred
     _viewCos: number
     --- Sine of the view's rotation, already divided by the zoom.
     _viewSin: number
+    --- The view's zoom and rotation as they arrived, kept alongside the folded
+    --- pair because the mask's projection is the camera's at another zoom and
+    --- cannot be recovered from two numbers that have one folded into them.
+    _viewZoom: number
+    --- Radians, the sense the camera turns in.
+    _viewRotation: number
     --- Whether anything has set a view. Until something does, the frame
     --- centres one on its own target, so world units are target pixels and a
     --- pipeline driven without a camera behaves as it reads.
@@ -229,6 +378,14 @@ local record Deferred
     _frameViewCos: number
     --- The frame's rotation sine over its zoom, as the shaders multiply by.
     _frameViewSin: number
+    --- The frame's view centre, zoom and rotation as the mask's projection
+    --- takes them. Resolved with everything else, because the pass that draws
+    --- the mask and the pass that inverts it have to agree exactly: a
+    --- silhouette drawn against one projection and marched against another is
+    --- a shadow in the wrong place.
+    _frameViewZoom: number
+    --- The frame's rotation in radians, for the mask's projection.
+    _frameViewRotation: number
     --- Least world X the grid covers this frame. The four bounds are the
     --- axis-aligned bound of what the camera sees, which is wider than the view
     --- itself once the camera is turned.
@@ -245,9 +402,15 @@ end
 
 local DeferredMT <const>: metatable<Deferred> = {__index = Deferred}
 
-local function buildPipeline(device: loader.CPtr, fragmentName: string, format: integer, name: string): GraphicsPipeline
+Deferred.MASK = MASK
+Deferred.SHADOW = SHADOW
+Deferred.STAMP = STAMP
+
+local function buildPipeline(
+    device: loader.CPtr, fragmentName: string, format: integer, name: string, defines: {string: string}
+): GraphicsPipeline
     local vertex = Shader.load(device, "deferred.fullscreen.vert", {})
-    local fragment = Shader.load(device, fragmentName, {})
+    local fragment = Shader.load(device, fragmentName, {defines = defines})
     local pipeline = GraphicsPipeline.create(
         device,
         {
@@ -292,6 +455,29 @@ local function sceneUniform(self: Deferred, width: number, height: number): load
     scene[13] = self._boundsMinY
     scene[14] = self._boundsMaxX
     scene[15] = self._boundsMaxY
+
+    -- World to mask UV, which is `Camera:toScreen` against the mask's own
+    -- projection divided through by the size that projection was built for.
+    -- Clip space is what the two have in common, and it carries no resolution,
+    -- so the mask's own scale drops out of this entirely: a mask at half size
+    -- covers the same world over fewer pixels, and a UV is a fraction either
+    -- way.
+    local turn <const> = math.cos(self._frameViewRotation) * self._maskZoom
+    local tilt <const> = math.sin(self._frameViewRotation) * self._maskZoom
+    local acrossMask <const> = 1.0 / width
+    local downMask <const> = 1.0 / height
+    local maskA <const> = turn * acrossMask
+    local maskB <const> = tilt * acrossMask
+    local maskC <const> = -tilt * downMask
+    local maskD <const> = turn * downMask
+    scene[16] = maskA
+    scene[17] = maskB
+    scene[18] = maskC
+    scene[19] = maskD
+    scene[20] = 0.5 - (maskA * self._frameViewX + maskB * self._frameViewY)
+    scene[21] = 0.5 - (maskC * self._frameViewX + maskD * self._frameViewY)
+    scene[22] = self._shadowSteps
+    scene[23] = self._shadowHeight
     return scene
 end
 
@@ -316,6 +502,19 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self.ambient = options.ambient or {0.08, 0.08, 0.10}
     self._destroyed = false
 
+    local shadows <const> = options.shadows == true
+    self._shadows = shadows
+    self._shadowMaskScale = options.shadowMaskScale or 1.0
+    self._shadowSteps = options.shadowSteps or 24
+    self._shadowMargin = options.shadowMargin or 200.0
+    self._shadowHeight = options.shadowHeight or 64.0
+    self._dropShadowOpacity = options.dropShadowOpacity or 0.4
+    self._dropShadowLength = options.dropShadowLength or 512.0
+    self._maskZoom = 1.0
+    self._stepClock = 0.0
+    self._blurUniform = loader.newArray("float[4]")
+    self._castUniform = loader.newArray("float[?]", CAST_FLOATS)
+
     self._lightBuffer = Buffer.create(
         device,
         {
@@ -326,17 +525,21 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         }
     )
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
-    self._sceneUniform = loader.newArray("float[16]")
+    self._sceneUniform = loader.newArray("float[?]", SCENE_FLOATS)
     self._binUniform = loader.newArray("float[8]")
     self._viewX = 0.0
     self._viewY = 0.0
     self._viewCos = 1.0
     self._viewSin = 0.0
+    self._viewZoom = 1.0
+    self._viewRotation = 0.0
     self._viewSet = false
     self._frameViewX = 0.0
     self._frameViewY = 0.0
     self._frameViewCos = 1.0
     self._frameViewSin = 0.0
+    self._frameViewZoom = 1.0
+    self._frameViewRotation = 0.0
     self._boundsMinX = 0.0
     self._boundsMinY = 0.0
     self._boundsMaxX = 0.0
@@ -399,9 +602,46 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         format = RGBA8,
     })
 
-    self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
-    self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
-    self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present")
+    if shadows then
+        graph:target({
+            -- One mask for every light, rather than a pass per light. Red
+            -- carries how tall the occluder covering a pixel is and green marks
+            -- that an occluder really covers it, so a march can tell a
+            -- silhouette from the halo the blur spreads around one. Both clear
+            -- to zero, which reads as no occluder anywhere.
+            name = "occluders",
+            format = RGBA8,
+            scale = self._shadowMaskScale,
+            clear = {r = 0, g = 0, b = 0, a = 0},
+        })
+        graph:target({
+            -- Where the first blur pass puts its result so the second can read
+            -- it. Nothing outside the two touches it.
+            name = "occludersTemp",
+            format = RGBA8,
+            scale = self._shadowMaskScale,
+            clear = {r = 0, g = 0, b = 0, a = 0},
+        })
+        graph:target({
+            -- One channel: how much of all lighting reaches a pixel after every
+            -- drop shadow thrown across it. Cleared to white, because a pixel
+            -- no shadow lands on multiplies the light it receives by one, and
+            -- half sized because it holds nothing sharp.
+            name = "dropShadowAO",
+            format = R8,
+            scale = options.dropShadowScale or 0.5,
+            clear = {r = 1, g = 1, b = 1, a = 1},
+        })
+    end
+
+    self._lightingPipeline = buildPipeline(
+        device, "deferred.lighting.frag", RGBA8, "lighting", shadows and {SHADOWS = "1"} or nil
+    )
+    if shadows then
+        self._blurPipeline = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
+    end
+    self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
+    self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present", nil)
 
     graph:pass({
         name = "geometry",
@@ -423,9 +663,71 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         end,
     })
 
+    if shadows then
+        graph:pass({
+            -- Before lighting rather than after, because the mask is what
+            -- lighting reads. This is the seam shadows want, and it is a
+            -- different one from the seam a post-process wants: a shadow is not
+            -- something done to a finished image.
+            name = "occluders",
+            outputs = {"occluders"},
+            execute = function(context: PassGraph.PassContext)
+                if options.occluders ~= nil then
+                    options.occluders(context)
+                end
+            end,
+        })
+        graph:pass({
+            name = "occluderBlurH",
+            inputs = {"occluders"},
+            outputs = {"occludersTemp"},
+            execute = function(context: PassGraph.PassContext)
+                local blur <const> = self._blurUniform
+                blur[0] = 1.0 / context.width
+                blur[1] = 0.0
+                blur[2] = 0.0
+                blur[3] = 0.0
+                context.pass:bindPipeline(self._blurPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            -- Back into the mask, which a target may be written twice for. The
+            -- clear it declares is applied again and costs nothing: this covers
+            -- every pixel of it, so there is nothing of the first write left to
+            -- preserve.
+            name = "occluderBlurV",
+            inputs = {"occludersTemp"},
+            outputs = {"occluders"},
+            execute = function(context: PassGraph.PassContext)
+                local blur <const> = self._blurUniform
+                blur[0] = 0.0
+                blur[1] = 1.0 / context.height
+                blur[2] = 0.0
+                blur[3] = 0.0
+                context.pass:bindPipeline(self._blurPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            -- Reads no G-buffer target, so it introduces no dependency the
+            -- graph has to resolve and could sit anywhere before lighting. It
+            -- is here because that is where a reader looks for it.
+            name = "dropShadowAO",
+            outputs = {"dropShadowAO"},
+            execute = function(context: PassGraph.PassContext)
+                if options.dropShadows ~= nil then
+                    options.dropShadows(context)
+                end
+            end,
+        })
+    end
+
     graph:pass({
         name = "lighting",
-        inputs = {"albedo", "normal"},
+        inputs = shadows and {"albedo", "normal", "occluders", "dropShadowAO"} or {"albedo", "normal"},
         outputs = {"lit"},
         execute = function(context: PassGraph.PassContext)
             local scene <const> = sceneUniform(self, context.width, context.height)
@@ -437,7 +739,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
 
             context.pass:bindPipeline(self._lightingPipeline.handle)
             context.pass:bindFragmentStorageBuffers(0, buffers)
-            C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, 64)
+            C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, SCENE_BYTES)
             context.pass:draw(3)
         end,
     })
@@ -510,9 +812,15 @@ function Deferred:setView(x: number, y: number, zoom: number, rotation: number)
     self._viewSet = true
     self._viewX = x
     self._viewY = y
-    local inverse <const> = zoom ~= 0.0 and 1.0 / zoom or 1.0
+    local scale <const> = zoom ~= 0.0 and zoom or 1.0
+    local inverse <const> = 1.0 / scale
     self._viewCos = math.cos(rotation) * inverse
     self._viewSin = math.sin(rotation) * inverse
+    -- Kept unfolded as well, because the mask's projection is this camera at
+    -- another zoom and a pair with the zoom already divided through cannot say
+    -- which part of it was the zoom.
+    self._viewZoom = scale
+    self._viewRotation = rotation
 end
 
 --- Replaces the light set for subsequent frames.
@@ -580,6 +888,8 @@ local function resolveView(self: Deferred, width: number, height: number)
         self._frameViewY = self._viewY
         self._frameViewCos = self._viewCos
         self._frameViewSin = self._viewSin
+        self._frameViewZoom = self._viewZoom
+        self._frameViewRotation = self._viewRotation
     else
         -- Centred on the target at zoom one, which puts a world unit on a
         -- target pixel and the world origin in the corner. The size is only
@@ -589,7 +899,19 @@ local function resolveView(self: Deferred, width: number, height: number)
         self._frameViewY = height * 0.5
         self._frameViewCos = 1.0
         self._frameViewSin = 0.0
+        self._frameViewZoom = 1.0
+        self._frameViewRotation = 0.0
     end
+
+    -- The mask's own zoom, widened so the shadow margin lands inside it. The
+    -- widening is the smaller of what each axis asks for, so both get at least
+    -- the margin and the projection stays uniform: two zooms would be a
+    -- non-uniform scale, which a rotation does not survive.
+    local margin <const> = 2.0 * self._shadowMargin
+    local worldWidth <const> = width / self._frameViewZoom
+    local worldHeight <const> = height / self._frameViewZoom
+    local ratio <const> = math.min(worldWidth / (worldWidth + margin), worldHeight / (worldHeight + margin))
+    self._maskZoom = self._frameViewZoom * ratio
 
     -- Half the target against the view's own axes. The two components already
     -- carry the reciprocal zoom, so this is the half extent in world units:
@@ -668,11 +990,17 @@ function Deferred:rebuildPipelines()
     local lighting: GraphicsPipeline = nil
     local composite: GraphicsPipeline = nil
     local present: GraphicsPipeline = nil
+    local blur: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
     local built, reason = pcall(function(): string
-        lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
-        composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
-        present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present")
+        lighting = buildPipeline(
+            device, "deferred.lighting.frag", RGBA8, "lighting", self._shadows and {SHADOWS = "1"} or nil
+        )
+        composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
+        present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present", nil)
+        if self._shadows then
+            blur = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
+        end
         bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
     end)
     if not built then
@@ -685,6 +1013,9 @@ function Deferred:rebuildPipelines()
         if present ~= nil then
             present:destroy()
         end
+        if blur ~= nil then
+            blur:destroy()
+        end
         if bin ~= nil then
             bin:destroy()
         end
@@ -694,14 +1025,19 @@ function Deferred:rebuildPipelines()
     local oldLighting <const> = self._lightingPipeline
     local oldComposite <const> = self._compositePipeline
     local oldPresent <const> = self._presentPipeline
+    local oldBlur <const> = self._blurPipeline
     local oldBin <const> = self._binPipeline
     self._lightingPipeline = lighting
     self._compositePipeline = composite
     self._presentPipeline = present
+    self._blurPipeline = blur
     self._binPipeline = bin
     oldLighting:destroy()
     oldComposite:destroy()
     oldPresent:destroy()
+    if oldBlur ~= nil then
+        oldBlur:destroy()
+    end
     oldBin:destroy()
 end
 
@@ -755,7 +1091,124 @@ function Deferred:bindLighting(context: PassGraph.PassContext)
     buffers[2] = self._tileCounts.handle
     buffers[3] = self._tileLights.handle
     context.pass:bindFragmentStorageBuffers(0, buffers)
-    C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 1, sceneUniform(self, context.width, context.height), 64)
+    C.SDL_PushGPUFragmentUniformData(
+        context.commandBuffer, 1, sceneUniform(self, context.width, context.height), SCENE_BYTES
+    )
+end
+
+--- Flushes any pending light writes onto a frame's command buffer.
+---
+--- Called by whoever is about to dispatch compute that reads the lights, which
+--- is ahead of where `render` would have flushed them: the shadow lane's
+--- compaction picks which lights a caster throws a copy by, and a pass reading
+--- a buffer whose upload has not been recorded reads the frame before. Safe to
+--- call more than once, since a flush with nothing dirty records nothing.
+--- @param frame The frame whose command buffer the copy rides.
+function Deferred:flushLights(frame: Frame)
+    self._lightBuffer:flush(frame.commandBuffer)
+end
+
+--- The buffer the lights are packed into.
+---
+--- For a pass that has to read them and is not one of this pipeline's own: the
+--- shadow lane's compaction runs on the other side of the boundary and still
+--- has to choose by the same lights the resolve shades with.
+function Deferred:lightHandle(): loader.CValue
+    return self._lightBuffer.handle
+end
+
+--- How far outside the view a caster is still kept, in world units.
+---
+--- Asked rather than restated, because the cull that keeps one and the
+--- projection that has to have room for it are on opposite sides of the
+--- boundary, and a caster kept by a wider rectangle than the mask covers is a
+--- silhouette drawn off the edge of the mask.
+function Deferred:shadowMargin(): number
+    return self._shadowMargin
+end
+
+--- Whether this pipeline has an occluder mask and a drop-shadow target.
+---
+--- Asked rather than assumed, because everything the shadow lane costs on the
+--- other side of the boundary is gated on the same answer: a backend that
+--- allocated a shadow list for a pipeline with nowhere to draw it would be
+--- paying for a list nothing reads.
+function Deferred:castsShadows(): boolean
+    return self._shadows
+end
+
+--- The colour format a pipeline drawing into the occluder mask must be created
+--- against, and the one drawing into the drop-shadow target.
+---
+--- Both from the graph rather than restated, so a pipeline cannot disagree with
+--- the attachment it draws into. Raises when shadows are off, since there is no
+--- target to answer for.
+--- @return The occluder mask's format.
+--- @return The drop-shadow target's format, which is one channel.
+function Deferred:castFormats(): integer, integer
+    return self.graph:formatOf("occluders"), self.graph:formatOf("dropShadowAO")
+end
+
+--- The camera the occluder mask is drawn with, as four numbers.
+---
+--- The scene's own camera at a wider zoom: wide enough that the shadow margin
+--- lands inside the mask rather than off its edge, and scaled to the mask's own
+--- size rather than the frame's. Resolved once a frame beside everything else,
+--- because the pass that draws the mask and the pass that inverts it have to
+--- agree exactly, and two derivations of one projection are two things that can
+--- disagree.
+---
+--- Valid only during a frame's passes: it is what `render` resolved for the
+--- frame being drawn.
+--- @return Centre of the view in world units.
+--- @return Centre of the view in world units, with Y running down.
+--- @return Zoom the mask is drawn at, which is not the camera's. It is meant
+---     for a matrix built at the frame's size and not at the mask's: clip space
+---     carries no resolution, so the mask's own scale is not in this and must
+---     not be applied to it.
+--- @return Rotation in radians, which is the camera's.
+function Deferred:maskView(): number, number, number, number
+    return self._frameViewX, self._frameViewY, self._maskZoom, self._frameViewRotation
+end
+
+--- Fills the block one of the three shadow draws is placed from.
+---
+--- The matrix is the caller's, because only the caller knows what size target
+--- the pass is writing; everything else is this pipeline's configuration and is
+--- filled in here so a draw cannot be issued at an opacity or a length the
+--- resolve was not told about.
+--- @param matrix World to clip for the target being drawn into, which for the
+---     mask is `maskView` at the pass's own width and height and for the other
+---     two is the scene camera's.
+--- @param mode `Deferred.MASK`, `Deferred.SHADOW` or `Deferred.STAMP`.
+--- @return The block to push, which is this pipeline's and is rewritten by the
+---     next call.
+function Deferred:castUniform(matrix: loader.CArray, mode: integer): loader.CArray
+    local block <const> = self._castUniform
+    for slot = 0, 15 do
+        block[slot] = matrix[slot]
+    end
+    block[16] = self._stepClock
+    block[17] = mode
+    block[18] = self._dropShadowOpacity
+    block[19] = self._dropShadowLength
+    return block
+end
+
+--- Bytes `castUniform` fills, for the caller that pushes it.
+function Deferred.castUniformSize(): integer
+    return CAST_BYTES
+end
+
+--- Says what the animation clock reads, so a caster's silhouette is the frame
+--- it is showing.
+---
+--- Set once per frame by whoever owns the clock, before the passes run. A
+--- pipeline nothing calls this on resolves every playback at step zero, which
+--- is the first frame of every animation.
+--- @param clock Whole fixed steps since the world started.
+function Deferred:setStepClock(clock: number)
+    self._stepClock = clock
 end
 
 --- Releases everything the pipeline owns. Safe to call more than once.
@@ -768,6 +1221,9 @@ function Deferred:destroy()
     self._lightingPipeline:destroy()
     self._compositePipeline:destroy()
     self._presentPipeline:destroy()
+    if self._blurPipeline ~= nil then
+        self._blurPipeline:destroy()
+    end
     self._binPipeline:destroy()
     self._lightBuffer:destroy()
     self._tileCounts:destroy()

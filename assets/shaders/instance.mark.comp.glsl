@@ -7,11 +7,18 @@
 // overlapping geometry swaps which one wins and the scene shimmers. A scan is
 // deterministic, so the same scene draws the same way every frame.
 //
-// Two lanes rather than one, because a blended instance must not reach the
-// G-buffer: that pass writes with replace and has nowhere to put partial
-// coverage, so an instance carrying an alpha below one leaves here for the
-// forward pass instead. Both lanes are scanned in the same dispatch, over the
-// one bound read the pass already pays for.
+// Three lanes rather than one, because what the G-buffer rasterises, what the
+// forward pass blends and what casts a shadow are three different lists over
+// one set of instances. A blended instance must not reach the G-buffer: that
+// pass writes with replace and has nowhere to put partial coverage, so an
+// instance carrying an alpha below one leaves here for the forward pass
+// instead. A caster is in whichever of those two its alpha put it and in the
+// shadow lane as well, because a wall both draws and blocks light.
+//
+// All three are scanned in the same dispatch, over the one bound read the pass
+// already pays for. A `uvec3` add under the same barriers is the same scan run
+// three times in parallel rather than three times in sequence, so the barrier
+// count is what it was and the shared memory is three kilobytes instead of one.
 layout(local_size_x = 256) in;
 
 layout(set = 0, binding = 0) readonly buffer Bounds {
@@ -23,40 +30,65 @@ layout(set = 1, binding = 1) writeonly buffer Counts { uint count[]; } counts;
 layout(set = 1, binding = 2) writeonly buffer BlendCounts {
     uint count[];
 } blendCounts;
+layout(set = 1, binding = 3) writeonly buffer CastCounts {
+    uint count[];
+} castCounts;
 layout(set = 2, binding = 0) uniform Cull {
     // World-space rectangle the camera can see: min xy, max xy.
     vec4 view;
     // Instance count, workgroup count, then the two fields the later passes
     // read: the destination list's capacity and which lane is being filled.
     vec4 params;
+    // x how far outside the view a caster is still kept, in world units. The
+    // rest is spare.
+    vec4 extra;
 } cull;
 
 #include "cull.glsl"
+#include "cast.glsl"
 
-shared uint scratch[256];
-shared uint blendScratch[256];
+shared uvec3 scratch[256];
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
     uint t = gl_LocalInvocationID.x;
 
-    uint keep = 0u;
-    uint keepBlend = 0u;
+    uvec3 keep = uvec3(0u);
     if (i < uint(cull.params.x)) {
         vec4 box = bounds.item[i];
-        // The sign of the first half extent says which lane, so the view test
-        // works from the magnitude of both.
+        // Neither sign says anything about length, so the view test works from
+        // the magnitude of both.
         vec2 extent = abs(box.zw);
         // Tested in world space now that a camera exists, so panning and
         // zooming change what survives rather than only what is drawn.
         bool outside = box.x + extent.x < cull.view.x || box.x - extent.x > cull.view.z ||
                        box.y + extent.y < cull.view.y || box.y - extent.y > cull.view.w;
-        keep = outside ? 0u : 1u;
-        // A survivor goes to one lane or the other and never to both, so the
-        // two lists partition what the view kept rather than overlapping.
-        if (keep == 1u && cullBlended(box)) {
-            keep = 0u;
-            keepBlend = 1u;
+        keep.x = outside ? 0u : 1u;
+        // A survivor goes to one drawing lane or the other and never to both,
+        // so the two lists partition what the view kept rather than
+        // overlapping.
+        if (keep.x == 1u && cullBlended(box)) {
+            keep.x = 0u;
+            keep.y = 1u;
+        }
+        // The shadow lane's own test, against a rectangle wider than the view.
+        // A caster just off the left edge throws a shadow that falls on screen,
+        // and the ordinary view test drops it: the previous engine expanded its
+        // light cull for exactly this and could not expand its drop-shadow
+        // fan-out, which lived inside the sprite cull and inherited the
+        // viewport. Here the lane's predicate is its own.
+        //
+        // The count is the fan-out rather than one. A prefix sum over counts is
+        // the same prefix sum, so this costs nothing beyond what the lane
+        // already costs, and it is what lets the compaction give every caster a
+        // fixed run without a second pass to tell it where the runs are.
+        if (cullCasts(box)) {
+            float margin = cull.extra.x;
+            bool far = box.x + extent.x < cull.view.x - margin ||
+                       box.x - extent.x > cull.view.z + margin ||
+                       box.y + extent.y < cull.view.y - margin ||
+                       box.y - extent.y > cull.view.w + margin;
+            keep.z = far ? 0u : CAST_FANOUT;
         }
         // An instance entirely outside its clip region is drawn and thrown
         // away a fragment at a time, which is correct and wasteful. Rejecting
@@ -67,31 +99,36 @@ void main() {
     }
 
     // Inclusive scan across the workgroup, once per lane. Each survivor learns
-    // how many survivors of its own lane precede it here, which is its offset
+    // how many entries of its own lane precede it here, which is its offset
     // inside this block of that lane's list.
     scratch[t] = keep;
-    blendScratch[t] = keepBlend;
     barrier();
     for (uint stride = 1u; stride < 256u; stride <<= 1) {
-        uint carried = 0u;
-        uint carriedBlend = 0u;
+        uvec3 carried = uvec3(0u);
         if (t >= stride) {
             carried = scratch[t - stride];
-            carriedBlend = blendScratch[t - stride];
         }
         barrier();
         scratch[t] += carried;
-        blendScratch[t] += carriedBlend;
         barrier();
     }
 
     if (i < uint(cull.params.x)) {
-        uint opaque = keep == 1u ? scratch[t] - 1u : CULLED;
-        uint blend = keepBlend == 1u ? blendScratch[t] - 1u : CULLED;
-        slots.slot[i] = (opaque << LANE_OPAQUE) | (blend << LANE_BLEND);
+        // Exclusive from the inclusive, which for a lane counting one is the
+        // inclusive less one and for a lane counting more is the inclusive less
+        // its own count. One expression covers both.
+        uvec3 inclusive = scratch[t];
+        uint opaque = keep.x != 0u ? inclusive.x - keep.x : CULLED;
+        uint blend = keep.y != 0u ? inclusive.y - keep.y : CULLED;
+        uint casting = keep.z != 0u ? inclusive.z - keep.z : CULLED;
+        slots.slot[i] = (opaque << laneShift(LANE_OPAQUE))
+            | (blend << laneShift(LANE_BLEND))
+            | (casting << laneShift(LANE_CAST));
     }
     if (t == 255u) {
-        counts.count[gl_WorkGroupID.x] = scratch[t];
-        blendCounts.count[gl_WorkGroupID.x] = blendScratch[t];
+        uvec3 total = scratch[t];
+        counts.count[gl_WorkGroupID.x] = total.x;
+        blendCounts.count[gl_WorkGroupID.x] = total.y;
+        castCounts.count[gl_WorkGroupID.x] = total.z;
     }
 }
