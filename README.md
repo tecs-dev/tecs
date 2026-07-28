@@ -1276,6 +1276,54 @@ knows when it handed a frame over and cannot see the display.
 `BENCH_PRESENT=vsync` puts the display's own wait back into `latencyDraw`,
 where it lands as a block in acquire.
 
+## Measuring allocation
+
+A frame that allocates has bought a collection it will pay for later, in some
+other frame. Frame time cannot see that either: the cost lands away from where
+it was incurred and arrives as a tail nobody can attribute. So steady-state
+allocation is measured on its own, by `make bench-alloc`, and held by
+`spec/allocation_spec.lua`.
+
+Measuring it is mostly a matter of not being fooled three times.
+`collectgarbage("count")` reports the heap rather than what was allocated, so a
+collection inside the window eats the delta and more work can measure as less:
+the collector is stopped for every window. `collectgarbage` is not compiled by
+LuaJIT, so a probe inside the frame aborts every trace that would have covered
+the frame and the compiler then spends the run recording and recompiling, which
+is heap traffic charged to the frame; on this engine four probes a frame move a
+5.6 KB frame to between 8 and 11 KB and make two runs of one binary differ by
+40%. And the compiler removes allocations that do not escape a trace, so the
+same source measures differently depending on what happens to be compiled.
+
+The bench answers all three. Each regime is measured twice: once with no probe
+in the frame at all, which gives the total, and once with probes at phase
+boundaries, which gives the breakdown into `sim`, `extract`, `render` and
+`submit`. Both count only the frames `jit.attach` reports the compiler did not
+touch, and the report prints how many of those there were, so the two columns
+can be read against each other rather than taken on trust.
+
+The spec cannot be that precise, and the reason is worth writing down. Under
+Busted the engine runs on a plain `luajit`, which does not reserve the
+machine-code arena `native/mcodearena.c` reserves at startup, so LuaJIT cannot
+place mcode near the interpreter, flushes its whole trace cache every few dozen
+frames, and starts again: three flushes in a hundred and twenty frames, and a
+frame that reads 5.6 KB under the engine's own binary reading between 8 and 12
+KB there. Turning the compiler off would make the reading exact and is worse
+than the imprecision, because `jit.off()` followed by `jit.flush()` on a
+process that has already run a device leaves LuaJIT reporting `jit.status()`
+true and unable to compile anything afterwards, which costs a later spec a 780x
+slowdown and fails the two specs that watch the process size.
+
+So the spec holds what can be held without touching the compiler: a ceiling on
+the frame well above the true figure; that the figure does not grow with the
+size of the world, which is what a per-row allocation cannot hide from;
+extraction measured on its own over several thousand runs, where the compiler's
+fixed contribution averages away and a per-call allocation does not; and the
+staging buffer's two properties read exactly, since a single call can be. One
+of them is not a measurement at all: a cursor does not escape the loop that
+opens it, so LuaJIT removes the allocation once it has compiled the traversal
+and no reading can see it, and the spec counts the calls instead.
+
 ## Input
 
 Live state answers "is it held". Frame events answer "did it change this

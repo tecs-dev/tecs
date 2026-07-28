@@ -218,7 +218,7 @@ local record Extractor
     _regionByImage: {integer: TextureArray.Region}
     --- Image name index a row asked for that nothing is registered under, or
     --- nil. Held rather than raised where it is found, because that point is
-    --- inside a query cursor: see `syncInstances`.
+    --- inside a query iteration: see `syncInstances`.
     _missingImage: integer
 end
 
@@ -388,8 +388,8 @@ local function writeRun(self: Extractor, packet: FramePacket,
                 local resolved <const> = self._slotByImage[image]
                 if resolved == nil then
                     -- Reported after the loop rather than raised here. This
-                    -- runs inside a query cursor, and an error thrown through
-                    -- one leaves the world deferred, which silently queues
+                    -- runs inside a query iteration, and an error thrown out
+                    -- of one leaves the world deferred, which silently queues
                     -- every spawn made after it: the frame would take the
                     -- world down with it instead of only itself. The row is
                     -- written against layer zero and the slot is left
@@ -895,11 +895,13 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     self._lastAlpha = self._alpha
 
     local rewritten = 0
-    -- A cursor rather than iter, because the layout above can leave a run it
-    -- could not place and leaving an archetype loop early through iter leaves
-    -- the world deferred, which silently queues every spawn made after it.
-    local cursor = self._renderables:cursor()
-    for archetype, length in cursor:iter() do
+    -- Runs to exhaustion, which is what `iter` requires and what makes it the
+    -- right traversal: a cursor is allocated per call, and this is the frame
+    -- path. Nothing below breaks or returns, an archetype the layout could not
+    -- place is handled in the body rather than by leaving, and the one error
+    -- this can raise is deferred to after the loop for exactly that reason.
+    -- Adding an early exit here means going back to a cursor and closing it.
+    for archetype, length in self._renderables:iter() do
         -- An archetype the layout above did not see has nowhere to be written,
         -- and one that lost rows since then would be written past its column.
         -- Both are the same structural change landing between the two walks,
@@ -937,14 +939,13 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         run.length = pending
         run.moved = false
     end
-    cursor:close()
 
     -- A Sprite naming an image nothing registered is still an error: every
     -- layer that exists holds some other picture, so drawing one of those
     -- instead would turn a broken asset into an art bug nobody traces back.
-    -- What the cursor above buys is that it is only this frame's error. The
-    -- world is whole, and a caller that catches this can register the image
-    -- and draw again.
+    -- Raised here rather than where it is found, so it is only this frame's
+    -- error: the loop above has finished and the world is whole, and a caller
+    -- that catches this can register the image and draw again.
     local missing <const> = self._missingImage
     if missing ~= nil then
         self._missingImage = nil

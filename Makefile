@@ -61,7 +61,8 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test test-package abi-check run clean \
         rebuild deps package check-package presets shaders bench bench-physics \
-        bench-sprites bench-text bench-particles bench-latency bench-ecs \
+        bench-sprites bench-text bench-particles bench-latency bench-alloc \
+        bench-ecs \
         bench-json \
         bench-snapshot bench-bitset format format-check
 
@@ -141,6 +142,9 @@ bench-particles: build $(OUT)/bench/particles.lua ## Run the particle benchmark
 
 bench-latency: build $(OUT)/bench/latency.lua ## Measure event-to-photon latency
 	@$(BIN) --entry $(OUT)/bench/latency.lua
+
+bench-alloc: build $(OUT)/bench/allocation.lua ## Measure allocation per frame
+	@$(BIN) --entry $(OUT)/bench/allocation.lua
 
 # The ECS benchmarks run under a plain interpreter rather than the host, since
 # none of them draw. They still need TECS_LIB, which the exports above set:

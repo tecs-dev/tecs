@@ -53,6 +53,14 @@ local record Slot
     --- Recorded writes. Empty is a slot with nothing to flush, which is what
     --- `flushSlot` returns false on.
     ranges: dirtyranges
+    --- The last typed view handed out over this slot, the declaration it was
+    --- cast to, and the address it was cast from. A cast allocates a cdata
+    --- object, and `mapSlotAs` is on the frame path, so the answer is kept and
+    --- handed back whenever the driver maps the slot to the same address
+    --- again, which is what mapping without cycling does.
+    view: loader.CArray
+    viewDeclaration: string
+    viewOf: loader.CValue
 end
 
 local record BufferOptions
@@ -99,6 +107,15 @@ end
 Buffer.slotCount = SLOT_COUNT
 
 local BufferMT <const>: metatable<Buffer> = { __index = Buffer }
+
+-- Reused across flushes; every buffer flushes a slot every frame and an array
+-- allocated for each would be two cdata objects per flush on the frame path.
+-- SDL copies out of these during `SDL_UploadToGPUBuffer`, so they only have to
+-- hold still for that call, and only one flush may be walking them: the encode
+-- below runs to completion on the thread that owns the device, which is the
+-- same constraint `RenderPass` records its colour targets under.
+local transferSource <const> = loader.newArray("SDL_GPUTransferBufferLocation[1]")
+local bufferDestination <const> = loader.newArray("SDL_GPUBufferRegion[1]")
 
 -- No vertex usage: geometry comes from storage buffers indexed by vertex and
 -- instance ID, so there is no vertex buffer to bind. An index buffer is the one
@@ -234,10 +251,24 @@ end
 ---
 --- Lets a producer assign struct fields in place rather than assembling a
 --- record elsewhere and copying it in.
+---
+--- The view is cached against the address it was cast from, so a slot mapped
+--- again to the same allocation hands back the same object instead of
+--- allocating another. A cycled slot, or one asked for under a different
+--- declaration, is cast afresh.
 function Buffer:mapSlotAs(index: integer, declaration: string,
                           cycle?: boolean): loader.CArray
     local slot = slotAt(self, index)
-    return loader.castPointer(declaration, mapSlotRecord(self, slot, cycle))
+    local mapped = mapSlotRecord(self, slot, cycle)
+    if slot.view ~= nil and slot.viewDeclaration == declaration
+        and slot.viewOf == mapped then
+        return slot.view
+    end
+    local view = loader.castPointer(declaration, mapped)
+    slot.view = view
+    slot.viewDeclaration = declaration
+    slot.viewOf = mapped
+    return view
 end
 
 --- Records that `size` bytes at `offset` were written into a slot.
@@ -317,10 +348,8 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
     local count = ranges.count
     if count == 0 then return false end
 
-    local from = loader.newArray("SDL_GPUTransferBufferLocation[1]")
-    local to = loader.newArray("SDL_GPUBufferRegion[1]")
-    local source = from[0] as loader.CStruct
-    local destination = to[0] as loader.CStruct
+    local source = transferSource[0] as loader.CStruct
+    local destination = bufferDestination[0] as loader.CStruct
     source.transfer_buffer = slot.transfer
     destination.buffer = self.handle
 
@@ -330,7 +359,8 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
         source.offset = offset
         destination.offset = offset
         destination.size = size
-        C.SDL_UploadToGPUBuffer(copyPass, from, to, false)
+        C.SDL_UploadToGPUBuffer(copyPass, transferSource, bufferDestination,
+            false)
     end
     C.SDL_EndGPUCopyPass(copyPass)
 
@@ -426,6 +456,11 @@ function Buffer:destroy()
             C.SDL_ReleaseGPUTransferBuffer(self._device, slot.transfer)
             slot.transfer = nil
         end
+        -- The staging it points into is gone, so the cached view is a pointer
+        -- to released memory and must not be handed to anyone again.
+        slot.view = nil
+        slot.viewDeclaration = nil
+        slot.viewOf = nil
     end
     C.SDL_ReleaseGPUBuffer(self._device, self.handle)
     self.handle = nil
