@@ -1330,7 +1330,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                         local rows = archetype:get(RigidBody)
                         for row = 1, length do
                             local body = handleOf(rows[row])
-                            World.removeShape(body)
+                            World.removeShape(body, entities[row])
                             addShape(body, entities[row], shapes[row])
                         end
                     end

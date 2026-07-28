@@ -480,19 +480,49 @@ function World.addCapsule(body: loader.CValue, radius: number, length: number, o
     return C.b2CreateCapsuleShape(body, shapeDef(options), capsule) as loader.CValue
 end
 
-local shapeScratch <const> = ffi.new("b2ShapeId[1]") as loader.CArray
+--- Room for a body's whole shape list, grown on the first body that needs
+--- more. Held rather than allocated per call, because this runs once per row
+--- of every archetype whose `Collider` column moved.
+local shapeScratch: loader.CArray = ffi.new("b2ShapeId[4]") as loader.CArray
+local shapeScratchSize = 4
 
---- Destroys the first shape Box2D lists for a body, and nothing when it has
---- none.
+--- Destroys the shape a given entity attached to a body, and nothing when it
+--- has none.
 ---
---- @param body Its shape list is read one entry deep, and Box2D links a new
----     shape at the head, so the entry that comes back is the most recently
----     attached rather than the first. On a body carrying only the shape it
----     was declared with, those are the same one; on a body that has since
----     gained a secondary collider, they are not.
-function World.removeShape(body: loader.CValue)
-    if (tonumber(C.b2Body_GetShapes(body, shapeScratch, 1)) as integer) > 0 then
+--- Every shape carries the entity that declared it, so the entity is what
+--- picks one out of the list rather than its position in it. Position would be
+--- wrong: Box2D links a new shape at the head, so a body that has gained a
+--- secondary collider lists that one first, and destroying the head would take
+--- the wrong entity's shape and leave its `ColliderShape` naming nothing.
+---
+--- @param body The body to search. A body with one shape takes a fast path
+---     that reads a single entry and never compares.
+--- @param entity The entity whose shape to destroy, which for a body's primary
+---     collider is the body's own entity. An entity with no shape on this body
+---     destroys nothing rather than raising.
+function World.removeShape(body: loader.CValue, entity: integer)
+    local count <const> = tonumber(C.b2Body_GetShapeCount(body)) as integer
+    if count <= 0 then
+        return
+    end
+    if count == 1 then
+        -- One shape is one answer, so nothing is gained by asking which entity
+        -- owns it: whatever the caller meant, this is the only candidate.
+        C.b2Body_GetShapes(body, shapeScratch, 1)
         C.b2DestroyShape(shapeScratch[0], true)
+        return
+    end
+    if count > shapeScratchSize then
+        shapeScratch = ffi.new("b2ShapeId[?]", count) as loader.CArray
+        shapeScratchSize = count
+    end
+    local found <const> = tonumber(C.b2Body_GetShapes(body, shapeScratch, count)) as integer
+    for index = 0, found - 1 do
+        local shape <const> = shapeScratch[index] as loader.CValue
+        if (tonumber(ffi.cast("intptr_t", C.b2Shape_GetUserData(shape))) as integer) == entity then
+            C.b2DestroyShape(shape, true)
+            return
+        end
     end
 end
 

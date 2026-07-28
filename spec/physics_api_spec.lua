@@ -136,6 +136,35 @@ describe("physics colliders", function()
         assert.equal(body, world:getFirstRelationship(secondary, physics.ColliderOf).target)
     end)
 
+    it("edits a body's own collider without taking a secondary one with it", function()
+        -- Box2D links a new shape at the head of a body's list, so the
+        -- secondary collider is what a body lists first. An edit that took the
+        -- head would destroy the wrong entity's shape and leave its
+        -- ColliderShape naming nothing, with no error anywhere.
+        local world = newWorld()
+        local body = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
+        physics.attach(world, body, { type = "static", halfWidth = 5, halfHeight = 5 })
+        local secondary = world:spawn()
+        physics.attachCollider(world, secondary, body, {
+            radius = 5,
+            offsetX = 40,
+            categoryBits = 4,
+        })
+        step(world)
+        assert.equal(secondary, physics.raycast(world, 20, 0, 60, 0, { maskBits = 4 }).entity)
+
+        -- Move the body's own collider, which is what dirties the column.
+        local collider = world:getMut(body, physics.Collider)
+        collider.halfWidth = 7
+        step(world)
+
+        local kept = physics.raycast(world, 20, 0, 60, 0, { maskBits = 4 })
+        assert.is_not_nil(kept, "editing a body's collider destroyed the secondary one's shape")
+        assert.equal(secondary, kept.entity)
+        -- And the body's own shape is the one that moved.
+        assert.equal(body, physics.raycast(world, -20, 0, 20, 0).entity)
+    end)
+
     it("reports contact and sensor buffers as typed events", function()
         local world = newWorld()
         local contacts, sensors = 0, 0
