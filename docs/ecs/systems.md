@@ -1,5 +1,5 @@
 ---
-description: "Adding and removing systems, the SystemConfig shape, ordering with before and after, and the tecs.runif predicates"
+description: "Adding and removing systems, the SystemConfig shape, ordering with before and after, and the tecs.ecs.runif predicates"
 outline: deep
 ---
 
@@ -24,7 +24,7 @@ makes the require line optional.
 Add systems to a world with `world:addSystem()`, passing a configuration table. The `run` function receives the
 frame's delta time and the world.
 
-Systems are registered from a plugin, and a game's entry plugin is the one `tecs.application` takes. That is
+Systems are registered from a plugin, and a game's entry plugin is the one `tecs.application.create` takes. That is
 where queries are built once and the systems that use them are declared:
 
 ```teal
@@ -33,13 +33,13 @@ local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local Renderable <const> = tecs.components.Renderable
 
-return tecs.application({
-    plugin = function(world: tecs.World, app: tecs.Application)
+return tecs.application.create({
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local movers <const> = world:query({ include = { Transform, Renderable } })
 
         world:addSystem({
             name = "game.Spin",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in movers:iter() do
                     local transforms = archetype:getMut(Transform)
@@ -61,7 +61,7 @@ like that one. See [Plugins](/ecs/plugins) for how a game with several modules c
 
 ## Where a system runs in the frame
 
-Three calls drive the phases, and [`Application`](/modules/Application) makes them:
+Three calls drive the phases, and [`Application`](/modules/application) makes them:
 
 | Call             | Phases                                        | When                                                  |
 | ---------------- | --------------------------------------------- | ----------------------------------------------------- |
@@ -152,7 +152,7 @@ relative to it.
 
 ```teal{3}
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "MyUpdateSystem",
     run = function(dt: number, world: tecs.World)
         -- update logic
@@ -171,7 +171,7 @@ runIf = function(dt: number, world: tecs.World, systemName: string): boolean
 end
 ```
 
-Tecs ships built-in predicates on `tecs.runif` that cover the common cases.
+Tecs ships built-in predicates on `tecs.ecs.runif` that cover the common cases.
 
 ### Scheduling helpers
 
@@ -181,7 +181,7 @@ These replace the accumulator most systems otherwise grow at the top of `run`:
 -- Without a helper: every system that ticks on an interval repeats this
 local elapsed = 0
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     run = function(dt: number)
         elapsed = elapsed + dt
         if elapsed < 0.5 then return end
@@ -192,8 +192,8 @@ world:addSystem({
 
 -- With one: the schedule is declared, not reimplemented
 world:addSystem({
-    phase = tecs.phases.Update,
-    runIf = tecs.runif.every(0.5),
+    phase = tecs.ecs.phases.Update,
+    runIf = tecs.ecs.runif.every(0.5),
     run = function() spawnWave(world) end
 })
 ```
@@ -221,9 +221,9 @@ function runif.after(delay: number): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "DelayedMessage",
-    runIf = tecs.runif.after(2.0),
+    runIf = tecs.ecs.runif.after(2.0),
     run = function(_dt: number, _world: tecs.World)
         print("This runs 2 seconds after the world started")
     end
@@ -243,9 +243,9 @@ function runif.every(interval: number, jitter?: number): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "PeriodicUpdate",
-    runIf = tecs.runif.every(1.0),
+    runIf = tecs.ecs.runif.every(1.0),
     run = function(_dt: number, _world: tecs.World)
         print("One second has passed")
     end
@@ -254,7 +254,7 @@ world:addSystem({
 
 `jitter` is an optional variance of plus or minus that many seconds, applied to the next interval each time the
 predicate fires, so systems sharing one interval desynchronize. The roll is drawn from the world's
-`"tecs.runif"` random stream, so a run reseeded through `tecs.random` fires on the same frames every time and a
+`"tecs.runif"` random stream, so a run reseeded through `tecs.ecs.random` fires on the same frames every time and a
 snapshot carries where the jitter had got to. A jitter large enough to reach zero is clamped, so the interval
 never collapses to a fire-every-frame.
 
@@ -268,10 +268,10 @@ function runif.cooldown(duration: number): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "HealthRegen",
     -- Run immediately, then every 5 seconds
-    runIf = tecs.runif.cooldown(5.0),
+    runIf = tecs.ecs.runif.cooldown(5.0),
     run = function(dt: number, world: tecs.World)
         -- regenerate health
     end
@@ -288,9 +288,9 @@ function runif.inState(name: string): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "GameplaySystem",
-    runIf = tecs.runif.inState("game"),
+    runIf = tecs.ecs.runif.inState("game"),
     run = function(dt: number, world: tecs.World)
         -- only runs when "game" is the current state
     end
@@ -307,9 +307,9 @@ function runif.negate(predicate: RunIfFn): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "PauseMenuSystem",
-    runIf = tecs.runif.negate(tecs.runif.inState("game")),
+    runIf = tecs.ecs.runif.negate(tecs.ecs.runif.inState("game")),
     run = function(dt: number, world: tecs.World)
         -- only runs when "game" is not the current state
     end
@@ -326,11 +326,11 @@ function runif.both(lhs: RunIfFn, rhs: RunIfFn): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "PeriodicGameplayUpdate",
-    runIf = tecs.runif.both(
-        tecs.runif.inState("game"),
-        tecs.runif.every(2.0)
+    runIf = tecs.ecs.runif.both(
+        tecs.ecs.runif.inState("game"),
+        tecs.ecs.runif.every(2.0)
     ),
     run = function(dt: number, world: tecs.World)
         -- runs every 2 seconds, but only in the "game" state
@@ -360,11 +360,11 @@ function runif.either(lhs: RunIfFn, rhs: RunIfFn): RunIfFn
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.FixedUpdate,
+    phase = tecs.ecs.phases.FixedUpdate,
     name = "AnimateWater",
-    runIf = tecs.runif.either(
-        tecs.runif.inState("game"),
-        tecs.runif.inState("editor")
+    runIf = tecs.ecs.runif.either(
+        tecs.ecs.runif.inState("game"),
+        tecs.ecs.runif.inState("editor")
     ),
     run = function(dt: number, world: tecs.World)
         -- animate water in the game or editor states
@@ -380,7 +380,7 @@ Any function of the right shape works, so more complex conditions do not need a 
 local health: number = 100
 
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "LowHealthWarning",
     runIf = function(_dt: number, _world: tecs.World, _systemName: string): boolean
         return health < 25
@@ -405,7 +405,7 @@ Run before another named system:
 
 ```teal{7}
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "MyOtherUpdateSystem",
     run = function(dt: number, world: tecs.World)
         -- update logic
@@ -418,7 +418,7 @@ Run after another named system:
 
 ```teal{7}
 world:addSystem({
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     name = "YetAnotherUpdateSystem",
     run = function(dt: number, world: tecs.World)
         -- update logic
@@ -435,7 +435,7 @@ Call `world:removeSystem(name)` to pull a system out of the pipeline.
 world:removeSystem("MyUpdateSystem")
 ```
 
-`tecs.runif.after` uses the same call to clean itself up once its delay elapses.
+`tecs.ecs.runif.after` uses the same call to clean itself up once its delay elapses.
 
 ## Design record
 

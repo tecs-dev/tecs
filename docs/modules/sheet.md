@@ -627,7 +627,7 @@ Binding again rescales from the pixel rects rather than from the last result, so
 image being registered a second time. Entities already carrying regions from an earlier bind keep them: a
 rebind moves nothing that has already been written into a `Sprite`.
 
-The whole-image sprite comes from the [Renderer](/modules/Renderer).
+The whole-image sprite comes from the [Renderer](/modules/renderer).
 
 ### Sheet:sprite
 

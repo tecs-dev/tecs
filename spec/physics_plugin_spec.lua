@@ -22,7 +22,7 @@ local Transform = components.Transform
 local built = {}
 
 local function newWorld(gravity)
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     world:addPlugin(physics.plugin({ gravity = gravity or { 0, 980 } }))
     built[#built + 1] = world
     return world
@@ -154,7 +154,7 @@ describe("ecs.physics write-back", function()
         local dirty = false
         world:addSystem({
             name = "spec.ObserveDirty",
-            phase = tecs.phases.Last,
+            phase = tecs.ecs.phases.Last,
             run = function()
                 dirty = false
                 for archetype in query:iter() do

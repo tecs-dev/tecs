@@ -6,12 +6,12 @@
 --   * `world:defer()` / `world:commit()` scopes still work explicitly.
 
 local tecs <const> = require("tecs")
-local Pos = tecs.newComponent({
+local Pos = tecs.ecs.newComponent({
     name = "InstantSpecPos",
     container = {},
     fields = {"x", "y"},
 })
-local Mark = tecs.newTagComponent({name = "InstantSpecMark"})
+local Mark = tecs.ecs.newTagComponent({name = "InstantSpecMark"})
 
 describe(
     "eager mutation semantics",
@@ -19,7 +19,7 @@ describe(
         it(
             "applies world:set immediately outside any scope",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Pos(1, 2))
                 world:set(e, Pos(10, 20))
                 -- Eager: no explicit commit required before read.
@@ -32,7 +32,7 @@ describe(
         it(
             "applies world:remove immediately outside any scope",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Pos(1, 2), Mark)
                 assert.is_true(world:has(e, Mark))
                 world:remove(e, Mark)
@@ -43,7 +43,7 @@ describe(
         it(
             "applies world:spawn/despawn immediately outside any scope",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Pos(1, 2))
                 assert.is_true(world:isAlive(e))
                 world:despawn(e)
@@ -58,7 +58,7 @@ describe(
                 -- transaction so the iterator's active-archetype list doesn't
                 -- shift mid-loop. After the loop exits, the staged mutation
                 -- applies automatically.
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e1 = world:spawn(Pos(1, 1))
                 local e2 = world:spawn(Pos(2, 2))
                 local e3 = world:spawn(Pos(3, 3))
@@ -92,7 +92,7 @@ describe(
                 -- inside a defer scope (since writing to an existing column
                 -- doesn't affect iteration safety). Only STRUCTURAL mutations
                 -- (archetype transitions) defer. Use Mark-add to observe it.
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Pos(1, 1))
                 world:defer()
                 world:set(e, Mark)
@@ -105,7 +105,7 @@ describe(
         it(
             "nested defer requires balanced commits",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Pos(1, 1))
                 world:defer()
                 world:defer()

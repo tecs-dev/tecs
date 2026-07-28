@@ -195,11 +195,11 @@ metamethods (`__call`, `__index`), and generated bindings.
   end
   ```
 
-- **FFI vs table storage**: `tecs.newFFIComponent` requires data that maps
+- **FFI vs table storage**: `tecs.ecs.newFFIComponent` requires data that maps
   cleanly to a C struct (numbers, booleans, fixed-size arrays) and pays off
   when the component is iterated densely: contiguous, cache-friendly
   columns. It also carries conversion, lifetime, and tooling tradeoffs, so
-  choose it for measured hot data, not by default. Use `tecs.newComponent`
+  choose it for measured hot data, not by default. Use `tecs.ecs.newComponent`
   (table storage) when fields hold Lua tables, varying strings, functions,
   or userdata, or when the component is cold. Do not
   mix: if one field needs a table, the component is a table component.
@@ -220,10 +220,10 @@ metamethods (`__call`, `__index`), and generated bindings.
 - Pick the correct `phase`; do not do render work in `Update` or game logic
   in `Render`.
 - Gate with `runIf` rather than early-returning inside `run` when the
-  condition is state-shaped. Use `tecs.runif.*` predicates for common gates
+  condition is state-shaped. Use `tecs.ecs.runif.*` predicates for common gates
   and custom predicates when combining checks.
 - Systems receive `dt`; never read wall clocks in game logic.
-- The host owns the loop. An entry file returns `tecs.application(config)`
+- The host owns the loop. An entry file returns `tecs.application.create(config)`
   and its callbacks run from there; nothing drives frames itself.
 
 ## Queries

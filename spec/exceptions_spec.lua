@@ -71,7 +71,7 @@ describe("exception safety", function()
     end
 
     local function newScene()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
             capacity = 4096,
@@ -268,14 +268,14 @@ describe("exception safety", function()
     ---------------------------------------------------------------------------
 
     it("closes the scope a system threw out of, so later spawns apply", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
 
         local query = world:query({ name = "spec.Tinted", include = { Tint } })
         local explode = true
         world:addSystem({
             name = "spec.ThrowsInIter",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 for _ in query:iter() do
                     if explode then
@@ -307,7 +307,7 @@ describe("exception safety", function()
     end)
 
     it("unwinds every scope on the next update, not one level of them", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
 
         local outer = world:query({ name = "spec.Outer", include = { Tint } })
@@ -315,7 +315,7 @@ describe("exception safety", function()
         local explode = true
         world:addSystem({
             name = "spec.ThrowsInNestedIter",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 for _ in outer:iter() do
                     for _ in inner:iter() do
@@ -341,7 +341,7 @@ describe("exception safety", function()
     end)
 
     it("survives a cursor closed after its scope was unwound", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         world:spawn(Tint(1, 0, 0, 1))
         local query = world:query({ name = "spec.Stale", include = { Tint } })
 

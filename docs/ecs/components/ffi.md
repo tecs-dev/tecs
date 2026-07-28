@@ -33,7 +33,7 @@ See [components](/modules/components) for the per-component reference.
 
 ## Basic usage
 
-Define FFI components with `tecs.newFFIComponent`:
+Define FFI components with `tecs.ecs.newFFIComponent`:
 
 ```teal
 local tecs <const> = require("tecs")
@@ -43,7 +43,7 @@ local record Velocity is tecs.Component
     vy: number
 end
 
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Velocity",
     container = Velocity,
     fields = {
@@ -109,7 +109,7 @@ local record Position is tecs.Component
     metamethod __call: function(self, x?: number, y?: number, z?: number): Position
 end
 
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Position",
     container = Position,
     fields = {
@@ -186,12 +186,12 @@ For LuaJIT FFI limitations and semantics, see the
 
 ## API reference
 
-### tecs.newFFIComponent(options)
+### tecs.ecs.newFFIComponent(options)
 
 Creates and registers an FFI-backed component.
 
 ```teal
-function tecs.newFFIComponent<C is Component>(options: FFIComponentOptions<C>): C
+function tecs.ecs.newFFIComponent<C is Component>(options: FFIComponentOptions<C>): C
 ```
 
 The `options` table supports the following properties:
@@ -226,7 +226,7 @@ local record Velocity is tecs.Component
     speed: {number}
 end
 
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Velocity",
     container = Velocity,
     fields = {
@@ -255,7 +255,7 @@ local record Health is tecs.Component
     maximum: integer
 end
 
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Health",
     container = Health,
     fields = {

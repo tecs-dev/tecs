@@ -96,12 +96,12 @@ REQUIRED_NOTICES = (
 # Enough of the surface to prove the type information is whole: the ECS half,
 # the engine half reached as a value, and the engine half reached as a type.
 GLOBAL_USAGE = """
-local world = tecs.newWorld()
+local world = tecs.ecs.newWorld()
 world:update(1 / 60)
 tecs.log.get("game"):info("entities: %d", world:getStats().entities)
 
-return tecs.application({
-    plugin = function(world: tecs.World, app: tecs.Application) print(world ~= nil and app.world ~= nil) end,
+return tecs.application.create({
+    plugin = function(world: tecs.World, app: tecs.application.Application) print(world ~= nil and app.world ~= nil) end,
 })
 """
 

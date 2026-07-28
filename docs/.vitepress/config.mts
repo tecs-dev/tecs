@@ -77,7 +77,7 @@ export default defineConfig({
 
         nav: [
             { text: "Get started", link: "/getting-started" },
-            { text: "Surface", link: "/modules/" },
+            { text: "Modules", link: "/modules/" },
             { text: "tecs.ecs", link: "/ecs/" },
             { text: "CLI", link: "/cli/" },
         ],
@@ -96,88 +96,61 @@ export default defineConfig({
             // writes it. A reader looking for `tecs.watch` scans for that
             // string; a thematic grouping makes them guess which of four
             // headings somebody filed it under first, and a collapsed group
-            // hides the name entirely until they guess right. Where two names
-            // differ only in case the capitalised one comes first, so
-            // `tecs.Application` sits above `tecs.application`.
+            // hides the name entirely until they guess right.
             //
-            // Every field on the surface is here, not only the ones with a
-            // page of their own under /modules/, because a reader does not
-            // know which half a name belongs to and should not have to. The
-            // order matches docs/modules/index.md and the home page exactly.
+            // Every module is here, including `tecs.ecs`, whose own pages are
+            // the group below. The order matches docs/modules/index.md and the
+            // home page exactly.
             {
                 text: "Modules",
                 collapsed: false,
                 items: [
                     { text: "Overview", link: "/modules/" },
-                    { text: "Generated signatures", link: "/modules/surface" },
+                    { text: "Generated signatures", link: "/modules/reference" },
                     { text: "tecs.animation", link: "/modules/animation" },
-                    { text: "tecs.Application", link: "/modules/Application" },
-                    { text: "tecs.application", link: "/modules/Application" },
+                    { text: "tecs.application", link: "/modules/application" },
                     { text: "tecs.assets", link: "/modules/assets" },
-                    { text: "tecs.Audio", link: "/modules/Audio" },
-                    { text: "tecs.audio", link: "/modules/Audio#physical-devices-and-microphone-capture" },
-                    { text: "tecs.builtins", link: "/ecs/builtins" },
-                    { text: "tecs.Camera", link: "/modules/Camera" },
+                    { text: "tecs.audio", link: "/modules/audio" },
+                    { text: "tecs.camera", link: "/modules/camera" },
                     { text: "tecs.capabilities", link: "/modules/capabilities" },
                     { text: "tecs.clipboard", link: "/modules/clipboard" },
                     { text: "tecs.clock", link: "/modules/clock" },
-                    { text: "tecs.componentByName", link: "/ecs/components/" },
                     { text: "tecs.components", link: "/modules/components" },
                     { text: "tecs.compress", link: "/modules/compress" },
-                    { text: "tecs.DEFAULT_MAX_ENTITIES", link: "/ecs/world" },
+                    { text: "tecs.ecs", link: "/ecs/" },
                     { text: "tecs.events", link: "/modules/events" },
                     { text: "tecs.filesystem", link: "/modules/filesystem" },
-                    { text: "tecs.findKey", link: "/ecs/world" },
-                    { text: "tecs.Future", link: "/modules/Future" },
-                    { text: "tecs.Gamepad", link: "/modules/Gamepad" },
-                    { text: "tecs.getComponentById", link: "/ecs/components/" },
+                    { text: "tecs.future", link: "/modules/future" },
+                    { text: "tecs.gamepad", link: "/modules/gamepad" },
                     { text: "tecs.hash", link: "/modules/hash" },
                     { text: "tecs.http", link: "/modules/http" },
-                    { text: "tecs.Input", link: "/modules/Input" },
+                    { text: "tecs.input", link: "/modules/input" },
                     { text: "tecs.json", link: "/modules/json" },
                     { text: "tecs.layers", link: "/modules/layers" },
-                    { text: "tecs.listKeys", link: "/ecs/world" },
                     { text: "tecs.log", link: "/modules/log" },
                     { text: "tecs.materials", link: "/modules/materials" },
-                    { text: "tecs.MAX_ENTITIES", link: "/ecs/world" },
                     { text: "tecs.mcp", link: "/modules/mcp" },
                     { text: "tecs.net", link: "/modules/net" },
-                    { text: "tecs.newComponent", link: "/ecs/components/table-components" },
-                    { text: "tecs.newContext", link: "/ecs/world" },
-                    { text: "tecs.newEvent", link: "/ecs/events" },
-                    { text: "tecs.newFFIComponent", link: "/ecs/components/ffi" },
-                    { text: "tecs.newFFIEvent", link: "/ecs/events" },
-                    { text: "tecs.newFFIRelationship", link: "/ecs/relationships/ffi" },
-                    { text: "tecs.newKey", link: "/ecs/world" },
-                    { text: "tecs.newMessageBus", link: "/ecs/events" },
-                    { text: "tecs.newRelationship", link: "/ecs/relationships/" },
-                    { text: "tecs.newScalarComponent", link: "/ecs/components/scalar-components" },
-                    { text: "tecs.newTagComponent", link: "/ecs/components/tag-components" },
-                    { text: "tecs.newWorld", link: "/ecs/world" },
                     { text: "tecs.particles", link: "/modules/particles" },
                     { text: "tecs.paths", link: "/modules/paths" },
-                    { text: "tecs.phases", link: "/ecs/phases" },
                     { text: "tecs.physics", link: "/modules/physics" },
                     { text: "tecs.proc", link: "/modules/proc" },
-                    { text: "tecs.random", link: "/modules/random" },
-                    { text: "tecs.Renderer", link: "/modules/Renderer" },
-                    { text: "tecs.runif", link: "/ecs/systems" },
+                    { text: "tecs.renderer", link: "/modules/renderer" },
                     { text: "tecs.sensors", link: "/modules/sensors" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
                     { text: "tecs.sheet", link: "/modules/sheet" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.text", link: "/modules/text" },
-                    { text: "tecs.version", link: "/modules/surface" },
+                    { text: "tecs.version", link: "/modules/reference" },
                     { text: "tecs.watch", link: "/modules/watch" },
-                    { text: "tecs.Window", link: "/modules/Window" },
+                    { text: "tecs.window", link: "/modules/window" },
                     { text: "tecs.workers", link: "/modules/workers" },
                 ],
             },
-            // The concept pages, under the module that actually holds the ECS
-            // half rather than under an invented category. `tecs.ecs` is what
-            // engine code requires; a game requires `tecs` and reaches the
-            // same things through the list above, which the section says in
-            // its first paragraph so the heading does not mislead.
+            // The concept pages, under the module that holds the ECS rather
+            // than under an invented category. `tecs.ecs` is one table: an
+            // engine module requires it, a game reads it off `tecs`, and both
+            // reach what is listed here.
             //
             // Alphabetical, with each section's own overview first.
             {
@@ -216,6 +189,7 @@ export default defineConfig({
                             { text: "Grouping", link: "/ecs/queries/grouping" },
                         ],
                     },
+                    { text: "Random", link: "/ecs/random" },
                     {
                         text: "Relationships",
                         collapsed: true,

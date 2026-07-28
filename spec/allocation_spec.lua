@@ -202,7 +202,7 @@ local COMPUTE_BAR = 160
 -- below the second.
 local FLUSH_BAR = 96
 
-local Mover = tecs.newTagComponent({ name = "AllocationSpecMover" })
+local Mover = tecs.ecs.newTagComponent({ name = "AllocationSpecMover" })
 
 --- Fills a freshly spawned archetype with drawable entities.
 local function fill(archetype, firstRow, lastRow)
@@ -262,7 +262,7 @@ local function scene()
             })
             world:addSystem({
                 name = "AllocationSpecMove",
-                phase = tecs.phases.Update,
+                phase = tecs.ecs.phases.Update,
                 run = function()
                     for archetype, length in movers:iter() do
                         local transforms = archetype:getMut(Transform)
@@ -404,10 +404,10 @@ describe("allocation", function()
         local world = app.world
         local function extractBytes()
             for _ = 1, 200 do
-                world:runPhase(tecs.phases.RenderFirst, clock.nominal)
+                world:runPhase(tecs.ecs.phases.RenderFirst, clock.nominal)
             end
             return perRun(EXTRACTIONS, function()
-                world:runPhase(tecs.phases.RenderFirst, clock.nominal)
+                world:runPhase(tecs.ecs.phases.RenderFirst, clock.nominal)
             end)
         end
 
@@ -434,10 +434,10 @@ describe("allocation", function()
         -- while a closure built per call does not.
         local world = app.world
         for _ = 1, 200 do
-            world:runPhase(tecs.phases.RenderLast, clock.nominal)
+            world:runPhase(tecs.ecs.phases.RenderLast, clock.nominal)
         end
         local cost = perRun(EXTRACTIONS, function()
-            world:runPhase(tecs.phases.RenderLast, clock.nominal)
+            world:runPhase(tecs.ecs.phases.RenderLast, clock.nominal)
         end)
 
         if os.getenv("TECS_ALLOCATION_REPORT") ~= nil then

@@ -28,7 +28,7 @@ The API is not yet stable and may change as development progresses.
 local tecs <const> = require("tecs")
 ```
 
-`tecs` is also set as a global by the module itself as it returns, so a game can write `tecs.newWorld()` in any
+`tecs` is also set as a global by the module itself as it returns, so a game can write `tecs.ecs.newWorld()` in any
 file with no require line. It is the same table `require` gives back, metatable included. The engine half is
 resolved lazily on first field access, so `require("tecs")` alone loads no engine module and a headless tool, a
 test or a server never demands a graphics stack.
@@ -37,7 +37,7 @@ There is a module called `tecs.ecs`, which is what this section is named for, an
 It is the ECS half on its own, and it exists because `tecs` is the aggregator that pulls every engine module in:
 a module the surface exports cannot also depend on the surface without making a cycle, which Teal rejects even
 through a type-only require. So engine modules require `tecs.ecs` and only a game requires the whole of `tecs`.
-Everything `tecs.ecs` carries is on `tecs` too — `tecs.newWorld`, `tecs.phases`, `tecs.builtins`, `tecs.runif`
+Everything `tecs.ecs` carries is on `tecs` too — `tecs.ecs.newWorld`, `tecs.ecs.phases`, `tecs.ecs.builtins`, `tecs.ecs.runif`
 and the component constructors are all on [the surface](/modules/) — and that is where a game reads them.
 
 The `tecs.utils.*` modules, `profile`, `pool` and `Bitset`, are also supported API and are required directly.
@@ -48,10 +48,10 @@ The `tecs.utils.*` modules, `profile`, `pool` and `Bitset`, are also supported A
 A `World` owns the entities, components, systems, plugins, resources, queries and state stack of a game.
 
 ```teal
-local world = tecs.newWorld()
+local world = tecs.ecs.newWorld()
 ```
 
-A game rarely calls this: `tecs.application` builds the world and hands it to the entry plugin. Constructing one
+A game rarely calls this: `tecs.application.create` builds the world and hands it to the entry plugin. Constructing one
 directly is what a test, a tool or a headless server does.
 
 > See the [World reference](/ecs/world).
@@ -62,10 +62,10 @@ An entity is a unique id standing for an object in the world. Entities carry no 
 own; the components attached to them are what they are.
 
 ```teal
-local Transform <const> = tecs.builtins.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 
 local entity = world:spawn(
-    tecs.builtins.Name("cactus"),
+    tecs.ecs.builtins.Name("cactus"),
     Transform(100, 100)
 )
 ```
@@ -83,13 +83,13 @@ Components describe traits: a position, a colour, a tint, a sound. They are the 
 Reading one back is typed, because you pass the component's type rather than a string:
 
 ```teal
-local name = world:get(entity, tecs.builtins.Name)
+local name = world:get(entity, tecs.ecs.builtins.Name)
 print(name)
 ```
 
 Three sets of components are already registered and ready to use.
 
-**Builtins**, on `tecs.builtins`, are the ECS's own: `Transform`, `Name`, `Key`, `TTL`, `ChildOf`,
+**Builtins**, on `tecs.ecs.builtins`, are the ECS's own: `Transform`, `Name`, `Key`, `TTL`, `ChildOf`,
 `RelativeTransform`, `Paused` and `Disabled`. `Transform` carries `x`, `y`, `z`, `layer`, `rotation`, `scaleX`
 and `scaleY`, and is what the hierarchy, the tweens and the renderer all read.
 
@@ -118,7 +118,7 @@ world:spawn(
 )
 ```
 
-**Your own**, registered with `tecs.newComponent`. Declare a Teal record, then wire it up:
+**Your own**, registered with `tecs.ecs.newComponent`. Declare a Teal record, then wire it up:
 
 ```teal
 local record Health is tecs.Component
@@ -127,7 +127,7 @@ local record Health is tecs.Component
     metamethod __call: function(self, current: number, max: number): Health
 end
 
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "Health",
     container = Health,
     fields = {"current", "max"},
@@ -137,10 +137,10 @@ tecs.newComponent({
 world:set(entity, Health(80, 100))
 ```
 
-`tecs.newFFIComponent` takes the same shape with `{name, ctype}` field pairs and backs the component with a C
+`tecs.ecs.newFFIComponent` takes the same shape with `{name, ctype}` field pairs and backs the component with a C
 struct, which is what you want for anything the GPU or a hot loop reads. There are also
-`tecs.newTagComponent` for bitset-backed markers, `tecs.newScalarComponent` for a bare number, string or
-boolean, and `tecs.newRelationship` for links between entities.
+`tecs.ecs.newTagComponent` for bitset-backed markers, `tecs.ecs.newScalarComponent` for a bare number, string or
+boolean, and `tecs.ecs.newRelationship` for links between entities.
 
 > See the [Components reference](/ecs/components/).
 
@@ -152,7 +152,7 @@ A system is a function that runs game logic. Behavior is added by registering sy
 ```teal
 world:addSystem({
     name = "game.Tick",
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     run = function(dt: number)
         print("time since last frame: " .. dt)
     end,
@@ -160,8 +160,8 @@ world:addSystem({
 ```
 
 Order is declared by the phase, not implied by where a loop happens to call it. `before` and `after` order
-systems within one phase by name, and `runIf` gates a system on a predicate: `tecs.runif.after(5)` fires once
-and removes itself, `tecs.runif.every(10)` fires on an interval, `tecs.runif.inState("menu")` gates on the
+systems within one phase by name, and `runIf` gates a system on a predicate: `tecs.ecs.runif.after(5)` fires once
+and removes itself, `tecs.ecs.runif.every(10)` fires on an interval, `tecs.ecs.runif.inState("menu")` gates on the
 state stack.
 
 > See the [Systems reference](/ecs/systems).
@@ -177,7 +177,7 @@ world:addPlugin(function(world: tecs.World)
 end)
 ```
 
-There is one composition mechanism rather than two. The entry plugin `tecs.application` takes is the same shape
+There is one composition mechanism rather than two. The entry plugin `tecs.application.create` takes is the same shape
 with the application passed alongside, and a game with several modules calls `world:addPlugin` from inside it.
 The engine installs its own pieces the same way: `tecs.text.plugin({renderer = app.renderer})` is an ordinary
 plugin.
@@ -190,7 +190,7 @@ A system is useful once it can find entities. Create queries during plugin setup
 them for the world's lifetime; never build one inside `run`.
 
 ```teal
-local Transform <const> = tecs.builtins.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 local Health <const> = ... -- registered above
 
 local function healthPlugin(world: tecs.World)
@@ -200,7 +200,7 @@ local function healthPlugin(world: tecs.World)
 
     world:addSystem({
         name = "game.Decay",
-        phase = tecs.phases.Update,
+        phase = tecs.ecs.phases.Update,
         run = function(dt: number)
             for archetype, length in dying:iter() do
                 local healths = archetype:getMut(Health)
@@ -256,7 +256,7 @@ host drives this, along with `world:startup` and `world:shutdown` at either end.
 
 ```teal
 world:addSystem({
-    phase = tecs.phases.Startup,
+    phase = tecs.ecs.phases.Startup,
     run = function()
         print("the game is starting up")
     end,
@@ -274,7 +274,7 @@ local record Score
     points: integer
 end
 
-local SCORE <const>: tecs.Key<Score> = tecs.newKey("game.score")
+local SCORE <const>: tecs.Key<Score> = tecs.ecs.newKey("game.score")
 ```
 
 The key carries the type, so reads and writes through it are checked:
@@ -285,8 +285,8 @@ world.resources[SCORE] = {points = 0}
 local score = world.resources[SCORE]
 ```
 
-Always name a key. Named keys are discoverable at runtime through `tecs.findKey` and `tecs.listKeys` and the
-tooling built on them, and a name is a stable identity: calling `tecs.newKey` again with the same name returns
+Always name a key. Named keys are discoverable at runtime through `tecs.ecs.findKey` and `tecs.ecs.listKeys` and the
+tooling built on them, and a name is a stable identity: calling `tecs.ecs.newKey` again with the same name returns
 the same key, so values keyed by it survive a hot reload. An unnamed key works, logs a warning, and stays
 invisible to lookups.
 

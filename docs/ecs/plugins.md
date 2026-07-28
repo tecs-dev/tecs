@@ -35,10 +35,10 @@ local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local Renderable <const> = tecs.components.Renderable
 
-return tecs.application({
+return tecs.application.create({
     window = { title = "my game", width = 1280, height = 720 },
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         world:spawn(Transform(100, 100), Tint(1, 0.4, 0.3, 1), Renderable())
     end,
 })
@@ -50,7 +50,7 @@ arguments. The application is passed rather than looked up, so there is no nil c
 
 The entry plugin runs before the startup phases, so anything it spawns is resident before the first frame is
 extracted. See [Getting started](/getting-started) for the entry file and
-[`Application`](/modules/Application) for the rest of the config.
+[`Application`](/modules/application) for the rest of the config.
 
 ## world:addPlugin
 
@@ -88,7 +88,7 @@ local record Health is tecs.Component
     metamethod __call: function(self, max: number): Health
 end
 
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "Health",
     container = Health,
     fields = {"max"},
@@ -103,7 +103,7 @@ local function healthPlugin(world: tecs.World)
 
     world:addSystem({
         name = "game.DamageOverTime",
-        phase = tecs.phases.FixedUpdate,
+        phase = tecs.ecs.phases.FixedUpdate,
         run = function(dt: number)
             for archetype, length in living:iter() do
                 local healths = archetype:getMut(Health)
@@ -115,7 +115,7 @@ local function healthPlugin(world: tecs.World)
         end,
     })
 
-    world:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+    world:observe(0, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
         -- The entity is still readable until the despawn commits.
         local transform <const> = world:get(e.entity, Transform)
         if transform then
@@ -128,7 +128,7 @@ end
 Install it from the entry plugin:
 
 ```teal
-plugin = function(world: tecs.World, app: tecs.Application)
+plugin = function(world: tecs.World, app: tecs.application.Application)
     world:addPlugin(healthPlugin)
 end,
 ```
@@ -152,7 +152,7 @@ local function spinPlugin(speed: number): tecs.Plugin
 
         world:addSystem({
             name = "game.Spin",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in spinning:iter() do
                     local transforms = archetype:getMut(tecs.components.Transform)
@@ -174,7 +174,7 @@ A plugin that needs another plugin's resource reads it and fails loudly when it 
 mistake surfaces at setup rather than as a nil three frames later.
 
 ```teal
-local SPAWNER <const>: tecs.Key<Spawner> = tecs.newKey("game.spawner")
+local SPAWNER <const>: tecs.Key<Spawner> = tecs.ecs.newKey("game.spawner")
 
 local function wavePlugin(world: tecs.World)
     local spawner <const> = world.resources[SPAWNER]
@@ -184,15 +184,15 @@ local function wavePlugin(world: tecs.World)
 
     world:addSystem({
         name = "game.Waves",
-        phase = tecs.phases.Update,
-        runIf = tecs.runif.every(5.0, 0.5),
+        phase = tecs.ecs.phases.Update,
+        runIf = tecs.ecs.runif.every(5.0, 0.5),
         run = function() spawner:release() end,
     })
 end
 ```
 
-Always name a key. A named key is discoverable at run time through `tecs.findKey` and the tooling built on it,
-and calling `tecs.newKey` again with the same name returns the same key, so values keyed by it survive hot
+Always name a key. A named key is discoverable at run time through `tecs.ecs.findKey` and the tooling built on it,
+and calling `tecs.ecs.newKey` again with the same name returns the same key, so values keyed by it survive hot
 reload.
 
 ### Organizing a plugin as a module

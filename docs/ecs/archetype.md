@@ -140,7 +140,7 @@ function Archetype:forEachRelationship<T is Relationship>(
 **Example:**
 
 ```teal
-local Likes = tecs.newRelationship({ name = "Likes", fields = { "weight" } })
+local Likes = tecs.ecs.newRelationship({ name = "Likes", fields = { "weight" } })
 
 archetype:forEachRelationship(Likes, 5, function(likes: Likes)
     print("Entity likes", likes.target)

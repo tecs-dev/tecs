@@ -7,7 +7,7 @@ outline: deep
 
 `tecs.text` draws strings from a multi-channel signed distance field. A `Text` names a font and a
 string, and it is one entity: its glyphs are not entities at all. The plugin registers an instance
-producer with the [renderer](/modules/Renderer) and every text owns a span of that producer's run.
+producer with the [renderer](/modules/renderer) and every text owns a span of that producer's run.
 
 A glyph is still an ordinary textured quad, with a UV rect addressing the font atlas and a material
 selecting the distance-field shader, so culling, depth, layers, clip regions and the indirect draw
@@ -293,7 +293,7 @@ function text.plugin(options: TextOptions): function(World)
 
 **Parameters:**
 
-- `options.renderer`: the [renderer](/modules/Renderer) the font atlases upload into and the glyph
+- `options.renderer`: the [renderer](/modules/renderer) the font atlases upload into and the glyph
   instances are produced for. Required; the call raises without it.
 
 **Example:**

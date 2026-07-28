@@ -43,7 +43,7 @@ describe("render extraction", function()
     -- Staging is a pair of addresses to the extractor and nothing more, so a
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local extractor = Extractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
@@ -162,7 +162,7 @@ describe("render extraction", function()
     end)
 
     it("tells whoever owns the packet that it is filled", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local extractor = Extractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
@@ -197,7 +197,7 @@ describe("reserved instance runs", function()
 
     local function newExtraction(reserveRuns, capacity)
         capacity = capacity or CAPACITY
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local extractor = Extractor.create({
             capacity = capacity,
             reserveRuns = reserveRuns,

@@ -15,7 +15,7 @@ return {
     include_dir = { "src/" },
 
     -- Where the `tecs` global is declared, so a file can write
-    -- `tecs.newWorld()` with no require line.
+    -- `tecs.ecs.newWorld()` with no require line.
     --
     -- Here rather than only on the command line, because the compiler is not
     -- always run by tecs. An editor, a language server or a bare `tl` reads

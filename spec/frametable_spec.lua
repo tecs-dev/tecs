@@ -304,7 +304,7 @@ describe("playback resolved on the GPU", function()
     -- Staging is a pair of addresses to the extractor and nothing more, so a
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local extractor = Extractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
@@ -426,7 +426,7 @@ describe("playback resolved on the GPU", function()
         )
         world:update(STEP)
 
-        world:set(entity, tecs.builtins.Paused)
+        world:set(entity, tecs.ecs.builtins.Paused)
         world:update(STEP)
 
         local _, held, rate = regionAt(instances, 0)

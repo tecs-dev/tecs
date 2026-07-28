@@ -20,15 +20,15 @@ node is a `SpawnPoint`". Anything that reduces to "is this entity part of group 
 
 ## Creating a tag component
 
-Create a tag with `tecs.newTagComponent`:
+Create a tag with `tecs.ecs.newTagComponent`:
 
 ```teal
-local Selected = tecs.newTagComponent({name = "Selected"})
-local Stunned = tecs.newTagComponent({name = "Stunned"})
+local Selected = tecs.ecs.newTagComponent({name = "Selected"})
+local Stunned = tecs.ecs.newTagComponent({name = "Stunned"})
 ```
 
 ```teal
-function tecs.newTagComponent(options: TagComponentOptions): Component
+function tecs.ecs.newTagComponent(options: TagComponentOptions): Component
 ```
 
 | Property    | Description                                                                                                                    |
@@ -118,9 +118,9 @@ Two performance properties worth knowing:
 
 Tecs ships a few tag components you'll interact with directly:
 
-- `tecs.builtins.Disabled`: auto-excluded from every query unless the query's `include` list names it
+- `tecs.ecs.builtins.Disabled`: auto-excluded from every query unless the query's `include` list names it
   explicitly.
-- `tecs.builtins.Paused`: not auto-excluded, because paused entities keep rendering. A query declared
+- `tecs.ecs.builtins.Paused`: not auto-excluded, because paused entities keep rendering. A query declared
   `type = "logic"` skips them; `exclude = {Paused}` does the same explicitly.
 
 See [Builtins](/ecs/builtins) for the full set.

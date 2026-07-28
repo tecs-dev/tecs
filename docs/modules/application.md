@@ -3,9 +3,9 @@ description: "The application object an entry file returns and the host drives: 
 outline: [2, 3]
 ---
 
-# tecs.Application
+# tecs.application.Application
 
-`tecs.Application` is the lifecycle the C host drives. An entry file ends with `return tecs.application(config)`,
+`tecs.application.Application` is the lifecycle the C host drives. An entry file ends with `return tecs.application.create(config)`,
 and the host calls into the returned object to initialise, for each event, for each iteration, and to shut down.
 
 It is not a function that runs until done. A platform that never hands control back has no loop to block in, so
@@ -14,9 +14,9 @@ the loop lives below Lua and the application is what it calls.
 ```teal
 local tecs <const> = require("tecs")
 
-return tecs.application({
+return tecs.application.create({
     window = { title = "Hello", width = 1280, height = 960 },
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         -- everything the game registers goes here
     end,
 })
@@ -58,7 +58,7 @@ that could disagree.
 
 | Field            | What it does                                                                     |
 | ---------------- | -------------------------------------------------------------------------------- |
-| `window`         | [`Window.Options`](/modules/Window), passed through whole                        |
+| `window`         | [`Window.Options`](/modules/window), passed through whole                        |
 | `framesInFlight` | Frames the device may have outstanding. Omitted leaves the device's own default  |
 | `presentMode`    | How the swapchain presents. Omitted leaves the device's own default              |
 | `ambientLight`   | Light every surface receives before any light entity contributes. Defaults white |
@@ -69,14 +69,14 @@ A game doing its own lighting turns this down to the level it wants unlit parts 
 
 ### The world and the renderer
 
-| Field           | Default  | What it does                                                            |
-| --------------- | -------- | ----------------------------------------------------------------------- |
-| `maxEntities`   | `2^20`   | Entity slots the world is sized for. `tecs.MAX_ENTITIES` is the ceiling |
-| `capacity`      | `65536`  | Instances the renderer's buffers are sized for                          |
-| `timestep`      | `1/60`   | Seconds one fixed step covers                                           |
-| `fixedMaxSteps` | `10`     | The most fixed steps one update runs before the overload policy applies |
-| `fixedOverload` | `"drop"` | What becomes of the catch-up that did not fit; `"accumulate"` keeps it  |
-| `reserveRuns`   | `false`  | Give each archetype a run with room to grow rather than packing them    |
+| Field           | Default  | What it does                                                                |
+| --------------- | -------- | --------------------------------------------------------------------------- |
+| `maxEntities`   | `2^20`   | Entity slots the world is sized for. `tecs.ecs.MAX_ENTITIES` is the ceiling |
+| `capacity`      | `65536`  | Instances the renderer's buffers are sized for                              |
+| `timestep`      | `1/60`   | Seconds one fixed step covers                                               |
+| `fixedMaxSteps` | `10`     | The most fixed steps one update runs before the overload policy applies     |
+| `fixedOverload` | `"drop"` | What becomes of the catch-up that did not fit; `"accumulate"` keeps it      |
+| `reserveRuns`   | `false`  | Give each archetype a run with room to grow rather than packing them        |
 
 `maxEntities` counts concurrent slots rather than lifetime spawns: a slot is given back on despawn and reused.
 The arena is preallocated for this many, so it is a memory decision as much as a limit.
@@ -98,7 +98,7 @@ the world sits in others; worth nothing for a scene held in a single archetype.
 
 | Field            | What it does                                                                       |
 | ---------------- | ---------------------------------------------------------------------------------- |
-| `audio`          | [`Audio.Config`](/modules/Audio). Omitted opens the platform's default device      |
+| `audio`          | [`Audio.Config`](/modules/audio). Omitted opens the platform's default device      |
 | `logFile`        | Log file under the writable root, as JSON Lines, beside the platform's destination |
 | `logLevel`       | Lowest priority that reaches the log at all, from [`tecs.log`](/modules/log)       |
 | `checkpoint`     | File the staged checkpoint is written to when the platform backgrounds us          |
@@ -128,12 +128,12 @@ written without being asked for. It is also one of the settings [`clearCrash`](#
 
 These are fields on the application a plugin is handed, so nothing has to be looked up:
 
-- `app.window` — [`Window`](/modules/Window)
+- `app.window` — [`Window`](/modules/window)
 - `app.device` — the GPU device
 - `app.world` — the [world](/ecs/world)
-- `app.renderer` — [`Renderer`](/modules/Renderer)
-- `app.input` — [`Input`](/modules/Input)
-- `app.audio` — [`Audio`](/modules/Audio)
+- `app.renderer` — [`Renderer`](/modules/renderer)
+- `app.input` — [`Input`](/modules/input)
+- `app.audio` — [`Audio`](/modules/audio)
 - `app.mcp` — the debug server, when `mcpPort` asked for one
 
 And four values it keeps about the run:

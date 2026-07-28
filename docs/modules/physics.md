@@ -13,7 +13,7 @@ to rebuild the simulation.
 
 ```teal
 local tecs <const> = require("tecs")
-local world = tecs.newWorld()
+local world = tecs.ecs.newWorld()
 world:addPlugin(tecs.physics.plugin({
     gravity = {0, 980},
     subStepCount = 4,

@@ -10,7 +10,7 @@ describe(
     function()
         local world: tecs.World
 
-        before_each(function() world = tecs.newWorld() end)
+        before_each(function() world = tecs.ecs.newWorld() end)
 
         describe(
             "createState",
@@ -78,7 +78,9 @@ describe(
                         world:createState("game")
                         local entered: string = nil
                         world:observe(
-                            0, tecs.builtins.StateEnter, function(e: tecs.builtins.StateEnter) entered = e.state end
+                            0,
+                            tecs.ecs.builtins.StateEnter,
+                            function(e: tecs.ecs.builtins.StateEnter) entered = e.state end
                         )
                         world:pushState("game")
                         luassert.is_equal("game", entered)
@@ -92,7 +94,9 @@ describe(
                         world:pushState("game")
                         local exited: string = nil
                         world:observe(
-                            0, tecs.builtins.StateExit, function(e: tecs.builtins.StateExit) exited = e.state end
+                            0,
+                            tecs.ecs.builtins.StateExit,
+                            function(e: tecs.ecs.builtins.StateExit) exited = e.state end
                         )
                         world:popState()
                         luassert.is_equal("game", exited)
@@ -109,8 +113,8 @@ describe(
                         local pushed: string = nil
                         world:observe(
                             0,
-                            tecs.builtins.StateBlur,
-                            function(e: tecs.builtins.StateBlur) blurred = e.state; pushed = e.pushed end
+                            tecs.ecs.builtins.StateBlur,
+                            function(e: tecs.ecs.builtins.StateBlur) blurred = e.state; pushed = e.pushed end
                         )
                         world:pushState("paused")
                         luassert.is_equal("game", blurred)
@@ -129,8 +133,8 @@ describe(
                         local popped: string = nil
                         world:observe(
                             0,
-                            tecs.builtins.StateFocus,
-                            function(e: tecs.builtins.StateFocus) focused = e.state; popped = e.popped end
+                            tecs.ecs.builtins.StateFocus,
+                            function(e: tecs.ecs.builtins.StateFocus) focused = e.state; popped = e.popped end
                         )
                         world:popState()
                         luassert.is_equal("game", focused)
@@ -148,7 +152,7 @@ describe(
                     function()
                         local gameComponent = world:createState("game")
                         world:pushState("game")
-                        local entity = world:spawn(tecs.builtins.Transform(0, 0))
+                        local entity = world:spawn(tecs.ecs.builtins.Transform(0, 0))
                         world:commit()
                         local stateTag = world:get(entity, gameComponent)
                         luassert.is_not_nil(stateTag)
@@ -159,7 +163,7 @@ describe(
                     "should not auto-tag entities spawned before any state",
                     function()
                         local gameComponent = world:createState("game")
-                        local entity = world:spawn(tecs.builtins.Transform(0, 0))
+                        local entity = world:spawn(tecs.ecs.builtins.Transform(0, 0))
                         world:commit()
                         local stateTag = world:get(entity, gameComponent)
                         luassert.is_nil(stateTag)
@@ -176,7 +180,7 @@ describe(
                     function()
                         world:createState("game")
                         world:pushState("game")
-                        local entity = world:spawn(tecs.builtins.Transform(0, 0))
+                        local entity = world:spawn(tecs.ecs.builtins.Transform(0, 0))
                         world:commit()
                         luassert.is_true(world:isAlive(entity))
                         world:popState()
@@ -197,12 +201,12 @@ describe(
                         )
                         world:createState("paused")
                         world:pushState("game")
-                        local entity = world:spawn(tecs.builtins.Transform(0, 0))
+                        local entity = world:spawn(tecs.ecs.builtins.Transform(0, 0))
                         world:commit()
                         -- Push paused state, game.onBlur should add Paused
                         world:pushState("paused")
                         world:commit()
-                        local paused = world:get(entity, tecs.builtins.Paused)
+                        local paused = world:get(entity, tecs.ecs.builtins.Paused)
                         luassert.is_not_nil(paused)
                     end
                 )
@@ -219,14 +223,14 @@ describe(
                         )
                         world:createState("paused")
                         world:pushState("game")
-                        local entity = world:spawn(tecs.builtins.Transform(0, 0))
+                        local entity = world:spawn(tecs.ecs.builtins.Transform(0, 0))
                         world:commit()
                         world:pushState("paused")
                         world:commit()
                         -- Pop paused, game.onFocus should remove Paused
                         world:popState()
                         world:commit()
-                        local paused = world:get(entity, tecs.builtins.Paused)
+                        local paused = world:get(entity, tecs.ecs.builtins.Paused)
                         luassert.is_nil(paused)
                     end
                 )

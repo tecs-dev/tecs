@@ -10,7 +10,7 @@ describe(
     function()
         local world: tecs.World
 
-        before_each(function() world = tecs.newWorld() end)
+        before_each(function() world = tecs.ecs.newWorld() end)
 
         describe(
             "creation",
@@ -27,8 +27,8 @@ describe(
                 it(
                     "creates a bundle with defaulted components",
                     function()
-                        local Tag1 = tecs.newTagComponent({name = "BundleTag1"})
-                        local Tag2 = tecs.newTagComponent({name = "BundleTag2"})
+                        local Tag1 = tecs.ecs.newTagComponent({name = "BundleTag1"})
+                        local Tag2 = tecs.ecs.newTagComponent({name = "BundleTag2"})
 
                         local bundle = world:newBundle(
                             "TestBundle2",
@@ -48,7 +48,7 @@ describe(
                 it(
                     "creates a bundle with metadata",
                     function()
-                        local Tag3 = tecs.newTagComponent({name = "BundleTag3"})
+                        local Tag3 = tecs.ecs.newTagComponent({name = "BundleTag3"})
 
                         local bundle = world:newBundle(
                             "TestBundle3",
@@ -70,7 +70,7 @@ describe(
                 it(
                     "registers bundle with world",
                     function()
-                        local Tag = tecs.newTagComponent({name = "RegisteredBundleTag"})
+                        local Tag = tecs.ecs.newTagComponent({name = "RegisteredBundleTag"})
 
                         world:newBundle(
                             "RegisteredBundle",
@@ -103,7 +103,7 @@ describe(
                             value: number
                         end
 
-                        local TC = tecs.newComponent({
+                        local TC = tecs.ecs.newComponent({
                             name = "BundleTestComponent1",
                             container = BundleTestComponent1,
                             fields = {"value"},
@@ -112,7 +112,7 @@ describe(
                             end,
                         })
 
-                        local Tag4 = tecs.newTagComponent({name = "BundleTag4"})
+                        local Tag4 = tecs.ecs.newTagComponent({name = "BundleTag4"})
 
                         local factoryCalled = 0
                         local bundle = world:newBundle(
@@ -146,7 +146,7 @@ describe(
                             id: integer
                         end
 
-                        local TC3 = tecs.newComponent({
+                        local TC3 = tecs.ecs.newComponent({
                             name = "BundleTestComponent3",
                             container = TestComponent3,
                             fields = {"id"},
@@ -202,7 +202,7 @@ describe(
                             y: number
                         end
 
-                        local TC = tecs.newComponent({
+                        local TC = tecs.ecs.newComponent({
                             name = "BundleTestComponent4",
                             container = TypedComponent,
                             fields = {"x", "y"},
@@ -238,8 +238,8 @@ describe(
                 it(
                     "allows marking components as required",
                     function()
-                        local Tag1 = tecs.newTagComponent({name = "RequiredTag1"})
-                        local Tag2 = tecs.newTagComponent({name = "RequiredTag2"})
+                        local Tag1 = tecs.ecs.newTagComponent({name = "RequiredTag1"})
+                        local Tag2 = tecs.ecs.newTagComponent({name = "RequiredTag2"})
 
                         local bundle = world:newBundle(
                             "RequiredBundle1",
@@ -260,7 +260,7 @@ describe(
                             id: integer
                         end
 
-                        local RequiredComp = tecs.newComponent({
+                        local RequiredComp = tecs.ecs.newComponent({
                             name = "MetadataRequiredComp",
                             container = RC,
                             fields = {"id"},
@@ -271,7 +271,7 @@ describe(
                             name: string
                         end
 
-                        local DefaultedComp = tecs.newComponent({
+                        local DefaultedComp = tecs.ecs.newComponent({
                             name = "MetadataDefaultedComp",
                             container = DC,
                             fields = {"name"},
@@ -302,7 +302,7 @@ describe(
                             value: number
                         end
 
-                        local TC = tecs.newComponent({
+                        local TC = tecs.ecs.newComponent({
                             name = "RequiredBundleTestComponent",
                             container = RequiredBundleTestComponent,
                             fields = {"value"},
@@ -311,7 +311,7 @@ describe(
                             end,
                         })
 
-                        local Tag3 = tecs.newTagComponent({name = "RequiredTag3"})
+                        local Tag3 = tecs.ecs.newTagComponent({name = "RequiredTag3"})
 
                         local bundle = world:newBundle(
                             "RequiredBundle2",
@@ -337,14 +337,14 @@ describe(
                             name: string
                         end
 
-                        local TC2 = tecs.newComponent({
+                        local TC2 = tecs.ecs.newComponent({
                             name = "RequiredBundleTestComponent2",
                             container = TestComponent2,
                             fields = {"name"},
                             init = function(instance: TestComponent2, name: string) instance.name = name or "" end,
                         })
 
-                        local Tag4 = tecs.newTagComponent({name = "RequiredTag4"})
+                        local Tag4 = tecs.ecs.newTagComponent({name = "RequiredTag4"})
                         local bundle = world:newBundle(
                             "RequiredBundle3",
                             {
@@ -366,7 +366,7 @@ describe(
                             id: integer
                         end
 
-                        local RC = tecs.newComponent({
+                        local RC = tecs.ecs.newComponent({
                             name = "RequiredBundleComponent3",
                             container = RequiredComp,
                             fields = {"id"},
@@ -377,7 +377,7 @@ describe(
                             name: string
                         end
 
-                        local OC = tecs.newComponent({
+                        local OC = tecs.ecs.newComponent({
                             name = "OptionalBundleComponent",
                             container = OptionalComp,
                             fields = {"name"},
@@ -386,7 +386,7 @@ describe(
                             end,
                         })
 
-                        local Tag6 = tecs.newTagComponent({name = "OptionalTag6"})
+                        local Tag6 = tecs.ecs.newTagComponent({name = "OptionalTag6"})
 
                         local bundle = world:newBundle(
                             "MixedBundle",
@@ -418,9 +418,9 @@ describe(
                 it(
                     "supports mixed required and with components",
                     function()
-                        local Tag7 = tecs.newTagComponent({name = "BundleChainTag7"})
-                        local Tag8 = tecs.newTagComponent({name = "BundleChainTag8"})
-                        local Tag9 = tecs.newTagComponent({name = "BundleChainTag9"})
+                        local Tag7 = tecs.ecs.newTagComponent({name = "BundleChainTag7"})
+                        local Tag8 = tecs.ecs.newTagComponent({name = "BundleChainTag8"})
+                        local Tag9 = tecs.ecs.newTagComponent({name = "BundleChainTag9"})
 
                         local bundle = world:newBundle(
                             "ChainBundle",
@@ -449,7 +449,7 @@ describe(
                 it(
                     "handles bundles with only required components",
                     function()
-                        local Tag10 = tecs.newTagComponent({name = "EmptyBundleTag"})
+                        local Tag10 = tecs.ecs.newTagComponent({name = "EmptyBundleTag"})
 
                         local bundle = world:newBundle(
                             "EmptyRequiredBundle",
@@ -478,7 +478,7 @@ describe(
                             value: number
                         end
 
-                        local TC = tecs.newComponent({
+                        local TC = tecs.ecs.newComponent({
                             name = "BundleSpawnTestComp",
                             container = SpawnTestComp,
                             fields = {"value"},
@@ -513,7 +513,7 @@ describe(
                             name: string
                         end
 
-                        local TC = tecs.newComponent({
+                        local TC = tecs.ecs.newComponent({
                             name = "WorldSpawnTestComp",
                             container = SpawnTestComp2,
                             fields = {"name"},
@@ -562,7 +562,7 @@ describe(
                         local record DC1 is tecs.Component
                             x: integer
                         end
-                        local Comp = tecs.newComponent({
+                        local Comp = tecs.ecs.newComponent({
                             name = "DeferComp1",
                             container = DC1,
                             fields = {"x"},
@@ -592,7 +592,7 @@ describe(
                         local record DC2 is tecs.Component
                             x: integer
                         end
-                        local Comp = tecs.newComponent({
+                        local Comp = tecs.ecs.newComponent({
                             name = "DeferComp2",
                             container = DC2,
                             fields = {"x"},
@@ -629,12 +629,12 @@ describe(
                         local record DC3Health is tecs.Component
                             hp: integer
                         end
-                        local Pos = tecs.newComponent({
+                        local Pos = tecs.ecs.newComponent({
                             name = "DeferPos3",
                             container = DC3Pos,
                             fields = {"x", "y"},
                         })
-                        local Health = tecs.newComponent({
+                        local Health = tecs.ecs.newComponent({
                             name = "DeferHealth3",
                             container = DC3Health,
                             fields = {"hp"},
@@ -673,12 +673,12 @@ describe(
                         local record DC4B is tecs.Component
                             v: integer
                         end
-                        local CompA = tecs.newComponent({
+                        local CompA = tecs.ecs.newComponent({
                             name = "DeferA4",
                             container = DC4A,
                             fields = {"v"},
                         })
-                        local CompB = tecs.newComponent({
+                        local CompB = tecs.ecs.newComponent({
                             name = "DeferB4",
                             container = DC4B,
                             fields = {"v"},
@@ -708,7 +708,7 @@ describe(
                             strength: number
                             metamethod __call: function(self, target: integer, strength: number): DenseRelData
                         end
-                        local DenseRel = tecs.newRelationship({
+                        local DenseRel = tecs.ecs.newRelationship({
                             name = "DeferDenseRel",
                             container = DenseRelData,
                             fields = {"strength"},
@@ -739,7 +739,7 @@ describe(
                 it(
                     "routes sparse relationships through setSparse",
                     function()
-                        local SparseRel = tecs.newRelationship({
+                        local SparseRel = tecs.ecs.newRelationship({
                             name = "DeferChildOf",
                             exclusive = true,
                             sparse = true,
@@ -749,7 +749,7 @@ describe(
                             x: integer
                             y: integer
                         end
-                        local PosComp = tecs.newComponent({
+                        local PosComp = tecs.ecs.newComponent({
                             name = "DeferChildPos",
                             container = DCPos,
                             fields = {"x", "y"},
@@ -794,7 +794,7 @@ describe(
                         local record DC5 is tecs.Component
                             v: integer
                         end
-                        local Comp = tecs.newComponent({
+                        local Comp = tecs.ecs.newComponent({
                             name = "DeferComp5",
                             container = DC5,
                             fields = {"v"},
@@ -833,7 +833,7 @@ describe(
                     x: number
                 end
 
-                local GC = tecs.newFFIComponent({
+                local GC = tecs.ecs.newFFIComponent({
                     name = "BundleGenCacheComp",
                     container = GenComp,
                     fields = {{"x", "float"}},
@@ -916,7 +916,7 @@ describe(
                         local record ReqBase is tecs.Component
                             v: number
                         end
-                        local Base = tecs.newComponent({
+                        local Base = tecs.ecs.newComponent({
                             name = "BundleReqBase",
                             container = ReqBase,
                             fields = {"v"},
@@ -925,7 +925,7 @@ describe(
                         local record ReqTop is tecs.Component
                             t: number
                         end
-                        local Top = tecs.newComponent({
+                        local Top = tecs.ecs.newComponent({
                             name = "BundleReqTop",
                             container = ReqTop,
                             fields = {"t"},
@@ -961,7 +961,7 @@ describe(
                 it(
                     "adds the wildcard container for dense relationship instances",
                     function()
-                        local Owes = tecs.newRelationship({
+                        local Owes = tecs.ecs.newRelationship({
                             name = "BundleWildcardOwes",
                         })
                         local target = world:spawn()
@@ -997,7 +997,7 @@ describe(
                 it(
                     "a despawn staged before commit wins over the bundle drain",
                     function()
-                        local Tag = tecs.newTagComponent({name = "BundleDespawnWinsTag"})
+                        local Tag = tecs.ecs.newTagComponent({name = "BundleDespawnWinsTag"})
                         local bundle = world:newBundle(
                             "DespawnWinsBundle",
                             {
@@ -1017,7 +1017,7 @@ describe(
                 it(
                     "applies sparse relationship values immediately at scope depth 0",
                     function()
-                        local Follows = tecs.newRelationship({
+                        local Follows = tecs.ecs.newRelationship({
                             name = "BundleSparseFollows",
                             sparse = true,
                             exclusive = true,
@@ -1046,7 +1046,7 @@ describe(
                 it(
                     "places each burst into its enqueue-time state archetype",
                     function()
-                        local Tag = tecs.newTagComponent({name = "BundleStateMixTag"})
+                        local Tag = tecs.ecs.newTagComponent({name = "BundleStateMixTag"})
                         local stateA = world:createState("BundleStateA")
                         local stateB = world:createState("BundleStateB")
                         local bundle = world:newBundle(

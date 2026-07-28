@@ -19,10 +19,10 @@ table-specific behavior.
 
 ## Creating a table component
 
-Pass a configuration table to `tecs.newComponent` to wire up the metatables and register the component.
+Pass a configuration table to `tecs.ecs.newComponent` to wire up the metatables and register the component.
 
 ```teal
-function tecs.newComponent<C is Component>(options: ComponentOptions<C>): C
+function tecs.ecs.newComponent<C is Component>(options: ComponentOptions<C>): C
 ```
 
 | Property      | Description                                                                                                                                              |
@@ -66,7 +66,7 @@ local record Health is tecs.Component
     metamethod __call: function(self, value?: number, max?: number): Health
 end
 
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "Health",
     container = Health,
     fields = {"value", "max"},
@@ -133,7 +133,7 @@ local record Inventory is tecs.Component
     metamethod __call: function(self, slots: {string}, capacity?: integer): Inventory
 end
 
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "Inventory",
     container = Inventory,
     fields = {"slots", "capacity"},

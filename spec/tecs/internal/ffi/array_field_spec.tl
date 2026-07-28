@@ -6,7 +6,7 @@ local record ArrHolder is tecs.Component
     vals: {number}
 end
 
-local Holder = tecs.newFFIComponent({
+local Holder = tecs.ecs.newFFIComponent({
     name = "FFIArrayFieldHolder",
     container = ArrHolder,
     fields = {{"vals", "float[3]"}},
@@ -38,7 +38,7 @@ describe(
         it(
             "round-trips through a table snapshot",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local id = world:spawn(Holder({vals = {7, 8, 9}}))
                 world:commit()
 

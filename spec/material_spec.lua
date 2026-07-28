@@ -101,7 +101,7 @@ describe("material identity across a snapshot", function()
         materials.install()
 
         local saved = materials.id("specmatb")
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local entity = world:spawn(Material(saved, 0.75))
 
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
@@ -123,7 +123,7 @@ describe("material identity across a snapshot", function()
             "the material that took the saved id is a different one"
         )
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(snapshot)
 
         local material = restored:get(entity, Material)
@@ -140,14 +140,14 @@ describe("material identity across a snapshot", function()
         write(dir .. "specmatb.glsl", body("B"))
         materials.install()
 
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local entity = world:spawn(Material(materials.id("specmatb"), 0.5))
         local buffer = world:saveSnapshot().buffer
 
         write(dir .. "specmata.glsl", body("A"))
         rebuild()
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(buffer)
 
         local material = restored:get(entity, Material)
@@ -159,14 +159,14 @@ describe("material identity across a snapshot", function()
         write(dir .. "specmatb.glsl", body("B"))
         materials.install()
 
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         world:spawn(Material(materials.id("specmatb"), 0.25))
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
 
         os.remove(dir .. "specmatb.glsl")
         rebuild()
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         local ok, err = pcall(function()
             restored:loadSnapshot(snapshot)
         end)
@@ -186,14 +186,14 @@ describe("material identity across a snapshot", function()
         write(dir .. "specmatb.glsl", body("B"))
         materials.install()
 
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local entity = world:spawn(Material())
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
 
         write(dir .. "specmata.glsl", body("A"))
         rebuild()
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(snapshot)
 
         local material = restored:get(entity, Material)

@@ -246,7 +246,7 @@ function log.closeFile()
 
 ## Under an application
 
-[`Application`](/modules/Application) opens a log file for you. `Application.Config.logFile` is a name under
+[`Application`](/modules/application) opens a log file for you. `Application.Config.logFile` is a name under
 the writable root and defaults to `log.jsonl`; set it to `""` to write only to the platform's own destination.
 
 ## Design record

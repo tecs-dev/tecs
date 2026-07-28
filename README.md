@@ -9,7 +9,7 @@ SDL owns the loop. An entry file returns an application and a C host drives it
 from `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate`, and `SDL_AppQuit`:
 
 ```lua
-return tecs.application({
+return tecs.application.create({
     load = function(app) end,
     update = function(app, dt) end,
     event = function(app, event)
@@ -127,14 +127,14 @@ code have separate histories.
 `tecs` is a global, so a game writes it in any file with no require line:
 
 ```lua
-local world = tecs.newWorld()
-local Velocity = tecs.newComponent({
+local world = tecs.ecs.newWorld()
+local Velocity = tecs.ecs.newComponent({
     name = "Velocity",
     container = {},
     fields = { "x", "y" },
     defaults = { 0, 0 },
 })
-world:spawn(tecs.builtins.Transform(0, 0), Velocity(1, 0))
+world:spawn(tecs.ecs.builtins.Transform(0, 0), Velocity(1, 0))
 ```
 
 `require("tecs")` is equally supported and returns exactly the same table, so a
@@ -154,7 +154,7 @@ including transitively, is enough. Require stays the mechanism; the global is a
 consequence of it.
 
 It is the same table, metatable included, so nothing about the lazy engine half
-changes: `tecs.Application` read off the global resolves on first use exactly as
+changes: `tecs.application.Application` read off the global resolves on first use exactly as
 it does read off the required value, and `require("tecs")` still loads no engine
 module. `require` caches, so the assignment runs once. A game that assigns
 `tecs` itself afterwards owns the name from then on, and the declaration below
@@ -358,7 +358,7 @@ at all: the host holds a single registry reference to one returned table,
 `SDL_Init` and `SDL_Quit` bracket the process, and the debug server's bindings
 are module-level.
 
-What the shape buys below itself is that nothing needs it. `tecs.Application` is
+What the shape buys below itself is that nothing needs it. `tecs.application.Application` is
 not loaded by `require("tecs")`; the engine modules resolve on first use through
 the surface's `__index`, which is what lets a tool build a world with no window,
 no device and no SDL reachable at all. Most of the spec suite never constructs
@@ -1192,11 +1192,20 @@ keeps its NULs.
 The smaller operating-system services stay small modules rather than becoming
 an `Application` grab bag. `tecs.system` holds URLs, locale preference, power,
 the simple blocking message box and asynchronous file and folder selection;
-`tecs.sensors` owns standalone sensor handles; lowercase `tecs.audio`
-enumerates physical devices and owns microphone streams, while `tecs.Audio`
-remains playback and the `Sound` component.
+`tecs.sensors` owns standalone sensor handles.
 Standard cursor shapes stay on `Input`, because cursor choice is an outbound
 input command on the same seam as visibility and relative mode.
+
+Device enumeration and microphone capture went the other way and are inside
+`tecs.audio`, beside the mixer, rather than being a module of their own. They
+were briefly two modules that differed only in the case of one letter, which is
+the worst spelling a distinction can have. The mixer and the device it opens
+are one subject at two levels: a game that wants a particular output names a
+device from `tecs.audio.playbackDevices` and passes its id to
+`tecs.audio.Audio.create`, and having to know which of two modules each half
+came from bought nothing. `src/tecs/platform/audio.tl` is still its own file
+and still only reaches SDL, so it is what the namespace searches first and a
+game listing devices never loads a mixer.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
@@ -3103,7 +3112,7 @@ substitutes recorded dt and recorded input without either subsystem knowing.
 Events are delivered as a reused `SDL_Event`, so recording is a 128 byte copy
 and replay is the same copy back, with no second representation to keep in sync.
 
-**Randomness is seeded, and split by name rather than by order.** `tecs.random`
+**Randomness is seeded, and split by name rather than by order.** `tecs.ecs.random`
 gives a world a generator per name, each seeded by hashing the name against the
 world's seed, so a stream that did not exist before takes a seed of its own
 without moving any other stream's. One generator shared between consumers has

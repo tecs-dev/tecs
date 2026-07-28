@@ -6,12 +6,12 @@ local components = require("tecs.components")
 local physics = require("tecs.physics")
 
 local Transform = components.Transform
-local Paused = tecs.builtins.Paused
+local Paused = tecs.ecs.builtins.Paused
 
 local built = {}
 
 local function newWorld(gravity)
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     world:addPlugin(physics.plugin({ gravity = gravity or { 0, 0 }, workerCount = 1 }))
     built[#built + 1] = world
     return world
@@ -203,14 +203,14 @@ describe("physics body controls", function()
         assert.is_true(math.abs(select(2, physics.velocity(world, entity))) < 0.1)
 
         local y = world:get(entity, Transform).y
-        world:set(entity, tecs.builtins.Disabled)
+        world:set(entity, tecs.ecs.builtins.Disabled)
         step(world)
         assert.is_nil(physics.raycast(world, -20, y, 20, y))
-        world:remove(entity, tecs.builtins.Disabled)
+        world:remove(entity, tecs.ecs.builtins.Disabled)
         step(world)
         assert.equal(entity, physics.raycast(world, -20, y, 20, y).entity)
 
-        world:set(entity, tecs.builtins.Disabled)
+        world:set(entity, tecs.ecs.builtins.Disabled)
         step(world)
         physics.detach(world, entity)
         step(world)

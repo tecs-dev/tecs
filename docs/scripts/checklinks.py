@@ -7,11 +7,11 @@ and resolves it the way VitePress does.
 
 Three kinds of target are checked:
 
-  /modules/Camera        docs/modules/Camera.md
+  /modules/camera        docs/modules/camera.md
   /ecs/queries/          docs/ecs/queries/index.md
   #a-heading             a heading, or an explicit {#id}, on the same page
 
-Anchors are checked across pages too, so `/modules/Application#crashes` fails
+Anchors are checked across pages too, so `/modules/application#crashes` fails
 when that section is renamed. Slugs follow GitHub's rule, which is what
 VitePress uses: lowercase, spaces to hyphens, punctuation dropped.
 
@@ -37,7 +37,7 @@ HTML_HREF = re.compile(r'href="([^"]+)"')
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 EXPLICIT_ID = re.compile(r"\{#([^}]+)\}\s*$")
 
-# An `<a id="...">` anchor, which the generated surface page is full of.
+# An `<a id="...">` anchor, which the generated reference page is full of.
 HTML_ANCHOR = re.compile(r'<a id="([^"]+)"')
 
 SKIPPED_PREFIXES = ("http://", "https://", "mailto:", "tel:", "//")

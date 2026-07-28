@@ -7,7 +7,7 @@ describe(
     function()
         local world: tecs.World
 
-        before_each(function() world = tecs.newWorld() end)
+        before_each(function() world = tecs.ecs.newWorld() end)
 
         describe(
             "after",
@@ -20,8 +20,8 @@ describe(
 
                         world:addSystem({
                             name = systemName,
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.after(0.1),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.after(0.1),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -45,8 +45,8 @@ describe(
                         local callCount = 0
 
                         world:addSystem({
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.after(0.1),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.after(0.1),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -68,8 +68,8 @@ describe(
 
                         world:addSystem({
                             name = "ImmediateSystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.after(0),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.after(0),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -93,8 +93,8 @@ describe(
 
                         world:addSystem({
                             name = "RepeatingSystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.every(0.1),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.every(0.1),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -122,8 +122,8 @@ describe(
                         -- Just verify that jitter doesn't cause errors
                         world:addSystem({
                             name = "JitteredSystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.every(0.05, 0.02),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.every(0.05, 0.02),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -144,8 +144,8 @@ describe(
 
                         world:addSystem({
                             name = "AccumulatingSystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.every(0.1),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.every(0.1),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -171,8 +171,8 @@ describe(
 
                         world:addSystem({
                             name = "CooldownSystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.cooldown(0.2),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.cooldown(0.2),
                             run = function(_dt: number, _world: tecs.World) callCount = callCount + 1 end,
                         })
 
@@ -202,11 +202,13 @@ describe(
                 it(
                     "should error when adding duplicate system names",
                     function()
-                        world:addSystem({name = "DuplicateSystem", phase = tecs.phases.Update, run = function() end})
+                        world:addSystem({
+                            name = "DuplicateSystem", phase = tecs.ecs.phases.Update, run = function() end
+                        })
 
                         luassert.error_matches(function()
                             world:addSystem({
-                                name = "DuplicateSystem", phase = tecs.phases.PostUpdate, run = function() end
+                                name = "DuplicateSystem", phase = tecs.ecs.phases.PostUpdate, run = function() end
                             })
                         end, "System with name 'DuplicateSystem' already exists",
                         "Should error on duplicate system name")
@@ -218,11 +220,11 @@ describe(
                     function()
                         -- Should not error when adding unnamed systems
                         local success1 = pcall(function()
-                            world:addSystem({phase = tecs.phases.Update, run = function() end})
+                            world:addSystem({phase = tecs.ecs.phases.Update, run = function() end})
                         end)
 
                         local success2 = pcall(function()
-                            world:addSystem({phase = tecs.phases.Update, run = function() end})
+                            world:addSystem({phase = tecs.ecs.phases.Update, run = function() end})
                         end)
 
                         -- Both systems should be added successfully without error
@@ -243,7 +245,7 @@ describe(
 
                         world:addSystem({
                             name = "TestSystem",
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             run = function() callCount = callCount + 1 end,
                         })
 
@@ -283,8 +285,8 @@ describe(
 
                         world:addSystem({
                             name = "PlayingOnlySystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.inState("playing"),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.inState("playing"),
                             run = function() callCount = callCount + 1 end,
                         })
 
@@ -319,8 +321,8 @@ describe(
 
                         world:addSystem({
                             name = "NotPlayingSystem",
-                            phase = tecs.phases.Update,
-                            runIf = tecs.runif.negate(tecs.runif.inState("playing")),
+                            phase = tecs.ecs.phases.Update,
+                            runIf = tecs.ecs.runif.negate(tecs.ecs.runif.inState("playing")),
                             run = function() callCount = callCount + 1 end,
                         })
 
@@ -352,7 +354,7 @@ describe(
                     "gate-first freezes the timer while the gate is closed",
                     function()
                         local gate = false
-                        local pred = tecs.runif.both(function(): boolean return gate end, tecs.runif.every(1))
+                        local pred = tecs.ecs.runif.both(function(): boolean return gate end, tecs.ecs.runif.every(1))
 
                         -- Two seconds pass while gated; the timer must NOT accumulate,
                         -- or reopening the gate would burst-fire the backlog.
@@ -370,7 +372,7 @@ describe(
                     "timer-first keeps cadence and spends gated fires",
                     function()
                         local gate = false
-                        local pred = tecs.runif.both(tecs.runif.every(1), function(): boolean return gate end)
+                        local pred = tecs.ecs.runif.both(tecs.ecs.runif.every(1), function(): boolean return gate end)
 
                         luassert.is_false(pred(1.0, world, "s"), "fire spent while gated")
                         gate = true
@@ -387,7 +389,7 @@ describe(
                 it(
                     "clamps pathological jitter to a positive interval",
                     function()
-                        local pred = tecs.runif.every(1, 5)
+                        local pred = tecs.ecs.runif.every(1, 5)
                         local fires = 0
                         for _ = 1, 1000 do
                             if pred(0.1, world, "s") then
@@ -401,13 +403,13 @@ describe(
                     end
                 )
 
-                -- Jitter comes off the world's `tecs.runif` stream rather than a
+                -- Jitter comes off the world's `tecs.ecs.runif` stream rather than a
                 -- process-wide generator, so the frames a jittered system fires on are
                 -- a function of the world's seed and nothing else.
                 local function schedule(seed: integer): {integer}
-                    local scoped <const> = tecs.newWorld()
-                    tecs.random.seed(scoped, seed)
-                    local pred <const> = tecs.runif.every(0.1, 0.05)
+                    local scoped <const> = tecs.ecs.newWorld()
+                    tecs.ecs.random.seed(scoped, seed)
+                    local pred <const> = tecs.ecs.runif.every(0.1, 0.05)
                     local hits: {integer} = {}
                     for frame = 1, 600 do
                         if pred(1 / 60, scoped, "s") then
@@ -446,12 +448,12 @@ describe(
                 it(
                     "carries its place through a snapshot",
                     function()
-                        local scoped <const> = tecs.newWorld()
-                        tecs.random.seed(scoped, 4242)
+                        local scoped <const> = tecs.ecs.newWorld()
+                        tecs.ecs.random.seed(scoped, 4242)
 
                         -- Rolled a few times first, so the save is taken mid-sequence and
                         -- restoring it is doing more than restarting from the seed.
-                        local warm <const> = tecs.runif.every(0.1, 0.05)
+                        local warm <const> = tecs.ecs.runif.every(0.1, 0.05)
                         for _ = 1, 120 do
                             warm(1 / 60, scoped, "s")
                         end
@@ -466,7 +468,7 @@ describe(
                         -- not reach, so both runs start with a fresh one; what is asserted
                         -- is that the rolls the second makes are the restored ones.
                         local function drive(): {integer}
-                            local pred <const> = tecs.runif.every(0.1, 0.05)
+                            local pred <const> = tecs.ecs.runif.every(0.1, 0.05)
                             local hits: {integer} = {}
                             for frame = 1, 300 do
                                 if pred(1 / 60, scoped, "s") then

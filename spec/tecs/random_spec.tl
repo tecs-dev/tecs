@@ -3,7 +3,7 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 local StringBuffer <const> = require("string.buffer")
 
-local random <const> = tecs.random
+local random <const> = tecs.ecs.random
 
 local function save(world: tecs.World): StringBuffer
     local out <const> = world:saveSnapshot()
@@ -294,7 +294,7 @@ describe(
                 it(
                     "hands the same generator back for the same name",
                     function()
-                        local world <const> = tecs.newWorld()
+                        local world <const> = tecs.ecs.newWorld()
                         luassert.is_true(random.stream(world, "a") == random.stream(world, "a"))
                         luassert.is_false(random.stream(world, "a") == random.stream(world, "b"))
                     end
@@ -303,7 +303,7 @@ describe(
                 it(
                     "refuses an unnamed stream",
                     function()
-                        local world <const> = tecs.newWorld()
+                        local world <const> = tecs.ecs.newWorld()
                         luassert.has_error(function()
                             random.stream(world, "")
                         end, "random: a stream needs a non-empty name")
@@ -317,11 +317,11 @@ describe(
                         -- seed comes from its name and the world's, so adding a system,
                         -- removing one, or having one draw a different number of values
                         -- moves nothing about what any other system sees.
-                        local alone <const> = tecs.newWorld()
+                        local alone <const> = tecs.ecs.newWorld()
                         random.seed(alone, 999)
                         local expected <const> = draw(random.stream(alone, "alpha"), 20)
 
-                        local crowded <const> = tecs.newWorld()
+                        local crowded <const> = tecs.ecs.newWorld()
                         random.seed(crowded, 999)
                         random.stream(crowded, "beta"):next()
                         for _ = 1, 37 do
@@ -336,7 +336,7 @@ describe(
                 it(
                     "gives different names different sequences",
                     function()
-                        local world <const> = tecs.newWorld()
+                        local world <const> = tecs.ecs.newWorld()
                         random.seed(world, 999)
                         local a <const> = draw(random.stream(world, "alpha"), 100)
                         local b <const> = draw(random.stream(world, "beta"), 100)
@@ -353,7 +353,7 @@ describe(
                 it(
                     "restarts every stream when the world is reseeded",
                     function()
-                        local world <const> = tecs.newWorld()
+                        local world <const> = tecs.ecs.newWorld()
                         random.seed(world, 4242)
                         local stream <const> = random.stream(world, "alpha")
                         local expected <const> = draw(stream, 20)
@@ -369,11 +369,11 @@ describe(
                 it(
                     "gives the same world seed the same streams in a fresh world",
                     function()
-                        local first <const> = tecs.newWorld()
+                        local first <const> = tecs.ecs.newWorld()
                         random.seed(first, 31337)
                         local expected <const> = draw(random.stream(first, "loot"), 40)
 
-                        local second <const> = tecs.newWorld()
+                        local second <const> = tecs.ecs.newWorld()
                         random.seed(second, 31337)
                         luassert.same(expected, draw(random.stream(second, "loot"), 40))
                     end
@@ -382,11 +382,11 @@ describe(
                 it(
                     "gives a different world seed different streams",
                     function()
-                        local first <const> = tecs.newWorld()
+                        local first <const> = tecs.ecs.newWorld()
                         random.seed(first, 31337)
                         local a <const> = draw(random.stream(first, "loot"), 40)
 
-                        local second <const> = tecs.newWorld()
+                        local second <const> = tecs.ecs.newWorld()
                         random.seed(second, 31338)
                         local b <const> = draw(random.stream(second, "loot"), 40)
 
@@ -408,7 +408,7 @@ describe(
                 it(
                     "continues the saved sequence rather than restarting it",
                     function()
-                        local world <const> = tecs.newWorld()
+                        local world <const> = tecs.ecs.newWorld()
                         random.seed(world, 4242)
                         local loot <const> = random.stream(world, "loot")
                         for _ = 1, 25 do
@@ -433,7 +433,7 @@ describe(
                 it(
                     "puts a stream back that this run has not asked for yet",
                     function()
-                        local origin <const> = tecs.newWorld()
+                        local origin <const> = tecs.ecs.newWorld()
                         random.seed(origin, 4242)
                         local loot <const> = random.stream(origin, "loot")
                         for _ = 1, 30 do
@@ -442,7 +442,7 @@ describe(
                         local saved <const> = save(origin)
                         local expected <const> = draw(loot, 20)
 
-                        local restored <const> = tecs.newWorld()
+                        local restored <const> = tecs.ecs.newWorld()
                         random.seed(restored, 1)
                         restored:loadSnapshot(saved)
                         luassert.same(expected, draw(random.stream(restored, "loot"), 20))
@@ -452,12 +452,12 @@ describe(
                 it(
                     "restarts a stream the file does not name",
                     function()
-                        local origin <const> = tecs.newWorld()
+                        local origin <const> = tecs.ecs.newWorld()
                         random.seed(origin, 4242)
                         random.stream(origin, "loot"):next()
                         local saved <const> = save(origin)
 
-                        local restored <const> = tecs.newWorld()
+                        local restored <const> = tecs.ecs.newWorld()
                         random.seed(restored, 1)
                         local unsaved <const> = random.stream(restored, "weather")
                         for _ = 1, 100 do
@@ -467,7 +467,7 @@ describe(
 
                         -- Reseeded from the restored world seed, which is what it would
                         -- have had if the save had been taken before it ever existed.
-                        local reference <const> = tecs.newWorld()
+                        local reference <const> = tecs.ecs.newWorld()
                         random.seed(reference, 4242)
                         luassert.same(draw(random.stream(reference, "weather"), 10), draw(unsaved, 10))
                     end
@@ -476,16 +476,16 @@ describe(
                 it(
                     "carries the world seed, so a later stream derives from it",
                     function()
-                        local origin <const> = tecs.newWorld()
+                        local origin <const> = tecs.ecs.newWorld()
                         random.seed(origin, 8675309)
                         random.stream(origin, "loot"):next()
                         local saved <const> = save(origin)
 
-                        local restored <const> = tecs.newWorld()
+                        local restored <const> = tecs.ecs.newWorld()
                         random.seed(restored, 1)
                         restored:loadSnapshot(saved)
 
-                        local reference <const> = tecs.newWorld()
+                        local reference <const> = tecs.ecs.newWorld()
                         random.seed(reference, 8675309)
                         luassert.same(
                             draw(random.stream(reference, "spawns"), 20), draw(random.stream(restored, "spawns"), 20)
@@ -496,7 +496,7 @@ describe(
                 it(
                     "writes the streams under one named key",
                     function()
-                        local world <const> = tecs.newWorld()
+                        local world <const> = tecs.ecs.newWorld()
                         random.seed(world, 4242)
                         random.stream(world, "loot"):next()
 
@@ -511,7 +511,7 @@ describe(
                                 found = entry.value as {string: any}
                             end
                         end
-                        luassert.is_not_nil(found, "no tecs.random entry in the data section")
+                        luassert.is_not_nil(found, "no tecs.ecs.random entry in the data section")
                         luassert.equal(4242, found.seed)
                         local streams <const> = found.streams as {string: {integer}}
                         luassert.equal(4, #streams["loot"])

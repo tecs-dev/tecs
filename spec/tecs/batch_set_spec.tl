@@ -3,22 +3,22 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Components exclusive to this spec to avoid cross-spec collisions.
-local Position = tecs.newComponent({
+local Position = tecs.ecs.newComponent({
     name = "BatchSetTestPosition",
     container = {},
     fields = {"x", "y"},
     defaults = {0, 0},
 })
 
-local Velocity = tecs.newComponent({
+local Velocity = tecs.ecs.newComponent({
     name = "BatchSetTestVelocity",
     container = {},
     fields = {"vx", "vy"},
     defaults = {0, 0},
 })
 
-local Tag = tecs.newTagComponent({name = "BatchSetTestTag"})
-local OtherTag = tecs.newTagComponent({name = "BatchSetTestOtherTag"})
+local Tag = tecs.ecs.newTagComponent({name = "BatchSetTestTag"})
+local OtherTag = tecs.ecs.newTagComponent({name = "BatchSetTestOtherTag"})
 
 describe(
     "world:batchSet()",
@@ -29,7 +29,7 @@ describe(
                 it(
                     "writes the same value to every entity in-place when arch already has the component",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
                         local b = world:spawn(Position(2, 2), Tag)
                         local c = world:spawn(Position(3, 3), Tag)
@@ -49,7 +49,7 @@ describe(
                 it(
                     "bulk-moves entities that lacked the component (structural add)",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Tag)
                         local b = world:spawn(Tag)
                         world:commit()
@@ -70,7 +70,7 @@ describe(
                 it(
                     "leaves non-matching entities untouched",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local tagged = world:spawn(Tag, Position(1, 1))
                         local untagged = world:spawn(Position(2, 2))
                         world:commit()
@@ -87,7 +87,7 @@ describe(
                 it(
                     "handles a mixed selector (some archetypes have component, some don't)",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         -- Archetype A: {Tag}
                         local a = world:spawn(Tag)
                         -- Archetype B: {Tag, Position}
@@ -106,7 +106,7 @@ describe(
                 it(
                     "works on a tag component (no value data)",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local e1 = world:spawn(Position(1, 1))
                         local e2 = world:spawn(Position(2, 2))
                         world:commit()
@@ -129,7 +129,7 @@ describe(
                 it(
                     "accepts a query with include/exclude",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
                         local b = world:spawn(Position(2, 2), Tag, OtherTag)
                         world:commit()
@@ -146,7 +146,7 @@ describe(
                 it(
                     "no-ops when the query matches nothing",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Position(1, 1))
                         world:commit()
 
@@ -164,7 +164,7 @@ describe(
                 it(
                     "invokes callback once per affected archetype with 1-based row range",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         for i = 1, 5 do
                             world:spawn(Tag, Position(i, i))
                         end
@@ -211,7 +211,7 @@ describe(
                 it(
                     "structural add via callback populates the destination column",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Tag)
                         local b = world:spawn(Tag)
                         world:commit()
@@ -250,7 +250,7 @@ describe(
                 it(
                     "defers until commit when wrapped in world:defer()",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
 
                         local q = world:query({include = {Tag}})
@@ -267,7 +267,7 @@ describe(
                 it(
                     "applies immediately in eager mode (outside any defer scope)",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Position(1, 1), Tag)
 
                         local q = world:query({include = {Tag}})
@@ -287,7 +287,7 @@ describe(
         it(
             "bulk-moves entities out of archetypes carrying the component",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(10, 20))
                 local b = world:spawn(Position(2, 2), Velocity(30, 40))
                 world:commit()
@@ -308,7 +308,7 @@ describe(
         it(
             "skips archetypes that don't carry the component",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 -- {Position} archetype (no Velocity)
                 local a = world:spawn(Position(1, 1))
                 -- {Position, Velocity} archetype
@@ -330,7 +330,7 @@ describe(
         it(
             "no-ops when the query matches nothing",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1))
                 world:commit()
                 local q = world:query({include = {OtherTag}})
@@ -342,7 +342,7 @@ describe(
         it(
             "defers until commit when wrapped in world:defer()",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(1, 1))
 
                 local q = world:query({include = {Velocity}})
@@ -359,7 +359,7 @@ describe(
         it(
             "applies immediately in eager mode",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(Position(1, 1), Velocity(1, 1))
 
                 local q = world:query({include = {Velocity}})
@@ -377,7 +377,7 @@ describe(
         it(
             "batchDespawn errors on a component array",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1))
                 world:commit()
                 luassert.has_error(function() (world as any):batchDespawn({Position}) end)
@@ -387,7 +387,7 @@ describe(
         it(
             "batchSet errors on a component array",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(Tag, Position(1, 1))
                 world:commit()
                 luassert.has_error(function() (world as any):batchSet({Tag}, Position(99, 99)) end)
@@ -397,7 +397,7 @@ describe(
         it(
             "batchRemove errors on a QueryDescriptor",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(Position(1, 1), Velocity(1, 1))
                 world:commit()
                 luassert.has_error(function() (world as any):batchRemove({include = {Position}}, Velocity) end)
@@ -412,7 +412,7 @@ describe(
         it(
             "rejects passing an instance when a callback is supplied",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(Tag, Position(1, 1))
                 world:commit()
                 local q = world:query({include = {Tag}})
@@ -433,8 +433,8 @@ describe(
         it(
             "callback form rejects dense relationships via NoBulkBatch metadata",
             function()
-                local world = tecs.newWorld()
-                local ParentOf = tecs.newRelationship({
+                local world = tecs.ecs.newWorld()
+                local ParentOf = tecs.ecs.newRelationship({
                     name = "BatchSetNoBulkDenseRelationship",
                 })
                 local parent = world:spawn()
@@ -462,12 +462,12 @@ describe(
             e: number
         end
 
-        local Pos = tecs.newFFIComponent({
+        local Pos = tecs.ecs.newFFIComponent({
             name = "BatchSwapCapPos",
             container = SwapPos,
             fields = {{"x", "float"}},
         })
-        local Extra = tecs.newFFIComponent({
+        local Extra = tecs.ecs.newFFIComponent({
             name = "BatchSwapCapExtra",
             container = SwapExtra,
             fields = {{"e", "float"}},
@@ -476,7 +476,7 @@ describe(
         it(
             "keeps capacity within every column after a swap fast path",
             function()
-                local world = tecs.newWorld() as WorldImpl
+                local world = tecs.ecs.newWorld() as WorldImpl
                 local ids: {integer} = {}
                 for i = 1, 100 do
                     ids[i] = world:spawn(Pos(i))
@@ -533,7 +533,7 @@ describe(
         it(
             "returns valid handles after clearEntities",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:batchSpawn(10, {Position}, fill)
                 world:commit()
                 world:clearEntities()
@@ -560,7 +560,7 @@ describe(
         it(
             "falls back to per-id handles when the range spans generations",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 for i = 1, 5 do
                     world:spawn(Position(i, i))
                 end

@@ -66,9 +66,9 @@ print(("%s on %s, %d decode workers"):format(caps.target, caps.architecture, dec
 
 ### Fields whose answer is about a device, not the target
 
-`gamepad` says the subsystem exists, not that a pad is plugged in; ask [`Input`](/modules/Input) which gamepads
+`gamepad` says the subsystem exists, not that a pad is plugged in; ask [`Input`](/modules/input) which gamepads
 are connected. `sensors` says the device itself carries a gyroscope or an accelerometer, which is a different
-question from whether a particular pad has one; [`Gamepad`](/modules/Gamepad) answers that per device. `touch`
+question from whether a particular pad has one; [`Gamepad`](/modules/gamepad) answers that per device. `touch`
 is the one hardware answer here that is asked of the platform each time the capabilities are resolved, because
 neither a desktop with a touchscreen nor a simulator without one follows from the OS name.
 

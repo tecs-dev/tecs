@@ -34,7 +34,7 @@ local buffer = require("string.buffer")
 -- FFI-only component set
 -------------------------------------------------------------------------------
 
-local Position = tecs.newFFIComponent({
+local Position = tecs.ecs.newFFIComponent({
     name = "SnapPosition",
     container = {},
     fields = {
@@ -43,7 +43,7 @@ local Position = tecs.newFFIComponent({
     },
 })
 
-local Velocity = tecs.newFFIComponent({
+local Velocity = tecs.ecs.newFFIComponent({
     name = "SnapVelocity",
     container = {},
     fields = {
@@ -52,7 +52,7 @@ local Velocity = tecs.newFFIComponent({
     },
 })
 
-local Health = tecs.newFFIComponent({
+local Health = tecs.ecs.newFFIComponent({
     name = "SnapHealth",
     container = {},
     fields = {
@@ -70,7 +70,7 @@ local Health = tecs.newFFIComponent({
 -- work, not just the per-entity fast path).
 
 local function buildWorld(count)
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     -- Three groups, sizes ~1/3 each. Using explicit floor to avoid off-by-one
     -- at small counts (e.g. 1K → 334 + 333 + 333 = 1000).
     local third = math.floor(count / 3)
@@ -139,7 +139,7 @@ local function getLoadResources(count)
         -- loadSnapshot despawns existing entities before refilling, so the
         -- same world ping-pongs full → empty → full across iterations. This
         -- matches the realistic "save game" pattern.
-        r = { bytes = srcBuf:tostring(), world = tecs.newWorld() }
+        r = { bytes = srcBuf:tostring(), world = tecs.ecs.newWorld() }
         loadCache[count] = r
     end
     return r

@@ -795,7 +795,7 @@ component write rather than a new timeline.
 ```teal
 local chase <const> = sequence.timeline("game.chase", {
     sequence.tweenTrack(0.5, "sineInOut", "transform.xy",
-        sequence.source.tracking(tecs.builtins.Transform, {"x", "y"})),
+        sequence.source.tracking(tecs.ecs.builtins.Transform, {"x", "y"})),
 })
 ```
 
@@ -823,7 +823,7 @@ A playback that faults is retired in the `"faulted"` state, and the reason is on
 function sequence.plugin(world: World)
 ```
 
-[`Application`](/modules/Application) installs the sequencer, so a game that builds one never calls this. A
+[`Application`](/modules/application) installs the sequencer, so a game that builds one never calls this. A
 world built by hand, a test or a tool that scripts input installs it itself; a second install on the same world
 does nothing.
 

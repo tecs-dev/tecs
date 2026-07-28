@@ -507,7 +507,7 @@ local record sequence
 
     --- Play a registered tween preset on a bound entity.
     ---
-    --- Needs the sequencer, which `tecs.application` installs. A binding
+    --- Needs the sequencer, which `tecs.application.create` installs. A binding
     --- that is missing or dead is not a fault: nothing plays, and a following
     --- `waitTween` resumes at once reporting `targetLost`.
     playTween: function(timeline: string, target: EntityRef, params?: {string: any}): Node
@@ -736,7 +736,7 @@ local record sequence
     ---     the format is free to change.
     disassemble: function(program: Program, pc?: integer): string
 
-    --- Install the sequencer. Auto-installed by `tecs.application`, and safe
+    --- Install the sequencer. Auto-installed by `tecs.application.create`, and safe
     --- to call again: a second install on the same world does nothing.
     plugin: function(world: World)
 end

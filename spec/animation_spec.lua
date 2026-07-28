@@ -69,7 +69,7 @@ local function stripSheet()
 end
 
 local function animatedWorld()
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     world:addPlugin(animation.plugin)
     return world
 end
@@ -582,7 +582,7 @@ describe("tecs.gfx.sheet", function()
         end)
 
         it("carries the sheet and slice by name through a snapshot", function()
-            local world = tecs.newWorld()
+            local world = tecs.ecs.newWorld()
             local name = uniqueName("saved")
             local first = pivoted(name)
             local entity = world:spawn(first:pivot("feet"))
@@ -615,7 +615,7 @@ describe("tecs.gfx.sheet", function()
         end)
 
         it("restores a pivot written directly with no sheet to name", function()
-            local world = tecs.newWorld()
+            local world = tecs.ecs.newWorld()
             local entity = world:spawn(Pivot(0.25, 0.75))
 
             local saved = world:saveSnapshot({ format = "table" }).snapshot
@@ -1193,7 +1193,7 @@ describe("tecs.gfx.animation", function()
                 })
                 world:addSystem({
                     name = "spec.ReadSubscriberDirty",
-                    phase = tecs.phases.Last,
+                    phase = tecs.ecs.phases.Last,
                     run = function()
                         for archetype in query:iter() do
                             if archetype:isComponentDirty(Sprite) or archetype:isComponentDirty(Animation) then
@@ -1251,11 +1251,11 @@ describe("tecs.gfx.animation", function()
             -- Pausing is an archetype move as well, and the world's clock does
             -- not stop for one entity, so where it holds has to be said rather
             -- than assumed.
-            world:set(entity, tecs.builtins.Paused)
+            world:set(entity, tecs.ecs.builtins.Paused)
             drive(world, 60)
             assert.equal(2, animation.frameOf(world, entity), "held on the frame it was on")
 
-            world:remove(entity, tecs.builtins.Paused)
+            world:remove(entity, tecs.ecs.builtins.Paused)
             drive(world, STEPS_PER_FRAME)
             assert.equal(3, animation.frameOf(world, entity), "and carries on from it")
         end)
@@ -1291,7 +1291,7 @@ describe("tecs.gfx.animation", function()
             })
             world:addSystem({
                 name = "spec.ReadDirty",
-                phase = tecs.phases.Last,
+                phase = tecs.ecs.phases.Last,
                 run = function()
                     seen.sprite, seen.animation = false, false
                     for archetype in query:iter() do
@@ -1632,7 +1632,7 @@ describe("tecs.gfx.animation", function()
             })
             world:addSystem({
                 name = "spec.ReadPivotDirty",
-                phase = tecs.phases.Last,
+                phase = tecs.ecs.phases.Last,
                 run = function()
                     seen.dirty = false
                     for archetype in query:iter() do

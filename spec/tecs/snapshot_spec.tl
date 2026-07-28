@@ -46,13 +46,13 @@ describe(
         before_each(function()
             local testId = math.random(1, 1000000)
             local posContainer: Position = {}
-            PositionComp = tecs.newComponent({
+            PositionComp = tecs.ecs.newComponent({
                 name = "SnapPosition" .. testId,
                 container = posContainer,
                 fields = {"x", "y"},
             })
             local hpContainer: Health = {}
-            HealthComp = tecs.newComponent({
+            HealthComp = tecs.ecs.newComponent({
                 name = "SnapHealth" .. testId,
                 container = hpContainer,
                 fields = {"hp"},
@@ -62,7 +62,7 @@ describe(
         it(
             "round-trips components with preserved entity IDs",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(10, 20), HealthComp(100))
                 local b = world:spawn(PositionComp(30, 40))
                 world:commit()
@@ -88,7 +88,7 @@ describe(
         it(
             "can be called a second time to restore the same snapshot",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(1, 2))
                 world:commit()
                 local snap = saveTableSnapshot(world)
@@ -129,7 +129,7 @@ describe(
                     metamethod __call: function(self, x: number, y: number, layer: integer): FFIStruct
                 end
                 local ffiContainer: FFIStruct = {}
-                local FFIComp: FFIStruct = tecs.newFFIComponent({
+                local FFIComp: FFIStruct = tecs.ecs.newFFIComponent({
                     name = "SnapFFI" .. testId,
                     container = ffiContainer,
                     fields = {
@@ -148,13 +148,13 @@ describe(
                     metamethod __call: function(self, c: integer, r: integer, k: integer): Cell
                 end
                 local cellContainer: Cell = {}
-                local CellComp: Cell = tecs.newComponent({
+                local CellComp: Cell = tecs.ecs.newComponent({
                     name = "SnapCell" .. testId,
                     container = cellContainer,
                     fields = {"col", "row", "colorIdx"},
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(FFIComp(100, 200, 3), CellComp(4, 5, 7))
                 local b = world:spawn(FFIComp(-10, -20, 1), CellComp(0, 0, 1))
                 world:commit()
@@ -199,7 +199,7 @@ describe(
                     metamethod __call: function(self, x: number, y: number, z: number): Vec3
                 end
                 local vec3Container: Vec3 = {}
-                local Vec3Comp: Vec3 = tecs.newFFIComponent({
+                local Vec3Comp: Vec3 = tecs.ecs.newFFIComponent({
                     name = "SnapMetaVec3" .. testId,
                     container = vec3Container,
                     fields = {
@@ -216,7 +216,7 @@ describe(
                     },
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local id = world:spawn(Vec3Comp(3, 4, 12))
                 world:commit()
 
@@ -227,7 +227,7 @@ describe(
 
                 -- Load into a brand-new world so we exercise the cold path: fresh
                 -- archetype creation, fresh column allocation, fresh cdata slots.
-                local fresh = tecs.newWorld()
+                local fresh = tecs.ecs.newWorld()
                 fresh:loadSnapshot(buf)
 
                 luassert.is_true(fresh:isAlive(id), "entity should restore at original id")
@@ -248,7 +248,7 @@ describe(
             "round-trips through JSON serialization",
             function()
                 local json <const> = require("tecs.json")
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(10, 20), HealthComp(100))
                 local b = world:spawn(PositionComp(30, 40))
                 world:commit()
@@ -269,7 +269,7 @@ describe(
         it(
             "survives repeated load-then-mutate cycles without orphans",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(1, 1), HealthComp(10))
                 world:spawn(PositionComp(2, 2), HealthComp(20))
                 world:spawn(PositionComp(3, 3), HealthComp(30))
@@ -316,9 +316,9 @@ describe(
                 -- Lenient semantics: `layers` only filters entities that carry a
                 -- Transform. Entities without a Transform (singletons, config)
                 -- are never touched by the layer allow-list.
-                local world = tecs.newWorld()
-                local onLayer2 = world:spawn(tecs.builtins.Transform(0, 0, 0, 2))
-                local onLayer5 = world:spawn(tecs.builtins.Transform(0, 0, 0, 5))
+                local world = tecs.ecs.newWorld()
+                local onLayer2 = world:spawn(tecs.ecs.builtins.Transform(0, 0, 0, 2))
+                local onLayer5 = world:spawn(tecs.ecs.builtins.Transform(0, 0, 0, 5))
                 local noTransform = world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -338,7 +338,7 @@ describe(
                 -- column-major data layout cleanly (writeEntity isn't called for
                 -- dense archetypes). Use opts.filterQuery instead -- it builds
                 -- a temp query that limits which archetypes get walked at all.
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local keeper = world:spawn(PositionComp(1, 1), HealthComp(10))
                 local skipper = world:spawn(PositionComp(2, 2))
                 world:commit()
@@ -359,14 +359,14 @@ describe(
         it(
             "does not mutate opts.filterQuery descriptors",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1), HealthComp(10))
                 world:commit()
 
                 world:observe(
                     0,
-                    tecs.builtins.OnSnapshotSave,
-                    function(ev: tecs.builtins.OnSnapshotSave) ev:exclude(HealthComp) end
+                    tecs.ecs.builtins.OnSnapshotSave,
+                    function(ev: tecs.ecs.builtins.OnSnapshotSave) ev:exclude(HealthComp) end
                 )
 
                 local descriptor: tecs.Query.Descriptor = {
@@ -388,14 +388,14 @@ describe(
         it(
             "leaves a reused opts table untouched across saves",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1), HealthComp(10))
                 world:commit()
 
                 world:observe(
                     0,
-                    tecs.builtins.OnSnapshotSave,
-                    function(ev: tecs.builtins.OnSnapshotSave) ev:exclude(HealthComp) end
+                    tecs.ecs.builtins.OnSnapshotSave,
+                    function(ev: tecs.ecs.builtins.OnSnapshotSave) ev:exclude(HealthComp) end
                 )
 
                 local descriptor: tecs.Query.Descriptor = {
@@ -425,7 +425,7 @@ describe(
                     skip: number
                 end
                 local SkippyComp: Skippy
-                SkippyComp = tecs.newComponent({
+                SkippyComp = tecs.ecs.newComponent({
                     name = "SnapSkippy" .. testId,
                     container = {} as Skippy,
                     fields = {"v", "skip"},
@@ -440,7 +440,7 @@ describe(
                     end,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e1 = world:spawn(SkippyComp(111, 1), HealthComp(10))
                 local e2 = world:spawn(SkippyComp(222, 0), HealthComp(20))
                 world:commit()
@@ -468,7 +468,7 @@ describe(
                     a: number
                     metamethod __call: function(self, a: number): HalfCustom
                 end
-                local HalfCustomComp: HalfCustom = tecs.newFFIComponent({
+                local HalfCustomComp: HalfCustom = tecs.ecs.newFFIComponent({
                     name = "SnapHalfCustom" .. testId,
                     container = {} as HalfCustom,
                     fields = {{"a", "float"}},
@@ -480,13 +480,13 @@ describe(
                     b: number
                     metamethod __call: function(self, b: number): PlainFFI
                 end
-                local PlainFFIComp: PlainFFI = tecs.newFFIComponent({
+                local PlainFFIComp: PlainFFI = tecs.ecs.newFFIComponent({
                     name = "SnapPlainFFI" .. testId,
                     container = {} as PlainFFI,
                     fields = {{"b", "float"}},
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local ids: {integer} = {}
                 for i = 1, 8 do
                     ids[i] = world:spawn(HalfCustomComp(i), PlainFFIComp(i * 100))
@@ -506,7 +506,7 @@ describe(
         it(
             "rebuilds the allocator free stack on load",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local ids: {integer} = {}
                 for i = 1, 20 do
                     ids[i] = world:spawn(PositionComp(i, i))
@@ -544,7 +544,7 @@ describe(
             "round-trips through a LuaJIT string.buffer",
             function()
                 local buffer = require("string.buffer")
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(11, 22), HealthComp(77))
                 local b = world:spawn(PositionComp(33, 44))
                 world:commit()
@@ -565,7 +565,7 @@ describe(
         it(
             "loadSnapshot accepts a Lua string source",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local a = world:spawn(PositionComp(7, 8))
                 world:commit()
 
@@ -590,7 +590,7 @@ describe(
                 local NeedsWorldComp: NeedsWorld
 
                 local needsWorldContainer: NeedsWorld = {}
-                NeedsWorldComp = tecs.newComponent({
+                NeedsWorldComp = tecs.ecs.newComponent({
                     name = "SparseSnapNeedsWorld" .. testId,
                     container = needsWorldContainer,
                     fields = {"value"},
@@ -600,19 +600,19 @@ describe(
                     end,
                 })
 
-                local SparseTagRel = tecs.newRelationship({
+                local SparseTagRel = tecs.ecs.newRelationship({
                     name = "SparseSnapDeserialize" .. testId,
                     sparse = true,
                     exclusive = true,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local target = world:spawn()
                 local owner = world:spawn(NeedsWorldComp(7), SparseTagRel(target) as tecs.Component)
                 world:commit()
 
                 local buf = saveBinarySnapshot(world)
-                local fresh = tecs.newWorld()
+                local fresh = tecs.ecs.newWorld()
 
                 fresh:loadSnapshot(buf)
                 luassert.is_true(fresh:isAlive(owner))
@@ -627,20 +627,20 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local SparseMaybeRel = tecs.newRelationship({
+                local SparseMaybeRel = tecs.ecs.newRelationship({
                     name = "SparseSnapMissingValue" .. testId,
                     sparse = true,
                     exclusive = true,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local target = world:spawn()
                 local wildcardOnly = world:spawn(PositionComp(1, 2), SparseMaybeRel as tecs.Component)
                 local withValue = world:spawn(PositionComp(3, 4), SparseMaybeRel(target) as tecs.Component)
                 world:commit()
 
                 local buf = saveBinarySnapshot(world)
-                local fresh = tecs.newWorld()
+                local fresh = tecs.ecs.newWorld()
 
                 fresh:loadSnapshot(buf)
                 luassert.is_true(fresh:isAlive(wildcardOnly))
@@ -655,7 +655,7 @@ describe(
         it(
             "delivers opts.customData entries via StartSnapshotLoad:onData",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -673,8 +673,8 @@ describe(
                 local seen: {string: any} = {}
                 world:observe(
                     0,
-                    tecs.builtins.StartSnapshotLoad,
-                    function(ev: tecs.builtins.StartSnapshotLoad)
+                    tecs.ecs.builtins.StartSnapshotLoad,
+                    function(ev: tecs.ecs.builtins.StartSnapshotLoad)
                         ev:onData("build", function(v: any) seen.build = v end)
                         ev:onData("score", function(v: any) seen.score = v end)
                         ev:onData("checkpoint", function(v: any) seen.checkpoint = v end)
@@ -691,14 +691,14 @@ describe(
         it(
             "OnSnapshotSave listeners can attach data via addData",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
                 world:observe(
                     0,
-                    tecs.builtins.OnSnapshotSave,
-                    function(ev: tecs.builtins.OnSnapshotSave)
+                    tecs.ecs.builtins.OnSnapshotSave,
+                    function(ev: tecs.ecs.builtins.OnSnapshotSave)
                         ev:addData("plugin.physics", "snapshot-bytes")
                         ev:addData("plugin.extra", {a = 1, b = 2})
                     end
@@ -709,8 +709,8 @@ describe(
                 local seen: {string: any} = {}
                 world:observe(
                     0,
-                    tecs.builtins.StartSnapshotLoad,
-                    function(ev: tecs.builtins.StartSnapshotLoad)
+                    tecs.ecs.builtins.StartSnapshotLoad,
+                    function(ev: tecs.ecs.builtins.StartSnapshotLoad)
                         ev:onData("plugin.physics", function(v: any) seen["plugin.physics"] = v end)
                         ev:onData("plugin.extra", function(v: any) seen["plugin.extra"] = v end)
                     end
@@ -726,7 +726,7 @@ describe(
         it(
             "addSnapshotHandler saves loads and finishes named data",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -767,7 +767,7 @@ describe(
         it(
             "addSnapshotHandler omits nil save results",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -786,7 +786,7 @@ describe(
         it(
             "addSnapshotHandler requires a non-empty name",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
 
                 luassert.has_error(function()
                     world:addSnapshotHandler({
@@ -812,7 +812,7 @@ describe(
                     metamethod __call: function(self, value: integer): DurableData
                 end
 
-                local RuntimeComp = tecs.newComponent({
+                local RuntimeComp = tecs.ecs.newComponent({
                     name = "SnapRuntime" .. testId,
                     container = {} as RuntimeData,
                     fields = {"slot"},
@@ -820,14 +820,14 @@ describe(
                     transient = true,
                 })
 
-                local DurableComp = tecs.newComponent({
+                local DurableComp = tecs.ecs.newComponent({
                     name = "SnapDurable" .. testId,
                     container = {} as DurableData,
                     fields = {"value"},
                     requires = {RuntimeComp},
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local id = world:spawn(DurableComp(42), RuntimeComp(99))
                 world:commit()
 
@@ -853,12 +853,12 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local TransientTag = tecs.newTagComponent({
+                local TransientTag = tecs.ecs.newTagComponent({
                     name = "SnapTransientTag" .. testId,
                     transient = true,
                 })
 
-                local TransientScalar = tecs.newScalarComponent({
+                local TransientScalar = tecs.ecs.newScalarComponent({
                     name = "SnapTransientScalar" .. testId,
                     kind = "number",
                     default = 0,
@@ -870,14 +870,14 @@ describe(
                     metamethod __call: function(self, value: integer): TransientFFI
                 end
 
-                local TransientFFIComp = tecs.newFFIComponent({
+                local TransientFFIComp = tecs.ecs.newFFIComponent({
                     name = "SnapTransientFFI" .. testId,
                     container = {} as TransientFFI,
                     fields = {{"value", "int32_t"}},
                     transient = true,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local id = world:spawn(PositionComp(1, 1), TransientTag, TransientScalar(12), TransientFFIComp(34))
                 world:commit()
 
@@ -909,14 +909,14 @@ describe(
                     metamethod __call: function(self, target: integer, weight: integer): Link
                 end
 
-                local LinkRel = tecs.newRelationship({
+                local LinkRel = tecs.ecs.newRelationship({
                     name = "SnapTransientLink" .. testId,
                     container = {} as Link,
                     fields = {"weight"},
                     transient = true,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local target = world:spawn(PositionComp(1, 1))
                 local source = world:spawn(PositionComp(2, 2), LinkRel(target, 7))
                 world:commit()
@@ -945,7 +945,7 @@ describe(
                 end
 
                 local okTable = pcall(function()
-                    tecs.newComponent({
+                    tecs.ecs.newComponent({
                         name = "BadTransientTable" .. testId,
                         container = {} as BadTable,
                         fields = {"value"},
@@ -961,7 +961,7 @@ describe(
                 end
 
                 local okFFI = pcall(function()
-                    tecs.newFFIComponent({
+                    tecs.ecs.newFFIComponent({
                         name = "BadTransientFFI" .. testId,
                         container = {} as BadFFI,
                         fields = {{"value", "int32_t"}},
@@ -977,7 +977,7 @@ describe(
                 end
 
                 local okRel = pcall(function()
-                    tecs.newRelationship({
+                    tecs.ecs.newRelationship({
                         name = "BadTransientRel" .. testId,
                         container = {} as BadRel,
                         fields = {"value"},
@@ -992,7 +992,7 @@ describe(
         it(
             "restores the state stack",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:createState("base")
                 world:createState("ready")
                 world:createState("game")
@@ -1016,14 +1016,14 @@ describe(
         it(
             "errors when a saved state stack references an unregistered state",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:createState("game")
                 world:pushState("game")
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
                 local snap = saveTableSnapshot(world)
-                local fresh = tecs.newWorld()
+                local fresh = tecs.ecs.newWorld()
 
                 luassert.error_matches(function() fresh:loadSnapshot(snap) end, "saved state 'game' is not registered")
             end
@@ -1032,29 +1032,29 @@ describe(
         it(
             "restores pipeline accumulator and phase enabled state",
             function()
-                local world = tecs.newWorld({timestep = 0.1})
-                world:disablePhase(tecs.phases.Update)
+                local world = tecs.ecs.newWorld({timestep = 0.1})
+                world:disablePhase(tecs.ecs.phases.Update)
                 world:update(0.05)
 
                 local savedAccumulator = world.pipeline.fixedAccumulator
                 local snap = saveTableSnapshot(world)
 
-                world:enablePhase(tecs.phases.Update)
+                world:enablePhase(tecs.ecs.phases.Update)
                 (world.pipeline as {string: any}).fixedAccumulator = 0
 
                 world:loadSnapshot(snap)
 
                 luassert.is_near(savedAccumulator, world.pipeline.fixedAccumulator, 1e-9)
                 local phaseStates = (world.pipeline as {string: any}).phaseStates as {boolean}
-                luassert.is_false(phaseStates[tecs.phases.Update.position])
+                luassert.is_false(phaseStates[tecs.ecs.phases.Update.position])
             end
         )
 
         it(
             "rebuilds runtime entity handles from Key after loading a snapshot",
             function()
-                local world = tecs.newWorld()
-                local player = world:spawn(tecs.builtins.Key("player"), PositionComp(1, 1))
+                local world = tecs.ecs.newWorld()
+                local player = world:spawn(tecs.ecs.builtins.Key("player"), PositionComp(1, 1))
                 world:commit()
 
                 local snap = saveTableSnapshot(world)
@@ -1066,8 +1066,8 @@ describe(
                 local finishSawPlayer = false
                 world:observe(
                     0,
-                    tecs.builtins.FinishSnapshotLoad,
-                    function(_ev: tecs.builtins.FinishSnapshotLoad)
+                    tecs.ecs.builtins.FinishSnapshotLoad,
+                    function(_ev: tecs.ecs.builtins.FinishSnapshotLoad)
                         playerHandle = world:requireKey("player")
                         finishSawPlayer = playerHandle == player
                     end
@@ -1084,8 +1084,8 @@ describe(
         it(
             "rebuilds the Key index after binary snapshot load",
             function()
-                local world = tecs.newWorld()
-                local player = world:spawn(tecs.builtins.Key("player"), PositionComp(1, 1))
+                local world = tecs.ecs.newWorld()
+                local player = world:spawn(tecs.ecs.builtins.Key("player"), PositionComp(1, 1))
                 world:commit()
 
                 local bytes = tostring(saveBinarySnapshot(world))
@@ -1102,7 +1102,7 @@ describe(
         it(
             "FinishSnapshotLoad fires once after the load completes",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -1112,8 +1112,8 @@ describe(
                 local seenPrelude: any
                 world:observe(
                     0,
-                    tecs.builtins.FinishSnapshotLoad,
-                    function(ev: tecs.builtins.FinishSnapshotLoad) fired = fired + 1; seenPrelude = ev.prelude end
+                    tecs.ecs.builtins.FinishSnapshotLoad,
+                    function(ev: tecs.ecs.builtins.FinishSnapshotLoad) fired = fired + 1; seenPrelude = ev.prelude end
                 )
 
                 world:loadSnapshot(buf)
@@ -1126,7 +1126,7 @@ describe(
         it(
             "handles nil customData (no user metadata)",
             function()
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -1135,8 +1135,8 @@ describe(
                 local fired = 0
                 world:observe(
                     0,
-                    tecs.builtins.StartSnapshotLoad,
-                    function(ev: tecs.builtins.StartSnapshotLoad)
+                    tecs.ecs.builtins.StartSnapshotLoad,
+                    function(ev: tecs.ecs.builtins.StartSnapshotLoad)
                         ev:onData("anything", function(_v: any) fired = fired + 1 end)
                     end
                 )
@@ -1151,7 +1151,7 @@ describe(
             "reuses an existing buffer when opts.buffer is provided",
             function()
                 local buffer = require("string.buffer")
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(1, 1))
                 world:commit()
 
@@ -1186,7 +1186,7 @@ describe(
                     metamethod __call: function(self, x: number, y: number, z: number): V3
                 end
                 local v3Container: V3 = {}
-                local Comp: V3 = tecs.newFFIComponent({
+                local Comp: V3 = tecs.ecs.newFFIComponent({
                     name = compName,
                     container = v3Container,
                     fields = {{"x", "double"}, {"y", "double"}, {"z", "double"}},
@@ -1224,7 +1224,7 @@ describe(
                 -- Data section: empty
                 buf:encode(nil)
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:loadSnapshot(buf)
 
                 luassert.is_true(world:isAlive(1))
@@ -1247,7 +1247,7 @@ describe(
                     metamethod __call: function(self, x: number): V1
                 end
                 local v1Container: V1 = {}
-                local Comp: V1 = tecs.newFFIComponent({
+                local Comp: V1 = tecs.ecs.newFFIComponent({
                     name = compName,
                     container = v1Container,
                     fields = {{"x", "double"}},
@@ -1279,7 +1279,7 @@ describe(
                 buf:putcdata(valsRaw, 16)
                 buf:encode(nil)
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:loadSnapshot(buf)
 
                 luassert.is_true(world:isAlive(1))
@@ -1307,7 +1307,7 @@ describe(
                 end
                 local seenPayload: {string: any} = nil
                 local Comp: CV
-                Comp = tecs.newFFIComponent({
+                Comp = tecs.ecs.newFFIComponent({
                     name = compName,
                     container = {} as CV,
                     fields = {{"a", "double"}, {"b", "double"}},
@@ -1342,7 +1342,7 @@ describe(
                 -- Data section: empty
                 buf:encode(nil)
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:loadSnapshot(buf)
 
                 luassert.is_true(world:isAlive(1))
@@ -1359,7 +1359,7 @@ describe(
             function()
                 -- The pre-pass deduplicates components into Snapshot.componentTable;
                 -- per-archetype frames reference entries by 1-based index.
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:spawn(PositionComp(10, 20), HealthComp(50))
                 world:spawn(PositionComp(-1, -2))
                 world:commit()

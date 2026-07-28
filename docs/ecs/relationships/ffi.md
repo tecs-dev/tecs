@@ -45,7 +45,7 @@ local record FastFollows is tecs.Relationship
 end
 
 -- Create an FFI-backed relationship
-local FastFollows = tecs.newFFIRelationship({
+local FastFollows = tecs.ecs.newFFIRelationship({
     name = "FastFollows",
     container = FastFollows,
     fields = {
@@ -87,7 +87,7 @@ Everything else in `fields` is your payload, and only your payload.
 
 ## Configuration reference
 
-The `tecs.newFFIRelationship` function accepts a configuration table with these fields:
+The `tecs.ecs.newFFIRelationship` function accepts a configuration table with these fields:
 
 | Property        | Description                                                                                 |
 | --------------- | ------------------------------------------------------------------------------------------- |
@@ -146,7 +146,7 @@ local record SafeFollows is tecs.Relationship
     maxDistance: number
 end
 
-local SafeFollows = tecs.newFFIRelationship({
+local SafeFollows = tecs.ecs.newFFIRelationship({
     name = "SafeFollows",
     container = SafeFollows,
     fields = {

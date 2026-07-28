@@ -68,7 +68,7 @@ describe(
         it(
             "exposes concrete phase positions through the public Phase type",
             function()
-                local update: tecs.Phase = tecs.phases.Update
+                local update: tecs.Phase = tecs.ecs.phases.Update
                 luassert.is_true(update.position > 0)
                 luassert.equals("Update", update.name)
             end
@@ -79,19 +79,19 @@ describe(
             function()
                 -- Add systems to different phases
                 test.pipeline:addSystem({
-                    phase = tecs.phases.PreUpdate, run = createCounterSystem(test, "before"), name = "before_system"
+                    phase = tecs.ecs.phases.PreUpdate, run = createCounterSystem(test, "before"), name = "before_system"
                 })
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
+                    phase = tecs.ecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
                 })
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
                 })
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.PostUpdate, run = createCounterSystem(test, "after"), name = "after_system"
+                    phase = tecs.ecs.phases.PostUpdate, run = createCounterSystem(test, "after"), name = "after_system"
                 })
 
                 test.pipeline:update(FPS, test.world)
@@ -118,16 +118,16 @@ describe(
                 -- Add systems with explicit dependencies
                 -- C should run before A, and B should run after A
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update,
+                    phase = tecs.ecs.phases.Update,
                     run = systemA,
                     name = "systemA",
                     before = {"systemB"},
                     after = {"systemC"},
                 })
 
-                test.pipeline:addSystem({phase = tecs.phases.Update, run = systemB, name = "systemB"})
+                test.pipeline:addSystem({phase = tecs.ecs.phases.Update, run = systemB, name = "systemB"})
 
-                test.pipeline:addSystem({phase = tecs.phases.Update, run = systemC, name = "systemC"})
+                test.pipeline:addSystem({phase = tecs.ecs.phases.Update, run = systemC, name = "systemC"})
 
                 test.pipeline:update(FPS, test.world)
 
@@ -145,11 +145,11 @@ describe(
 
                 -- Create a circular dependency: A before B, B before A
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update, run = systemA, name = "systemA", before = {"systemB"}
+                    phase = tecs.ecs.phases.Update, run = systemA, name = "systemA", before = {"systemB"}
                 })
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update, run = systemB, name = "systemB", before = {"systemA"}
+                    phase = tecs.ecs.phases.Update, run = systemB, name = "systemB", before = {"systemA"}
                 })
 
                 luassert.error_matches(function()
@@ -166,7 +166,7 @@ describe(
                 test.pipeline = pipeline.new(fixedTimestep)
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
+                    phase = tecs.ecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
                 })
 
                 -- Run with dt less than fixed timestep
@@ -192,7 +192,7 @@ describe(
                 test.pipeline = pipeline.new(fixedTimestep)
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
+                    phase = tecs.ecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
                 })
 
                 -- Run with a very large dt, which the default fixedMaxSteps bounds.
@@ -208,7 +208,7 @@ describe(
                 local system, runIf = createConditionalSystem(test)
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update, run = system, runIf = runIf, name = "conditional_system"
+                    phase = tecs.ecs.phases.Update, run = system, runIf = runIf, name = "conditional_system"
                 })
 
                 -- First run with counter = 0 (even, should run)
@@ -232,7 +232,7 @@ describe(
             "should enable and disable phases correctly",
             function()
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
                 })
 
                 -- Run once with all phases enabled
@@ -240,14 +240,14 @@ describe(
                 luassert.equals(1, test.counter, "System should run with phase enabled")
 
                 -- Disable the Update phase
-                test.pipeline:disablePhase(tecs.phases.Update)
+                test.pipeline:disablePhase(tecs.ecs.phases.Update)
 
                 -- Run again with update phase disabled
                 test.pipeline:update(FPS, test.world)
                 luassert.equals(1, test.counter, "System should not run with phase disabled")
 
                 -- Re-enable the Update phase
-                test.pipeline:enablePhase(tecs.phases.Update)
+                test.pipeline:enablePhase(tecs.ecs.phases.Update)
 
                 -- Run again with update phase re-enabled
                 test.pipeline:update(FPS, test.world)
@@ -260,7 +260,7 @@ describe(
             function()
                 local system = createCounterSystem(test, "update")
 
-                test.pipeline:addSystem({phase = tecs.phases.Update, run = system, name = "update_system"})
+                test.pipeline:addSystem({phase = tecs.ecs.phases.Update, run = system, name = "update_system"})
 
                 -- Run once
                 test.pipeline:update(FPS, test.world)
@@ -283,10 +283,10 @@ describe(
 
                 luassert.equals(0, test.pipeline.count, "fresh pipeline should start empty")
 
-                test.pipeline:addSystem({phase = tecs.phases.Update, run = systemA, name = "update_system"})
+                test.pipeline:addSystem({phase = tecs.ecs.phases.Update, run = systemA, name = "update_system"})
                 luassert.equals(1, test.pipeline.count, "count should update immediately after add")
 
-                test.pipeline:addSystem({phase = tecs.phases.PreUpdate, run = systemB, name = "before_system"})
+                test.pipeline:addSystem({phase = tecs.ecs.phases.PreUpdate, run = systemB, name = "before_system"})
                 luassert.equals(2, test.pipeline.count, "count should include multiple added systems before update")
 
                 test.pipeline:removeSystem("update_system")
@@ -299,7 +299,7 @@ describe(
             function()
                 -- Add system to FixedUpdate phase
                 test.pipeline:addSystem({
-                    phase = tecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
+                    phase = tecs.ecs.phases.FixedUpdate, run = createCounterSystem(test, "fixed"), name = "fixed_system"
                 })
 
                 -- Run with all phases enabled
@@ -307,14 +307,14 @@ describe(
                 luassert.equals(1, test.fixedCounter, "System should run with parent phase enabled")
 
                 -- Disable the FixedUpdateGroup phase (parent of FixedUpdate)
-                test.pipeline:disablePhase(tecs.phases.FixedUpdateGroup)
+                test.pipeline:disablePhase(tecs.ecs.phases.FixedUpdateGroup)
 
                 -- Run again
                 test.pipeline:update(FPS, test.world)
                 luassert.equals(1, test.fixedCounter, "System should not run when parent phase is disabled")
 
                 -- Re-enable just the child phase
-                test.pipeline:enablePhase(tecs.phases.FixedUpdate)
+                test.pipeline:enablePhase(tecs.ecs.phases.FixedUpdate)
 
                 -- Run again
                 test.pipeline:update(FPS, test.world)
@@ -336,11 +336,11 @@ describe(
                 } as tecs.World
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.PreUpdate, run = createCounterSystem(test, "before"), name = "before_system"
+                    phase = tecs.ecs.phases.PreUpdate, run = createCounterSystem(test, "before"), name = "before_system"
                 })
 
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
+                    phase = tecs.ecs.phases.Update, run = createCounterSystem(test, "update"), name = "update_system"
                 })
 
                 test.pipeline:update(FPS, test.world)
@@ -371,12 +371,12 @@ describe(
                     function()
                         local order: {string} = {}
                         test.pipeline:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "beforeTargetB",
                             run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
                         })
                         test.pipeline:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "beforeSourceA",
                             run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
                             before = {"beforeTargetB"},
@@ -393,13 +393,13 @@ describe(
                     function()
                         local order: {string} = {}
                         test.pipeline:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "redundantA",
                             run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
                             before = {"redundantB"},
                         })
                         test.pipeline:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "redundantB",
                             run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
                             after = {"redundantA"},
@@ -417,12 +417,12 @@ describe(
                         local runs = 0
                         local shared = function(_dt: number, _world: tecs.World) runs = runs + 1 end
                         test.pipeline:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "sharedFn1",
                             run = shared,
                         })
                         test.pipeline:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "sharedFn2",
                             run = shared,
                         })
@@ -440,17 +440,17 @@ describe(
             function()
                 local ran = 0
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update,
+                    phase = tecs.ecs.phases.Update,
                     name = "disabledLeafProbe",
                     run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
                 })
 
-                test.pipeline:disablePhase(tecs.phases.Update)
-                test.pipeline:run(tecs.phases.Update, FPS, test.world)
+                test.pipeline:disablePhase(tecs.ecs.phases.Update)
+                test.pipeline:run(tecs.ecs.phases.Update, FPS, test.world)
                 luassert.equals(0, ran, "disabled leaf phase must not run directly")
 
-                test.pipeline:enablePhase(tecs.phases.Update)
-                test.pipeline:run(tecs.phases.Update, FPS, test.world)
+                test.pipeline:enablePhase(tecs.ecs.phases.Update)
+                test.pipeline:run(tecs.ecs.phases.Update, FPS, test.world)
                 luassert.equals(1, ran, "re-enabled phase runs again")
             end
         )
@@ -460,7 +460,7 @@ describe(
             function()
                 local ran = 0
                 test.pipeline:addSystem({
-                    phase = tecs.phases.Update,
+                    phase = tecs.ecs.phases.Update,
                     name = "crossPipelineProbe",
                     run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
                 })
@@ -500,7 +500,7 @@ describe(
 
         local function counting(p: tecs.Pipeline): tecs.Pipeline
             p:addSystem({
-                phase = tecs.phases.FixedUpdate,
+                phase = tecs.ecs.phases.FixedUpdate,
                 name = "overloadStep",
                 run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
             })
@@ -628,10 +628,10 @@ describe(
         it(
             "passes the policy through newWorld and reports the loss in getStats",
             function()
-                local world <const> = tecs.newWorld({timestep = 1 / 8, fixedMaxSteps = 2})
+                local world <const> = tecs.ecs.newWorld({timestep = 1 / 8, fixedMaxSteps = 2})
                 local steps = 0
                 world:addSystem({
-                    phase = tecs.phases.FixedUpdate,
+                    phase = tecs.ecs.phases.FixedUpdate,
                     name = "worldOverloadStep",
                     run = function(_dt: number, _world: tecs.World) steps = steps + 1 end,
                 })
@@ -648,7 +648,7 @@ describe(
         it(
             "drops nothing on a world that is keeping up",
             function()
-                local world <const> = tecs.newWorld()
+                local world <const> = tecs.ecs.newWorld()
                 world:update(1 / 60)
                 luassert.equals(0, world:getStats().fixedStepsDropped)
                 luassert.equals(0, world:getStats().fixedTimeDropped)

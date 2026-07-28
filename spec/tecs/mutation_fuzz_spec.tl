@@ -62,53 +62,53 @@ local FUZZ_TRACE <const> = os.getenv("TECS_FUZZ_TRACE") ~= nil
 -- Id packing mirrors IdAllocator: slot + generation * 2^22.
 local GEN_STRIDE <const> = 4194304
 
-local ChildOf <const> = tecs.builtins.ChildOf
-local Key <const> = tecs.builtins.Key
-local Transform <const> = tecs.builtins.Transform
+local ChildOf <const> = tecs.ecs.builtins.ChildOf
+local Key <const> = tecs.ecs.builtins.Key
+local Transform <const> = tecs.ecs.builtins.Transform
 
 -- Fuzz components: one numeric field each so canonical state is cheap.
-local FzA = tecs.newComponent({
+local FzA = tecs.ecs.newComponent({
     name = "FuzzA",
     container = {},
     fields = {"v"},
     defaults = {0},
 })
-local FzB = tecs.newComponent({
+local FzB = tecs.ecs.newComponent({
     name = "FuzzB",
     container = {},
     fields = {"v"},
     defaults = {0},
 })
-local FzHealth = tecs.newComponent({
+local FzHealth = tecs.ecs.newComponent({
     name = "FuzzHealth",
     container = {},
     fields = {"v"},
     defaults = {100},
 })
-local FzArmor = tecs.newComponent({
+local FzArmor = tecs.ecs.newComponent({
     name = "FuzzArmor",
     container = {},
     fields = {"v"},
     defaults = {1},
     requires = {FzHealth},
 })
-local FzTag = tecs.newTagComponent({name = "FuzzTag"})
+local FzTag = tecs.ecs.newTagComponent({name = "FuzzTag"})
 
 -- FFI component: cdata columns through moves, batch bulk copies, and
 -- snapshot memcpy paths.
-local FzF = tecs.newFFIComponent({
+local FzF = tecs.ecs.newFFIComponent({
     name = "FuzzF",
     container = {},
     fields = {{"v", "double"}},
 })
 
 -- Raw-value scalar columns; string scalars ride builtin Key.
-local FzNum = tecs.newScalarComponent({
+local FzNum = tecs.ecs.newScalarComponent({
     name = "FuzzNum",
     kind = "number",
     default = 0,
 })
-local FzBool = tecs.newScalarComponent({
+local FzBool = tecs.ecs.newScalarComponent({
     name = "FuzzBool",
     kind = "boolean",
     default = false,
@@ -116,7 +116,7 @@ local FzBool = tecs.newScalarComponent({
 
 -- Dense exclusive reverse-indexed relationship (ChildOf covers the
 -- sparse + cascadeDelete axis).
-local FzLink = tecs.newRelationship({
+local FzLink = tecs.ecs.newRelationship({
     name = "FuzzLink",
     exclusive = true,
     reverseIndex = true,
@@ -127,7 +127,7 @@ local FzLink = tecs.newRelationship({
 -- always derives `w` from the target: a cache hit and a rebuilt
 -- instance then agree, keeping both worlds and snapshot round-trips
 -- deterministic.
-local FzRope = tecs.newRelationship({
+local FzRope = tecs.ecs.newRelationship({
     name = "FuzzRope",
     exclusive = true,
     reverseIndex = true,
@@ -138,7 +138,7 @@ local FzRope = tecs.newRelationship({
 -- stores and the removeOne path. Transient: multi-target sparse stores
 -- do not fit the snapshot row format (one value per entity/container),
 -- so marks drop through snapshot round-trips in both worlds alike.
-local FzMark = tecs.newRelationship({
+local FzMark = tecs.ecs.newRelationship({
     name = "FuzzMark",
     sparse = true,
     reverseIndex = true,
@@ -147,8 +147,8 @@ local FzMark = tecs.newRelationship({
 
 -- Pre-register the state tag so `createState("fuzzState")` reuses one
 -- global component across worlds and seeds.
-local FzState = tecs.newTagComponent({name = "fuzzStateState"})
-local TTL <const> = tecs.builtins.TTL
+local FzState = tecs.ecs.newTagComponent({name = "fuzzStateState"})
+local TTL <const> = tecs.ecs.builtins.TTL
 
 -- Ops draw from these; canonical reads also cover FzHealth (pulled in
 -- via requires, never set directly).
@@ -344,8 +344,8 @@ describe(
                 for seedIndex = 1, FUZZ_SEEDS do
                     local seed = FUZZ_SEED_OFFSET + seedIndex
                     local rng = newRng(seed * 7919)
-                    local wa = tecs.newWorld()
-                    local wb = tecs.newWorld()
+                    local wa = tecs.ecs.newWorld()
+                    local wb = tecs.ecs.newWorld()
                     local alive: {integer} = {}
                     local dead: {integer} = {}
                     local keyN = 0
@@ -369,8 +369,8 @@ describe(
                         local function installSpawnObserver(w: tecs.World)
                             w:observe(
                                 0,
-                                tecs.builtins.OnSpawn,
-                                function(ev: tecs.builtins.OnSpawn)
+                                tecs.ecs.builtins.OnSpawn,
+                                function(ev: tecs.ecs.builtins.OnSpawn)
                                     if ev.entity % 3 == 0 then
                                         w:set(
                                             ev.entity, (FzB as function(integer): tecs.Component)(ev.entity % 997 + 1)
@@ -1292,21 +1292,21 @@ describe(
                     local want = canonicalState(wa, true)
 
                     local outTable = wa:saveSnapshot({format = "table"})
-                    local freshTable = tecs.newWorld()
+                    local freshTable = tecs.ecs.newWorld()
                     freshTable:createState("fuzzState")
                     freshTable:loadSnapshot(outTable.snapshot)
                     luassert.equals(want, canonicalState(freshTable, true), "table restore diverged, seed " .. seed)
                     validate(freshTable)
 
                     local outBinary = wa:saveSnapshot()
-                    local freshBinary = tecs.newWorld()
+                    local freshBinary = tecs.ecs.newWorld()
                     freshBinary:createState("fuzzState")
                     freshBinary:loadSnapshot(outBinary.buffer)
                     luassert.equals(want, canonicalState(freshBinary, true), "binary restore diverged, seed " .. seed)
                     validate(freshBinary)
 
                     local resaved = freshTable:saveSnapshot()
-                    local freshAgain = tecs.newWorld()
+                    local freshAgain = tecs.ecs.newWorld()
                     freshAgain:createState("fuzzState")
                     freshAgain:loadSnapshot(resaved.buffer)
                     luassert.equals(want, canonicalState(freshAgain, true), "re-save stability diverged, seed " .. seed)
@@ -1315,7 +1315,7 @@ describe(
                     -- Layer-filtered binary save restores exactly the matching
                     -- subset; entities without Transform always pass the filter.
                     local outLayers = wa:saveSnapshot({layers = {1, 3}})
-                    local freshLayers = tecs.newWorld()
+                    local freshLayers = tecs.ecs.newWorld()
                     freshLayers:createState("fuzzState")
                     freshLayers:loadSnapshot(outLayers.buffer)
                     local wantLayers = canonicalState(
@@ -1340,7 +1340,7 @@ describe(
                         format = "table",
                         filterQuery = {include = {FzTag}},
                     })
-                    local freshQuery = tecs.newWorld()
+                    local freshQuery = tecs.ecs.newWorld()
                     freshQuery:createState("fuzzState")
                     freshQuery:loadSnapshot(outQuery.snapshot)
                     local wantQuery = canonicalState(

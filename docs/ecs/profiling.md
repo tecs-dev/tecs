@@ -35,7 +35,7 @@ pyroscope, and most other flamegraph tools.
 
 ### Timed session
 
-Start a session, then schedule a one-shot system to stop it after a delay. `tecs.runif.after` fires once and
+Start a session, then schedule a one-shot system to stop it after a delay. `tecs.ecs.runif.after` fires once and
 removes the system from the pipeline. Pass a path to `:stop()` to write the collapsed-stack text straight to
 disk.
 
@@ -45,8 +45,8 @@ local profile <const> = require("tecs.utils.profile")
 local session = profile.sample()
 
 world:addSystem({
-    phase = tecs.phases.First,
-    runIf = tecs.runif.after(5),
+    phase = tecs.ecs.phases.First,
+    runIf = tecs.ecs.runif.after(5),
     run = function()
         session:stop(tecs.paths.writable("tecs.collapsed"))
     end,
@@ -65,7 +65,7 @@ local zone <const> = require("jit.zone")
 
 world:addSystem({
     name = "myGame.Render",
-    phase = tecs.phases.Render,
+    phase = tecs.ecs.phases.Render,
     run = function()
         zone("uploadBuffers")
         uploadBuffers()
@@ -123,8 +123,8 @@ local session = profile.trace()
 
 world:addSystem({
     name = "profile.traceReport",
-    phase = tecs.phases.First,
-    runIf = tecs.runif.every(10),
+    phase = tecs.ecs.phases.First,
+    runIf = tecs.ecs.runif.every(10),
     run = function()
         local report = session:stop()
         if report.blacklisted > 0 then

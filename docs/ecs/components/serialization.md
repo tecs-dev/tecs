@@ -29,7 +29,7 @@ automatically.
 
 ```teal
 -- This component serializes automatically. Its .new unpacks both fields.
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "Health",
     container = Health,
     fields = {"hp", "maxHp"},
@@ -47,7 +47,7 @@ If you are deciding between these two storage backends in the first place, see
 [Table Components](/ecs/components/table-components) and [FFI Components](/ecs/components/ffi).
 
 ```teal
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Velocity",
     container = Velocity,
     fields = {
@@ -123,14 +123,14 @@ handles, controller edge state, per-frame scratch, and derived indices.
 
 ```teal
 -- Durable: enough information to recreate the physics body.
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "RigidBody",
     container = RigidBody,
     fields = {"shape", "mass"},
 })
 
 -- Runtime-only: process-local physics engine handle.
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "PhysicsBodyHandle",
     container = PhysicsBodyHandle,
     transient = true,
@@ -173,7 +173,7 @@ A worked example, shipping v2 of a `Health` component that widens `current` and 
 
 ```teal
 -- v1 (the build that wrote the save)
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Health",
     container = Health,
     fields = {
@@ -183,7 +183,7 @@ tecs.newFFIComponent({
 })
 
 -- v2 (the build loading it)
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "Health",
     container = Health,
     fields = {

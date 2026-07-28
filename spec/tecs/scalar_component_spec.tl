@@ -9,13 +9,13 @@ describe(
         it(
             "supports set(entity, component, value) and get(entity, component)",
             function()
-                local Health = tecs.newScalarComponent({
+                local Health = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecHealth",
                     kind = "number",
                     default = 100,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn()
                 world:commit()
 
@@ -30,13 +30,13 @@ describe(
         it(
             "uses default value when added without explicit scalar payload",
             function()
-                local Ammo = tecs.newScalarComponent({
+                local Ammo = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecAmmo",
                     kind = "number",
                     default = 12,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn()
                 world:commit()
 
@@ -50,13 +50,13 @@ describe(
         it(
             "stores scalar values directly in query columns",
             function()
-                local Heat = tecs.newScalarComponent({
+                local Heat = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecHeat",
                     kind = "number",
                     default = 0,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn()
                 world:commit()
                 world:set(e, Heat, 7)
@@ -77,16 +77,16 @@ describe(
         it(
             "uses implicit zero defaults by kind",
             function()
-                local Flag = tecs.newScalarComponent({
+                local Flag = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecFlag",
                     kind = "boolean",
                 })
-                local Label = tecs.newScalarComponent({
+                local Label = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecLabel",
                     kind = "string",
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn()
                 world:commit()
 
@@ -102,12 +102,12 @@ describe(
         it(
             "supports scalar instances directly in spawn(...)",
             function()
-                local Tag = tecs.newScalarComponent({
+                local Tag = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecSpawnTag",
                     kind = "string",
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Tag("hero"))
                 world:commit()
 
@@ -118,23 +118,23 @@ describe(
         it(
             "supports mixing scalar and table components in spawn(...)",
             function()
-                local Score = tecs.newScalarComponent({
+                local Score = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecSpawnScore",
                     kind = "number",
                     default = 0,
                 })
-                local Label = tecs.newScalarComponent({
+                local Label = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecSpawnLabel",
                     kind = "string",
                 })
 
-                local world = tecs.newWorld()
-                local e = world:spawn(tecs.builtins.Transform(1, 2), Score(99), Label("boss"))
+                local world = tecs.ecs.newWorld()
+                local e = world:spawn(tecs.ecs.builtins.Transform(1, 2), Score(99), Label("boss"))
                 world:commit()
 
                 luassert.equals(99, world:get(e, Score))
                 luassert.equals("boss", world:get(e, Label))
-                local t = world:get(e, tecs.builtins.Transform)
+                local t = world:get(e, tecs.ecs.builtins.Transform)
                 luassert.equals(1, t.x)
                 luassert.equals(2, t.y)
             end
@@ -143,13 +143,13 @@ describe(
         it(
             "supports 2-arg set with a scalar instance wrapper",
             function()
-                local Mana = tecs.newScalarComponent({
+                local Mana = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecSetMana",
                     kind = "number",
                     default = 0,
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn()
                 world:commit()
 
@@ -163,12 +163,12 @@ describe(
         it(
             "returns the raw scalar value (not a wrapper) from world:get",
             function()
-                local Title = tecs.newScalarComponent({
+                local Title = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecRawGet",
                     kind = "string",
                 })
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(Title("Knight"))
                 world:commit()
 
@@ -181,7 +181,7 @@ describe(
         it(
             "reuses wrapper instances for repeated string values",
             function()
-                local Tag = tecs.newScalarComponent({
+                local Tag = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecCache",
                     kind = "string",
                 })
@@ -195,7 +195,7 @@ describe(
         it(
             "serialize unwraps wrapper instances and raw column reads",
             function()
-                local Title: tecs.ScalarComponent<string> = tecs.newScalarComponent({
+                local Title: tecs.ScalarComponent<string> = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecSerializeShape",
                     kind = "string",
                 })
@@ -225,19 +225,19 @@ describe(
 
                 -- With `default` present, the typed field target binds T directly;
                 -- no cast needed.
-                fakeModule.Stamina = tecs.newScalarComponent({
+                fakeModule.Stamina = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecModuleStamina",
                     kind = "number",
                     default = 50,
                 })
                 -- Without `default`, the literal has no T-typed value, so T can't
                 -- bind from the target either; cast the result.
-                fakeModule.Title = tecs.newScalarComponent({
+                fakeModule.Title = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecModuleTitle",
                     kind = "string",
                 }) as tecs.ScalarComponent<string>
 
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 local e = world:spawn(fakeModule.Stamina(80), fakeModule.Title("hero"))
                 world:commit()
 
@@ -256,11 +256,11 @@ describe(
         it(
             "works with builtins.Name as a scalar in spawn",
             function()
-                local world = tecs.newWorld()
-                local e = world:spawn(tecs.builtins.Name("Frank"))
+                local world = tecs.ecs.newWorld()
+                local e = world:spawn(tecs.ecs.builtins.Name("Frank"))
                 world:commit()
 
-                luassert.equals("Frank", world:get(e, tecs.builtins.Name))
+                luassert.equals("Frank", world:get(e, tecs.ecs.builtins.Name))
             end
         )
     end

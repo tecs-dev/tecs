@@ -3,9 +3,9 @@ description: "Seeded generation in named, independent streams a snapshot carries
 outline: deep
 ---
 
-# tecs.random
+# tecs.ecs.random
 
-`tecs.random` is seeded generation, in named streams a snapshot carries. Nothing here reads a clock. A
+`tecs.ecs.random` is seeded generation, in named streams a snapshot carries. Nothing here reads a clock. A
 generator produces the same sequence from the same seed on every machine this runs on, which is what lets a
 replay, a snapshot and a bug report all describe the same run. `math.random` cannot: its state is a
 process-wide global with no way to read it back, so anything built on it is reproducible only by accident.
@@ -17,10 +17,10 @@ nothing about what any other system sees. Splitting one generator between consum
 where the order consumers happen to run in decides what each of them gets.
 
 ```teal
-local rng <const> = tecs.random.stream(world, "loot")
+local rng <const> = tecs.ecs.random.stream(world, "loot")
 local roll <const> = rng:integer(1, 20)
 
-local field <const> = tecs.random.noise(1234)
+local field <const> = tecs.ecs.random.noise(1234)
 local height <const> = field:fbm2(x * 0.01, y * 0.01, 4)
 ```
 
@@ -30,7 +30,7 @@ local height <const> = field:fbm2(x * 0.01, y * 0.01, 4)
 local tecs <const> = require("tecs")
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.random`.
+The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.ecs.random`.
 `tecs` is also set as a global, which makes the require line optional.
 
 ## Streams
@@ -50,7 +50,7 @@ function random.stream(world: ecs.World, name: string): Random
 
 - `world`: the world the stream belongs to. Its streams go away with it.
 - `name`: a non-empty name. Names are namespaced by dots the way snapshot data keys are; the engine uses
-  `tecs.audio` and `tecs.runif`, so a game's own names should carry its own prefix.
+  `tecs.audio` and `tecs.ecs.runif`, so a game's own names should carry its own prefix.
 
 **Returns:** the `Random` for that name, seeded by hashing the name against the world's seed.
 
@@ -59,11 +59,11 @@ Raises on a name that is `nil` or empty.
 **Example:**
 
 ```teal
-local world <const> = tecs.newWorld()
-tecs.random.seed(world, 20260726)
+local world <const> = tecs.ecs.newWorld()
+tecs.ecs.random.seed(world, 20260726)
 
-local loot <const> = tecs.random.stream(world, "game.loot")
-local spawns <const> = tecs.random.stream(world, "game.spawns")
+local loot <const> = tecs.ecs.random.stream(world, "game.loot")
+local spawns <const> = tecs.ecs.random.stream(world, "game.spawns")
 ```
 
 Drawing from `loot` moves nothing in `spawns`, and adding a third stream later moves neither.
@@ -94,7 +94,7 @@ calls during setup anyway.
 ## Snapshots
 
 The state is four integers. Saving a world writes every stream's four words, and the world's seed, under the
-`tecs.random` key; loading puts them back. See [save games](/ecs/save-games) for the snapshot API itself.
+`tecs.ecs.random` key; loading puts them back. See [save games](/ecs/save-games) for the snapshot API itself.
 
 A load updates each generator in place rather than replacing it, so a caller that took its stream at startup
 keeps drawing from the restored sequence rather than the one this run was on. A stream the file does not name
@@ -255,7 +255,7 @@ Raises on fewer than one octave.
 **Example:**
 
 ```teal
-local field <const> = tecs.random.noise(seed)
+local field <const> = tecs.ecs.random.noise(seed)
 for y = 0, height - 1 do
     for x = 0, width - 1 do
         local h <const> = field:fbm2(x * 0.02, y * 0.02, 5)

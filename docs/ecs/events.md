@@ -25,8 +25,8 @@ makes the require line optional.
 
 The system centers on three ideas:
 
-- **Events**: typed records or FFI structs that carry information, registered once with `tecs.newEvent` or
-  `tecs.newFFIEvent`.
+- **Events**: typed records or FFI structs that carry information, registered once with `tecs.ecs.newEvent` or
+  `tecs.ecs.newFFIEvent`.
 - **Addresses**: integer routing destinations. `0` is world level; an entity ID addresses that entity.
 - **Observers**: callbacks registered at an address for one event type.
 
@@ -47,9 +47,9 @@ next to its systems, so both are on the world and both run inside the crash guar
 local tecs <const> = require("tecs")
 local Transform <const> = tecs.components.Transform
 
-return tecs.application({
-    plugin = function(world: tecs.World, app: tecs.Application)
-        world:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+return tecs.application.create({
+    plugin = function(world: tecs.World, app: tecs.application.Application)
+        world:observe(0, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
             -- Still readable: the row is removed at commit, not here.
             local transform <const> = world:get(e.entity, Transform)
             if transform then
@@ -81,7 +81,7 @@ slot.
 ```teal
 local entityId <const>: integer = world:spawn()
 
-world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+world:observe(entityId, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
     print("Entity " .. e.entity .. " was despawned")
 end)
 ```
@@ -125,7 +125,7 @@ world:observe(0, MyCustomEvent, function(e: MyCustomEvent)
     print("Got MyCustomEvent")
 end)
 
-world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+world:observe(entityId, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
     print("Entity despawned: " .. e.entity)
 end)
 ```
@@ -198,7 +198,7 @@ until the dispatch unwinds, so an observer can unsubscribe itself from inside it
 
 ```teal
 world:stopObserving(0, MyEvent, myCallback)
-world:stopObserving(entityId, tecs.builtins.OnDespawn, "cleanup-handler")
+world:stopObserving(entityId, tecs.ecs.builtins.OnDespawn, "cleanup-handler")
 ```
 
 ### world:clearObservers {#world-clear-observers}
@@ -215,12 +215,12 @@ function World:clearObservers(address: integer)
 Event registration functions live directly on the `tecs` module. An event type must be registered exactly once;
 registering the same type twice raises an error.
 
-### tecs.newEvent
+### tecs.ecs.newEvent
 
 Configures an event record so it has a `__call`-based constructor and a unique `eventId`.
 
 ```teal
-function tecs.newEvent<E is Event>(event: E)
+function tecs.ecs.newEvent<E is Event>(event: E)
 ```
 
 **Parameters:**
@@ -245,7 +245,7 @@ PlayerDamaged.init = function(e: PlayerDamaged, damage: number, source: string)
     e.damage = damage
     e.source = source
 end
-tecs.newEvent(PlayerDamaged)
+tecs.ecs.newEvent(PlayerDamaged)
 
 -- A direct constructor always allocates a fresh instance.
 local damageEvent <const>: PlayerDamaged = PlayerDamaged(10, "fire")
@@ -271,13 +271,13 @@ storage to its pool as soon as the emit completes, and the next emit of the same
 you need.
 :::
 
-### tecs.newFFIEvent
+### tecs.ecs.newFFIEvent
 
 Configures an event backed by a C struct, allocated from the emitting world's leased FFI slice on the
 `world:emit` path.
 
 ```teal
-function tecs.newFFIEvent<E is Event>(
+function tecs.ecs.newFFIEvent<E is Event>(
     event: E,
     fields: {{string, string}},
     structName?: string
@@ -318,7 +318,7 @@ end
 -- Use `"double"` for any field holding an entity ID. A packed ID carries
 -- generation bits and does not fit in int32, and truncation would produce
 -- a garbage ID on the receiving side.
-tecs.newFFIEvent(DamageEvent, {
+tecs.ecs.newFFIEvent(DamageEvent, {
     {"damage", "float"},
     {"entityId", "double"},
     {"damageType", "int32_t"}
@@ -332,7 +332,7 @@ world:emit(0, DamageEvent, 15.5, 1234, 2)
 
 ::: tip FFI event compatibility
 An FFI event's fields live in a C struct, so it cannot carry Lua tables, strings, functions or userdata. Use
-`tecs.newEvent` for events that need Lua values.
+`tecs.ecs.newEvent` for events that need Lua values.
 :::
 
 The builtin [`OnSpawn`](/ecs/builtins#onspawn-event) and [`OnDespawn`](/ecs/builtins#ondespawn-event) events are
@@ -341,11 +341,11 @@ FFI events, each carrying a single `entity` field declared as `double` for exact
 ## MessageBus
 
 `world:observe` and `world:emit` delegate to the world's `MessageBus`, the address-keyed router that holds the
-observers and dispatches events. Each world owns one. `tecs.newMessageBus()` creates a standalone bus when you
+observers and dispatches events. Each world owns one. `tecs.ecs.newMessageBus()` creates a standalone bus when you
 want routing without a world.
 
 ```teal
-function tecs.newMessageBus(): MessageBus
+function tecs.ecs.newMessageBus(): MessageBus
 ```
 
 | Method                                                | Description                                                                                                                                                                                         |

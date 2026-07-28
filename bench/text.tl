@@ -85,7 +85,7 @@ local function phrase(seed: integer, length: integer): string
     return table.concat(out)
 end
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "text", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -93,7 +93,7 @@ return tecs.application({
     maxEntities = TEXTS * (LENGTH + 4) + 4096,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local renderer = app.renderer
         -- Real time, recorded where both values are visible. The world's dt is
         -- whatever the loop measured, and this is that same measurement kept
@@ -138,7 +138,7 @@ return tecs.application({
         local frame = 0
         world:addSystem({
             name = "bench.Churn",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function()
                 if frame == WARMUP then
                     timing.reset()
@@ -197,7 +197,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 local frames <const> = math.max(1, frame - WARMUP)
                 print(

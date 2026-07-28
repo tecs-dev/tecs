@@ -1,11 +1,11 @@
 -- The `tecs` global.
 --
--- A game writes `tecs.newWorld()` in any file with no require line. The global
--- is set by `tecs/init.tl` itself as it returns, so requiring the module
+-- A game writes `tecs.ecs.newWorld()` in any file with no require line. The
+-- global is set by `tecs/init.tl` itself as it returns, so requiring the module
 -- anywhere, including transitively, is what makes the global exist. Setting it
 -- from the host instead would leave it present for a game and absent under a
 -- plain interpreter, so a tool, this suite and the benchmarks would each see a
--- different surface.
+-- different set of names.
 --
 -- `tecs/global.d.tl` is what types it, and reads that type off the module
 -- rather than restating it. Nothing in this repository is checked against that
@@ -38,21 +38,22 @@ local function checkTeal(source, declared)
     return output
 end
 
--- Both halves of the surface, and both positions the name is used in: a value
--- (`tecs.newWorld`, `tecs.log`) and a type (`tecs.World`, `tecs.phases`).
+-- The ECS and a lazily resolved module, in both positions a name is used in: a
+-- value (`tecs.ecs.newWorld`, `tecs.log`) and a type (`tecs.World`,
+-- `tecs.application.Application`).
 local USAGE = [[
-local world = tecs.newWorld()
+local world = tecs.ecs.newWorld()
 world:update(1 / 60)
 
 local logger = tecs.log.get("game")
 logger:info("entities: %d", world:getStats().entities)
 
-return tecs.application({
-    plugin = function(game: tecs.World, app: tecs.Application)
+return tecs.application.create({
+    plugin = function(game: tecs.World, app: tecs.application.Application)
         print(app.window ~= nil)
         game:addSystem({
             name = "game.Tick",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function(dt: number) print(dt) end,
         })
         game:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
@@ -74,16 +75,24 @@ describe("the tecs global", function()
         -- state it is in before anything reads it, and reading it through the
         -- global has to resolve and memoize exactly as reading it off the
         -- required value does.
-        rawset(_G.tecs, "Camera", nil)
-        assert.is_nil(rawget(_G.tecs, "Camera"))
+        rawset(_G.tecs, "camera", nil)
+        assert.is_nil(rawget(_G.tecs, "camera"))
 
-        local camera = _G.tecs.Camera
+        local camera = _G.tecs.camera
         assert.is_not_nil(camera)
-        assert.is_true(rawequal(camera, require("tecs.gfx.Camera")))
-        assert.is_true(rawequal(camera, rawget(_G.tecs, "Camera")))
+        assert.is_true(rawequal(camera, rawget(_G.tecs, "camera")))
+
+        -- The namespace memoizes its members the same way, and the class it
+        -- carries is the module itself rather than a copy of it.
+        assert.is_true(rawequal(camera.Camera, require("tecs.gfx.Camera")))
+        assert.is_true(rawequal(camera.Camera, rawget(camera, "Camera")))
     end)
 
-    it("answers nil for a name the surface does not have", function()
+    it("answers nil for a member a namespace does not have", function()
+        assert.is_nil(_G.tecs.camera.Nosuchthing)
+    end)
+
+    it("answers nil for a name that is not a module", function()
         assert.is_nil(_G.tecs.Aplication)
         assert.is_nil(_G.tecs.nosuchthing)
     end)

@@ -38,7 +38,7 @@ not built. See [Tecs CLI](/cli/).
 local tecs <const> = require("tecs")
 ```
 
-`tecs` is also a global, set by the module itself as it returns, so a game can write `tecs.newWorld()` in any file
+`tecs` is also a global, set by the module itself as it returns, so a game can write `tecs.ecs.newWorld()` in any file
 with no require line. It is the same table `require` gives back, metatable included. Engine modules resolve on
 first field access, so `require("tecs")` alone loads no engine module and a headless tool, a test or a server
 never demands a graphics stack.
@@ -67,8 +67,8 @@ back has no loop to block in, which is why the shape is this and not a `run()`.
 ```teal
 local tecs <const> = require("tecs")
 
-return tecs.application({
-    plugin = function(world: tecs.World, app: tecs.Application)
+return tecs.application.create({
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         -- register systems, observers and entities here
     end,
 })
@@ -76,7 +76,7 @@ return tecs.application({
 
 There is one entry point rather than a list of callbacks. `Application.Config` carries `plugin`, a single
 `function(world, app)`, and nothing else a game supplies is called by the loop, because the ECS already answers
-every question a callback would have. See [`Application`](/modules/Application) for the rest of the config.
+every question a callback would have. See [`Application`](/modules/application) for the rest of the config.
 
 The four callbacks a loop-shaped engine would hand you map onto machinery that was already there:
 
@@ -98,15 +98,15 @@ plugin the world takes is `function(world)`, so the entry reads as that shape wi
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.builtins.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 
-return tecs.application({
-    plugin = function(world: tecs.World, app: tecs.Application)
+return tecs.application.create({
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local movers = world:query({ include = { Transform } })
 
         world:addSystem({
             name = "game.Spin",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in movers:iter() do
                     local transforms = archetype:getMut(Transform)

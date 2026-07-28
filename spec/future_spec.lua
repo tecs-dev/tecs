@@ -14,7 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local sequence = require("tecs.sequence")
-local Future = require("tecs.Future")
+local Future = require("tecs.future.Future")
 
 local C = sdl.C
 
@@ -64,7 +64,7 @@ local function stackDepth()
     return depth
 end
 
-describe("tecs.Future", function()
+describe("tecs.future.Future", function()
     describe("states", function()
         it("starts pending and settles once", function()
             local future = Future.pending()
@@ -754,7 +754,7 @@ describe("tecs.Future", function()
         local world
 
         before_each(function()
-            world = tecs.newWorld()
+            world = tecs.ecs.newWorld()
             world:addPlugin(sequence.plugin)
             world:startup()
         end)
@@ -773,7 +773,7 @@ describe("tecs.Future", function()
         end
 
         it("parks a program until the future settles", function()
-            local loader = world:spawn(tecs.builtins.Transform(0, 0))
+            local loader = world:spawn(tecs.ecs.builtins.Transform(0, 0))
             world:commit()
 
             local future = Future.pending()
@@ -801,7 +801,7 @@ describe("tecs.Future", function()
         end)
 
         it("does not wait for a future that already settled", function()
-            local loader = world:spawn(tecs.builtins.Transform(0, 0))
+            local loader = world:spawn(tecs.ecs.builtins.Transform(0, 0))
             world:commit()
             Future.track(world, loader, "level1", Future.settled("loaded"))
 
@@ -823,7 +823,7 @@ describe("tecs.Future", function()
         end)
 
         it("does not wait for a key nothing was tracked under", function()
-            local loader = world:spawn(tecs.builtins.Transform(0, 0))
+            local loader = world:spawn(tecs.ecs.builtins.Transform(0, 0))
             world:commit()
 
             local calls = 0
@@ -848,7 +848,7 @@ describe("tecs.Future", function()
             -- restored cursor carries the provider name, the entity and the
             -- key, and a game re-issuing the work re-tracks it under the same
             -- key with no further cooperation.
-            local loader = world:spawn(tecs.builtins.Transform(0, 0))
+            local loader = world:spawn(tecs.ecs.builtins.Transform(0, 0))
             world:commit()
 
             local first = Future.pending()

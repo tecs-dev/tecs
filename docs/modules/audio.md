@@ -3,7 +3,7 @@ description: "Sound output: clips, voices, groups, keyed limits, fades, pitch, l
 outline: deep
 ---
 
-# tecs.Audio
+# tecs.audio.Audio
 
 `app.audio` is the whole of sound output: load a clip, play it, set a gain, fade it, repeat it, pitch it, seek
 it, pan it, put it in a group, cap how often it may start, stop it. It is built on SDL_mixer 3, and an entity
@@ -38,11 +38,11 @@ enemies dying together from playing forty identical sounds.
 local tecs <const> = require("tecs")
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.Audio`. `tecs`
+The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.audio.Audio`. `tecs`
 is also set as a global, which makes the require line optional, and engine modules are resolved lazily on first
 field access.
 
-A game does not usually construct one. [`Application`](/modules/Application) creates the audio from its `audio`
+A game does not usually construct one. [`Application`](/modules/application) creates the audio from its `audio`
 config, installs it into the world, calls `update` once per iteration and destroys it on shutdown, so `app.audio`
 is the object every example below is calling into.
 
@@ -94,7 +94,7 @@ no handling. An explicit physical id stays on that device until this `Audio` is 
 | Field       | Type      | Description                                                                                                           |
 | ----------- | --------- | --------------------------------------------------------------------------------------------------------------------- |
 | `available` | `boolean` | Whether an output opened. `false` on a machine with no sound, where every call here still works and nothing is heard. |
-| `Sound`     | `Sound`   | The component type, also reachable as `tecs.Audio.Sound`. See [the Sound component](#the-sound-component).            |
+| `Sound`     | `Sound`   | The component type, also reachable as `tecs.audio.Sound`. See [the Sound component](#the-sound-component).            |
 
 ### install
 
@@ -140,7 +140,7 @@ function Audio:update(dt?: number): integer
 
 **Returns:** voices sounding after the sweep.
 
-Call it once per frame. [`Application`](/modules/Application) already does.
+Call it once per frame. [`Application`](/modules/application) already does.
 
 ### destroy
 
@@ -750,7 +750,7 @@ an entity rather than a handle a game has to remember to release, and it is why 
 does the obvious thing.
 
 `Sound` is declared by this module rather than in [`components`](/modules/components), and is reachable as
-`tecs.Audio.Sound`. It is an FFI component, so its columns are contiguous C memory and it holds numbers only.
+`tecs.audio.Sound`. It is an FFI component, so its columns are contiguous C memory and it holds numbers only.
 
 | Field     | Type     | Default | Description                                                                                                                                                                         |
 | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -769,11 +769,11 @@ does the obvious thing.
 **Example:**
 
 ```teal
-local Sound <const> = tecs.Audio.Sound
+local Sound <const> = tecs.audio.Sound
 local siren <const> = app.audio:load("assets/sfx/siren.ogg")
 
 world:spawn(Sound(siren.id, 1, 0.8, 1, 1.0, 0, 0.0, 0.0, 0.0,
-    tecs.Audio.groupId("sfx")))
+    tecs.audio.Audio.groupId("sfx")))
 ```
 
 ::: warning batchSpawn skips FFI defaults

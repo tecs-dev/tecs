@@ -3,10 +3,10 @@ description: "Gameplay input in three tiers, behind a layer stack: live state, f
 outline: [2, 3]
 ---
 
-# tecs.Input
+# tecs.input.Input
 
-`tecs.Input` is gameplay input, in three tiers, behind a layer stack. A game does not construct one: the
-[application](/modules/Application) does, and hands it over as `app.input`.
+`tecs.input.Input` is gameplay input, in three tiers, behind a layer stack. A game does not construct one: the
+[application](/modules/application) does, and hands it over as `app.input`.
 
 SDL owns device mechanics; this owns gameplay semantics. That split is why there is no `tecs.keyboard` beside it
 and no supported way to reach raw SDL: a query answered by polling the device would bypass replay, layers, edge
@@ -216,7 +216,7 @@ through the registry and answers for itself.
 
 `refreshDevices` runs before the game's plugin, because the platform reports an addition rather than a device
 that was there all along, and waiting for an event would leave every already-plugged-in pad invisible. See
-[`tecs.Gamepad`](/modules/Gamepad).
+[`tecs.gamepad.Gamepad`](/modules/gamepad).
 
 What `Input` holds is what the machine has one of: a keyboard, an aggregate mouse, the touch surface, the pen,
 and the registry the pads live in.

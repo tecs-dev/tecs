@@ -1,11 +1,11 @@
 ---
-description: "The components, relationship, events and systems every world registers automatically through tecs.builtins"
+description: "The components, relationship, events and systems every world registers automatically through tecs.ecs.builtins"
 outline: deep
 ---
 
 # Builtins
 
-`tecs.builtins` holds the components, the one relationship, and the events that Tecs registers itself. Every
+`tecs.ecs.builtins` holds the components, the one relationship, and the events that Tecs registers itself. Every
 world creates them, and the builtin plugin that owns the `TTL` and `RelativeTransform` systems is installed when
 the world is constructed, so nothing here has to be added by hand.
 
@@ -15,7 +15,7 @@ the world is constructed, so nothing here has to be added by hand.
 local tecs <const> = require("tecs")
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so these live on `tecs.builtins`.
+The whole surface is `require("tecs")` and every module is a field on it, so these live on `tecs.ecs.builtins`.
 `tecs` is also set as a global, which makes the require line optional.
 
 ## Components
@@ -48,16 +48,16 @@ Name: tecs.ScalarComponent<string>
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.builtins.Name("Phreddy")
+    tecs.ecs.builtins.Name("Phreddy")
 )
 
-local name <const> = world:get(entity, tecs.builtins.Name) -- "Phreddy"
+local name <const> = world:get(entity, tecs.ecs.builtins.Name) -- "Phreddy"
 ```
 
 To change an existing entity's name, use the three-argument form of `world:set`:
 
 ```teal
-world:set(entity, tecs.builtins.Name, "Greg")
+world:set(entity, tecs.ecs.builtins.Name, "Greg")
 ```
 
 ### Key {#key}
@@ -76,8 +76,8 @@ Key: tecs.ScalarComponent<string>
 
 ```teal
 local player <const> = world:spawn(
-    tecs.builtins.Key("player"),
-    tecs.builtins.Name("Player ship")
+    tecs.ecs.builtins.Key("player"),
+    tecs.ecs.builtins.Name("Player ship")
 )
 
 assert(world:byKey("player") == player)
@@ -103,10 +103,10 @@ children, and their children in turn.
 
 ```teal
 local parent <const> = world:spawn()
-local child <const> = world:spawn(tecs.builtins.ChildOf(parent))
+local child <const> = world:spawn(tecs.ecs.builtins.ChildOf(parent))
 
 -- Visit the children of a parent
-world:targets(parent, tecs.builtins.ChildOf, function(childId: integer)
+world:targets(parent, tecs.ecs.builtins.ChildOf, function(childId: integer)
     print("Child:", childId)
 end)
 
@@ -174,7 +174,7 @@ Positional arguments allocate nothing beyond the component itself, and are what 
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.builtins.Transform(10, 11, 1, 2) -- x, y, z, layer
+    tecs.ecs.builtins.Transform(10, 11, 1, 2) -- x, y, z, layer
 )
 ```
 
@@ -182,7 +182,7 @@ The table form is more readable and allocates the table you pass:
 
 ```teal
 world:spawn(
-    tecs.builtins.Transform.new({
+    tecs.ecs.builtins.Transform.new({
         x = 10,
         y = 11,
         z = 1,
@@ -199,7 +199,7 @@ explicit `world:markComponentDirty(entity, Transform)` afterwards, or the write 
 :::
 
 ```teal
-local transform <const> = world:getMut(entity, tecs.builtins.Transform)
+local transform <const> = world:getMut(entity, tecs.ecs.builtins.Transform)
 transform.rotation = math.pi / 4
 transform.scaleX = 2
 transform.scaleY = 2
@@ -264,12 +264,12 @@ end
 
 ```teal
 local parent <const> = world:spawn(
-    tecs.builtins.Transform(100, 100, 0)
+    tecs.ecs.builtins.Transform(100, 100, 0)
 )
 
 local child <const> = world:spawn(
-    tecs.builtins.ChildOf(parent),
-    tecs.builtins.RelativeTransform(50, 30)  -- 50 right, 30 down
+    tecs.ecs.builtins.ChildOf(parent),
+    tecs.ecs.builtins.RelativeTransform(50, 30)  -- 50 right, 30 down
 )
 ```
 
@@ -307,7 +307,7 @@ end
 ```teal
 world:spawn(
     -- Despawn the entity after 10 seconds
-    tecs.builtins.TTL(10)
+    tecs.ecs.builtins.TTL(10)
 )
 ```
 
@@ -319,7 +319,7 @@ ordinary queries, so a disabled entity is not extracted and therefore is not dra
 
 ```teal
 local entity <const> = world:spawn(
-    tecs.builtins.Disabled
+    tecs.ecs.builtins.Disabled
 )
 ```
 
@@ -334,8 +334,8 @@ The [state stack](/ecs/states) manages this tag for you when a state's `onBlur` 
 also set it yourself:
 
 ```teal
-world:set(entity, tecs.builtins.Paused)
-world:remove(entity, tecs.builtins.Paused)
+world:set(entity, tecs.ecs.builtins.Paused)
+world:remove(entity, tecs.ecs.builtins.Paused)
 ```
 
 ## Events
@@ -378,7 +378,7 @@ reason, and drains before returning, so the caller still receives a committed en
 :::
 
 ```teal
-world:observe(0, tecs.builtins.OnSpawn, function(event: tecs.builtins.OnSpawn)
+world:observe(0, tecs.ecs.builtins.OnSpawn, function(event: tecs.ecs.builtins.OnSpawn)
     print("Entity spawned: " .. event.entity)
 end)
 ```
@@ -406,9 +406,9 @@ the slot.
 Observe one entity:
 
 ```teal
-world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+world:observe(entityId, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
     -- The entity is still readable until the despawn commits
-    local transform <const> = world:get(e.entity, tecs.builtins.Transform)
+    local transform <const> = world:get(e.entity, tecs.ecs.builtins.Transform)
     if transform then
         spawnExplosionAt(transform.x, transform.y)
     end
@@ -418,7 +418,7 @@ end)
 Or observe every despawn:
 
 ```teal
-world:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+world:observe(0, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
     print("Entity " .. e.entity .. " was despawned")
 end)
 ```
@@ -437,7 +437,7 @@ end
 ```
 
 ```teal
-world:observe(0, tecs.builtins.ArchetypeCreated, function(event: tecs.builtins.ArchetypeCreated)
+world:observe(0, tecs.ecs.builtins.ArchetypeCreated, function(event: tecs.ecs.builtins.ArchetypeCreated)
     local archetype <const> = event.archetype
     -- inspect newly created archetypes here
 end)

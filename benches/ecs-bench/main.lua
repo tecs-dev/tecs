@@ -87,70 +87,70 @@ evo.debug_mode(false)
 -- Counter is a Lua-table component because it needs an onReplace hook to
 -- mirror evolved's ON_ASSIGN. newFFIComponent only forwards onAdd/onRemove.
 
-local Position = tecs.newComponent({ name = "VsEvoPosition", container = {}, fields = { "x", "y" } })
-local Velocity = tecs.newComponent({ name = "VsEvoVelocity", container = {}, fields = { "vx", "vy" } })
-local ScalarPosX = tecs.newScalarComponent({
+local Position = tecs.ecs.newComponent({ name = "VsEvoPosition", container = {}, fields = { "x", "y" } })
+local Velocity = tecs.ecs.newComponent({ name = "VsEvoVelocity", container = {}, fields = { "vx", "vy" } })
+local ScalarPosX = tecs.ecs.newScalarComponent({
     name = "VsEvoScalarPosX",
     container = {},
     kind = "number",
     default = 0,
 })
-local ScalarVelX = tecs.newScalarComponent({
+local ScalarVelX = tecs.ecs.newScalarComponent({
     name = "VsEvoScalarVelX",
     container = {},
     kind = "number",
     default = 0,
 })
-local FFIPosition = tecs.newFFIComponent({
+local FFIPosition = tecs.ecs.newFFIComponent({
     name = "VsEvoFFIPosition",
     container = {},
     fields = { { "x", "double" }, { "y", "double" } },
 })
-local FFIVelocity = tecs.newFFIComponent({
+local FFIVelocity = tecs.ecs.newFFIComponent({
     name = "VsEvoFFIVelocity",
     container = {},
     fields = { { "vx", "double" }, { "vy", "double" } },
 })
-local Health = tecs.newComponent({ name = "VsEvoHealth", container = {}, fields = { "hp" } })
-local Damage = tecs.newComponent({ name = "VsEvoDamage", container = {}, fields = { "dmg" } })
-local FFIHealth = tecs.newFFIComponent({
+local Health = tecs.ecs.newComponent({ name = "VsEvoHealth", container = {}, fields = { "hp" } })
+local Damage = tecs.ecs.newComponent({ name = "VsEvoDamage", container = {}, fields = { "dmg" } })
+local FFIHealth = tecs.ecs.newFFIComponent({
     name = "VsEvoFFIHealth",
     container = {},
     fields = { { "hp", "double" } },
 })
-local FFIDamage = tecs.newFFIComponent({
+local FFIDamage = tecs.ecs.newFFIComponent({
     name = "VsEvoFFIDamage",
     container = {},
     fields = { { "dmg", "double" } },
 })
 
-local TagA = tecs.newTagComponent({ name = "VsEvoTagA" })
-local TagB = tecs.newTagComponent({ name = "VsEvoTagB" })
-local TagC = tecs.newTagComponent({ name = "VsEvoTagC" })
+local TagA = tecs.ecs.newTagComponent({ name = "VsEvoTagA" })
+local TagB = tecs.ecs.newTagComponent({ name = "VsEvoTagB" })
+local TagC = tecs.ecs.newTagComponent({ name = "VsEvoTagC" })
 
 -- Components for the "component/tag add/remove" batch tests. World layout at
 -- setup: N tracked entities carry (Position, Velocity, Alive); 4N background
 -- entities carry (Health, BenchName, Aggro). Query `{Position}` matches only
 -- the tracked archetype.
-local BenchName = tecs.newComponent({ name = "VsEvoBenchName", container = {}, fields = { "value" } })
-local Alive = tecs.newTagComponent({ name = "VsEvoAlive" })
-local Aggro = tecs.newTagComponent({ name = "VsEvoAggro" })
+local BenchName = tecs.ecs.newComponent({ name = "VsEvoBenchName", container = {}, fields = { "value" } })
+local Alive = tecs.ecs.newTagComponent({ name = "VsEvoAlive" })
+local Aggro = tecs.ecs.newTagComponent({ name = "VsEvoAggro" })
 local BENCH_NAME_MONSTER = BenchName("monster")
 
 -- 20 unique tags for the multi-archetype query/churn tests.
 local ArchTags = {}
 for i = 1, 20 do
-    ArchTags[i] = tecs.newTagComponent({ name = "VsEvoArchTag" .. i })
+    ArchTags[i] = tecs.ecs.newTagComponent({ name = "VsEvoArchTag" .. i })
 end
 
 -- Three-level hook chain tags. Observer-based: each query's onEntitiesAdded
 -- adds the next tag in the chain. Mirrors evolved's hook-chain dispatch
 -- (per-write, not atomic-resolve).
-local ChainC = tecs.newTagComponent({ name = "VsEvoChainC" })
-local ChainB = tecs.newTagComponent({ name = "VsEvoChainB" })
-local ChainA = tecs.newTagComponent({ name = "VsEvoChainA" })
+local ChainC = tecs.ecs.newTagComponent({ name = "VsEvoChainC" })
+local ChainB = tecs.ecs.newTagComponent({ name = "VsEvoChainB" })
+local ChainA = tecs.ecs.newTagComponent({ name = "VsEvoChainA" })
 
-local Counter = tecs.newComponent({
+local Counter = tecs.ecs.newComponent({
     name = "VsEvoCounter",
     container = {},
     fields = { "n" },
@@ -287,7 +287,7 @@ local cases = {
 local _cachedWorld
 local function freshTecsWorld()
     if not _cachedWorld then
-        _cachedWorld = tecs.newWorld()
+        _cachedWorld = tecs.ecs.newWorld()
     else
         _cachedWorld:clearEntities()
     end
@@ -891,7 +891,7 @@ tecsScenarios.queryMulti = {
 
 tecsScenarios.queryBuild = {
     setup = function(case)
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         populateQueryBuildTecsWorld(world, case.params.count)
         return { world = world }
     end,
@@ -986,12 +986,12 @@ tecsScenarios.dispatch200 = (function()
     return {
         setup = function()
             if not dispatchWorld then
-                dispatchWorld = tecs.newWorld()
+                dispatchWorld = tecs.ecs.newWorld()
                 local counter = 0
                 for i = 1, 200 do
                     dispatchWorld:addSystem({
                         name = "BenchSystem" .. i,
-                        phase = tecs.phases.Update,
+                        phase = tecs.ecs.phases.Update,
                         run = function()
                             counter = counter + 1
                         end,
@@ -1001,7 +1001,7 @@ tecsScenarios.dispatch200 = (function()
             return { world = dispatchWorld }
         end,
         run = function(state)
-            state.world:runPhase(tecs.phases.Update, 1 / 60)
+            state.world:runPhase(tecs.ecs.phases.Update, 1 / 60)
         end,
     }
 end)()

@@ -14,7 +14,7 @@ provider that defaults to the real thing. That is what makes recorded replay pos
 system and `dt` is data. Reading the performance counter directly from the run loop would make deterministic
 replay unimplementable rather than merely unimplemented.
 
-[`Application`](/modules/Application) drives this module for you: it calls `clock.reset` after startup and
+[`Application`](/modules/application) drives this module for you: it calls `clock.reset` after startup and
 `clock.step` once per iteration, and hands the result to the world. A game reads `clock.now` for its own
 measurements and sets `provider` only when it is driving a replay.
 

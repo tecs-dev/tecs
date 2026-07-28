@@ -13,8 +13,8 @@ syscall a frame should not wait on.
 
 Nothing here creates a GPU resource. Decoding and residency are separate decisions: the renderer knows what
 layout its textures need, and an asset that has been decoded is useful before anything has decided where it
-will live. Turning a decoded image into something drawable is [`Renderer`](/modules/Renderer); turning a
-decoded clip into something audible is [`Audio`](/modules/Audio).
+will live. Turning a decoded image into something drawable is [`Renderer`](/modules/renderer); turning a
+decoded clip into something audible is [`Audio`](/modules/audio).
 
 ::: info An image is a PNG or a JPEG
 SDL_image offers eighteen formats and the build turns off every other one, because each is a codec a shipped
@@ -51,7 +51,7 @@ Installing twice is installing once. Spawning unconditionally would leave the fi
 its channels and nothing reading them, and every decode already queued would answer into a channel that has
 been dropped, so a load in flight across the second call would never resolve.
 
-[`Application`](/modules/Application) owns this: it installs the worker, calls `update` once per iteration and
+[`Application`](/modules/application) owns this: it installs the worker, calls `update` once per iteration and
 `shutdown` at teardown, so a game that loads an image and does nothing else still sees its handle resolve and
 the decoding thread still stops. A headless tool or a test that loads assets installs it itself.
 
@@ -159,7 +159,7 @@ and once to decode it. That is a second read of a small file, off the main threa
 copy of a piece of music.
 
 A handle whose mixer could not be initialised comes back already `"failed"` rather than raising.
-[`Audio`](/modules/Audio) is the normal caller; a game loads clips through it rather than through here.
+[`Audio`](/modules/audio) is the normal caller; a game loads clips through it rather than through here.
 
 ## Handle
 
@@ -283,7 +283,7 @@ polls instead of walking the content tree.
 
 A `Handle` settles once and is read as a field, and that is deliberately the whole of it. The general
 settle-once value with combinators over it, which a child process or a request returns, is
-[`Future`](/modules/Future); it carries `status`, `value` and `error`, chains with `map`, `flatMap` and
+[`Future`](/modules/future); it carries `status`, `value` and `error`, chains with `map`, `flatMap` and
 `recover`, and is what the sequencer's awaitable bridge parks a program on. A load queued here is not one of
 those: it is a handle, and the sequencer waits on it through whatever subsystem owns the decode.
 

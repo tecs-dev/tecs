@@ -13,7 +13,7 @@ describe(
                     "registeres component",
                     function()
                         local container: tecs.Component = {}
-                        local component = tecs.newComponent({name = "MyComponent", container = container})
+                        local component = tecs.ecs.newComponent({name = "MyComponent", container = container})
 
                         luassert.is_not_nil(component, "MyComponent should not be nil")
                         luassert.is_not_nil(component.componentId, "MyComponent should have an ID")
@@ -31,7 +31,7 @@ describe(
                     "creates instances of components",
                     function()
                         local container: tecs.Component = {}
-                        local component = tecs.newComponent({name = "MyComponent2", container = container})
+                        local component = tecs.ecs.newComponent({name = "MyComponent2", container = container})
                         local instance = component()
 
                         luassert.is_not_nil(instance, "MyComponent2 should not have made a nil instance")
@@ -52,7 +52,7 @@ describe(
                             name: string
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "MyComponent3",
                             container = MyComponent3,
                             fields = {"name"},
@@ -76,10 +76,10 @@ describe(
                     function()
                         local container1 = {}
                         local container2 = {}
-                        tecs.newComponent({name = "Hi__World", container = container1})
+                        tecs.ecs.newComponent({name = "Hi__World", container = container1})
 
                         luassert.error_matches(function()
-                            tecs.newComponent({name = "Hi__World", container = container2})
+                            tecs.ecs.newComponent({name = "Hi__World", container = container2})
                         end, "Component Hi__World already registered",
                         nil) -- TODO: Why do the types want nil here?
                     end
@@ -98,7 +98,7 @@ describe(
                             y: number
                             z: number
                         end
-                        local comp = tecs.newComponent({
+                        local comp = tecs.ecs.newComponent({
                             name = "FieldsNewTest",
                             container = FieldComp as tecs.Component,
                             fields = {"x", "y", "z"},
@@ -117,7 +117,7 @@ describe(
                             radius: number
                             cookie: integer
                         end
-                        local comp = tecs.newComponent({
+                        local comp = tecs.ecs.newComponent({
                             name = "ConfigNewTest",
                             container = ConfigComp as tecs.Component,
                             fields = {"radius"},
@@ -151,7 +151,7 @@ describe(
                             first: any
                             second: number
                         end
-                        local comp = tecs.newComponent({
+                        local comp = tecs.ecs.newComponent({
                             name = "PosOnlyTest",
                             container = PosOnly as tecs.Component,
                             fields = {"first", "second"},
@@ -177,7 +177,7 @@ describe(
                             value: number
                         end
                         luassert.error_matches(function()
-                            tecs.newComponent({
+                            tecs.ecs.newComponent({
                                 name = "BrokenCtorOnlyTest",
                                 container = Broken as tecs.Component,
                                 init = function(instance: Broken, v: number) instance.value = v end,
@@ -194,7 +194,7 @@ describe(
                             value: number
                             validated: boolean
                         end
-                        local comp = tecs.newComponent({
+                        local comp = tecs.ecs.newComponent({
                             name = "MixedFieldsCtorTest",
                             container = Mixed as tecs.Component,
                             fields = {"value"},
@@ -226,7 +226,7 @@ describe(
                             label: string
                         end
 
-                        local comp = tecs.newComponent({
+                        local comp = tecs.ecs.newComponent({
                             name = "FancyTableCallTest",
                             container = FancyTable as tecs.Component,
                             fields = {"x", "y"},
@@ -261,7 +261,7 @@ describe(
                             y: integer
                         end
 
-                        local comp = tecs.newFFIComponent({
+                        local comp = tecs.ecs.newFFIComponent({
                             name = "FancyFFICallTest",
                             container = FancyFFI as tecs.Component,
                             fields = {
@@ -327,7 +327,7 @@ describe(
                 it(
                     "creates relationship component",
                     function()
-                        local rel = tecs.newRelationship({name = "TestRel2007"})
+                        local rel = tecs.ecs.newRelationship({name = "TestRel2007"})
 
                         luassert.is_not_nil(rel, "TestRel2007 should not be nil")
                         luassert.is_not_nil(rel.componentId, "TestRel2007 should have an ID")
@@ -341,7 +341,7 @@ describe(
                 it(
                     "creates relationship component instances",
                     function()
-                        local rel = tecs.newRelationship({name = "TestRel2008"})
+                        local rel = tecs.ecs.newRelationship({name = "TestRel2008"})
 
                         local instance1 = rel(2)
 
@@ -370,7 +370,7 @@ describe(
                             speed: number
                         end
 
-                        local rel = tecs.newRelationship({
+                        local rel = tecs.ecs.newRelationship({
                             name = "Attachment",
                             container = Attachment,
                             fields = {"speed"},
@@ -406,7 +406,7 @@ describe(
                 it(
                     "creates simple relationships without data",
                     function()
-                        local Follows = tecs.newRelationship({name = "Follows"})
+                        local Follows = tecs.ecs.newRelationship({name = "Follows"})
 
                         luassert.is_not_nil(Follows, "Follows should not be nil")
                         luassert.is_not_nil(Follows.componentName, "Follows should have a name")
@@ -435,7 +435,7 @@ describe(
                     function()
                         -- Should error if init is provided without container
                         luassert.has_error(function()
-                            tecs.newRelationship({
+                            tecs.ecs.newRelationship({
                                 name = "BadRelationship",
                                 fields = {},
                                 init = function(instance: tecs.Relationship, id: integer) instance.target = id end,
@@ -452,7 +452,7 @@ describe(
                             offset: number
                         end
 
-                        local rel = tecs.newRelationship({
+                        local rel = tecs.ecs.newRelationship({
                             name = "AttachFields",
                             container = AttachFields,
                             fields = {"speed", "offset"},
@@ -474,7 +474,7 @@ describe(
                             drag: number
                         end
 
-                        local rel = tecs.newRelationship({
+                        local rel = tecs.ecs.newRelationship({
                             name = "AttachDefaults",
                             container = AttachDefaults,
                             fields = {"speed", "drag"},
@@ -505,7 +505,7 @@ describe(
                     "rejects relationship init without fields or new",
                     function()
                         luassert.error_matches(function()
-                            tecs.newRelationship({
+                            tecs.ecs.newRelationship({
                                 name = "BadRelCtorOnly",
                                 container = {},
                                 init = function(_instance: tecs.Relationship, id: integer) end,
@@ -522,7 +522,7 @@ describe(
                             speed: number
                             validated: boolean
                         end
-                        local rel = tecs.newRelationship({
+                        local rel = tecs.ecs.newRelationship({
                             name = "MixedRelFieldsCtor",
                             container = RelData as tecs.Relationship,
                             fields = {"speed"},
@@ -546,7 +546,7 @@ describe(
                     "rejects defaults without fields on relationships",
                     function()
                         luassert.has_error(function()
-                            tecs.newRelationship({
+                            tecs.ecs.newRelationship({
                                 name = "BadRelDefaults",
                                 container = {},
                                 defaults = {0},
@@ -561,7 +561,7 @@ describe(
                         it(
                             "should return component instance for basic relationships",
                             function()
-                                local Likes = tecs.newRelationship({name = "LikesTargeting1"})
+                                local Likes = tecs.ecs.newRelationship({name = "LikesTargeting1"})
 
                                 local targetEntity = 42
                                 local result = Likes:targeting(targetEntity)
@@ -585,7 +585,7 @@ describe(
                                     delay: number
                                 end
 
-                                local Follows = tecs.newRelationship({
+                                local Follows = tecs.ecs.newRelationship({
                                     name = "FollowsTargeting2",
                                     container = FollowsType,
                                     fields = {"delay"},
@@ -613,8 +613,8 @@ describe(
                         it(
                             "should work with world queries",
                             function()
-                                local world = tecs.newWorld()
-                                local Likes = tecs.newRelationship({name = "LikesTargeting3"})
+                                local world = tecs.ecs.newWorld()
+                                local Likes = tecs.ecs.newRelationship({name = "LikesTargeting3"})
 
                                 local target = world:spawn()
                                 local entity1 = world:spawn(Likes:targeting(target) as tecs.Component)
@@ -641,13 +641,13 @@ describe(
                         it(
                             "should work with world:get",
                             function()
-                                local world = tecs.newWorld()
+                                local world = tecs.ecs.newWorld()
 
                                 local record FollowsType is tecs.Relationship
                                     delay: number
                                 end
 
-                                local Follows = tecs.newRelationship({
+                                local Follows = tecs.ecs.newRelationship({
                                     name = "FollowsTargeting4",
                                     container = FollowsType,
                                     fields = {"delay"},
@@ -678,7 +678,7 @@ describe(
                         it(
                             "should require target entity ID",
                             function()
-                                local Likes = tecs.newRelationship({name = "LikesTargeting5"})
+                                local Likes = tecs.ecs.newRelationship({name = "LikesTargeting5"})
 
                                 luassert.has_error(function() Likes:targeting(nil) end, "Missing target entity ID")
                             end
@@ -694,7 +694,7 @@ describe(
                 it(
                     "creates tag components",
                     function()
-                        local Frozen = tecs.newTagComponent({name = "Frozen"})
+                        local Frozen = tecs.ecs.newTagComponent({name = "Frozen"})
 
                         luassert.is_not_nil(Frozen, "Frozen tag should not be nil")
                         luassert.is_not_nil(Frozen.componentId, "Frozen tag should have an ID")
@@ -710,7 +710,7 @@ describe(
                         -- Presence is archetype-defined, not per-row. Any row read yields
                         -- the container; writes are no-ops. Callers only ever index live
                         -- rows, so there is no observable difference at the world level.
-                        local Selected = tecs.newTagComponent({name = "Selected"})
+                        local Selected = tecs.ecs.newTagComponent({name = "Selected"})
                         local column = Selected.storage:createColumn(100)
 
                         luassert.is_not_nil(column, "Tag column should not be nil")
@@ -728,8 +728,8 @@ describe(
                 it(
                     "multiple tags have independent containers",
                     function()
-                        local Tag1 = tecs.newTagComponent({name = "Tag1"})
-                        local Tag2 = tecs.newTagComponent({name = "Tag2"})
+                        local Tag1 = tecs.ecs.newTagComponent({name = "Tag1"})
+                        local Tag2 = tecs.ecs.newTagComponent({name = "Tag2"})
 
                         local column1 = Tag1.storage:createColumn(10)
                         local column2 = Tag2.storage:createColumn(10)
@@ -743,7 +743,7 @@ describe(
                 it(
                     "tag components work as regular components",
                     function()
-                        local Active = tecs.newTagComponent({name = "Active"})
+                        local Active = tecs.ecs.newTagComponent({name = "Active"})
 
                         -- Should be callable like a regular component
                         local instance = Active()
@@ -766,7 +766,7 @@ describe(
                         it(
                             "should default layer to 1 when not provided",
                             function()
-                                local transform = tecs.builtins.Transform()
+                                local transform = tecs.ecs.builtins.Transform()
                                 luassert.is_equal(transform.layer, 1, "Transform should default layer to 1")
                             end
                         )
@@ -775,7 +775,7 @@ describe(
                             "should reject layer 0 as invalid",
                             function()
                                 luassert.has_error(function()
-                                    tecs.builtins.Transform(10, 20, 30, 0)
+                                    tecs.ecs.builtins.Transform(10, 20, 30, 0)
                                 end, "Transform layer must be greater than 0, got: 0")
                             end
                         )
@@ -783,7 +783,7 @@ describe(
                         it(
                             "should preserve valid layer values",
                             function()
-                                local transform = tecs.builtins.Transform(5, 10, 15, 3)
+                                local transform = tecs.ecs.builtins.Transform(5, 10, 15, 3)
                                 luassert.is_equal(transform.layer, 3, "Transform should preserve valid layer")
                                 luassert.is_equal(transform.x, 5, "Transform should preserve x value")
                                 luassert.is_equal(transform.y, 10, "Transform should preserve y value")
@@ -795,7 +795,7 @@ describe(
                             "should reject negative layer values",
                             function()
                                 luassert.has_error(function()
-                                    tecs.builtins.Transform(0, 0, 0, -1)
+                                    tecs.ecs.builtins.Transform(0, 0, 0, -1)
                                 end, "Transform layer must be greater than 0, got: -1")
                             end
                         )
@@ -804,7 +804,7 @@ describe(
                             "should reject negative layer values with table argument",
                             function()
                                 luassert.has_error(function()
-                                    tecs.builtins.Transform.new({x = 0, y = 0, z = 0, layer = -5})
+                                    tecs.ecs.builtins.Transform.new({x = 0, y = 0, z = 0, layer = -5})
                                 end, "Transform layer must be greater than 0, got: -5")
                             end
                         )
@@ -812,7 +812,7 @@ describe(
                         it(
                             "should default layer to 1 with table argument when layer is nil",
                             function()
-                                local transform = tecs.builtins.Transform.new({x = 100, y = 200, z = 300})
+                                local transform = tecs.ecs.builtins.Transform.new({x = 100, y = 200, z = 300})
                                 luassert.is_equal(
                                     transform.layer, 1, "Transform should default layer to 1 with table argument"
                                 )
@@ -826,7 +826,7 @@ describe(
                             "should reject layer 0 with table argument",
                             function()
                                 luassert.has_error(function()
-                                    tecs.builtins.Transform.new({x = 50, y = 60, z = 70, layer = 0})
+                                    tecs.ecs.builtins.Transform.new({x = 50, y = 60, z = 70, layer = 0})
                                 end, "Transform layer must be greater than 0, got: 0")
                             end
                         )
@@ -834,7 +834,7 @@ describe(
                         it(
                             "should default coordinates to 0 when not provided",
                             function()
-                                local transform = tecs.builtins.Transform()
+                                local transform = tecs.ecs.builtins.Transform()
                                 luassert.is_equal(transform.x, 0, "Transform should default x to 0")
                                 luassert.is_equal(transform.y, 0, "Transform should default y to 0")
                                 luassert.is_equal(transform.z, 0, "Transform should default z to 0")
@@ -845,7 +845,7 @@ describe(
                         it(
                             "should default rotation to 0",
                             function()
-                                local transform = tecs.builtins.Transform()
+                                local transform = tecs.ecs.builtins.Transform()
                                 luassert.is_equal(transform.rotation, 0, "Transform should default rotation to 0")
                             end
                         )
@@ -853,7 +853,7 @@ describe(
                         it(
                             "should default scale to 1",
                             function()
-                                local transform = tecs.builtins.Transform()
+                                local transform = tecs.ecs.builtins.Transform()
                                 luassert.is_equal(transform.scaleX, 1, "Transform should default scaleX to 1")
                                 luassert.is_equal(transform.scaleY, 1, "Transform should default scaleY to 1")
                             end
@@ -862,7 +862,7 @@ describe(
                         it(
                             "should preserve rotation when set",
                             function()
-                                local transform = tecs.builtins.Transform()
+                                local transform = tecs.ecs.builtins.Transform()
                                 transform.rotation = math.pi / 4
                                 luassert.is_true(
                                     math.abs(transform.rotation - math.pi / 4) < 0.0001,
@@ -874,7 +874,7 @@ describe(
                         it(
                             "should preserve scale when set",
                             function()
-                                local transform = tecs.builtins.Transform()
+                                local transform = tecs.ecs.builtins.Transform()
                                 transform.scaleX = 2.5
                                 transform.scaleY = 0.5
                                 luassert.is_equal(transform.scaleX, 2.5, "Transform should preserve scaleX")
@@ -885,7 +885,7 @@ describe(
                         it(
                             "should support rotation with position and layer",
                             function()
-                                local transform = tecs.builtins.Transform(10, 20, 30, 2)
+                                local transform = tecs.ecs.builtins.Transform(10, 20, 30, 2)
                                 transform.rotation = math.pi / 2
                                 luassert.is_equal(transform.x, 10, "Transform should preserve x")
                                 luassert.is_equal(transform.y, 20, "Transform should preserve y")
@@ -899,7 +899,7 @@ describe(
                         it(
                             "should support scale with position and layer",
                             function()
-                                local transform = tecs.builtins.Transform(5, 15, 25, 3)
+                                local transform = tecs.ecs.builtins.Transform(5, 15, 25, 3)
                                 transform.scaleX = 3
                                 transform.scaleY = 3
                                 luassert.is_equal(transform.x, 5, "Transform should preserve x")
@@ -924,7 +924,7 @@ describe(
                             metamethod __call: function(self, x: number, y: number): FieldsComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "FieldsComp",
                             container = FieldsComp,
                             fields = {"x", "y"},
@@ -946,7 +946,7 @@ describe(
                             metamethod __call: function(self, a: number, b: number): FieldsNilComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "FieldsNilComp",
                             container = FieldsNilComp,
                             fields = {"a", "b"},
@@ -973,7 +973,7 @@ describe(
                             metamethod __call: function(self, x?: number, y?: number, z?: number): DefaultsComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "DefaultsComp",
                             container = DefaultsComp,
                             fields = {"x", "y", "z"},
@@ -996,7 +996,7 @@ describe(
                             metamethod __call: function(self, a?: number, b?: number): OverrideComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "OverrideComp",
                             container = OverrideComp,
                             fields = {"a", "b"},
@@ -1019,7 +1019,7 @@ describe(
                             metamethod __call: function(self, x?: number, y?: number, z?: number): PartialComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "PartialComp",
                             container = PartialComp,
                             fields = {"x", "y", "z"},
@@ -1042,7 +1042,7 @@ describe(
                             metamethod __call: function(self, mode: string, alpha?: string): HolesComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "HolesComp",
                             container = HolesComp,
                             fields = {"mode", "alpha"},
@@ -1071,7 +1071,7 @@ describe(
                             metamethod __call: function(self, label?: string): StrDefComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "StrDefComp",
                             container = StrDefComp,
                             fields = {"label"},
@@ -1087,7 +1087,7 @@ describe(
                     "errors when defaults provided without fields",
                     function()
                         luassert.has_error(function()
-                            tecs.newComponent({
+                            tecs.ecs.newComponent({
                                 name = "BadDefaultsComp",
                                 container = {},
                                 defaults = {0, 0},
@@ -1104,7 +1104,7 @@ describe(
                             metamethod __call: function(self, value?: number): MetaComp
                         end
 
-                        tecs.newComponent({
+                        tecs.ecs.newComponent({
                             name = "MetaComp",
                             container = MetaComp,
                             fields = {"value"},
@@ -1129,7 +1129,7 @@ describe(
                         local record Follows is tecs.Relationship
                             metamethod __call: function(self, target: integer): Follows
                         end
-                        local FollowsContainer: Follows = tecs.newRelationship({
+                        local FollowsContainer: Follows = tecs.ecs.newRelationship({
                             name = "SerFollows",
                             exclusive = false,
                         }) as Follows
@@ -1138,7 +1138,7 @@ describe(
                         local data = FollowsContainer.serialize(inst)
                         luassert.is_equal(42, data.target)
 
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local restored = FollowsContainer.deserialize(w, data)
                         luassert.is_equal(42, (restored as tecs.Relationship).target)
                     end
@@ -1150,14 +1150,14 @@ describe(
                         local record Parent is tecs.Relationship
                             metamethod __call: function(self, target: integer): Parent
                         end
-                        local ParentOf: Parent = tecs.newRelationship({
+                        local ParentOf: Parent = tecs.ecs.newRelationship({
                             name = "SerParentOf",
                             exclusive = true,
                             sparse = true,
                             reverseIndex = true,
                         }) as Parent
 
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local parent = w:spawn()
                         local child = w:spawn(ParentOf(parent))
                         w:commit()
@@ -1185,7 +1185,7 @@ describe(
                             flag: boolean
                             n: number
                         end
-                        local FlagComp: Flags = tecs.newComponent({
+                        local FlagComp: Flags = tecs.ecs.newComponent({
                             name = "FalseDefaultComp" .. math.random(1, 1000000),
                             container = {} as Flags,
                             fields = {"flag", "n"},

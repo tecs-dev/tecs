@@ -29,7 +29,7 @@
 ---     local field <const> = tecs.random.noise(1234)
 ---     local height <const> = field:fbm2(x * 0.01, y * 0.01, 4)
 
-local type ecs = require("tecs.ecs")
+local type types = require("tecs.types")
 
 local bit <const> = require("bit")
 
@@ -273,7 +273,7 @@ local record random
     --- @return The world's generator for this name, not a copy: two callers
     ---     asking for one name draw from the same sequence, in the order they
     ---     happen to ask.
-    stream: function(world: ecs.World, name: string): Random
+    stream: function(world: types.World, name: string): Random
 
     --- Sets the world's seed and restarts every stream in it from that seed.
     ---
@@ -282,7 +282,7 @@ local record random
     ---
     --- @param seed Read as a 32-bit word, as `new` reads one. There is no way
     ---     to ask a world for its seed back; take it from a snapshot instead.
-    seed: function(world: ecs.World, seed: integer)
+    seed: function(world: types.World, seed: integer)
 end
 
 local RandomMT <const>: metatable<random.Random> = {__index = random.Random}
@@ -570,7 +570,9 @@ end
 
 --- The streams each world has. Weak, so a world that has gone takes its
 --- streams with it.
-local registries <const>: {ecs.World: Registry} = setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Registry}>)
+local registries <const>: {types.World: Registry} = setmetatable({}, {
+    __mode = "k"
+} as metatable<{types.World: Registry}>)
 
 --- Derives a stream's seed from the world's seed and the stream's name.
 ---
@@ -628,7 +630,7 @@ end
 --- before anything has asked for a stream drops the saved seed on the floor;
 --- `random.seed` installs it too, which is what a game that cares calls during
 --- setup anyway.
-local function ensure(world: ecs.World): Registry
+local function ensure(world: types.World): Registry
     local existing <const> = registries[world]
     if existing ~= nil then
         return existing
@@ -639,19 +641,19 @@ local function ensure(world: ecs.World): Registry
 
     world:addSnapshotHandler({
         name = "tecs.random",
-        save = function(_world: ecs.World): any
+        save = function(_world: types.World): any
             local streams: {string: {integer}} = {}
             for name, generator in pairs(registry.streams) do
                 streams[name] = generator:state()
             end
             return {seed = registry.seed, streams = streams}
         end,
-        load = function(_world: ecs.World, value: any) restore(registry, value as {string: any}) end,
+        load = function(_world: types.World, value: any) restore(registry, value as {string: any}) end,
     })
     return registry
 end
 
-function random.stream(world: ecs.World, name: string): Random
+function random.stream(world: types.World, name: string): Random
     if name == nil or name == "" then
         error("random: a stream needs a non-empty name", 2)
     end
@@ -666,7 +668,7 @@ function random.stream(world: ecs.World, name: string): Random
     return generator
 end
 
-function random.seed(world: ecs.World, seed: integer)
+function random.seed(world: types.World, seed: integer)
     local registry <const> = ensure(world)
     registry.seed = tobit(seed)
     for name, generator in pairs(registry.streams) do

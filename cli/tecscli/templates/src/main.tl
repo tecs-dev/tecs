@@ -13,13 +13,13 @@
 local TRAVEL <const> = 60.0
 local SWEEP <const> = 1.2
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "{{title}}", width = 1280, height = 720},
 
     -- Your game is a plugin: handed the world, which holds everything that
     -- exists, and the application, which holds everything that does not. It
     -- registers what should happen and returns.
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.ecs.World, app: tecs.application.Application)
         print(("{{name}} on tecs %s, drawing through %s"):format(tecs.version, app.device.driver))
 
         -- Drawing text is opt-in, because a font atlas is uploaded into one
@@ -62,7 +62,7 @@ return tecs.application({
         -- phase it belongs to rather than a place in a list.
         world:addSystem({
             name = "{{name}}.Quit",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 if app.input:keyPressed("escape") then
                     app.quitRequested = true

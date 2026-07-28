@@ -9,7 +9,7 @@ local luassert <const> = require("luassert")
 -- test pokes directly. (A name-only relationship folds to FFI storage, whose
 -- instances aren't registered per-target; that path is covered end-to-end via
 -- ChildOf in relationships_spec.)
-local TestRel <const> = tecs.newRelationship({name = "TestRel", fields = {"weight"}})
+local TestRel <const> = tecs.ecs.newRelationship({name = "TestRel", fields = {"weight"}})
 
 describe(
     "Archetype tests",
@@ -20,7 +20,7 @@ describe(
                 it(
                     "creates a new archetype with components",
                     function()
-                        local componentTypes: {tecs.Component} = {tecs.builtins.Name, tecs.builtins.TTL}
+                        local componentTypes: {tecs.Component} = {tecs.ecs.builtins.Name, tecs.ecs.builtins.TTL}
                         local arch = Archetype.new(componentTypes)
 
                         luassert.is_not_nil(arch, "Expected Archetype.new() to return a non-nil value")
@@ -29,17 +29,19 @@ describe(
                         luassert.is_equal(0, arch.entities[0], "Expected entities to be empty")
 
                         -- Should have columns for both components
-                        luassert.is_not_nil(arch.columns[tecs.builtins.Name], "Expected Name column to exist")
-                        luassert.is_not_nil(arch.columns[tecs.builtins.TTL], "Expected TTL column to exist")
-                        luassert.is_nil(arch.columns[tecs.builtins.Transform], "Expected Transform column to not exist")
+                        luassert.is_not_nil(arch.columns[tecs.ecs.builtins.Name], "Expected Name column to exist")
+                        luassert.is_not_nil(arch.columns[tecs.ecs.builtins.TTL], "Expected TTL column to exist")
+                        luassert.is_nil(
+                            arch.columns[tecs.ecs.builtins.Transform], "Expected Transform column to not exist"
+                        )
                     end
                 )
 
                 it(
                     "assigns unique IDs to archetypes",
                     function()
-                        local arch1 = Archetype.new({tecs.builtins.Name}, 1)
-                        local arch2 = Archetype.new({tecs.builtins.Name}, 1)
+                        local arch1 = Archetype.new({tecs.ecs.builtins.Name}, 1)
+                        local arch2 = Archetype.new({tecs.ecs.builtins.Name}, 1)
 
                         luassert.not_equal(arch1.id, arch2.id, "Expected different IDs for different archetypes")
                     end
@@ -53,7 +55,7 @@ describe(
                 it(
                     "returns a readable string representation",
                     function()
-                        local arch = Archetype.new({tecs.builtins.Name, tecs.builtins.TTL}, 123)
+                        local arch = Archetype.new({tecs.ecs.builtins.Name, tecs.ecs.builtins.TTL}, 123)
                         local str = tostring(arch)
 
                         luassert.is_true(str:find("Archetype%(%[") ~= nil, "Expected to start with 'Archetype(['")
@@ -70,7 +72,7 @@ describe(
                 it(
                     "ignore invalid components",
                     function()
-                        local arch = Archetype.new({tecs.builtins.Name}, 123)
+                        local arch = Archetype.new({tecs.ecs.builtins.Name}, 123)
 
                         luassert.is_nil(arch:getFirstRelationship(TestRel, 10), "Expected no rel to be found")
                     end
@@ -127,8 +129,8 @@ describe(
                 it(
                     "supports a typed public observer on a queried archetype",
                     function()
-                        local w = tecs.newWorld()
-                        local Tag = tecs.newTagComponent({
+                        local w = tecs.ecs.newWorld()
+                        local Tag = tecs.ecs.newTagComponent({
                             name = "PublicObsTag" .. math.random(1, 1000000),
                         })
                         w:spawn(Tag())
@@ -171,8 +173,8 @@ describe(
                     "notifies a move-only observer on swap-pop",
                     function()
                         local WorldImpl <const> = require("tecs.internal.world")
-                        local w = tecs.newWorld()
-                        local Tag = tecs.newTagComponent({name = "MoveObsTag" .. math.random(1, 1000000)})
+                        local w = tecs.ecs.newWorld()
+                        local Tag = tecs.ecs.newTagComponent({name = "MoveObsTag" .. math.random(1, 1000000)})
                         local e1 = w:spawn(Tag())
                         local e2 = w:spawn(Tag())
                         w:commit()

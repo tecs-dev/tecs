@@ -110,7 +110,7 @@ local function spawnLights(world: tecs.World, width: number, height: number)
     end
 end
 
-return tecs.application({
+return tecs.application.create({
     window = {
         title = "tecs",
         width = math.floor(tonumber(os.getenv("TECS_WIDTH")) or 1280),
@@ -127,7 +127,7 @@ return tecs.application({
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local width, height = app.window:getPixelSize()
         print(("tecs %s"):format(tecs.version))
         print(("  driver: %s"):format(app.device.driver))
@@ -181,7 +181,7 @@ return tecs.application({
         if not static then
             world:addSystem({
                 name = "demo.Spin",
-                phase = tecs.phases.Update,
+                phase = tecs.ecs.phases.Update,
                 run = function(dt: number)
                     elapsed = elapsed + dt
                     for archetype, length in spinning:iter() do
@@ -197,7 +197,7 @@ return tecs.application({
         local orbiting = world:query({include = {Transform, PointLight}})
         world:addSystem({
             name = "demo.OrbitLights",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 local index = 0
                 for archetype, length in orbiting:iter() do
@@ -215,7 +215,7 @@ return tecs.application({
         local input = app.input
         world:addSystem({
             name = "demo.Quit",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 -- Reads the base layer, so this stops responding on its own if
                 -- a menu layer is ever pushed over it.
@@ -236,7 +236,7 @@ return tecs.application({
         -- rather than a callback the loop has to remember to call.
         world:addSystem({
             name = "demo.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(
                     ("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, " .. "%d resynced)"):format(

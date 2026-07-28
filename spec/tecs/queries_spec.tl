@@ -21,7 +21,7 @@ describe(
         local testId = 0
 
         before_each(function()
-            world = tecs.newWorld()
+            world = tecs.ecs.newWorld()
             testId = testId + 1
 
             -- Create fresh components for each test to avoid conflicts
@@ -46,8 +46,8 @@ describe(
                 it(
                     "formats queries consistently in tostring",
                     function()
-                        local GroupA = tecs.newComponent({name = "FormatGroupA_" .. testId, container = {}})
-                        local GroupB = tecs.newComponent({name = "FormatGroupB_" .. testId, container = {}})
+                        local GroupA = tecs.ecs.newComponent({name = "FormatGroupA_" .. testId, container = {}})
+                        local GroupB = tecs.ecs.newComponent({name = "FormatGroupB_" .. testId, container = {}})
                         local query = world:query({
                             name = "Moving",
                             include = {Position, Velocity},
@@ -339,9 +339,9 @@ describe(
                 it(
                     "filters initial matches with includeAny correctly",
                     function()
-                        local groupA = tecs.newComponent({name = "IncludeAnyGroupA_" .. testId, container = {}})
-                        local groupB = tecs.newComponent({name = "IncludeAnyGroupB_" .. testId, container = {}})
-                        local other = tecs.newComponent({name = "IncludeAnyOther_" .. testId, container = {}})
+                        local groupA = tecs.ecs.newComponent({name = "IncludeAnyGroupA_" .. testId, container = {}})
+                        local groupB = tecs.ecs.newComponent({name = "IncludeAnyGroupB_" .. testId, container = {}})
+                        local other = tecs.ecs.newComponent({name = "IncludeAnyOther_" .. testId, container = {}})
 
                         world:spawn(Position(1, 1), groupA)
                         world:spawn(Position(2, 2), groupB)
@@ -1013,7 +1013,7 @@ describe(
                 it(
                     "excludes disabled entities from queries by default",
                     function()
-                        local builtins = tecs.builtins
+                        local builtins = tecs.ecs.builtins
 
                         -- Spawn normal entities
                         world:spawn(Position(1, 1), Velocity(10, 10))
@@ -1041,7 +1041,7 @@ describe(
                 it(
                     "includes disabled entities when explicitly requested",
                     function()
-                        local builtins = tecs.builtins
+                        local builtins = tecs.ecs.builtins
 
                         -- Spawn disabled entity
                         world:spawn(Position(1, 1), Velocity(10, 10), builtins.Disabled)
@@ -1077,7 +1077,7 @@ describe(
 
                 before_each(function()
                     world:spawn(Position(1, 1), Velocity(10, 10))
-                    world:spawn(Position(2, 2), Velocity(20, 20), tecs.builtins.Paused)
+                    world:spawn(Position(2, 2), Velocity(20, 20), tecs.ecs.builtins.Paused)
                     world:update(0)
                 end)
 
@@ -1118,7 +1118,7 @@ describe(
                     "keeps paused entities that a logic query includes explicitly",
                     function()
                         local query = world:query({
-                            include = {Position, Velocity, tecs.builtins.Paused},
+                            include = {Position, Velocity, tecs.ecs.builtins.Paused},
                             type = "logic",
                         })
 
@@ -1151,9 +1151,9 @@ describe(
                     local containerA: tecs.Component = {}
                     local containerB: tecs.Component = {}
                     local containerC: tecs.Component = {}
-                    GroupA = tecs.newComponent({name = "GroupA_" .. testId, container = containerA})
-                    GroupB = tecs.newComponent({name = "GroupB_" .. testId, container = containerB})
-                    GroupC = tecs.newComponent({name = "GroupC_" .. testId, container = containerC})
+                    GroupA = tecs.ecs.newComponent({name = "GroupA_" .. testId, container = containerA})
+                    GroupB = tecs.ecs.newComponent({name = "GroupB_" .. testId, container = containerB})
+                    GroupC = tecs.ecs.newComponent({name = "GroupC_" .. testId, container = containerC})
                 end)
 
                 it(
@@ -1700,9 +1700,9 @@ describe(
                         -- arch{A,B}. Tracks the bug where observer-driven staging
                         -- appended a new spawn record on the destination without
                         -- marking the source arch for `pendingMoveOut`.
-                        local TagA = tecs.newTagComponent({name = "CascadeTagA"})
-                        local TagB = tecs.newTagComponent({name = "CascadeTagB"})
-                        local TagC = tecs.newTagComponent({name = "CascadeTagC"})
+                        local TagA = tecs.ecs.newTagComponent({name = "CascadeTagA"})
+                        local TagB = tecs.ecs.newTagComponent({name = "CascadeTagB"})
+                        local TagC = tecs.ecs.newTagComponent({name = "CascadeTagC"})
 
                         world:query({
                             name = "AObs",

@@ -1,4 +1,4 @@
---- Declares the `tecs` global, so a game can write `tecs.newWorld()` in any
+--- Declares the `tecs` global, so a game can write `tecs.ecs.newWorld()` in any
 --- file with no require line.
 ---
 --- The type is not restated here; it is read off `tecs/init.tl`, so the global

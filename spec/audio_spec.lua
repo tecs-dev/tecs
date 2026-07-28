@@ -307,7 +307,7 @@ end
 --- The same, plus a world the audio is installed into.
 local function scene(config)
     local audio, clip, backend = loaded(config)
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     audio:install(world)
     return audio, clip, backend, world
 end
@@ -977,7 +977,7 @@ describe("audio", function()
         -- the same rates in the same order every time it is played back.
         local function variedRates(seed, count)
             local audio, clip, backend, world = scene({ maxVoices = 32 })
-            tecs.random.seed(world, seed)
+            tecs.ecs.random.seed(world, seed)
             local rates = {}
             for index = 1, count do
                 audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
@@ -1004,7 +1004,7 @@ describe("audio", function()
 
         it("carries the variance stream through a snapshot", function()
             local audio, clip, backend, world = scene({ maxVoices = 32 })
-            tecs.random.seed(world, 4242)
+            tecs.ecs.random.seed(world, 4242)
             audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
 
             local saved = world:saveSnapshot().buffer
@@ -1653,7 +1653,7 @@ describe("audio", function()
             world:update(1 / 60)
             assert.are.equal(1, audio:sounding())
 
-            world:set(entity, tecs.builtins.Disabled)
+            world:set(entity, tecs.ecs.builtins.Disabled)
             world:update(1 / 60)
             assert.are.equal(0, audio:sounding(), "a disabled entity is not heard")
             assert.is_false(backend.tracks[1].playing)
@@ -1663,7 +1663,7 @@ describe("audio", function()
                 "and the handle goes with it, or re-enabling reads a voice that has gone as one that finished"
             )
 
-            world:remove(entity, tecs.builtins.Disabled)
+            world:remove(entity, tecs.ecs.builtins.Disabled)
             world:update(1 / 60)
             assert.are.equal(1, audio:sounding())
             assert.are.equal(2, backend.tracks[1].plays)
@@ -1679,9 +1679,9 @@ describe("audio", function()
             world:update(1 / 60)
             assert.are.equal(-1, world:get(entity, Audio.Sound).voice)
 
-            world:set(entity, tecs.builtins.Disabled)
+            world:set(entity, tecs.ecs.builtins.Disabled)
             world:update(1 / 60)
-            world:remove(entity, tecs.builtins.Disabled)
+            world:remove(entity, tecs.ecs.builtins.Disabled)
             world:update(1 / 60)
 
             assert.are.equal(0, audio:sounding(), "a sound that ran out does not come back for being switched off")
@@ -1939,7 +1939,7 @@ describe("audio", function()
         end)
 
         it("says why rather than failing when no audio is installed", function()
-            mcpTools.bind(nil, tecs.newWorld())
+            mcpTools.bind(nil, tecs.ecs.newWorld())
             local result = callTool("audio")
             assert.is_true(result.isError)
             assert.is_truthy(result.content[1].text:find("no audio", 1, true))
@@ -1951,7 +1951,7 @@ describe("audio", function()
             -- only report itself unavailable. Two worlds because `install`
             -- takes a world and the mixer holds no reference to any of them.
             local audio, _, _, world = scene()
-            local second = tecs.newWorld()
+            local second = tecs.ecs.newWorld()
             audio:install(second)
             assert.are.equal(audio, Audio.of(world))
             assert.are.equal(audio, Audio.of(second))

@@ -47,7 +47,7 @@ describe("a pivoted quad", function()
     -- Staging is a pair of addresses to the extractor and nothing more, so a
     -- plain C array is the whole of what a device supplies it with.
     local function newExtraction()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local extractor = Extractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,

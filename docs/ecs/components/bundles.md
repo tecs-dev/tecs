@@ -18,7 +18,7 @@ Bundles are reusable templates for spawning entities with a predefined set of co
 Create bundles through the world with a declarative definition:
 
 ```teal
-local Transform <const> = tecs.builtins.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 local Renderable <const> = tecs.components.Renderable
 local Tint <const> = tecs.components.Tint
 

@@ -200,19 +200,19 @@ The stack emits four builtin events at address `0`. See [Events](/ecs/events) fo
 [Builtins](/ecs/builtins#events) for the event records.
 
 ```teal
-world:observe(0, tecs.builtins.StateEnter, function(e: tecs.builtins.StateEnter)
+world:observe(0, tecs.ecs.builtins.StateEnter, function(e: tecs.ecs.builtins.StateEnter)
     print("Entered state:", e.state)
 end)
 
-world:observe(0, tecs.builtins.StateExit, function(e: tecs.builtins.StateExit)
+world:observe(0, tecs.ecs.builtins.StateExit, function(e: tecs.ecs.builtins.StateExit)
     print("Exited state:", e.state)
 end)
 
-world:observe(0, tecs.builtins.StateBlur, function(e: tecs.builtins.StateBlur)
+world:observe(0, tecs.ecs.builtins.StateBlur, function(e: tecs.ecs.builtins.StateBlur)
     print(e.state, "lost focus, pushed:", e.pushed)
 end)
 
-world:observe(0, tecs.builtins.StateFocus, function(e: tecs.builtins.StateFocus)
+world:observe(0, tecs.ecs.builtins.StateFocus, function(e: tecs.ecs.builtins.StateFocus)
     print(e.state, "regained focus, popped:", e.popped)
 end)
 ```
@@ -233,13 +233,13 @@ local enemies <const> = world:query({include = {GameState, Enemy}})
 
 ## Conditional systems
 
-`tecs.runif.inState` gates a system on the state currently on top:
+`tecs.ecs.runif.inState` gates a system on the state currently on top:
 
 ```teal
 world:addSystem({
     name = "GameplayUpdate",
-    phase = tecs.phases.Update,
-    runIf = tecs.runif.inState("game"),
+    phase = tecs.ecs.phases.Update,
+    runIf = tecs.ecs.runif.inState("game"),
     run = function(dt: number, world: tecs.World)
         -- only runs while "game" is the top state
     end
@@ -267,7 +267,7 @@ such as the player or the active camera.
 local GameState <const> = world:createState("game")
 local enemies <const> = world:query({include = {GameState, Enemy}})
 
-world:observe(0, tecs.builtins.FinishSnapshotLoad, function()
+world:observe(0, tecs.ecs.builtins.FinishSnapshotLoad, function()
     playerId = world:requireKey("player")
     rebuildEnemyIndex(enemies)
 end)

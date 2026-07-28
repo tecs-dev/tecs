@@ -10,8 +10,8 @@
 -- Two properties, and they pull in opposite directions:
 --
 --  * A tool that only wants the ECS must not be made to find a graphics stack.
---    `require("tecs")` therefore loads no engine module, and the engine half of
---    the surface resolves on first use.
+--    `require("tecs")` therefore loads no engine module: `tecs.ecs` is the only
+--    field there up front, and every other module resolves on first use.
 --  * A tool that does want workers or physics must get them, working, with no
 --    window in sight.
 --
@@ -56,9 +56,9 @@ describe("tecs headless", function()
             local output = run(
                 [[
                 local tecs = require("tecs")
-                local world = tecs.newWorld()
-                local Tag = tecs.newTagComponent({ name = "Headless" })
-                local Transform = tecs.builtins.Transform
+                local world = tecs.ecs.newWorld()
+                local Tag = tecs.ecs.newTagComponent({ name = "Headless" })
+                local Transform = tecs.ecs.builtins.Transform
                 local entity = world:spawn(Transform(10, 20), Tag)
                 world:update(1 / 60)
 
@@ -75,16 +75,16 @@ describe("tecs headless", function()
             assert.are.equal("ok 1 10 20 1\n", output)
         end)
 
-        -- The property that keeps the one above true. A module added to the
-        -- eager half of the surface would break a pure ECS tool, and would do
-        -- it silently: everything still works on a developer's machine, where
-        -- the libraries are installed.
+        -- The property that keeps the one above true. A module required
+        -- eagerly by `tecs.ecs` would break a pure ECS tool, and would do it
+        -- silently: everything still works on a developer's machine, where the
+        -- libraries are installed.
         it("builds a world through the ECS half alone", function()
-            -- The half engine modules require, reached first and on its own.
-            -- Under the whole surface this always works, because that requires
-            -- the compatibility shim before anything else; this half has to
-            -- stand up without it having been asked for. A fresh interpreter is
-            -- the only place a load-order fault like that appears.
+            -- The module engine code requires, reached first and on its own.
+            -- Through `tecs` this always works, because that requires the
+            -- compatibility shim before anything else; this has to stand up
+            -- without it having been asked for. A fresh interpreter is the
+            -- only place a load-order fault like that appears.
             local output = run(
                 [[
                 local ecs = require("tecs.ecs")
@@ -150,7 +150,7 @@ describe("tecs headless", function()
             local output = run(
                 [[
                 local tecs = require("tecs")
-                local world = tecs.newWorld()
+                local world = tecs.ecs.newWorld()
                 world:addPlugin(tecs.physics.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))

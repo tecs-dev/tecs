@@ -30,7 +30,7 @@ on first field access.
 local components <const> = tecs.components
 
 local entity <const> = world:spawn(
-    tecs.builtins.Transform(120, 80),
+    tecs.ecs.builtins.Transform(120, 80),
     components.Tint(1, 0.4, 0.2, 1),
     components.Renderable()
 )
@@ -66,7 +66,7 @@ skips FFI defaults, so a callback has to set every field it cares about.
 Position, rotation and scale in world units, which are pixels with the origin at the top left. Lighting works
 in the same units, so a light's position needs no conversion.
 
-This is the ECS builtin, re-exported: `tecs.components.Transform` and `tecs.builtins.Transform` are the same
+This is the ECS builtin, re-exported: `tecs.components.Transform` and `tecs.ecs.builtins.Transform` are the same
 component. It is a superset of what a renderer needs, carrying `z` and `layer` besides, and it is what the
 hierarchy and the authoring systems already move. A renderer reading a transform of its own would draw an
 entity where a parent transform or a tween had not put it.
@@ -166,7 +166,7 @@ drawing the layer the old name resolved to.
 :::
 
 The UV rect selects a region, so an atlas is the same thing as a whole image with the rect set to the full
-range. A Sprite is normally not built by hand: [`Renderer`](/modules/Renderer) hands one back when an image is
+range. A Sprite is normally not built by hand: [`Renderer`](/modules/renderer) hands one back when an image is
 registered, and [`sheet`](/modules/sheet) builds them per frame and per slice.
 
 **Pairs with:** `Renderable` and `Tint`, which the renderable query requires; `Animation` from
@@ -226,7 +226,7 @@ fragments it produces never read the region table. A world that clips nothing pa
 
 Nesting is the caller's. A region is one rectangle, so a panel inside a panel is set up as the intersection of
 the two rather than as two regions an instance sits in at once. The rectangle itself is set through
-[`Renderer`](/modules/Renderer).
+[`Renderer`](/modules/renderer).
 
 ## Renderable
 
@@ -286,7 +286,7 @@ Subsystems register components of their own, and they are documented with the su
 | `AnimationEvents`     | [`animation`](/modules/animation)                | Events derived from playback.                         |
 | `Text`                | [`text`](/modules/text)                          | A run of distance-field text.                         |
 | `ParticleEmitter`     | [`particles`](/modules/particles)                | An emitter, whose particles are not entities.         |
-| `Sound`               | [`Audio`](/modules/Audio)                        | A voice attached to an entity.                        |
+| `Sound`               | [`Audio`](/modules/audio)                        | A voice attached to an entity.                        |
 | `RigidBody`           | [`physics`](/modules/physics)                    | The body an entity is.                                |
 | `TweenTrackingTarget` | [`sequence`](/modules/sequence#tracking-sources) | Selects the entity a tracking tween chases.           |
 

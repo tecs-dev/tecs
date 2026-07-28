@@ -16,7 +16,7 @@ local components = require("tecs.components")
 local physics = require("tecs.physics")
 
 local Transform = components.Transform
-local Paused = tecs.builtins.Paused
+local Paused = tecs.ecs.builtins.Paused
 
 -- Every world built here, so teardown can shut all of them down. The
 -- simulation is per world now: a world nobody shuts down keeps its Box2D world
@@ -25,7 +25,7 @@ local Paused = tecs.builtins.Paused
 local built = {}
 
 local function newWorld()
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     world:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
     built[#built + 1] = world
     return world
@@ -200,7 +200,7 @@ describe("ecs.physics despawn", function()
         local killed = false
         world:addSystem({
             name = "spec.KillTheBody",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 if killed then
                     return

@@ -20,7 +20,7 @@ For the bigger picture of when scalar components fit, start from the
 ```teal
 local tecs <const> = require("tecs")
 
-local Health = tecs.newScalarComponent({
+local Health = tecs.ecs.newScalarComponent({
     name = "Health",
     kind = "number",
     default = 100,
@@ -28,7 +28,7 @@ local Health = tecs.newScalarComponent({
 ```
 
 ```teal
-function tecs.newScalarComponent<T>(options: ScalarComponentOptions<T>): ScalarComponent<T>
+function tecs.ecs.newScalarComponent<T>(options: ScalarComponentOptions<T>): ScalarComponent<T>
 ```
 
 ### Options
@@ -57,7 +57,7 @@ local record mymodule
     Health: tecs.ScalarComponent<number>
 end
 
-mymodule.Health = tecs.newScalarComponent({
+mymodule.Health = tecs.ecs.newScalarComponent({
     name = "Health",
     kind = "number",
     default = 100,

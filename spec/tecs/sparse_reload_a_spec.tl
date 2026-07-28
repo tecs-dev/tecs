@@ -10,8 +10,8 @@ describe(
         it(
             "commits an unrelated world",
             function()
-                local w = tecs.newWorld()
-                w:spawn(tecs.builtins.Name("first"))
+                local w = tecs.ecs.newWorld()
+                w:spawn(tecs.ecs.builtins.Name("first"))
                 w:commit()
                 luassert.is_true(true)
             end

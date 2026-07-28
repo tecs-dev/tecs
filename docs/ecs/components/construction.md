@@ -35,7 +35,7 @@ local record Health is tecs.Component
     metamethod __call: function(self, current?: integer, maximum?: integer): Health
 end
 
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "Health",
     container = Health,
     fields = {"current", "maximum"},

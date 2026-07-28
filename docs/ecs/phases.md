@@ -12,12 +12,12 @@ Phases are not advice. They are how the engine composes itself: input latching, 
 animation, text layout, audio and render extraction are all systems the engine registers into named phases, and a
 game's systems interleave with them by declaring a phase rather than by being called from somewhere.
 
-[`Application`](/modules/Application) drives all three groups. It runs the game's plugin, then `world:startup()`
+[`Application`](/modules/application) drives all three groups. It runs the game's plugin, then `world:startup()`
 once, then `world:update(dt)` per iteration, then `world:shutdown()` at teardown.
 
 ## Phase groups
 
-Tecs organizes phases into hierarchical groups. The whole tree hangs off `tecs.phases.AllGroups`.
+Tecs organizes phases into hierarchical groups. The whole tree hangs off `tecs.ecs.phases.AllGroups`.
 
 ### StartupGroup
 
@@ -68,22 +68,22 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | Phase             | System                          | Installed by                                       |
 | ----------------- | ------------------------------- | -------------------------------------------------- |
 | `First`           | `sequence.AdvanceFrame`         | [`sequence`](/modules/sequence), every application |
-| `FixedFirst`      | `tecs.EnterFixedInput`          | [`Application`](/modules/Application)              |
-| `FixedFirst`      | `tecs.SnapshotTransforms`       | [`Renderer`](/modules/Renderer)                    |
+| `FixedFirst`      | `tecs.EnterFixedInput`          | [`Application`](/modules/application)              |
+| `FixedFirst`      | `tecs.SnapshotTransforms`       | [`Renderer`](/modules/renderer)                    |
 | `FixedFirst`      | `sequence.Advance`              | [`sequence`](/modules/sequence), every application |
 | `FixedUpdate`     | `ttl`                           | builtins, every world                              |
 | `FixedUpdate`     | `tecs.StepPhysics`              | [`physics`](/modules/physics) plugin               |
 | `FixedPostUpdate` | `tecs.SyncBodyTransforms`       | [`physics`](/modules/physics) plugin               |
 | `FixedPostUpdate` | `tecs.AdvanceAnimation`         | [`animation`](/modules/animation) plugin           |
-| `FixedLast`       | `tecs.ExitFixedInput`           | [`Application`](/modules/Application)              |
+| `FixedLast`       | `tecs.ExitFixedInput`           | [`Application`](/modules/application)              |
 | `Update`          | `sequence.AdvancePresentation`  | [`sequence`](/modules/sequence), every application |
 | `PostUpdate`      | `RelativeTransform`             | builtins, every world                              |
-| `PostUpdate`      | `tecs.PlaySounds`               | [`Audio`](/modules/Audio)                          |
+| `PostUpdate`      | `tecs.PlaySounds`               | [`Audio`](/modules/audio)                          |
 | `PostUpdate`      | `tecs.EncodeAnimation`          | [`animation`](/modules/animation) plugin           |
 | `PostUpdate`      | `tecs.ReportAnimation`          | [`animation`](/modules/animation) plugin           |
 | `PostUpdate`      | `tecs.TextLayout`               | [`text`](/modules/text) plugin                     |
 | `PostUpdate`      | `tecs.ParticleEmitterSync`      | [`particles`](/modules/particles) plugin           |
-| `RenderFirst`     | `tecs.SyncRenderState`          | [`Renderer`](/modules/Renderer)                    |
+| `RenderFirst`     | `tecs.SyncRenderState`          | [`Renderer`](/modules/renderer)                    |
 | `RenderLast`      | `RelativeTransformDirtySampler` | builtins, every world                              |
 
 Three things follow from that table and are worth stating outright.
@@ -136,7 +136,7 @@ Both clocks advance whether or not any system is registered in a fixed phase.
 
 ## Using phases
 
-Access phases through `tecs.phases`:
+Access phases through `tecs.ecs.phases`:
 
 ```teal
 local tecs <const> = require("tecs")
@@ -144,14 +144,14 @@ local tecs <const> = require("tecs")
 -- Presentation: runs once per frame with the frame's dt.
 world:addSystem({
     name = "game.FadeTints",
-    phase = tecs.phases.Update,
+    phase = tecs.ecs.phases.Update,
     run = myFadeSystem
 })
 
 -- Simulation: runs on the fixed clock with the fixed timestep as dt.
 world:addSystem({
     name = "game.StepEnemies",
-    phase = tecs.phases.FixedUpdate,
+    phase = tecs.ecs.phases.FixedUpdate,
     run = myEnemySystem
 })
 ```
@@ -163,7 +163,7 @@ Concrete indexed phases expose a public `position`: their numeric slot in the pi
 inspection and ordering diagnostics:
 
 ```teal
-print(tecs.phases.Update.name, tecs.phases.Update.position)
+print(tecs.ecs.phases.Update.name, tecs.ecs.phases.Update.position)
 ```
 
 Phase groups expose their child phase tree through `children` instead, and have no `position` of their own. A custom
@@ -191,10 +191,10 @@ You can dynamically enable and disable phases to control which systems run:
 ```teal
 -- Stop the simulation without stopping presentation: physics, TTL and
 -- animation advance all live in the fixed group.
-world:disablePhase(tecs.phases.FixedUpdateGroup)
+world:disablePhase(tecs.ecs.phases.FixedUpdateGroup)
 
 -- Resume it
-world:enablePhase(tecs.phases.FixedUpdateGroup)
+world:enablePhase(tecs.ecs.phases.FixedUpdateGroup)
 ```
 
 ::: warning Disabling parent phases
@@ -217,10 +217,10 @@ You can explicitly run a specific phase using `world:runPhase()`:
 
 ```teal
 -- Run only the Render phase
-world:runPhase(tecs.phases.Render)
+world:runPhase(tecs.ecs.phases.Render)
 
 -- Run the entire RenderGroup
-world:runPhase(tecs.phases.RenderGroup)
+world:runPhase(tecs.ecs.phases.RenderGroup)
 ```
 
 ::: info Disabled phases behavior
@@ -235,14 +235,14 @@ Re-enable a phase with `world:enablePhase()` before running it directly.
 
 ```teal
 -- Disable all rendering (this cascades to RenderGroup's children too)
-world:disablePhase(tecs.phases.RenderGroup)
+world:disablePhase(tecs.ecs.phases.RenderGroup)
 
 -- runPhase honors the disabled state, so this runs nothing
-world:runPhase(tecs.phases.RenderGroup)
+world:runPhase(tecs.ecs.phases.RenderGroup)
 
 -- Re-enable a phase before running it directly
-world:enablePhase(tecs.phases.Render)
-world:runPhase(tecs.phases.Render)
+world:enablePhase(tecs.ecs.phases.Render)
+world:runPhase(tecs.ecs.phases.Render)
 ```
 
 Unlike `world:update`, `runPhase` only dispatches systems: it does not unwind deferred scopes before running and
@@ -277,7 +277,7 @@ function World:disablePhase(phase: Phase)
 ### world:registerPhase {#world-register-phase}
 
 Registers a custom phase with the world's pipeline, assigning it a position if it does not already have one and
-enabling it. Use this when an extension or custom pipeline adds phases outside the built-in `tecs.phases` tree.
+enabling it. Use this when an extension or custom pipeline adds phases outside the built-in `tecs.ecs.phases` tree.
 
 ```teal
 function World:registerPhase(phase: Phase)

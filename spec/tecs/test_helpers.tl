@@ -92,40 +92,40 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     local spriteContainer: TestHelpers.Sprite = {}
     local transformContainer: TestHelpers.Transform = {}
 
-    provider.PosComponent = tecs.newComponent({
+    provider.PosComponent = tecs.ecs.newComponent({
         name = prefix .. "Pos" .. testId,
         container = posContainer,
         fields = {"x", "y"},
         defaults = {0, 0},
     })
 
-    provider.VelComponent = tecs.newComponent({
+    provider.VelComponent = tecs.ecs.newComponent({
         name = prefix .. "Vel" .. testId,
         container = velContainer,
         fields = {"x", "y"},
         defaults = {0, 0},
     })
 
-    provider.HealthComponent = tecs.newComponent({
+    provider.HealthComponent = tecs.ecs.newComponent({
         name = prefix .. "Health" .. testId,
         container = healthContainer,
         fields = {"value", "max"},
         defaults = {100, 100},
     })
 
-    provider.DeadComponent = tecs.newComponent({
+    provider.DeadComponent = tecs.ecs.newComponent({
         name = prefix .. "Dead" .. testId,
         container = deadContainer,
     })
 
-    provider.SpriteComponent = tecs.newComponent({
+    provider.SpriteComponent = tecs.ecs.newComponent({
         name = prefix .. "Sprite" .. testId,
         container = spriteContainer,
         fields = {"texture", "width", "height"},
         defaults = {"", 0, 0},
     })
 
-    provider.TransformComponent = tecs.newComponent({
+    provider.TransformComponent = tecs.ecs.newComponent({
         name = prefix .. "Transform" .. testId,
         container = transformContainer,
         fields = {"scale", "rotation"},
@@ -133,7 +133,7 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     })
 
     function provider:createRelationship(name: string, exclusive: boolean): tecs.Relationship
-        return tecs.newRelationship({name = prefix .. name .. testId, exclusive = exclusive})
+        return tecs.ecs.newRelationship({name = prefix .. name .. testId, exclusive = exclusive})
     end
 
     return provider

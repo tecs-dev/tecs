@@ -3,7 +3,7 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Use the actual built-in Transform component
-local Transform <const> = tecs.builtins.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 
 describe(
     "Built-in Transform spawn/respawn",
@@ -16,10 +16,10 @@ describe(
             local testId = math.random(1, 1000000)
 
             local tagContainer: tecs.Component = {}
-            TestTag = tecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
+            TestTag = tecs.ecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
 
             local colorContainer: tecs.Component = {}
-            TestColor = tecs.newFFIComponent({
+            TestColor = tecs.ecs.newFFIComponent({
                 name = "BuiltinTest_Color" .. testId,
                 container = colorContainer,
                 fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
@@ -30,7 +30,7 @@ describe(
         it(
             "preserves Transform values after spawn/despawn cycles using builtin Transform",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
 
                 -- This test mimics the UI example scene switching
                 for cycle = 1, 3 do
@@ -141,7 +141,7 @@ describe(
         it(
             "handles many entities across multiple cycles",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
 
                 -- Run many cycles with many entities to stress test
                 for cycle = 1, 10 do
@@ -180,7 +180,7 @@ describe(
         it(
             "verifies entity-to-component value consistency within same archetype",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
 
                 -- Spawn multiple entities with same component signature but different values
                 -- This tests if values are correctly mapped to entities within the same archetype
@@ -257,8 +257,8 @@ describe(
 describe(
     "RelativeTransform hierarchy",
     function()
-        local ChildOf <const> = tecs.builtins.ChildOf
-        local RelativeTransform <const> = tecs.builtins.RelativeTransform
+        local ChildOf <const> = tecs.ecs.builtins.ChildOf
+        local RelativeTransform <const> = tecs.ecs.builtins.RelativeTransform
         local WorldImpl <const> = require("tecs.internal.world")
 
         -- Records, per update, whether the child's archetype had a dirty
@@ -268,7 +268,7 @@ describe(
             local seen: {boolean} = {}
             w:addSystem({
                 name = "TransformDirtyProbe",
-                phase = tecs.phases.Last,
+                phase = tecs.ecs.phases.Last,
                 run = function()
                     local arch = (w as WorldImpl):currentArchetype(child)
                     local found = false
@@ -287,7 +287,7 @@ describe(
         it(
             "recomputes children when the parent moves and marks Transform dirty",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local parent = w:spawn(Transform(100, 200, 0))
                 local child = w:spawn(
                     Transform(0, 0, 0), RelativeTransform(10, 20, 0), ChildOf(parent) as tecs.Component
@@ -314,7 +314,7 @@ describe(
         it(
             "recomputes children when ChildOf retargets",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local parent1 = w:spawn(Transform(100, 0, 0))
                 local parent2 = w:spawn(Transform(1000, 0, 0))
                 local child = w:spawn(

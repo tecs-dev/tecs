@@ -145,10 +145,10 @@ describe("mcp context", function()
         -- Through world:getStats rather than a tally kept beside it, so the
         -- first question an agent asks about a running game is answered by the
         -- tool that says what the build is.
-        local world = tecs.newWorld()
-        world:addSystem({ name = "spec.context", phase = tecs.phases.Update, run = function() end })
+        local world = tecs.ecs.newWorld()
+        world:addSystem({ name = "spec.context", phase = tecs.ecs.phases.Update, run = function() end })
         for index = 1, 3 do
-            world:spawn(tecs.builtins.Transform(index, 0, 0, 1, 0, 1, 1))
+            world:spawn(tecs.ecs.builtins.Transform(index, 0, 0, 1, 0, 1, 1))
         end
         world:commit()
         tools.bind(nil, world)

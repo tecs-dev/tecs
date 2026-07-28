@@ -90,7 +90,7 @@ are the worked examples of why:
 - **`tecs.animation.Animation`** holds a sheet id and a tag id, both decided by the order sheets were built in,
   and saves the pair of names instead. The frame index is deliberately dropped to zero, so the first step after
   a load rewrites the Sprite's region rather than trusting the region it was saved holding.
-- **`tecs.Audio.Sound`** crosses as the clip path and the group name it interned from. The voice is not
+- **`tecs.audio.Sound`** crosses as the clip path and the group name it interned from. The voice is not
   restored: a snapshot records that an entity has a sound, not how far through it the mixer had got, so it
   starts.
 - **`tecs.text.Text`** saves the authored fields and the font by name. A font never loaded in this process
@@ -123,7 +123,7 @@ local record PathCache is tecs.Component
     cursor: number
 end
 
-tecs.newFFIComponent({
+tecs.ecs.newFFIComponent({
     name = "PathCache",
     container = PathCache,
     fields = {
@@ -147,7 +147,7 @@ plugin that owns them re-derives them from the saved source of truth on load. A 
 per visible tile from a much smaller authored grid is the shape this exists for:
 
 ```teal
-world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
+world:observe(0, tecs.ecs.builtins.OnSnapshotSave, function(ev: tecs.ecs.builtins.OnSnapshotSave)
     ev:exclude(TileInstance)
 end)
 ```
@@ -160,7 +160,7 @@ them.
 
 Three engine subsystems already carry their own state across a snapshot, so these need no work from you:
 
-- **Seeded randomness.** `tecs.random` installs a `"tecs.random"` handler that saves the world seed and the
+- **Seeded randomness.** `tecs.ecs.random` installs a `"tecs.random"` handler that saves the world seed and the
   state of every named stream. It is installed lazily, on the first `random.stream` or `random.seed` call for
   that world, so a world that loads a snapshot before anything has asked for a stream drops the saved seed.
   Seeding during setup, which a game that cares does anyway, is enough to avoid that.
@@ -338,7 +338,7 @@ an entity that must survive save and load, give that entity a [`Key`](/ecs/built
 
 ```teal
 local playerId = world:spawn(
-    tecs.builtins.Key("player"),
+    tecs.ecs.builtins.Key("player"),
     Player()
 )
 
@@ -368,7 +368,7 @@ local record DespawnEffect is tecs.Component
     metamethod __call: function(self, name: string): DespawnEffect
 end
 
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "DespawnEffect",
     container = DespawnEffect,
     fields = {"name"},
@@ -379,12 +379,12 @@ Then let setup react to matching entities and install the entity observer:
 
 ```teal
 local despawnEffectQuery = world:query({
-    include = {DespawnEffect, tecs.builtins.Transform},
+    include = {DespawnEffect, tecs.ecs.builtins.Transform},
     onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
         local entities = archetype.entities
         for row = firstRow, lastRow do
             local entity = entities[row]
-            world:observe(entity, tecs.builtins.OnDespawn, function(_ev: tecs.builtins.OnDespawn)
+            world:observe(entity, tecs.ecs.builtins.OnDespawn, function(_ev: tecs.ecs.builtins.OnDespawn)
                 -- spawn the effect here
             end, "despawn-effect")
         end

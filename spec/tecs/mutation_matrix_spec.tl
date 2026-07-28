@@ -17,14 +17,14 @@ results.
 ]]
 
 -- Components exclusive to this spec to avoid cross-spec collisions.
-local MatHealth = tecs.newComponent({
+local MatHealth = tecs.ecs.newComponent({
     name = "MatrixHealth",
     container = {},
     fields = {"hp"},
     defaults = {100},
 })
 
-local MatArmor = tecs.newComponent({
+local MatArmor = tecs.ecs.newComponent({
     name = "MatrixArmor",
     container = {},
     fields = {"ar"},
@@ -32,25 +32,25 @@ local MatArmor = tecs.newComponent({
     requires = {MatHealth},
 })
 
-local MatPos = tecs.newComponent({
+local MatPos = tecs.ecs.newComponent({
     name = "MatrixPos",
     container = {},
     fields = {"x"},
     defaults = {0},
 })
 
-local MatVel = tecs.newComponent({
+local MatVel = tecs.ecs.newComponent({
     name = "MatrixVel",
     container = {},
     fields = {"dx"},
     defaults = {0},
 })
 
-local MatMarker = tecs.newTagComponent({name = "MatrixMarker"})
-local MatBatchTag = tecs.newTagComponent({name = "MatrixBatchTag"})
+local MatMarker = tecs.ecs.newTagComponent({name = "MatrixMarker"})
+local MatBatchTag = tecs.ecs.newTagComponent({name = "MatrixBatchTag"})
 
 -- Dense exclusive reverse-indexed relationship (compact FFI layout).
-local MatLink = tecs.newRelationship({
+local MatLink = tecs.ecs.newRelationship({
     name = "MatrixLink",
     exclusive = true,
     reverseIndex = true,
@@ -90,8 +90,8 @@ local modes: {Mode} = {
             local ran = false
             w:observe(
                 0,
-                tecs.builtins.OnSpawn,
-                function(_ev: tecs.builtins.OnSpawn)
+                tecs.ecs.builtins.OnSpawn,
+                function(_ev: tecs.ecs.builtins.OnSpawn)
                     if not ran then
                         ran = true
                         ops(w)
@@ -113,7 +113,7 @@ local function forEachMode(
 )
     for i = 1, #modes do
         local mode = modes[i]
-        local w = tecs.newWorld()
+        local w = tecs.ecs.newWorld()
         local e = setup(w)
         mode.run(w, function(world: tecs.World) ops(world, e) end)
         validate(w)
@@ -224,7 +224,7 @@ describe(
             function()
                 for i = 1, #modes do
                     local mode = modes[i]
-                    local w = tecs.newWorld()
+                    local w = tecs.ecs.newWorld()
                     local id: integer = nil
                     mode.run(w, function(world: tecs.World) id = world:spawn(MatArmor(5), MatHealth(50)) end)
                     luassert.equals(50, w:get(id, MatHealth).hp, "mode: " .. mode.name)
@@ -238,7 +238,7 @@ describe(
             function()
                 for i = 1, #modes do
                     local mode = modes[i]
-                    local w = tecs.newWorld()
+                    local w = tecs.ecs.newWorld()
                     w:newBundle("matrixModes", {required = {MatArmor}})
                     local id: integer = nil
                     mode.run(w, function(world: tecs.World) id = world:spawnBundle("matrixModes", MatArmor(3)) end)
@@ -257,7 +257,7 @@ describe(
         it(
             "constant form pulls required components into the transition",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local e = w:spawn(MatBatchTag)
                 local q = w:query({include = {MatBatchTag}})
                 w:batchSet(q, MatArmor(2))
@@ -272,7 +272,7 @@ describe(
         it(
             "callback form pulls required components into the transition",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local e = w:spawn(MatBatchTag)
                 local q = w:query({include = {MatBatchTag}})
                 w:batchSet(
@@ -300,7 +300,7 @@ describe(
         it(
             "batch spawn callback values win over required defaults",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local firstId = w:batchSpawn(
                     2,
                     {MatArmor, MatHealth},
@@ -322,7 +322,7 @@ describe(
         it(
             "bundle values win over required defaults, instant and staged",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 w:newBundle("matrixReqOrder", {required = {MatArmor, MatHealth}})
 
                 local id = w:spawnBundle("matrixReqOrder", MatArmor(5), MatHealth(50))
@@ -344,22 +344,22 @@ describe(
         it(
             "claims Key and rejects duplicate live keys",
             function()
-                local w = tecs.newWorld()
-                w:newBundle("matrixKeyed", {required = {tecs.builtins.Key, MatPos}})
+                local w = tecs.ecs.newWorld()
+                w:newBundle("matrixKeyed", {required = {tecs.ecs.builtins.Key, MatPos}})
 
-                local id = w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(3))
+                local id = w:spawnBundle("matrixKeyed", tecs.ecs.builtins.Key("matrixHero"), MatPos(3))
                 luassert.equals(id, w:byKey("matrixHero"))
                 luassert.equals(3, w:get(id, MatPos).x)
 
                 local ok = pcall(function()
-                    w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(4))
+                    w:spawnBundle("matrixKeyed", tecs.ecs.builtins.Key("matrixHero"), MatPos(4))
                 end)
                 luassert.is_false(ok, "duplicate live key must error")
 
                 -- Despawn releases the key for reclaiming.
                 w:despawn(id)
                 luassert.is_nil(w:byKey("matrixHero"))
-                local id2 = w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(5))
+                local id2 = w:spawnBundle("matrixKeyed", tecs.ecs.builtins.Key("matrixHero"), MatPos(5))
                 luassert.equals(id2, w:byKey("matrixHero"))
                 validate(w)
             end
@@ -368,15 +368,15 @@ describe(
         it(
             "emits OnSpawn with staged-entity semantics on the instant path",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 w:newBundle("matrixPlain", {required = {MatPos}})
 
                 local seen: {integer} = {}
                 local aliveDuring: boolean = true
                 w:observe(
                     0,
-                    tecs.builtins.OnSpawn,
-                    function(ev: tecs.builtins.OnSpawn)
+                    tecs.ecs.builtins.OnSpawn,
+                    function(ev: tecs.ecs.builtins.OnSpawn)
                         seen[#seen + 1] = ev.entity
                         aliveDuring = w:isAlive(ev.entity)
                         -- Observer mutations stage against the pending entity.
@@ -398,11 +398,11 @@ describe(
         it(
             "emits OnSpawn at stage time inside a scope",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 w:newBundle("matrixPlain2", {required = {MatPos}})
 
                 local seen = 0
-                w:observe(0, tecs.builtins.OnSpawn, function(_ev: tecs.builtins.OnSpawn) seen = seen + 1 end)
+                w:observe(0, tecs.ecs.builtins.OnSpawn, function(_ev: tecs.ecs.builtins.OnSpawn) seen = seen + 1 end)
 
                 w:defer()
                 local id = w:spawnBundle("matrixPlain2", MatPos(2))
@@ -423,14 +423,14 @@ describe(
         it(
             "instant set of a dense relationship instance adds the wildcard container",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local target = w:spawn(MatPos(1))
                 local e = w:spawn(MatPos(2))
                 w:set(e, MatLink(target))
                 luassert.is_true(w:has(e, MatLink), "container marker present on the instant path")
                 luassert.equals(target, w:getFirstRelationship(e, MatLink).target)
 
-                local w2 = tecs.newWorld()
+                local w2 = tecs.ecs.newWorld()
                 local target2 = w2:spawn(MatPos(1))
                 local e2 = w2:spawn(MatPos(2))
                 w2:defer()
@@ -445,10 +445,10 @@ describe(
         it(
             "instant despawn of a sparse relationship source cleans the store",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local parent = w:spawn(MatPos(1))
                 local child = w:spawn(MatPos(2))
-                w:set(child, tecs.builtins.ChildOf(parent))
+                w:set(child, tecs.ecs.builtins.ChildOf(parent))
 
                 -- The child is a source, not a target: its despawn takes the
                 -- instant path and must still drop its store entry and
@@ -456,13 +456,13 @@ describe(
                 w:despawn(child)
                 local sources = 0
                 w:targets(
-                    parent, tecs.builtins.ChildOf, function(_id: integer, _ctx: nil) sources = sources + 1 end, nil
+                    parent, tecs.ecs.builtins.ChildOf, function(_id: integer, _ctx: nil) sources = sources + 1 end, nil
                 )
                 luassert.equals(0, sources, "reverse index cleaned")
 
                 -- The recycled slot must not inherit the phantom relationship.
                 local recycled = w:spawn(MatPos(3))
-                luassert.is_nil(w:getFirstRelationship(recycled, tecs.builtins.ChildOf))
+                luassert.is_nil(w:getFirstRelationship(recycled, tecs.ecs.builtins.ChildOf))
                 validate(w)
             end
         )
@@ -470,7 +470,7 @@ describe(
         it(
             "bulk batch moves copy dense FFI relationship instance columns",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local target = w:spawn(MatPos(1))
                 -- Two batches into the same source archetype so the second
                 -- batchSet takes the non-empty-destination copy branch.
@@ -494,25 +494,25 @@ describe(
         it(
             "row-major snapshot round-trips scalar values on sparse-marker archetypes",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local parent = w:spawn(MatPos(1))
                 local e = w:spawn(MatPos(2))
-                w:set(e, tecs.builtins.ChildOf(parent))
-                w:set(e, tecs.builtins.Key("matrixRowMajor"))
+                w:set(e, tecs.ecs.builtins.ChildOf(parent))
+                w:set(e, tecs.ecs.builtins.Key("matrixRowMajor"))
 
                 -- Binary form (crashed before the writer fix).
                 local out = w:saveSnapshot()
                 w:loadSnapshot(out.buffer)
-                luassert.equals("matrixRowMajor", w:get(e, tecs.builtins.Key))
+                luassert.equals("matrixRowMajor", w:get(e, tecs.ecs.builtins.Key))
                 luassert.equals(e, w:byKey("matrixRowMajor"))
-                luassert.equals(parent, w:getFirstRelationship(e, tecs.builtins.ChildOf).target)
+                luassert.equals(parent, w:getFirstRelationship(e, tecs.ecs.builtins.ChildOf).target)
 
                 -- Table form (silently dropped the Key before the fix).
                 local out2 = w:saveSnapshot({format = "table"})
                 w:loadSnapshot(out2.snapshot)
-                luassert.equals("matrixRowMajor", w:get(e, tecs.builtins.Key))
+                luassert.equals("matrixRowMajor", w:get(e, tecs.ecs.builtins.Key))
                 luassert.equals(e, w:byKey("matrixRowMajor"))
-                luassert.equals(parent, w:getFirstRelationship(e, tecs.builtins.ChildOf).target)
+                luassert.equals(parent, w:getFirstRelationship(e, tecs.ecs.builtins.ChildOf).target)
                 validate(w)
             end
         )
@@ -522,7 +522,7 @@ describe(
 describe(
     "sparse relationship store hygiene",
     function()
-        local MatMark = tecs.newRelationship({
+        local MatMark = tecs.ecs.newRelationship({
             name = "MatrixMark",
             sparse = true,
             reverseIndex = true,
@@ -532,7 +532,7 @@ describe(
         it(
             "batchDespawn's bulk path cleans source store entries",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local target = w:spawn(MatPos(1))
                 local src = w:spawn(MatBatchTag)
                 w:set(src, MatMark(target))
@@ -551,7 +551,7 @@ describe(
         it(
             "getFirstRelationship returns an instance for multi-target sparse stores",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local t1 = w:spawn(MatPos(1))
                 local t2 = w:spawn(MatPos(2))
                 local src = w:spawn(MatPos(3))

@@ -37,7 +37,7 @@ describe(
             local testId = math.random(1, 1000000)
 
             local transformContainer: TestTransform = {}
-            TransformComp = tecs.newFFIComponent({
+            TransformComp = tecs.ecs.newFFIComponent({
                 name = "SpawnTest_Transform" .. testId,
                 container = transformContainer,
                 fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
@@ -45,7 +45,7 @@ describe(
             })
 
             local colorContainer: TestColor = {}
-            ColorComp = tecs.newFFIComponent({
+            ColorComp = tecs.ecs.newFFIComponent({
                 name = "SpawnTest_Color" .. testId,
                 container = colorContainer,
                 fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
@@ -53,13 +53,13 @@ describe(
             })
 
             local tagContainer: TestTag = {}
-            TagComp = tecs.newTagComponent({name = "SpawnTest_Tag" .. testId, container = tagContainer})
+            TagComp = tecs.ecs.newTagComponent({name = "SpawnTest_Tag" .. testId, container = tagContainer})
         end)
 
         it(
             "preserves component values after spawn/despawn/respawn cycle",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
 
                 -- Spawn 10 entities with different Transform values
                 local entities: {integer} = {}
@@ -117,7 +117,7 @@ describe(
         it(
             "preserves component values after multiple spawn/despawn cycles",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
 
                 -- Run multiple cycles to stress test the spawn/despawn logic
                 for cycle = 1, 5 do
@@ -157,7 +157,7 @@ describe(
         it(
             "preserves values when spawning entities with different component signatures",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
 
                 -- This test mimics the UI example where Text entities (Transform+Text+Color)
                 -- and Circle entities (Transform+Circle+Color) are spawned together

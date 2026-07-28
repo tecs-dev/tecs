@@ -58,7 +58,7 @@ local reentered = false
 -- host must refuse to enter a second time.
 local inUpdate = false
 
-return tecs.application({
+return tecs.application.create({
     window = { title = "hostlifecycle", width = 64, height = 64 },
     debugMaxFrames = FRAMES,
 
@@ -115,7 +115,7 @@ return tecs.application({
 
         world:addSystem({
             name = "fixture.Stimulus",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 inUpdate = true
 
@@ -159,7 +159,7 @@ return tecs.application({
 
         world:addSystem({
             name = "fixture.Frame",
-            phase = tecs.phases.Last,
+            phase = tecs.ecs.phases.Last,
             run = function()
                 frame = frame + 1
             end,
@@ -167,7 +167,7 @@ return tecs.application({
 
         world:addSystem({
             name = "fixture.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(("arrivalDelta=%.3f"):format(arrivalDelta or -1.0))
                 print(("backgroundEventFrame=%d"):format(backgroundEventFrame or -1))

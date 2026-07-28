@@ -33,7 +33,7 @@ The `groupBy` function receives an archetype and returns an integer. Tecs calls 
 matching the query and stores the key with the archetype, so iteration can keep same-key archetypes together.
 
 ```teal
-local Transform <const> = tecs.builtins.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 local Renderable <const> = tecs.components.Renderable
 local Sprite <const> = tecs.components.Sprite
 local Material <const> = tecs.components.Material

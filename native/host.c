@@ -633,7 +633,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     /* The engine is loaded before a game's first line, so `tecs` is simply
      * there. Requiring it is what sets the global, and asking every file to do
      * that is ceremony a game should never have to think about: a game writes
-     * `tecs.newWorld()` in any file and it works.
+     * `tecs.ecs.newWorld()` in any file and it works.
      *
      * A tool running under a plain interpreter never reaches this, so the
      * headless property holds: nothing outside the host pays for the engine
@@ -642,7 +642,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
      * game. A single-file build's chunk is the command line tool, and
      * unpacking its payload and setting package.path is the first thing it
      * does, so the engine is not reachable yet and must not be insisted on.
-     * A game's chunk finds it already loaded and writes `tecs.newWorld()` with
+     * A game's chunk finds it already loaded and writes `tecs.ecs.newWorld()` with
      * no preamble; a chunk that sets up its own paths requires it itself, as
      * the tool does. */
     lua_getglobal(L, "require");
@@ -660,7 +660,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     /* The entry chunk returns its application, which the host retains for the
      * life of the process. */
     if (!lua_istable(L, -1)) {
-        SDL_Log("tecs: %s must return tecs.application(config)", entry);
+        SDL_Log("tecs: %s must return tecs.application.create(config)", entry);
         SDL_free(resolved);
         return SDL_APP_FAILURE;
     }

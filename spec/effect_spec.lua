@@ -72,7 +72,7 @@ describe("particle effect identity across a snapshot", function()
         local smoke = register("specSmoke", 64)
         assert.are.equal(2, smoke.index)
 
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local entity = world:spawn(Transform(0, 0), ParticleEmitter({ effect = smoke, seed = 3 }))
 
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
@@ -91,7 +91,7 @@ describe("particle effect identity across a snapshot", function()
         assert.are.equal(2, sparksAgain.index)
         assert.are_not.equal(smoke.index, smokeAgain.index, "the indices have to move or this proves nothing")
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(snapshot)
 
         local emitter = restored:get(entity, ParticleEmitter)
@@ -106,11 +106,11 @@ describe("particle effect identity across a snapshot", function()
     -- rendering fault rather than a save one.
     it("carries the tint a game set on it", function()
         local effect = register("specTinted", 8)
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local entity =
             world:spawn(Transform(0, 0), ParticleEmitter({ effect = effect, tint = { 0.25, 0.5, 0.75, 0.5 } }))
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(world:saveSnapshot({ format = "table" }).snapshot)
 
         local tint = restored:get(entity, ParticleEmitter).tint
@@ -125,7 +125,7 @@ describe("particle effect identity across a snapshot", function()
         register("specSparks", 8)
         local smoke = register("specSmoke", 64)
 
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local entity = world:spawn(Transform(0, 0), ParticleEmitter({ effect = smoke, state = "paused" }))
         local buffer = world:saveSnapshot().buffer
 
@@ -133,7 +133,7 @@ describe("particle effect identity across a snapshot", function()
         register("specSmoke", 64)
         register("specSparks", 8)
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         restored:loadSnapshot(buffer)
 
         local emitter = restored:get(entity, ParticleEmitter)
@@ -145,7 +145,7 @@ describe("particle effect identity across a snapshot", function()
     it("refuses a snapshot naming an effect this build does not have", function()
         local smoke = register("specSmoke", 64)
 
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         world:spawn(Transform(0, 0), ParticleEmitter({ effect = smoke }))
         local snapshot = world:saveSnapshot({ format = "table" }).snapshot
 
@@ -155,7 +155,7 @@ describe("particle effect identity across a snapshot", function()
         particles.reset()
         register("specSparks", 8)
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         local ok, err = pcall(function()
             restored:loadSnapshot(snapshot)
         end)
@@ -178,7 +178,7 @@ describe("particle effect identity across a snapshot", function()
     it("refuses a snapshot whose emitter names no effect at all", function()
         register("specSparks", 8)
 
-        local restored = tecs.newWorld()
+        local restored = tecs.ecs.newWorld()
         local ok, err = pcall(function()
             ParticleEmitter.deserialize(restored, { state = "playing", seed = 1 })
         end)

@@ -113,7 +113,7 @@ timing.enable()
 --- the two is the host loop and the presentation wait around it.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "shapes", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -123,7 +123,7 @@ return tecs.application({
     maxEntities = COUNT + 1024,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local renderer = app.renderer
         spawnField(world)
 
@@ -131,7 +131,7 @@ return tecs.application({
         -- the sync recompute a basis per entity per frame, which is a different
         -- amount of work and would not be comparable.
         local moving = world:query({include = {Transform, Renderable}})
-        local phase = MODE == "fixed" and tecs.phases.FixedUpdate or tecs.phases.Update
+        local phase = MODE == "fixed" and tecs.ecs.phases.FixedUpdate or tecs.ecs.phases.Update
 
         world:addSystem({
             name = "bench.Drift",
@@ -161,7 +161,7 @@ return tecs.application({
         local frame = 0
         world:addSystem({
             name = "bench.Sample",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function(dt: number)
                 -- Warmup frames are the ones that built and first uploaded the
                 -- scene. Dropping them from every stage at once is what makes
@@ -179,7 +179,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(("frames after %d warmup, %d of %d instances synced"):format(WARMUP, renderer.count, COUNT))
                 local report = timing.format()

@@ -1,8 +1,10 @@
 --- Audio device discovery and pull-based microphone capture.
 ---
---- Playback itself is `tecs.Audio`. This module names physical devices for an
---- `Audio.Config.device` and exposes recording, which is a stream of bytes
---- coming into the game rather than a mixer sending sound out.
+--- Published under `tecs.audio` beside the mixer, which is `tecs.audio.Audio`.
+--- This half names physical devices for an `Audio.Config.device` and exposes
+--- recording, which is a stream of bytes coming into the game rather than a
+--- mixer sending sound out. Kept a file of its own because it reaches SDL and
+--- nothing else, so listing devices never opens a mixer.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

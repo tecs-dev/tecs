@@ -1187,7 +1187,7 @@ local record types
         --- Preserves: systems, queries, archetype columns, observers.
         ---
         --- If you need post-construction state (systems gone, queries gone),
-        --- just call `tecs.newWorld()` -- same path, clearer intent.
+        --- just call `tecs.ecs.newWorld()` -- same path, clearer intent.
         clearEntities: function(self)
 
         --- Compact the world: prune dead archetypes whose relationship
@@ -1220,11 +1220,11 @@ local record types
         --- @return true if present, false otherwise.
         has: function(self, entity: integer, component: components.Component): boolean
 
-        --- Return the live entity currently carrying `tecs.builtins.Key(key)`,
+        --- Return the live entity currently carrying `tecs.ecs.builtins.Key(key)`,
         --- or nil if no live entity has that key.
         byKey: function(self, key: string): integer | nil
 
-        --- Return the live entity currently carrying `tecs.builtins.Key(key)`,
+        --- Return the live entity currently carrying `tecs.ecs.builtins.Key(key)`,
         --- or error if no live entity has that key.
         requireKey: function(self, key: string): integer
 

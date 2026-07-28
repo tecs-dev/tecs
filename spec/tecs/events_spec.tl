@@ -20,9 +20,9 @@ end
 
 -- Register events with mutate-in-place constructors
 Greet.init = function(e: Greet, name: string) e.name = name end
-tecs.newEvent(Greet)
+tecs.ecs.newEvent(Greet)
 Depart.init = function(e: Depart, name: string) e.name = name end
-tecs.newEvent(Depart)
+tecs.ecs.newEvent(Depart)
 
 -- Test address
 local ADDR <const> = 0
@@ -34,7 +34,7 @@ local ADDR <const> = 0
 describe(
     "MessageBus",
     function()
-        describe("new", function() it("works", function() tecs.newMessageBus() end) end)
+        describe("new", function() it("works", function() tecs.ecs.newMessageBus() end) end)
 
         describe(
             "subscribe",
@@ -43,7 +43,7 @@ describe(
                     "emits in order",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         bus:observe(ADDR, Greet, function(greet: Greet) table.insert(messages, greet.name .. " 1") end)
                         bus:observe(ADDR, Greet, function(greet: Greet) table.insert(messages, greet.name .. " 2") end)
                         bus:observe(
@@ -69,7 +69,7 @@ describe(
                     "emits once with observeOnce",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         bus:observeOnce(
                             ADDR, Greet, function(greet: Greet) table.insert(messages, greet.name .. " 1") end
                         )
@@ -91,7 +91,7 @@ describe(
                     "can unsubscribe by receiver",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         local listener = function(greet: Greet) table.insert(messages, greet.name) end
                         bus:observe(ADDR, Greet, listener)
                         bus:emit(ADDR, Greet("Hi"))
@@ -108,7 +108,7 @@ describe(
                     "can unsubscribe by id",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         local listener = function(greet: Greet) table.insert(messages, greet.name) end
                         bus:observe(ADDR, Greet, listener, "id")
                         bus:emit(ADDR, Greet("Hi"))
@@ -130,7 +130,7 @@ describe(
                     "events at different addresses are isolated",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
 
                         bus:observe(
                             1, Greet, function(greet: Greet) table.insert(messages, "addr1: " .. greet.name) end
@@ -154,7 +154,7 @@ describe(
                     function()
                         local count1 = 0
                         local count2 = 0
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
 
                         bus:observe(1, Greet, function() count1 = count1 + 1 end)
                         bus:observe(2, Greet, function() count2 = count2 + 1 end)
@@ -182,7 +182,7 @@ describe(
                     "handles single observer fast path",
                     function()
                         local count = 0
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         bus:observe(ADDR, Greet, function() count = count + 1 end)
 
                         bus:emit(ADDR, Greet("test"))
@@ -194,7 +194,7 @@ describe(
                     "handles small observer count fast path",
                     function()
                         local counts = {0, 0, 0}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
 
                         for i = 1, 3 do
                             local idx = i
@@ -212,7 +212,7 @@ describe(
                     "maintains order after swap-and-pop removal",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
 
                         local listener1 = function() table.insert(messages, "1") end
                         local listener2 = function() table.insert(messages, "2") end
@@ -242,7 +242,7 @@ describe(
                     "handles multiple IDs for same callback",
                     function()
                         local count = 0
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         local listener = function() count = count + 1 end
 
                         bus:observe(ADDR, Greet, listener, "id1")
@@ -279,7 +279,7 @@ describe(
                 it(
                     "correctly cleans up reverse mappings",
                     function()
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
                         local listener1 = function() end
                         local listener2 = function() end
 
@@ -308,7 +308,7 @@ describe(
                     "handles removing during emission",
                     function()
                         local messages: {string} = {}
-                        local bus = tecs.newMessageBus()
+                        local bus = tecs.ecs.newMessageBus()
 
                         local listener2: function(Greet)
                         local listener1 = function(_: Greet)
@@ -352,7 +352,7 @@ describe(
                             metamethod __call: function(self: Foo, hi: string): Foo
                         end
                         Foo.init = function(e: Foo, hi: string) e.hi = hi end
-                        tecs.newEvent(Foo)
+                        tecs.ecs.newEvent(Foo)
 
                         luassert.is_not_nil(getmetatable(Foo), "Expected Foo to have a metatable")
 
@@ -370,7 +370,7 @@ describe(
                             metamethod __call: function(self: Bar, value: number): Bar
                         end
                         Bar.init = function(e: Bar, value: number) e.value = value end
-                        tecs.newEvent(Bar)
+                        tecs.ecs.newEvent(Bar)
 
                         local instance1 = Bar(42)
                         local instance2 = Bar(99)
@@ -396,9 +396,9 @@ describe(
                                 e.b = b
                             end
                         end
-                        tecs.newEvent(Baz)
+                        tecs.ecs.newEvent(Baz)
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local first: Baz = nil
                         local second: Baz = nil
                         world:observe(
@@ -431,9 +431,9 @@ describe(
                             metamethod __call: function(self: Nested, value: integer): Nested
                         end
                         Nested.init = function(e: Nested, value: integer) e.value = value end
-                        tecs.newEvent(Nested)
+                        tecs.ecs.newEvent(Nested)
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local outer: Nested = nil
                         local inner: Nested = nil
                         world:observe(
@@ -469,9 +469,9 @@ describe(
                             initCount = initCount + 1
                             e.value = value
                         end
-                        tecs.newEvent(SkipInit)
+                        tecs.ecs.newEvent(SkipInit)
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:emit(ADDR, SkipInit, 7)
                         luassert.is_equal(0, initCount)
                     end
@@ -491,7 +491,7 @@ describe(
                         end
 
                         assert.has_error(function()
-                            tecs.newFFIEvent(
+                            tecs.ecs.newFFIEvent(
                                 FFIReservedField,
                                 {
                                     {"typeId", "int32_t"},
@@ -504,7 +504,7 @@ describe(
                             FFIReservedField.eventId, "Expected invalid FFI event registration to leave eventId unset"
                         )
 
-                        tecs.newFFIEvent(
+                        tecs.ecs.newFFIEvent(
                             FFIReservedField,
                             {
                                 {"value", "int32_t"},
@@ -527,7 +527,7 @@ describe(
                             metamethod __call: function(self: FFILazyEmit, value: integer): FFILazyEmit
                         end
 
-                        tecs.newFFIEvent(
+                        tecs.ecs.newFFIEvent(
                             FFILazyEmit,
                             {
                                 {"value", "int32_t"},
@@ -535,7 +535,7 @@ describe(
                             "FFILazyEmit"
                         )
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local seen = 0
                         world:observe(ADDR, FFILazyEmit, function(ev: FFILazyEmit) seen = tonumber(ev.value) end)
 
@@ -552,10 +552,10 @@ describe(
                 it(
                     "survives an observer despawning its own entity mid-emit",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         -- A global OnDespawn observer makes despawn clear the entity's
                         -- observer address inline.
-                        world:observe(0, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) end)
+                        world:observe(0, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
 
                         local e = world:spawn()
                         world:commit()
@@ -580,8 +580,8 @@ describe(
                 it(
                     "supports fresh observers at a cleared address after the emit",
                     function()
-                        local world = tecs.newWorld()
-                        world:observe(0, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) end)
+                        local world = tecs.ecs.newWorld()
+                        world:observe(0, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
 
                         local e = world:spawn()
                         world:commit()
@@ -600,7 +600,7 @@ describe(
         describe(
             "observer cleanup on despawn",
             function()
-                local LeakTag = tecs.newTagComponent({name = "ObserverLeakTag"})
+                local LeakTag = tecs.ecs.newTagComponent({name = "ObserverLeakTag"})
 
                 -- Observer addresses are slots; a despawn must clear the address
                 -- even when no OnDespawn observer exists, or the slot's next
@@ -626,7 +626,7 @@ describe(
                 it(
                     "clears per-entity observers on instant despawn",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         assertNoLeak(world, function(id: integer) world:despawn(id) end)
                     end
                 )
@@ -634,7 +634,7 @@ describe(
                 it(
                     "clears per-entity observers on deferred despawn",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         assertNoLeak(world, function(id: integer) world:defer(); world:despawn(id) end)
                     end
                 )
@@ -642,7 +642,7 @@ describe(
                 it(
                     "clears per-entity observers on batch despawn",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local q = world:query({include = {LeakTag}})
                         assertNoLeak(world, function(_id: integer) world:batchDespawn(q) end)
                     end

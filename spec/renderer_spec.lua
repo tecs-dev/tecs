@@ -66,7 +66,7 @@ describe("ecs.Renderer", function()
     -- Builds a world with a renderer installed. Ambient is full white by
     -- default so transport can be tested without lighting in the way.
     local function newScene(ambient, capacity, reserveRuns)
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, {
             ambient = ambient or { 1.0, 1.0, 1.0 },
             capacity = capacity or 256,
@@ -273,7 +273,7 @@ describe("ecs.Renderer", function()
         local moving = world:query({ include = { Transform, Renderable } })
         world:addSystem({
             name = "spec.Move",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 for archetype, length in moving:iter() do
                     local transforms = archetype:getMut(Transform)
@@ -454,7 +454,7 @@ describe("ecs.Renderer", function()
     -- to carry that origin rather than assume it away.
     describe("a packed image array", function()
         local function packedScene(layers)
-            local world = tecs.newWorld()
+            local world = tecs.ecs.newWorld()
             local renderer = Renderer.create(device.handle, FORMAT, {
                 ambient = { 1.0, 1.0, 1.0 },
                 capacity = 256,
@@ -1017,7 +1017,7 @@ describe("ecs.Renderer", function()
 
         -- A spawn that only queued would be invisible here, which is how a
         -- scope the sync failed to pop shows itself from outside.
-        local Marker = tecs.newTagComponent({ name = "AfterMissingImage" })
+        local Marker = tecs.ecs.newTagComponent({ name = "AfterMissingImage" })
         world:spawn(Marker)
         local seen = 0
         for _, length in world:query({ include = { Marker } }):iter() do
@@ -1067,7 +1067,7 @@ describe("ecs.Renderer", function()
         local moving = world:query({ include = { Transform, Renderable } })
         world:addSystem({
             name = "spec.Nudge",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 for archetype, length in moving:iter() do
                     local transforms = archetype:getMut(Transform)
@@ -1148,7 +1148,7 @@ describe("ecs.Renderer", function()
     end)
 
     it("drops rows past capacity rather than overrunning the buffer", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
         renderer:install(world)
 
@@ -1167,14 +1167,14 @@ describe("ecs.Renderer", function()
     -- queued instead of applied, and nothing says so. The count above is the
     -- same either way, so it takes a spawn after the sync to tell.
     it("leaves the world undeferred after dropping rows", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
         renderer:install(world)
 
         -- Two archetypes, because the break has to actually execute. With one,
         -- the first pass fills the buffer and the loop then ends by exhausting
         -- the query, which pops the scope and hides the defect entirely.
-        local Second = tecs.newTagComponent({ name = "CapacitySecondArchetype" })
+        local Second = tecs.ecs.newTagComponent({ name = "CapacitySecondArchetype" })
         for _ = 1, 6 do
             world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable())
         end
@@ -1187,11 +1187,11 @@ describe("ecs.Renderer", function()
         -- because the world drains what it deferred when the update ends. A
         -- scope the sync failed to pop is invisible from outside and defers
         -- every system that runs after it.
-        local Marker = tecs.newTagComponent({ name = "AfterCapacityDrop" })
+        local Marker = tecs.ecs.newTagComponent({ name = "AfterCapacityDrop" })
         local seen = -1
         world:addSystem({
             name = "spec.SpawnAfterSync",
-            phase = tecs.phases.Last,
+            phase = tecs.ecs.phases.Last,
             run = function()
                 world:spawn(Marker)
                 seen = 0
@@ -2058,7 +2058,7 @@ describe("ecs.Renderer", function()
 
         --- A world whose body teleports one span to the right per fixed step.
         local function movingScene(span)
-            local world = tecs.newWorld()
+            local world = tecs.ecs.newWorld()
             local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
             renderer:install(world)
 
@@ -2071,7 +2071,7 @@ describe("ecs.Renderer", function()
 
             world:addSystem({
                 name = "spec.Teleport",
-                phase = tecs.phases.FixedUpdate,
+                phase = tecs.ecs.phases.FixedUpdate,
                 run = function()
                     local transform = world:getMut(entity, Transform)
                     transform.x = transform.x + span
@@ -2110,7 +2110,7 @@ describe("ecs.Renderer", function()
         end)
 
         it("leaves an entity without the component alone", function()
-            local world = tecs.newWorld()
+            local world = tecs.ecs.newWorld()
             local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
             renderer:install(world)
             world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE), Tint(1, 1, 1, 1), Renderable())

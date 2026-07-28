@@ -3,7 +3,7 @@ require("busted")
 local tecs <const> = require("tecs")
 local fixedtracking <const> = require("tecs.internal.fixedtracking")
 
-local Position = tecs.newFFIComponent({
+local Position = tecs.ecs.newFFIComponent({
     name = "FixedTrackingSpecPosition",
     container = {},
     fields = {{"x", "float"}},
@@ -26,7 +26,7 @@ describe(
         it(
             "reports tracked writes separately for every catch-up iteration",
             function()
-                local world = tecs.newWorld({timestep = 0.01})
+                local world = tecs.ecs.newWorld({timestep = 0.01})
                 fixedtracking.track(world, Position)
                 world:spawn(Position(0))
                 local arch = findArchetype(world)
@@ -45,7 +45,7 @@ describe(
                 )
 
                 world:addSystem({
-                    phase = tecs.phases.FixedUpdate,
+                    phase = tecs.ecs.phases.FixedUpdate,
                     run = function() local positions = arch:getMut(Position); positions[1].x = positions[1].x + 1 end,
                 })
 
@@ -60,7 +60,7 @@ describe(
         it(
             "does not replay a write in a later fixed iteration",
             function()
-                local world = tecs.newWorld({timestep = 0.01})
+                local world = tecs.ecs.newWorld({timestep = 0.01})
                 fixedtracking.track(world, Position)
                 world:spawn(Position(0))
                 local arch = findArchetype(world)
@@ -71,7 +71,7 @@ describe(
                     world, function() wrote[#wrote + 1] = fixedtracking.wroteThisStep(world, arch, Position) end
                 )
                 world:addSystem({
-                    phase = tecs.phases.FixedUpdate,
+                    phase = tecs.ecs.phases.FixedUpdate,
                     run = function()
                         if not shouldWrite then
                             return
@@ -91,17 +91,17 @@ describe(
         it(
             "lets a later variable-rate write supersede the fixed marker",
             function()
-                local world = tecs.newWorld({timestep = 0.01})
+                local world = tecs.ecs.newWorld({timestep = 0.01})
                 fixedtracking.track(world, Position)
                 world:spawn(Position(0))
                 local arch = findArchetype(world)
 
                 world:addSystem({
-                    phase = tecs.phases.FixedUpdate,
+                    phase = tecs.ecs.phases.FixedUpdate,
                     run = function() arch:getMut(Position)[1].x = 1 end,
                 })
                 world:addSystem({
-                    phase = tecs.phases.Update,
+                    phase = tecs.ecs.phases.Update,
                     run = function() arch:getMut(Position)[1].x = 2 end,
                 })
 

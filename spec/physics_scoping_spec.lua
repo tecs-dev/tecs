@@ -26,7 +26,7 @@ local Transform = components.Transform
 local built = {}
 
 local function newWorld(options)
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     world:addPlugin(physics.plugin(options or { gravity = { 0, 980 } }))
     built[#built + 1] = world
     return world
@@ -41,15 +41,15 @@ end)
 
 describe("ecs.physics world scoping", function()
     it("reports no simulation for a world that has none", function()
-        assert.is_nil(physics.of(tecs.newWorld()))
+        assert.is_nil(physics.of(tecs.ecs.newWorld()))
     end)
 
     -- The key's name is the published part, because `listKeys` reverse-maps
     -- names to ids: that is what lets a debug tool answer what is installed
     -- into a world without every module exporting its key.
     it("names its resource key", function()
-        assert.is_not_nil(tecs.findKey("tecs.physics"))
-        assert.is_not_nil(tecs.listKeys()["tecs.physics"])
+        assert.is_not_nil(tecs.ecs.findKey("tecs.physics"))
+        assert.is_not_nil(tecs.ecs.listKeys()["tecs.physics"])
     end)
 
     -- The module used to keep one simulation on itself, so a second install
@@ -102,7 +102,7 @@ describe("ecs.physics world scoping", function()
     -- which an application calls first and deliberately, so that is where the
     -- release goes.
     it("destroys the simulation on shutdown", function()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         world:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
         assert.is_not_nil(physics.of(world))
 
@@ -119,9 +119,9 @@ describe("ecs.physics world scoping", function()
     it("joins the solver threads once every world has shut down", function()
         local before = TaskPool.liveThreadCount()
 
-        local first = tecs.newWorld()
+        local first = tecs.ecs.newWorld()
         first:addPlugin(physics.plugin({ gravity = { 0, 980 }, workerCount = 4 }))
-        local second = tecs.newWorld()
+        local second = tecs.ecs.newWorld()
         second:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
 
         -- One pool, shared, however many simulations hold it: threads are the
@@ -140,7 +140,7 @@ describe("ecs.physics world scoping", function()
         local first = newWorld({ gravity = { 0, 980 }, workerCount = 2 })
         assert.is_not_nil(physics.of(first))
 
-        local second = tecs.newWorld()
+        local second = tecs.ecs.newWorld()
         assert.has_error(function()
             second:addPlugin(physics.plugin({ gravity = { 0, 980 }, workerCount = 3 }))
         end)

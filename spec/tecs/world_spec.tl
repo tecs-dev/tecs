@@ -5,7 +5,7 @@ local luassert <const> = require("luassert")
 local spy <const> = require("luassert.spy")
 local TestHelpers <const> = require("spec.tecs.test_helpers")
 local tecs <const> = require("tecs")
-local phases <const> = tecs.phases
+local phases <const> = tecs.ecs.phases
 
 describe(
     "WorldImpl",
@@ -40,7 +40,7 @@ describe(
                 it(
                     "creates a world",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
 
                         luassert.is_not_nil(w2, "World should be created successfully")
                         luassert.is_table(w2, "World should be a table")
@@ -52,7 +52,7 @@ describe(
                     "creates a world with a custom pipeline",
                     function()
                         local spyRun = spy.new(function() end)
-                        local w2 = tecs.newWorld({
+                        local w2 = tecs.ecs.newWorld({
                             pipelineFactory = function(): tecs.Pipeline
                                 return {
                                     -- builtin-plugins add systems. Don't assert on this though since more may be added in the future.
@@ -72,7 +72,7 @@ describe(
                 it(
                     "returns stats about the world",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local stats = w2:getStats()
 
                         luassert.is_table(stats, "Stats should be a table")
@@ -114,7 +114,7 @@ describe(
                 it(
                     "rejects stale handles after slot reuse",
                     function()
-                        local parentRel = tecs.newRelationship({
+                        local parentRel = tecs.ecs.newRelationship({
                             name = "WorldStaleParent_" .. tostring(testId),
                             exclusive = true,
                         })
@@ -139,7 +139,7 @@ describe(
                 it(
                     "spawn-then-despawn in the same frame still fires OnDespawn",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
 
                         -- Spawn-then-despawn in the same frame still fires the despawn
                         -- event. Hooks are immediate now, so the spawn's hooks have
@@ -151,8 +151,8 @@ describe(
                         local despawnEventEmitted = false
                         w2:observe(
                             entity,
-                            tecs.builtins.OnDespawn,
-                            function(e: tecs.builtins.OnDespawn)
+                            tecs.ecs.builtins.OnDespawn,
+                            function(e: tecs.ecs.builtins.OnDespawn)
                                 despawnEventEmitted = true
                                 luassert.equals(entity, e.entity, "OnDespawn event should contain correct entity ID")
                             end
@@ -169,14 +169,14 @@ describe(
                 it(
                     "emits OnSpawn for a top-level spawn",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local fired = 0
                         local aliveDuring: boolean = true
                         local eventId: integer = 0
                         w2:observe(
                             0,
-                            tecs.builtins.OnSpawn,
-                            function(e: tecs.builtins.OnSpawn)
+                            tecs.ecs.builtins.OnSpawn,
+                            function(e: tecs.ecs.builtins.OnSpawn)
                                 fired = fired + 1
                                 eventId = e.entity
                                 aliveDuring = w2:isAlive(e.entity)
@@ -202,11 +202,11 @@ describe(
                 it(
                     "keeps observer mutations staged during a deferred OnSpawn",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         w2:observe(
                             0,
-                            tecs.builtins.OnSpawn,
-                            function(e: tecs.builtins.OnSpawn) w2:set(e.entity, VelComponent(7, 6)) end
+                            tecs.ecs.builtins.OnSpawn,
+                            function(e: tecs.ecs.builtins.OnSpawn) w2:set(e.entity, VelComponent(7, 6)) end
                         )
 
                         w2:defer()
@@ -227,13 +227,15 @@ describe(
                 it(
                     "does not emit OnDespawn for an already-dead id",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local id = w2:spawn(PosComponent(1, 1))
                         w2:commit()
 
                         local fired = 0
                         w2:observe(
-                            0, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) fired = fired + 1 end
+                            0,
+                            tecs.ecs.builtins.OnDespawn,
+                            function(_e: tecs.ecs.builtins.OnDespawn) fired = fired + 1 end
                         )
 
                         w2:despawn(id)
@@ -249,7 +251,7 @@ describe(
                 it(
                     "carries high-generation packed ids intact in OnSpawn/OnDespawn",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
 
                         -- Recycle one slot until its generation pushes the packed id
                         -- past int32 range (generation lives above bit 22).
@@ -262,10 +264,14 @@ describe(
                         local spawnSeen: number = 0
                         local despawnSeen: number = 0
                         w2:observe(
-                            0, tecs.builtins.OnSpawn, function(e: tecs.builtins.OnSpawn) spawnSeen = e.entity end
+                            0,
+                            tecs.ecs.builtins.OnSpawn,
+                            function(e: tecs.ecs.builtins.OnSpawn) spawnSeen = e.entity end
                         )
                         w2:observe(
-                            0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn) despawnSeen = e.entity end
+                            0,
+                            tecs.ecs.builtins.OnDespawn,
+                            function(e: tecs.ecs.builtins.OnDespawn) despawnSeen = e.entity end
                         )
 
                         local id = w2:spawn()
@@ -281,7 +287,7 @@ describe(
                 it(
                     "rejects mutations through stale handles",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local stale = w2:spawn(PosComponent(1, 1))
                         w2:commit()
                         w2:despawn(stale)
@@ -313,7 +319,7 @@ describe(
                 it(
                     "spawnAt removes the revived slot from the free stack",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local a = w2:spawn(PosComponent(1, 1))
                         w2:commit()
                         w2:despawn(a)
@@ -338,7 +344,7 @@ describe(
                 it(
                     "batchSpawnAt removes revived slots from the free stack",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local a = w2:spawn(PosComponent(1, 1))
                         w2:commit()
                         w2:despawn(a)
@@ -367,7 +373,7 @@ describe(
                 it(
                     "despawns entities and emits event",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
 
                         -- Create entity
                         local entity = w2:spawn()
@@ -379,8 +385,8 @@ describe(
                         local despawnEventEmitted = false
                         w2:observe(
                             entity,
-                            tecs.builtins.OnDespawn,
-                            function(e: tecs.builtins.OnDespawn)
+                            tecs.ecs.builtins.OnDespawn,
+                            function(e: tecs.ecs.builtins.OnDespawn)
                                 despawnEventEmitted = true
                                 luassert.equals(entity, e.entity, "OnDespawn event should contain correct entity ID")
                             end
@@ -426,7 +432,7 @@ describe(
                 it(
                     "returns true/false for a tag component",
                     function()
-                        local Tag = tecs.newTagComponent({name = "HasSpecTag"})
+                        local Tag = tecs.ecs.newTagComponent({name = "HasSpecTag"})
                         local e1 = w:spawn(Tag)
                         local e2 = w:spawn()
                         w:commit()
@@ -438,7 +444,7 @@ describe(
                 it(
                     "returns true for a dense relationship container and instance",
                     function()
-                        local Follows = tecs.newRelationship({name = "HasSpecDenseFollows"})
+                        local Follows = tecs.ecs.newRelationship({name = "HasSpecDenseFollows"})
                         local leader = w:spawn()
                         local other = w:spawn()
                         local follower = w:spawn(Follows(leader) as tecs.Component)
@@ -458,7 +464,7 @@ describe(
                 it(
                     "distinguishes dense-relationship instances by target",
                     function()
-                        local Follows = tecs.newRelationship({name = "HasSpecDenseFollowsTarget"})
+                        local Follows = tecs.ecs.newRelationship({name = "HasSpecDenseFollowsTarget"})
                         local a = w:spawn()
                         local b = w:spawn()
                         local f = w:spawn(Follows(a) as tecs.Component)
@@ -475,7 +481,7 @@ describe(
                 it(
                     "returns true/false for a sparse relationship container",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "HasSpecSparseChildOf",
                             exclusive = true,
                             sparse = true,
@@ -496,7 +502,7 @@ describe(
                 it(
                     "routes sparse-instance checks through the relationship store",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "HasSpecSparseChildOfInstance",
                             exclusive = true,
                             sparse = true,
@@ -519,7 +525,7 @@ describe(
                 it(
                     "reflects removal of a dense relationship",
                     function()
-                        local Follows = tecs.newRelationship({name = "HasSpecDenseFollowsRemove"})
+                        local Follows = tecs.ecs.newRelationship({name = "HasSpecDenseFollowsRemove"})
                         local leader = w:spawn()
                         local f = w:spawn(Follows(leader) as tecs.Component)
                         w:commit()
@@ -534,7 +540,7 @@ describe(
                 it(
                     "reflects removal of a sparse relationship",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "HasSpecSparseChildOfRemove",
                             exclusive = true,
                             sparse = true,
@@ -559,8 +565,8 @@ describe(
                         -- Canonical flag invariant: single source of truth for the
                         -- `:has` branch. Pin it so accidental propagation (e.g. to
                         -- dense instances or containers) is caught early.
-                        local DenseRel = tecs.newRelationship({name = "HasSpecFlagDense"})
-                        local SparseRel = tecs.newRelationship({
+                        local DenseRel = tecs.ecs.newRelationship({name = "HasSpecFlagDense"})
+                        local SparseRel = tecs.ecs.newRelationship({
                             name = "HasSpecFlagSparse",
                             exclusive = true,
                             sparse = true,
@@ -618,20 +624,20 @@ describe(
                 it(
                     "adds components using public API",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
 
-                        local entity = w2:spawn(tecs.builtins.Name("TestEntity"))
+                        local entity = w2:spawn(tecs.ecs.builtins.Name("TestEntity"))
 
                         -- Force the world to update so batched changes are applied.
                         w2:update(1 / 60)
 
-                        local component = w2:get(entity, tecs.builtins.Name)
+                        local component = w2:get(entity, tecs.ecs.builtins.Name)
                         luassert.is_not_nil(component, "Component should be added to entity")
                         luassert.equals("TestEntity", component, "Component should have the correct value")
 
                         -- Get a non-existent component
                         luassert.is_nil(
-                            w2:get(entity, tecs.builtins.Transform), "Non-existent component should return nil"
+                            w2:get(entity, tecs.ecs.builtins.Transform), "Non-existent component should return nil"
                         )
                     end
                 )
@@ -639,10 +645,10 @@ describe(
                 it(
                     "fails when adding component to unknown entity",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
 
                         luassert.error_matches(function()
-                            w2:set(12345, tecs.builtins.Name("TestEntity"))
+                            w2:set(12345, tecs.ecs.builtins.Name("TestEntity"))
                         end, "Entity ID not found: 12345",
                         "Should fail when adding component to an unknown entity")
                     end
@@ -668,30 +674,34 @@ describe(
                 it(
                     "removes components using public API",
                     function()
-                        local w2 = tecs.newWorld()
-                        local entity = w2:spawn(tecs.builtins.Name("TestEntity"))
+                        local w2 = tecs.ecs.newWorld()
+                        local entity = w2:spawn(tecs.ecs.builtins.Name("TestEntity"))
 
                         -- Force the world to update so batched changes are applied.
                         w2:update(1 / 60)
 
                         -- Verify component was added
-                        luassert.is_not_nil(w2:get(entity, tecs.builtins.Name), "Component should be added initially")
+                        luassert.is_not_nil(
+                            w2:get(entity, tecs.ecs.builtins.Name), "Component should be added initially"
+                        )
 
                         -- Remove the component
-                        w2:remove(entity, tecs.builtins.Name)
+                        w2:remove(entity, tecs.ecs.builtins.Name)
 
                         -- Force the world to update so batched changes are applied.
                         w2:update(1 / 60)
 
                         -- Verify component was removed
-                        luassert.is_nil(w2:get(entity, tecs.builtins.Name), "Component should be removed from entity")
+                        luassert.is_nil(
+                            w2:get(entity, tecs.ecs.builtins.Name), "Component should be removed from entity"
+                        )
                     end
                 )
 
                 it(
                     "can observe events at entity address",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local entity = w2:spawn()
 
                         -- force the world to update so batched changes are applied.
@@ -700,8 +710,8 @@ describe(
                         local eventReceived = false
                         w2:observe(
                             entity,
-                            tecs.builtins.OnDespawn,
-                            function(_e: tecs.builtins.OnDespawn) eventReceived = true end
+                            tecs.ecs.builtins.OnDespawn,
+                            function(_e: tecs.ecs.builtins.OnDespawn) eventReceived = true end
                         )
 
                         w2:despawn(entity)
@@ -714,16 +724,19 @@ describe(
                 it(
                     "can check for observers at entity address",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local entity = w2:spawn()
                         w2:update(1 / 60)
 
-                        luassert.is_false(w2:hasObservers(entity, tecs.builtins.OnDespawn), "No observers initially")
+                        luassert.is_false(
+                            w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn), "No observers initially"
+                        )
 
-                        w2:observe(entity, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) end)
+                        w2:observe(entity, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
 
                         luassert.is_true(
-                            w2:hasObservers(entity, tecs.builtins.OnDespawn), "Should have observers after registering"
+                            w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn),
+                            "Should have observers after registering"
                         )
                     end
                 )
@@ -731,18 +744,18 @@ describe(
                 it(
                     "clears observers when entity is despawned",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local entity = w2:spawn()
                         w2:update(1 / 60)
 
-                        w2:observe(entity, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) end)
-                        luassert.is_true(w2:hasObservers(entity, tecs.builtins.OnDespawn), "Should have observers")
+                        w2:observe(entity, tecs.ecs.builtins.OnDespawn, function(_e: tecs.ecs.builtins.OnDespawn) end)
+                        luassert.is_true(w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn), "Should have observers")
 
                         w2:despawn(entity)
                         w2:update(1 / 60)
 
                         luassert.is_false(
-                            w2:hasObservers(entity, tecs.builtins.OnDespawn), "Observers should be cleared"
+                            w2:hasObservers(entity, tecs.ecs.builtins.OnDespawn), "Observers should be cleared"
                         )
                     end
                 )
@@ -802,8 +815,8 @@ describe(
                 it(
                     "puts resources",
                     function()
-                        local w2 = tecs.newWorld()
-                        local k: tecs.Key<string> = tecs.newKey("spec.world.res")
+                        local w2 = tecs.ecs.newWorld()
+                        local k: tecs.Key<string> = tecs.ecs.newKey("spec.world.res")
                         local v = "test"
                         w2.resources[k] = v
 
@@ -837,11 +850,11 @@ describe(
                 it(
                     "adds systems using public API",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local systemCalled = false
                         local testSystem = function(_dt, _w) systemCalled = true end
 
-                        w2:addSystem({phase = tecs.phases.Update, name = "TestSystem", run = testSystem})
+                        w2:addSystem({phase = tecs.ecs.phases.Update, name = "TestSystem", run = testSystem})
 
                         w2:update(1 / 60)
 
@@ -873,11 +886,11 @@ describe(
                 it(
                     "removes systems using public API",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local callCount = 0
                         local testSystem = function(_dt, _w) callCount = callCount + 1 end
 
-                        w2:addSystem({phase = tecs.phases.Update, name = "TestSystem", run = testSystem})
+                        w2:addSystem({phase = tecs.ecs.phases.Update, name = "TestSystem", run = testSystem})
 
                         w2:update(1 / 60)
                         luassert.equals(1, callCount, "System should be called once")
@@ -899,10 +912,10 @@ describe(
                 it(
                     "has startup phase",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local startupCalled = false
                         w2:addSystem({
-                            phase = tecs.phases.Startup,
+                            phase = tecs.ecs.phases.Startup,
                             name = "StartupSystem",
                             run = function() startupCalled = true end,
                         })
@@ -916,10 +929,10 @@ describe(
                 it(
                     "has shutdown phase",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local shutdownCalled = false
                         w2:addSystem({
-                            phase = tecs.phases.Shutdown,
+                            phase = tecs.ecs.phases.Shutdown,
                             name = "ShutdownSystem",
                             run = function(_dt, _w) shutdownCalled = true end,
                         })
@@ -933,12 +946,12 @@ describe(
                 it(
                     "releases its ffi event slice on shutdown",
                     function()
-                        local w2 = tecs.newWorld() as WorldImpl
+                        local w2 = tecs.ecs.newWorld() as WorldImpl
                         local sliceId = w2._ffiSliceId
 
                         w2:shutdown()
 
-                        local w3 = tecs.newWorld() as WorldImpl
+                        local w3 = tecs.ecs.newWorld() as WorldImpl
                         luassert.is_equal(sliceId, w3._ffiSliceId)
                     end
                 )
@@ -946,23 +959,23 @@ describe(
                 it(
                     "enables and disables phases",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local updateCalled = false
                         w2:addSystem({
-                            phase = tecs.phases.Update,
+                            phase = tecs.ecs.phases.Update,
                             name = "UpdateSystem",
                             run = function(_dt, _w) updateCalled = true end,
                         })
 
                         -- Disable the update phase
-                        w2:disablePhase(tecs.phases.Update)
+                        w2:disablePhase(tecs.ecs.phases.Update)
 
                         -- Run update
                         w2:update(1 / 60)
                         luassert.is_false(updateCalled, "Update system should not be called when phase is disabled")
 
                         -- Re-enable the update phase
-                        w2:enablePhase(tecs.phases.Update)
+                        w2:enablePhase(tecs.ecs.phases.Update)
 
                         -- Run update again
                         w2:update(1 / 60)
@@ -993,7 +1006,7 @@ describe(
                 it(
                     "adds plugins using public API",
                     function()
-                        local w2 = tecs.newWorld()
+                        local w2 = tecs.ecs.newWorld()
                         local pluginCalled = false
 
                         local testPlugin = function(ww: tecs.World)
@@ -1016,7 +1029,7 @@ describe(
                 it(
                     "returns fixed timing for interpolation",
                     function()
-                        local w2: tecs.World = tecs.newWorld({timestep = 0.1})
+                        local w2: tecs.World = tecs.ecs.newWorld({timestep = 0.1})
 
                         local timestep, accumulator, alpha = w2:getFixedTiming()
                         luassert.is_near(0.1, timestep, 1e-9)
@@ -1044,7 +1057,7 @@ describe(
                         -- default policy. What is left is the part of a step that had not
                         -- elapsed, so the alpha an interpolator reads carries on from
                         -- where it was rather than jumping.
-                        local w2 = tecs.newWorld({timestep = 0.1})
+                        local w2 = tecs.ecs.newWorld({timestep = 0.1})
 
                         w2:update(2)
 
@@ -1067,7 +1080,7 @@ describe(
                         -- The accumulate policy abandons nothing, so the accumulator can
                         -- hold whole steps between updates and the alpha has to stay in
                         -- range regardless.
-                        local w2 = tecs.newWorld({timestep = 0.1, fixedOverload = "accumulate"})
+                        local w2 = tecs.ecs.newWorld({timestep = 0.1, fixedOverload = "accumulate"})
 
                         w2:update(2)
 
@@ -1081,7 +1094,7 @@ describe(
                 it(
                     "advances fixed timing while fixed phases are disabled",
                     function()
-                        local w2 = tecs.newWorld({timestep = 0.1})
+                        local w2 = tecs.ecs.newWorld({timestep = 0.1})
                         w2:disablePhase(phases.FixedUpdateGroup)
 
                         w2:update(0.15)
@@ -1135,8 +1148,8 @@ describe(
 
                         w:observe(
                             entity,
-                            tecs.builtins.OnDespawn,
-                            function(event: tecs.builtins.OnDespawn)
+                            tecs.ecs.builtins.OnDespawn,
+                            function(event: tecs.ecs.builtins.OnDespawn)
                                 entityIdInEvent = event.entity
                                 wasAliveInEvent = w:isAlive(event.entity)
                             end
@@ -1155,7 +1168,7 @@ describe(
                 it(
                     "should cascade delete children when parent with cascadeDelete relationship is despawned",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "ChildOfAliveTest",
                             exclusive = true,
                             sparse = true,
@@ -1185,7 +1198,7 @@ describe(
                             value: number
                         end
 
-                        local TestComponent = tecs.newComponent({
+                        local TestComponent = tecs.ecs.newComponent({
                             name = "TestComponentAlive",
                             container = TestComponentType,
                             fields = {"value"},
@@ -1202,8 +1215,8 @@ describe(
 
                         w:observe(
                             entity,
-                            tecs.builtins.OnDespawn,
-                            function(event: tecs.builtins.OnDespawn)
+                            tecs.ecs.builtins.OnDespawn,
+                            function(event: tecs.ecs.builtins.OnDespawn)
                                 wasAlive = w:isAlive(event.entity)
                                 local comp = w:get(event.entity, TestComponent)
                                 if comp then
@@ -1373,7 +1386,7 @@ describe(
                 it(
                     "supports sparse relationship components in the signature",
                     function()
-                        local SparseRel = tecs.newRelationship({
+                        local SparseRel = tecs.ecs.newRelationship({
                             name = "BatchSparse" .. testId,
                             exclusive = true,
                             sparse = true,
@@ -1451,7 +1464,7 @@ describe(
                 it(
                     "allows mid-frame world:set on a batch-spawned id",
                     function()
-                        local Tag = tecs.newTagComponent({name = "BatchMidSet" .. testId})
+                        local Tag = tecs.ecs.newTagComponent({name = "BatchMidSet" .. testId})
                         local firstIdMaybe, ids = w:batchSpawn(
                             3,
                             {PosComponent},
@@ -1530,7 +1543,7 @@ describe(
                 it(
                     "respects query include/exclude",
                     function()
-                        local Tag = tecs.newTagComponent({name = "BatchDespawnTag" .. testId})
+                        local Tag = tecs.ecs.newTagComponent({name = "BatchDespawnTag" .. testId})
                         for _ = 1, 4 do
                             w:spawn(PosComponent(0, 0), Tag)
                         end
@@ -1596,7 +1609,7 @@ describe(
                     "emits global OnDespawn for every entity on the fast path",
                     function()
                         local observed: {integer} = {}
-                        w:observe(0, tecs.builtins.OnDespawn, function(ev) observed[#observed + 1] = ev.entity end)
+                        w:observe(0, tecs.ecs.builtins.OnDespawn, function(ev) observed[#observed + 1] = ev.entity end)
 
                         local ids: {integer} = {}
                         for i = 1, 5 do
@@ -1627,7 +1640,9 @@ describe(
                         w:commit()
 
                         local perEntityFires = 0
-                        w:observe(id, tecs.builtins.OnDespawn, function(_ev) perEntityFires = perEntityFires + 1 end)
+                        w:observe(
+                            id, tecs.ecs.builtins.OnDespawn, function(_ev) perEntityFires = perEntityFires + 1 end
+                        )
 
                         local q = w:query({include = {PosComponent}})
                         w:batchDespawn(q)
@@ -1635,7 +1650,7 @@ describe(
 
                         luassert.equals(1, perEntityFires, "per-entity OnDespawn should fire once")
                         luassert.is_false(
-                            w:hasObservers(id, tecs.builtins.OnDespawn),
+                            w:hasObservers(id, tecs.ecs.builtins.OnDespawn),
                             "per-entity observers should be cleared after despawn"
                         )
                     end
@@ -1644,7 +1659,7 @@ describe(
                 it(
                     "cascades sparse relationships via the slow path",
                     function()
-                        local SparseRel = tecs.newRelationship({
+                        local SparseRel = tecs.ecs.newRelationship({
                             name = "BatchDespawnRel" .. testId,
                             exclusive = true,
                             sparse = true,
@@ -1669,13 +1684,13 @@ describe(
                 it(
                     "indexes builtin Key and rejects duplicate live keys",
                     function()
-                        local a = w:spawn(tecs.builtins.Key("player"), PosComponent(1, 2))
+                        local a = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(1, 2))
                         w:commit()
 
                         luassert.equals(a, w:byKey("player"))
                         luassert.equals(a, w:requireKey("player"))
 
-                        local ok = pcall(function() w:spawn(tecs.builtins.Key("player"), PosComponent(3, 4)) end)
+                        local ok = pcall(function() w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(3, 4)) end)
                         luassert.is_false(ok)
                     end
                 )
@@ -1683,14 +1698,14 @@ describe(
                 it(
                     "reaps builtin Key when an entity despawns",
                     function()
-                        local a = w:spawn(tecs.builtins.Key("player"), PosComponent(1, 2))
+                        local a = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(1, 2))
                         w:commit()
 
                         w:despawn(a)
                         w:commit()
 
                         luassert.is_nil(w:byKey("player"))
-                        local b = w:spawn(tecs.builtins.Key("player"), PosComponent(3, 4))
+                        local b = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(3, 4))
                         w:commit()
                         luassert.equals(b, w:byKey("player"))
                     end
@@ -1702,16 +1717,16 @@ describe(
                         local a = w:spawn(PosComponent(1, 2))
                         w:commit()
 
-                        w:set(a, tecs.builtins.Key("first"))
+                        w:set(a, tecs.ecs.builtins.Key("first"))
                         w:commit()
                         luassert.equals(a, w:byKey("first"))
 
-                        w:set(a, tecs.builtins.Key("second"))
+                        w:set(a, tecs.ecs.builtins.Key("second"))
                         w:commit()
                         luassert.is_nil(w:byKey("first"))
                         luassert.equals(a, w:byKey("second"))
 
-                        w:remove(a, tecs.builtins.Key)
+                        w:remove(a, tecs.ecs.builtins.Key)
                         w:commit()
                         luassert.is_nil(w:byKey("second"))
                     end
@@ -1724,15 +1739,15 @@ describe(
                         w:commit()
 
                         local q = w:query({include = {PosComponent}})
-                        w:batchSet(q, tecs.builtins.Key("player"))
+                        w:batchSet(q, tecs.ecs.builtins.Key("player"))
                         w:commit()
                         luassert.equals(a, w:byKey("player"))
 
-                        w:batchRemove(q, tecs.builtins.Key)
+                        w:batchRemove(q, tecs.ecs.builtins.Key)
                         w:commit()
                         luassert.is_nil(w:byKey("player"))
 
-                        local b = w:spawn(tecs.builtins.Key("player"), PosComponent(3, 4))
+                        local b = w:spawn(tecs.ecs.builtins.Key("player"), PosComponent(3, 4))
                         w:commit()
                         luassert.equals(b, w:byKey("player"))
                     end
@@ -1746,7 +1761,7 @@ describe(
                         w:commit()
 
                         local q = w:query({include = {PosComponent}})
-                        local ok = pcall(function() w:batchSet(q, tecs.builtins.Key("player")) end)
+                        local ok = pcall(function() w:batchSet(q, tecs.ecs.builtins.Key("player")) end)
                         luassert.is_false(ok)
                     end
                 )
@@ -1755,7 +1770,7 @@ describe(
                     "rejects batch spawning entities with builtin Key",
                     function()
                         local ok = pcall(function()
-                            w:batchSpawn(2, {tecs.builtins.Key}, function(_arch, _first, _last, _count) end)
+                            w:batchSpawn(2, {tecs.ecs.builtins.Key}, function(_arch, _first, _last, _count) end)
                         end)
                         luassert.is_false(ok)
                     end
@@ -1769,9 +1784,9 @@ describe(
                         wImpl:batchSpawnAtRaw(
                             ids,
                             1,
-                            {tecs.builtins.Key, PosComponent},
+                            {tecs.ecs.builtins.Key, PosComponent},
                             function(arch, rowStart, _rowEnd, _count)
-                                (arch.columns[tecs.builtins.Key] as {string})[rowStart] = "player"
+                                (arch.columns[tecs.ecs.builtins.Key] as {string})[rowStart] = "player"
                                 (arch.columns[PosComponent] as {PosComponent})[rowStart] = PosComponent(1, 2)
                             end
                         )

@@ -123,7 +123,7 @@ timing.enable()
 --- Wall time between iterations, which is the frame time a player feels.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "particles", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -131,7 +131,7 @@ return tecs.application({
     maxEntities = 4096,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local renderer = app.renderer
         world:addPlugin(particles.plugin({
             renderer = renderer,
@@ -144,7 +144,7 @@ return tecs.application({
         local frame = 0
         world:addSystem({
             name = "bench.Sample",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function(dt: number)
                 if frame == WARMUP then
                     timing.reset()
@@ -158,7 +158,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(("frames after %d warmup, %d instances resident"):format(WARMUP, renderer.count))
                 local report = timing.format()

@@ -14,7 +14,7 @@ local COUNT <const> = 240
 --- `batchSpawn` rather than a spawn each, because one call resolves the
 --- archetype once and the callback writes columns in place. It skips FFI
 --- defaults, so every field is written here.
-local function spawnRing(world: tecs.World, width: number, height: number)
+local function spawnRing(world: tecs.ecs.World, width: number, height: number)
     local Transform <const> = tecs.components.Transform
     local Tint <const> = tecs.components.Tint
     local Renderable <const> = tecs.components.Renderable
@@ -26,7 +26,7 @@ local function spawnRing(world: tecs.World, width: number, height: number)
     world:batchSpawn(
         COUNT,
         {Transform, Tint, Renderable},
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+        function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
             for row = firstRow, lastRow do
@@ -50,7 +50,7 @@ local function spawnRing(world: tecs.World, width: number, height: number)
     )
 end
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "huh2", width = 1280, height = 720},
     ambientLight = {0.06, 0.06, 0.09},
     capacity = COUNT + 64,
@@ -58,7 +58,7 @@ return tecs.application({
     -- The game is a plugin, which is the only way in. It is handed the world
     -- and the application, and it registers what should happen rather than
     -- being called by the loop directly.
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.ecs.World, app: tecs.application.Application)
         local width <const>, height <const> = app.window:getPixelSize()
 
         -- What came up, said once at startup. Worth keeping: the driver and
@@ -82,7 +82,7 @@ return tecs.application({
         -- archetype every frame and defeats every dirty-gated consumer.
         world:addSystem({
             name = "huh2.Spin",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 elapsed = elapsed + dt
                 for archetype, length in spinning:iter() do
@@ -97,7 +97,7 @@ return tecs.application({
         local input <const> = app.input
         world:addSystem({
             name = "huh2.Quit",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 if input:keyPressed("escape") then
                     app.quitRequested = true

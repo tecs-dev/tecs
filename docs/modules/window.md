@@ -3,16 +3,16 @@ description: "Creating an OS window and reading its size, state, confinement and
 outline: deep
 ---
 
-# tecs.Window
+# tecs.window.Window
 
-`tecs.Window` is an OS window, and the displays it can sit on. It creates one, reads and changes its size,
+`tecs.window.Window` is an OS window, and the displays it can sit on. It creates one, reads and changes its size,
 position, decoration, fullscreen state and opacity, confines the pointer to it, asks for the user's attention
 through it, and enumerates the displays around it.
 
 The handle is owned by the platform layer and released by `destroy`, not by a finalizer. Tying GPU-adjacent
 lifetimes to Lua's collector makes hot reload either leak or double-free, depending on collection order.
 
-[`Application`](/modules/Application) creates the window for you from the `Window.Options` its config carries,
+[`Application`](/modules/application) creates the window for you from the `Window.Options` its config carries,
 and holds it. A game that only wants a window of a certain size sets the options and never calls `Window.create`.
 
 ## Requiring it
@@ -21,7 +21,7 @@ and holds it. A game that only wants a window of a certain size sets the options
 local tecs <const> = require("tecs")
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.Window`.
+The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.window.Window`.
 `tecs` is also set as a global, which makes the require line optional, and engine modules are resolved lazily on
 first field access.
 
@@ -110,7 +110,7 @@ reachable later.
 **Example:**
 
 ```teal
-local window <const> = tecs.Window.create({
+local window <const> = tecs.window.Window.create({
     title = "Starfarer",
     width = 1600, height = 900,
     minWidth = 640, minHeight = 360,
@@ -358,7 +358,7 @@ in a window that is not rendering yet.
 
 ## Confinement
 
-Pointer behaviour is [`Input`](/modules/Input)'s: relative mouse mode, warping, capture and cursor visibility all
+Pointer behaviour is [`Input`](/modules/input)'s: relative mouse mode, warping, capture and cursor visibility all
 act through the window but are input modes. What is here instead is confinement, which is a property of the
 window's bargain with the window manager rather than of the pointer.
 
@@ -444,7 +444,7 @@ What a game restoring a saved resolution asks for, since the display may no long
 **Example:**
 
 ```teal
-local mode <const> = tecs.Window.closestFullscreenMode(saved.width, saved.height, saved.refreshRate)
+local mode <const> = tecs.window.Window.closestFullscreenMode(saved.width, saved.height, saved.refreshRate)
 if mode ~= nil then
     window:setFullscreenMode(mode)
     window:setFullscreen(true)

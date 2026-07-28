@@ -185,7 +185,7 @@ clock.provider = function(_real: number): number return 1.0 / 60.0 end
 local plainWindows: {Window} = {}
 local probedWindows: {Window} = {}
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "allocation", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -195,7 +195,7 @@ return tecs.application({
     -- measured frame's `submit` bracket.
     debugMaxFrames = #REGIMES * 2 * (WARMUP + FRAMES + 1) + 1,
 
-    plugin = function(world: tecs.World, _app: tecs.Application)
+    plugin = function(world: tecs.World, _app: tecs.application.Application)
         spawnField(world)
 
         local moving = world:query({
@@ -264,7 +264,7 @@ return tecs.application({
             end
             world:addSystem({
                 name = SYSTEM,
-                phase = tecs.phases.Update,
+                phase = tecs.ecs.phases.Update,
                 run = body,
             })
             installed = name
@@ -312,7 +312,7 @@ return tecs.application({
         -- three below are inside the bracket it opens.
         world:addSystem({
             name = "bench.AllocFirst",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function()
                 local now = probing and heapBytes() or 0.0
                 local touched <const> = traceEvents > 0
@@ -373,7 +373,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.AllocPostUpdate",
-            phase = tecs.phases.PostUpdate,
+            phase = tecs.ecs.phases.PostUpdate,
             run = function()
                 if probing then
                     atPostUpdate = heapBytes()
@@ -383,7 +383,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.AllocPreRender",
-            phase = tecs.phases.PreRender,
+            phase = tecs.ecs.phases.PreRender,
             run = function()
                 if probing then
                     atPreRender = heapBytes()
@@ -393,7 +393,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.AllocLast",
-            phase = tecs.phases.Last,
+            phase = tecs.ecs.phases.Last,
             run = function()
                 if probing then
                     atLast = heapBytes()
@@ -403,7 +403,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.AllocReport",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 collectgarbage("restart")
                 print(

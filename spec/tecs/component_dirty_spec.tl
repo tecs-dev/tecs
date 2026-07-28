@@ -15,17 +15,17 @@
 local tecs <const> = require("tecs")
 local internal <const> = require("tecs.internal.types")
 
-local Pos = tecs.newComponent({
+local Pos = tecs.ecs.newComponent({
     name = "ComponentDirtySpecPos",
     container = {},
     fields = {"x", "y"},
 })
-local Vel = tecs.newComponent({
+local Vel = tecs.ecs.newComponent({
     name = "ComponentDirtySpecVel",
     container = {},
     fields = {"dx", "dy"},
 })
-local Tag = tecs.newTagComponent({name = "ComponentDirtySpecTag"})
+local Tag = tecs.ecs.newTagComponent({name = "ComponentDirtySpecTag"})
 
 local function clearDirty(arch: tecs.Archetype)
     (arch as internal.ArchetypeInternal):clearDirtyComponents()
@@ -61,7 +61,7 @@ describe(
                 it(
                     "archetype:get(Foo) does not mark Foo dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
                         world:update(0) -- clear dirty from spawn
 
@@ -75,7 +75,7 @@ describe(
                 it(
                     "archetype:getMut(Foo) marks Foo dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
                         world:update(0)
 
@@ -89,7 +89,7 @@ describe(
                 it(
                     "getMut(Foo) does NOT mark other components dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(0, 0))
                         world:update(0)
 
@@ -104,7 +104,7 @@ describe(
                 it(
                     "repeated getMut(Foo) is idempotent",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
                         world:update(0)
 
@@ -121,7 +121,7 @@ describe(
                     "archetype:get(Foo) returns the same column as archetype:getMut(Foo)",
                     function()
                         -- Same underlying storage; the difference is the dirty mark.
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
 
                         local arch = findArchetype(world, {Pos})
@@ -140,7 +140,7 @@ describe(
                 it(
                     "spawn into a new archetype marks every component on it dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(3, 4))
 
                         local arch = findArchetype(world, {Pos, Vel})
@@ -154,7 +154,7 @@ describe(
                     function()
                         -- Spawn into Pos archetype, then add Tag -- that's a move-in
                         -- to {Pos, Tag} archetype.
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local e = world:spawn(Pos(1, 2))
                         world:update(0) -- clear dirty from initial spawn
 
@@ -171,7 +171,7 @@ describe(
                 it(
                     "swap-pop on entity removal marks every component on the source dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local a = world:spawn(Pos(1, 1))
                         local _b = world:spawn(Pos(2, 2))
                         local _c = world:spawn(Pos(3, 3))
@@ -195,7 +195,7 @@ describe(
                 it(
                     "world:set on existing component marks it dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local e = world:spawn(Pos(1, 2), Vel(0, 0))
                         world:update(0)
 
@@ -210,7 +210,7 @@ describe(
                 it(
                     "archetype:set marks the affected component dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(0, 0))
                         world:update(0)
 
@@ -230,7 +230,7 @@ describe(
                 it(
                     "world:update clears component-dirty bitsets at end of frame",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
                         local arch = findArchetype(world, {Pos})
                         assert.is_true(arch:isComponentDirty(Pos))
@@ -246,7 +246,7 @@ describe(
                 it(
                     "the internal clear clears every bit",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(0, 0))
                         local arch = findArchetype(world, {Pos, Vel})
 
@@ -265,7 +265,7 @@ describe(
                 it(
                     "archetype:markComponentDirty sets the bit for that component only",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(0, 0))
                         local arch = findArchetype(world, {Pos, Vel})
                         clearDirty(arch)
@@ -280,7 +280,7 @@ describe(
                 it(
                     "world:markComponentDirty ignores a stale entity handle",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local stale = world:spawn(Pos(1, 2))
                         world:despawn(stale)
                         local fresh = world:spawn(Pos(3, 4))
@@ -302,7 +302,7 @@ describe(
                 it(
                     "archetype:markAllComponentsDirty sets every component's bit",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(0, 0))
                         local arch = findArchetype(world, {Pos, Vel})
                         clearDirty(arch)
@@ -322,7 +322,7 @@ describe(
                 it(
                     "an archetype with any component dirty is in world:dirtyArchetypes",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
 
                         local arch = findArchetype(world, {Pos})
@@ -339,7 +339,7 @@ describe(
                 it(
                     "world:update clears the dirty-archetype set",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2))
                         world:update(0)
 
@@ -359,7 +359,7 @@ describe(
                 it(
                     "yields exactly the components currently marked dirty",
                     function()
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         world:spawn(Pos(1, 2), Vel(0, 0))
                         local arch = findArchetype(world, {Pos, Vel})
                         clearDirty(arch)

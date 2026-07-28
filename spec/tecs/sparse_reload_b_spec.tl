@@ -1,7 +1,7 @@
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
-local ChildOf <const> = tecs.builtins.ChildOf
-local Name <const> = tecs.builtins.Name
+local ChildOf <const> = tecs.ecs.builtins.ChildOf
+local Name <const> = tecs.ecs.builtins.Name
 
 describe(
     "sparse relationship module reload",
@@ -9,7 +9,7 @@ describe(
         it(
             "reads a committed ChildOf through the public API",
             function()
-                local w = tecs.newWorld()
+                local w = tecs.ecs.newWorld()
                 local parent = w:spawn(Name("parent"))
                 local child = w:spawn(Name("child"), ChildOf(parent))
                 w:commit()

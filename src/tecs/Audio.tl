@@ -47,7 +47,7 @@
 --- mute and every group's gain, mute and pause are a game's state as much as
 --- an entity is, and none of them is in the world, so `install` adds a
 --- snapshot handler that carries them. Pitch variance is drawn from the
---- world's `tecs.audio` stream, so `tecs.random` carries that part.
+--- world's `tecs.audio` stream, so `tecs.ecs.random` carries that part.
 ---
 --- **Position is passed through and nothing else.** See `Sound` for what a
 --- caller still has to do by hand. `setStereo` is the other way to place a

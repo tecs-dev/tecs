@@ -296,7 +296,7 @@ describe("rendering from a pack", function()
     -- One red quad covering the target, so a shader that failed to build or
     -- bound the wrong resources reads back as something other than red.
     local function renderQuad()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
             capacity = 64,

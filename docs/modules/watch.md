@@ -34,7 +34,7 @@ The whole surface is `require("tecs")` and every module is a field on it, so thi
 is also set as a global, which makes the require line optional, and engine modules are resolved lazily on first
 field access.
 
-[`Application`](/modules/Application) starts the watcher when its config asks for one, and registers the
+[`Application`](/modules/application) starts the watcher when its config asks for one, and registers the
 reloaders for `"shader"`, `"image"`, `"sound"` and `"font"` before it does, so a game that only wants the stock
 behaviour writes no code here at all. Everything below is for a game or a tool that drives the watcher itself or
 adds a kind of its own.

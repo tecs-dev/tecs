@@ -44,7 +44,7 @@ second call on the same world is ignored, because adding a system twice under on
 **Example:**
 
 ```teal
-local world <const> = tecs.newWorld()
+local world <const> = tecs.ecs.newWorld()
 world:addPlugin(tecs.animation.plugin)
 ```
 

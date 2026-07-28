@@ -59,7 +59,7 @@ describe("gfx.text", function()
     -- A world with a renderer and the text plugin. Ambient is full white so a
     -- glyph's colour reaches the screen without a light in the way.
     local function newScene()
-        local world = tecs.newWorld()
+        local world = tecs.ecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
             capacity = 4096,
@@ -397,8 +397,8 @@ describe("gfx.text", function()
         local parent = world:spawn(Transform(20, 40, 0, 1))
         world:spawn(
             Transform(0, 0, 0, 1),
-            tecs.builtins.RelativeTransform(0, 0, 0, 0, 1, 1),
-            tecs.builtins.ChildOf(parent),
+            tecs.ecs.builtins.RelativeTransform(0, 0, 0, 0, 1, 1),
+            tecs.ecs.builtins.ChildOf(parent),
             Tint(0.0, 1.0, 0.0, 1.0),
             text.Text.new({ text = "H", font = font, size = 96 })
         )
@@ -574,7 +574,7 @@ describe("gfx.text", function()
         settle(world, renderer)
         assert.are.equal(6, renderer.count)
 
-        local other = tecs.newWorld()
+        local other = tecs.ecs.newWorld()
         spawnText(other, 30, 60, "Hi", 48)
         local saved = other:saveSnapshot({}).buffer
 

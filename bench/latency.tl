@@ -115,14 +115,14 @@ timing.enable()
 local injected = 0
 local reactions = 0
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "latency", width = WIDTH, height = HEIGHT},
     presentMode = os.getenv("BENCH_PRESENT") or "immediate",
     ambientLight = {1.0, 1.0, 1.0},
     capacity = COUNT + 64,
     debugMaxFrames = TOTAL,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local input = app.input
         spawnField(world)
 
@@ -138,13 +138,13 @@ return tecs.application({
         local frame = 0
         world:addSystem({
             name = "bench.Frame",
-            phase = tecs.phases.Last,
+            phase = tecs.ecs.phases.Last,
             run = function() frame = frame + 1 end,
         })
 
         world:addSystem({
             name = "bench.React",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 -- Inside the step, because the step is what the measurement
                 -- brackets. A reaction deferred to the next frame would be a
@@ -174,7 +174,7 @@ return tecs.application({
         -- hundred and fifty, and dropping it is the more honest of the two.
         world:addSystem({
             name = "bench.Inject",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function()
                 -- Warmup frames built and first uploaded the scene, and are
                 -- also what gets the reaction compiled. Dropping them here
@@ -202,7 +202,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(("%d presses injected, %d reacted to"):format(injected, reactions))
                 local report = timing.format()

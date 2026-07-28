@@ -22,7 +22,7 @@ local C = sdl.C
 -- A component a game declares, registered once for the process the way a
 -- game's would be. Nothing tells the debug server about it.
 local Ammo = {}
-tecs.newComponent({
+tecs.ecs.newComponent({
     name = "SpecAmmo",
     container = Ammo,
     fields = { "rounds" },
@@ -59,7 +59,7 @@ describe("mcp world tools", function()
     end)
 
     before_each(function()
-        world = tecs.newWorld()
+        world = tecs.ecs.newWorld()
         mcpWorld.bind(world)
     end)
 

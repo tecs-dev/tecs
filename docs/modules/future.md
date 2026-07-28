@@ -3,7 +3,7 @@ description: "A value that settles once: four states, combinators, a source-driv
 outline: deep
 ---
 
-# tecs.Future
+# tecs.future.Future
 
 Several things in this tree are work in flight: an asset decode, a child process, a request. Each of them used to
 own a private settle-once cell with four states, a failure string and a blocking wait that pumped a worker, and
@@ -24,7 +24,7 @@ tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
 local tecs <const> = require("tecs")
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.Future`. `tecs`
+The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.future.Future`. `tecs`
 is also set as a global, which makes the require line optional, and engine modules are resolved lazily on first
 field access.
 
@@ -256,7 +256,7 @@ local runs <const> = {
     tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } }),
     tecs.proc.run({ args = { "git", "status", "--porcelain" } }),
 }
-tecs.Future.all(runs):onSettle(function(joined)
+tecs.future.Future.all(runs):onSettle(function(joined)
     if joined.status == "ready" then
         report(joined.value[1], joined.value[2])
     end
@@ -270,7 +270,7 @@ in this tree is something that can be told to block for up to N milliseconds and
 which is the whole of what a future needs from the work behind it: an asset decode and a child process are a
 worker channel, and an HTTP transfer is a curl multi handle whose poll is the same shape.
 
-The type is reachable as `tecs.Future.Source`.
+The type is reachable as `tecs.future.Source`.
 
 | Field           | Type                                          | Default  | Description                                                                                                                                                                                           |
 | --------------- | --------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

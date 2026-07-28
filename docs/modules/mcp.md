@@ -14,7 +14,7 @@ reads a world that is not mid-update and writes one that has not yet advanced, w
 and none of them queue anything. The cost is that a tool must not block: it runs during a frame someone is
 watching.
 
-The server also outlives the game. When a system raises, [`Application`](/modules/Application) records the
+The server also outlives the game. When a system raises, [`Application`](/modules/application) records the
 traceback here and keeps polling, so an agent that was debugging up to the moment it broke gets the reason
 rather than a refused connection.
 
@@ -37,7 +37,7 @@ open a socket nobody asked for. The application binds the renderer and the world
 two tool modules so their registrations run, and calls `poll` once per frame before the crash guard.
 
 ```teal
-tecs.application({
+tecs.application.create({
     mcpPort = 7100,
     plugin = registerEverything,
 })
@@ -238,7 +238,7 @@ anything, and an unknown kind is refused rather than pushed and then ignored. Th
 
 Sound output: the clips loaded, the voices sounding, and the gains, mutes and pauses over them.
 
-Read-only. No arguments. Requires an [`Audio`](/modules/Audio) installed on the bound world.
+Read-only. No arguments. Requires an [`Audio`](/modules/audio) installed on the bound world.
 
 **Returns:** `available`, `masterGain`, `muted`, `sounding`, `maxVoices`, `loading`, the `decoders` this build
 linked, and four lists: `clips`, `groups`, `keys` and `voices`. Sound is the one subsystem with nothing to look
@@ -544,7 +544,7 @@ function world.bind(w: ecs.World)
 
 `tools.bind` supplies what the frame-facing tools look at. `tools.bindReload` supplies the device's half of a
 shader reload: swapping a pipeline means destroying live GPU handles and creating new ones against the formats
-the device claimed, which is knowledge the [`Renderer`](/modules/Renderer) has and nothing in the tools does.
+the device claimed, which is knowledge the [`Renderer`](/modules/renderer) has and nothing in the tools does.
 `world.bind` is what the eight world tools act on. A tool called before its binding exists reports why rather
 than failing obscurely.
 

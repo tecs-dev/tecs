@@ -3,7 +3,7 @@ description: "The view: centre, zoom, rotation, the world-to-clip matrix, the vi
 outline: deep
 ---
 
-# tecs.Camera
+# tecs.camera.Camera
 
 A camera is what the view is looking at: a centre in world units, a zoom, a rotation, and a projection
 mode. It is one type rather than a 2D camera and a 3D one, because the only thing that would differ
@@ -13,7 +13,7 @@ the cull, cares which built it.
 Position is the centre of the view rather than a corner, so a camera that has never been moved shows the
 world origin in the middle of the window. The renderer centres a default camera on the first frame it
 draws, so a scene that never mentions a camera behaves as though world coordinates were screen
-coordinates. See [Renderer](/modules/Renderer) for how a camera reaches a frame.
+coordinates. See [Renderer](/modules/renderer) for how a camera reaches a frame.
 
 ## Requiring it
 
@@ -21,7 +21,7 @@ coordinates. See [Renderer](/modules/Renderer) for how a camera reaches a frame.
 local tecs <const> = require("tecs")
 ```
 
-`tecs.Camera` is the module. `tecs` is also set as a global, so the require line is optional, and engine
+`tecs.camera.Camera` is the module. `tecs` is also set as a global, so the require line is optional, and engine
 modules are resolved lazily on first field access.
 
 ## Creating a camera
@@ -53,7 +53,7 @@ function Camera.create(options?: CameraOptions): Camera
 **Example:**
 
 ```teal
-local camera <const> = tecs.Camera.create({ x = 400, y = 300, zoom = 2 })
+local camera <const> = tecs.camera.Camera.create({ x = 400, y = 300, zoom = 2 })
 ```
 
 ## Fields

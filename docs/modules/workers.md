@@ -169,9 +169,9 @@ mcode memory`.
 ## Related
 
 - [`assets`](/modules/assets) decodes images and sounds on a worker of its own.
-- [`proc`](/modules/proc) runs a child process, and answers a [`Future`](/modules/Future) rather than a raw
+- [`proc`](/modules/proc) runs a child process, and answers a [`Future`](/modules/future) rather than a raw
   channel.
-- [`Future`](/modules/Future) is the settle-once value a worker-backed subsystem hands out, and its `Source`
+- [`Future`](/modules/future) is the settle-once value a worker-backed subsystem hands out, and its `Source`
   interface is exactly what a channel offers: take what is ready, or block for up to N milliseconds.
 
 ## Design record

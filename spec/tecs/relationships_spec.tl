@@ -7,7 +7,7 @@ describe(
     function()
         local world: tecs.World
 
-        before_each(function() world = tecs.newWorld() end)
+        before_each(function() world = tecs.ecs.newWorld() end)
 
         describe(
             "relationship teardown (cascade)",
@@ -15,7 +15,7 @@ describe(
                 it(
                     "should cascade delete when parent is despawned",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "ChildOfCascadeTest",
                             exclusive = true,
                             sparse = true,
@@ -65,21 +65,21 @@ describe(
                             b: number
                             metamethod __call: function(self, r: number, g: number, b: number): Tint
                         end
-                        local MarkerComp = tecs.newTagComponent({
+                        local MarkerComp = tecs.ecs.newTagComponent({
                             name = "CascadeMarker" .. math.random(1, 1000000),
                             container = Marker,
                         })
-                        local PosComp: Pos = tecs.newComponent({
+                        local PosComp: Pos = tecs.ecs.newComponent({
                             name = "CascadePos" .. math.random(1, 1000000),
                             container = Pos,
                             fields = {"x", "y"},
                         })
-                        local TintComp: Tint = tecs.newComponent({
+                        local TintComp: Tint = tecs.ecs.newComponent({
                             name = "CascadeTint" .. math.random(1, 1000000),
                             container = Tint,
                             fields = {"r", "g", "b"},
                         })
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "CascadeChildOf" .. math.random(1, 1000000),
                             exclusive = true,
                             sparse = true,
@@ -116,7 +116,7 @@ describe(
                 it(
                     "should not cascade delete when relationship is just removed",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "ChildOfNoCascadeTest",
                             exclusive = true,
                         })
@@ -149,7 +149,7 @@ describe(
                 it(
                     "should not cascade delete when reparenting",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "ChildOfReparentTest",
                             exclusive = true,
                         })
@@ -394,7 +394,7 @@ describe(
                 it(
                     "should allow querying for any entity with a relationship via wildcard",
                     function()
-                        local Likes = tecs.newRelationship({name = "LikesWildcardTest"})
+                        local Likes = tecs.ecs.newRelationship({name = "LikesWildcardTest"})
 
                         local target1 = world:spawn()
                         local target2 = world:spawn()
@@ -428,7 +428,7 @@ describe(
                 it(
                     "should allow querying for specific target with :targeting()",
                     function()
-                        local Follows = tecs.newRelationship({name = "FollowsTargetingTest"})
+                        local Follows = tecs.ecs.newRelationship({name = "FollowsTargetingTest"})
 
                         local leader1 = world:spawn()
                         local leader2 = world:spawn()
@@ -545,7 +545,7 @@ describe(
                 it(
                     "should return the relationship instance with correct target",
                     function()
-                        local ChildOf = tecs.newRelationship({name = "ChildOfGetFirstTest", exclusive = true})
+                        local ChildOf = tecs.ecs.newRelationship({name = "ChildOfGetFirstTest", exclusive = true})
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.Component)
@@ -560,7 +560,7 @@ describe(
                 it(
                     "last exclusive sibling wins when multiple passed to spawn",
                     function()
-                        local ChildOf = tecs.newRelationship({name = "ChildOfExclusiveSpawnTest", exclusive = true})
+                        local ChildOf = tecs.ecs.newRelationship({name = "ChildOfExclusiveSpawnTest", exclusive = true})
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
@@ -583,8 +583,8 @@ describe(
                 it(
                     "interleaved exclusive containers resolve independently in spawn",
                     function()
-                        local ChildOf = tecs.newRelationship({name = "ChildOfInterleavedTest", exclusive = true})
-                        local MemberOf = tecs.newRelationship({name = "MemberOfInterleavedTest", exclusive = true})
+                        local ChildOf = tecs.ecs.newRelationship({name = "ChildOfInterleavedTest", exclusive = true})
+                        local MemberOf = tecs.ecs.newRelationship({name = "MemberOfInterleavedTest", exclusive = true})
 
                         local parentA = world:spawn()
                         local parentB = world:spawn()
@@ -614,7 +614,7 @@ describe(
                 it(
                     "should return nil for entities without the relationship",
                     function()
-                        local ChildOf = tecs.newRelationship({name = "ChildOfGetFirstNilTest", exclusive = true})
+                        local ChildOf = tecs.ecs.newRelationship({name = "ChildOfGetFirstNilTest", exclusive = true})
 
                         local entity = world:spawn()
                         world:update(0)
@@ -627,7 +627,9 @@ describe(
                 it(
                     "should return correct target after reparenting",
                     function()
-                        local ChildOf = tecs.newRelationship({name = "ChildOfGetFirstReparentTest", exclusive = true})
+                        local ChildOf = tecs.ecs.newRelationship({
+                            name = "ChildOfGetFirstReparentTest", exclusive = true
+                        })
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
@@ -647,7 +649,7 @@ describe(
                 it(
                     "should work with non-exclusive relationships",
                     function()
-                        local Likes = tecs.newRelationship({name = "LikesGetFirstTest"})
+                        local Likes = tecs.ecs.newRelationship({name = "LikesGetFirstTest"})
 
                         local target1 = world:spawn()
                         local target2 = world:spawn()
@@ -688,7 +690,7 @@ describe(
                 it(
                     "round-trips a relationship target past the int32 boundary",
                     function()
-                        local Likes = tecs.newRelationship({name = "LikesHighGen"})
+                        local Likes = tecs.ecs.newRelationship({name = "LikesHighGen"})
 
                         local target = churnHighGenEntity()
                         luassert.is_true(target > 2 ^ 31, "churn should drive the target id past the int32 boundary")
@@ -705,7 +707,7 @@ describe(
                 it(
                     "cascade-deletes children of a high-generation parent",
                     function()
-                        local ChildOf = tecs.newRelationship({
+                        local ChildOf = tecs.ecs.newRelationship({
                             name = "ChildOfHighGen",
                             exclusive = true,
                             sparse = true,
@@ -735,7 +737,7 @@ describe(
                     amount: number
                 end
 
-                local Owes = tecs.newRelationship({
+                local Owes = tecs.ecs.newRelationship({
                     name = "DenseRelIdOwes",
                     container = OwesRec,
                     fields = {"amount"},
@@ -807,7 +809,7 @@ describe(
                             return {target = (value as {string: any}).target as integer}
                         end
                         local myD = function(_w: tecs.World, data: {string: any}): any return data end
-                        local Rel = tecs.newRelationship({
+                        local Rel = tecs.ecs.newRelationship({
                             name = "RedirectForward" .. testId,
                             serialize = (myS as any),
                             deserialize = (myD as any),

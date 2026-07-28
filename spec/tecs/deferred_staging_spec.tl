@@ -3,21 +3,21 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Components exclusive to this spec to avoid cross-spec collisions.
-local Shared = tecs.newComponent({
+local Shared = tecs.ecs.newComponent({
     name = "DeferStageShared",
     container = {},
     fields = {"v"},
     defaults = {0},
 })
 
-local Extra = tecs.newComponent({
+local Extra = tecs.ecs.newComponent({
     name = "DeferStageExtra",
     container = {},
     fields = {"e"},
     defaults = {0},
 })
 
-local Absent = tecs.newComponent({
+local Absent = tecs.ecs.newComponent({
     name = "DeferStageAbsent",
     container = {},
     fields = {"a"},
@@ -33,7 +33,7 @@ describe(
                 it(
                     "routes a set correctly after a remove touched another archetype",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         -- e1 lives in archetype {Shared}; e2 in archetype {Shared, Extra}.
                         local e1 = w:spawn(Shared(11))
                         local e2 = w:spawn(Shared(22), Extra(1))
@@ -57,7 +57,7 @@ describe(
                 it(
                     "routes a set correctly after a remove staged a structural move",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local e1 = w:spawn(Shared(11))
                         local e2 = w:spawn(Shared(22), Extra(1))
                         w:commit()
@@ -98,7 +98,7 @@ describe(
                 it(
                     "settles after deferred spawns",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         w:defer()
                         for i = 1, 50 do
                             w:spawn(Shared(i))
@@ -111,7 +111,7 @@ describe(
                 it(
                     "settles after a committed move",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local e = w:spawn(Shared(1))
                         w:commit()
 
@@ -127,7 +127,7 @@ describe(
                 it(
                     "settles when a staged spawn migrates and despawns",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         w:defer()
                         local id = w:spawn(Shared(1))
                         w:set(id, Extra(2))
@@ -142,7 +142,7 @@ describe(
                 it(
                     "settles when a committed staged move despawns",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local e = w:spawn(Shared(1))
                         w:commit()
 
@@ -159,7 +159,7 @@ describe(
                 it(
                     "settles when a batch-spawned entity is removed in the same scope",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         w:defer()
                         local firstId = w:batchSpawn(10, {Shared}, function(_arch, _first, _last, _count) end)
                         luassert.is_not_nil(firstId)
@@ -172,7 +172,7 @@ describe(
                 it(
                     "tolerates repeated sets on a batch-staged id",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         w:defer()
                         local firstId = w:batchSpawn(
                             5,
@@ -200,7 +200,7 @@ describe(
                 it(
                     "settles across repeated spawn scopes into one archetype",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         for _ = 1, 5 do
                             w:defer()
                             for i = 1, 20 do
@@ -229,7 +229,7 @@ describe(
                 it(
                     "re-entrant despawn from a deferred OnDespawn observer despawns once",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local ids: {integer} = {}
                         for i = 1, 4 do
                             ids[i] = w:spawn(Shared(i))
@@ -237,7 +237,9 @@ describe(
                         w:commit()
 
                         w:observe(
-                            0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn) w:despawn(e.entity) end
+                            0,
+                            tecs.ecs.builtins.OnDespawn,
+                            function(e: tecs.ecs.builtins.OnDespawn) w:despawn(e.entity) end
                         )
 
                         w:defer()
@@ -254,14 +256,16 @@ describe(
                 it(
                     "re-entrant despawn during a top-level despawn despawns once",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local a = w:spawn(Shared(1))
                         local b = w:spawn(Shared(2))
                         local c = w:spawn(Shared(3))
                         w:commit()
 
                         w:observe(
-                            0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn) w:despawn(e.entity) end
+                            0,
+                            tecs.ecs.builtins.OnDespawn,
+                            function(e: tecs.ecs.builtins.OnDespawn) w:despawn(e.entity) end
                         )
 
                         w:despawn(a)
@@ -277,7 +281,7 @@ describe(
                 it(
                     "a despawn staged during drain cancels the entity's staged move",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local e1 = w:spawn(Shared(1))
                         local e2 = w:spawn(Shared(2))
                         w:commit()
@@ -313,7 +317,7 @@ describe(
                 it(
                     "despawns staged while draining despawns still apply",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local ids: {integer} = {}
                         for i = 1, 3 do
                             ids[i] = w:spawn(Shared(i))
@@ -348,7 +352,7 @@ describe(
                 it(
                     "batch mutations staged by one-shot-phase observers still apply",
                     function()
-                        local w = tecs.newWorld()
+                        local w = tecs.ecs.newWorld()
                         local e1 = w:spawn(Shared(1))
                         local s1 = w:spawn(Absent(1))
                         w:commit()

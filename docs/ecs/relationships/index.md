@@ -9,9 +9,9 @@ Relationships model directed connections between entities, such as parent-child 
 behaviors, or targeting. Tecs manages their lifecycle automatically, preserving referential integrity
 when entities are despawned.
 
-The engine ships one: `tecs.builtins.ChildOf`, registered on every world. It is exclusive, sparse, reverse-indexed
+The engine ships one: `tecs.ecs.builtins.ChildOf`, registered on every world. It is exclusive, sparse, reverse-indexed
 and cascade-deleting, which is the combination a scene hierarchy wants, and it is what
-`tecs.builtins.RelativeTransform` follows to compose a child's world `Transform` from its parent's. Everything on
+`tecs.ecs.builtins.RelativeTransform` follows to compose a child's world `Transform` from its parent's. Everything on
 this page can be read against that one working example.
 
 ## Relationship features
@@ -43,11 +43,11 @@ one by calling `newRelationship` with just a `name`:
 local tecs <const> = require("tecs")
 
 -- "entity A Likes entity B": nothing is recorded but the target.
-local Likes: tecs.Relationship = tecs.newRelationship({name = "Likes"})
+local Likes: tecs.Relationship = tecs.ecs.newRelationship({name = "Likes"})
 
 -- Same target-only shape, but exclusive: one target at a time, so setting a
 -- new target replaces the old one.
-local Targets: tecs.Relationship = tecs.newRelationship({
+local Targets: tecs.Relationship = tecs.ecs.newRelationship({
     name = "Targets",
     exclusive = true
 })
@@ -75,8 +75,8 @@ world:set(entityA, Targets(enemy))
 -- Parent an entity at spawn. `RelativeTransform` requires `Transform`, so the
 -- child's world transform column arrives with it.
 local child = world:spawn(
-    tecs.builtins.ChildOf(parent),
-    tecs.builtins.RelativeTransform(16, 0)
+    tecs.ecs.builtins.ChildOf(parent),
+    tecs.ecs.builtins.RelativeTransform(16, 0)
 )
 ```
 
@@ -110,7 +110,7 @@ Use `fields` (with optional `defaults`) to declare the data fields. The first po
 is always the target entity ID; the remaining arguments map to `fields` in order:
 
 ```teal
-tecs.newRelationship({
+tecs.ecs.newRelationship({
     name = "Follows",
     container = Follows,
     fields = {"delay", "maxDistance"},
@@ -151,7 +151,7 @@ Some relationships are marked as exclusive, meaning an entity can only have one 
 combat AI that `Targets` a single enemy is a natural fit:
 
 ```teal
-local Targets: tecs.Relationship = tecs.newRelationship({
+local Targets: tecs.Relationship = tecs.ecs.newRelationship({
     name = "Targets",
     exclusive = true
 })
@@ -172,7 +172,7 @@ with the same sparse relationship share the same archetype regardless of their t
 this way:
 
 ```teal
-local ChildOf: tecs.Relationship = tecs.newRelationship({
+local ChildOf: tecs.Relationship = tecs.ecs.newRelationship({
     name = "ChildOf",
     exclusive = true,
     sparse = true,
@@ -186,8 +186,8 @@ Sparse relationships work seamlessly with queries. A dense wildcard tag is alway
 query uses the same row-indexed pattern as dense columns:
 
 ```teal
-local ChildOf <const> = tecs.builtins.ChildOf
-local Transform <const> = tecs.builtins.Transform
+local ChildOf <const> = tecs.ecs.builtins.ChildOf
+local Transform <const> = tecs.ecs.builtins.Transform
 
 local query: tecs.Query = world:query({include = {ChildOf, Transform}})
 
@@ -233,7 +233,7 @@ both dense and sparse relationships:
 ```teal
 -- Find all entities that are children of any parent
 local allChildren: tecs.Query = world:query({
-    include = {tecs.builtins.ChildOf}
+    include = {tecs.ecs.builtins.ChildOf}
 })
 
 -- Find all entities that follow something
@@ -368,7 +368,7 @@ This is how `ChildOf` implements parent-child hierarchies: despawning a parent a
 (and grandchildren, recursively).
 
 ```teal
-local ChildOf <const> = tecs.builtins.ChildOf
+local ChildOf <const> = tecs.ecs.builtins.ChildOf
 
 local parent: integer = world:spawn()
 local child: integer = world:spawn(ChildOf(parent))
@@ -502,12 +502,12 @@ For a sparse relationship, passing the container removes every target at once:
 
 ```teal
 -- Clear the entity's parent, whatever it was
-world:remove(child, tecs.builtins.ChildOf)
+world:remove(child, tecs.ecs.builtins.ChildOf)
 ```
 
 ## Configuration reference
 
-The `tecs.newRelationship` function accepts a configuration table with these fields:
+The `tecs.ecs.newRelationship` function accepts a configuration table with these fields:
 
 | Property        | Description                                                                                                     |
 | --------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -592,7 +592,7 @@ local record CustomRel is tecs.Relationship
     metamethod __call: function(self, target: integer, customData: string): CustomRel
 end
 
-tecs.newRelationship({
+tecs.ecs.newRelationship({
     name = "CustomRel",
     container = CustomRel,
     fields = {"customData"},

@@ -10,7 +10,7 @@
 --       variants = {
 --           {
 --               name = "current",
---               setup = function(case) return tecs.newWorld() end,  -- optional, not measured
+--               setup = function(case) return tecs.ecs.newWorld() end,  -- optional, not measured
 --               run = function(state, case) ... end,                -- the measured function
 --               teardown = function(state) end,                     -- optional, not measured
 --           },

@@ -221,7 +221,7 @@ local function spawnOne(world: tecs.World, at: integer): integer
     )
 end
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "sprites", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -231,7 +231,7 @@ return tecs.application({
     maxEntities = TOTAL + 1024,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local renderer = app.renderer
         if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" then
             error(("tecs: no sprite bench regime '%s'"):format(MODE))
@@ -287,7 +287,7 @@ return tecs.application({
         local frame = 0
         world:addSystem({
             name = "bench.Churn",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function(dt: number)
                 -- Warmup frames are the ones that built and first uploaded the
                 -- scene. Dropping them from every stage at once is what makes
@@ -331,7 +331,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 local frames <const> = math.max(1, frame - WARMUP)
                 print(

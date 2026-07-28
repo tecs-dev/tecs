@@ -198,7 +198,7 @@ Touch positions are converted into window coordinates using the size
 
 SDL dispatches six of these from its event watcher rather than queueing them, and the instant they arrive is the
 only one a game gets on some platforms. The host therefore answers them where they arrive, by calling a hook on
-the [application](/modules/Application), and queues the event as well, so a game can observe the change like any
+the [application](/modules/application), and queues the event as well, so a game can observe the change like any
 other. The hook is where a game meets the platform's deadline; the stream is where it observes the change. These
 six carry no stamp from SDL, so `arrival` on them is where they were delivered, and
 [`isInput`](#isinput) excludes them.
@@ -210,7 +210,7 @@ six carry no stamp from SDL, so `arrival` on them is where they were delivered, 
 
 `which` is the display the event is about, which is its whole subject: a display event that did not carry one
 would name a change on a machine with two monitors without saying which of them changed.
-[`Window`](/modules/Window#displays) is where the new state is read from.
+[`Window`](/modules/window#displays) is where the new state is read from.
 
 ### Windows
 
@@ -220,8 +220,8 @@ would name a change on a machine with two monitors without saying which of them 
 `windowDisplayScaleChanged`, `windowSafeAreaChanged`, `windowOccluded`, `windowEnterFullscreen`,
 `windowLeaveFullscreen`.
 
-`which` is the window id, which is what [`Window:id`](/modules/Window#id) answers. An event reports a change and
-nothing reports the state a window started in, so [`Window`](/modules/Window) has a getter for every one of these
+`which` is the window id, which is what [`Window:id`](/modules/window#id) answers. An event reports a change and
+nothing reports the state a window started in, so [`Window`](/modules/window) has a getter for every one of these
 facts.
 
 ### Keyboard and text
@@ -306,7 +306,7 @@ asking to see: the round trip is the normalisation, not the identity.
 
 ## Wiring the stream
 
-These three are how the loop and a replay driver reach the module. [`Application`](/modules/Application) calls
+These three are how the loop and a replay driver reach the module. [`Application`](/modules/application) calls
 the first two for you.
 
 ### setTouchScale

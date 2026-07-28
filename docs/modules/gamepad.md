@@ -3,7 +3,7 @@ description: "One connected gamepad as an object: buttons, axes, sensors, touchp
 outline: deep
 ---
 
-# tecs.Gamepad
+# tecs.gamepad.Gamepad
 
 A gamepad is not a set of globals the way a keyboard nearly is. It has identity, a lifetime shorter than the
 process, metadata, capabilities that differ between devices, and outputs. Two pads sharing one button set is not
@@ -22,13 +22,13 @@ reconnect stays disconnected and the reconnected device is a new object.
 local tecs <const> = require("tecs")
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.Gamepad`.
+The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.gamepad.Gamepad`.
 `tecs` is also set as a global, which makes the require line optional, and engine modules are resolved lazily on
 first field access.
 
 ## Where a pad comes from
 
-Pads are opened, fed the event stream and disconnected by [`Input`](/modules/Input), which also owns the layer
+Pads are opened, fed the event stream and disconnected by [`Input`](/modules/input), which also owns the layer
 stack every query here is answered against; that module is where a game gets hold of a `Gamepad` object in the
 first place.
 
@@ -75,7 +75,7 @@ A name that is not in the table below raises.
 Every query that reads folded state takes an optional `layer`, and answers as if nothing were held when that
 layer cannot read. Omitting it means the base layer, which is the safe default: it goes quiet when anything is
 pushed over it. The stack is shared across every device rather than being one of this pad's own, so a layer
-blocks every device or none. The stack itself lives in [`Input`](/modules/Input).
+blocks every device or none. The stack itself lives in [`Input`](/modules/input).
 
 The questions about the device rather than about its state, `hasButton`, `hasAxis`, `hasSensor`,
 `sensorEnabled`, `label` and `power`, take no layer and answer the same way whatever is on top.
@@ -297,7 +297,7 @@ One finger on one of the device's touchpads, in 0..1 across the pad.
 | `pressure` | `number`  | How hard, in 0..1, on a device that measures it. Devices that do not report a constant while the finger is down.                                                                                     |
 | `down`     | `boolean` | Whether the finger is on the pad.                                                                                                                                                                    |
 
-The type is reachable as `tecs.Gamepad.TouchpadFinger`.
+The type is reachable as `tecs.gamepad.TouchpadFinger`.
 
 ### touchpadFingers
 

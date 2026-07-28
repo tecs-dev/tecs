@@ -23,13 +23,13 @@ window and no device.
 Create a world that runs its fixed phases at 60 Hz using the default configuration:
 
 ```teal
-local world = tecs.newWorld()
+local world = tecs.ecs.newWorld()
 ```
 
 Create one that runs them at 30 Hz:
 
 ```teal
-local world = tecs.newWorld({
+local world = tecs.ecs.newWorld({
     timestep = 1 / 30
 })
 ```
@@ -44,10 +44,10 @@ local world = tecs.newWorld({
 
 ## World lifecycle
 
-An [`Application`](/modules/Application) owns a world and drives it: it calls `world:startup` at the end of
+An [`Application`](/modules/application) owns a world and drives it: it calls `world:startup` at the end of
 initialisation, once the entry plugin has run, so everything the plugin spawned is resident before the first
 frame; `world:update(dt)` once per host iteration; and `world:shutdown` before anything is destroyed. A game
-does not call these itself. It reaches the world through the entry plugin `tecs.application` takes; see
+does not call these itself. It reaches the world through the entry plugin `tecs.application.create` takes; see
 [Getting started](/getting-started). Call them yourself only when you drive a world with no application, as
 tests, tools and benchmarks do.
 
@@ -146,8 +146,8 @@ world:isAlive(b)        -- true
 The packed layout reserves 22 bits for the slot and 31 bits for the generation. Slot 0 is reserved, so a world
 can be configured for at most `2^22 - 1` concurrent entities (~4M), and each slot has `2^31` generation values
 before wrapping. The default `maxEntities` is lower (`2^20`, roughly one million slots) to keep the
-preallocated slot arena smaller. Both limits are exported as `tecs.MAX_ENTITIES` and
-`tecs.DEFAULT_MAX_ENTITIES`, so sizing code never hard-codes the numbers.
+preallocated slot arena smaller. Both limits are exported as `tecs.ecs.MAX_ENTITIES` and
+`tecs.ecs.DEFAULT_MAX_ENTITIES`, so sizing code never hard-codes the numbers.
 
 ::: warning Treat entity ids as opaque
 Do not inspect or unpack entity ids with `bit.*`. Packed ids can exceed 32 bits, so LuaJIT bit operations
@@ -164,8 +164,8 @@ round-trip. For singleton or authored entities that runtime code needs to redisc
 
 ```teal
 world:spawn(
-    tecs.builtins.Key("player"),
-    tecs.builtins.Name("Player ship")
+    tecs.ecs.builtins.Key("player"),
+    tecs.ecs.builtins.Name("Player ship")
 )
 
 local player = world:requireKey("player")
@@ -217,7 +217,7 @@ local playerId = world:spawn(
     components.Transform(100, 100),
     components.Tint(1, 1, 1, 1),
     components.Renderable,
-    tecs.builtins.Name("Player")
+    tecs.ecs.builtins.Name("Player")
 )
 
 -- A light is an entity too.
@@ -227,7 +227,7 @@ local lightId = world:spawn(
 )
 
 -- Get notified when any entity spawns (world-level observer).
-world:observe(0, tecs.builtins.OnSpawn, function(event: tecs.builtins.OnSpawn)
+world:observe(0, tecs.ecs.builtins.OnSpawn, function(event: tecs.ecs.builtins.OnSpawn)
     print("Entity created with id: " .. event.entity)
 end)
 ```
@@ -325,7 +325,7 @@ end
   operation drains.
 - Component constructors do not run for the placed rows. Only `requires`-supplied defaults are written before
   the callback, so set every field you depend on inside it.
-- `batchSpawn` does not support `tecs.builtins.Key`; keys must be claimed per entity before the entity becomes
+- `batchSpawn` does not support `tecs.ecs.builtins.Key`; keys must be claimed per entity before the entity becomes
   visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
 - `batchSpawn` does not emit `OnSpawn` per entity; write initial data in the `callback` or react with a query's
   [`onEntitiesAdded`](/ecs/queries/callbacks).
@@ -340,7 +340,7 @@ placement.
 
 ```teal
 local Transform <const> = tecs.components.Transform
-local ChildOf <const> = tecs.builtins.ChildOf
+local ChildOf <const> = tecs.ecs.builtins.ChildOf
 
 local firstId, ids = world:batchSpawn(5, {Transform, ChildOf},
     function(arch, firstRow, lastRow, _count)
@@ -394,7 +394,7 @@ how the ids are ordered.
 **Notes:**
 
 - This is a [deferred operation](#deferred-operations).
-- `batchSpawnAt` does not support `tecs.builtins.Key`; keys must be claimed per entity before the entity
+- `batchSpawnAt` does not support `tecs.ecs.builtins.Key`; keys must be claimed per entity before the entity
   becomes visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
 - Like `batchSpawn`, `batchSpawnAt` does not emit `OnSpawn` per entity.
 
@@ -430,7 +430,7 @@ includes that component.
 
 ```teal
 -- Listen for despawn events
-world:observe(entity, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+world:observe(entity, tecs.ecs.builtins.OnDespawn, function(e: tecs.ecs.builtins.OnDespawn)
     print("Entity " .. e.entity .. " is being despawned")
 end)
 
@@ -653,7 +653,7 @@ end
 ```
 
 ::: tip When you want a fully fresh world
-If you need to drop systems and queries too, call `tecs.newWorld()`; it is the same code path and makes the
+If you need to drop systems and queries too, call `tecs.ecs.newWorld()`; it is the same code path and makes the
 intent obvious at the call site.
 :::
 
@@ -831,7 +831,7 @@ configuration, ordering, conditional execution, and removal rules.
 ## Plugins
 
 Use plugins to add systems, components, states, and more to a `World`. Tecs builds everything around plugins:
-a game itself is one, the `function(world, app)` an [`Application`](/modules/Application) is configured with,
+a game itself is one, the `function(world, app)` an [`Application`](/modules/application) is configured with,
 and a game with several modules calls `world:addPlugin` from inside it rather than growing a second composition
 mechanism. Engine features arrive the same way, for example `tecs.text.plugin({ renderer = app.renderer })`.
 
@@ -853,7 +853,7 @@ function World:addPlugin(plugin: function(world: World))
 local Transform <const> = tecs.components.Transform
 local Renderable <const> = tecs.components.Renderable
 
-local SPIN: tecs.Key<number> = tecs.newKey("game.spinRate")
+local SPIN: tecs.Key<number> = tecs.ecs.newKey("game.spinRate")
 
 local function spinPlugin(world: tecs.World)
     -- Build the query once, here, and never inside `run`.
@@ -861,7 +861,7 @@ local function spinPlugin(world: tecs.World)
 
     world:addSystem({
         name = "game.Spin",
-        phase = tecs.phases.Update,
+        phase = tecs.ecs.phases.Update,
         run = function(dt: number)
             local rate = world.resources[SPIN]
             for archetype, length in spinning:iter() do
@@ -899,7 +899,7 @@ local gameSettings: GameSettings = {
 }
 
 -- Define a key for the resource.
-local GAME_SETTINGS: tecs.Key<GameSettings> = tecs.newKey("game.settings")
+local GAME_SETTINGS: tecs.Key<GameSettings> = tecs.ecs.newKey("game.settings")
 
 -- Add a resource to the world
 world.resources[GAME_SETTINGS] = gameSettings
@@ -912,12 +912,12 @@ print("Difficulty:", settings.difficulty)
 You can define resource keys for numbers, strings, and any other type too.
 
 ```teal
-local GAME_UUID: tecs.Key<string> = tecs.newKey("game.uuid")
+local GAME_UUID: tecs.Key<string> = tecs.ecs.newKey("game.uuid")
 world.resources[GAME_UUID] = "abc"
 ```
 
-Always name your keys. A named key is discoverable at runtime: `tecs.findKey(name)` returns it,
-`tecs.listKeys()` enumerates every named key, and tooling such as the [debug server](/modules/mcp) reads
+Always name your keys. A named key is discoverable at runtime: `tecs.ecs.findKey(name)` returns it,
+`tecs.ecs.listKeys()` enumerates every named key, and tooling such as the [debug server](/modules/mcp) reads
 resources by name through them. A named key is also a stable identity: calling `newKey` again with the same
 name returns the same key, so resources keyed by it survive a hot reload. Creating a key without a name logs a
 warning and leaves the resource invisible to name-based tools.

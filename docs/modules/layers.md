@@ -233,7 +233,7 @@ packed at, so the number itself means nothing beyond having changed.
 
 A layer decides where its contents are placed and how they sort; it does not bound them. Keeping an
 entity's fragments inside a rectangle is the `Clip` component, whose index names a rectangle set through
-the [Renderer](/modules/Renderer). Zero, the default, means no clipping, and a world that clips nothing
+the [Renderer](/modules/renderer). Zero, the default, means no clipping, and a world that clips nothing
 pays for it exactly nowhere.
 
 ## Design record

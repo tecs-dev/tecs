@@ -3,14 +3,14 @@ description: "Turns a world into a frame, through an extractor that builds a fra
 outline: [2, 3]
 ---
 
-# tecs.Renderer
+# tecs.renderer.Renderer
 
-`tecs.Renderer` is the path from a world to the GPU. A game does not construct one: the
-[application](/modules/Application) does, and hands it over as `app.renderer`.
+`tecs.renderer.Renderer` is the path from a world to the GPU. A game does not construct one: the
+[application](/modules/application) does, and hands it over as `app.renderer`.
 
 ```teal
-return tecs.application({
-    plugin = function(world: tecs.World, app: tecs.Application)
+return tecs.application.create({
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         app.renderer.camera.zoom = 2.0
     end,
 })
@@ -70,7 +70,7 @@ Everything the renderer draws is an entity in a world. The components it reads a
 [`tecs.components`](/modules/components) — `Transform`, `PreviousTransform`, `Tint`, `Sprite`, `Material`,
 `PointLight`, `Clip` and `Renderable` — and the modules that produce them have their own pages:
 
-- [`tecs.Camera`](/modules/Camera), the view it draws from
+- [`tecs.camera.Camera`](/modules/camera), the view it draws from
 - [`tecs.layers`](/modules/layers), z-ordering and per-layer behaviour
 - [`tecs.sheet`](/modules/sheet) and [`tecs.animation`](/modules/animation), sprite sheets and playback
 - [`tecs.text`](/modules/text), distance-field text drawn through an instance producer
@@ -92,7 +92,7 @@ Everything the renderer draws is an entity in a world. The components it reads a
 
 `dropped` is the one to watch. `capacity` is a ceiling rather than a hint, and rows past it are dropped rather
 than growing a buffer mid-frame; a scene that is missing something and reports a non-zero `dropped` needs a
-larger `capacity` in the [application config](/modules/Application#the-world-and-the-renderer).
+larger `capacity` in the [application config](/modules/application#the-world-and-the-renderer).
 
 `rewritten` being zero is the dirty model working. A frame in which nothing moved rewrites nothing.
 
@@ -106,7 +106,7 @@ An image is uploaded once and lives in the array for the life of the renderer.
 
 ```teal
 local sprite, region = app.renderer:registerImage(handle)
-world:spawn(tecs.builtins.Transform(100, 100), sprite)
+world:spawn(tecs.ecs.builtins.Transform(100, 100), sprite)
 ```
 
 `registerImage(handle)` takes a decoded [`assets.Handle`](/modules/assets), uploads it, and answers with a

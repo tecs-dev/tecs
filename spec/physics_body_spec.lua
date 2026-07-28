@@ -23,7 +23,7 @@ local Transform = components.Transform
 local built = {}
 
 local function newWorld(options)
-    local world = tecs.newWorld()
+    local world = tecs.ecs.newWorld()
     world:addPlugin(physics.plugin(options or { gravity = { 0, 980 } }))
     built[#built + 1] = world
     return world

@@ -152,14 +152,14 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
     end
 end
 
-return tecs.application({
+return tecs.application.create({
     window = {title = "physics", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
     capacity = BODIES + 64,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
+    plugin = function(world: tecs.World, app: tecs.application.Application)
         local renderer = app.renderer
 
         -- Iterations completed, which is what the drop schedule and the warmup
@@ -168,7 +168,7 @@ return tecs.application({
         local frame = 0
         world:addSystem({
             name = "bench.Frame",
-            phase = tecs.phases.Last,
+            phase = tecs.ecs.phases.Last,
             run = function() frame = frame + 1 end,
         })
 
@@ -205,7 +205,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Drop",
-            phase = tecs.phases.Update,
+            phase = tecs.ecs.phases.Update,
             run = function()
                 if dropped >= WAVES then
                     return
@@ -244,7 +244,7 @@ return tecs.application({
             -- Beside the step rather than beside the frame, so a body takes
             -- the same impulse per step of simulated time however the frames
             -- fall.
-            phase = tecs.phases.FixedUpdate,
+            phase = tecs.ecs.phases.FixedUpdate,
             run = function()
                 -- The physics step is fixed, so the push is too.
                 local push = BLOWER_FORCE / 60.0
@@ -279,7 +279,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Sample",
-            phase = tecs.phases.First,
+            phase = tecs.ecs.phases.First,
             run = function()
                 -- Everything before this built the scene: waves still landing,
                 -- the pile still settling, archetypes still moving. Dropping
@@ -294,7 +294,7 @@ return tecs.application({
 
         world:addSystem({
             name = "bench.Report",
-            phase = tecs.phases.Shutdown,
+            phase = tecs.ecs.phases.Shutdown,
             run = function()
                 print(
                     ("frames after %d warmup, %d bodies spawned, " .. "%d instances synced"):format(

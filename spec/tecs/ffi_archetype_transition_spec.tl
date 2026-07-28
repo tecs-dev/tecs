@@ -16,7 +16,7 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): Position
                         end
-                        local PositionComponent = tecs.newFFIComponent({
+                        local PositionComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Position1",
                             container = Position,
                             fields = {{"x", "float"}, {"y", "float"}},
@@ -24,9 +24,9 @@ describe(
 
                         local record Tag is tecs.Component
                         end
-                        local TagComponent = tecs.newTagComponent({name = "FFITransitionTest_Tag1"})
+                        local TagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_Tag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(PositionComponent(100.5, 200.5))
                         world:update(1 / 60)
 
@@ -51,15 +51,15 @@ describe(
                             radius: number
                             metamethod __call: function(self, radius: number): Circle
                         end
-                        local CircleComponent = tecs.newFFIComponent({
+                        local CircleComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Circle1", container = Circle, fields = {{"radius", "float"}}
                         })
 
                         local record Marker is tecs.Component
                         end
-                        local MarkerComponent = tecs.newTagComponent({name = "FFITransitionTest_Marker1"})
+                        local MarkerComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_Marker1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(CircleComponent(25.5), MarkerComponent())
                         world:update(1 / 60)
 
@@ -83,7 +83,7 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): Vec2
                         end
-                        local TransformComponent = tecs.newFFIComponent({
+                        local TransformComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Transform1",
                             container = Vec2,
                             fields = {{"x", "float"}, {"y", "float"}},
@@ -96,7 +96,7 @@ describe(
                             a: number
                             metamethod __call: function(self, r: number, g: number, b: number, a: number): Color
                         end
-                        local ColorComponent = tecs.newFFIComponent({
+                        local ColorComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Color1",
                             container = Color,
                             fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}, {"a", "float"}},
@@ -105,14 +105,14 @@ describe(
                         local record Physics is tecs.Component
                             mass: number
                         end
-                        local PhysicsComponent = tecs.newComponent({
+                        local PhysicsComponent = tecs.ecs.newComponent({
                             name = "FFITransitionTest_Physics1",
                             container = Physics,
                             fields = {"mass"},
                             init = function(instance: Physics, mass: number) instance.mass = mass or 1.0 end,
                         })
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(TransformComponent(50.0, 75.0), ColorComponent(1.0, 0.5, 0.25, 0.8))
                         world:update(1 / 60)
 
@@ -143,15 +143,15 @@ describe(
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.newFFIComponent({
+                        local FFI = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_MutatedFFI1", container = TestFFI, fields = {{"value", "float"}}
                         })
 
                         local record TestTag is tecs.Component
                         end
-                        local Tag = tecs.newTagComponent({name = "FFITransitionTest_MutatedTag1"})
+                        local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_MutatedTag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(Tag())
                         world:update(1 / 60)
 
@@ -172,7 +172,7 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): TestFFI
                         end
-                        local FFI = tecs.newFFIComponent({
+                        local FFI = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_MutatedFFI2",
                             container = TestFFI,
                             fields = {{"x", "float"}, {"y", "float"}},
@@ -180,13 +180,13 @@ describe(
 
                         local record TagA is tecs.Component
                         end
-                        local TagAComp = tecs.newTagComponent({name = "FFITransitionTest_MutatedTagA"})
+                        local TagAComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_MutatedTagA"})
 
                         local record TagB is tecs.Component
                         end
-                        local TagBComp = tecs.newTagComponent({name = "FFITransitionTest_MutatedTagB"})
+                        local TagBComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_MutatedTagB"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(FFI(10, 20), TagAComp())
                         world:update(1 / 60)
 
@@ -213,7 +213,7 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): Pos
                         end
-                        local PosComponent = tecs.newFFIComponent({
+                        local PosComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_MultiPos1",
                             container = Pos,
                             fields = {{"x", "float"}, {"y", "float"}},
@@ -224,13 +224,13 @@ describe(
                             vy: number
                             metamethod __call: function(self, vx: number, vy: number): Velocity
                         end
-                        local VelocityComponent = tecs.newFFIComponent({
+                        local VelocityComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_MultiVel1",
                             container = Velocity,
                             fields = {{"vx", "float"}, {"vy", "float"}},
                         })
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
 
                         local ids: {integer} = {}
                         for i = 1, 100 do
@@ -262,19 +262,19 @@ describe(
                             value: number
                             metamethod __call: function(self, value: number): Data
                         end
-                        local DataComponent = tecs.newFFIComponent({
+                        local DataComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_InterleavedData1", container = Data, fields = {{"value", "float"}}
                         })
 
                         local record TagA is tecs.Component
                         end
-                        local TagAComponent = tecs.newTagComponent({name = "FFITransitionTest_TagA1"})
+                        local TagAComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_TagA1"})
 
                         local record TagB is tecs.Component
                         end
-                        local TagBComponent = tecs.newTagComponent({name = "FFITransitionTest_TagB1"})
+                        local TagBComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_TagB1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
 
                         local id1 = world:spawn(DataComponent(111.0), TagAComponent())
                         local id2 = world:spawn(DataComponent(222.0), TagBComponent())
@@ -306,17 +306,17 @@ describe(
                     function()
                         local record TestTag is tecs.Component
                         end
-                        local Tag = tecs.newTagComponent({name = "FFITransitionTest_DespawnTag1"})
+                        local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_DespawnTag1"})
 
                         local record TestFFI is tecs.Component
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.newFFIComponent({
+                        local FFI = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_DespawnFFI1", container = TestFFI, fields = {{"value", "float"}}
                         })
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(FFI(42), Tag())
                         world:update(1 / 60)
 
@@ -330,17 +330,17 @@ describe(
                     function()
                         local record TestTag is tecs.Component
                         end
-                        local Tag = tecs.newTagComponent({name = "FFITransitionTest_DespawnTag2"})
+                        local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_DespawnTag2"})
 
                         local record TestFFI is tecs.Component
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.newFFIComponent({
+                        local FFI = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_DespawnFFI2", container = TestFFI, fields = {{"value", "float"}}
                         })
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id1 = world:spawn(FFI(1), Tag())
                         local id2 = world:spawn(FFI(2), Tag())
                         local id3 = world:spawn(FFI(3), Tag())
@@ -368,15 +368,15 @@ describe(
                             id: number
                             metamethod __call: function(self, id: number): TestFFI
                         end
-                        local FFI = tecs.newFFIComponent({
+                        local FFI = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_GrowthFFI1", container = TestFFI, fields = {{"id", "float"}}
                         })
 
                         local record TestTag is tecs.Component
                         end
-                        local Tag = tecs.newTagComponent({name = "FFITransitionTest_GrowthTag1"})
+                        local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_GrowthTag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
 
                         local firstId = world:spawn(FFI(1), Tag())
                         world:update(1 / 60)
@@ -412,19 +412,19 @@ describe(
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
-                        local FFI = tecs.newFFIComponent({
+                        local FFI = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_GrowthFFI2", container = TestFFI, fields = {{"value", "float"}}
                         })
 
                         local record TagA is tecs.Component
                         end
-                        local TagAComp = tecs.newTagComponent({name = "FFITransitionTest_GrowthTagA"})
+                        local TagAComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_GrowthTagA"})
 
                         local record TagB is tecs.Component
                         end
-                        local TagBComp = tecs.newTagComponent({name = "FFITransitionTest_GrowthTagB"})
+                        local TagBComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_GrowthTagB"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
 
                         local ids: {integer} = {}
                         for i = 1, 100 do
@@ -469,7 +469,7 @@ describe(
                             z: number
                             metamethod __call: function(self, x: number, y: number, z: number): FFIData
                         end
-                        local FFIDataComponent = tecs.newFFIComponent({
+                        local FFIDataComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_MixedFFI1",
                             container = FFIData,
                             fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
@@ -479,7 +479,7 @@ describe(
                             name: string
                             values: {number}
                         end
-                        local TableDataComponent = tecs.newComponent({
+                        local TableDataComponent = tecs.ecs.newComponent({
                             name = "FFITransitionTest_MixedTable1",
                             container = TableData,
                             fields = {"name", "values"},
@@ -491,9 +491,9 @@ describe(
 
                         local record TransitionTag is tecs.Component
                         end
-                        local TransitionTagComponent = tecs.newTagComponent({name = "FFITransitionTest_MixedTag1"})
+                        local TransitionTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_MixedTag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(
                             FFIDataComponent(1.5, 2.5, 3.5), TableDataComponent("test", {10, 20, 30})
                         )
@@ -535,7 +535,7 @@ describe(
                             b: number
                             metamethod __call: function(self, a: number, b: number): ZeroData
                         end
-                        local ZeroDataComponent = tecs.newFFIComponent({
+                        local ZeroDataComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Zero1",
                             container = ZeroData,
                             fields = {{"a", "float"}, {"b", "float"}},
@@ -543,9 +543,9 @@ describe(
 
                         local record ZeroTag is tecs.Component
                         end
-                        local ZeroTagComponent = tecs.newTagComponent({name = "FFITransitionTest_ZeroTag1"})
+                        local ZeroTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_ZeroTag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(ZeroDataComponent(0.0, 0.0))
                         world:update(1 / 60)
 
@@ -566,7 +566,7 @@ describe(
                             y: number
                             metamethod __call: function(self, x: number, y: number): NegData
                         end
-                        local NegDataComponent = tecs.newFFIComponent({
+                        local NegDataComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Neg1",
                             container = NegData,
                             fields = {{"x", "float"}, {"y", "float"}},
@@ -574,9 +574,9 @@ describe(
 
                         local record NegTag is tecs.Component
                         end
-                        local NegTagComponent = tecs.newTagComponent({name = "FFITransitionTest_NegTag1"})
+                        local NegTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_NegTag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(NegDataComponent(-100.5, -999.9))
                         world:update(1 / 60)
 
@@ -596,15 +596,15 @@ describe(
                             big: number
                             metamethod __call: function(self, big: number): LargeData
                         end
-                        local LargeDataComponent = tecs.newFFIComponent({
+                        local LargeDataComponent = tecs.ecs.newFFIComponent({
                             name = "FFITransitionTest_Large1", container = LargeData, fields = {{"big", "double"}}
                         })
 
                         local record LargeTag is tecs.Component
                         end
-                        local LargeTagComponent = tecs.newTagComponent({name = "FFITransitionTest_LargeTag1"})
+                        local LargeTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_LargeTag1"})
 
-                        local world = tecs.newWorld()
+                        local world = tecs.ecs.newWorld()
                         local id = world:spawn(LargeDataComponent(1e15))
                         world:update(1 / 60)
 
