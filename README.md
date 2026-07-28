@@ -114,7 +114,8 @@ Working today:
 - Particles simulated on the GPU: an entity is an emitter and its particles are
   not entities, their state living in a buffer the CPU never reads, drawn
   through the instance stream and the cull that were already there. Opaque
-  only, until there is a blended pass
+  only: the forward blended lane exists, and nothing particle-shaped routes
+  into it yet
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -211,13 +212,14 @@ it no longer is. `Application.Config` carries `plugin`, one
 
 The reason is that the ECS already answers all four questions, and answers them
 better than a callback can. A system's order is declared by the phase it is
-registered in rather than being implicit in where the loop happens to call it.
-A system and an observer are both registered on the world, so the debug server
-lists them; a field of a config table is reachable from nowhere. And both run
-inside the crash guard, so the line that fails leaves a traceback and a live
-process rather than unwinding to the host. That last one used to cut the other
-way: the same line of gameplay was inspectable after it failed in a system and
-fatal after it failed in `update`, which was reason enough on its own.
+registered in rather than being implicit in where the loop happens to call it. A
+system and an observer are both registered on the world, so the world can count
+them and the debug server reports the count; a field of a config table is
+reachable from nowhere. And both run inside the crash guard, so the line that
+fails leaves a traceback and a live process rather than unwinding to the host.
+That last one used to cut the other way: the same line of gameplay was
+inspectable after it failed in a system and fatal after it failed in `update`,
+which was reason enough on its own.
 
 So the four map onto machinery that was already there:
 
@@ -232,13 +234,13 @@ So the four map onto machinery that was already there:
               PostShutdown
 ```
 
-Three of those four phases groups were built and never invoked. `world:startup`
-and `world:shutdown` existed, the twenty-eight phases existed, and
-`Application` called neither, so a game registering a `Startup` system got one
-that was accepted, listed, and silently never run. That is presumably why the
-callbacks existed at all: they filled a gap that was only ever a missing pair
-of calls. `spec/phases_spec.lua` is the guard against it happening again, and
-it is deliberately not a list of the six phases that were dead. It takes
+Two of those four rows were built and never invoked. `world:startup` and
+`world:shutdown` existed, all twenty-one phases existed, and `Application`
+called neither, so a game registering a `Startup` system got one that was
+accepted, counted, and silently never run. That is presumably why the callbacks
+existed at all: they filled a gap that was only ever a missing pair of calls.
+`spec/phases_spec.lua` is the guard against it happening again, and it is
+deliberately not a list of the six phases that were dead. It takes
 `phases.index` from the phases module, registers a marker in every phase in it,
 drives a real application through the whole lifecycle and names the ones that
 never fired, so a phase added later is covered the day it is added.
@@ -247,10 +249,10 @@ never fired, so a phase added later is covered the day it is added.
 
 There is one entry point rather than a list of them, because the world already
 composes plugins. `world:addPlugin` takes an `ecs.Plugin`, which is a plain
-`function(world)`; it is how the engine installs its own sequencer and how
-`main.tl` installs the text plugin. A game with several modules calls it from
-inside its entry plugin, so a list here would be a second mechanism for
-something that already has one.
+`function(world)`, and it is how `main.tl` installs the text plugin. Anything
+the entry plugin delegates to has that same shape and goes through the world, so
+a game with several modules calls it from inside its entry plugin and a list
+here would be a second mechanism for something that already has one.
 
 The entry plugin is handed the world and the application, in that order. The
 world comes first because every plugin the world takes is `function(world)`:
@@ -469,23 +471,27 @@ query left some entities updated and some not, and nothing here knows which half
 or what either half meant.
 
 Two gates, and they are different kinds of thing. The first is whether this is a
-development build at all, which is `debug` or `mcpPort` in the config: a shipped
-build has neither, latches on the first crash and stays latched, because there
-is nobody there to read the frame and carrying on with a world that is provably
-inconsistent is how one bug becomes a corrupted save. The second is severity,
-and it is narrow rather than a judgement about how bad the throw looked:
-recovery reports whether it had to force-end a pass or cancel a frame instead of
-submitting it, and neither resumes at any setting, because the device is then
-not in the state the engine intended and the next frame would be recorded
-against something nobody can describe.
+development build at all, which is `debug`, `mcpPort` or `watch` in the config:
+a shipped build sets none of them, latches on the first crash and stays latched,
+because there is nobody there to read the frame and carrying on with a world
+that is provably inconsistent is how one bug becomes a corrupted save. `watch`
+is in that list because the file watcher is the other caller below, and a
+watcher that could not pick the loop back up would be a notification rather than
+a tool. The second gate is severity, and it is narrow rather than a judgement
+about how bad the throw looked: recovery reports whether it had to force-end a
+pass or cancel a frame instead of submitting it, and neither resumes at any
+setting, because the device is then not in the state the engine intended and the
+next frame would be recorded against something nobody can describe.
 
 The callers are the debug server's `clear_crash` tool and the file watcher's
 reloads, and both mean the same thing: something about the run has changed, try
 it again. That is what gives the watcher its purpose back. Simulated time stops
 with the simulation, so `app.elapsed` does not accumulate the length of the fix.
-`Input`'s fixed-phase gate is known to survive a resume latched on if the throw
-landed between `FixedFirst` and `FixedLast`; clearing it is a call to
-`input:exitFixedPhase` and has not been made yet. Physics resumability is open.
+`Input`'s fixed-phase gate would otherwise survive a resume latched on if the
+throw landed between `FixedFirst` and `FixedLast`, so recovery leaves that phase
+the ordinary way, late: the engine enters and leaves it twice a frame through
+the same call, and taking it once more is cheaper than a second way out. Physics
+resumability is open.
 
 ## Workers and assets
 
@@ -581,25 +587,27 @@ nothing else still sees its handle resolve and the decoding thread still stops.
 Subsystems that load assets of their own drain the same queue when they look at
 their own waiting lists, and that is an optimisation rather than the mechanism.
 
-A handle is a one-shot future, not a cache. Two loads of one path that overlap
-share the decode and the surface, because decoding the same file twice at once
-produces nothing the first decode does not already have; the last of them to
-release is the one that frees. A load that starts after the first has resolved
-decodes again, since handing back a handle whose pixels may already have been
-uploaded and released would be a cache with none of a cache's guarantees.
-Release is terminal and says so: a released handle reports `"released"` rather
-than reporting `"ready"` over pixels that are gone, which is the difference
-between a clear error at the upload and a null dereference inside it.
+A handle is a one-shot future, not a cache. Two image loads of one path that
+overlap share the decode and the surface, because decoding the same file twice
+at once produces nothing the first decode does not already have; the last of
+them to release is the one that frees. A load that starts after the first has
+resolved decodes again, since handing back a handle whose pixels may already
+have been uploaded and released would be a cache with none of a cache's
+guarantees. Sharing is the image path only: two overlapping sound loads of one
+path each get their own clip. Release is terminal and says so: a released handle
+reports `"released"` rather than reporting `"ready"` over pixels that are gone,
+which is the difference between a clear error at the upload and a null
+dereference inside it.
 
-Files a game interprets itself go through `assets.read`, which is the only
+Files a game interprets itself go through `filesystem.read`, which is the only
 sanctioned way to get bytes out of the content root: on Android content lives
-inside the package and `io.open` does not reach it. It answers bytes rather
-than text, so an image, an archive or a binary sidecar comes back whole and
-being text is a decoder's opinion. Reading a document is that call and a
-decoder over it, with nothing in between:
+inside the package and `io.open` does not reach it. It answers bytes rather than
+text, so an image, an archive or a binary sidecar comes back whole and being
+text is a decoder's opinion. Reading a document is that call and a decoder over
+it, with nothing in between:
 
 ```lua
-local bytes = tecs.assets.read(tecs.paths.asset("levels/1.json"))
+local bytes = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
 local level = tecs.json.decode(bytes)
 ```
 
@@ -616,9 +624,12 @@ drains the worker itself, so a subsystem polling only its own batch still sees
 its loads finish. The one rule it imposes is that a callback must not add to the
 batch it is being called from, because the compaction is walking it.
 
-All three entry points record what they touched. `assets.loaded` answers every
-path this process has read or decoded and the kind it was read as, which is what
-the file watcher polls instead of walking the content tree.
+All three entry points record what they touched, and they record it in one
+place: `filesystem.loaded` answers every path this process has read or decoded
+and the kind it was read as, which is what the file watcher polls instead of
+walking the content tree. The two loads call `filesystem.note` rather than
+keeping a list of their own, because the decode they are recording happens on a
+worker and a second list is a second answer to the same question.
 
 ## Hashing and decompression
 
@@ -671,7 +682,7 @@ implementation's strings is what makes the next swap expensive.
 
 `app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
 loop it, pitch it, seek it, pan it, put it in a group, cap how often it may
-start, stop it. It is built on SDL_mixer 3 and on five decisions.
+start, stop it. It is built on SDL_mixer 3 and on six decisions.
 
 **The mixer decodes.** A clip is whatever the linked decoders can read. What
 this build has is a question with a runtime answer rather than a configure-time
@@ -740,9 +751,11 @@ startup beside the clip it governs, so restoring one from a file would let an
 old save override a rule the build has since changed, and what a limit's bucket
 holds is derived from voices a snapshot does not restore.
 
-The output is the platform's default rather than a device chosen by name, so
-SDL migrates the logical device when the system default changes and plugged-in
-headphones need no handling.
+The output defaults to the platform's default rather than to a device chosen by
+name, so SDL migrates the logical device when the system default changes and
+plugged-in headphones need no handling. Naming one is available and is the
+exception: `config.device` takes an id from `tecs.audio.playbackDevices`, and a
+build that pins an output has said it would rather not follow the system.
 
 A `Sound` component is how a sound belongs to an entity. Presence is the
 instruction: an entity carrying one with a loaded clip starts sounding on the
@@ -821,8 +834,11 @@ The executor is native for the same reason worker threads are. Box2D calls the
 task function from whichever thread picks the work up, so an `enqueueTask`
 written in Lua would be an FFI callback invoked from a thread the VM did not
 create. `native/taskpool.c` is a fixed set of threads over one queue of chunks,
-and Lua's part is to install two function pointers and a context into
-`b2WorldDef` before the world is created.
+and Lua's part is to install two function pointers, a context and the worker
+count into `b2WorldDef` before the world is created. The count is there for the
+same reason the pointers are: Box2D indexes per-worker state by it, so a
+definition naming more workers than the pool started would have the solver
+address state that does not exist.
 
 Worker slot zero is the thread that called `b2World_Step`, which drains the
 queue while it waits instead of idling; every other slot belongs to one thread
@@ -840,11 +856,16 @@ than the pool has room for means the task runs in the calling thread, which
 Box2D accounts for through a null result.
 
 The count defaults to the machine's performance cores where the platform will
-say which those are, because the workers wait on each other between stages and
-the slowest core sets the pace of the step. Adding workers does not change the
-answer: the solver colours its constraint graph so no colour holds two
-constraints sharing a body, and a 1,600-body pile lands bit-exactly where one
-worker left it whether it was solved by 2 or by 64.
+say which those are, falling back to its logical cores, because the workers wait
+on each other between stages and the slowest core sets the pace of the step. It
+is capped at eight whatever the machine has, since the solver's stages are short
+enough that past a handful of workers the coordination costs more than the work,
+and a spinning worker on a core the stepping thread needs takes more than it
+contributes. Adding workers does not change the answer either way: the solver
+colours its constraint graph so no colour holds two constraints sharing a body,
+and `spec/taskpool_spec.lua` steps a 256-body pile for 120 steps and asserts it
+lands bit-exactly where one worker left it whether two, three, four or eight
+solved it.
 
 ## A body's lifetime
 
@@ -932,15 +953,15 @@ The vocabulary covers what a game can act on and stops there. Displays report
 being added, removed, moved, reoriented, rescaled and remoded, each naming the
 display it happened to. Windows report occlusion, entering and leaving
 fullscreen, a display scale change and a safe area change, beside the states
-they already reported. Keyboards, mice and audio devices report arriving,
-leaving and being reformatted. A trackpad pinch arrives as `pinchBegin`,
-`pinchUpdate` and `pinchEnd` carrying the factor it zoomed by, and counts as
-player input for latency. What stays out is what this engine cannot act on: the
-joystick family, because every pad is opened as a gamepad and forwarding both
-would report one device twice; camera devices and the 2D renderer's device-loss
-events, because neither subsystem is used; hit tests, because none is installed;
-and ICC profile and HDR state, because there is no colour-managed path for a
-game to respond through.
+they already reported. Keyboards, mice and audio devices report arriving and
+leaving, and an audio device reports being reformatted as well. A trackpad pinch
+arrives as `pinchBegin`, `pinchUpdate` and `pinchEnd` carrying the factor it
+zoomed by, and counts as player input for latency. What stays out is what this
+engine cannot act on: the joystick family, because every pad is opened as a
+gamepad and forwarding both would report one device twice; camera devices and
+the 2D renderer's device-loss events, because neither subsystem is used; hit
+tests, because none is installed; and ICC profile and HDR state, because there
+is no colour-managed path for a game to respond through.
 
 Every kind is drivable by name. `events.push` takes the engine's vocabulary
 rather than an SDL union and fills the payload for the key, mouse, wheel, pen,
@@ -985,11 +1006,14 @@ The engine acts on lifecycle and input events and then hands every event to the
 game anyway. An engine that consumed events would leave a game unable to tell
 an event it never received from one it mishandled.
 
-Every event carries an `arrival`, in the units `clock.now` reports: SDL's own
-nanosecond stamp for the event, converted onto the performance counter. The two
-clocks are the same clock in SDL's implementation and not by its contract, so
-the host measures the offset between them once at startup rather than assuming
-one, and both are monotonic, so the one measurement holds.
+Every event that came through the host's queue carries an `arrival`, in the
+units `clock.now` reports: SDL's own nanosecond stamp for the event, converted
+onto the performance counter. An event that did not, a replayed one above all,
+has none rather than a made-up one, because a synthesised arrival would be a
+latency measurement of the replay driver. The two clocks are the same clock in
+SDL's implementation and not by its contract, so the host measures the offset
+between them once at startup rather than assuming one, and both are monotonic,
+so the one measurement holds.
 
 Taking a reading where SDL hands the event over instead would be simpler and
 would be a floor rather than a measurement. SDL only hands events over while
@@ -1086,10 +1110,11 @@ A game could not save state on being backgrounded at all, and the plumbing is
 the easy half. The contract is the part that decides whether it works.
 
 At this engine's entity counts a world is not serialisable inside a platform
-callback. iOS allows roughly five seconds from the hook returning and Android
-rather less, and a callback that walked four million entities would be killed
-part way through and leave nothing behind. So `_willEnterBackground` writes a
-buffer the game already had.
+callback. iOS allows roughly five seconds from the hook being entered and
+Android rather less, so the clock is running while the callback runs and a
+callback that walked four million entities would be killed part way through and
+leave nothing behind. The host complains past 250 ms for that reason. So
+`_willEnterBackground` writes a buffer the game already had.
 
 `app:stageCheckpoint(bytes)` is how it gets one, called from an ordinary system
 on an ordinary frame whenever the state worth keeping has changed. It takes
@@ -1189,18 +1214,29 @@ of making game code run at device-thread cadence.
 ## Touching the filesystem
 
 `tecs.paths` answers where a path is; `tecs.filesystem` is what to do once you
-have one. It is one SDL call per function and nothing composed out of several:
-`SDL_GetPathInfo` behind `info`, `exists`, `isFile` and `isDirectory`,
-`SDL_GlobDirectory` behind `list` and `glob`, then `createDirectory`, `remove`,
+have one. It is one backend call per function and nothing composed out of
+several, and on SDL each of those is the obvious call: `SDL_GetPathInfo` behind
+`info`, `exists`, `isFile` and `isDirectory`, `SDL_GlobDirectory` behind `list`
+and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,
 `rename`, `copy`, `write`, `currentDirectory` and `userFolder`. No virtual
-filesystem and no invented path scheme, so a failure is SDL's failure and the
-name says which call to read about. Like `proc` it initialises no subsystem and
-is more useful with no window than with one.
+filesystem and no invented path scheme, so a failure is the platform's failure
+and the name says which call to read about. Like `proc` it initialises no
+subsystem and is more useful with no window than with one.
 
-Reading is deliberately absent, because `assets.read` is already `SDL_LoadFile`
-plus the record of what this process has opened that `watch` polls, and a
-second reader would mean a file opened through the wrong one never reloads. So
-`write` is here and its other half is one module along.
+Nothing here reaches the operating system, because `adapter` names storage as a
+seam and a seam that covered only _where_ content is would leave every read of a
+path under that root going to the host's own file API anyway. So the calls are
+`storagebackend`'s and what stays in this module is what a port should not have
+to write twice: the argument checks, the record of what has been opened, and the
+four questions that are one backend call answered differently.
+
+Reading is one of those calls rather than something `assets` owns, and there is
+exactly one reader in the tree, because a second one would mean a file opened
+through the wrong one never reloads. `read` is the load plus the record of what
+this process has opened that `watch` polls, and the decodes in `assets` write
+into that same record through `note` instead of keeping one of their own. Bytes
+are bytes, so nothing at this layer can tell a font's metrics from a level:
+whatever asked for them names the kind, and an unnamed read is a document.
 
 Enumeration is glob rather than `SDL_EnumerateDirectory`, so no FFI callback is
 installed for a walk; the list comes back as one allocation holding the array
@@ -1221,14 +1257,19 @@ would leave the one unbounded case, a recursive glob over a large tree, exactly
 where it was. That case runs on a worker instead: every function takes a path
 and returns a value, so nothing crosses a thread that must not.
 
-`SDL_Storage` is not covered yet. Its readiness model has no equivalent in a
-path call and, on a desktop, no test: every backing it can have here is the
-plain filesystem, so a spec would only exercise the ready-immediately path.
-Adopting it later is a `Storage` class whose methods are these functions minus
-the module, reusing the same `Info`, `PathType` and `GlobOptions`, and adding
-`ready`, `close`, `spaceRemaining` and a `read` of its own, since
-`SDL_ReadStorageFile` is not `SDL_LoadFile`. Nothing above changes shape for
-it, which is why nothing above resolves a path.
+`SDL_Storage` is deliberately not what the SDL backend is written against. Its
+readiness model has no equivalent in a path call and, on a desktop, no test:
+every backing it can have here is the plain filesystem, so a spec would only
+ever exercise the ready-immediately path and would prove nothing about the model
+that is the reason to have it. So it belongs to whichever port needs it, which
+is exactly what the seam is for: a target whose content is a title storage
+writes `SDL_OpenTitleStorage`, its readiness wait and its `SDL_ReadStorageFile`
+into a backend of its own, in a module the engine never sees. Its paths being a
+different space costs nothing either, because every path that reaches a backend
+was built by resolving against a root the same platform minted, so a port that
+answers `""` for its base receives back exactly the storage-relative paths it
+handed out. The engine concatenates and never interprets, which is why nothing
+above resolves a path.
 
 ## A value that settles once
 
@@ -1254,12 +1295,15 @@ should cost. `"cancelled"` is a state of its own rather than a kind of failure,
 because `recover` must not run for it: a caller who cancelled a load did not ask
 for a fallback value.
 
-**A `Source` is the whole driver interface.** Two functions: `poll`, which takes
-whatever is ready, and `advance(ms)`, which blocks for up to that long and takes
-whatever arrives. That is all a worker channel is and all a curl multi handle
-is, so the same hook covers a decode, a subprocess and a transfer. `poll` is
-what the loop calls once a frame, and `wait` spends its budget inside `advance`
-rather than spinning.
+**A `Source` is the whole driver interface.** Two functions carry it: `poll`,
+which takes whatever is ready, and `advance(ms)`, which blocks for up to that
+long and takes whatever arrives. That is all a worker channel is and all a curl
+multi handle is, so the same hook covers a decode, a subprocess and a transfer.
+`poll` is what the loop calls once a frame, and `wait` spends its budget inside
+`advance` rather than spinning. A third, `cancel`, is optional and is the honest
+answer to work that cannot be stopped: a source with no hook leaves it running
+and stops caring, rather than the interface pretending every source can be told
+to stop.
 
 **The budget is wall clock.** Every wait this replaces subtracted the nominal
 slice size whatever the slice actually cost, and a source returns as soon as one
@@ -1578,17 +1622,17 @@ and fails the two specs that watch the process size.
 
 So the spec holds what can be held without touching the compiler: a ceiling on
 the frame well above the true figure; that the figure does not grow with the
-size of the world, which is what a per-row allocation cannot hide from; and
-then each piece of the frame path measured on its own, where the compiler's
+size of the world, which is what a per-row allocation cannot hide from; and then
+each piece of the frame path measured on its own, where the compiler's
 contribution to a window is roughly fixed and divides away while a per-call
 allocation does not. Extraction, the hierarchy dirty sampler, a two-pass render
 graph and a compute pass are each read that way, and the staging buffer's two
-properties are read exactly, since a single call can be. Two of the assertions
-are not measurements at all: a cursor does not escape the loop that opens it,
-so LuaJIT removes the allocation once it has compiled the traversal and no
-reading can see it, and the frame object and the event handler are one object
-each per iteration, which is too small to see past the compiler's noise and
-just as real. All three are counted rather than weighed.
+properties are read exactly, since a single call can be. Three of the assertions
+are not measurements at all: a cursor does not escape the loop that opens it, so
+LuaJIT removes the allocation once it has compiled the traversal and no reading
+can see it, and the frame object and the closure the event drain is handed are
+one object each per iteration, which is too small to see past the compiler's
+noise and just as real. All three are counted rather than weighed.
 
 What a steady-state frame costs today is a little over 300 bytes for a still
 scene and exactly 144 more for a moving one, and nearly all of it is not the
@@ -1639,8 +1683,8 @@ the process, metadata, capabilities that differ between devices, and outputs, so
 it is an object reached through `input:gamepads()` and it answers for itself.
 Two pads sharing one button set is not a simplification but a defect: pad A
 releasing a button releases pad B's. Devices already attached are opened before
-a game's `load` runs, because the platform reports additions and not devices
-that were there all along.
+a game's entry plugin runs, because the platform reports additions and not
+devices that were there all along.
 
 A reference to a pad that went away is safe by construction rather than by
 documented caution. The platform handle lives in one field, one function reads
@@ -1673,22 +1717,24 @@ release for a key held as the window loses focus, and a button left held on a
 device that is gone is worse than one that never worked. A pen carried out of
 range clears its pressure for the same reason: nothing reports the lift.
 
-Queries are never answered by polling the device. `SDL_GetKeyboardState` and
-its relatives are read when a device is opened or resynchronised and never
-after, because a poll bypasses replay, layers, edge detection and latching, all
-of which are the point. The state is fed typed events and holds no globals, so
-a recorded session replays by feeding the same events back through
-`events.source`, and every outbound command goes through a backend for the same
-reason.
+Queries are never answered by polling the device. SDL's own state-reading calls
+are not used at all, not even once at startup, because a poll bypasses replay,
+layers, edge detection and latching, all of which are the point. The state is
+fed typed events and holds no globals, so a recorded session replays by feeding
+the same events back through `events.source`, and every outbound command goes
+through a backend for the same reason.
 
 ## The Tecs binding
 
-Tecs itself is unchanged and consumed as a dependency. What lives here is
-tecs's own surface on top of it: components, a renderer that syncs from a
-world, and a physics plugin.
+The ECS and the engine are one tree, and the boundary between them is a
+dependency rule rather than a repository. A game requires `tecs`, the whole
+surface; engine code requires `tecs.ecs`, which carries what the engine actually
+uses. That runs one way on purpose, because the surface exports the engine
+modules and a module that also depended on the surface would be a cycle, which
+Teal rejects even through a type-only require.
 
-`Renderer` is the bridge, and the only module that knows about both archetypes
-and GPU buffers. Everything below it is renderer; above it is Tecs.
+`Renderer` is where the two meet, and the only module that knows about both
+archetypes and GPU buffers.
 
 It is two halves and the seam between them. `Extractor` is world-facing:
 queries, archetype runs, relayout detection, dirty gating, producers and the
@@ -2632,20 +2678,20 @@ once, at spawn, and held until the particle expires. Four thousand particles
 cost three dispatches and no per-frame host writes; what that buys is paid for
 by not being able to inspect, move, kill or count one of them.
 
-Three things divide the work. A `ParticleEffect` is immutable data describing
-how particles spawn and evolve, registered once under a name and shared by
-every emitter naming it. The emitter component names an effect and carries
-playback state, a seed and a few per-instance scales, and deliberately nothing
-else: if an instance could override every effect field then effects would stop
-being reusable GPU data. A pool owns one run of the instance buffer,
-sub-allocates a contiguous slot range of the effect's capacity to each emitter,
-and records the passes that fill it.
+Three things divide the work. An `Effect` is immutable data describing how
+particles spawn and evolve, built by `particles.effect`, registered once under a
+name and shared by every emitter naming it. The emitter component names an
+effect and carries playback state, a seed and a few per-instance scales, and
+deliberately nothing else: if an instance could override every effect field then
+effects would stop being reusable GPU data. A pool owns one run of the instance
+buffer, sub-allocates a contiguous slot range of the effect's capacity to each
+emitter, and records the passes that fill it.
 
 Drawing is not new work. A particle written into the instance buffer is an
 instance: the same sixteen floats, the same four bound floats, the same mark,
-scan and compact, and the same one indirect draw. The pool is an
-`InstanceProducer` whose `takeDirty` is always empty, which is what gives it a
-region of the instance and bounds buffers the host flush never covers, and a
+scan and compact, and the same indirect draw. The pool is an `InstanceProducer`
+whose `takeDirty` is always empty, which is what gives it a region of the
+instance and bounds buffers the host flush never covers, and a
 `Backend.ComputeStage`, which is what lets it write that region between the
 staging flush and the cull. Nothing downstream was taught about particles.
 
@@ -2733,22 +2779,29 @@ what almost every "has the explosion ended" question is actually asking;
 name carries the caveat. Neither reads anything back, because a readback here
 is a pipeline stall.
 
-**Particles are opaque.** There is no blend state anywhere in this engine yet:
-the geometry pass writes with replace, so a colour's alpha reaches the
-swapchain and nothing blends against it. A gradient ending at transparent black
-writes opaque black over what was behind it, which is worse than not fading.
-Alpha is carried and it is inert, `render.blend` is accepted and logged and
-ignored so an effect authored today draws as written once there is a blended
-pass, and the only fade that works is the size curve going to zero. What that
-leaves working is debris, chunks, gibs, snow, rain, confetti and hard-edged
-sparks. Fire, smoke, glow and soft dust want the blended pass and are not here.
+**Particles are opaque.** The forward blended lane exists and nothing
+particle-shaped reaches it: routing into it is extraction negating the first
+half extent of a cull bound, and the simulate pass writes every particle's bound
+with both extents positive. So a particle goes to the G-buffer, which is written
+with replace and has nowhere to put partial coverage, and a colour's alpha
+reaches the swapchain having blended against nothing. A gradient ending at
+transparent black writes opaque black over what was behind it, which is worse
+than not fading. Alpha is carried and it is inert, `render.blend` is accepted
+and logged and ignored so an effect authored today draws as written once the
+simulate pass can pick the lane, and the only fade that works is the size curve
+going to zero. What that leaves working is debris, chunks, gibs, snow, rain,
+confetti and hard-edged sparks. Fire, smoke, glow and soft dust want the blended
+lane and do not yet reach it.
 
 ## GPU-driven by default
 
-`make run` animates 512 instances and issues exactly one dispatch and one
-indirect draw per frame. Per-instance data lives in a storage buffer that a
-compute pass updates, and the instance count is written by that same pass into
-an `SDL_GPUIndirectDrawCommand`, so the CPU never learns it.
+`make run` animates 4000 instances and never tells the GPU how many of them to
+draw. Per-instance data lives in a storage buffer the host writes the deltas of,
+and what decides the draw is a chain of compute passes: mark, scan and compact
+for the opaque lane, five more for the blended one, light binning beside them.
+The instance count each draw consumes is written by that chain into an
+`SDL_GPUIndexedIndirectDrawCommand`, so the CPU never learns what survived the
+cull.
 
 That is the whole reason for the deferred-only decision. There are no vertex
 buffers anywhere: shaders index storage buffers by vertex and instance ID.
@@ -2815,10 +2868,10 @@ What makes the swap cheap is that the pipeline objects a frame binds are read
 through the backend every frame, so replacing them is picked up by the next
 frame with no pass graph rebuilt and nothing in the world touched.
 `Backend:rebuildPipelines` is that half. It waits for the device to go idle,
-builds the geometry pipeline, the three cull pipelines and the deferred pass's
-own two against the formats the G-buffer was created with, and installs them
-only once every one of them has compiled, so a source that no longer compiles
-raises and leaves the process drawing exactly what it drew.
+builds the geometry and forward pipelines, the five cull and sort pipelines and
+the deferred pass's own four against the formats the G-buffer was created with,
+and installs them only once every one of them has compiled, so a source that no
+longer compiles raises and leaves the process drawing exactly what it drew.
 
 Images re-read on the same principle, through `reload_image`. A file is decoded
 again and written over the texels its name already occupies, so the layer and
@@ -2889,20 +2942,24 @@ useful one: a font regenerated over a page that was missing can come back.
 
 ### The file watcher
 
-Those five are driven by an agent that knows it edited something, and also by a
-watcher that notices. SDL has no change notification: not in 3.4 and not behind
-a hint, and `SDL_AddEventWatch` watches the event queue rather than the
-filesystem. What `SDL_filesystem.h` offers is `SDL_GetPathInfo`, which answers a
-type, a size and three timestamps. So `tecs.platform.watch` polls, and going
-native to avoid polling would mean inotify, FSEvents and
-`ReadDirectoryChangesW`, plus one more for every platform whose SDK is licensed,
-to save work measured below in microseconds.
+Four of those five are driven by an agent that knows it edited something, and
+also by a watcher that notices. The sheet is the exception, and by omission
+rather than by decision: no kind is registered for one, so `sheet.replace` is
+reachable from game code alone.
 
-It polls what was loaded rather than the content tree. `assets` records every
-path this process has read or decoded, which is both a much smaller set and the
-only set where a change has anything to act on, since a file nothing opened has
-no reloader to route to. That is also why `SDL_EnumerateDirectory` is never
-called: there is nothing to enumerate.
+SDL has no change notification: not in 3.4 and not behind a hint, and
+`SDL_AddEventWatch` watches the event queue rather than the filesystem. What
+`SDL_filesystem.h` offers is `SDL_GetPathInfo`, which answers a type, a size and
+three timestamps. So `tecs.platform.watch` polls, and going native to avoid
+polling would mean inotify, FSEvents and `ReadDirectoryChangesW`, plus one more
+for every platform whose SDK is licensed, to save work measured below in
+microseconds.
+
+It polls what was loaded rather than the content tree. `filesystem` records
+every path this process has read or decoded, which is both a much smaller set
+and the only set where a change has anything to act on, since a file nothing
+opened has no reloader to route to. That is also why `SDL_EnumerateDirectory` is
+never called: there is nothing to enumerate.
 
 The poll is synchronous, on the main thread, between frames. Async IO is not an
 option rather than a rejected one: SDL's asynchronous IO opens, reads, writes
@@ -2973,7 +3030,8 @@ and a port supplies these and touches nothing above them:
  input       Devices, rumble, cursor modes, text input  adapter.input
  audio       A mixer, tracks, gain, tags                adapter.audio
  static FFI  Function pointers taken at build time      native/registry.c
- storage     Content and writable roots                 adapter.basePath/prefPath
+ storage     Content and writable roots, and how a      adapter.basePath/prefPath
+             file under one is reached                  and adapter.storage
  shaders     A pack in the platform's own format        adapter.shaderFormat
 ```
 
@@ -2981,24 +3039,26 @@ Each is a seam rather than a fork because everything above it is already
 indifferent to the answer. The application is an object a host drives rather
 than a function that runs until done, which is why iOS and a console SDK can
 both call the same four methods. Events are one typed stream discriminated by
-`kind`, so a platform with no `SDL_Event` produces those values directly.
-Input needs a second face because rumble, an LED, a cursor mode and a text
-input session are commands going the other way, and no event vocabulary can
-express one. Audio is almost that direction alone: a mixer opens, a voice is
-pointed at a clip, a gain is set, a voice stops, and the one thing that comes
-back is whether a voice is still sounding, which is asked rather than
-delivered. A target that forbids `dlopen` reaches its libraries through a
-table of pointers
-taken at build time, and nothing calls `ffi.load` when one is present. The pack
-layout does not change for a platform with private bytecode; only the declared
-format does.
+`kind`, so a platform with no `SDL_Event` produces those values directly. Input
+needs a second face because rumble, an LED, a cursor mode and a text input
+session are commands going the other way, and no event vocabulary can express
+one. Audio is almost that direction alone: a mixer opens, a voice is pointed at
+a clip, a gain is set, a voice stops, and the one thing that comes back is
+whether a voice is still sounding, which is asked rather than delivered. A
+target that forbids `dlopen` reaches its libraries through a table of pointers
+taken at build time, and nothing calls `ffi.load` when one is present. Storage
+is two halves and neither is useful alone, which is why it is one seam and not
+two: a platform that says its content lives at a root it invented is not served
+by the engine then reading that root with the host's own file calls, so the seam
+carries operations and not just paths. The pack layout does not change for a
+platform with private bytecode; only the declared format does.
 
-`tecs.platform.adapter` holds the SDL implementation of all five, which
-doubles as the worked example. `spec/adapter_spec.lua` installs a platform that
-is not SDL and drives real work through it, because a seam nobody has ever
-substituted is a guess about what a port would need rather than a contract.
-That spec is not a console port and cannot be one; it is the evidence that a
-port has five things to supply.
+`tecs.platform.adapter` holds the SDL implementation of all seven, which doubles
+as the worked example. `spec/adapter_spec.lua` installs a platform that is not
+SDL and drives real work through it, because a seam nobody has ever substituted
+is a guess about what a port would need rather than a contract. That spec is not
+a console port and cannot be one; it is the evidence that a port has seven
+things to supply.
 
 The fiddly part is bindings. SDL_GPU consumes compiled shaders and is told
 separately how many resources of each class they bind, and it fixes the
@@ -3089,15 +3149,20 @@ dependency on dynamic loading in the place it is hardest to notice, since a
 worker that fails to start looks like a worker that had nothing to do.
 
 ```
- sdl3        1231 functions
- box2d        421
- spvc         169
- sdl3image    102
- sdl3mixer     92
- shaderc       45
- worker        10
- taskpool       7
- logsink        3
+ sdl3       1231 functions
+ box2d       421
+ spvc        169
+ sdl3image   102
+ sdl3mixer    94
+ curl         81
+ zlib         81
+ shaderc      45
+ sdl3net      34
+ worker       10
+ dialogs      10
+ taskpool      7
+ http          7
+ logsink       3
 ```
 
 Signatures come from the generated cdef rather than being parsed again, so the
@@ -3141,7 +3206,7 @@ Lua where it cannot inline across an FFI call. `World.getAngle` converting a
 ## Layout
 
 ```
-host/main.c                 process entry: a Lua state and argv, nothing else
+native/host.c               process entry: a Lua state and argv, nothing else
 scripts/gencdef.py          header -> cdef + constants generator
 scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
@@ -3196,13 +3261,18 @@ fail inside a dependency a quarter of an hour later. And LuaJIT's Makefile
 refuses to guess a deployment target on Apple, so the macOS presets name one.
 
 `make check-package` is the gate on that distinction. It inspects the installed
-binaries for search paths and absolute references that leave the package, and
-for a shader compiler a release is not meant to ship. Only a packaged install
-can pass that: a development one keeps its link paths on purpose, so what runs
-against one is the half that is about the tree rather than the preset, the
-licence position and the packaged types, and the rest is reported as not run.
-A package that resolved a library from the build machine works there and
-nowhere else, and the failure only appears once someone else unpacks it.
+binaries for search paths and absolute references that leave the package, and it
+checks that a pack is there, since a release ships no compiler and must
+therefore ship its shaders. The script also refuses a shader compiler outright,
+and that is the one check the make target turns off: it passes
+`--allow-compiler`, because `check-package` packages whatever `PRESET=` names
+and that defaults to a development preset, which links one on purpose. Only a
+packaged install can pass the rest: a development one keeps its link paths on
+purpose, so what runs against one is the half that is about the tree rather than
+the preset, the licence position and the packaged types, and the rest is
+reported as not run. A package that resolved a library from the build machine
+works there and nowhere else, and the failure only appears once someone else
+unpacks it.
 
 `make test-package` is the other half of the same idea. `make test` runs the
 suite against a build tree, which on a development preset means against the
@@ -3225,9 +3295,11 @@ a real window to completion.
 
 ## Requirements
 
-CMake 3.24+, LuaJIT, SDL3 (3.4+, for SDL_GPU), SDL3_image, SDL3_mixer,
-SDL3_net, Box2D 3.x, shaderc, SPIRV-Cross, and Teal (`tl`). `make deps`
-installs them on macOS.
+CMake 3.24+, LuaJIT, SDL3 (3.4+, for SDL_GPU), SDL3_image, SDL3_mixer, SDL3_net,
+Box2D 3.x, shaderc, SPIRV-Cross, libcurl, zlib, and Teal (`tl`). The configure
+requires every one of them. `make deps` installs the ones Homebrew supplies;
+libcurl and zlib are not among them, because a development preset finds the
+host's.
 
 A development build takes SDL_mixer from the system, and a system build is
 whatever the packager configured: Homebrew's loads its optional decoders by
@@ -3260,9 +3332,13 @@ binaries it describes. A package that carried the code and not the notice would
 be the one compliance failure this engine could commit on its own, so
 `make check-package` fails an install that is missing it.
 
-Dependencies are found through pkg-config rather than a package manager's
-paths, which is what lets the same build description cross-compile. Box2D ships
-no pkg-config file and is located directly.
+Dependencies are found through pkg-config rather than a package manager's paths,
+which is what lets the same build description cross-compile. Two are found by
+hand and each for its own reason: Box2D ships no pkg-config file at all, and
+SDL3_net ships one whose `includedir` and `libdir` are `/include` and `/lib`,
+which CMake rejects when it builds an imported target out of them. Its `.pc`
+file is still consulted for the version, which is the one thing that answer is
+good for.
 
 SPIRV-Cross is distributed as static archives only, and the FFI needs a shared
 object, so the build links one. Whole-archive linking is deliberate there: the C

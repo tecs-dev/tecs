@@ -27,24 +27,29 @@
 --- that has been decoded is useful before anything has decided where it will
 --- live.
 ---
---- A file whose contents something else knows how to interpret goes through
---- `read`. That is synchronous and is the only sanctioned way to get bytes out
---- of the content root, because content lives inside the package on Android
---- and `io.open` does not reach it. It answers bytes and never text: a Lua
---- string carries a length, so an image, an archive or a binary sidecar comes
---- back whole, and a format that is text is a decoder's opinion rather than
---- this function's.
+--- A file whose contents something else knows how to interpret is not loaded
+--- here at all. It goes through `filesystem.read`, which is synchronous and is
+--- the only sanctioned way to get bytes out of the content root, because
+--- content lives inside the package on Android and `io.open` does not reach
+--- it. It answers bytes and never text: a Lua string carries a length, so an
+--- image, an archive or a binary sidecar comes back whole, and a format that
+--- is text is a decoder's opinion rather than that function's.
 ---
---- Reading a document is therefore those two halves and nothing between them:
+--- Reading a document is therefore two halves with nothing between them:
 ---
 ---     local tecs <const> = require("tecs")
----     local bytes <const> = tecs.assets.read(tecs.paths.asset("levels/1.json"))
+---     local bytes <const> = tecs.filesystem.read(tecs.paths.asset("levels/1.json"))
 ---     local level <const> = tecs.json.decode(bytes)
 ---
 --- `paths.asset` resolves against the content root and `read` answers nil for
 --- a path with no file, so a game distinguishes an absent document from a
 --- malformed one, which the decoder raises on. A parser for a binary format
 --- sits in exactly that second position, over the same bytes.
+---
+--- What the two loads below do share with it is the record of what this
+--- process has opened: each calls `filesystem.note` so the file watcher polls
+--- one list rather than two, since the decode being recorded finishes on a
+--- worker and a second list would be a second answer to the same question.
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
