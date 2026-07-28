@@ -42,7 +42,6 @@ local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
 local type box2d = require("tecs.box2d")
-local type http = require("tecs.http")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")
@@ -448,7 +447,6 @@ local record tecs
     filesystem: filesystem
     future: future
     gfx: gfx
-    http: http
     input: input
     log: log
     mcp: mcp
@@ -532,7 +530,6 @@ local SURFACE <const>: {string: Namespace} = {
             particles = {module = "tecs.gfx.particles"},
         },
     },
-    http = {module = "tecs.http"},
     input = {
         module = "tecs.platform.Input",
         class = "Input",
@@ -541,7 +538,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     log = {module = "tecs.log"},
     mcp = {module = "tecs.mcp"},
-    net = {module = "tecs.net"},
+    net = {module = "tecs.net", within = {http = {module = "tecs.net.http"}}},
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     time = {module = "tecs.platform.time"},

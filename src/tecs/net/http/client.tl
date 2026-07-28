@@ -6,7 +6,7 @@
 --- as much as can be done without waiting, and each request's answer arrives
 --- as a settled `Future<Response>`.
 ---
----     tecs.http.client({userAgent = "mygame/1.0"})
+---     tecs.net.http.newClient({userAgent = "mygame/1.0"})
 ---         :send({
 ---             url = "https://example.com/manifest.json",
 ---             headers = {accept = "application/json"},
@@ -16,18 +16,19 @@
 ---             print(manifest.status, manifest.value)
 ---         end)
 ---
---- Nothing there goes in a frame. Building a client puts it on
---- `tecs.http.clients`, and `tecs.Application` turns that list once an
+--- Nothing there goes in a frame. Building a client puts it on the list
+--- `tecs.net.http.pumpClients` turns, and `tecs.Application` turns it once an
 --- iteration for the same reason it updates `assets` and `proc`: a transfer
 --- that finished has finished, and nothing else in the frame is obliged to
 --- ask. `pump` stays on this type because a headless tool has no application
 --- to do it, and because the specs drive it directly. A game never calls it.
 ---
---- `tecs.http.client` is both callable and a namespace: calling it builds a
---- `Client`, and `client.Request`, `client.Response` and `client.Options` are
---- the records around it. That is how every component in this tree constructs,
---- and it is why this file is `client.tl` rather than `Client.tl`: it is a
---- module containing a class.
+--- This module owns `Client` and exposes `newClient`, rather than being
+--- callable itself. A callable namespace would put `Request`, `Response` and
+--- `Options` a level below the thing that constructs them, and the public name
+--- for each of them would then be one segment deeper than any public name in
+--- this tree goes. So the file is `client.tl` rather than `Client.tl`, and it
+--- is a module containing a class.
 ---
 --- ## Every call returns a future
 ---
@@ -194,8 +195,8 @@ local curl <const> = require("tecs.ffi.curl")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
 local Future <const> = require("tecs.Future")
-local DataStream <const> = require("tecs.http.DataStream")
-local clients <const> = require("tecs.http.clients")
+local DataStream <const> = require("tecs.net.http.DataStream")
+local clients <const> = require("tecs.net.http.clients")
 
 loader.declare("http")
 
@@ -402,8 +403,8 @@ local record client
         --- Advances every transfer as far as it can go without waiting.
         ---
         --- **A game does not call this.** An application turns every open
-        --- client once an iteration, through `tecs.http.clients`. It is here
-        --- for a headless tool that has no application, and for a test that
+        --- client once an iteration, through `tecs.net.http.pumpClients`. It
+        --- is here for a headless tool with no application, and for a test that
         --- drives a transfer a turn at a time.
         ---
         --- Answers how many transfers settled, so a caller that wants to know
@@ -437,8 +438,19 @@ local record client
         advance: function(self: Client, ms: number): integer
     end
 
-    --- Builds a client. `tecs.http.client(options)`.
-    metamethod __call: function(self: client, options?: Options): Client
+    --- Builds a client, which is what `tecs.net.http.newClient` answers with.
+    ---
+    --- @param options Read here rather than kept, so a field changed on the
+    ---     table afterwards is not seen. Omitted takes every default, which is
+    ---     a usable client with no `User-Agent` of its own; name the game and
+    ---     its version, because a server operator reading a log has nothing
+    ---     else to go on. Each entry of `insecureHosts` logs a warning here.
+    --- @return An open client, already on the list an application turns once
+    ---     an iteration, so a request sent through it settles without the
+    ---     caller driving anything. It stays on that list until `close`, which
+    ---     is what ends a client: dropping the last reference to one does not,
+    ---     and its sockets then stay open for the life of the process.
+    newClient: function(options?: Options): Client
 end
 
 local type Options = client.Options
@@ -1228,7 +1240,7 @@ local function insecureSet(hosts: {string}): {string: boolean}
     return set
 end
 
-local function newClient(options?: Options): Client
+function client.newClient(options?: Options): Client
     ensure()
 
     local given <const> = options or {} as Options
@@ -1284,12 +1296,5 @@ local function newClient(options?: Options): Client
     clients.add(self as clients.Pumpable)
     return self
 end
-
-setmetatable(
-    client,
-    {
-        __call = function(_self: client, options?: Options): Client return newClient(options) end,
-    } as metatable<client>
-)
 
 return client

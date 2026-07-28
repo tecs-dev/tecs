@@ -114,6 +114,7 @@ describe("tecs headless", function()
                     "tecs.gpu.Device", "tecs.ffi.sdl3", "tecs.ffi.box2d",
                     "tecs.data", "tecs.platform.system",
                     "tecs.platform.filesystem", "tecs.platform.watch",
+                    "tecs.net", "tecs.net.http", "tecs.net.http.client",
                 }
                 local loaded = {}
                 for _, name in ipairs(engine) do
@@ -182,17 +183,25 @@ describe("tecs headless", function()
                 local eager = package.loaded["tecs.platform.watch"] ~= nil
                 local watch = tecs.filesystem.watch
 
-                print(("%s %s %s %s"):format(
+                -- The same shape one protocol down: naming the transport must
+                -- not resolve libcurl, which is what `tecs.net.http` links.
+                local net = tecs.net
+                local curl = package.loaded["tecs.net.http"] ~= nil
+
+                print(("%s %s %s %s %s %s"):format(
                     tostring(rawequal(filesystem, require("tecs.platform.filesystem"))),
                     tostring(eager),
                     tostring(rawequal(watch, require("tecs.platform.watch"))),
-                    tostring(tecs.filesystem.nosuchthing)))
+                    tostring(tecs.filesystem.nosuchthing),
+                    tostring(rawequal(net, require("tecs.net"))),
+                    tostring(curl)))
             ]],
                 false
             )
             -- The name is the module, the watcher did not come with it, and
-            -- reading it answers with the module rather than a copy.
-            assert.are.equal("true false true nil\n", output)
+            -- reading it answers with the module rather than a copy. `net` is
+            -- the same, and HTTP did not come with it.
+            assert.are.equal("true false true nil true false\n", output)
         end)
 
         it("reports a mistyped engine name as nil", function()

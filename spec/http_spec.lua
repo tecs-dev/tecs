@@ -20,7 +20,7 @@ local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local net = require("tecs.ffi.sdl3net")
 local transport = require("tecs.mcp.transport")
-local http = require("tecs.http")
+local http = require("tecs.net.http")
 
 local BODY = "the multi interface drove this without blocking\n"
 
@@ -44,7 +44,7 @@ local function listenSomewhere()
     error("no free port in " .. table.concat(failures, ", "))
 end
 
-describe("http.client", function()
+describe("http.newClient", function()
     local server, port, client
     local silent, silentPort
 
@@ -65,7 +65,7 @@ describe("http.client", function()
     -- fixture that is one request behind. Building the listener per test is
     -- what makes the suite deterministic rather than usually right.
     before_each(function()
-        client = http.client({ userAgent = "tecs-spec/1.0" })
+        client = http.newClient({ userAgent = "tecs-spec/1.0" })
         server, port = listenSomewhere()
         -- A second listener that is never polled. A connection to it completes,
         -- because the kernel accepts into the backlog, and then nothing ever
@@ -462,7 +462,7 @@ describe("http.client", function()
 
     it("lets a request override maxBytes with unbounded zero", function()
         client:close()
-        client = http.client({ maxBytes = 8 })
+        client = http.newClient({ maxBytes = 8 })
         local pending = client:send({ url = url("/unbounded"), maxBytes = 0 })
         drive(pending, function()
             server:respond(200, "OK", BODY, "text/plain")
@@ -477,11 +477,11 @@ describe("http.client", function()
         -- URL are all refused, so what a reviewer reads is a list of hosts.
         for _, bad in ipairs({ "*", "", "localhost:8080", "https://example.com", "*.example.com" }) do
             assert.has_error(function()
-                http.client({ insecureHosts = { bad } })
+                http.newClient({ insecureHosts = { bad } })
             end)
         end
 
-        local allowed = http.client({ insecureHosts = { "dev.example.com" } })
+        local allowed = http.newClient({ insecureHosts = { "dev.example.com" } })
         assert.is_not_nil(allowed)
         allowed:close()
     end)
@@ -539,7 +539,7 @@ describe("http.client", function()
 
             for turn = 1, 2000 do
                 -- The one call an application makes. Note what is absent.
-                http.clients.pump()
+                http.pumpClients()
                 server:poll(turn * 0.05, function()
                     server:respond(200, "OK", BODY, "text/plain")
                 end)
@@ -557,18 +557,18 @@ describe("http.client", function()
             -- Closing is what ends a client's place in a frame; dropping the
             -- last reference to one deliberately does not, or a request nobody
             -- kept would stop moving whenever a collection happened to run.
-            local before = http.clients.count()
-            local extra = http.client({ userAgent = "tecs-spec/1.0" })
-            assert.are.equal(before + 1, http.clients.count())
+            local before = http.openClients()
+            local extra = http.newClient({ userAgent = "tecs-spec/1.0" })
+            assert.are.equal(before + 1, http.openClients())
 
             local pending = extra:send({ url = silentUrl("/never-answered") })
             extra:close()
-            assert.are.equal(before, http.clients.count())
+            assert.are.equal(before, http.openClients())
             assert.are.equal("cancelled", pending.status)
 
             -- And the list turns without it rather than reaching a closed
             -- client, which is what a stale entry would look like.
-            assert.are.equal(0, http.clients.pump())
+            assert.are.equal(0, http.pumpClients())
         end)
     end)
 
@@ -587,7 +587,7 @@ describe("http.client", function()
 
         local function turn(entity, component, turns)
             for count = 1, turns or 2000 do
-                http.clients.pump()
+                http.pumpClients()
                 world:update(1 / 60)
                 server:poll(count * 0.05, function()
                     server:respond(200, "OK", BODY, "text/plain")

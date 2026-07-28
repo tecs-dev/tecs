@@ -1506,11 +1506,11 @@ decode that finished has finished, a child that exited has exited, a transfer
 that completed has completed, and nothing else in a frame is obliged to ask.
 The reason it was not simply a third line in `Application` is that `assets` and
 `proc` are module singletons and a client is an object a game constructs, maybe
-several of. So the clients come to the loop: building one registers it in
-`tecs.http.clients`, `close` takes it off, and the application turns whatever is
-on the list. That list is a module with no FFI in it, because
-`tecs.http.client` loads libcurl the moment it is required and a game with no
-HTTP in it must not link one. It holds its clients strongly, so a request whose
+several of. So the clients come to the loop: building one registers it on the
+list `tecs.net.http.pumpClients` turns, `close` takes it off, and the
+application turns whatever is on the list. That list is a module with no FFI in
+it, because `tecs.net.http` loads libcurl the moment it is required and a game
+with no HTTP in it must not link one. It holds its clients strongly, so a request whose
 future is the only thing a game kept still lands; the price is that `close` is
 what ends a client rather than losing the last reference to it, and the
 alternative -- a weak list -- is a fire-and-forget request that stops moving
@@ -3465,8 +3465,8 @@ src/tecs/mcp/             the debug server: transport, tools, sandbox
 src/tecs/assets.tl        images and clips, decoded on a worker
 src/tecs/workers.tl       threads with serialized channels
 src/tecs/Future.tl        the value everything asynchronous settles into
-src/tecs/http/            requests, and the clients the loop turns
 src/tecs/net.tl           nonblocking TCP and UDP transport
+src/tecs/net/http/        requests, and the clients the loop turns
 src/tecs/random.tl        seeded streams and Perlin noise
 src/tecs/data.tl          JSON, zlib and raw DEFLATE, and three hashes
 assets/                   shaders, materials and fonts, globbed at build time

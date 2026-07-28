@@ -69,7 +69,7 @@ local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local filesystem <const> = require("tecs.platform.filesystem")
 local system <const> = require("tecs.platform.system")
-local httpClients <const> = require("tecs.http.clients")
+local httpClients <const> = require("tecs.net.http.clients")
 local watch <const> = require("tecs.platform.watch")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
@@ -883,7 +883,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- transfer reach a deadline it had no reason to.
     --
     -- Costs an integer compare on a process that has never built a client.
-    -- This module is what makes that true: `tecs.http.client` loads libcurl
+    -- This module is what makes that true: `tecs.net.http` loads libcurl
     -- when it is required, and the list of live clients deliberately does not,
     -- so a game with no HTTP in it does not link one.
     httpClients.pump()

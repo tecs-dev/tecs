@@ -5,7 +5,7 @@
 --- the world: something the debug server can list, something a system can
 --- react to, something that dies when the entity that asked for it does.
 ---
----     world:addPlugin(tecs.http.plugin.install)
+---     world:addPlugin(tecs.net.http.plugin.install)
 ---
 ---     world:spawn(http.plugin.Request, {url = "https://example.com/scores"})
 ---
@@ -26,7 +26,7 @@
 --- defaults, and kept in the world's resources so a game can reach it:
 --- `plugin.clientOf(world)`. A game that wants two clients, one for a chatty
 --- API and one for downloads, builds the second itself; nothing about this
---- plugin is in the way of `tecs.http.client` beside it.
+--- plugin is in the way of `tecs.net.http.newClient` beside it.
 ---
 --- Despawning the world does not close the client. `plugin.close(world)` does,
 --- and a program that ends is a process that ends, which is the same answer
@@ -34,8 +34,8 @@
 
 local ecs <const> = require("tecs.ecs")
 local Future <const> = require("tecs.Future")
-local client <const> = require("tecs.http.client")
-local DataStream <const> = require("tecs.http.DataStream")
+local client <const> = require("tecs.net.http.client")
+local DataStream <const> = require("tecs.net.http.DataStream")
 
 local type World = ecs.World
 local type Component = ecs.Component
@@ -89,7 +89,7 @@ local record plugin
         future: Future<client.Response>
     end
 
-    --- Installs the plugin: `world:addPlugin(tecs.http.plugin.install)`.
+    --- Installs the plugin: `world:addPlugin(tecs.net.http.plugin.install)`.
     ---
     --- Takes options because the plugin builds the world's client, and a game
     --- that wants a `userAgent` on it has nowhere else to say so:
@@ -105,6 +105,12 @@ local type Request = plugin.Request
 local type Response = plugin.Response
 local type Pending = plugin.Pending
 
+-- The three names below, the resource key under them and the system names
+-- further down are all spelled `tecs.http.*` and stay that way now that the
+-- module is `tecs.net.http`. A snapshot names a component by string and an
+-- agent selects a system by one, so they are a save format and a tooling
+-- surface rather than module paths. See `AGENTS.md` on externally typed
+-- strings.
 ecs.newComponent({
     name = "tecs.http.Request",
     container = plugin.Request,
@@ -190,7 +196,7 @@ function plugin.install(world: World, options?: Options)
     end
     installed[world] = true
 
-    local owned <const> = client(options)
+    local owned <const> = client.newClient(options)
     world.resources[CLIENT] = owned
 
     local waiting <const> = world:query({

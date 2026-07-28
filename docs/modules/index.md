@@ -46,11 +46,11 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behaviour                                         |
 | [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to                                          |
 | [`tecs.gfx.particles`](/modules/gfx/particles)       | emitters                                                                   |
-| [`tecs.http`](/modules/http)                         | fetching over HTTP without stopping the frame                              |
 | [`tecs.input`](/modules/input)                       | gameplay input, the gamepads on it, and standalone sensors                 |
 | [`tecs.log`](/modules/log)                           | SDL's logging, per platform, with a named logger as the unit of filtering  |
 | [`tecs.mcp`](/modules/mcp)                           | the debug server: transport, tools, sandbox                                |
-| [`tecs.net`](/modules/net)                           | nonblocking TCP streams and UDP datagrams                                  |
+| [`tecs.net`](/modules/net/)                          | nonblocking TCP streams and UDP datagrams                                  |
+| [`tecs.net.http`](/modules/net/http)                 | fetching over HTTP without stopping the frame                              |
 | [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                            |
 | [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers  |
 | [`tecs.time`](/modules/time)                         | monotonic time                                                             |

@@ -235,11 +235,11 @@ behind each one.
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
 - [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
 - [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
-- [`tecs.http`](/modules/http) - fetching over HTTP without stopping the frame
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
-- [`tecs.net`](/modules/net) - nonblocking TCP streams and UDP datagrams
+- [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
+- [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time

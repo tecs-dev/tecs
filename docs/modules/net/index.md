@@ -9,6 +9,10 @@ outline: deep
 and sends whole UDP datagrams. It does not add a message protocol: a TCP stream is bytes in order, and framing
 those bytes into messages belongs to the game.
 
+A protocol built on that is a namespace one level down, and [`tecs.net.http`](/modules/net/http) is the one there
+is. Naming this module loads no protocol: HTTP resolves libcurl when it is read, so a program that only opens a
+socket never links one.
+
 The surface follows the game loop rather than hiding one:
 
 - resolution and client connection return [`Future`](/modules/Future) values;
@@ -853,6 +857,16 @@ Begins connecting to a resolved address.
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>FutureType&lt;<a href="#tecs.net.Stream">Stream</a>&gt;</code> | A future over a stream the caller owns and closes. Already "failed" when the address is closed, SDL3_net could not start, or the connection could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Cancelling it destroys the half-open socket. |
 
+<a id="tecs.net.http"></a>
+
+### tecs.net.http
+
+<pre><code v-pre><a href="#tecs.net.http">tecs.net.http</a>: http
+</code></pre>
+
+HTTP and HTTPS, over libcurl. The one protocol namespace here: this
+module is the transport, and framing bytes into messages is what a
+protocol above it does.
 <a id="tecs.net.init"></a>
 
 ### tecs.net.init

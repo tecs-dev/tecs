@@ -8,11 +8,11 @@
 --- one, and it is read a piece at a time so a 500 MB download is never also a
 --- 500 MB string.
 ---
----     tecs.http.client():send({
+---     tecs.net.http.newClient():send({
 ---         url = "https://example.com/upload",
 ---         method = "PUT",
----         body = tecs.http.DataStream.ofFile("save.bin"),
----         into = tecs.http.DataStream.ofFile("reply.bin"),
+---         body = tecs.net.http.DataStream.ofFile("save.bin"),
+---         into = tecs.net.http.DataStream.ofFile("reply.bin"),
 ---     })
 ---
 --- ## One value, two directions

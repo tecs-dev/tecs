@@ -3,15 +3,15 @@ description: "An HTTP client where every request is a future, every body is a st
 outline: deep
 ---
 
-# tecs.http
+# tecs.net.http
 
-`tecs.http` fetches things over HTTP and HTTPS without stopping the frame it was called from. Make a client, send a
+`tecs.net.http` fetches things over HTTP and HTTPS without stopping the frame it was called from. Make a client, send a
 request, attach a continuation. Nothing else is yours to do.
 
 ```teal
-tecs.http.client({ userAgent = "mygame/1.0" })
+tecs.net.http.newClient({ userAgent = "mygame/1.0" })
     :send({ url = "https://example.com/manifest.json" })
-    :map(function(response: tecs.http.client.Response): Manifest
+    :map(function(response: tecs.net.http.Response): Manifest
         return tecs.data.decodeJSON(response.body:text()) as Manifest
     end)
     :onSettle(function(manifest: tecs.Future<Manifest>)
@@ -26,6 +26,15 @@ tecs.http.client({ userAgent = "mygame/1.0" })
 There is no line missing from that. A client is driven by the application from the frame it already runs, the same
 way [`assets`](/modules/assets) and [`proc`](/modules/system) are, so a request started anywhere settles on its own.
 
+HTTP sits under [`tecs.net`](/modules/net/) because it is a protocol over the transport that module opens, and it
+is flat beneath that one namespace: `Client`, `ClientOptions`, `Request`, `Response` and `DataStream` are all one
+segment below `http`, and `newClient` is what builds a client. There is no `tecs.net.http.client` to reach
+through.
+
+A headless tool has no application to turn the clients it built, so `tecs.net.http.pumpClients()` turns every open
+one and answers how many transfers settled. `tecs.net.http.openClients()` counts the clients built and not yet
+closed, which is how a leaked one shows up. A game calls neither.
+
 `onSettle` is handed the future rather than the value, which is what lets one continuation answer both outcomes.
 [`map`](/modules/future#map), [`flatMap`](/modules/future#flatmap) and [`recover`](/modules/future#recover) are
 the rest of it: everything a request returns is a [`Future`](/modules/future) and behaves like every other one.
@@ -39,7 +48,7 @@ One value for bytes, wherever they are. A request takes one, a response carries 
 the client has to care which kind it is.
 
 ```teal
-local DataStream <const> = tecs.http.DataStream
+local DataStream <const> = tecs.net.http.DataStream
 
 DataStream.ofString('{"score":11}', "application/json")
 DataStream.ofFile("saves/slot1.bin")            -- a path, written as it arrives
@@ -70,12 +79,12 @@ case that is not served yet, and it needs the read side moved into C beside the 
 
 `maxBytes` counts every byte a body has been, drained or not, so a destination is not a way around the ceiling.
 
-## client
+## newClient
 
 Builds a client. Every field is optional.
 
 ```teal
-local client <const> = tecs.http.client(options?: Options)
+local client <const> = tecs.net.http.newClient(options?: Options)
 ```
 
 One client is one connection pool. Build one for the game and keep it; **call `close` when you are done with it**,
@@ -164,7 +173,7 @@ mode a request is issued in. Startup and tools want it; a frame does not.
 
 ```teal
 local config <const> = client:send({ url = url })
-    :map(function(response: tecs.http.client.Response): string return response.body:text() end)
+    :map(function(response: tecs.net.http.Response): string return response.body:text() end)
     :recover(function(): string return DEFAULTS end)
     :wait(2000)
 ```
@@ -184,7 +193,7 @@ are not checked, each of which logs a warning when the client is built. No wildc
 accepted in that list.
 
 ```teal
-local client <const> = tecs.http.client({ insecureHosts = { "dev.example.com" } })
+local client <const> = tecs.net.http.newClient({ insecureHosts = { "dev.example.com" } })
 ```
 
 A self-signed development server is a real need and this serves it. Pinning a development CA through libcurl's own
@@ -196,7 +205,7 @@ Unset, libcurl reads `http_proxy` and `https_proxy` from the environment, which 
 expects. `proxy` overrides that, and `proxy = ""` is how a game ignores the environment and talks direct.
 
 ```teal
-tecs.http.client({ proxy = "http://cache.internal:3128", noProxy = "localhost,127.0.0.1" })
+tecs.net.http.newClient({ proxy = "http://cache.internal:3128", noProxy = "localhost,127.0.0.1" })
 ```
 
 ## A request as an entity
@@ -206,9 +215,9 @@ world. The plugin gives it an entity instead, so it is listed by the [debug serv
 system, and cancelled when whatever asked for it despawns.
 
 ```teal
-world:addPlugin(tecs.http.plugin.install)
+world:addPlugin(tecs.net.http.plugin.install)
 
-world:spawn(tecs.http.plugin.Request({ url = "https://example.com/scores" }))
+world:spawn(tecs.net.http.plugin.Request({ url = "https://example.com/scores" }))
 ```
 
 Some frames later that entity carries a `Response` instead of a `Request`, so a system with
@@ -217,7 +226,7 @@ carries `status`, `headers`, `body`, `url` and an `error` that is set only when 
 404 is a `status` of 404 and no error, as everywhere else here.
 
 The plugin owns one client per world, reachable as `http.plugin.clientOf(world)` and closed by
-`http.plugin.close(world)`. Build a second one with `tecs.http.client` if a chatty API and a downloader want
+`http.plugin.close(world)`. Build a second one with `tecs.net.http.newClient` if a chatty API and a downloader want
 different pools.
 
 ## Cancelling

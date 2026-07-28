@@ -108,7 +108,7 @@ MODULES = [
     ),
     ("docs/modules/log.md", [("src/tecs/log.tl", "tecs.log")]),
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
-    ("docs/modules/net.md", [("src/tecs/net.tl", "tecs.net")]),
+    ("docs/modules/net/index.md", [("src/tecs/net.tl", "tecs.net")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),

@@ -1,10 +1,16 @@
---- Nonblocking TCP and UDP networking over SDL3_net.
+--- Nonblocking TCP and UDP networking over SDL3_net, and the protocols above
+--- it.
 ---
---- This is a transport surface, not a protocol. A stream is an ordered
---- sequence of bytes: one write may take several reads to receive, several
---- writes may arrive in one read, and message framing belongs to the caller.
---- A datagram preserves one send as one packet, but may be lost, duplicated or
---- reordered by the network.
+--- What sits directly here is the transport, not a protocol. A stream is an
+--- ordered sequence of bytes: one write may take several reads to receive,
+--- several writes may arrive in one read, and message framing belongs to the
+--- caller. A datagram preserves one send as one packet, but may be lost,
+--- duplicated or reordered by the network.
+---
+--- A protocol built on that is a namespace one level down, and `http` is the
+--- one there is. Reading this module's name loads no protocol: `tecs.net.http`
+--- resolves libcurl when it is read, and a program that only opens a socket
+--- never reads it.
 ---
 --- Resolution and client connection are asynchronous and return
 --- [`Future`](Future) values. Call `net.poll` once per frame while either is
@@ -19,6 +25,13 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local binding <const> = require("tecs.ffi.sdl3net")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
+
+-- Type-only, so nothing loads here and libcurl is not resolved by a program
+-- that only opens a socket: the field below declares the name and `tecs.init`
+-- fills it in on the first read of it. The edge runs this way round and only
+-- this way. Nothing under `http` requires this module, which is what keeps
+-- naming its type from being a require cycle Teal rejects.
+local type http = require("tecs.net.http")
 
 local type FutureType<T> = Future<T>
 local type Source = Future.Source
@@ -40,6 +53,11 @@ local DEFAULT_WAIT_MS <const> = 5000
 local WAIT_SLICE_MS <const> = 16
 
 local record net
+    --- HTTP and HTTPS, over libcurl. The one protocol namespace here: this
+    --- module is the transport, and framing bytes into messages is what a
+    --- protocol above it does.
+    http: http
+
     --- A resolved network address.
     record Address
         --- The hostname passed to `resolve`, or the numeric peer address for

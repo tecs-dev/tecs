@@ -10,7 +10,7 @@
 ---
 --- ## Why this is a module of its own
 ---
---- The loop has to reach the list without loading libcurl. `tecs.http.client`
+--- The loop has to reach the list without loading libcurl. `tecs.net.http`
 --- resolves the library when it is required, so an `Application` that required
 --- it would make every game depend on libcurl being present at startup,
 --- including the ones that never make a request. This module names no library
