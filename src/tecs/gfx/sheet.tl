@@ -473,15 +473,29 @@ end
 
 local BuilderMT <const>: metatable<Builder> = {__index = Builder}
 
+--- The sheet surface: the constructors, the process-wide registry they write
+--- into, and the `Pivot` component a slice resolves to.
+---
+--- Registration is per process rather than per world, so a sheet built once is
+--- reachable from every world by id or by name.
 local record sheet
+    --- How a tag walks its span.
     type Direction = Direction
+    --- One frame, as `rects` and the builder take it.
     type Rect = Rect
+    --- A named span of frames, as the constructors take it.
     type Tag = Tag
+    --- A named region that moves across the frames.
     type Slice = Slice
+    --- Where a slice sits from one frame on.
     type SliceKey = SliceKey
+    --- What `grid` takes.
     type GridOptions = GridOptions
+    --- What `rects` takes.
     type RectsOptions = RectsOptions
+    --- What `fromAseprite` takes.
     type AsepriteOptions = AsepriteOptions
+    --- What `build` answers with.
     type Builder = Builder
 
     --- An image divided into frames.

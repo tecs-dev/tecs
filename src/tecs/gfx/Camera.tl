@@ -41,9 +41,17 @@ local record CameraOptions
     projection: string
 end
 
+--- A view onto the world, as one object.
+---
+--- Every field is plain and meant to be assigned to directly, frame by frame;
+--- nothing here has to be told a field moved. A renderer copies the values it
+--- draws from at extraction, so a camera moved after that moves the next frame
+--- and not the one in flight.
 local record Camera
     --- Centre of the view, in world units.
     x: number
+    --- The other half of it, running down: increasing y moves the view towards
+    --- the bottom of the world.
     y: number
     --- Above one magnifies. Applied about the centre, so zooming does not move
     --- what is under the middle of the window.
@@ -58,7 +66,11 @@ local record Camera
     --- else changes what the camera reports about itself and not what it draws.
     projection: string
 
+    --- The sixteen floats `matrix` rewrites and hands back. Allocated once,
+    --- because it is written every frame and read straight into a uniform.
     _matrix: loader.CArray
+    --- The four numbers `viewBounds` rewrites and hands back, on the same
+    --- terms.
     _view: {number}
 
     --- Creates a camera. Everything defaults to an unrotated, unzoomed view at

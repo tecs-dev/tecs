@@ -76,15 +76,26 @@ local record RendererOptions
     packImages: boolean
 end
 
+--- The renderer a game holds, and the only object that sees both halves.
+---
+--- One is created per device and installed on a world, after which it does its
+--- work from the system it registered and from `render`. It owns the packet,
+--- the extractor and the backend, and `destroy` takes all three with it.
 local record Renderer
+    --- Re-exported for whoever writes one and passes it to `addProducer`.
     type InstanceProducer = InstanceProducer
+    --- Re-exported for whoever names a rectangle for `setClipRegion`.
     type ClipRegion = ClipRegion
+    --- Re-exported for whoever implements one and passes it to
+    --- `addComputeStage`.
     type ComputeStage = ComputeStage
 
     --- What the view is looking at. Centred on the viewport the first time a
     --- frame is drawn, so a scene that never mentions a camera sees world
     --- coordinates as screen coordinates.
     camera: Camera
+    --- Instances the buffers were sized for, fixed at creation. Nothing grows,
+    --- so this is what `dropped` counts against.
     capacity: integer
     --- Instances the last sync left resident.
     count: integer
@@ -100,8 +111,14 @@ local record Renderer
     --- and passes around the three it already has.
     deferred: Deferred
 
+    --- The world-facing half. `camera` above is its camera, named here so
+    --- neither half has to be reached for.
     _extractor: Extractor
+    --- The device-facing half. `images`, `instances` and `deferred` above are
+    --- its, on the same terms.
     _backend: Backend
+    --- The one packet, refilled each extraction rather than allocated per
+    --- frame, so what `render` draws is always the last extraction's.
     _packet: FramePacket
     --- Staging slot the next extraction writes into, rotated after each
     --- submission.
@@ -111,12 +128,19 @@ local record Renderer
     --- for that with a fresh driver allocation every frame. Writing to a slot
     --- the GPU is not reading gives the same guarantee and allocates nothing.
     _slot: integer
+    --- Whether the camera has been put in the middle of the viewport yet. It
+    --- happens on the first frame that has something to draw, once and never
+    --- again, so a game that moves the camera itself is not moved back.
     _centred: boolean
 end
 
 local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
 
 --- Builds a renderer for `device`.
+---
+--- @param swapchainFormat The `SDL_GPUTextureFormat` present copies into.
+--- @param options Every field has a default, and nil is accepted at runtime
+---     even though the signature does not mark it optional.
 function Renderer.create(device: loader.CPtr, swapchainFormat: integer, options: RendererOptions): Renderer
     options = options or {}
 
@@ -169,6 +193,15 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer, options:
 end
 
 --- Registers the sync system and queries on `world`.
+---
+--- Two systems, not one: the transform snapshot the interpolation reads runs
+--- in FixedFirst, before anything in the step has moved, and the extraction
+--- itself runs in RenderFirst. The counts above are published as the second
+--- returns, so a system later in the frame reads this frame's numbers.
+---
+--- @param world The queries and both systems are added here and nowhere else,
+---     so a renderer that was created and never installed draws an empty
+---     packet rather than failing.
 function Renderer:install(world: ecs.World)
     self._extractor:install(
         world,
@@ -198,6 +231,12 @@ end
 --- return is the region, which reports the size that was uploaded.
 ---
 --- The handle's pixels are released here: the array holds them now.
+---
+--- @param handle Must have loaded: any other status raises, and the pixels are
+---     released whether the path was new or already registered.
+--- @return A Sprite selecting the whole image, ready to spawn.
+--- @return Where it landed, which reports the size that was uploaded rather
+---     than the cell's. The renderer's own record, not a copy.
 function Renderer:registerImage(handle: assets.Handle): components.Sprite, TextureArray.Region
     if handle.status ~= "ready" then
         error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
@@ -229,6 +268,13 @@ end
 --- into and adding one would be `registerImage`.
 ---
 --- The handle's pixels are released here: the array holds them now.
+---
+--- @param handle Must have loaded, must name a path already registered, and
+---     must be the same size it was registered at. Each of the three raises,
+---     and the pixels are only released once all three have passed.
+--- @return The same Sprite `registerImage` answered with, since neither the
+---     layer nor the rect moved.
+--- @return The region, unchanged, and still the renderer's own record.
 function Renderer:replaceImage(handle: assets.Handle): components.Sprite, TextureArray.Region
     if handle.status ~= "ready" then
         error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
@@ -268,10 +314,6 @@ function Renderer:rebuildPipelines()
     self._backend:rebuildPipelines()
 end
 
---- A resolved Sprite for a registered image, ready to spawn.
----
---- UVs are fractions of the image rather than of the cell it sits in. Omitted,
---- they select the whole image. Fails on a name nothing is registered under.
 --- The region an image already occupies, or nil if none has registered it.
 ---
 --- What `registerImage` answers, without a decoded handle to answer it with.
@@ -279,6 +321,11 @@ end
 --- does when its metrics are re-read, would otherwise have to decode the file
 --- again only to be handed back the layer it already had and have its pixels
 --- released undrawn.
+---
+--- @param path The path the image was registered under, spelled the same way.
+--- @return The renderer's own record of where the image landed, not a copy.
+---     Nil says nothing is registered under that path, which is the one answer
+---     `registerImage` and `replaceImage` differ on.
 function Renderer:regionOf(path: string): TextureArray.Region
     return self._extractor:regionOf(components.imageId(path))
 end
@@ -288,6 +335,18 @@ function Renderer:reservesRuns(): boolean
     return self._extractor:reservesRuns()
 end
 
+--- A resolved Sprite for a registered image, ready to spawn.
+---
+--- UVs are fractions of the image rather than of the cell it sits in. Omitted,
+--- they select the whole image. Fails on a name nothing is registered under.
+---
+--- @param name The path the image was registered under.
+--- @param u0 Zero at the image's left edge and one at its right, not the
+---     cell's. Defaults to zero, as `v0` does.
+--- @param u1 Defaults to one, as `v1` does, so omitting all four is the whole
+---     image.
+--- @return A fresh Sprite, with the fractions already mapped into the rect the
+---     image occupies within its cell.
 function Renderer:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
     return self._extractor:sprite(name, u0, v0, u1, v1)
 end
@@ -298,16 +357,31 @@ end
 --- inside the rectangle and thrown away where they do not. Region zero is not
 --- a region and cannot be set: it is what an instance says when it wants no
 --- clipping at all.
+---
+--- @param index 1 through 255. Zero, a fraction, or anything outside that
+---     raises.
+--- @param region Nil raises rather than clearing; `clearClipRegion` is what
+---     stops a region clipping.
 function Renderer:setClipRegion(index: integer, region: ClipRegion)
     self._backend:setClipRegion(index, region)
 end
 
 --- Stops region `index` clipping anything.
+---
+--- Instances still naming it draw whole rather than disappearing, so an
+--- adapter handing indices out and taking them back leaves nothing behind that
+--- silently removes content.
+---
+--- @param index The same range `setClipRegion` takes. Clearing one nobody set
+---     is not an error.
 function Renderer:clearClipRegion(index: integer)
     self._backend:clearClipRegion(index)
 end
 
 --- Adds a producer, laid out after the archetypes in the order added.
+---
+--- @param producer Held for the life of the renderer; there is no way to take
+---     one back out.
 function Renderer:addProducer(producer: InstanceProducer)
     self._extractor:addProducer(producer)
 end
@@ -317,6 +391,9 @@ end
 --- What a producer whose instances are written on the GPU needs beyond the
 --- run a producer already gets: the run reserves the slots, and this is where
 --- something is put in them.
+---
+--- @param stage Held until `destroy`, which calls its own. There is no way to
+---     take one back out.
 function Renderer:addComputeStage(stage: ComputeStage)
     self._backend:addComputeStage(stage)
 end
@@ -325,6 +402,9 @@ end
 ---
 --- For a stage that has to build its own pipelines and buffers before there is
 --- a frame to record onto.
+---
+--- @return The `SDL_GPUDevice` handed to `create`. Not owned here: `destroy`
+---     releases what was built on it and never the device itself.
 function Renderer:device(): loader.CPtr
     return self._backend:device()
 end
@@ -339,6 +419,11 @@ function Renderer:extractSeconds(): number
 end
 
 --- Draws the packet the last extraction produced.
+---
+--- @param frame Recorded onto and not submitted, so a caller with passes of
+---     its own records them after this and submits once. Its width and height
+---     are what the camera's matrix and the view bounds are resolved against,
+---     which is why they are not stored on the camera.
 function Renderer:render(frame: Frame)
     local packet = self._packet
 
@@ -372,6 +457,10 @@ function Renderer:render(frame: Frame)
 end
 
 --- The composited image the last frame produced.
+---
+--- @return The scene target rather than the swapchain, so it can be read at any
+---     point between frames. The renderer goes on drawing into it, so the next
+---     frame overwrites what a caller has not already copied out.
 function Renderer:captureTexture(): Texture
     return self._backend:captureTexture()
 end

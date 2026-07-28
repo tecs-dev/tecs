@@ -150,7 +150,13 @@ local record PlayOptions
     playing: boolean
 end
 
+--- The playback surface: the `Animation` component, its two events, the
+--- constructors and controls over it, and the system that advances it.
+---
+--- Nothing here is installed for you. A world that draws no sprite sheets pays
+--- for none of it until `plugin` is called.
 local record animation
+    --- What `of` and `play` take.
     type PlayOptions = PlayOptions
 
     --- Playback state for one entity.

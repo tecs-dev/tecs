@@ -23,6 +23,12 @@ local type Camera = require("tecs.gfx.Camera")
 local LIGHT_FLOATS <const> = lightlayout.FLOATS
 local MAX_LIGHTS <const> = lightlayout.MAX
 
+--- The seam between the two halves of rendering, as one object.
+---
+--- One is created per renderer and reused for the life of it. Every field is
+--- rewritten each frame between `begin` and the extraction that fills it, and
+--- is only meaningful to the backend consuming that same frame: nothing here
+--- describes a frame other than the last one extracted.
 local record FramePacket
     --- Staging slot the instance and bounds bytes were written into. The
     --- backend flushes this slot and no other.
@@ -59,8 +65,12 @@ local record FramePacket
     --- The projection mode is not carried because there is one, and a second
     --- one arrives as an enum rather than as the string a camera names it by.
     cameraX: number
+    --- The other half of that position, in the same world units, running down.
     cameraY: number
+    --- Above one magnifies. Zero is copied across like any other value and
+    --- guarded where it would be divided by, not rejected here.
     cameraZoom: number
+    --- Radians. Positive turns the scene counter-clockwise on screen.
     cameraRotation: number
 
     --- Fixed steps the world had run when this frame was extracted.
@@ -75,18 +85,26 @@ local record FramePacket
     --- Lights, `lightlayout.FLOATS` each, in the order the lighting pass reads
     --- them.
     lights: loader.CArray
+    --- Lights actually written, at most `lightlayout.MAX`. Floats past this
+    --- many are whatever an earlier frame left there and are not read.
     lightCount: integer
 
     --- Bytes of the instance buffer this frame wrote, and of the bounds
     --- buffer. The backend records these against the staging slot and flushes
     --- it; nothing else decides what is copied.
     instanceRanges: dirtyranges
+    --- Offsets here are into the bounds buffer, whose stride is
+    --- `instancelayout.BOUND_BYTES` rather than the instance's.
     boundsRanges: dirtyranges
 end
 
 local FramePacketMT <const>: metatable<FramePacket> = {__index = FramePacket}
 
 --- Builds an empty packet, with its storage allocated once.
+---
+--- @return A packet reporting nothing drawn, at the origin and unzoomed. The
+---     light array and the two range lists are allocated here and are the same
+---     objects for the life of it.
 function FramePacket.create(): FramePacket
     local self = setmetatable({} as FramePacket, FramePacketMT)
     self.slot = 0
@@ -111,6 +129,9 @@ end
 --- The counts are not cleared: an extraction writes all three before it
 --- returns, and a packet that reported zero drawn between being reset and
 --- being filled would be a state no consumer should be able to observe.
+---
+--- @param slot The staging slot this frame's bytes are going into, zero-based
+---     and below `Buffer.slotCount`. Recorded rather than checked.
 function FramePacket:begin(slot: integer)
     self.slot = slot
     self.lightCount = 0
@@ -119,6 +140,9 @@ function FramePacket:begin(slot: integer)
 end
 
 --- Copies a camera's state in. The camera itself never crosses.
+---
+--- @param camera Read here and not retained, so moving it afterwards does not
+---     move the frame this packet describes.
 function FramePacket:setCamera(camera: Camera)
     self.cameraX = camera.x
     self.cameraY = camera.y
@@ -130,6 +154,11 @@ end
 ---
 --- Positions are in world units, like everything else a packet carries; see
 --- `Deferred.Light` for what each value means.
+---
+--- Dropping is silent and the caller is not told: the alternative is a frame
+--- that raises over a light nobody would have picked out of the image. Order
+--- decides which are kept, so the first `lightlayout.MAX` offered survive and
+--- the rest of the frame's are lost.
 function FramePacket:addLight(
     x: number, y: number, z: number, radius: number, r: number, g: number, b: number, intensity: number
 )

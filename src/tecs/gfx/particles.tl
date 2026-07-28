@@ -1904,23 +1904,42 @@ end
 -- The surface
 -------------------------------------------------------------------------------
 
+--- The particle surface: the registry, the authoring helpers, the emitter
+--- component and the plugin that installs a pool.
+---
+--- Registration is process-wide rather than per world, so an effect registered
+--- once is reachable from every world; a pool, by contrast, is per world and
+--- has to be installed.
 local record particles
+    --- The handle `effect` answers with and a `ParticleEmitter` names.
     type Effect = Effect
+    --- What `effect` takes.
     type EffectOptions = EffectOptions
+    --- What `curve` answers with.
     type Curve = Curve
+    --- What `gradient` answers with.
     type Gradient = Gradient
+    --- The two-bound form of a `Value`.
     type Range = Range
+    --- Accepted wherever a property may vary per particle.
     type Value = Value
+    --- Accepted wherever a colour is asked for.
     type Color = Color
+    --- What `poolOf` answers with.
     type Pool = Pool
+    --- What `plugin` takes.
     type PoolOptions = PoolOptions
+    --- What a `ParticleEmitter` is constructed from.
     type EmitterOptions = EmitterOptions
+    --- The three values an emitter's `state` takes.
     type EmitterState = EmitterState
 
     --- Samples one compiled curve or gradient holds.
     CURVE_SAMPLES: integer
     --- Floats per effect and per emitter record, which the shaders state again.
     EFFECT_FLOATS: integer
+    --- The second of that pair, and a different number: an emitter record is
+    --- much the smaller of the two.
     EMITTER_FLOATS: integer
     --- Floats of state one particle carries, on the GPU and nowhere else.
     STATE_FLOATS: integer
@@ -1932,6 +1951,8 @@ local record particles
     --- the right thing. `spec/particles_spec.lua` reads both and holds them to
     --- each other, which is the only reason this is on the surface.
     EFFECT: {string: integer}
+    --- The same for an emitter record. Both are keyed by field name and give a
+    --- float offset from the record's start, counting from zero.
     EMITTER: {string: integer}
 
     --- The emitter component.
@@ -1940,12 +1961,22 @@ local record particles
     --- Registers an effect under `options.name`. Immutable once registered,
     --- and shared by every emitter naming it. A name is required and a name
     --- already taken is refused.
+    ---
+    --- @param options Every section but `name` is optional and defaults to
+    ---     something drawable.
+    --- @return A handle that stays valid until `reset`. Registration is
+    ---     process-wide, so this is reachable from every world.
     effect: function(options: EffectOptions): Effect
 
     --- The effect registered under `name`, or nil when nothing has that name.
+    ---
+    --- @param name Nil answers nil rather than raising, so a restore holding no
+    ---     name takes the same path as one holding an unknown name.
     find: function(name: string): Effect
 
     --- Every registered effect's name, in registration order.
+    ---
+    --- @return A fresh table each call, the caller's to keep and to modify.
     names: function(): {string}
 
     --- Forgets every registered effect, so a spec can register a set again.
@@ -1953,16 +1984,32 @@ local record particles
     reset: function()
 
     --- Compiles keyframes into a curve over normalised age.
+    ---
+    --- @param keys `{age, value}` pairs with age in zero to one. They may sit
+    ---     anywhere in that span and need not be sorted; what comes out is the
+    ---     piecewise-linear curve through them at a fixed resolution. Empty or
+    ---     nil raises, and one key is a constant.
     curve: function(keys: {CurveKey}): Curve
 
     --- Compiles keyframes into a colour gradient over normalised age.
+    ---
+    --- @param keys `{age, colour}` pairs, on the same terms as `curve` takes
+    ---     its values. The alpha channel is carried and is inert.
     gradient: function(keys: {CurveKey}): Gradient
 
     --- Installs the pool on a world. Nothing is allocated or dispatched
     --- without it.
+    ---
+    --- @param options `renderer` is required; the two capacities default.
+    --- @return The plugin, to be handed to a world. Installing it on a world
+    ---     that already has a pool does nothing, and installing it on two
+    ---     worlds gives each its own run of the one renderer's buffer.
     plugin: function(options: PoolOptions): function(World)
 
     --- The pool installed on a world, or nil. For tests and tooling.
+    ---
+    --- @return Nil when the plugin was never installed on that world. The
+    ---     pool itself, not a copy, so writing through it writes the world's.
     poolOf: function(world: World): Pool
 end
 

@@ -237,12 +237,24 @@ local record TextOptions
     renderer: Renderer
 end
 
+--- The text surface: the font loader, the `Text` component, and the plugin
+--- that lays it out and produces its glyph instances.
+---
+--- Fonts are loaded per process and are independent of any device, so one is
+--- shared by every world and every renderer. Everything else here is per
+--- world and needs the plugin installed.
 local record text
+    --- What `loadFont` answers with, and what a `Text` names.
     type Font = Font
+    --- One entry of a font's `glyphs`, in the units the atlas was generated
+    --- at.
     type GlyphMetrics = GlyphMetrics
+    --- What `loadFont` takes.
     type FontOptions = FontOptions
+    --- What `plugin` takes.
     type TextOptions = TextOptions
 
+    --- The text component.
     Text: Text
 
     loadFont: function(options: FontOptions): Font
@@ -367,6 +379,13 @@ end
 --- Answers with the font already loaded under the same metrics path rather
 --- than reading it twice, so a path means one font for the life of the
 --- process however many times it is asked for.
+---
+--- @param options `metrics` is required. `atlas` defaults to the first page
+---     the metrics name, resolved beside them, and is only consulted the first
+---     time a path is loaded.
+--- @return The one font for that path, shared rather than copied. The atlas is
+---     named and not read here: a renderer decodes and uploads it the first
+---     frame a text needs it.
 function text.loadFont(options: FontOptions): Font
     if options == nil or options.metrics == nil then
         error("tecs: a font needs a `metrics` path", 2)
@@ -402,11 +421,19 @@ function text.loadFont(options: FontOptions): Font
 end
 
 --- The font the engine ships, loaded on first use.
+---
+--- @return The same font every call, since it goes through `loadFont` under a
+---     fixed path.
 function text.defaultFont(): Font
     return text.loadFont({metrics = DEFAULT_METRICS})
 end
 
 --- A loaded font by the metrics path it was loaded from, or nil.
+---
+--- @param name The path exactly as it was passed to `loadFont`, not the file
+---     it resolves to.
+--- @return Nil when nothing has loaded that path, which is the non-raising way
+---     to ask; `loadFont` would read it.
 function text.fontByName(name: string): Font
     return fontsByName[name]
 end
@@ -997,6 +1024,14 @@ end
 ---
 --- The same layout the system runs, so a caller sizing a panel around a
 --- string gets the number the glyphs will occupy.
+---
+--- @param item Read and not written, and it need not be on an entity: a
+---     `Text` assembled to ask this question is enough.
+--- @return Width in world units at `item.size`, before any Transform scale the
+---     entity drawing it applies. Zero for a nil item, one with no font, or
+---     one with no string.
+--- @return Height on the same terms, counting whole lines: a one-line text is
+---     one line height rather than the ink's extent.
 function text.measure(item: Text): number, number
     if item == nil or item.font == nil or item.text == nil then
         return 0.0, 0.0
@@ -1145,6 +1180,9 @@ end
 ---
 --- Laying out a string that did not change is the cost the dirty gates exist
 --- to avoid, and this is how that is asserted rather than assumed.
+---
+--- @return A count that only ever increases, and zero for a world the plugin
+---     was never installed on. It counts rows laid out, not frames.
 function text.layouts(world: World): integer
     return layoutCounts[world] or 0
 end
@@ -1155,6 +1193,14 @@ end
 --- Read back out of the instance the producer wrote, so this is where the
 --- glyph is drawn rather than where a layout intended it. Nothing when the
 --- text has no such glyph.
+---
+--- @param index One-based over the glyphs the layout produced, which is not
+---     the string's byte index: a newline, a space, and a codepoint the font
+---     has no metrics for each move the pen and take no slot.
+--- @return World x of the glyph's centre, then y, then its width and height in
+---     world units. All four are nil together when the plugin is not installed
+---     on the world, the entity carries no `Text`, or the index is past what
+---     it laid out.
 function text.glyphAt(world: World, entity: integer, index: integer): number, number, number, number
     local install = installs[world]
     if install == nil then
@@ -1374,6 +1420,11 @@ end
 --- own world transform in the same phase. Glyph positions are absolute, so a
 --- text laid out before that composition would use the transform the previous
 --- frame left and never notice the write that changed it.
+---
+--- @param options `renderer` is required and is the only field.
+--- @return The plugin, to be handed to a world. Each world it is installed on
+---     gets its own producer run of the one renderer's instance buffer, and
+---     the fonts themselves are shared across all of them.
 function text.plugin(options: TextOptions): function(World)
     if options == nil or options.renderer == nil then
         error("tecs: the text plugin needs a `renderer`", 2)

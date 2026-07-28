@@ -95,10 +95,20 @@ local record Playback
     tickBase: integer
 end
 
+--- The playback registry and the buffer it assembles, as one module.
+---
+--- Process-wide rather than per world, so an index registered once means the
+--- same playback everywhere. Nothing is ever unregistered: an index handed out
+--- stays valid for the life of the process, which is what lets an instance
+--- carry one instead of a pointer.
 local record frametable
     --- Ticks per second of clip time.
     TICK_HZ: number
+    --- Floats per directory entry: entry base, tick base, tick count, step
+    --- count.
     DIRECTORY_FLOATS: integer
+    --- Floats per frame entry: u0, v0, u1, v1, array layer, pivot x, pivot y,
+    --- and one reserved.
     ENTRY_FLOATS: integer
 
     --- Registers a sheet, tag and slice, or answers the index they have.

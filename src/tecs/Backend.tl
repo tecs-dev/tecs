@@ -153,76 +153,145 @@ local record ComputeStage
     destroy: function(self: ComputeStage)
 end
 
+--- What a backend is built with. Required, unlike most options tables here:
+--- `capacity` has no default at this level and the renderer above always
+--- supplies one.
 local record BackendOptions
-    --- Ambient colour applied everywhere.
+    --- Ambient colour applied everywhere, as red, green and blue.
     ambient: {number}
-    --- Instances the buffers are sized for.
+    --- Instances the buffers are sized for. A ceiling: nothing grows to admit
+    --- a row past it.
     capacity: integer
-    --- Cell size of the image array.
+    --- Cell size of the image array, in pixels, square. Defaults to 512, and
+    --- no image may exceed it.
     cell: integer
-    --- Layers the image array holds.
+    --- Layers the image array holds, including the white default in layer
+    --- zero. Defaults to 64, and a count above `instancelayout.LAYER_SLOTS`
+    --- fails at construction because a layer number shares its float with the
+    --- clip index.
     layers: integer
-    --- Fit many images into each layer rather than one.
+    --- Fit many images into each layer rather than one. Defaults to false.
     packImages: boolean
 end
 
+--- The device half of the renderer, as one object.
+---
+--- Built once against a device and a swapchain format, then handed one packet
+--- per frame through `consume`. Everything below is created here and released
+--- by `destroy`, including any compute stage that was added; nothing outlives
+--- it except the device it was built on.
 local record Backend
+    --- Re-exported so a caller naming a rectangle types it from the module
+    --- that takes one, rather than reaching for a second require.
     type ClipRegion = ClipRegion
+    --- Re-exported for whoever implements one and hands it to
+    --- `addComputeStage`.
     type ComputeStage = ComputeStage
+    --- Re-exported for whoever assembles the table `create` takes.
     type Options = BackendOptions
 
+    --- The pass graph a consumed packet is drawn through. Owned here, so
+    --- targets and passes a caller adds to it go when this backend does.
     deferred: Deferred
+    --- The instance buffer the scene is drawn from, with the staging slots the
+    --- extractor writes through behind it. A compute stage writes its own
+    --- region of the device side directly instead.
     instances: Buffer
+    --- Draws the compacted opaque list into the G-buffer, depth written and
+    --- colour replaced. Swapped in place by `rebuildPipelines`, so nothing may
+    --- hold it across a reload.
     pipeline: GraphicsPipeline
     --- Draws the forward list over the composited image, with blending baked
     --- in and the geometry pass's depth attached and not written.
     blendPipeline: GraphicsPipeline
+    --- Nearest and clamped, and the only sampler the instance passes bind:
+    --- every image shares one binding, so they share its filtering too.
     sampler: Sampler
     --- Every image, one binding, so the scene is one draw.
     images: TextureArray
+    --- Instances the buffers are sized for. A ceiling, not a hint: rows past
+    --- it are dropped upstream rather than grown into.
     capacity: integer
     --- Instances the forward list holds, which is `MAX_BLEND` or the whole
     --- buffer where that is smaller.
     blendCapacity: integer
-    --- Instances the last consumed packet left resident, which is what the
-    --- cull is dispatched over and what the geometry pass tests before it
-    --- records anything.
+    --- Copied from the packet at each `consume`, and what the geometry and
+    --- forward passes test before they record anything: at zero both return
+    --- without binding, and no cull is dispatched.
     count: integer
     --- UV extent of the white pixel within its cell, published to whoever
     --- writes instances: an image smaller than a cell does not reach the
     --- cell's edge, so sampling 0..1 would read the undefined remainder.
     whiteU0: number
+    --- Top edge of that rect. V runs down, so this is the smaller of the two.
     whiteV0: number
+    --- Right edge of it.
     whiteU1: number
+    --- Bottom edge of it.
     whiteV1: number
+    --- The opaque lane's three passes: the view test that packs a rank per
+    --- lane into a slot, the single-workgroup scan that turns per-block counts
+    --- into per-block bases, and the write of each survivor at its base plus
+    --- its rank.
     _mark: ComputePipeline
+    --- Dispatched three times a frame that blends: over the opaque lane's
+    --- blocks, over the forward lane's, and over the forward lane's bucket
+    --- table. What it folds arrives in the uniform, so one pipeline serves all
+    --- three.
     _scan: ComputePipeline
+    --- Dispatched once per lane, told by the uniform which of the two ranks
+    --- packed into a slot it is reading.
     _compact: ComputePipeline
     --- The two passes that turn the compacted forward list into a sorted one.
     _rank: ComputePipeline
+    --- Reads the bases the bucket scan left and writes each entry where its
+    --- bucket and its rank put it.
     _place: ComputePipeline
+    --- Centre xy and half extent xy per instance, and the only buffer the view
+    --- test reads. Apart from the instance because it is read for every entity
+    --- every frame, drawn or not; the sign of the first half extent is also
+    --- where the lane is read from.
     _bounds: Buffer
     --- A rank per lane per instance, packed into one word: the opaque lane in
     --- the low half and the forward lane in the high half. One buffer rather
     --- than two, because a rank is an offset within a workgroup of 256 and two
     --- of them fit in the word the mark pass already writes.
     _slots: Buffer
+    --- Survivors of the opaque lane per workgroup of 256, rewritten in place
+    --- by the scan as the offset each block's run starts at in `_visible`.
     _blocks: Buffer
+    --- The compacted opaque list, an instance index per entry in instance
+    --- order. As long as the instance buffer, and meaningful only up to the
+    --- count the scan wrote into the draw arguments.
     _visible: Buffer
+    --- The geometry draw's `SDL_GPUIndexedIndirectDrawCommand`. Every field
+    --- but the instance count is seeded at creation and never touched again;
+    --- the scan writes that one, and the CPU never reads it back.
     _drawArgs: Buffer
     --- Survivors of the forward lane per block, then the compacted list, then
     --- its draw arguments. The same three the opaque lane has, and the
     --- compaction that fills them is the same shader run against them.
     _blendBlocks: Buffer
+    --- In instance order, which is where extraction put a row rather than
+    --- where the scene put it, so this is what the sort reads and never what
+    --- is drawn.
     _blendVisible: Buffer
+    --- Also read by compute: the three passes after the scan take the entry
+    --- count from here rather than being told it.
     _blendArgs: Buffer
     --- What the depth sort works in: a bucket and a within-bucket rank per
     --- entry, a count per bucket per block, and the list the sort produces.
     --- The last is what the forward draw walks; `_blendVisible` is what it was
     --- built from and is never drawn.
     _blendBucket: Buffer
+    --- How many earlier entries of the same block share the entry's bucket,
+    --- which is its offset within that block's run of it.
     _blendRank: Buffer
+    --- Bucket major, a block per 256 entries, so folding the whole table puts
+    --- every block of a farther bucket ahead of the first block of a nearer
+    --- one. Rewritten in place by the scan as bases.
     _blendCounts: Buffer
+    --- Back to front, and the only forward list the draw walks.
     _blendSorted: Buffer
     --- Blocks the forward list's own dispatches cover, which is its capacity
     --- rather than the frame's count: every block of the counts table has to be
@@ -232,20 +301,32 @@ local record Backend
     --- lane is skipped when nothing is, so a world that blends nothing pays for
     --- this in one branch and one empty render pass.
     _blending: boolean
+    --- Two triangles over four corners, uploaded once and never touched again.
+    --- The only geometry either draw binds: there is no vertex stream, and a
+    --- quad's corner comes from the vertex index while everything about the
+    --- instance comes from a storage buffer.
     _indices: Buffer
     --- Frame tables every animated instance resolves against, and the revision
     --- the resident copy was uploaded from. Uploaded when it moves rather than
     --- per frame: it is content, and the frame that registers an animation is
     --- the rare one.
     _playbacks: Buffer
+    --- Starts below every revision the table can report, so the first frame
+    --- uploads whatever is there rather than leaving the buffer unwritten.
     _playbackRevision: integer
-    --- Fixed steps the packet being drawn was extracted at, which is what an
-    --- animated instance resolves its frame against.
+    --- Copied from the packet at each `consume` and pushed in the layer
+    --- uniform, so every pass of one frame resolves an animation against one
+    --- number.
     _stepClock: number
     --- Where the packet said the view was. A calculator for the matrix and the
     --- view bounds rather than the camera a game holds, which lives on the
     --- other side of the boundary and is copied into every packet.
     _view: Camera
+    --- The eight floats every cull dispatch is pushed from: the world
+    --- rectangle the view covers as minimum xy then maximum xy, then the
+    --- instance count, the workgroups to fold over, the destination list's
+    --- capacity, and which lane's rank a compaction reads. The last three are
+    --- rewritten between dispatches, so it is one uniform and a push each.
     _cullUniform: loader.CArray
     --- What each layer does to its contents, in the shape the vertex shader
     --- reads it.
@@ -265,34 +346,75 @@ local record Backend
     --- and rewritten at every use rather than filled once: a buffer that grew
     --- has a new handle, and a list holding the old one binds freed memory.
     _geometryBuffers: {loader.CValue}
+    --- The image array, which is the whole of the geometry pass's texture
+    --- binding.
     _geometryTextures: {loader.CValue}
+    --- The same three the geometry pass binds, with the sorted forward list in
+    --- place of the compacted opaque one.
     _forwardBuffers: {loader.CValue}
+    --- The image array again. A list of its own rather than the geometry
+    --- pass's, since both are live within one frame.
     _forwardTextures: {loader.CValue}
+    --- The slot table and both lanes' per-block counts.
     _markWrites: {loader.CValue}
+    --- The bounds, which is everything the view test reads.
     _markReads: {loader.CValue}
+    --- The opaque lane's block counts, rewritten in place as bases, and the
+    --- draw arguments the total lands in.
     _scanWrites: {loader.CValue}
+    --- The compacted opaque list.
     _compactWrites: {loader.CValue}
+    --- The slot table and the bases the scan left in the opaque lane's blocks.
     _compactReads: {loader.CValue}
+    --- The forward lane's block counts and draw arguments, the same pair the
+    --- opaque scan writes.
     _blendScanWrites: {loader.CValue}
+    --- The compacted forward list.
     _blendCompactWrites: {loader.CValue}
+    --- The same slot table the opaque compaction read, and the forward lane's
+    --- bases.
     _blendCompactReads: {loader.CValue}
+    --- A bucket and a within-block rank per entry, and the counts table the
+    --- bucket scan folds.
     _rankWrites: {loader.CValue}
+    --- The instances, for the depth the bucket is derived from; the compacted
+    --- forward list, for which instance an entry names; and its draw
+    --- arguments, for how many entries there are.
     _rankReads: {loader.CValue}
+    --- The counts table, rewritten as bases, and the draw arguments again.
     _bucketScanWrites: {loader.CValue}
+    --- The sorted forward list.
     _placeWrites: {loader.CValue}
+    --- Everything the two passes before it produced, plus the entry count.
     _placeReads: {loader.CValue}
     --- The cull passes, begun again each frame rather than allocated per
     --- frame; see `ComputePass.begin` for what that asks of a caller. Nil
     --- until the first frame that culls anything.
     _markPass: ComputePass
+    --- One workgroup, whatever the world holds: it folds blocks, not
+    --- instances.
     _scanPass: ComputePass
+    --- Dispatched over every resident instance, as the mark pass is.
     _compactPass: ComputePass
+    --- The forward lane's five, and nil until the first frame that blends
+    --- anything rather than the first that culls.
     _blendScanPass: ComputePass
+    --- Dispatched over every resident instance too: both lanes are packed into
+    --- the one slot table, so both compactions walk all of it.
     _blendCompactPass: ComputePass
+    --- Dispatched over the forward list's own blocks, all of them however few
+    --- entries survived, because the scan below folds every entry of the
+    --- counts table and a block left unwritten would fold a stale one.
     _rankPass: ComputePass
+    --- One workgroup over the counts table, which is bucket major.
     _bucketScanPass: ComputePass
+    --- Over the forward list's blocks again, as the rank pass was.
     _placePass: ComputePass
+    --- The `SDL_GPUDevice` every handle here was created against. Not owned:
+    --- `destroy` releases what was built on it and never the device itself.
     _device: loader.CPtr
+    --- Set by the first `destroy`, which is what makes a second one return
+    --- rather than release a handle twice.
     _destroyed: boolean
 end
 
@@ -390,6 +512,11 @@ local function buildForward(self: Backend): GraphicsPipeline
 end
 
 --- Builds a backend for `device`.
+---
+--- @param swapchainFormat The `SDL_GPUTextureFormat` present copies into, which
+---     the composite and present pipelines are built against.
+--- @param options Required, and `capacity` with it: there is no default at this
+---     level, and the buffers are sized once here and never resized.
 function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: BackendOptions): Backend
     local self = setmetatable({} as Backend, BackendMT)
     self._device = device
@@ -710,7 +837,11 @@ end
 --- pay for that guarantee with a fresh driver allocation every frame, which at
 --- four million instances is over three hundred megabytes a frame retired and
 --- reallocated, and the driver cannot reclaim it fast enough.
---- @return The instance staging as floats, then the bounds staging as floats.
+---
+--- @param slot Zero-based, below `Buffer.slotCount`.
+--- @return The instance staging as floats, valid until this slot is mapped
+---     again.
+--- @return The bounds staging as floats, on the same terms.
 function Backend:mapSlot(slot: integer): loader.CArray, loader.CArray
     return self.instances:mapSlotAs(slot, "float *", false), self._bounds:mapSlotAs(slot, "float *", false)
 end
@@ -720,6 +851,9 @@ end
 --- Order is the order they were added, and each is asked whether it has
 --- anything to do before it is asked to do it. A backend nothing was added to
 --- records nothing and dispatches nothing.
+---
+--- @param stage Held until `destroy`, which calls its own. There is no way to
+---     take one back out.
 function Backend:addComputeStage(stage: ComputeStage)
     self._stages[#self._stages + 1] = stage
 end
@@ -855,6 +989,11 @@ end
 --- A region is one rectangle. Whoever sets it up owns the nesting, so a panel
 --- within a panel is set as the intersection of the two and the fragment tests
 --- once rather than walking a chain.
+---
+--- @param index 1 through `instancelayout.CLIPS - 1`. Zero, a fraction, or
+---     anything outside that raises.
+--- @param region Nil raises rather than clearing; `clearClipRegion` is what
+---     stops a region clipping.
 function Backend:setClipRegion(index: integer, region: ClipRegion)
     checkClipIndex(index, 3)
     if region == nil then
@@ -878,6 +1017,9 @@ end
 --- still pointing at it draw whole rather than disappearing. An adapter handing
 --- indices out and taking them back therefore leaves nothing behind that
 --- silently removes content.
+---
+--- @param index The same range `setClipRegion` takes. Clearing one nobody set
+---     is not an error.
 function Backend:clearClipRegion(index: integer)
     checkClipIndex(index, 3)
     local base <const> = index * 4
@@ -1004,6 +1146,11 @@ end
 --- The packet's ranges are what is copied. The device buffers are persistent
 --- and hold every earlier frame's bytes, so a packet carries the delta and
 --- never a snapshot.
+---
+--- @param packet Read and not kept: everything taken from it is copied here,
+---     so the caller is free to refill it as soon as this returns.
+--- @param frame Recorded onto and not submitted. Submitting it is the caller's,
+---     after every pass it wants in the frame has been recorded.
 function Backend:consume(packet: FramePacket, frame: Frame)
     local slot <const> = packet.slot
     self.instances:markSlotRanges(slot, packet.instanceRanges)
