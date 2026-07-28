@@ -15,7 +15,9 @@
 --- Material component writes a zero and has to mean something specific. The
 --- rest are numbered by sorted name, so the same files always produce the same
 --- numbering. Adding a material renumbers the ones after it alphabetically,
---- which matters only for something that stored an id across a rebuild.
+--- which is why an id is a within-a-build answer and nothing stores one: a
+--- name is what a material is identified by anywhere the number has to
+--- outlive the set of files it was assigned from.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local filesystem <const> = require("tecs.platform.filesystem")
@@ -58,6 +60,10 @@ local record materials
     reload: function(): boolean, string
     --- The id a material is dispatched by, resolved from its name.
     id: function(name: string): integer
+    --- The same, answering nil rather than raising on a name nothing has.
+    find: function(name: string): integer
+    --- The material an id dispatches to, or nil when nothing has that id.
+    name: function(id: integer): string
     --- Every material name, in id order.
     names: function(): {string}
     --- Forgets everything read, so a spec can start from the files again.
@@ -193,13 +199,37 @@ end
 --- which files exist, and hard-coding one would break the moment a material was
 --- added ahead of it alphabetically.
 function materials.id(name: string): integer
-    materials.install()
-    local material = byName[name]
-    if material == nil then
+    local id = materials.find(name)
+    if id == nil then
         error(("tecs: no material named '%s'; found %s")
             :format(name, table.concat(materials.names(), ", ")), 2)
     end
+    return id
+end
+
+--- The id a material is dispatched by, or nil when nothing has that name.
+---
+--- What `id` is built on, for a caller with somewhere better to put the
+--- refusal than an error raised from here. Reading a `Material` back out of a
+--- snapshot is that caller: the name it holds is a fact about the file rather
+--- than about the call site, and the message says so.
+function materials.find(name: string): integer
+    materials.install()
+    local material = byName[name]
+    if material == nil then return nil end
     return material.id
+end
+
+--- The material an id dispatches to, or nil when nothing has that id.
+---
+--- The reverse of `id`, and what a snapshot writes in place of the number.
+--- Nothing is kept in step to answer it: `order` already holds the names at
+--- their ids, counting from one, so this is the lookup the numbering was
+--- assigned from rather than a second copy of it.
+function materials.name(id: integer): string
+    materials.install()
+    if id == nil then return nil end
+    return order[id + 1]
 end
 
 --- Every material name, in id order.

@@ -2501,6 +2501,21 @@ after it alphabetically, while `Material` components in the live world already
 hold numbers, so editing a body reloads and adding one is a restart. Both are
 refused by name rather than attempted.
 
+The same renumbering is why a `Material` crosses a snapshot as the material's
+name and not as its id, the way a `Sprite` carries its image's name and an
+`Animation` its sheet's. A reload is refused because a live world's numbers
+cannot be moved under it, but a save outlives the process and there is nothing
+left to refuse by the time it is read: a build with one more material file
+would load an id that means a different shader, render the scene wrong and say
+nothing about it. So `materials.name` writes the name and `materials.find`
+resolves it again, and a name this build does not have raises and says which
+one, since falling back to the default or dropping the component are the same
+silent wrong shader by another route. The set of materials is not written
+alongside it. A snapshot naming only materials the build has is safe whether or
+not the set matches, so a set-level check would refuse loads that are correct,
+and one narrow enough not to would be asking exactly what the names already
+answer.
+
 What makes the swap cheap is that the pipeline objects a frame binds are read
 through the backend every frame, so replacing them is picked up by the next
 frame with no pass graph rebuilt and nothing in the world touched.

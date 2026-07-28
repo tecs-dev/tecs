@@ -72,7 +72,11 @@ describe("mcp world tools", function()
             found[entry.name] = entry
         end
 
-        assert.are.same({ "id", "param" }, found.Material.fields)
+        -- What a component serializes, which for a Material is the material's
+        -- name rather than the id it dispatches by. An id is a position in
+        -- this build's sorted material list, and a number an agent cannot
+        -- resolve to anything is worse than no field at all.
+        assert.are.same({ "material", "param" }, found.Material.fields)
         assert.is_false(found.Material.tag)
         for _, field in ipairs(found.Transform.fields) do
             assert.is_falsy(field:find("^_"))

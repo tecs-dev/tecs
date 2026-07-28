@@ -5,6 +5,7 @@
 --- staging instead of reading fields one entity at a time through a table.
 
 local ecs <const> = require("tecs.ecs")
+local materials <const> = require("tecs.gpu.materials")
 
 local type Component = ecs.Component
 
@@ -254,6 +255,9 @@ ecs.newFFIComponent({
 --- The id comes from `materials.id(name)` rather than being written as a
 --- number, because the numbering depends on which material files exist and a
 --- literal would break the moment one was added ahead of it alphabetically.
+--- For the same reason only the name is written to a snapshot: an id is a
+--- position in sorted order, and a saved one would name whichever material the
+--- loading build happened to put there.
 ---
 --- One instance format either way: the batch, the cull and the draw do not know
 --- which material an entity uses, which is what keeps the whole scene one draw.
@@ -272,6 +276,32 @@ ecs.newFFIComponent({
         { "param", "float" },
     },
     defaults = { 0, 0.25 },
+    serialize = function(instance: Material): {string: any}
+        -- The name, the way a Sprite writes its image and an Animation its
+        -- sheet. The id is this build's answer, and the file has to hold
+        -- something that means the same in the next one.
+        return {
+            material = materials.name(instance.id as integer),
+            param = instance.param,
+        }
+    end,
+    deserialize = function(_world: ecs.World, data: {string: any}): Material
+        local name = data.material as string
+        local id = 0
+        if name ~= nil and name ~= "" then
+            id = materials.find(name)
+            -- Neither the default nor a skipped component. Both of those load
+            -- without a word and draw the entity through a shader nobody
+            -- asked for, which is the failure a name is written to prevent;
+            -- refusing is the only answer that is not a guess.
+            if id == nil then
+                error(("loadSnapshot: snapshot references material '%s' "
+                    .. "which this build does not have; found %s")
+                    :format(name, table.concat(materials.names(), ", ")), 0)
+            end
+        end
+        return Material(id, data.param as number)
+    end,
 })
 
 --- Which clip region a renderable's fragments are kept inside.
