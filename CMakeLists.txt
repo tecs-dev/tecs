@@ -655,6 +655,37 @@ if(TECS_BUILD_LUA)
         DEPENDS "${TECS_LUA_OUT}/tecstools/tl.lua" "${TECS_LUA_OUT}/tecscli/toolchain.lua"
     )
 
+    # LuaJIT's own Lua library, beside the engine's.
+    #
+    # `jit.zone` is what `src/tecs/internal/pipeline.tl` attributes a frame's
+    # systems with and `jit.vmdef` is what turns a trace abort code into a
+    # sentence, so both are load-bearing for the profiler rather than optional.
+    # They are ordinary Lua files that ship with LuaJIT and are not inside it,
+    # so a package that carries a LuaJIT and not these has a `require` that
+    # fails at the moment somebody profiles.
+    #
+    # Copied rather than shimmed. Hand-written stand-ins for the two were what
+    # was here, and a table of trace-abort strings transcribed from a version of
+    # LuaJIT is a copy that goes stale silently: the pin moves, a code changes
+    # meaning, and the profiler reports the old sentence.
+    find_path(
+        TECS_LUAJIT_JIT_DIR
+        NAMES jit/vmdef.lua
+        HINTS "${TECS_LUAJIT_PREFIX}/share/luajit-2.1"
+        PATHS /opt/homebrew/share/luajit-2.1 /usr/local/share/luajit-2.1 /usr/share/luajit-2.1
+        NO_DEFAULT_PATH
+    )
+    if(NOT TECS_LUAJIT_JIT_DIR)
+        message(FATAL_ERROR "tecs: LuaJIT's jit/*.lua were not found. Set TECS_LUAJIT_JIT_DIR to the directory holding jit/vmdef.lua.")
+    endif()
+    add_custom_target(
+        tecs_jitlib
+        ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${TECS_LUAJIT_JIT_DIR}/jit" "${TECS_LUA_OUT}/jit"
+        COMMENT "Copying LuaJIT's Lua library"
+        VERBATIM
+    )
+
     # The notices, staged as a directory so they can be packed like everything
     # else. A statically linked binary has no adjacent file to put them in, and
     # permissive still means the notice travels with the code: a package
@@ -715,6 +746,7 @@ if(TECS_BUILD_LUA)
                 tecs_cli_tools
                 tecs_teal
                 tecs_notices
+                tecs_jitlib
             COMMENT "Packing the content root"
             VERBATIM
         )
