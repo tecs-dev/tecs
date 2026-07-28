@@ -46,8 +46,7 @@ local function observations()
     for key, value in output:gmatch("([%w_]+)=([^\n]+)") do
         seen[key] = value
     end
-    assert.are.equal("done", seen.fixture,
-        "the fixture did not run to shutdown; the host said:\n" .. output)
+    assert.are.equal("done", seen.fixture, "the fixture did not run to shutdown; the host said:\n" .. output)
     return seen, output
 end
 
@@ -73,10 +72,14 @@ describe("host", function()
     it("dates an event from when SDL produced it, not from the pump that found it", function()
         local delta = tonumber(seen.arrivalDelta)
         assert.is_not_nil(delta, "no press was observed")
-        assert.is_true(delta >= 0.0,
-            ("arrival preceded the push by %.3f ms, so the two clocks are not aligned"):format(-delta))
-        assert.is_true(delta < 10.0,
-            ("arrival was %.3f ms after the push; the 60 ms stall is in the stamp"):format(delta))
+        assert.is_true(
+            delta >= 0.0,
+            ("arrival preceded the push by %.3f ms, so the two clocks are not aligned"):format(-delta)
+        )
+        assert.is_true(
+            delta < 10.0,
+            ("arrival was %.3f ms after the push; the 60 ms stall is in the stamp"):format(delta)
+        )
     end)
 
     -- Defect: the drain count was zeroed unconditionally when the iteration
@@ -88,8 +91,7 @@ describe("host", function()
     it("keeps an event that arrived while the previous batch was being drained", function()
         local at = tonumber(seen.backgroundEventFrame)
         assert.is_not_nil(at)
-        assert.are.equal(6, at,
-            "the backgrounding pushed during frame 5 was not delivered on frame 6")
+        assert.are.equal(6, at, "the backgrounding pushed during frame 5 was not delivered on frame 6")
     end)
 
     -- Defect: a game could not save state on being backgrounded, because the
@@ -98,13 +100,15 @@ describe("host", function()
     -- the stack, and re-entering the state from inside `world:update` is worse
     -- than being late.
     it("never re-enters Lua to run a lifecycle hook mid-update", function()
-        assert.are.equal("false", seen.reentered,
-            "a hook ran while a system was still on the stack")
+        assert.are.equal("false", seen.reentered, "a hook ran while a system was still on the stack")
     end)
 
     it("runs the hook it had to refuse at the top of the next iteration", function()
-        assert.are.equal(6, tonumber(seen.backgroundHookFrame),
-            "the refused backgrounding hook was dropped rather than replayed")
+        assert.are.equal(
+            6,
+            tonumber(seen.backgroundHookFrame),
+            "the refused backgrounding hook was dropped rather than replayed"
+        )
     end)
 
     -- A game writing a file wants one write per backgrounding. The second is the
@@ -112,16 +116,18 @@ describe("host", function()
     -- run, three of them without a return to the foreground in between, so a
     -- host counting events rather than backgroundings would say four.
     it("dispatches one backgrounding hook per backgrounding, and rearms on the foreground", function()
-        assert.are.equal(2, tonumber(seen.backgroundHookCount),
-            "four backgrounding events either collapsed to one or were not deduplicated at all")
+        assert.are.equal(
+            2,
+            tonumber(seen.backgroundHookCount),
+            "four backgrounding events either collapsed to one or were not deduplicated at all"
+        )
     end)
 
     -- Low memory, backgrounding, foregrounding and termination are separate jobs
     -- with separate deadlines, so they are separate hooks. The fixture writes
     -- three of the six, and the three it leaves out must not be an error.
     it("offers each concern its own hook and tolerates the ones a game omits", function()
-        assert.are.equal(1, tonumber(seen.lowMemoryHookCount),
-            "low memory did not reach its own hook")
+        assert.are.equal(1, tonumber(seen.lowMemoryHookCount), "low memory did not reach its own hook")
     end)
 
     -- Deferral is only honest while there is an iteration left to defer into.
@@ -129,9 +135,14 @@ describe("host", function()
     -- the hook for a replay that will never happen is a silent drop; the host
     -- reports it instead.
     it("reports rather than defers a hook it cannot run past termination", function()
-        assert.are.equal(0, tonumber(seen.terminatingHookCount),
-            "the termination hook ran, so the run did not end where it should have")
-        assert.is_truthy(raw:find("_terminating could not run", 1, true),
-            "a hook that could never be replayed was recorded rather than reported")
+        assert.are.equal(
+            0,
+            tonumber(seen.terminatingHookCount),
+            "the termination hook ran, so the run did not end where it should have"
+        )
+        assert.is_truthy(
+            raw:find("_terminating could not run", 1, true),
+            "a hook that could never be replayed was recorded rather than reported"
+        )
     end)
 end)

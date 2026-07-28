@@ -268,20 +268,19 @@ describe("allocation", function()
 
         assert.is_true(
             small <= FRAME_BAR and large <= FRAME_BAR,
-            ("a steady-state frame allocates %.0f bytes at %d entities and %.0f at %d, "
+            (
+                "a steady-state frame allocates %.0f bytes at %d entities and %.0f at %d, "
                 .. "over the %d byte ceiling. Run `make bench-alloc` for the breakdown "
-                .. "by stage."):format(small, STILL + MOVERS, large, STILL + EXTRA + MOVERS, FRAME_BAR)
+                .. "by stage."
+            ):format(small, STILL + MOVERS, large, STILL + EXTRA + MOVERS, FRAME_BAR)
         )
 
         assert.is_true(
             large <= small * LOAD_FACTOR,
-            ("allocation per frame grew with the world: %d entities cost %.0f bytes a frame "
-                .. "and %d cost %.0f. Something on the frame path allocates per row."):format(
-                STILL + MOVERS,
-                small,
-                STILL + EXTRA + MOVERS,
-                large
-            )
+            (
+                "allocation per frame grew with the world: %d entities cost %.0f bytes a frame "
+                .. "and %d cost %.0f. Something on the frame path allocates per row."
+            ):format(STILL + MOVERS, small, STILL + EXTRA + MOVERS, large)
         )
     end)
 
@@ -322,9 +321,11 @@ describe("allocation", function()
         assert.are.equal(
             0,
             opened,
-            ("the frame path opened %d query cursors in ten frames. A cursor is "
+            (
+                "the frame path opened %d query cursors in ten frames. A cursor is "
                 .. "allocated per call; `iter` is the traversal for a loop that runs "
-                .. "to exhaustion."):format(opened)
+                .. "to exhaustion."
+            ):format(opened)
         )
     end)
 
@@ -351,8 +352,10 @@ describe("allocation", function()
 
         assert.is_true(
             cost <= EXTRACT_BAR,
-            ("extraction allocates %.1f bytes a run, over the %d byte bar. "
-                .. "Something in Extractor allocates per frame again."):format(cost, EXTRACT_BAR)
+            (
+                "extraction allocates %.1f bytes a run, over the %d byte bar. "
+                .. "Something in Extractor allocates per frame again."
+            ):format(cost, EXTRACT_BAR)
         )
     end)
 

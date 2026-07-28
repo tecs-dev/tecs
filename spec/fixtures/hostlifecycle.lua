@@ -15,7 +15,9 @@
 -- can reach the host's inline dispatch: from Lua, Lua is always active.
 
 local root = os.getenv("TECS_LUA") or __tecsContent or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then root = root:sub(1, -2) end
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
@@ -35,7 +37,8 @@ local STALL = 0.060
 --- what a long update or a blocked swapchain acquire looks like from outside.
 local function stall()
     local until_ = clock.now() + STALL
-    while clock.now() < until_ do end
+    while clock.now() < until_ do
+    end
 end
 
 local frame = 0
@@ -66,13 +69,19 @@ return tecs.application({
         -- was handed, so a field and a method are the same thing to it.
         app._willEnterBackground = function()
             backgroundHookCount = backgroundHookCount + 1
-            if backgroundHookFrame == nil then backgroundHookFrame = frame end
-            if inUpdate then reentered = true end
+            if backgroundHookFrame == nil then
+                backgroundHookFrame = frame
+            end
+            if inUpdate then
+                reentered = true
+            end
         end
 
         app._lowMemory = function()
             lowMemoryHookCount = lowMemoryHookCount + 1
-            if inUpdate then reentered = true end
+            if inUpdate then
+                reentered = true
+            end
         end
 
         app._terminating = function()
@@ -90,7 +99,9 @@ return tecs.application({
         end)
 
         world:observe(0, events.on.appWillEnterBackground, function()
-            if backgroundEventFrame == nil then backgroundEventFrame = frame end
+            if backgroundEventFrame == nil then
+                backgroundEventFrame = frame
+            end
             -- The engine suspends simulation on this event, which would stop
             -- the frame counter and with it the rest of the schedule below.
             -- What is under test is the host, not that policy, so the fixture
@@ -145,7 +156,9 @@ return tecs.application({
         world:addSystem({
             name = "fixture.Frame",
             phase = tecs.phases.Last,
-            run = function() frame = frame + 1 end,
+            run = function()
+                frame = frame + 1
+            end,
         })
 
         world:addSystem({
