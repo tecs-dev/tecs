@@ -121,10 +121,11 @@ Compaction is an ordered three-pass scan rather than an `atomicAdd`, because dra
 
 Working: windowing, input in three tiers behind a layer stack, events, the GPU pipeline, materials, camera,
 layers, physics, workers and asset loading, logging, the debug server, sprite sheets with animation,
-sequencing with tweening merged into it, distance-field text drawn through an instance producer, and audio
-on SDL3_mixer: a voice per track, groups by tag, keyed limits, fades, pitch, loop points, and streaming.
+sequencing with tweening merged into it, distance-field text drawn through an instance producer, audio
+on SDL3_mixer (a voice per track, groups by tag, keyed limits, fades, pitch, loop points, and streaming),
+and shadows: an occluder mask every light marches against, and a drop shadow that reaches ambient.
 
-Not ported: shadows, post-processing, UI, tiled maps and multi-camera.
+Not ported: post-processing, UI, tiled maps and multi-camera.
 
 ## Development Guidelines
 
@@ -203,6 +204,26 @@ tests prose. The only defence is the person making the change, at the time they 
 - Prefer linking to entry points that exist in this repo, not guessed future paths.
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
+
+`make docs-check` is the gate, and it holds four things: every page carries a one-line
+`description:`; the module list matches `src/tecs/init.tl` in three listings at once
+(`docs/index.md`, `docs/modules/index.md` and the sidebar in `docs/.vitepress/config.mts`), in
+one order, with one page per public name and no page outliving its module; every link and anchor
+resolves; and each page's generated reference section matches a fresh render. That last one is
+why a page is never hand-edited below its `@generated` marker: run `python3 docs/scripts/reference.py`.
+
+### Docblocks
+
+Every public function, record and field carries a `---` docblock, and every public function
+carries `@param` for each parameter and `@return` for each return.
+
+A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
+means, what happens at a boundary, whether a returned table is the caller's to keep or a view
+onto something live, which errors are raised rather than returned. A tag that restates the
+parameter's own name is worse than no tag, because it costs a line and answers nothing.
+
+Documentation lives on the declaration, which is the record field, and the implementing function
+below does not repeat it. Two copies drift, and tealdoc reads the declaration.
 
 ### Mutation and Dirty Model
 

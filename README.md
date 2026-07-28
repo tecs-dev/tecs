@@ -1943,7 +1943,7 @@ set of named slices carrying rectangles, nine-slice centres and pivots that
 move from frame to frame. Tag zero is the whole sheet, forward.
 
 Reading an Aseprite JSON export is one function in front of that model rather
-than a second model: `sheet.fromAseprite` walks the export and writes what it
+than a second model: `animation.fromAseprite` walks the export and writes what it
 finds through the same builder everything else uses, so a reader for the binary
 `.aseprite` format populates the same sheet without reshaping anything. Both of
 Aseprite's frame layouts are read, the array and the object keyed by frame name,
@@ -1951,10 +1951,10 @@ the second in sorted name order because the names carry the frame number.
 Trimmed exports are not: `spriteSourceSize` is ignored, so export with trimming
 off.
 
-`sheet.build` is the model's own front door, for an atlas from any other tool:
-frames, tags and slices in any order, `finish` to register. `sheet.grid` cuts a
+`animation.build` is the model's own front door, for an atlas from any other tool:
+frames, tags and slices in any order, `finish` to register. `animation.grid` cuts a
 uniform grid (with an optional margin around it and spacing between the cells)
-and `sheet.rects` takes an explicit list, and both are that builder with a loop
+and `animation.rects` takes an explicit list, and both are that builder with a loop
 in front.
 
 Timing is per frame rather than per entity, which is the thing a single frames-
@@ -2954,7 +2954,7 @@ frees. A resident clip stays resident whatever the new file's length would have
 chosen on a first load, because rows pointing at it were started against held
 samples and turning it into a stream under them would change what a voice is.
 
-A sheet re-reads through `sheet.replace`, which exists because building a sheet
+A sheet re-reads through `animation.replace`, which exists because building a sheet
 under a name that is already taken does the opposite of what a reload wants: it
 answers new entities with the new sheet and leaves every entity already playing
 on the old one, which is right for two sheets that share a name and wrong for
@@ -3003,7 +3003,7 @@ useful one: a font regenerated over a page that was missing can come back.
 
 Four of those five are driven by an agent that knows it edited something, and
 also by a watcher that notices. The sheet is the exception, and by omission
-rather than by decision: no kind is registered for one, so `sheet.replace` is
+rather than by decision: no kind is registered for one, so `animation.replace` is
 reachable from game code alone.
 
 SDL has no change notification: not in 3.4 and not behind a hint, and

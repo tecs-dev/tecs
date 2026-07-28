@@ -133,6 +133,12 @@ metamethods (`__call`, `__index`), and generated bindings.
 - New event/data string keys exposed to tooling (snapshot data keys, custom
   MCP data) are namespaced with dots: `"myGame.gameState"`.
 
+The camelCase rule is about identifiers this tree declares, and a vendored
+library's own names are not among them. `tecs.json` passes lua-cjson's
+`encode_escape_forward_slash` through spelled the way lua-cjson spells it, for
+the same reason `tecs.physics` does not rename Box2D's concepts: a renamed key
+is a name that matches nothing the library's own documentation says.
+
 ## Bindings
 
 - Every import and module-level binding is `local x <const> = ...`.
@@ -162,6 +168,9 @@ metamethods (`__call`, `__index`), and generated bindings.
   time. Do not overload `nil` to mean multiple things.
 - Type every public signature fully, including returns. Multiple returns are
   fine; more than three suggests a record.
+- A module that re-exports a C library still declares a Teal type for it. A
+  bare `return require("cjson")` is `any`, and an untyped surface in a tree
+  built on static typing is a hole rather than a shortcut.
 - Declare external formats in `.d.tl` files; never hand-wave them as `any`.
   Dynamic requires that Teal cannot resolve go through a variable
   (`pcall(require, moduleName)`), since literal requires are statically
