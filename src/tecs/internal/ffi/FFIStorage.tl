@@ -210,7 +210,8 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     -- Per-storage column allocator. When the renderer marks this component's
     -- storage GPU-uploadable (via the storage's `setColumnAllocator`), columns
     -- are allocated through this `fn(byteCount, structName) -> (ptr, holder)`
-    -- so their backing can be a love.data.ByteData. Default nil keeps `C.new`.
+    -- so their backing can be memory the GPU side owns rather than this one's.
+    -- Default nil keeps `C.new`.
     local columnAllocator: function(integer, string): (any, any) = nil
 
     local structName = def.name

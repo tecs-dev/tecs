@@ -1302,7 +1302,7 @@ function snapshot.loadSnapshot(world: World, source: any): SnapshotPrelude
     end
 
     -- Accept a Lua string, since a caller usually has one:
-    --   world:loadSnapshot(love.filesystem.read("save.bin"))
+    --   world:loadSnapshot(filesystem.read("save.bin"))
     -- The string is copied once into a fresh internal buffer.
     local buf: any
     if type(source) == "string" then

@@ -570,7 +570,7 @@ describe(
                 world:commit()
 
                 local buf = saveBinarySnapshot(world)
-                local bytes = tostring(buf) -- mimic love.filesystem.read return shape
+                local bytes = tostring(buf) -- what filesystem.read hands back
 
                 world:loadSnapshot(bytes)
                 luassert.is_true(world:isAlive(a))
