@@ -46,7 +46,7 @@ entity.
 **Teal type:**
 
 ```teal
-Name: tecs.ScalarComponent<string>
+Name: tecs.ecs.ScalarComponent<string>
 ```
 
 **Example:**
@@ -74,7 +74,7 @@ entity despawns, or the component is removed, the key leaves the index and can b
 **Teal type:**
 
 ```teal
-EntityKey: tecs.ScalarComponent<string>
+EntityKey: tecs.ecs.ScalarComponent<string>
 ```
 
 **Example:**
@@ -147,7 +147,7 @@ Constructing a `Transform` with a `layer` below 1 raises an error naming the val
 **Teal type:**
 
 ```teal
-record Transform is tecs.Component
+record Transform is tecs.ecs.Component
     x: number
     y: number
     z: number
@@ -239,7 +239,7 @@ the parent; add that yourself alongside it.
 **Teal type:**
 
 ```teal
-record RelativeTransform is tecs.Component
+record RelativeTransform is tecs.ecs.Component
     x: number
     y: number
     z: number
@@ -293,7 +293,7 @@ zero.
 **Teal type:**
 
 ```teal
-record TTL is tecs.Component
+record TTL is tecs.ecs.Component
     --- The total amount of time the entity had to live.
     startingTime: number
 
@@ -366,7 +366,7 @@ Emitted when an entity is spawned, at address `0`. It is an FFI event carrying t
 the packed ID survives with its generation bits intact.
 
 ```teal
-record OnSpawn is tecs.Event
+record OnSpawn is tecs.ecs.Event
     entity: integer
 
     metamethod __call: function(self, entity: integer): OnSpawn
@@ -394,7 +394,7 @@ Emitted when an entity is despawned, both at the entity's own address and at add
 carrying the entity ID as a `double`.
 
 ```teal
-record OnDespawn is tecs.Event
+record OnDespawn is tecs.ecs.Event
     entity: integer
 
     metamethod __call: function(self, entity: integer): OnDespawn
@@ -434,10 +434,10 @@ Emitted at address `0` when a new archetype is created, that is when some entity
 combination the world has not seen.
 
 ```teal
-record ArchetypeCreated is tecs.Event
-    archetype: tecs.Archetype
+record ArchetypeCreated is tecs.ecs.Event
+    archetype: tecs.ecs.Archetype
 
-    metamethod __call: function(self, archetype: tecs.Archetype): ArchetypeCreated
+    metamethod __call: function(self, archetype: tecs.ecs.Archetype): ArchetypeCreated
 end
 ```
 
@@ -458,19 +458,19 @@ signature, prefer [query callbacks](/ecs/queries/callbacks).
 All four are emitted at address `0` by the [state stack](/ecs/states).
 
 ```teal
-record StateEnter is tecs.Event
+record StateEnter is tecs.ecs.Event
     --- The state name being entered.
     state: string
     metamethod __call: function(self, state: string): StateEnter
 end
 
-record StateExit is tecs.Event
+record StateExit is tecs.ecs.Event
     --- The state name being exited.
     state: string
     metamethod __call: function(self, state: string): StateExit
 end
 
-record StateBlur is tecs.Event
+record StateBlur is tecs.ecs.Event
     --- The state losing focus.
     state: string
     --- The state being pushed on top.
@@ -478,7 +478,7 @@ record StateBlur is tecs.Event
     metamethod __call: function(self, state: string, pushed: string): StateBlur
 end
 
-record StateFocus is tecs.Event
+record StateFocus is tecs.ecs.Event
     --- The state regaining focus.
     state: string
     --- The state that was popped.
@@ -496,13 +496,13 @@ snapshot API itself.
 keyed metadata, or exclude entities a plugin will re-derive on load:
 
 ```teal
-record OnSnapshotSave is tecs.Event
+record OnSnapshotSave is tecs.ecs.Event
     --- Encode a (key, value) pair into the snapshot's data section.
     --- Keys must be strings and values must be `string.buffer`-encodable.
     addData: function(self, key: string, value: any)
 
     --- Skip every entity carrying `component`.
-    exclude: function(self, component: tecs.Component)
+    exclude: function(self, component: tecs.ecs.Component)
 
     metamethod __call: function(self): OnSnapshotSave
 end
@@ -512,7 +512,7 @@ end
 Observers register per-key callbacks, each of which fires once per matching entry written during the save:
 
 ```teal
-record StartSnapshotLoad is tecs.Event
+record StartSnapshotLoad is tecs.ecs.Event
     --- Register a callback for the data entry keyed by `key`. Multiple
     --- listeners may register the same key; all fire in registration order.
     onData: function(self, key: string, callback: function(value: any))
@@ -525,7 +525,7 @@ end
 callback has run:
 
 ```teal
-record FinishSnapshotLoad is tecs.Event
+record FinishSnapshotLoad is tecs.ecs.Event
     --- The snapshot prelude, carrying the version and the counts.
     prelude: any
 

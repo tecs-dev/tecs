@@ -90,7 +90,7 @@ describe(
 
                         local worldA = tecs.ecs.newWorld()
                         local parentA = worldA:spawn()
-                        local childA = worldA:spawn(ChildOf(parentA) as tecs.Component)
+                        local childA = worldA:spawn(ChildOf(parentA) as tecs.ecs.Component)
                         worldA:update(0)
                         luassert.is_not_nil(worldA:get(childA, ChildOf), "worldA should see its own child")
 
@@ -122,12 +122,12 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         local rel = world:get(child, ChildOf)
                         luassert.is_not_nil(rel, "should return the relationship")
-                        luassert.equals(parent, (rel as tecs.Relationship).target)
+                        luassert.equals(parent, (rel as tecs.ecs.Relationship).target)
                     end
                 )
 
@@ -142,12 +142,12 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
-                        local rel = world:get(child, ChildOf(parent) as tecs.Component)
+                        local rel = world:get(child, ChildOf(parent) as tecs.ecs.Component)
                         luassert.is_not_nil(rel, "should return specific target relationship")
-                        luassert.equals(parent, (rel as tecs.Relationship).target)
+                        luassert.equals(parent, (rel as tecs.ecs.Relationship).target)
                     end
                 )
 
@@ -163,10 +163,10 @@ describe(
 
                         local parent = world:spawn()
                         local other = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
-                        local rel = world:get(child, ChildOf(other) as tecs.Component)
+                        local rel = world:get(child, ChildOf(other) as tecs.ecs.Component)
                         luassert.is_nil(rel, "should return nil for wrong target")
                     end
                 )
@@ -183,7 +183,7 @@ describe(
 
                         local parent = world:spawn()
                         world:defer()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
 
                         local rel = world:get(child, ChildOf)
                         luassert.is_nil(rel, "should not read pending sparse value inside defer")
@@ -206,16 +206,16 @@ describe(
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
-                        local child = world:spawn(ChildOf(parent1) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent1) as tecs.ecs.Component)
                         world:update(0)
 
-                        world:set(child, ChildOf(parent2) as tecs.Component)
+                        world:set(child, ChildOf(parent2) as tecs.ecs.Component)
                         world:update(0)
 
                         local rel = world:get(child, ChildOf)
                         luassert.is_not_nil(rel)
                         luassert.equals(
-                            parent2, (rel as tecs.Relationship).target, "should have new parent after reparenting"
+                            parent2, (rel as tecs.ecs.Relationship).target, "should have new parent after reparenting"
                         )
                     end
                 )
@@ -236,7 +236,7 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         world:remove(child, ChildOf)
@@ -258,10 +258,10 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
-                        world:remove(child, ChildOf(parent) as tecs.Component)
+                        world:remove(child, ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         local rel = world:get(child, ChildOf)
@@ -280,7 +280,7 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         -- Child should be in ChildOf query
@@ -327,8 +327,8 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child1 = world:spawn(ChildOf(parent) as tecs.Component)
-                        local child2 = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
+                        local child2 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         local orphan = world:spawn()
                         world:update(0)
 
@@ -363,7 +363,7 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         local query = world:query({include = {ChildOf}})
@@ -372,7 +372,7 @@ describe(
                             for row = 1, len do
                                 local rel = children[row]
                                 luassert.is_not_nil(rel, "proxy should return value at row")
-                                luassert.equals(parent, (rel as tecs.Relationship).target)
+                                luassert.equals(parent, (rel as tecs.ecs.Relationship).target)
                             end
                         end
                     end
@@ -394,8 +394,8 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child1 = world:spawn(ChildOf(parent) as tecs.Component)
-                        local child2 = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
+                        local child2 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         local found: {integer: boolean} = {}
@@ -441,8 +441,8 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local mid = world:spawn(ChildOf(root) as tecs.Component)
-                        local leaf = world:spawn(ChildOf(mid) as tecs.Component)
+                        local mid = world:spawn(ChildOf(root) as tecs.ecs.Component)
+                        local leaf = world:spawn(ChildOf(mid) as tecs.ecs.Component)
                         world:update(0)
 
                         local visited: {integer} = {}
@@ -476,8 +476,8 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local mid = world:spawn(ChildOf(root) as tecs.Component)
-                        local leaf = world:spawn(ChildOf(mid) as tecs.Component)
+                        local mid = world:spawn(ChildOf(root) as tecs.ecs.Component)
+                        local leaf = world:spawn(ChildOf(mid) as tecs.ecs.Component)
                         world:update(0)
 
                         local visited: {integer} = {}
@@ -506,7 +506,7 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local leaf = world:spawn(ChildOf(root) as tecs.Component)
+                        local leaf = world:spawn(ChildOf(root) as tecs.ecs.Component)
                         world:update(0)
 
                         local ctx = {count = 0}
@@ -562,9 +562,9 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local a = world:spawn(ChildOf(root) as tecs.Component)
-                        local b = world:spawn(ChildOf(a) as tecs.Component)
-                        local c = world:spawn(ChildOf(b) as tecs.Component)
+                        local a = world:spawn(ChildOf(root) as tecs.ecs.Component)
+                        local b = world:spawn(ChildOf(a) as tecs.ecs.Component)
+                        local c = world:spawn(ChildOf(b) as tecs.ecs.Component)
                         world:update(0)
 
                         luassert.has_error(function()
@@ -591,9 +591,9 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local child1 = world:spawn(ChildOf(root) as tecs.Component)
-                        local child2 = world:spawn(ChildOf(root) as tecs.Component)
-                        local grandchild = world:spawn(ChildOf(child1) as tecs.Component)
+                        local child1 = world:spawn(ChildOf(root) as tecs.ecs.Component)
+                        local child2 = world:spawn(ChildOf(root) as tecs.ecs.Component)
+                        local grandchild = world:spawn(ChildOf(child1) as tecs.ecs.Component)
                         world:update(0)
 
                         local visited: {integer} = {}
@@ -636,8 +636,8 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child1 = world:spawn(ChildOf(parent) as tecs.Component)
-                        local child2 = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
+                        local child2 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         world:despawn(parent)
@@ -661,8 +661,8 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local child = world:spawn(ChildOf(root) as tecs.Component)
-                        local grandchild = world:spawn(ChildOf(child) as tecs.Component)
+                        local child = world:spawn(ChildOf(root) as tecs.ecs.Component)
+                        local grandchild = world:spawn(ChildOf(child) as tecs.ecs.Component)
                         world:update(0)
 
                         world:despawn(root)
@@ -686,7 +686,7 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         -- Remove the relationship, don't despawn parent
@@ -710,7 +710,7 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         local unrelated = world:spawn()
                         world:update(0)
 
@@ -754,7 +754,7 @@ describe(
 
                         -- Spawn children with different parents
                         for i = 1, 50 do
-                            world:spawn(Transform(0, 0), ChildOf(parents[i]) as tecs.Component)
+                            world:spawn(Transform(0, 0), ChildOf(parents[i]) as tecs.ecs.Component)
                         end
                         world:update(0)
 
@@ -792,8 +792,8 @@ describe(
                         world:commit()
 
                         world:defer()
-                        world:set(e, Follows(target) as tecs.Component)
-                        world:remove(e, Follows(target) as tecs.Component)
+                        world:set(e, Follows(target) as tecs.ecs.Component)
+                        world:remove(e, Follows(target) as tecs.ecs.Component)
                         world:commit()
 
                         luassert.is_false(world:has(e, Follows), "the container marker must not survive the remove")
@@ -816,17 +816,17 @@ describe(
                         world:commit()
 
                         world:defer()
-                        world:set(e, Follows(t1) as tecs.Component)
-                        world:set(e, Follows(t2) as tecs.Component)
-                        world:remove(e, Follows(t1) as tecs.Component)
+                        world:set(e, Follows(t1) as tecs.ecs.Component)
+                        world:set(e, Follows(t2) as tecs.ecs.Component)
+                        world:remove(e, Follows(t1) as tecs.ecs.Component)
                         world:commit()
 
                         luassert.is_true(world:has(e, Follows))
                         luassert.is_nil(
-                            world:get(e, Follows(t1) as tecs.Component), "the removed target must not resurrect"
+                            world:get(e, Follows(t1) as tecs.ecs.Component), "the removed target must not resurrect"
                         )
                         luassert.is_not_nil(
-                            world:get(e, Follows(t2) as tecs.Component), "the surviving staged target must commit"
+                            world:get(e, Follows(t2) as tecs.ecs.Component), "the surviving staged target must commit"
                         )
                     end
                 )
@@ -861,7 +861,7 @@ describe(
                             name = "SparseSlotReuseWatcher",
                             include = {Marker},
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _first: integer, _last: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
                             )
                                 removals = removals + 1
                                 if removals == 2 and not recycled then
@@ -871,7 +871,7 @@ describe(
                         })
 
                         world:defer()
-                        world:set(e1, Follows(target) as tecs.Component)
+                        world:set(e1, Follows(target) as tecs.ecs.Component)
                         world:despawn(e1)
                         world:despawn(e2)
                         world:commit()

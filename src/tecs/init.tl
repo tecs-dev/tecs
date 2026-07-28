@@ -73,28 +73,6 @@ local type loader = require("tecs.ffi.loader")
 -- through `within`, and a lowercase field of a record here is one of them only
 -- where the parent has no module of its own.
 
---- The object an entry file returns, and what builds one.
-local record application
-    Application: Application
-    type Config = Application.Config
-
-    --- Builds the application an entry file returns.
-    ---
-    --- Not a function that runs until done: an entry file ends with
-    --- `return tecs.application.create(config)` and the host drives it from
-    --- there, because a platform that never hands control back has no loop to
-    --- block in.
-    ---
-    --- @param config Read here, so a field changed on the table afterwards is
-    ---     not seen. Nothing is opened yet: the window, the GPU device and the
-    ---     audio mixer are the host's to bring up on the first callback, which
-    ---     is what lets an entry file be loaded by a tool that never runs one.
-    --- @return The application the host drives through its init, event, iterate
-    ---     and quit callbacks. Returning it is the whole contract; a game that
-    ---     calls into it itself is doing the host's job.
-    create: function(config: Application.Config): Application
-end
-
 --- Sound, at both levels: a mixer with clips, voices, groups and limits, and
 --- the physical devices it opens and records from.
 local record audio
@@ -195,12 +173,6 @@ local record input
     ---     `destroy`. Nil on failure, and nothing is left open in that case.
     --- @return The reason, when the first return is nil.
     openSensor: function(id: number): sensors.Sensor, string
-end
-
---- A value that settles once.
-local record future
-    Future: Future
-    type Source = Future.Source
 end
 
 --- Drawing: what a frame is drawn from, what draws it, and the vocabularies a
@@ -393,45 +365,58 @@ local record gfx
     particles: particles
 end
 
+-- The four ECS types every subsystem's signatures name, and the only ECS
+-- vocabulary here. A plugin is handed a `World`, a system is a `System`, a
+-- plugin is a `Plugin`, and what either of them iterates is a `Query`, so
+-- physics, drawing, audio and the sequencer all write these four in their own
+-- public signatures. The rest of the vocabulary is machinery for configuring
+-- the ECS rather than for reaching across it, so `Component`, `Archetype`,
+-- `Bundle`, `SystemConfig` and the snapshot records are `tecs.ecs.*` and have
+-- one spelling there.
+local type World = types.World
+local type Query = types.Query
+local type System = types.System
+local type Plugin = types.Plugin
+
 local record tecs
-    type World = types.World
-    type System = types.System
-    type Plugin = types.Plugin
-    type Pipeline = types.Pipeline
-    type FixedOverload = types.FixedOverload
-    type Component = types.components.Component
-    type ScalarComponent<T> = types.components.ScalarComponent<T>
-    type ComponentOptions<C> = types.components.ComponentOptions<C>
-    type FFIComponentOptions<C> = types.components.FFIComponentOptions<C>
-    type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T>
-    type TagComponentOptions = types.components.TagComponentOptions
-    type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
-    type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
-    type Relationship = types.components.Relationship
-    type Query = types.Query
-    type QueryDescriptor = types.Query.Descriptor
-    type QueryCursor = types.Query.Cursor
-    type Archetype = types.Archetype
-    type ArchetypeEntityObserver = types.ArchetypeEntityObserver
-    type Event = types.events.Event
-    type EventListener = types.events.EventListener
-    type EventInit = types.events.EventInit
-    type MessageBus = types.events.MessageBus
-    type Context = types.Context
-    type Key<T> = types.Context.Key<T>
-    type StatePolicy = types.StatePolicy
-    type Stats = types.World.Stats
-    type Phase = types.Phase
-    type SystemConfig = types.SystemConfig
-    type DoubleArray = types.DoubleArray
-    type Bundle = types.Bundle
-    type BundleDef = types.Bundle.Definition
-    type Snapshot = types.World.Snapshot
-    type SnapshotPrelude = types.World.SnapshotPrelude
-    type SnapshotComponentTableEntry = types.World.SnapshotComponentTableEntry
-    type SnapshotOptions = types.World.SnapshotOptions
-    type SnapshotOutput = types.World.SnapshotOutput
-    type SnapshotHandler = types.World.SnapshotHandler
+    type World = World
+    type Query = Query
+    type System = System
+    type Plugin = Plugin
+
+    --- The application the host drives, and what a game reaches the window,
+    --- the device, the input, the renderer and the audio through.
+    ---
+    --- At the root because it is not a subsystem: it owns one of each of them
+    --- and is handed to the entry plugin beside the world.
+    Application: Application
+
+    --- What `newApplication` takes. Named here so a game can annotate the
+    --- table it passes without reaching through the class for it.
+    type ApplicationConfig = Application.Config
+
+    --- A value that settles once, and the combinators over it.
+    ---
+    --- At the root because every subsystem that answers later returns one:
+    --- an asset decode, a child process, an HTTP transfer and a DNS lookup are
+    --- all `Future<T>`, and no one of them owns the type.
+    Future: Future
+
+    --- Builds the application an entry file returns.
+    ---
+    --- Not a function that runs until done: an entry file ends with
+    --- `return tecs.newApplication(config)` and the host drives it from there,
+    --- because a platform that never hands control back has no loop to block
+    --- in.
+    ---
+    --- @param config Read here, so a field changed on the table afterwards is
+    ---     not seen. Nothing is opened yet: the window, the GPU device and the
+    ---     audio mixer are the host's to bring up on the first callback, which
+    ---     is what lets an entry file be loaded by a tool that never runs one.
+    --- @return The application the host drives through its init, event, iterate
+    ---     and quit callbacks. Returning it is the whole contract; a game that
+    ---     calls into it itself is doing the host's job.
+    newApplication: function(config: Application.Config): Application
 
     --- Worlds, components, queries, systems, events and resources. The one
     --- half that reaches nothing below Lua, so it is here rather than
@@ -454,19 +439,16 @@ local record tecs
     --- name on `tecs.gfx` resolves SDL through the FFI: a headless tool that
     --- positions an entity would be made to find a graphics stack to do it.
     ---
-    --- Published here off `tecs.ecs`, the way `World`, `Query` and the rest of
-    --- the ECS vocabulary already are, so this costs nothing that naming it
-    --- one level down would not: `ecs` is loaded by the time `tecs` is.
+    --- Published here off `tecs.ecs`, which costs nothing that naming it one
+    --- level down would not: `ecs` is loaded by the time `tecs` is.
     Transform: ecs.Transform
 
-    application: application
     assets: assets
     audio: audio
     box2d: box2d
     data: data
     events: events
     filesystem: filesystem
-    future: future
     gfx: gfx
     input: input
     log: log
@@ -495,6 +477,10 @@ tecs.Transform = ecs.Transform
 --- one value rather than a copy of one. Names one level down are hung off it
 --- lazily, so a `within` costs nothing until one of them is read.
 ---
+--- A descriptor naming a `member` answers with that one name off the module
+--- instead, which is what a public name that is a function rather than a table
+--- resolves through.
+---
 --- A descriptor with no principal module, or with several modules at one
 --- level, answers with a table built here instead, which fills a member at a
 --- time. That table cannot be typed by any one module, so `init.tl` declares a
@@ -507,6 +493,10 @@ local record Namespace
     --- The member name that answers with `module` itself, which is how a class
     --- sits inside a namespace named for it.
     class: string
+    --- The one name taken off `module`, for a public name that is a function
+    --- rather than a table. `tecs.newApplication` is the constructor declared
+    --- in `tecs.Application`, and naming it loads that module and nothing else.
+    member: string
     --- Further modules read at this level, searched before `module`.
     beside: {string}
     --- The names one level down, each described the same way and each resolved
@@ -533,7 +523,9 @@ end
 --- of them reaches SDL to do. Every other name here answers with one module,
 --- which is what lets the module's own record type it.
 local SURFACE <const>: {string: Namespace} = {
-    application = {module = "tecs.Application", class = "Application"},
+    Application = {module = "tecs.Application"},
+    Future = {module = "tecs.Future"},
+    newApplication = {module = "tecs.Application", member = "newApplication"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
     box2d = {module = "tecs.box2d"},
@@ -543,7 +535,6 @@ local SURFACE <const>: {string: Namespace} = {
         module = "tecs.platform.filesystem",
         within = {watch = {module = "tecs.platform.watch"}},
     },
-    future = {module = "tecs.Future", class = "Future"},
     gfx = {
         beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer", "tecs.gfx.text"},
         within = {
@@ -578,10 +569,10 @@ local SURFACE <const>: {string: Namespace} = {
 ---
 --- @param spec What the name resolves through. A descriptor with one principal
 ---     module answers with that module and loads it now, with the names below
----     it hung off it unloaded; anything else answers with a table that loads
----     nothing until a member is read.
---- @return The module or the namespace, which is what the name is from here on:
----     the caller memoizes it, so this runs once per name.
+---     it hung off it unloaded, or with one `member` off it; anything else
+---     answers with a table that loads nothing until a member is read.
+--- @return The module, the member, or the namespace, which is what the name is
+---     from here on: the caller memoizes it, so this runs once per name.
 local resolve: function(spec: Namespace): any
 
 --- Builds the table a namespace answers with. Nothing under it loads until a
@@ -709,6 +700,9 @@ resolve = function(spec: Namespace): any
         return namespace(spec)
     end
     local module = require(spec.module) as {string: any}
+    if spec.member ~= nil then
+        return module[spec.member]
+    end
     if spec.within ~= nil then
         hang(module, spec.within)
     end

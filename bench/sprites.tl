@@ -146,7 +146,7 @@ local function scatter(world: tecs.World, count: integer, animated: boolean)
         return
     end
 
-    local types: {tecs.Component} = animated and {Transform, Tint, Sprite, Renderable, Animation}
+    local types: {tecs.ecs.Component} = animated and {Transform, Tint, Sprite, Renderable, Animation}
         or {Transform, Tint, Sprite, Renderable}
 
     local originX <const> = (WIDTH - AREA_W) * 0.5
@@ -158,7 +158,7 @@ local function scatter(world: tecs.World, count: integer, animated: boolean)
     world:batchSpawn(
         count,
         types,
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+        function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
@@ -221,7 +221,7 @@ local function spawnOne(world: tecs.World, at: integer): integer
     )
 end
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "sprites", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -231,7 +231,7 @@ return tecs.application.create({
     maxEntities = TOTAL + 1024,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer
         if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" then
             error(("tecs: no sprite bench regime '%s'"):format(MODE))

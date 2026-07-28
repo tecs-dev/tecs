@@ -58,7 +58,7 @@ local reentered = false
 -- host must refuse to enter a second time.
 local inUpdate = false
 
-return tecs.application.create({
+return tecs.newApplication({
     window = { title = "hostlifecycle", width = 64, height = 64 },
     debugMaxFrames = FRAMES,
 

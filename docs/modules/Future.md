@@ -3,7 +3,7 @@ description: "A value that settles once: four states, combinators, a source-driv
 outline: deep
 ---
 
-# tecs.future.Future
+# tecs.Future
 
 Several things in this tree are work in flight: an asset decode, a child process, a request. Each of them used to
 own a private settle-once cell with four states, a failure string and a blocking wait that pumped a worker, and
@@ -246,7 +246,7 @@ local runs <const> = {
     tecs.system.runProcess({ args = { "git", "rev-parse", "HEAD" } }),
     tecs.system.runProcess({ args = { "git", "status", "--porcelain" } }),
 }
-tecs.future.Future.all(runs):onSettle(function(joined)
+tecs.Future.all(runs):onSettle(function(joined)
     if joined.status == "ready" then
         report(joined.value[1], joined.value[2])
     end
@@ -260,7 +260,7 @@ in this tree is something that can be told to block for up to N milliseconds and
 which is the whole of what a future needs from the work behind it: an asset decode and a child process are a
 worker channel, and an HTTP transfer is a curl multi handle whose poll is the same shape.
 
-The type is reachable as `tecs.future.Source`.
+The type is reachable as `tecs.Future.Source`.
 
 | Field           | Type                                          | Default  | Description                                                                                                                                                                                          |
 | --------------- | --------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -394,11 +394,11 @@ restore re-issues the work and re-tracks it under the same key.
 
 Every function and type this module carries, rendered from `src/tecs/Future.tl`.
 
-<a id="tecs.future.Future.Source"></a>
+<a id="tecs.Future.Source"></a>
 
-### tecs.future.Future.Source
+### tecs.Future.Source
 
-<pre><code v-pre>record <a href="#tecs.future.Future.Source">tecs.future.Future.Source</a>
+<pre><code v-pre>record <a href="#tecs.Future.Source">tecs.Future.Source</a>
 </code></pre>
 
 Where a future's settlements come from, and what a blocking wait spends
@@ -409,11 +409,11 @@ to N milliseconds and hand over whatever arrived, which is the whole of
 what a future needs from the work behind it. An asset decode and a child
 process are a worker channel; an HTTP transfer is a curl multi handle,
 whose `curl_multi_poll` is the same shape.
-<a id="tecs.future.Future.Source.poll"></a>
+<a id="tecs.Future.Source.poll"></a>
 
-### tecs.future.Future.Source.poll
+### tecs.Future.Source.poll
 
-<pre><code v-pre>function <a href="#tecs.future.Future.Source.poll">tecs.future.Future.Source.poll</a>(<a href="#tecs.future.Future.Source">Source</a>): integer
+<pre><code v-pre>function <a href="#tecs.Future.Source.poll">tecs.Future.Source.poll</a>(<a href="#tecs.Future.Source">Source</a>): integer
 </code></pre>
 
 Takes everything ready and settles what it belongs to.
@@ -423,9 +423,9 @@ that answers nil on any frame where nothing finished.
 
 #### Parameters
 
-| Type                                                               | Name | Description |
-| ------------------------------------------------------------------ | ---- | ----------- |
-| <code v-pre><a href="#tecs.future.Future.Source">Source</a></code> |      |             |
+| Type                                                        | Name | Description |
+| ----------------------------------------------------------- | ---- | ----------- |
+| <code v-pre><a href="#tecs.Future.Source">Source</a></code> |      |             |
 
 #### Returns
 
@@ -433,11 +433,11 @@ that answers nil on any frame where nothing finished.
 | -------------------------- | ----------------- |
 | <code v-pre>integer</code> | How many settled. |
 
-<a id="tecs.future.Future.Source.advance"></a>
+<a id="tecs.Future.Source.advance"></a>
 
-### tecs.future.Future.Source.advance
+### tecs.Future.Source.advance
 
-<pre><code v-pre>function <a href="#tecs.future.Future.Source.advance">tecs.future.Future.Source.advance</a>(<a href="#tecs.future.Future.Source">Source</a>, number): integer
+<pre><code v-pre>function <a href="#tecs.Future.Source.advance">tecs.Future.Source.advance</a>(<a href="#tecs.Future.Source">Source</a>, number): integer
 </code></pre>
 
 Blocks up to `ms` for one settlement and takes it.
@@ -447,10 +447,10 @@ longer than it is asked to.
 
 #### Parameters
 
-| Type                                                               | Name | Description |
-| ------------------------------------------------------------------ | ---- | ----------- |
-| <code v-pre><a href="#tecs.future.Future.Source">Source</a></code> |      |             |
-| <code v-pre>number</code>                                          |      |             |
+| Type                                                        | Name | Description |
+| ----------------------------------------------------------- | ---- | ----------- |
+| <code v-pre><a href="#tecs.Future.Source">Source</a></code> |      |             |
+| <code v-pre>number</code>                                   |      |             |
 
 #### Returns
 
@@ -458,30 +458,30 @@ longer than it is asked to.
 | -------------------------- | ----------------- |
 | <code v-pre>integer</code> | How many settled. |
 
-<a id="tecs.future.Future.Source.sliceMs"></a>
+<a id="tecs.Future.Source.sliceMs"></a>
 
-### tecs.future.Future.Source.sliceMs
+### tecs.Future.Source.sliceMs
 
-<pre><code v-pre><a href="#tecs.future.Future.Source.sliceMs">tecs.future.Future.Source.sliceMs</a>: number
+<pre><code v-pre><a href="#tecs.Future.Source.sliceMs">tecs.Future.Source.sliceMs</a>: number
 </code></pre>
 
 Milliseconds one `wait` slice blocks for. Optional; 16 by default.
-<a id="tecs.future.Future.Source.defaultWaitMs"></a>
+<a id="tecs.Future.Source.defaultWaitMs"></a>
 
-### tecs.future.Future.Source.defaultWaitMs
+### tecs.Future.Source.defaultWaitMs
 
-<pre><code v-pre><a href="#tecs.future.Future.Source.defaultWaitMs">tecs.future.Future.Source.defaultWaitMs</a>: number
+<pre><code v-pre><a href="#tecs.Future.Source.defaultWaitMs">tecs.Future.Source.defaultWaitMs</a>: number
 </code></pre>
 
 Milliseconds `wait` spends when the caller names nothing. Optional;
 5000 by default. It lives here rather than on `wait` so a subprocess
 can keep a longer default than a decode without a second
 convention.
-<a id="tecs.future.Future.Source.cancel"></a>
+<a id="tecs.Future.Source.cancel"></a>
 
-### tecs.future.Future.Source.cancel
+### tecs.Future.Source.cancel
 
-<pre><code v-pre>function <a href="#tecs.future.Future.Source.cancel">tecs.future.Future.Source.cancel</a>(<a href="#tecs.future.Future.Source">Source</a>, Future&lt;&lt;any type&gt;&gt;)
+<pre><code v-pre>function <a href="#tecs.Future.Source.cancel">tecs.Future.Source.cancel</a>(<a href="#tecs.Future.Source">Source</a>, Future&lt;&lt;any type&gt;&gt;)
 </code></pre>
 
 Stops the work behind a root future whose last watcher has gone.
@@ -492,16 +492,16 @@ honestly do.
 
 #### Parameters
 
-| Type                                                               | Name | Description |
-| ------------------------------------------------------------------ | ---- | ----------- |
-| <code v-pre><a href="#tecs.future.Future.Source">Source</a></code> |      |             |
-| <code v-pre>Future&lt;&lt;any type&gt;&gt;</code>                  |      |             |
+| Type                                                        | Name | Description |
+| ----------------------------------------------------------- | ---- | ----------- |
+| <code v-pre><a href="#tecs.Future.Source">Source</a></code> |      |             |
+| <code v-pre>Future&lt;&lt;any type&gt;&gt;</code>           |      |             |
 
-<a id="tecs.future.Future.abandon"></a>
+<a id="tecs.Future.abandon"></a>
 
-### tecs.future.Future.abandon
+### tecs.Future.abandon
 
-<pre><code v-pre>function <a href="#tecs.future.Future.abandon">tecs.future.Future.abandon</a>(self: Future&lt;T&gt;, err: string)
+<pre><code v-pre>function <a href="#tecs.Future.abandon">tecs.Future.abandon</a>(self: Future&lt;T&gt;, err: string)
 </code></pre>
 
 Settles this future as canceled, if nothing has settled it yet.
@@ -520,11 +520,11 @@ taken off the multi.
 | <code v-pre>Future&lt;T&gt;</code> | <code v-pre>self</code> |                                                                                                                             |
 | <code v-pre>string</code>          | <code v-pre>err</code>  | Nil becomes "canceled". No watcher counting happens here: this settles the future outright, whoever else was waiting on it. |
 
-<a id="tecs.future.Future.all"></a>
+<a id="tecs.Future.all"></a>
 
-### tecs.future.Future.all
+### tecs.Future.all
 
-<pre><code v-pre>function <a href="#tecs.future.Future.all">tecs.future.Future.all</a>&lt;U&gt;(inputs: {Future&lt;U&gt;}): Future&lt;{U}&gt;
+<pre><code v-pre>function <a href="#tecs.Future.all">tecs.Future.all</a>&lt;U&gt;(inputs: {Future&lt;U&gt;}): Future&lt;{U}&gt;
 </code></pre>
 
 A future carrying every input's value, in input order.
@@ -556,11 +556,11 @@ deep rather than five hundred.
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;{U}&gt;</code> | A future whose value is a fresh array indexed as `inputs` is, so a hole cannot appear: the join only settles "ready" once every slot is filled. |
 
-<a id="tecs.future.Future.cancel"></a>
+<a id="tecs.Future.cancel"></a>
 
-### tecs.future.Future.cancel
+### tecs.Future.cancel
 
-<pre><code v-pre>function <a href="#tecs.future.Future.cancel">tecs.future.Future.cancel</a>(self: Future&lt;T&gt;)
+<pre><code v-pre>function <a href="#tecs.Future.cancel">tecs.Future.cancel</a>(self: Future&lt;T&gt;)
 </code></pre>
 
 Gives up this consumer's interest in the work.
@@ -580,11 +580,11 @@ Canceling a settled future is a no-op.
 | ---------------------------------- | ----------------------- | ----------- |
 | <code v-pre>Future&lt;T&gt;</code> | <code v-pre>self</code> |             |
 
-<a id="tecs.future.Future.complete"></a>
+<a id="tecs.Future.complete"></a>
 
-### tecs.future.Future.complete
+### tecs.Future.complete
 
-<pre><code v-pre>function <a href="#tecs.future.Future.complete">tecs.future.Future.complete</a>(self: Future&lt;T&gt;, value: T)
+<pre><code v-pre>function <a href="#tecs.Future.complete">tecs.Future.complete</a>(self: Future&lt;T&gt;, value: T)
 </code></pre>
 
 Settles this future with a value, if nothing has settled it yet.
@@ -602,19 +602,19 @@ answer wins.
 | <code v-pre>Future&lt;T&gt;</code> | <code v-pre>self</code>  |                                                                                                                                                     |
 | <code v-pre>T</code>               | <code v-pre>value</code> | Stored as it is, not copied, and read back off `value`. Nil is a legal value and still settles "ready", which is how a future over nothing settles. |
 
-<a id="tecs.future.Future.error"></a>
+<a id="tecs.Future.error"></a>
 
-### tecs.future.Future.error
+### tecs.Future.error
 
-<pre><code v-pre><a href="#tecs.future.Future.error">tecs.future.Future.error</a>: string
+<pre><code v-pre><a href="#tecs.Future.error">tecs.Future.error</a>: string
 </code></pre>
 
 Why it did not. Set on "failed" and on "canceled".
-<a id="tecs.future.Future.fail"></a>
+<a id="tecs.Future.fail"></a>
 
-### tecs.future.Future.fail
+### tecs.Future.fail
 
-<pre><code v-pre>function <a href="#tecs.future.Future.fail">tecs.future.Future.fail</a>(self: Future&lt;T&gt;, err: string)
+<pre><code v-pre>function <a href="#tecs.Future.fail">tecs.Future.fail</a>(self: Future&lt;T&gt;, err: string)
 </code></pre>
 
 Settles this future as failed, if nothing has settled it yet.
@@ -626,11 +626,11 @@ Settles this future as failed, if nothing has settled it yet.
 | <code v-pre>Future&lt;T&gt;</code> | <code v-pre>self</code> |                                                                                                                  |
 | <code v-pre>string</code>          | <code v-pre>err</code>  | A sentence for a log, not something to match on. Nil becomes "failed", so `error` is set on every failed future. |
 
-<a id="tecs.future.Future.failed"></a>
+<a id="tecs.Future.failed"></a>
 
-### tecs.future.Future.failed
+### tecs.Future.failed
 
-<pre><code v-pre>function <a href="#tecs.future.Future.failed">tecs.future.Future.failed</a>&lt;U&gt;(err: string): Future&lt;U&gt;
+<pre><code v-pre>function <a href="#tecs.Future.failed">tecs.Future.failed</a>&lt;U&gt;(err: string): Future&lt;U&gt;
 </code></pre>
 
 A future already carrying a failure.
@@ -653,11 +653,11 @@ A future already carrying a failure.
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;U&gt;</code> | A future at "failed" with no source, so `wait` on it returns at once and `cancel` does nothing. `map` on it propagates without running the transform, while `recover` on it is the one thing that still runs. |
 
-<a id="tecs.future.Future.flatMap"></a>
+<a id="tecs.Future.flatMap"></a>
 
-### tecs.future.Future.flatMap
+### tecs.Future.flatMap
 
-<pre><code v-pre>function <a href="#tecs.future.Future.flatMap">tecs.future.Future.flatMap</a>&lt;U&gt;(transform: Future&lt;T&gt;, function(T): Future&lt;U&gt;): Future&lt;U&gt;
+<pre><code v-pre>function <a href="#tecs.Future.flatMap">tecs.Future.flatMap</a>&lt;U&gt;(transform: Future&lt;T&gt;, function(T): Future&lt;U&gt;): Future&lt;U&gt;
 </code></pre>
 
 A future carrying whatever the future `transform` starts settles to.
@@ -688,11 +688,11 @@ there is nothing yet to cancel afterwards.
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;U&gt;</code> | A new future settling to whatever the inner one settles to, status and all, so an inner that is canceled leaves this canceled and not failed. |
 
-<a id="tecs.future.Future.map"></a>
+<a id="tecs.Future.map"></a>
 
-### tecs.future.Future.map
+### tecs.Future.map
 
-<pre><code v-pre>function <a href="#tecs.future.Future.map">tecs.future.Future.map</a>&lt;U&gt;(transform: Future&lt;T&gt;, function(T): U): Future&lt;U&gt;
+<pre><code v-pre>function <a href="#tecs.Future.map">tecs.Future.map</a>&lt;U&gt;(transform: Future&lt;T&gt;, function(T): U): Future&lt;U&gt;
 </code></pre>
 
 A future carrying `transform` applied to this one's value.
@@ -720,11 +720,11 @@ failure.
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;U&gt;</code> | A new future watching this one. Canceling it gives up this link's interest in the upstream and does not settle the upstream unless nothing else wants it. |
 
-<a id="tecs.future.Future.onSettle"></a>
+<a id="tecs.Future.onSettle"></a>
 
-### tecs.future.Future.onSettle
+### tecs.Future.onSettle
 
-<pre><code v-pre>function <a href="#tecs.future.Future.onSettle">tecs.future.Future.onSettle</a>(self: Future&lt;T&gt;, listener: function(Future&lt;T&gt;)): Future&lt;T&gt;
+<pre><code v-pre>function <a href="#tecs.Future.onSettle">tecs.Future.onSettle</a>(self: Future&lt;T&gt;, listener: function(Future&lt;T&gt;)): Future&lt;T&gt;
 </code></pre>
 
 Registers a dependent, and returns this future.
@@ -747,11 +747,11 @@ listener that raises is logged and does not stop the others.
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;T&gt;</code> | This same future, not a derived one, so chaining `onSettle` registers several listeners on one thing rather than building a chain. |
 
-<a id="tecs.future.Future.pending"></a>
+<a id="tecs.Future.pending"></a>
 
-### tecs.future.Future.pending
+### tecs.Future.pending
 
-<pre><code v-pre>function <a href="#tecs.future.Future.pending">tecs.future.Future.pending</a>&lt;U&gt;(<a href="#tecs.future.Future.Source">Source</a>): Future&lt;U&gt;
+<pre><code v-pre>function <a href="#tecs.Future.pending">tecs.Future.pending</a>&lt;U&gt;(<a href="#tecs.Future.Source">Source</a>): Future&lt;U&gt;
 </code></pre>
 
 Creates a future nothing has settled yet.
@@ -769,9 +769,9 @@ and a `wait` on it returns at once.
 
 #### Parameters
 
-| Type                                                               | Name | Description |
-| ------------------------------------------------------------------ | ---- | ----------- |
-| <code v-pre><a href="#tecs.future.Future.Source">Source</a></code> |      |             |
+| Type                                                        | Name | Description |
+| ----------------------------------------------------------- | ---- | ----------- |
+| <code v-pre><a href="#tecs.Future.Source">Source</a></code> |      |             |
 
 #### Returns
 
@@ -779,11 +779,11 @@ and a `wait` on it returns at once.
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;U&gt;</code> | A future at "pending" with one watcher, so a single `cancel` on it settles it "canceled" and calls the source's hook. |
 
-<a id="tecs.future.Future.recover"></a>
+<a id="tecs.Future.recover"></a>
 
-### tecs.future.Future.recover
+### tecs.Future.recover
 
-<pre><code v-pre>function <a href="#tecs.future.Future.recover">tecs.future.Future.recover</a>(self: Future&lt;T&gt;, recovery: function(string): T): Future&lt;T&gt;
+<pre><code v-pre>function <a href="#tecs.Future.recover">tecs.Future.recover</a>(self: Future&lt;T&gt;, recovery: function(string): T): Future&lt;T&gt;
 </code></pre>
 
 A future that turns this one's failure into a value.
@@ -804,11 +804,11 @@ recovered, which is the whole reason the two are distinct states.
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;T&gt;</code> | A new future watching this one, carrying the same type: a recovery produces a value where the upstream produced an error, so a ready upstream passes through untouched. |
 
-<a id="tecs.future.Future.settled"></a>
+<a id="tecs.Future.settled"></a>
 
-### tecs.future.Future.settled
+### tecs.Future.settled
 
-<pre><code v-pre>function <a href="#tecs.future.Future.settled">tecs.future.Future.settled</a>&lt;U&gt;(U): Future&lt;U&gt;
+<pre><code v-pre>function <a href="#tecs.Future.settled">tecs.Future.settled</a>&lt;U&gt;(U): Future&lt;U&gt;
 </code></pre>
 
 A future already carrying a value.
@@ -831,19 +831,19 @@ A future already carrying a value.
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>Future&lt;U&gt;</code> | A future at "ready" with no source, so `wait` on it returns at once and `cancel` does nothing. A listener added to it still runs on the next drain. |
 
-<a id="tecs.future.Future.status"></a>
+<a id="tecs.Future.status"></a>
 
-### tecs.future.Future.status
+### tecs.Future.status
 
-<pre><code v-pre><a href="#tecs.future.Future.status">tecs.future.Future.status</a>: string
+<pre><code v-pre><a href="#tecs.Future.status">tecs.Future.status</a>: string
 </code></pre>
 
 "pending", "ready", "failed", or "canceled".
-<a id="tecs.future.Future.track"></a>
+<a id="tecs.Future.track"></a>
 
-### tecs.future.Future.track
+### tecs.Future.track
 
-<pre><code v-pre>function <a href="#tecs.future.Future.track">tecs.future.Future.track</a>&lt;U&gt;(entity: World, key: integer, future: string, Future&lt;U&gt;)
+<pre><code v-pre>function <a href="#tecs.Future.track">tecs.Future.track</a>&lt;U&gt;(entity: World, key: integer, future: string, Future&lt;U&gt;)
 </code></pre>
 
 Makes a future something a sequence can wait for.
@@ -889,19 +889,19 @@ contract says a provider that cannot pause its work does not offer it.
 | <code v-pre>string</code>          | <code v-pre>future</code> | Nil raises. One that has already settled is deliberately not written down, so a later await on that key carries straight on rather than hanging. |
 | <code v-pre>Future&lt;U&gt;</code> |                           |                                                                                                                                                  |
 
-<a id="tecs.future.Future.value"></a>
+<a id="tecs.Future.value"></a>
 
-### tecs.future.Future.value
+### tecs.Future.value
 
-<pre><code v-pre><a href="#tecs.future.Future.value">tecs.future.Future.value</a>: T
+<pre><code v-pre><a href="#tecs.Future.value">tecs.Future.value</a>: T
 </code></pre>
 
 What settled. Valid only on "ready".
-<a id="tecs.future.Future.wait"></a>
+<a id="tecs.Future.wait"></a>
 
-### tecs.future.Future.wait
+### tecs.Future.wait
 
-<pre><code v-pre>function <a href="#tecs.future.Future.wait">tecs.future.Future.wait</a>(self: Future&lt;T&gt;, timeoutMs: number): Future&lt;T&gt;
+<pre><code v-pre>function <a href="#tecs.Future.wait">tecs.Future.wait</a>(self: Future&lt;T&gt;, timeoutMs: number): Future&lt;T&gt;
 </code></pre>
 
 Blocks until this future settles, advancing its source.

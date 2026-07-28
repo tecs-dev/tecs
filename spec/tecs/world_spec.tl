@@ -53,12 +53,12 @@ describe(
                     function()
                         local spyRun = spy.new(function() end)
                         local w2 = tecs.ecs.newWorld({
-                            pipelineFactory = function(): tecs.Pipeline
+                            pipelineFactory = function(): tecs.ecs.Pipeline
                                 return {
                                     -- builtin-plugins add systems. Don't assert on this though since more may be added in the future.
                                     addSystem = spy.new(function() end),
                                     run = spyRun,
-                                } as tecs.Pipeline
+                                } as tecs.ecs.Pipeline
                             end,
                         })
 
@@ -119,12 +119,12 @@ describe(
                             exclusive = true,
                         })
 
-                        local stale = w:spawn(PosComponent(1, 2), parentRel(123) as tecs.Component)
+                        local stale = w:spawn(PosComponent(1, 2), parentRel(123) as tecs.ecs.Component)
                         w:commit()
                         w:despawn(stale)
                         w:commit()
 
-                        local fresh = w:spawn(PosComponent(9, 9), parentRel(456) as tecs.Component)
+                        local fresh = w:spawn(PosComponent(9, 9), parentRel(456) as tecs.ecs.Component)
                         w:commit()
 
                         luassert.is_false(w:isAlive(stale))
@@ -337,7 +337,7 @@ describe(
                         w2:commit()
 
                         w2:batchSpawnAt({a}, {PosComponent},
-                        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _n: integer)
+                        function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, _n: integer)
                             local ps = arch:getMut(PosComponent)
                             for i = startRow, lastRow do
                                 ps[i] = PosComponent(9, 9)
@@ -433,17 +433,17 @@ describe(
                         local Follows = tecs.ecs.newRelationship({name = "HasSpecDenseFollows"})
                         local leader = w:spawn()
                         local other = w:spawn()
-                        local follower = w:spawn(Follows(leader) as tecs.Component)
+                        local follower = w:spawn(Follows(leader) as tecs.ecs.Component)
                         w:commit()
 
                         -- Dense instance: archetype column presence check.
-                        luassert.is_true(w:has(follower, Follows(leader) as tecs.Component))
+                        luassert.is_true(w:has(follower, Follows(leader) as tecs.ecs.Component))
                         -- Dense container (wildcard): attached via addComponentStaged,
                         -- so the arch membership check returns true for any follower.
-                        luassert.is_true(w:has(follower, Follows as tecs.Component))
+                        luassert.is_true(w:has(follower, Follows as tecs.ecs.Component))
                         -- Non-follower has neither.
-                        luassert.is_false(w:has(other, Follows as tecs.Component))
-                        luassert.is_false(w:has(other, Follows(leader) as tecs.Component))
+                        luassert.is_false(w:has(other, Follows as tecs.ecs.Component))
+                        luassert.is_false(w:has(other, Follows(leader) as tecs.ecs.Component))
                     end
                 )
 
@@ -453,12 +453,12 @@ describe(
                         local Follows = tecs.ecs.newRelationship({name = "HasSpecDenseFollowsTarget"})
                         local a = w:spawn()
                         local b = w:spawn()
-                        local f = w:spawn(Follows(a) as tecs.Component)
+                        local f = w:spawn(Follows(a) as tecs.ecs.Component)
                         w:commit()
 
-                        luassert.is_true(w:has(f, Follows(a) as tecs.Component))
+                        luassert.is_true(w:has(f, Follows(a) as tecs.ecs.Component))
                         luassert.is_false(
-                            w:has(f, Follows(b) as tecs.Component),
+                            w:has(f, Follows(b) as tecs.ecs.Component),
                             "dense instance to a different target must not match"
                         )
                     end
@@ -474,14 +474,14 @@ describe(
                             reverseIndex = true,
                         })
                         local parent = w:spawn()
-                        local kid = w:spawn(ChildOf(parent) as tecs.Component)
+                        local kid = w:spawn(ChildOf(parent) as tecs.ecs.Component)
                         local orphan = w:spawn()
                         w:commit()
 
                         -- Sparse container lives in the archetype as a wildcard, so
                         -- the dense-arch path resolves it.
-                        luassert.is_true(w:has(kid, ChildOf as tecs.Component))
-                        luassert.is_false(w:has(orphan, ChildOf as tecs.Component))
+                        luassert.is_true(w:has(kid, ChildOf as tecs.ecs.Component))
+                        luassert.is_false(w:has(orphan, ChildOf as tecs.ecs.Component))
                     end
                 )
 
@@ -496,13 +496,13 @@ describe(
                         })
                         local parent1 = w:spawn()
                         local parent2 = w:spawn()
-                        local kid = w:spawn(ChildOf(parent1) as tecs.Component)
+                        local kid = w:spawn(ChildOf(parent1) as tecs.ecs.Component)
                         w:commit()
 
                         -- Specific-target: matches only the live target, not siblings.
-                        luassert.is_true(w:has(kid, ChildOf(parent1) as tecs.Component))
+                        luassert.is_true(w:has(kid, ChildOf(parent1) as tecs.ecs.Component))
                         luassert.is_false(
-                            w:has(kid, ChildOf(parent2) as tecs.Component),
+                            w:has(kid, ChildOf(parent2) as tecs.ecs.Component),
                             "sparse instance for a different target must not match"
                         )
                     end
@@ -513,13 +513,13 @@ describe(
                     function()
                         local Follows = tecs.ecs.newRelationship({name = "HasSpecDenseFollowsRemove"})
                         local leader = w:spawn()
-                        local f = w:spawn(Follows(leader) as tecs.Component)
+                        local f = w:spawn(Follows(leader) as tecs.ecs.Component)
                         w:commit()
 
-                        luassert.is_true(w:has(f, Follows(leader) as tecs.Component))
-                        w:remove(f, Follows(leader) as tecs.Component)
+                        luassert.is_true(w:has(f, Follows(leader) as tecs.ecs.Component))
+                        w:remove(f, Follows(leader) as tecs.ecs.Component)
                         w:commit()
-                        luassert.is_false(w:has(f, Follows(leader) as tecs.Component))
+                        luassert.is_false(w:has(f, Follows(leader) as tecs.ecs.Component))
                     end
                 )
 
@@ -533,15 +533,15 @@ describe(
                             reverseIndex = true,
                         })
                         local parent = w:spawn()
-                        local kid = w:spawn(ChildOf(parent) as tecs.Component)
+                        local kid = w:spawn(ChildOf(parent) as tecs.ecs.Component)
                         w:commit()
 
-                        luassert.is_true(w:has(kid, ChildOf(parent) as tecs.Component))
-                        luassert.is_true(w:has(kid, ChildOf as tecs.Component))
-                        w:remove(kid, ChildOf(parent) as tecs.Component)
+                        luassert.is_true(w:has(kid, ChildOf(parent) as tecs.ecs.Component))
+                        luassert.is_true(w:has(kid, ChildOf as tecs.ecs.Component))
+                        w:remove(kid, ChildOf(parent) as tecs.ecs.Component)
                         w:commit()
-                        luassert.is_false(w:has(kid, ChildOf(parent) as tecs.Component))
-                        luassert.is_false(w:has(kid, ChildOf as tecs.Component))
+                        luassert.is_false(w:has(kid, ChildOf(parent) as tecs.ecs.Component))
+                        luassert.is_false(w:has(kid, ChildOf as tecs.ecs.Component))
                     end
                 )
 
@@ -569,7 +569,7 @@ describe(
                             "dense relationship container must not be flagged"
                         )
                         luassert.is_nil(
-                            ((DenseRel(t) as tecs.Component) as {string: any}).isSparseInstance,
+                            ((DenseRel(t) as tecs.ecs.Component) as {string: any}).isSparseInstance,
                             "dense relationship instance must not be flagged"
                         )
                         luassert.is_nil(
@@ -577,7 +577,7 @@ describe(
                             "sparse relationship container must not be flagged"
                         )
                         luassert.is_true(
-                            ((SparseRel(t) as tecs.Component) as {string: any}).isSparseInstance,
+                            ((SparseRel(t) as tecs.ecs.Component) as {string: any}).isSparseInstance,
                             "sparse relationship instance must be flagged"
                         )
                     end
@@ -789,7 +789,7 @@ describe(
                     "puts resources",
                     function()
                         local w2 = tecs.ecs.newWorld()
-                        local k: tecs.Key<string> = tecs.ecs.newKey("spec.world.res")
+                        local k: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.world.res")
                         local v = "test"
                         w2.resources[k] = v
 
@@ -1150,7 +1150,7 @@ describe(
                         })
 
                         local parent = w:spawn()
-                        local child = w:spawn(ChildOf(parent) as tecs.Component)
+                        local child = w:spawn(ChildOf(parent) as tecs.ecs.Component)
                         w:update(0)
 
                         luassert.is_true(w:isAlive(parent), "Parent should be alive before despawn")
@@ -1167,7 +1167,7 @@ describe(
                 it(
                     "should allow component access during OnDespawn",
                     function()
-                        local record TestComponentType is tecs.Component
+                        local record TestComponentType is tecs.ecs.Component
                             value: number
                         end
 
@@ -1218,7 +1218,7 @@ describe(
                         local firstIdMaybe, ids = w:batchSpawn(
                             count,
                             {PosComponent, VelComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 local velocities = arch:getMut(VelComponent)
                                 for i = startRow, lastRow do
@@ -1250,7 +1250,7 @@ describe(
                         local firstIdMaybe, ids = w:batchSpawn(
                             5,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1283,7 +1283,7 @@ describe(
                         local firstId, ids = small:batchSpawn(
                             2,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for row = startRow, lastRow do
                                     positions[row] = PosComponent(row, row)
@@ -1309,7 +1309,7 @@ describe(
                         w:batchSpawn(
                             50,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1334,7 +1334,7 @@ describe(
                         w:query({
                             include = {PosComponent},
                             onEntitiesAdded = function(
-                                _archetype: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _archetype: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 matchCount = matchCount + count
                             end,
@@ -1343,7 +1343,7 @@ describe(
                         w:batchSpawn(
                             20,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1370,8 +1370,8 @@ describe(
 
                         local firstIdMaybe, ids = w:batchSpawn(
                             5,
-                            {PosComponent, SparseRel as tecs.Component},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            {PosComponent, SparseRel as tecs.ecs.Component},
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1384,7 +1384,7 @@ describe(
                         -- the ledger walker, so targets land in the RelationshipStore
                         -- alongside the fresh entities.
                         for i = 0, 4 do
-                            w:set(firstId + i, (SparseRel as function(integer): tecs.Component)(parent))
+                            w:set(firstId + i, (SparseRel as function(integer): tecs.ecs.Component)(parent))
                         end
                         w:commit()
 
@@ -1405,7 +1405,7 @@ describe(
                         w:batchSpawn(
                             10,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1416,7 +1416,7 @@ describe(
                         w:batchSpawn(
                             10,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i + 100, i + 100)
@@ -1441,7 +1441,7 @@ describe(
                         local firstIdMaybe, ids = w:batchSpawn(
                             3,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1467,7 +1467,7 @@ describe(
                         local firstIdMaybe, ids = w:batchSpawn(
                             3,
                             {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(PosComponent)
                                 for i = startRow, lastRow do
                                     positions[i] = PosComponent(i, i)
@@ -1793,7 +1793,7 @@ describe(
                         w:commit()
 
                         local count = 0
-                        w:forEachArchetype(function(_arch: tecs.Archetype) count = count + 1 end)
+                        w:forEachArchetype(function(_arch: tecs.ecs.Archetype) count = count + 1 end)
                         -- At least the 2 populated archetypes + the empty sentinel
                         luassert.is_true(count >= 2, "should visit at least 2 archetypes, got " .. count)
                     end
@@ -1827,8 +1827,8 @@ describe(
                         -- query's global ArchetypeCreated subscription must survive
                         -- clearEntities, or new archetypes are silently missed until the
                         -- query is rebuilt.
-                        w:spawn(PosComponent(3, 3), VelComponent() as tecs.Component)
-                        w:spawn(PosComponent(4, 4), VelComponent() as tecs.Component)
+                        w:spawn(PosComponent(3, 3), VelComponent() as tecs.ecs.Component)
+                        w:spawn(PosComponent(4, 4), VelComponent() as tecs.ecs.Component)
                         luassert.equals(2, queryCount(q), "query must match a new archetype after clearEntities")
 
                         -- The pre-existing Pos-only archetype keeps working too.

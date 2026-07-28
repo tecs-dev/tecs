@@ -123,7 +123,7 @@ timing.enable()
 --- Wall time between iterations, which is the frame time a player feels.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "particles", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -131,7 +131,7 @@ return tecs.application.create({
     maxEntities = 4096,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer
         world:addPlugin(particles.plugin({
             renderer = renderer,

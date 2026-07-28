@@ -24,8 +24,8 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child1 = world:spawn(ChildOf(parent) as tecs.Component)
-                        local child2 = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
+                        local child2 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
 
                         -- Commit spawns
                         world:update(0)
@@ -52,14 +52,14 @@ describe(
                         -- Mirrors a real pattern (bubble + label-child with several
                         -- rendering components). If cascade misbehaves when the child has
                         -- non-trivial component baggage, this catches it.
-                        local record Marker is tecs.Component
+                        local record Marker is tecs.ecs.Component
                         end
-                        local record Pos is tecs.Component
+                        local record Pos is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): Pos
                         end
-                        local record Tint is tecs.Component
+                        local record Tint is tecs.ecs.Component
                             r: number
                             g: number
                             b: number
@@ -91,7 +91,7 @@ describe(
                         local labels: {integer} = {}
                         for i = 1, 5 do
                             labels[i] = world:spawn(
-                                ChildOf(parent) as tecs.Component, PosComp(i, i * 2), TintComp(1, 1, 1), MarkerComp
+                                ChildOf(parent) as tecs.ecs.Component, PosComp(i, i * 2), TintComp(1, 1, 1), MarkerComp
                             )
                         end
                         world:update(0)
@@ -122,7 +122,7 @@ describe(
                         })
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
 
                         -- Commit spawns
                         world:update(0)
@@ -131,7 +131,7 @@ describe(
                         luassert.is_true(world:isAlive(child), "Child should be alive")
 
                         -- Remove relationship (orphan the child)
-                        world:remove(child, ChildOf(parent) as tecs.Component)
+                        world:remove(child, ChildOf(parent) as tecs.ecs.Component)
 
                         -- Force changes to be committed
                         world:update(0)
@@ -141,7 +141,7 @@ describe(
                         -- For exclusive relationships, passing the wildcard should work
                         -- But currently it returns the wildcard container instead of nil
                         -- This might be a separate bug to fix
-                        local childOfRel = world:get(child, ChildOf(parent) as tecs.Component)
+                        local childOfRel = world:get(child, ChildOf(parent) as tecs.ecs.Component)
                         luassert.is_nil(childOfRel, "Child should no longer have specific ChildOf(parent)")
                     end
                 )
@@ -156,7 +156,7 @@ describe(
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
-                        local child = world:spawn(ChildOf(parent1) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent1) as tecs.ecs.Component)
 
                         -- Commit spawns
                         world:update(0)
@@ -164,7 +164,7 @@ describe(
                         luassert.is_true(world:isAlive(child), "Child should be alive")
 
                         -- Reparent to parent2 (exclusive relationship replaces parent1)
-                        world:set(child, ChildOf(parent2) as tecs.Component)
+                        world:set(child, ChildOf(parent2) as tecs.ecs.Component)
 
                         -- Force changes to be committed
                         world:update(0)
@@ -173,14 +173,14 @@ describe(
                         luassert.is_true(world:isAlive(parent2), "Parent2 should still be alive")
                         luassert.is_true(world:isAlive(child), "Child should still be alive after reparenting")
 
-                        local childOfRel = world:get(child, ChildOf(parent2) as tecs.Component)
+                        local childOfRel = world:get(child, ChildOf(parent2) as tecs.ecs.Component)
                         luassert.is_not_nil(childOfRel, "Child should have ChildOf(parent2)")
                         luassert.equals(
-                            parent2, (childOfRel as tecs.Relationship).target, "Child should be child of parent2"
+                            parent2, (childOfRel as tecs.ecs.Relationship).target, "Child should be child of parent2"
                         )
 
                         -- Exclusive relationship should have removed the old ChildOf(parent1)
-                        local oldRel = world:get(child, ChildOf(parent1) as tecs.Component)
+                        local oldRel = world:get(child, ChildOf(parent1) as tecs.ecs.Component)
                         luassert.is_nil(oldRel, "Child should no longer have ChildOf(parent1) after reparenting")
                     end
                 )
@@ -398,8 +398,8 @@ describe(
 
                         local target1 = world:spawn()
                         local target2 = world:spawn()
-                        local entity1 = world:spawn(Likes(target1) as tecs.Component)
-                        local entity2 = world:spawn(Likes(target2) as tecs.Component)
+                        local entity1 = world:spawn(Likes(target1) as tecs.ecs.Component)
+                        local entity2 = world:spawn(Likes(target2) as tecs.ecs.Component)
                         local entityNoRel = world:spawn()
 
                         world:update(0)
@@ -432,10 +432,10 @@ describe(
 
                         local leader1 = world:spawn()
                         local leader2 = world:spawn()
-                        local follower1 = world:spawn(Follows(leader1) as tecs.Component)
-                        local follower2 = world:spawn(Follows(leader2) as tecs.Component)
+                        local follower1 = world:spawn(Follows(leader1) as tecs.ecs.Component)
+                        local follower2 = world:spawn(Follows(leader2) as tecs.ecs.Component)
                         local followerBoth = world:spawn(
-                            Follows(leader1) as tecs.Component, Follows(leader2) as tecs.Component
+                            Follows(leader1) as tecs.ecs.Component, Follows(leader2) as tecs.ecs.Component
                         )
 
                         world:update(0)
@@ -467,7 +467,7 @@ describe(
 
                         -- Spawn child with ChildOf - this tests componentHash propagation
                         -- The FFI instance needs componentHash for archetype hashing
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         -- Query using wildcard should find the child
@@ -519,8 +519,8 @@ describe(
                         world:update(0)
 
                         -- Spawn children with different parents
-                        local child1 = world:spawn(ChildOf(parent1) as tecs.Component)
-                        local child2 = world:spawn(ChildOf(parent2) as tecs.Component)
+                        local child1 = world:spawn(ChildOf(parent1) as tecs.ecs.Component)
+                        local child2 = world:spawn(ChildOf(parent2) as tecs.ecs.Component)
                         world:update(0)
 
                         -- Query for children of parent1
@@ -548,7 +548,7 @@ describe(
                         local ChildOf = tecs.ecs.newRelationship({name = "ChildOfGetFirstTest", exclusive = true})
 
                         local parent = world:spawn()
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
 
                         local rel = world:getFirstRelationship(child, ChildOf)
@@ -568,9 +568,9 @@ describe(
 
                         -- Spawn with three exclusive siblings: only the last should win
                         local child = world:spawn(
-                            ChildOf(parent1) as tecs.Component,
-                            ChildOf(parent2) as tecs.Component,
-                            ChildOf(parent3) as tecs.Component
+                            ChildOf(parent1) as tecs.ecs.Component,
+                            ChildOf(parent2) as tecs.ecs.Component,
+                            ChildOf(parent3) as tecs.ecs.Component
                         )
                         world:update(0)
 
@@ -595,10 +595,10 @@ describe(
                         -- Pattern: ChildOf(A), MemberOf(A), ChildOf(B), MemberOf(B)
                         -- Expected: only ChildOf(B) and MemberOf(B) survive.
                         local entity = world:spawn(
-                            ChildOf(parentA) as tecs.Component,
-                            MemberOf(groupA) as tecs.Component,
-                            ChildOf(parentB) as tecs.Component,
-                            MemberOf(groupB) as tecs.Component
+                            ChildOf(parentA) as tecs.ecs.Component,
+                            MemberOf(groupA) as tecs.ecs.Component,
+                            ChildOf(parentB) as tecs.ecs.Component,
+                            MemberOf(groupB) as tecs.ecs.Component
                         )
                         world:update(0)
 
@@ -633,11 +633,11 @@ describe(
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
-                        local child = world:spawn(ChildOf(parent1) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent1) as tecs.ecs.Component)
                         world:update(0)
 
                         -- Reparent
-                        world:set(child, ChildOf(parent2) as tecs.Component)
+                        world:set(child, ChildOf(parent2) as tecs.ecs.Component)
                         world:update(0)
 
                         local rel = world:getFirstRelationship(child, ChildOf)
@@ -653,7 +653,9 @@ describe(
 
                         local target1 = world:spawn()
                         local target2 = world:spawn()
-                        local entity = world:spawn(Likes(target1) as tecs.Component, Likes(target2) as tecs.Component)
+                        local entity = world:spawn(
+                            Likes(target1) as tecs.ecs.Component, Likes(target2) as tecs.ecs.Component
+                        )
                         world:update(0)
 
                         local rel = world:getFirstRelationship(entity, Likes)
@@ -695,7 +697,7 @@ describe(
                         local target = churnHighGenEntity()
                         luassert.is_true(target > 2 ^ 31, "churn should drive the target id past the int32 boundary")
 
-                        local liker = world:spawn(Likes(target) as tecs.Component)
+                        local liker = world:spawn(Likes(target) as tecs.ecs.Component)
                         world:update(0)
 
                         local rel = world:getFirstRelationship(liker, Likes)
@@ -718,7 +720,7 @@ describe(
                         local parent = churnHighGenEntity()
                         luassert.is_true(parent > 2 ^ 31, "churn should drive the parent id past the int32 boundary")
 
-                        local child = world:spawn(ChildOf(parent) as tecs.Component)
+                        local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
                         world:update(0)
                         luassert.is_true(world:isAlive(child), "child should be alive")
 
@@ -733,7 +735,7 @@ describe(
         describe(
             "dense table relationship component ids",
             function()
-                local record OwesRec is tecs.Component
+                local record OwesRec is tecs.ecs.Component
                     amount: number
                 end
 
@@ -772,13 +774,13 @@ describe(
                         local t2 = world:spawn()
                         world:commit()
 
-                        local q = world:query({include = {Owes:targeting(t1) as tecs.Component}})
+                        local q = world:query({include = {Owes:targeting(t1) as tecs.ecs.Component}})
 
-                        local e1 = world:spawn(Owes(t1) as tecs.Component)
+                        local e1 = world:spawn(Owes(t1) as tecs.ecs.Component)
                         world:commit()
                         -- Creates a new archetype after the query exists; it must not
                         -- match through a signature bit shared with the container.
-                        local e2 = world:spawn(Owes(t2) as tecs.Component)
+                        local e2 = world:spawn(Owes(t2) as tecs.ecs.Component)
                         world:commit()
 
                         local count = 0

@@ -38,7 +38,7 @@ Define FFI components with `tecs.ecs.newFFIComponent`:
 ```teal
 local tecs <const> = require("tecs")
 
-local record Velocity is tecs.Component
+local record Velocity is tecs.ecs.Component
     vx: number
     vy: number
 end
@@ -102,7 +102,7 @@ FFI components use the same `__call(...)` / `.new(data)` / `fields` / `defaults`
 components. The FFI-specific difference is that the base instance is an FFI struct instead of a Lua table.
 
 ```teal
-local record Position is tecs.Component
+local record Position is tecs.ecs.Component
     x: number
     y: number
     z: number
@@ -220,7 +220,7 @@ the component.
 **Example:**
 
 ```teal
-local record Velocity is tecs.Component
+local record Velocity is tecs.ecs.Component
     vx: number
     vy: number
     speed: {number}
@@ -250,7 +250,7 @@ The init hook receives the allocated instance plus the **positional** arguments.
 `init`, so the hook never sees a table in its first slot and doesn't need a `type(x) == "table"` fork.
 
 ```teal
-local record Health is tecs.Component
+local record Health is tecs.ecs.Component
     current: integer
     maximum: integer
 end

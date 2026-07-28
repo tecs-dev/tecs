@@ -50,6 +50,7 @@
 --- and none is needed by anything drawing text today.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local filesystem <const> = require("tecs.platform.filesystem")
 local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
@@ -63,7 +64,7 @@ local log <const> = require("tecs.log")
 local type Renderer = require("tecs.Renderer")
 
 local type Component = ecs.Component
-local type World = ecs.World
+local type World = types.World
 
 local Transform <const> = ecs.Transform
 local Tint <const> = components.Tint

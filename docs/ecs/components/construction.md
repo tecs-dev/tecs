@@ -29,7 +29,7 @@ This page documents the shared component model. For backend and category-specifi
 Call the component container directly to construct an instance:
 
 ```teal
-local record Health is tecs.Component
+local record Health is tecs.ecs.Component
     current: integer
     maximum: integer
     metamethod __call: function(self, current?: integer, maximum?: integer): Health

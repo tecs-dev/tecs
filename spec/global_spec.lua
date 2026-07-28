@@ -40,7 +40,7 @@ end
 
 -- The ECS and a lazily resolved module, in both positions a name is used in: a
 -- value (`tecs.ecs.newWorld`, `tecs.log`) and a type (`tecs.World`,
--- `tecs.application.Application`).
+-- `tecs.Application`).
 local USAGE = [[
 local world = tecs.ecs.newWorld()
 world:update(1 / 60)
@@ -48,8 +48,8 @@ world:update(1 / 60)
 local logger = tecs.log.get("game")
 logger:info("entities: %d", world:getStats().entities)
 
-return tecs.application.create({
-    plugin = function(game: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(game: tecs.World, app: tecs.Application)
         print(app.window ~= nil)
         game:addSystem({
             name = "game.Tick",

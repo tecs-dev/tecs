@@ -1676,7 +1676,7 @@ program's own clock, never inside this call.
 
 Play a registered tween preset on a bound entity.
 
-Needs the sequencer, which `tecs.application.create` installs. A binding
+Needs the sequencer, which `tecs.newApplication` installs. A binding
 that is missing or dead is not a fault: nothing plays, and a following
 `waitTween` resumes at once reporting `targetLost`.
 
@@ -1727,7 +1727,7 @@ order. For diagnostics and the debugger, not for hot paths.
 <pre><code v-pre>function <a href="#tecs.sequence.plugin">tecs.sequence.plugin</a>(World)
 </code></pre>
 
-Install the sequencer. Auto-installed by `tecs.application.create`, and safe
+Install the sequencer. Auto-installed by `tecs.newApplication`, and safe
 to call again: a second install on the same world does nothing.
 
 #### Parameters
@@ -1835,7 +1835,7 @@ worlds evaluating the same name run the same thing.
 
 ### tecs.sequence.registerQuery
 
-<pre><code v-pre>function <a href="#tecs.sequence.registerQuery">tecs.sequence.registerQuery</a>(name: World, descriptor: string, ecs.Query.Descriptor)
+<pre><code v-pre>function <a href="#tecs.sequence.registerQuery">tecs.sequence.registerQuery</a>(name: World, descriptor: string, types.Query.Descriptor)
 </code></pre>
 
 Register a query a `waitQuery` step can name.
@@ -1847,11 +1847,11 @@ holds its subscriptions for the life of the world.
 
 #### Parameters
 
-| Type                                    | Name                          | Description                                                                                                                                                                                      |
-| --------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre>World</code>                | <code v-pre>name</code>       | Empty raises. Registering it again re-tests every playback already parked on the name, against the new query, at the next fixed step.                                                            |
-| <code v-pre>string</code>               | <code v-pre>descriptor</code> | Copied rather than kept, and its `onEntitiesAdded` and `onEntitiesRemoved` are wrapped rather than replaced: the ones you supply are still called, after the name is marked. A non-table raises. |
-| <code v-pre>ecs.Query.Descriptor</code> |                               |                                                                                                                                                                                                  |
+| Type                                      | Name                          | Description                                                                                                                                                                                      |
+| ----------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>World</code>                  | <code v-pre>name</code>       | Empty raises. Registering it again re-tests every playback already parked on the name, against the new query, at the next fixed step.                                                            |
+| <code v-pre>string</code>                 | <code v-pre>descriptor</code> | Copied rather than kept, and its `onEntitiesAdded` and `onEntitiesRemoved` are wrapped rather than replaced: the ones you supply are still called, after the name is marked. A non-table raises. |
+| <code v-pre>types.Query.Descriptor</code> |                               |                                                                                                                                                                                                  |
 
 <a id="tecs.sequence.resume"></a>
 

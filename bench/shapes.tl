@@ -65,7 +65,7 @@ local function spawnField(world: tecs.World)
         world:batchSpawn(
             PER_KIND,
             {Transform, Tint, Material, Renderable},
-            function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+            function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
                 -- batchSpawn skips FFI defaults, so every field is written here.
                 local transforms = archetype:getMut(Transform)
                 local tints = archetype:getMut(Tint)
@@ -113,7 +113,7 @@ timing.enable()
 --- the two is the host loop and the presentation wait around it.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "shapes", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -123,7 +123,7 @@ return tecs.application.create({
     maxEntities = COUNT + 1024,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer
         spawnField(world)
 

@@ -13,13 +13,13 @@
 local TRAVEL <const> = 60.0
 local SWEEP <const> = 1.2
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "{{title}}", width = 1280, height = 720},
 
     -- Your game is a plugin: handed the world, which holds everything that
     -- exists, and the application, which holds everything that does not. It
     -- registers what should happen and returns.
-    plugin = function(world: tecs.ecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         print(("{{name}} on tecs %s, drawing through %s"):format(tecs.version, app.device.driver))
 
         -- Drawing text is opt-in, because a font atlas is uploaded into one

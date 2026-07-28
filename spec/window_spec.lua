@@ -680,7 +680,7 @@ describe("Application's window configuration", function()
     local app
 
     setup(function()
-        app = Application.create({
+        app = Application.newApplication({
             window = {
                 title = "configured",
                 width = SIZE,

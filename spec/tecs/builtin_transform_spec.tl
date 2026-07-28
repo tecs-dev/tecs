@@ -9,16 +9,16 @@ describe(
     "Built-in Transform spawn/respawn",
     function()
         -- Create a test tag component with unique name for each test
-        local TestTag: tecs.Component
-        local TestColor: tecs.Component
+        local TestTag: tecs.ecs.Component
+        local TestColor: tecs.ecs.Component
 
         before_each(function()
             local testId = math.random(1, 1000000)
 
-            local tagContainer: tecs.Component = {}
+            local tagContainer: tecs.ecs.Component = {}
             TestTag = tecs.ecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
 
-            local colorContainer: tecs.Component = {}
+            local colorContainer: tecs.ecs.Component = {}
             TestColor = tecs.ecs.newFFIComponent({
                 name = "BuiltinTest_Color" .. testId,
                 container = colorContainer,
@@ -290,7 +290,7 @@ describe(
                 local w = tecs.ecs.newWorld()
                 local parent = w:spawn(Transform(100, 200, 0))
                 local child = w:spawn(
-                    Transform(0, 0, 0), RelativeTransform(10, 20, 0), ChildOf(parent) as tecs.Component
+                    Transform(0, 0, 0), RelativeTransform(10, 20, 0), ChildOf(parent) as tecs.ecs.Component
                 )
                 w:commit()
 
@@ -318,7 +318,7 @@ describe(
                 local parent1 = w:spawn(Transform(100, 0, 0))
                 local parent2 = w:spawn(Transform(1000, 0, 0))
                 local child = w:spawn(
-                    Transform(0, 0, 0), RelativeTransform(5, 0, 0), ChildOf(parent1) as tecs.Component
+                    Transform(0, 0, 0), RelativeTransform(5, 0, 0), ChildOf(parent1) as tecs.ecs.Component
                 )
                 w:commit()
 
@@ -329,7 +329,7 @@ describe(
 
                 -- Sparse retarget: no structural change, but the commit-time
                 -- container mark must reopen the dirty gate.
-                w:set(child, ChildOf(parent2) as tecs.Component)
+                w:set(child, ChildOf(parent2) as tecs.ecs.Component)
                 w:update(1 / 60)
                 luassert.equals(1005, w:get(child, Transform).x)
             end

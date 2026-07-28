@@ -229,7 +229,7 @@ describe(
 
                         local query = world:query({
                             include = {Position},
-                            groupBy = function(archetype: tecs.Archetype): integer return archetype.id end,
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer return archetype.id end,
                         })
                         luassert.is_equal(2, query:count())
                     end
@@ -249,7 +249,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 callbackInvocations = callbackInvocations + 1
                                 totalSeen = totalSeen + count
@@ -408,7 +408,7 @@ describe(
                         world:query({
                             include = {Position, Health},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 addCalls = addCalls + count
                             end,
@@ -434,7 +434,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 removeCalls = removeCalls + count
                             end,
@@ -457,7 +457,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 removeCalls = removeCalls + count
                             end,
@@ -479,12 +479,12 @@ describe(
                         world:query({
                             include = {Position, Health},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 addCalls = addCalls + count
                             end,
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 removeCalls = removeCalls + count
                             end,
@@ -843,7 +843,7 @@ describe(
                         world:update(0)
 
                         local query = world:query({include = {Position}})
-                        local cursor: tecs.QueryCursor = query:cursor()
+                        local cursor: tecs.ecs.QueryCursor = query:cursor()
                         local selected: integer = nil
 
                         for _archetype, _len, entities in cursor:iter() do
@@ -961,7 +961,7 @@ describe(
 
                         local query = world:query({
                             include = {Position},
-                            groupBy = function(archetype: tecs.Archetype): integer return archetype.id end,
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer return archetype.id end,
                         })
 
                         local matchedArchetypes = 0
@@ -1141,14 +1141,14 @@ describe(
         describe(
             "groupBy archetype grouping",
             function()
-                local GroupA: tecs.Component
-                local GroupB: tecs.Component
-                local GroupC: tecs.Component
+                local GroupA: tecs.ecs.Component
+                local GroupB: tecs.ecs.Component
+                local GroupC: tecs.ecs.Component
 
                 before_each(function()
-                    local containerA: tecs.Component = {}
-                    local containerB: tecs.Component = {}
-                    local containerC: tecs.Component = {}
+                    local containerA: tecs.ecs.Component = {}
+                    local containerB: tecs.ecs.Component = {}
+                    local containerC: tecs.ecs.Component = {}
                     GroupA = tecs.ecs.newComponent({name = "GroupA_" .. testId, container = containerA})
                     GroupB = tecs.ecs.newComponent({name = "GroupB_" .. testId, container = containerB})
                     GroupC = tecs.ecs.newComponent({name = "GroupC_" .. testId, container = containerC})
@@ -1166,7 +1166,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 1
                                 end
@@ -1201,7 +1201,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 1
                                 end
@@ -1248,7 +1248,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 1
                                 end
@@ -1286,7 +1286,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 1
                                 end
@@ -1324,7 +1324,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 1
                                 end
@@ -1357,7 +1357,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 10
                                 end
@@ -1428,7 +1428,7 @@ describe(
                         local query = world:query({
                             include = {Position},
                             includeAny = {GroupA, GroupB, GroupC},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 if archetype:get(GroupA) then
                                     return 1
                                 end
@@ -1474,7 +1474,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, firstRow: integer, lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
                             )
                                 table.insert(calls, {firstRow, lastRow, count})
                             end,
@@ -1482,8 +1482,8 @@ describe(
 
                         world:batchSpawn(
                             10,
-                            {Position as tecs.Component},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            {Position as tecs.ecs.Component},
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(Position)
                                 for i = startRow, lastRow do
                                     positions[i] = Position(i, i)
@@ -1506,7 +1506,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, firstRow: integer, lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
                             )
                                 table.insert(calls, {firstRow, lastRow, count})
                             end,
@@ -1529,7 +1529,7 @@ describe(
                         world:query({
                             include = {Position, Velocity},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 table.insert(calls, {count})
                             end,
@@ -1556,7 +1556,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, firstRow: integer, lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
                             )
                                 table.insert(calls, {firstRow, lastRow, count})
                             end,
@@ -1564,8 +1564,8 @@ describe(
 
                         world:batchSpawn(
                             10,
-                            {Position as tecs.Component},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            {Position as tecs.ecs.Component},
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(Position)
                                 for i = startRow, lastRow do
                                     positions[i] = Position(i, i)
@@ -1592,7 +1592,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer
                             )
                                 table.insert(calls, {count})
                             end,
@@ -1617,12 +1617,12 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, _count: integer
                             )
                                 table.insert(addedCalls, true)
                             end,
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _firstRow: integer, _lastRow: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _firstRow: integer, _lastRow: integer, _count: integer
                             )
                                 table.insert(removedCalls, true)
                             end,
@@ -1648,8 +1648,8 @@ describe(
                     function()
                         world:batchSpawn(
                             7,
-                            {Position as tecs.Component},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                            {Position as tecs.ecs.Component},
+                            function(arch: tecs.ecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                                 local positions = arch:getMut(Position)
                                 for i = startRow, lastRow do
                                     positions[i] = Position(i, i)
@@ -1662,7 +1662,7 @@ describe(
                         world:query({
                             include = {Position},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, firstRow: integer, lastRow: integer, count: integer
+                                _arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, count: integer
                             )
                                 table.insert(calls, {firstRow, lastRow, count})
                             end,
@@ -1706,7 +1706,7 @@ describe(
                             name = "AObs",
                             include = {TagA},
                             onEntitiesAdded = function(
-                                arch: tecs.Archetype, firstRow: integer, lastRow: integer, _c: integer
+                                arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _c: integer
                             )
                                 local entities = arch.entities
                                 for row = firstRow, lastRow do
@@ -1718,7 +1718,7 @@ describe(
                             name = "BObs",
                             include = {TagB},
                             onEntitiesAdded = function(
-                                arch: tecs.Archetype, firstRow: integer, lastRow: integer, _c: integer
+                                arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _c: integer
                             )
                                 local entities = arch.entities
                                 for row = firstRow, lastRow do
@@ -1737,7 +1737,7 @@ describe(
                         -- Entity count: each of the three entities should appear
                         -- in arch{A,B,C} exactly once and NOT appear in arch{A}
                         -- (alone) or arch{A,B} (no C) at all.
-                        local function countIn(include: {tecs.Component}, exclude: {tecs.Component}): integer
+                        local function countIn(include: {tecs.ecs.Component}, exclude: {tecs.ecs.Component}): integer
                             local q = world:query({
                                 name = "regress_probe_" .. tostring({}),
                                 include = include,
@@ -1819,7 +1819,7 @@ describe(
 
                         local q = world:query({
                             include = {Position},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 return archetype:get(Velocity) and 2 or 1
                             end,
                         })
@@ -1847,7 +1847,7 @@ describe(
 
                         local q = world:query({
                             include = {Position},
-                            groupBy = function(archetype: tecs.Archetype): integer
+                            groupBy = function(archetype: tecs.ecs.Archetype): integer
                                 return archetype:get(Velocity) and 2 or 1
                             end,
                         })
@@ -1882,7 +1882,7 @@ describe(
                         local q = world:query({
                             include = {Position},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _first: integer, _last: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
                             )
                                 if not triggered then
                                     triggered = true

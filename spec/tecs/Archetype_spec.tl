@@ -20,7 +20,7 @@ describe(
                 it(
                     "creates a new archetype with components",
                     function()
-                        local componentTypes: {tecs.Component} = {tecs.ecs.Name, tecs.ecs.TTL}
+                        local componentTypes: {tecs.ecs.Component} = {tecs.ecs.Name, tecs.ecs.TTL}
                         local arch = Archetype.new(componentTypes)
 
                         luassert.is_not_nil(arch, "Expected Archetype.new() to return a non-nil value")
@@ -84,7 +84,7 @@ describe(
                         (arch.entities as {integer})[1] = 1
                         ffi.setDoubleArraySize(arch.entities, 1)
                         arch.columns[TestRel][1] = TestRel
-                        arch.columns[firstExpected as tecs.Component][1] = firstExpected -- TODO: Teal self bugs
+                        arch.columns[firstExpected as tecs.ecs.Component][1] = firstExpected -- TODO: Teal self bugs
 
                         local firstRel = arch:getFirstRelationship(TestRel, 1)
                         luassert.is_equal(firstRel, firstExpected, "Expected to be TestRel(1)")
@@ -100,8 +100,8 @@ describe(
                         (arch.entities as {integer})[1] = 1
                         ffi.setDoubleArraySize(arch.entities, 1)
                         arch.columns[TestRel][1] = TestRel
-                        arch.columns[firstExpected as tecs.Component][1] = firstExpected -- TODO: Teal self bugs
-                        arch.columns[secondExpected as tecs.Component][1] = secondExpected -- TODO: Teal self bugs
+                        arch.columns[firstExpected as tecs.ecs.Component][1] = firstExpected -- TODO: Teal self bugs
+                        arch.columns[secondExpected as tecs.ecs.Component][1] = secondExpected -- TODO: Teal self bugs
 
                         local rels = {}
                         arch:forEachRelationship(
@@ -135,21 +135,21 @@ describe(
                         w:commit()
 
                         local query = w:query({include = {Tag}})
-                        local observed: tecs.Archetype = nil
+                        local observed: tecs.ecs.Archetype = nil
                         for arch in query:iter() do
                             observed = arch
                         end
                         luassert.is_not_nil(observed)
 
                         local added = 0
-                        local observer: tecs.ArchetypeEntityObserver = {
+                        local observer: tecs.ecs.ArchetypeEntityObserver = {
                             onEntitiesAdded = function(
-                                _self: tecs.ArchetypeEntityObserver,
-                                arch: tecs.Archetype,
+                                _self: tecs.ecs.ArchetypeEntityObserver,
+                                arch: tecs.ecs.Archetype,
                                 firstRow: integer,
                                 lastRow: integer,
                                 count: integer,
-                                sourceArchetype?: tecs.Archetype
+                                sourceArchetype?: tecs.ecs.Archetype
                             )
                                 added = added + count
                                 luassert.equals(observed, arch)

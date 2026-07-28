@@ -17,6 +17,7 @@
 
 local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local mcp <const> = require("tecs.mcp")
 
 --- Registers the world-facing tools, and names the world they act on.
@@ -35,17 +36,17 @@ local record world
     --- @param w Replaces whatever was bound before. Passing nil unbinds, after
     ---     which every tool that touches the world fails with a message saying
     ---     so; `components_info` still answers, reporting `bound` as false.
-    bind: function(w: ecs.World)
+    bind: function(w: types.World)
 end
 
-local bound: ecs.World = nil
+local bound: types.World = nil
 
-function world.bind(w: ecs.World)
+function world.bind(w: types.World)
     bound = w
 end
 
 --- The bound world, or an error naming why there is not one.
-local function current(): ecs.World
+local function current(): types.World
     if bound == nil then
         error("no world is bound; the application has not started", 0)
     end
@@ -138,7 +139,7 @@ end
 --- Reported beside the id everywhere an entity is, because a bare number says
 --- nothing about which entity it is and `Name` is what the ECS provides for
 --- saying so.
-local function nameOf(w: ecs.World, entity: integer): string
+local function nameOf(w: types.World, entity: integer): string
     local Name <const> = ecs.Name
     if not w:has(entity, Name as ecs.Component) then
         return nil
@@ -148,7 +149,7 @@ local function nameOf(w: ecs.World, entity: integer): string
 end
 
 --- Reads one entity's components as plain tables.
-local function describe(w: ecs.World, entity: integer, declared: {string: ecs.Component}): {string: any}
+local function describe(w: types.World, entity: integer, declared: {string: ecs.Component}): {string: any}
     local values: {string: any} = {}
     local count = 0
     for name, kind in pairs(declared) do
@@ -172,7 +173,7 @@ local function describe(w: ecs.World, entity: integer, declared: {string: ecs.Co
 end
 
 --- Everything about one entity, with the registry read once for it.
-local function describeOne(w: ecs.World, entity: integer): {string: any}
+local function describeOne(w: types.World, entity: integer): {string: any}
     return describe(w, entity, ecs.declaredComponents())
 end
 
@@ -186,7 +187,7 @@ end
 --- declared and carried by nothing here, which is an ordinary state and not
 --- the same answer as a name nobody registered. So `components_info` reports
 --- both rather than conflating them.
-local function presentIn(w: ecs.World): {ecs.Component: boolean}
+local function presentIn(w: types.World): {ecs.Component: boolean}
     local present: {ecs.Component: boolean} = {}
     if w == nil then
         return present
@@ -384,7 +385,7 @@ mcp.register({
 
         -- LuaJIT is 5.1, where unpack is a global rather than table.unpack.
         local unpackAll = (_G as {string: any})["unpack"] as function({any}): any...
-        local entity = (w.spawn as function(ecs.World, ...: any): integer)(w, unpackAll(instances))
+        local entity = (w.spawn as function(types.World, ...: any): integer)(w, unpackAll(instances))
         return describeOne(w, entity)
     end,
 })

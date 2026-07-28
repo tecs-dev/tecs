@@ -11,13 +11,14 @@
 --- is what lets one runtime serve both.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local ffi <const> = require("ffi")
 local components <const> = require("tecs.components")
 local internalComponents <const> = require("tecs.internal.components")
 
 local mathPi, mathSin, mathCos, mathPow <const> = math.pi, math.sin, math.cos, math.pow
 
-local type World = ecs.World
+local type World = types.World
 local type Component = ecs.Component
 
 --- What one authored timeline entry does.

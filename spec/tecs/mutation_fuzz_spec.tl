@@ -152,10 +152,10 @@ local TTL <const> = tecs.ecs.TTL
 
 -- Ops draw from these; canonical reads also cover FzHealth (pulled in
 -- via requires, never set directly).
-local opComps: {tecs.Component} = {FzA, FzB, FzArmor, FzTag, FzF, FzNum, FzBool}
-local readComps: {tecs.Component} = {FzA, FzB, FzArmor, FzHealth, FzTag, FzF, FzNum, FzBool}
-local batchRemoveComps: {tecs.Component} = {FzB, FzTag, FzArmor, ChildOf, FzF, FzNum}
-local batchSpawnSets: {{tecs.Component}} = {{FzA}, {FzA, FzTag}, {FzF, FzB}}
+local opComps: {tecs.ecs.Component} = {FzA, FzB, FzArmor, FzTag, FzF, FzNum, FzBool}
+local readComps: {tecs.ecs.Component} = {FzA, FzB, FzArmor, FzHealth, FzTag, FzF, FzNum, FzBool}
+local batchRemoveComps: {tecs.ecs.Component} = {FzB, FzTag, FzArmor, ChildOf, FzF, FzNum}
+local batchSpawnSets: {{tecs.ecs.Component}} = {{FzA}, {FzA, FzTag}, {FzF, FzB}}
 
 -- Park-Miller LCG: multiplier small enough that state * 16807 stays
 -- exact in a double, so sequences reproduce everywhere.
@@ -164,15 +164,15 @@ local function newRng(seed: integer): function(integer): integer
     return function(n: integer): integer state = (state * 16807) % 2147483647; return (state % n) + 1 end
 end
 
-local function instanceOf(compIdx: integer, value: integer): tecs.Component
+local function instanceOf(compIdx: integer, value: integer): tecs.ecs.Component
     local comp = opComps[compIdx]
     if comp == FzTag then
         return FzTag
     end
     if comp == FzBool then
-        return (FzBool as function(boolean): tecs.Component)(value % 2 == 0)
+        return (FzBool as function(boolean): tecs.ecs.Component)(value % 2 == 0)
     end
-    return (comp as function(integer): tecs.Component)(value)
+    return (comp as function(integer): tecs.ecs.Component)(value)
 end
 
 local function validate(w: tecs.World)
@@ -221,7 +221,7 @@ local function canonicalState(
     w: tecs.World, skipTransient?: boolean, keep?: function(tecs.World, integer): boolean
 ): string
     local lines: {string} = {}
-    w:forEachArchetype(function(arch: tecs.Archetype)
+    w:forEachArchetype(function(arch: tecs.ecs.Archetype)
         local entities = arch.entities
         for row = 1, entities[0] as integer do
             local id = entities[row] as integer
@@ -373,7 +373,8 @@ describe(
                                 function(ev: tecs.ecs.OnSpawn)
                                     if ev.entity % 3 == 0 then
                                         w:set(
-                                            ev.entity, (FzB as function(integer): tecs.Component)(ev.entity % 997 + 1)
+                                            ev.entity,
+                                            (FzB as function(integer): tecs.ecs.Component)(ev.entity % 997 + 1)
                                         )
                                     end
                                 end
@@ -396,11 +397,13 @@ describe(
                         return {
                             tag = w:query({
                                 include = {FzTag},
-                                onEntitiesAdded = function(_a: tecs.Archetype, _f: integer, _l: integer, count: integer)
+                                onEntitiesAdded = function(
+                                    _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
+                                )
                                     addedCount[w] = addedCount[w] + count
                                 end,
                                 onEntitiesRemoved = function(
-                                    _a: tecs.Archetype, _f: integer, _l: integer, count: integer
+                                    _a: tecs.ecs.Archetype, _f: integer, _l: integer, count: integer
                                 )
                                     removedCount[w] = removedCount[w] + count
                                 end,
@@ -734,7 +737,7 @@ describe(
                                     wa,
                                     wb,
                                     function(w: tecs.World): integer
-                                        w:set(src, (FzRope as function(integer, integer): tecs.Component)(tgt, wv))
+                                        w:set(src, (FzRope as function(integer, integer): tecs.ecs.Component)(tgt, wv))
                                         return nil
                                     end
                                 )
@@ -759,7 +762,9 @@ describe(
                                     wa,
                                     wb,
                                     function(w: tecs.World): integer
-                                        w:remove(src, (FzRope as function(integer, integer): tecs.Component)(tgt, wv))
+                                        w:remove(
+                                            src, (FzRope as function(integer, integer): tecs.ecs.Component)(tgt, wv)
+                                        )
                                         return nil
                                     end
                                 )
@@ -783,9 +788,11 @@ describe(
                                     function(w: tecs.World): integer
                                         w:set(
                                             id,
-                                            (Transform as function(number, number, number, integer): tecs.Component)(
-                                                x, y, 0, layer
-                                            )
+                                            (
+                                                Transform as function(
+                                                    number, number, number, integer
+                                                ): tecs.ecs.Component
+                                            )(x, y, 0, layer)
                                         )
                                         return nil
                                     end
@@ -926,7 +933,7 @@ describe(
                                         wa,
                                         wb,
                                         function(w: tecs.World): integer
-                                            w:batchSet(qs[w][qk], (FzB as function(integer): tecs.Component)(v))
+                                            w:batchSet(qs[w][qk], (FzB as function(integer): tecs.ecs.Component)(v))
                                             return nil
                                         end
                                     )
@@ -985,13 +992,15 @@ describe(
                                     local firstId, ids = w:batchSpawn(
                                         n,
                                         compSet,
-                                        function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _c: integer)
+                                        function(
+                                            arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _c: integer
+                                        )
                                             for ci = 1, #compSet do
                                                 local comp = compSet[ci]
                                                 if comp ~= FzTag then
                                                     local col = arch:getMut(comp)
                                                     for r = firstRow, lastRow do
-                                                        col[r] = (comp as function(integer): tecs.Component)(
+                                                        col[r] = (comp as function(integer): tecs.ecs.Component)(
                                                             v0 + r - firstRow + ci
                                                         )
                                                     end
@@ -1040,10 +1049,14 @@ describe(
                                     w:batchSpawnAt(
                                         idsList,
                                         {FzA},
-                                        function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _c: integer)
+                                        function(
+                                            arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _c: integer
+                                        )
                                             local col = arch:getMut(FzA)
                                             for r = firstRow, lastRow do
-                                                col[r] = (FzA as function(integer): tecs.Component)(v0 + r - firstRow)
+                                                col[r] = (FzA as function(integer): tecs.ecs.Component)(
+                                                    v0 + r - firstRow
+                                                )
                                             end
                                         end
                                     )
@@ -1067,7 +1080,7 @@ describe(
                                     wb,
                                     function(w: tecs.World): integer
                                         return w:spawnBundle(
-                                            "fuzzBundle", (FzArmor as function(integer): tecs.Component)(v)
+                                            "fuzzBundle", (FzArmor as function(integer): tecs.ecs.Component)(v)
                                         )
                                     end
                                 )

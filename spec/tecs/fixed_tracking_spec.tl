@@ -10,9 +10,9 @@ local Position = tecs.ecs.newFFIComponent({
     defaults = {0},
 })
 
-local function findArchetype(world: tecs.World): tecs.Archetype
-    local match: tecs.Archetype = nil
-    world:forEachArchetype(function(arch: tecs.Archetype)
+local function findArchetype(world: tecs.World): tecs.ecs.Archetype
+    local match: tecs.ecs.Archetype = nil
+    world:forEachArchetype(function(arch: tecs.ecs.Archetype)
         if arch:get(Position) ~= nil and ((arch as {string: any}).entities as {integer})[0] > 0 then
             match = arch
         end

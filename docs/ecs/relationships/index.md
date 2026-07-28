@@ -43,11 +43,11 @@ one by calling `newRelationship` with just a `name`:
 local tecs <const> = require("tecs")
 
 -- "entity A Likes entity B": nothing is recorded but the target.
-local Likes: tecs.Relationship = tecs.ecs.newRelationship({name = "Likes"})
+local Likes: tecs.ecs.Relationship = tecs.ecs.newRelationship({name = "Likes"})
 
 -- Same target-only shape, but exclusive: one target at a time, so setting a
 -- new target replaces the old one.
-local Targets: tecs.Relationship = tecs.ecs.newRelationship({
+local Targets: tecs.ecs.Relationship = tecs.ecs.newRelationship({
     name = "Targets",
     exclusive = true
 })
@@ -85,10 +85,10 @@ local child = world:spawn(
 Sometimes relationships need to carry additional information about the connection. For example, a "following"
 relationship might specify a delay.
 
-First, define a Teal record that implements `tecs.Relationship`:
+First, define a Teal record that implements `tecs.ecs.Relationship`:
 
 ```teal
-local record Follows is tecs.Relationship
+local record Follows is tecs.ecs.Relationship
     delay: number
     maxDistance: number
 
@@ -151,7 +151,7 @@ Some relationships are marked as exclusive, meaning an entity can only have one 
 combat AI that `Targets` a single enemy is a natural fit:
 
 ```teal
-local Targets: tecs.Relationship = tecs.ecs.newRelationship({
+local Targets: tecs.ecs.Relationship = tecs.ecs.newRelationship({
     name = "Targets",
     exclusive = true
 })
@@ -172,7 +172,7 @@ with the same sparse relationship share the same archetype regardless of their t
 this way:
 
 ```teal
-local ChildOf: tecs.Relationship = tecs.ecs.newRelationship({
+local ChildOf: tecs.ecs.Relationship = tecs.ecs.newRelationship({
     name = "ChildOf",
     exclusive = true,
     sparse = true,
@@ -587,7 +587,7 @@ non-trivial initialization (validation, derived values, external resources); pai
 it with `fields` so `.new` still codegens:
 
 ```teal
-local record CustomRel is tecs.Relationship
+local record CustomRel is tecs.ecs.Relationship
     customData: string
     metamethod __call: function(self, target: integer, customData: string): CustomRel
 end

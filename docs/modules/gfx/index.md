@@ -578,8 +578,8 @@ Subsystems register components of their own, and they are documented with the su
 [application](/modules/application) does, and hands it over as `app.renderer`.
 
 ```teal
-return tecs.application.create({
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
         app.renderer.camera.zoom = 2.0
     end,
 })
@@ -1823,7 +1823,7 @@ Every image, one binding, so the scene is one draw.
 
 ### tecs.gfx.Renderer.install
 
-<pre><code v-pre>function <a href="#tecs.gfx.Renderer.install">tecs.gfx.Renderer.install</a>(self: Renderer, world: ecs.World)
+<pre><code v-pre>function <a href="#tecs.gfx.Renderer.install">tecs.gfx.Renderer.install</a>(self: Renderer, world: types.World)
 </code></pre>
 
 Registers the sync system and queries on `world`.
@@ -1835,10 +1835,10 @@ returns, so a system later in the frame reads this frame's numbers.
 
 #### Parameters
 
-| Type                         | Name                     | Description                                                                                                                                                 |
-| ---------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Renderer</code>  | <code v-pre>self</code>  |                                                                                                                                                             |
-| <code v-pre>ecs.World</code> | <code v-pre>world</code> | The queries and both systems are added here and nowhere else, so a renderer that was created and never installed draws an empty packet rather than failing. |
+| Type                           | Name                     | Description                                                                                                                                                 |
+| ------------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Renderer</code>    | <code v-pre>self</code>  |                                                                                                                                                             |
+| <code v-pre>types.World</code> | <code v-pre>world</code> | The queries and both systems are added here and nowhere else, so a renderer that was created and never installed draws an empty packet rather than failing. |
 
 <a id="tecs.gfx.Renderer.instances"></a>
 

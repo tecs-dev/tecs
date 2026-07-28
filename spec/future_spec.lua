@@ -64,7 +64,7 @@ local function stackDepth()
     return depth
 end
 
-describe("tecs.future.Future", function()
+describe("tecs.Future", function()
     describe("states", function()
         it("starts pending and settles once", function()
             local future = Future.pending()

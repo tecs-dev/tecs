@@ -9,14 +9,14 @@
 --- registry lookup before it could touch a number, and paid that per playback
 --- per frame. Here the walk is the dense array and the timeline is a field.
 
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local seqcursors <const> = require("tecs.sequence.internal.cursors")
 local seqtypes <const> = require("tecs.sequence.internal.types")
 local tweeneval <const> = require("tecs.sequence.internal.tweeneval")
 
 local floor <const> = math.floor
 
-local type World = ecs.World
+local type World = types.World
 local type Cursor = seqtypes.Cursor
 local type PlaybackMode = tweeneval.PlaybackMode
 local type RunSlot = tweeneval.RunSlot

@@ -145,7 +145,7 @@ local function spawnField(world: tecs.World)
     world:batchSpawn(
         COUNT,
         {Transform, Tint, Renderable},
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+        function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
@@ -185,7 +185,7 @@ time.provider = function(_real: number): number return 1.0 / 60.0 end
 local plainWindows: {Window} = {}
 local probedWindows: {Window} = {}
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "allocation", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -195,7 +195,7 @@ return tecs.application.create({
     -- measured frame's `submit` bracket.
     debugMaxFrames = #REGIMES * 2 * (WARMUP + FRAMES + 1) + 1,
 
-    plugin = function(world: tecs.World, _app: tecs.application.Application)
+    plugin = function(world: tecs.World, _app: tecs.Application)
         spawnField(world)
 
         local moving = world:query({

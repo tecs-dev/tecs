@@ -74,8 +74,8 @@ application and a C host drives it, so nothing in a game blocks and nothing driv
 ```teal
 local Transform <const> = tecs.Transform
 
-return tecs.application.create({
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
         local movers = world:query({ include = { Transform } })
 
         world:addSystem({
@@ -104,7 +104,7 @@ return tecs.application.create({
 local world = tecs.ecs.newWorld()
 
 -- Define typed components with Teal
-local record Position is tecs.Component
+local record Position is tecs.ecs.Component
     x: number
     y: number
     metamethod __call: function(self, x?: number, y?: number): Position
@@ -116,7 +116,7 @@ tecs.ecs.newFFIComponent({
     fields = {{"x", "float"}, {"y", "float"}},
 })
 
-local record Velocity is tecs.Component
+local record Velocity is tecs.ecs.Component
     x: number
     y: number
     metamethod __call: function(self, x?: number, y?: number): Velocity
@@ -181,7 +181,7 @@ world:despawn(parent)
 local world = tecs.ecs.newWorld()
 
 -- Define a custom event
-local record DamageEvent is tecs.Event
+local record DamageEvent is tecs.ecs.Event
     target: integer
     amount: number
     metamethod __call: function(self, target: integer, amount: number): DamageEvent
@@ -220,7 +220,7 @@ behind each one.
 
 <div class="module-columns">
 
-- [`tecs.application`](/modules/application) - the object an entry file returns, and what builds one
+- [`tecs.Application`](/modules/Application) - the object an entry file returns, and what the host drives
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.box2d`](/modules/box2d) - Box2D 3, solved across a shared thread pool
@@ -229,7 +229,7 @@ behind each one.
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
 - [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
 - [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
-- [`tecs.future`](/modules/future) - a value that settles once
+- [`tecs.Future`](/modules/Future) - a value that settles once
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.gfx.animation`](/modules/gfx/animation) - sprite sheets, and the playback that reads them
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behavior
@@ -240,6 +240,7 @@ behind each one.
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
 - [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
+- [`tecs.newApplication`](/modules/Application) - builds the application an entry file returns
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time

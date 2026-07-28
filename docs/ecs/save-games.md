@@ -119,7 +119,7 @@ The entity is still saved; the transient column is left out of the saved archety
 behavior applies, including `requires` defaults for transient components.
 
 ```teal
-local record PathCache is tecs.Component
+local record PathCache is tecs.ecs.Component
     nodeCount: number
     cursor: number
 end
@@ -196,7 +196,7 @@ world:addSnapshotHandler({
 Snapshots the world and lets subsystems inject custom data.
 
 ```teal
-function world:saveSnapshot(opts?: tecs.SnapshotOptions): tecs.SnapshotOutput
+function world:saveSnapshot(opts?: tecs.ecs.SnapshotOptions): tecs.ecs.SnapshotOutput
 ```
 
 **Parameters:**
@@ -319,7 +319,7 @@ Restores a snapshot into `world`, replacing the current world state. See
 [Snapshot handlers](#snapshot-handlers) for hooking the load lifecycle and reading custom data back.
 
 ```teal
-function world:loadSnapshot(source: any): tecs.SnapshotPrelude
+function world:loadSnapshot(source: any): tecs.ecs.SnapshotPrelude
 ```
 
 **Parameters:**
@@ -367,7 +367,7 @@ When an entity needs durable behavior, save the intent as ECS data and let a que
 Rather than hand-registering a one-off `OnDespawn` callback per entity, store a component:
 
 ```teal
-local record DespawnEffect is tecs.Component
+local record DespawnEffect is tecs.ecs.Component
     name: string
     metamethod __call: function(self, name: string): DespawnEffect
 end
@@ -384,7 +384,7 @@ Then let setup react to matching entities and install the entity observer:
 ```teal
 local despawnEffectQuery = world:query({
     include = {DespawnEffect, tecs.Transform},
-    onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
+    onEntitiesAdded = function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
         local entities = archetype.entities
         for row = firstRow, lastRow do
             local entity = entities[row]
@@ -459,7 +459,7 @@ world:addSnapshotHandler({
     load = function(_world: tecs.World, value: any)
         rng:load(value)
     end,
-    finish = function(world: tecs.World, _prelude: tecs.SnapshotPrelude)
+    finish = function(world: tecs.World, _prelude: tecs.ecs.SnapshotPrelude)
         playerId = world:requireKey("player")
     end,
 })

@@ -5,9 +5,10 @@
 --- be a cycle. `tecs.sequence` re-exports every one of them.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 
-local type World = ecs.World
+local type World = types.World
 
 --- Why a cursor stopped running.
 local enum FaultReason
@@ -428,7 +429,7 @@ local record WorldState
     -- Query waits work the same way, except a query is a condition rather
     -- than an edge: a name is marked dirty when its query gains or loses
     -- entities, and every cursor parked on it re-tests at the next step.
-    queries: {string: ecs.Query}
+    queries: {string: types.Query}
     queryWaiters: {string: {integer: boolean}}
     dirtyQueries: {string: boolean}
 

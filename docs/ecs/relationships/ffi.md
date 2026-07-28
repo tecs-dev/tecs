@@ -32,7 +32,7 @@ FFI-backed relationships can store additional data along with the target while m
 local tecs <const> = require("tecs")
 
 -- Define the relationship record
-local record FastFollows is tecs.Relationship
+local record FastFollows is tecs.ecs.Relationship
     delay: number
     maxDistance: number
 
@@ -141,7 +141,7 @@ repeat another field's name, and must carry a non-empty type.
 FFI relationships support `init` hooks for validation and derived state:
 
 ```teal
-local record SafeFollows is tecs.Relationship
+local record SafeFollows is tecs.ecs.Relationship
     delay: number
     maxDistance: number
 end

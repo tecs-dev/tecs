@@ -219,16 +219,16 @@ The observer remains attached for the archetype's lifetime. Registration applies
 instance: it does not discover other archetypes with the same component signature, and there is no unsubscribe.
 
 ```teal
-local observer: tecs.ArchetypeEntityObserver = {
+local observer: tecs.ecs.ArchetypeEntityObserver = {
     onActivated = function(
-        _self: tecs.ArchetypeEntityObserver,
-        activated: tecs.Archetype
+        _self: tecs.ecs.ArchetypeEntityObserver,
+        activated: tecs.ecs.Archetype
     )
         print("archetype became active:", activated.id)
     end,
     onDeactivated = function(
-        _self: tecs.ArchetypeEntityObserver,
-        deactivated: tecs.Archetype
+        _self: tecs.ecs.ArchetypeEntityObserver,
+        deactivated: tecs.ecs.Archetype
     )
         print("archetype became empty:", deactivated.id)
     end,

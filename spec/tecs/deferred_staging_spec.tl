@@ -177,7 +177,7 @@ describe(
                         local firstId = w:batchSpawn(
                             5,
                             {Shared},
-                            function(arch: tecs.Archetype, first: integer, last: integer, _count: integer)
+                            function(arch: tecs.ecs.Archetype, first: integer, last: integer, _count: integer)
                                 local col = arch:getMut(Shared)
                                 for r = first, last do
                                     col[r] = Shared(r)
@@ -285,7 +285,7 @@ describe(
                             name = "DrainMoveCancelWatcher",
                             include = {Extra},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _first: integer, _last: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
                             )
                                 if not fired then
                                     fired = true
@@ -321,7 +321,7 @@ describe(
                             name = "DespawnCascadeWatcher",
                             include = {Shared},
                             onEntitiesRemoved = function(
-                                _arch: tecs.Archetype, _first: integer, _last: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
                             )
                                 if not cascaded then
                                     cascaded = true
@@ -356,7 +356,7 @@ describe(
                             name = "OneShotBatchWatcher",
                             include = {Extra},
                             onEntitiesAdded = function(
-                                _arch: tecs.Archetype, _first: integer, _last: integer, _count: integer
+                                _arch: tecs.ecs.Archetype, _first: integer, _last: integer, _count: integer
                             )
                                 if not staged then
                                     staged = true

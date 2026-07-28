@@ -22,7 +22,7 @@ excluded component. This callback _does not_ fire when an entity moves between a
 world:query({
     include = {tecs.Transform, tecs.box2d.RigidBody},
     onEntitiesAdded = function(
-        archetype: tecs.Archetype,
+        archetype: tecs.ecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
@@ -53,7 +53,7 @@ are removed from archetypes, so the rows in the range are still readable.
 world:query({
     include = {tecs.Transform, tecs.box2d.RigidBody},
     onEntitiesRemoved = function(
-        archetype: tecs.Archetype,
+        archetype: tecs.ecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
@@ -103,7 +103,7 @@ local PointLight <const> = tecs.gfx.PointLight
 world:query({
     include = {PointLight},
     onEntitiesAdded = function(
-        arch: tecs.Archetype,
+        arch: tecs.ecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
@@ -115,7 +115,7 @@ world:query({
         end
     end,
     onEntitiesRemoved = function(
-        arch: tecs.Archetype,
+        arch: tecs.ecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
@@ -137,7 +137,7 @@ being clipped and again when it stops:
 world:query({
     include = {tecs.gfx.Renderable, tecs.gfx.Clip},
     onEntitiesAdded = function(
-        arch: tecs.Archetype,
+        arch: tecs.ecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer
@@ -145,7 +145,7 @@ world:query({
         -- Entity acquired Clip (and was already Renderable).
     end,
     onEntitiesRemoved = function(
-        arch: tecs.Archetype,
+        arch: tecs.ecs.Archetype,
         firstRow: integer,
         lastRow: integer,
         count: integer

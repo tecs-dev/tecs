@@ -12,7 +12,7 @@ describe(
                 it(
                     "registeres component",
                     function()
-                        local container: tecs.Component = {}
+                        local container: tecs.ecs.Component = {}
                         local component = tecs.ecs.newComponent({name = "MyComponent", container = container})
 
                         luassert.is_not_nil(component, "MyComponent should not be nil")
@@ -30,7 +30,7 @@ describe(
                 it(
                     "creates instances of components",
                     function()
-                        local container: tecs.Component = {}
+                        local container: tecs.ecs.Component = {}
                         local component = tecs.ecs.newComponent({name = "MyComponent2", container = container})
                         local instance = component()
 
@@ -48,7 +48,7 @@ describe(
                 it(
                     "uses init and default metatable",
                     function()
-                        local record MyComponent3 is tecs.Component
+                        local record MyComponent3 is tecs.ecs.Component
                             name: string
                         end
 
@@ -93,14 +93,14 @@ describe(
                 it(
                     "codegens .new from fields that unpacks by name",
                     function()
-                        local record FieldComp is tecs.Component
+                        local record FieldComp is tecs.ecs.Component
                             x: number
                             y: number
                             z: number
                         end
                         local comp = tecs.ecs.newComponent({
                             name = "FieldsNewTest",
-                            container = FieldComp as tecs.Component,
+                            container = FieldComp as tecs.ecs.Component,
                             fields = {"x", "y", "z"},
                         })
                         local inst = (comp as any).new({x = 1, y = 2, z = 3}) as {string: number}
@@ -113,13 +113,13 @@ describe(
                 it(
                     "honors opts.new for custom table-form constructors",
                     function()
-                        local record ConfigComp is tecs.Component
+                        local record ConfigComp is tecs.ecs.Component
                             radius: number
                             cookie: integer
                         end
                         local comp = tecs.ecs.newComponent({
                             name = "ConfigNewTest",
-                            container = ConfigComp as tecs.Component,
+                            container = ConfigComp as tecs.ecs.Component,
                             fields = {"radius"},
                             init = function(instance: ConfigComp, radius?: number)
                                 instance.radius = radius or 100
@@ -147,13 +147,13 @@ describe(
                 it(
                     "__call is positional-only; table arg is no longer unpacked by name",
                     function()
-                        local record PosOnly is tecs.Component
+                        local record PosOnly is tecs.ecs.Component
                             first: any
                             second: number
                         end
                         local comp = tecs.ecs.newComponent({
                             name = "PosOnlyTest",
-                            container = PosOnly as tecs.Component,
+                            container = PosOnly as tecs.ecs.Component,
                             fields = {"first", "second"},
                             init = function(instance: PosOnly, first?: any, second?: number)
                                 instance.first = first
@@ -173,13 +173,13 @@ describe(
                 it(
                     "init without fields or new errors at registration",
                     function()
-                        local record Broken is tecs.Component
+                        local record Broken is tecs.ecs.Component
                             value: number
                         end
                         luassert.error_matches(function()
                             tecs.ecs.newComponent({
                                 name = "BrokenCtorOnlyTest",
-                                container = Broken as tecs.Component,
+                                container = Broken as tecs.ecs.Component,
                                 init = function(instance: Broken, v: number) instance.value = v end,
                             })
                         end, "requires either `fields`",
@@ -190,13 +190,13 @@ describe(
                 it(
                     "fields + init coexist: fields drives .new, init refines __call",
                     function()
-                        local record Mixed is tecs.Component
+                        local record Mixed is tecs.ecs.Component
                             value: number
                             validated: boolean
                         end
                         local comp = tecs.ecs.newComponent({
                             name = "MixedFieldsCtorTest",
-                            container = Mixed as tecs.Component,
+                            container = Mixed as tecs.ecs.Component,
                             fields = {"value"},
                             init = function(instance: Mixed, value: number)
                                 instance.value = value
@@ -220,7 +220,7 @@ describe(
                         local initCalls = 0
                         local callCalls = 0
 
-                        local record FancyTable is tecs.Component
+                        local record FancyTable is tecs.ecs.Component
                             x: number
                             y: number
                             label: string
@@ -228,7 +228,7 @@ describe(
 
                         local comp = tecs.ecs.newComponent({
                             name = "FancyTableCallTest",
-                            container = FancyTable as tecs.Component,
+                            container = FancyTable as tecs.ecs.Component,
                             fields = {"x", "y"},
                             defaults = {3, 7},
                             __call = function(instance: FancyTable, label: string)
@@ -256,14 +256,14 @@ describe(
                         local initCalls = 0
                         local callCalls = 0
 
-                        local record FancyFFI is tecs.Component
+                        local record FancyFFI is tecs.ecs.Component
                             x: integer
                             y: integer
                         end
 
                         local comp = tecs.ecs.newFFIComponent({
                             name = "FancyFFICallTest",
-                            container = FancyFFI as tecs.Component,
+                            container = FancyFFI as tecs.ecs.Component,
                             fields = {
                                 {"x", "int32_t"},
                                 {"y", "int32_t"},
@@ -295,7 +295,7 @@ describe(
                 it(
                     "detects conflicting names",
                     function()
-                        local container1: tecs.Component = {componentName = "MyComponent5"}
+                        local container1: tecs.ecs.Component = {componentName = "MyComponent5"}
                         container1.componentType = container1
 
                         components.registerComponent(container1)
@@ -310,7 +310,7 @@ describe(
                 it(
                     "assigns componentId if one not set",
                     function()
-                        local container: tecs.Component = {componentName = "MyComponent6"}
+                        local container: tecs.ecs.Component = {componentName = "MyComponent6"}
                         container.componentType = container
 
                         components.registerComponent(container)
@@ -366,7 +366,7 @@ describe(
                 it(
                     "can create relationship instances that have custom records",
                     function()
-                        local record Attachment is tecs.Relationship
+                        local record Attachment is tecs.ecs.Relationship
                             speed: number
                         end
 
@@ -438,7 +438,7 @@ describe(
                             tecs.ecs.newRelationship({
                                 name = "BadRelationship",
                                 fields = {},
-                                init = function(instance: tecs.Relationship, id: integer) instance.target = id end,
+                                init = function(instance: tecs.ecs.Relationship, id: integer) instance.target = id end,
                             })
                         end, "Cannot provide init for relationship without a container")
                     end
@@ -447,7 +447,7 @@ describe(
                 it(
                     "supports fields on relationships",
                     function()
-                        local record AttachFields is tecs.Relationship
+                        local record AttachFields is tecs.ecs.Relationship
                             speed: number
                             offset: number
                         end
@@ -469,7 +469,7 @@ describe(
                 it(
                     "supports fields with defaults on relationships",
                     function()
-                        local record AttachDefaults is tecs.Relationship
+                        local record AttachDefaults is tecs.ecs.Relationship
                             speed: number
                             drag: number
                         end
@@ -508,7 +508,7 @@ describe(
                             tecs.ecs.newRelationship({
                                 name = "BadRelCtorOnly",
                                 container = {},
-                                init = function(_instance: tecs.Relationship, id: integer) end,
+                                init = function(_instance: tecs.ecs.Relationship, id: integer) end,
                             })
                         end, "requires either `fields`",
                         nil)
@@ -518,13 +518,13 @@ describe(
                 it(
                     "fields + init coexist on relationships",
                     function()
-                        local record RelData is tecs.Relationship
+                        local record RelData is tecs.ecs.Relationship
                             speed: number
                             validated: boolean
                         end
                         local rel = tecs.ecs.newRelationship({
                             name = "MixedRelFieldsCtor",
-                            container = RelData as tecs.Relationship,
+                            container = RelData as tecs.ecs.Relationship,
                             fields = {"speed"},
                             init = function(instance: RelData, _id: integer, speed: number)
                                 instance.speed = speed or 10
@@ -581,7 +581,7 @@ describe(
                         it(
                             "should return component type for data relationships",
                             function()
-                                local record FollowsType is tecs.Relationship
+                                local record FollowsType is tecs.ecs.Relationship
                                     delay: number
                                 end
 
@@ -617,9 +617,9 @@ describe(
                                 local Likes = tecs.ecs.newRelationship({name = "LikesTargeting3"})
 
                                 local target = world:spawn()
-                                local entity1 = world:spawn(Likes:targeting(target) as tecs.Component)
+                                local entity1 = world:spawn(Likes:targeting(target) as tecs.ecs.Component)
                                 local _entity2 = world:spawn(
-                                    Likes(123) as tecs.Component
+                                    Likes(123) as tecs.ecs.Component
                                 ) -- Different target (unused but needed for test setup)
                                 world:update(0) -- Commit spawns
 
@@ -643,7 +643,7 @@ describe(
                             function()
                                 local world = tecs.ecs.newWorld()
 
-                                local record FollowsType is tecs.Relationship
+                                local record FollowsType is tecs.ecs.Relationship
                                     delay: number
                                 end
 
@@ -718,9 +718,9 @@ describe(
                         luassert.equals(Selected, column[9999])
 
                         -- Writes are no-ops; reads still return the container.
-                        (column as {tecs.Component})[5] = Selected
+                        (column as {tecs.ecs.Component})[5] = Selected
                         luassert.equals(Selected, column[5])
-                        (column as {tecs.Component})[5] = nil
+                        (column as {tecs.ecs.Component})[5] = nil
                         luassert.equals(Selected, column[5])
                     end
                 )
@@ -918,7 +918,7 @@ describe(
                 it(
                     "creates instances with positional args",
                     function()
-                        local record FieldsComp is tecs.Component
+                        local record FieldsComp is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): FieldsComp
@@ -940,7 +940,7 @@ describe(
                 it(
                     "passes nil through when no defaults",
                     function()
-                        local record FieldsNilComp is tecs.Component
+                        local record FieldsNilComp is tecs.ecs.Component
                             a: number
                             b: number
                             metamethod __call: function(self, a: number, b: number): FieldsNilComp
@@ -966,7 +966,7 @@ describe(
                 it(
                     "applies defaults for omitted args",
                     function()
-                        local record DefaultsComp is tecs.Component
+                        local record DefaultsComp is tecs.ecs.Component
                             x: number
                             y: number
                             z: number
@@ -990,7 +990,7 @@ describe(
                 it(
                     "supplied args override defaults",
                     function()
-                        local record OverrideComp is tecs.Component
+                        local record OverrideComp is tecs.ecs.Component
                             a: number
                             b: number
                             metamethod __call: function(self, a?: number, b?: number): OverrideComp
@@ -1012,7 +1012,7 @@ describe(
                 it(
                     "partially supplied args use defaults for the rest",
                     function()
-                        local record PartialComp is tecs.Component
+                        local record PartialComp is tecs.ecs.Component
                             x: number
                             y: number
                             z: number
@@ -1036,7 +1036,7 @@ describe(
                 it(
                     "nil holes in defaults leave those fields without defaults",
                     function()
-                        local record HolesComp is tecs.Component
+                        local record HolesComp is tecs.ecs.Component
                             mode: string
                             alpha: string
                             metamethod __call: function(self, mode: string, alpha?: string): HolesComp
@@ -1066,7 +1066,7 @@ describe(
                 it(
                     "string defaults work",
                     function()
-                        local record StrDefComp is tecs.Component
+                        local record StrDefComp is tecs.ecs.Component
                             label: string
                             metamethod __call: function(self, label?: string): StrDefComp
                         end
@@ -1099,7 +1099,7 @@ describe(
                 it(
                     "metatable fallback works with defaults",
                     function()
-                        local record MetaComp is tecs.Component
+                        local record MetaComp is tecs.ecs.Component
                             value: number
                             metamethod __call: function(self, value?: number): MetaComp
                         end
@@ -1126,7 +1126,7 @@ describe(
                 it(
                     "serializes and deserializes dense relationship instances",
                     function()
-                        local record Follows is tecs.Relationship
+                        local record Follows is tecs.ecs.Relationship
                             metamethod __call: function(self, target: integer): Follows
                         end
                         local FollowsContainer: Follows = tecs.ecs.newRelationship({
@@ -1134,20 +1134,20 @@ describe(
                             exclusive = false,
                         }) as Follows
 
-                        local inst = FollowsContainer(42) as tecs.Relationship
+                        local inst = FollowsContainer(42) as tecs.ecs.Relationship
                         local data = FollowsContainer.serialize(inst)
                         luassert.is_equal(42, data.target)
 
                         local w = tecs.ecs.newWorld()
                         local restored = FollowsContainer.deserialize(w, data)
-                        luassert.is_equal(42, (restored as tecs.Relationship).target)
+                        luassert.is_equal(42, (restored as tecs.ecs.Relationship).target)
                     end
                 )
 
                 it(
                     "serializes sparse relationship values via the container",
                     function()
-                        local record Parent is tecs.Relationship
+                        local record Parent is tecs.ecs.Relationship
                             metamethod __call: function(self, target: integer): Parent
                         end
                         local ParentOf: Parent = tecs.ecs.newRelationship({
@@ -1163,8 +1163,8 @@ describe(
                         w:commit()
 
                         -- Sparse: value lives in the per-world store.
-                        local stores = (w as {string: any}).relationshipStores as {tecs.Component: any}
-                        local store = stores[ParentOf as tecs.Component] as {string: any}
+                        local stores = (w as {string: any}).relationshipStores as {tecs.ecs.Component: any}
+                        local store = stores[ParentOf as tecs.ecs.Component] as {string: any}
                         local value = store:get(child)
                         luassert.is_not_nil(value, "store should hold the sparse value")
 
@@ -1181,7 +1181,7 @@ describe(
                 it(
                     "preserves false defaults",
                     function()
-                        local record Flags is tecs.Component
+                        local record Flags is tecs.ecs.Component
                             flag: boolean
                             n: number
                         end

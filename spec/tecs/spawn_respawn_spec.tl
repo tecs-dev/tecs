@@ -13,19 +13,19 @@ describe(
     "Spawn/Respawn consistency",
     function()
         -- Create FFI components that use recycling (like Transform does)
-        local record TestTransform is tecs.Component
+        local record TestTransform is tecs.ecs.Component
             x: number
             y: number
             z: number
         end
 
-        local record TestColor is tecs.Component
+        local record TestColor is tecs.ecs.Component
             r: number
             g: number
             b: number
         end
 
-        local record TestTag is tecs.Component
+        local record TestTag is tecs.ecs.Component
         end
 
         local TransformComp: TestTransform

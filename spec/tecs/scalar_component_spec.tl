@@ -195,7 +195,7 @@ describe(
         it(
             "serialize unwraps wrapper instances and raw column reads",
             function()
-                local Title: tecs.ScalarComponent<string> = tecs.ecs.newScalarComponent({
+                local Title: tecs.ecs.ScalarComponent<string> = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecSerializeShape",
                     kind = "string",
                 })
@@ -219,8 +219,8 @@ describe(
                 -- cast is required -- Teal does not infer the scalar T from
                 -- `default` or `kind` on its own.
                 local record fakeModule
-                    Stamina: tecs.ScalarComponent<number>
-                    Title: tecs.ScalarComponent<string>
+                    Stamina: tecs.ecs.ScalarComponent<number>
+                    Title: tecs.ecs.ScalarComponent<string>
                 end
 
                 -- With `default` present, the typed field target binds T directly;
@@ -235,7 +235,7 @@ describe(
                 fakeModule.Title = tecs.ecs.newScalarComponent({
                     name = "ScalarSpecModuleTitle",
                     kind = "string",
-                }) as tecs.ScalarComponent<string>
+                }) as tecs.ecs.ScalarComponent<string>
 
                 local world = tecs.ecs.newWorld()
                 local e = world:spawn(fakeModule.Stamina(80), fakeModule.Title("hero"))

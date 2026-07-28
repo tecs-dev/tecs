@@ -74,7 +74,8 @@ Every function and type this module carries, rendered from {sources}."""
 # settle.
 MODULES = [
     ("docs/ecs/index.md", [("src/tecs/ecs.tl", "tecs.ecs")]),
-    ("docs/modules/application.md", [("src/tecs/Application.tl", "tecs.application.Application")]),
+    ("docs/modules/Application.md", [("src/tecs/Application.tl", "tecs.Application")]),
+    ("docs/modules/Future.md", [("src/tecs/Future.tl", "tecs.Future")]),
     ("docs/modules/assets.md", [("src/tecs/assets.tl", "tecs.assets")]),
     (
         "docs/modules/audio.md",
@@ -84,7 +85,6 @@ MODULES = [
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
     ("docs/modules/filesystem/index.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
     ("docs/modules/filesystem/watch.md", [("src/tecs/platform/watch.tl", "tecs.filesystem.watch")]),
-    ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
     (
         "docs/modules/gfx/index.md",
         [

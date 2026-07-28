@@ -38,8 +38,8 @@ next to its systems, so both are on the world and both run inside the crash guar
 local tecs <const> = require("tecs")
 local Transform <const> = tecs.Transform
 
-return tecs.application.create({
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
         world:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
             -- Still readable: the row is removed at commit, not here.
             local transform <const> = world:get(e.entity, Transform)
@@ -238,7 +238,7 @@ function tecs.ecs.newEvent<E is Event>(event: E)
 **Example:**
 
 ```teal
-local record PlayerDamaged is tecs.Event
+local record PlayerDamaged is tecs.ecs.Event
     damage: number
     source: string
 
@@ -307,7 +307,7 @@ order they were declared, so the constructor's argument order matches the `field
 **Example:**
 
 ```teal
-local record DamageEvent is tecs.Event
+local record DamageEvent is tecs.ecs.Event
     damage: number
     entityId: integer
     damageType: integer

@@ -1732,7 +1732,7 @@ reads it the same way.
 
 ### tecs.audio.Audio.install
 
-<pre><code v-pre>function <a href="#tecs.audio.Audio.install">tecs.audio.Audio.install</a>(self: Audio, world: ecs.World)
+<pre><code v-pre>function <a href="#tecs.audio.Audio.install">tecs.audio.Audio.install</a>(self: Audio, world: types.World)
 </code></pre>
 
 Adds the system that plays `Sound` components, and the snapshot handler
@@ -1744,10 +1744,10 @@ the iteration instead.
 
 #### Parameters
 
-| Type                         | Name                     | Description                                                                                                                                                                                             |
-| ---------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>Audio</code>     | <code v-pre>self</code>  |                                                                                                                                                                                                         |
-| <code v-pre>ecs.World</code> | <code v-pre>world</code> | Repoints this instance's pitch variance at the world's `tecs.audio` random stream, so installing into a second world moves the variance to that one's. One `Audio` per world is the shape this expects. |
+| Type                           | Name                     | Description                                                                                                                                                                                             |
+| ------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Audio</code>       | <code v-pre>self</code>  |                                                                                                                                                                                                         |
+| <code v-pre>types.World</code> | <code v-pre>world</code> | Repoints this instance's pitch variance at the world's `tecs.audio` random stream, so installing into a second world moves the variance to that one's. One `Audio` per world is the shape this expects. |
 
 <a id="tecs.audio.Audio.keyCount"></a>
 
@@ -1952,7 +1952,7 @@ Whether a master mute is holding the output down.
 
 ### tecs.audio.Audio.of
 
-<pre><code v-pre>function <a href="#tecs.audio.Audio.of">tecs.audio.Audio.of</a>(world: ecs.World): Audio
+<pre><code v-pre>function <a href="#tecs.audio.Audio.of">tecs.audio.Audio.of</a>(world: types.World): Audio
 </code></pre>
 
 The audio installed into a world, or nil when none has been.
@@ -1962,9 +1962,9 @@ the debug tools have and what a game writing its own systems often has too.
 
 #### Parameters
 
-| Type                         | Name                     | Description |
-| ---------------------------- | ------------------------ | ----------- |
-| <code v-pre>ecs.World</code> | <code v-pre>world</code> |             |
+| Type                           | Name                     | Description |
+| ------------------------------ | ------------------------ | ----------- |
+| <code v-pre>types.World</code> | <code v-pre>world</code> |             |
 
 #### Returns
 

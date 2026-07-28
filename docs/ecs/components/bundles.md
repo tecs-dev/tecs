@@ -22,7 +22,7 @@ local Transform <const> = tecs.Transform
 local Renderable <const> = tecs.gfx.Renderable
 local Tint <const> = tecs.gfx.Tint
 
-local playerBundle: tecs.Bundle = world:newBundle("Player", {
+local playerBundle: tecs.ecs.Bundle = world:newBundle("Player", {
     required = { Transform, Health },
     with = {
         [Tint] = function(): Tint return Tint(1, 1, 1, 1) end,
@@ -43,7 +43,7 @@ Components listed in `required` must be supplied by the caller at spawn time. Th
 **positional**: the order in the `required` array determines the argument order at `bundle:spawn(...)`.
 
 ```teal
-local enemyBundle: tecs.Bundle = world:newBundle("Enemy", {
+local enemyBundle: tecs.ecs.Bundle = world:newBundle("Enemy", {
     required = { Transform, Health, Damage },
 })
 
@@ -66,7 +66,7 @@ component's default constructor.
 **With a factory:**
 
 ```teal
-local bulletBundle: tecs.Bundle = world:newBundle("Bullet", {
+local bulletBundle: tecs.ecs.Bundle = world:newBundle("Bullet", {
     required = { Transform },
     with = {
         [Velocity] = function(): Velocity return Velocity(100, 0) end,
@@ -81,7 +81,7 @@ initial values.
 **With `true` (default constructor):**
 
 ```teal
-local propBundle: tecs.Bundle = world:newBundle("Prop", {
+local propBundle: tecs.ecs.Bundle = world:newBundle("Prop", {
     required = { Transform },
     with = {
         [Renderable] = true,
@@ -209,13 +209,13 @@ end
 Get a single bundle by name:
 
 ```teal
-local bundle: tecs.Bundle = world:getBundle("Player")
+local bundle: tecs.ecs.Bundle = world:getBundle("Player")
 ```
 
 Get all registered bundles:
 
 ```teal
-local bundles: {string: tecs.Bundle} = world:getBundles()
+local bundles: {string: tecs.ecs.Bundle} = world:getBundles()
 
 for name, bundle in pairs(bundles) do
     print(name)

@@ -9,7 +9,7 @@ SDL owns the loop. An entry file returns an application and a C host drives it
 from `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate`, and `SDL_AppQuit`:
 
 ```lua
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "game", width = 1280, height = 720},
 
     plugin = function(world, app)
@@ -168,7 +168,7 @@ including transitively, is enough. Require stays the mechanism; the global is a
 consequence of it.
 
 It is the same table, metatable included, so nothing about the lazy engine half
-changes: `tecs.application.Application` read off the global resolves on first use exactly as
+changes: `tecs.Application` read off the global resolves on first use exactly as
 it does read off the required value, and `require("tecs")` still loads no engine
 module. `require` caches, so the assignment runs once. A game that assigns
 `tecs` itself afterwards owns the name from then on, and the declaration below
@@ -290,6 +290,26 @@ is written `tecs.Transform`, at the root, because it is the one component
 every subsystem moves and so belongs to none of them; the component module
 used to re-export it, which was a second spelling of one thing, and a second
 spelling is the alias this tree does not keep.
+
+The root carries what crosses subsystems, and nothing else. `Transform` is one
+of them; the others are `Application` and its `ApplicationConfig`, `Future`,
+`newApplication`, `version`, and the four ECS types every subsystem writes into
+its own signatures: `World`, `Query`, `System` and `Plugin`. An application is
+not a subsystem, since it owns one of each of them, and a future is what every
+subsystem that answers later hands back, so neither has an owner to be filed
+under. The rest of the ECS vocabulary is `tecs.ecs`: `Component`, `Archetype`,
+`Bundle`, `SystemConfig` and the snapshot records are named while configuring
+the ECS rather than while reaching across it, and each of them had been
+reachable at the root as well, which is thirty-four aliases the root no longer
+carries.
+
+The line between them is what a name is written next to. A game annotating a
+plugin writes `function(world: tecs.World, app: tecs.Application)`, and the
+same `World` appears in the public signature of physics, drawing, audio and the
+sequencer. A game declaring a component writes `is tecs.ecs.Component`, which
+it is doing because it is talking to the ECS. Engine code that needs only the
+type reaches for `tecs.types`, which sits below both halves and is what makes
+`tecs.ecs.World` unnecessary rather than merely duplicated.
 
 `spec/surface_spec.lua` walks the whole of it. The record in `init.tl` is what
 a game is type-checked against and the descriptor table beneath it is what a
@@ -457,7 +477,7 @@ at all: the host holds a single registry reference to one returned table,
 `SDL_Init` and `SDL_Quit` bracket the process, and the debug server's bindings
 are module-level.
 
-What the shape buys below itself is that nothing needs it. `tecs.application.Application` is
+What the shape buys below itself is that nothing needs it. `tecs.Application` is
 not loaded by `require("tecs")`; the engine modules resolve on first use through
 the surface's `__index`, which is what lets a tool build a world with no window,
 no device and no SDL reachable at all. Most of the spec suite never constructs

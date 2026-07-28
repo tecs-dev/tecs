@@ -53,6 +53,7 @@
 
 local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local time <const> = require("tecs.platform.time")
@@ -234,19 +235,19 @@ local record Application
         ---
         --- One entry point rather than a list, because composing plugins is
         --- something the world already does: `world:addPlugin` takes an
-        --- `ecs.Plugin` and is how the engine installs its own, so a game with
+        --- `tecs.Plugin` and is how the engine installs its own, so a game with
         --- several calls it from in here and needs no second mechanism.
         ---
         --- The world comes first because every plugin the world takes is
         --- `function(world)`, so this reads as that shape with one more thing
         --- and code moves between here and a delegated plugin without a silent
         --- argument swap.
-        plugin: function(world: ecs.World, app: Application)
+        plugin: function(world: types.World, app: Application)
     end
 
     window: Window
     device: Device
-    world: ecs.World
+    world: types.World
     renderer: Renderer
     input: Input
     audio: Audio
@@ -429,7 +430,16 @@ local function receive(event: events.Event)
 end
 
 --- Builds an application. Return the result from the entry chunk.
-function Application.create(config: Application.Config): Application
+---
+--- Reached as `tecs.newApplication`, at the root rather than under a module,
+--- because an application is not a subsystem: it owns the window, the device,
+--- the input, the renderer and the audio, and is handed to the entry plugin
+--- beside the world.
+---
+--- @param config Read here, so a field changed on the table afterwards is not
+---     seen. Nothing is opened yet.
+--- @return The application, at rest until the host's first callback.
+function Application.newApplication(config: Application.Config): Application
     local self = setmetatable({} as Application, ApplicationMT)
     self._config = config or {} as Application.Config
     self._shutdownDone = false

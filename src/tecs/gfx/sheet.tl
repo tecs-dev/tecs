@@ -31,10 +31,11 @@
 --- answer, so a sheet holds pixels until `bind` hands it one.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local components <const> = require("tecs.components")
 
 local type Component = ecs.Component
-local type World = ecs.World
+local type World = types.World
 local type Sprite = components.Sprite
 
 local floor <const> = math.floor

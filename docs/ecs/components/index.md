@@ -243,13 +243,13 @@ or instance values (shared by every entity that auto-adds the dependency). The c
 required component itself declares `requires`, those are pulled in too.
 
 ```teal
-local record Position is tecs.Component
+local record Position is tecs.ecs.Component
     x: number
     y: number
     metamethod __call: function(self, x?: number, y?: number): Position
 end
 
-local record Velocity is tecs.Component
+local record Velocity is tecs.ecs.Component
     vx: number
     vy: number
     metamethod __call: function(self, vx?: number, vy?: number): Velocity

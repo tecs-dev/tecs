@@ -14,6 +14,7 @@
 --- module they are declared in is reached.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local materials <const> = require("tecs.gpu.materials")
 
 local type Component = ecs.Component
@@ -273,7 +274,7 @@ ecs.newFFIComponent({
             v1 = instance.v1,
         }
     end,
-    deserialize = function(_world: ecs.World, data: {string: any}): Sprite
+    deserialize = function(_world: types.World, data: {string: any}): Sprite
         local name = data.image as string
         local image = 0
         if name ~= nil and name ~= "" then
@@ -322,7 +323,7 @@ ecs.newFFIComponent({
             param = instance.param,
         }
     end,
-    deserialize = function(_world: ecs.World, data: {string: any}): Material
+    deserialize = function(_world: types.World, data: {string: any}): Material
         local name = data.material as string
         local id = 0
         if name ~= nil and name ~= "" then

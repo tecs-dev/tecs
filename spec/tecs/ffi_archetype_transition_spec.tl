@@ -11,7 +11,7 @@ describe(
                 it(
                     "should preserve FFI data when adding a component",
                     function()
-                        local record Position is tecs.Component
+                        local record Position is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): Position
@@ -22,7 +22,7 @@ describe(
                             fields = {{"x", "float"}, {"y", "float"}},
                         })
 
-                        local record Tag is tecs.Component
+                        local record Tag is tecs.ecs.Component
                         end
                         local TagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_Tag1"})
 
@@ -47,7 +47,7 @@ describe(
                 it(
                     "should preserve FFI data when removing a component",
                     function()
-                        local record Circle is tecs.Component
+                        local record Circle is tecs.ecs.Component
                             radius: number
                             metamethod __call: function(self, radius: number): Circle
                         end
@@ -55,7 +55,7 @@ describe(
                             name = "FFITransitionTest_Circle1", container = Circle, fields = {{"radius", "float"}}
                         })
 
-                        local record Marker is tecs.Component
+                        local record Marker is tecs.ecs.Component
                         end
                         local MarkerComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_Marker1"})
 
@@ -78,7 +78,7 @@ describe(
                 it(
                     "should preserve multiple FFI components through transitions",
                     function()
-                        local record Vec2 is tecs.Component
+                        local record Vec2 is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): Vec2
@@ -89,7 +89,7 @@ describe(
                             fields = {{"x", "float"}, {"y", "float"}},
                         })
 
-                        local record Color is tecs.Component
+                        local record Color is tecs.ecs.Component
                             r: number
                             g: number
                             b: number
@@ -102,7 +102,7 @@ describe(
                             fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}, {"a", "float"}},
                         })
 
-                        local record Physics is tecs.Component
+                        local record Physics is tecs.ecs.Component
                             mass: number
                         end
                         local PhysicsComponent = tecs.ecs.newComponent({
@@ -139,7 +139,7 @@ describe(
                 it(
                     "should set new FFI component during transition",
                     function()
-                        local record TestFFI is tecs.Component
+                        local record TestFFI is tecs.ecs.Component
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
@@ -147,7 +147,7 @@ describe(
                             name = "FFITransitionTest_MutatedFFI1", container = TestFFI, fields = {{"value", "float"}}
                         })
 
-                        local record TestTag is tecs.Component
+                        local record TestTag is tecs.ecs.Component
                         end
                         local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_MutatedTag1"})
 
@@ -167,7 +167,7 @@ describe(
                 it(
                     "should update FFI component while also adding another component",
                     function()
-                        local record TestFFI is tecs.Component
+                        local record TestFFI is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): TestFFI
@@ -178,11 +178,11 @@ describe(
                             fields = {{"x", "float"}, {"y", "float"}},
                         })
 
-                        local record TagA is tecs.Component
+                        local record TagA is tecs.ecs.Component
                         end
                         local TagAComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_MutatedTagA"})
 
-                        local record TagB is tecs.Component
+                        local record TagB is tecs.ecs.Component
                         end
                         local TagBComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_MutatedTagB"})
 
@@ -208,7 +208,7 @@ describe(
                 it(
                     "should preserve FFI data when multiple entities transition simultaneously",
                     function()
-                        local record Pos is tecs.Component
+                        local record Pos is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): Pos
@@ -219,7 +219,7 @@ describe(
                             fields = {{"x", "float"}, {"y", "float"}},
                         })
 
-                        local record Velocity is tecs.Component
+                        local record Velocity is tecs.ecs.Component
                             vx: number
                             vy: number
                             metamethod __call: function(self, vx: number, vy: number): Velocity
@@ -258,7 +258,7 @@ describe(
                 it(
                     "should handle interleaved add and remove transitions",
                     function()
-                        local record Data is tecs.Component
+                        local record Data is tecs.ecs.Component
                             value: number
                             metamethod __call: function(self, value: number): Data
                         end
@@ -266,11 +266,11 @@ describe(
                             name = "FFITransitionTest_InterleavedData1", container = Data, fields = {{"value", "float"}}
                         })
 
-                        local record TagA is tecs.Component
+                        local record TagA is tecs.ecs.Component
                         end
                         local TagAComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_TagA1"})
 
-                        local record TagB is tecs.Component
+                        local record TagB is tecs.ecs.Component
                         end
                         local TagBComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_TagB1"})
 
@@ -304,11 +304,11 @@ describe(
                 it(
                     "should not crash when despawning entity with tag",
                     function()
-                        local record TestTag is tecs.Component
+                        local record TestTag is tecs.ecs.Component
                         end
                         local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_DespawnTag1"})
 
-                        local record TestFFI is tecs.Component
+                        local record TestFFI is tecs.ecs.Component
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
@@ -328,11 +328,11 @@ describe(
                 it(
                     "should not crash when despawning non-last entity with tag",
                     function()
-                        local record TestTag is tecs.Component
+                        local record TestTag is tecs.ecs.Component
                         end
                         local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_DespawnTag2"})
 
-                        local record TestFFI is tecs.Component
+                        local record TestFFI is tecs.ecs.Component
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
@@ -364,7 +364,7 @@ describe(
                 it(
                     "should access correct data via query after capacity grows",
                     function()
-                        local record TestFFI is tecs.Component
+                        local record TestFFI is tecs.ecs.Component
                             id: number
                             metamethod __call: function(self, id: number): TestFFI
                         end
@@ -372,7 +372,7 @@ describe(
                             name = "FFITransitionTest_GrowthFFI1", container = TestFFI, fields = {{"id", "float"}}
                         })
 
-                        local record TestTag is tecs.Component
+                        local record TestTag is tecs.ecs.Component
                         end
                         local Tag = tecs.ecs.newTagComponent({name = "FFITransitionTest_GrowthTag1"})
 
@@ -408,7 +408,7 @@ describe(
                 it(
                     "should access correct data after transition causes growth",
                     function()
-                        local record TestFFI is tecs.Component
+                        local record TestFFI is tecs.ecs.Component
                             value: number
                             metamethod __call: function(self, v: number): TestFFI
                         end
@@ -416,11 +416,11 @@ describe(
                             name = "FFITransitionTest_GrowthFFI2", container = TestFFI, fields = {{"value", "float"}}
                         })
 
-                        local record TagA is tecs.Component
+                        local record TagA is tecs.ecs.Component
                         end
                         local TagAComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_GrowthTagA"})
 
-                        local record TagB is tecs.Component
+                        local record TagB is tecs.ecs.Component
                         end
                         local TagBComp = tecs.ecs.newTagComponent({name = "FFITransitionTest_GrowthTagB"})
 
@@ -463,7 +463,7 @@ describe(
                 it(
                     "should preserve both through transitions",
                     function()
-                        local record FFIData is tecs.Component
+                        local record FFIData is tecs.ecs.Component
                             x: number
                             y: number
                             z: number
@@ -475,7 +475,7 @@ describe(
                             fields = {{"x", "float"}, {"y", "float"}, {"z", "float"}},
                         })
 
-                        local record TableData is tecs.Component
+                        local record TableData is tecs.ecs.Component
                             name: string
                             values: {number}
                         end
@@ -489,7 +489,7 @@ describe(
                             end,
                         })
 
-                        local record TransitionTag is tecs.Component
+                        local record TransitionTag is tecs.ecs.Component
                         end
                         local TransitionTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_MixedTag1"})
 
@@ -530,7 +530,7 @@ describe(
                 it(
                     "should handle zero values",
                     function()
-                        local record ZeroData is tecs.Component
+                        local record ZeroData is tecs.ecs.Component
                             a: number
                             b: number
                             metamethod __call: function(self, a: number, b: number): ZeroData
@@ -541,7 +541,7 @@ describe(
                             fields = {{"a", "float"}, {"b", "float"}},
                         })
 
-                        local record ZeroTag is tecs.Component
+                        local record ZeroTag is tecs.ecs.Component
                         end
                         local ZeroTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_ZeroTag1"})
 
@@ -561,7 +561,7 @@ describe(
                 it(
                     "should handle negative values",
                     function()
-                        local record NegData is tecs.Component
+                        local record NegData is tecs.ecs.Component
                             x: number
                             y: number
                             metamethod __call: function(self, x: number, y: number): NegData
@@ -572,7 +572,7 @@ describe(
                             fields = {{"x", "float"}, {"y", "float"}},
                         })
 
-                        local record NegTag is tecs.Component
+                        local record NegTag is tecs.ecs.Component
                         end
                         local NegTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_NegTag1"})
 
@@ -592,7 +592,7 @@ describe(
                 it(
                     "should handle very large values",
                     function()
-                        local record LargeData is tecs.Component
+                        local record LargeData is tecs.ecs.Component
                             big: number
                             metamethod __call: function(self, big: number): LargeData
                         end
@@ -600,7 +600,7 @@ describe(
                             name = "FFITransitionTest_Large1", container = LargeData, fields = {{"big", "double"}}
                         })
 
-                        local record LargeTag is tecs.Component
+                        local record LargeTag is tecs.ecs.Component
                         end
                         local LargeTagComponent = tecs.ecs.newTagComponent({name = "FFITransitionTest_LargeTag1"})
 

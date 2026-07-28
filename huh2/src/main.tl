@@ -14,7 +14,7 @@ local COUNT <const> = 240
 --- `batchSpawn` rather than a spawn each, because one call resolves the
 --- archetype once and the callback writes columns in place. It skips FFI
 --- defaults, so every field is written here.
-local function spawnRing(world: tecs.ecs.World, width: number, height: number)
+local function spawnRing(world: tecs.World, width: number, height: number)
     local Transform <const> = tecs.ecs.builtins.Transform
     local Tint <const> = tecs.gfx.Tint
     local Renderable <const> = tecs.gfx.Renderable
@@ -50,7 +50,7 @@ local function spawnRing(world: tecs.ecs.World, width: number, height: number)
     )
 end
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "huh2", width = 1280, height = 720},
     ambientLight = {0.06, 0.06, 0.09},
     capacity = COUNT + 64,
@@ -58,7 +58,7 @@ return tecs.application.create({
     -- The game is a plugin, which is the only way in. It is handed the world
     -- and the application, and it registers what should happen rather than
     -- being called by the loop directly.
-    plugin = function(world: tecs.ecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local width <const>, height <const> = app.window:getPixelSize()
 
         -- What came up, said once at startup. Worth keeping: the driver and

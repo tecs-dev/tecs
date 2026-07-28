@@ -9,9 +9,9 @@
 --- Registered globally, like evaluators and for the same reason: a provider is
 --- code, and a snapshot carries the name it was registered under.
 
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 
-local type World = ecs.World
+local type World = types.World
 
 local record awaitables
     --- What a name has to answer.

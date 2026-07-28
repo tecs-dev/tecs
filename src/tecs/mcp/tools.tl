@@ -10,6 +10,7 @@ local system <const> = require("tecs.platform.system")
 local filesystem <const> = require("tecs.platform.filesystem")
 local log <const> = require("tecs.log")
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local mcp <const> = require("tecs.mcp")
 local events <const> = require("tecs.platform.events")
 local watch <const> = require("tecs.platform.watch")
@@ -43,7 +44,7 @@ local record tools
     ---     report that the application has not started.
     --- @param world Bound in the same call as the renderer, so the two cannot
     ---     be replaced independently.
-    bind: function(renderer: Renderer, world: ecs.World)
+    bind: function(renderer: Renderer, world: types.World)
     --- Supplies what rebuilds the pipelines after a shader reload.
     ---
     --- Separate from `bind` because it is the device's half of the operation
@@ -73,10 +74,10 @@ local record tools
 end
 
 local bound: Renderer = nil
-local boundWorld: ecs.World = nil
+local boundWorld: types.World = nil
 local boundReload: function() = nil
 
-function tools.bind(renderer: Renderer, world: ecs.World)
+function tools.bind(renderer: Renderer, world: types.World)
     bound = renderer
     boundWorld = world
 end
@@ -86,7 +87,7 @@ function tools.bindReload(rebuild: function())
 end
 
 --- The bound world, or an error naming why there is not one.
-local function world(): ecs.World
+local function world(): types.World
     if boundWorld == nil then
         error("no world is bound; the application has not started", 0)
     end

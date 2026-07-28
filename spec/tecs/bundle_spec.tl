@@ -3,7 +3,7 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Type alias for bundle type (world:newBundle returns any to avoid circular deps)
-local type Bundle = tecs.Bundle
+local type Bundle = tecs.ecs.Bundle
 
 describe(
     "bundle",
@@ -99,7 +99,7 @@ describe(
                 it(
                     "calls factories when no overrides provided",
                     function()
-                        local record BundleTestComponent1 is tecs.Component
+                        local record BundleTestComponent1 is tecs.ecs.Component
                             value: number
                         end
 
@@ -142,7 +142,7 @@ describe(
                 it(
                     "creates fresh instances on each spawn",
                     function()
-                        local record TestComponent3 is tecs.Component
+                        local record TestComponent3 is tecs.ecs.Component
                             id: integer
                         end
 
@@ -197,7 +197,7 @@ describe(
                 it(
                     "enforces type-safe factories",
                     function()
-                        local record TypedComponent is tecs.Component
+                        local record TypedComponent is tecs.ecs.Component
                             x: number
                             y: number
                         end
@@ -256,7 +256,7 @@ describe(
                 it(
                     "tracks required vs defaulted in metadata",
                     function()
-                        local record RC is tecs.Component
+                        local record RC is tecs.ecs.Component
                             id: integer
                         end
 
@@ -267,7 +267,7 @@ describe(
                             init = function(instance: RC, id: integer) instance.id = id or 0 end,
                         })
 
-                        local record DC is tecs.Component
+                        local record DC is tecs.ecs.Component
                             name: string
                         end
 
@@ -298,7 +298,7 @@ describe(
                 it(
                     "validates all required components are provided",
                     function()
-                        local record RequiredBundleTestComponent is tecs.Component
+                        local record RequiredBundleTestComponent is tecs.ecs.Component
                             value: number
                         end
 
@@ -333,7 +333,7 @@ describe(
                 it(
                     "errors when a required component is missing at spawn",
                     function()
-                        local record TestComponent2 is tecs.Component
+                        local record TestComponent2 is tecs.ecs.Component
                             name: string
                         end
 
@@ -362,7 +362,7 @@ describe(
                 it(
                     "works with mixed required and optional components",
                     function()
-                        local record RequiredComp is tecs.Component
+                        local record RequiredComp is tecs.ecs.Component
                             id: integer
                         end
 
@@ -373,7 +373,7 @@ describe(
                             init = function(instance: RequiredComp, id: integer) instance.id = id or 0 end,
                         })
 
-                        local record OptionalComp is tecs.Component
+                        local record OptionalComp is tecs.ecs.Component
                             name: string
                         end
 
@@ -474,7 +474,7 @@ describe(
                 it(
                     "spawns entity via bundle:spawn()",
                     function()
-                        local record SpawnTestComp is tecs.Component
+                        local record SpawnTestComp is tecs.ecs.Component
                             value: number
                         end
 
@@ -509,7 +509,7 @@ describe(
                 it(
                     "spawns entity via world:spawnBundle()",
                     function()
-                        local record SpawnTestComp2 is tecs.Component
+                        local record SpawnTestComp2 is tecs.ecs.Component
                             name: string
                         end
 
@@ -559,7 +559,7 @@ describe(
                 it(
                     "defers placement until commit",
                     function()
-                        local record DC1 is tecs.Component
+                        local record DC1 is tecs.ecs.Component
                             x: integer
                         end
                         local Comp = tecs.ecs.newComponent({
@@ -589,7 +589,7 @@ describe(
                 it(
                     "drains multiple bundle spawns in insertion order",
                     function()
-                        local record DC2 is tecs.Component
+                        local record DC2 is tecs.ecs.Component
                             x: integer
                         end
                         local Comp = tecs.ecs.newComponent({
@@ -622,11 +622,11 @@ describe(
                 it(
                     "supports world:set on a bundle-spawned id before commit",
                     function()
-                        local record DC3Pos is tecs.Component
+                        local record DC3Pos is tecs.ecs.Component
                             x: integer
                             y: integer
                         end
-                        local record DC3Health is tecs.Component
+                        local record DC3Health is tecs.ecs.Component
                             hp: integer
                         end
                         local Pos = tecs.ecs.newComponent({
@@ -667,10 +667,10 @@ describe(
                 it(
                     "interleaves bundle spawns across different bundles in one commit",
                     function()
-                        local record DC4A is tecs.Component
+                        local record DC4A is tecs.ecs.Component
                             v: integer
                         end
-                        local record DC4B is tecs.Component
+                        local record DC4B is tecs.ecs.Component
                             v: integer
                         end
                         local CompA = tecs.ecs.newComponent({
@@ -704,7 +704,7 @@ describe(
                 it(
                     "handles dense relationships as required components",
                     function()
-                        local record DenseRelData is tecs.Relationship
+                        local record DenseRelData is tecs.ecs.Relationship
                             strength: number
                             metamethod __call: function(self, target: integer, strength: number): DenseRelData
                         end
@@ -745,7 +745,7 @@ describe(
                             sparse = true,
                             reverseIndex = true,
                         })
-                        local record DCPos is tecs.Component
+                        local record DCPos is tecs.ecs.Component
                             x: integer
                             y: integer
                         end
@@ -791,7 +791,7 @@ describe(
                 it(
                     "survives world:clearEntities between commits",
                     function()
-                        local record DC5 is tecs.Component
+                        local record DC5 is tecs.ecs.Component
                             v: integer
                         end
                         local Comp = tecs.ecs.newComponent({
@@ -829,7 +829,7 @@ describe(
         describe(
             "column cache invalidation",
             function()
-                local record GenComp is tecs.Component
+                local record GenComp is tecs.ecs.Component
                     x: number
                 end
 
@@ -913,7 +913,7 @@ describe(
                 it(
                     "expands requires like other spawn paths",
                     function()
-                        local record ReqBase is tecs.Component
+                        local record ReqBase is tecs.ecs.Component
                             v: number
                         end
                         local Base = tecs.ecs.newComponent({
@@ -922,7 +922,7 @@ describe(
                             fields = {"v"},
                             defaults = {41},
                         })
-                        local record ReqTop is tecs.Component
+                        local record ReqTop is tecs.ecs.Component
                             t: number
                         end
                         local Top = tecs.ecs.newComponent({
@@ -966,13 +966,13 @@ describe(
                         })
                         local target = world:spawn()
                         world:commit()
-                        local instance = Owes(target) as tecs.Component
+                        local instance = Owes(target) as tecs.ecs.Component
 
                         local bundle = world:newBundle(
                             "WildcardBundle",
                             {
                                 with = {
-                                    [instance] = function(): tecs.Component return instance end,
+                                    [instance] = function(): tecs.ecs.Component return instance end,
                                 },
                             }
                         ) as Bundle
@@ -981,7 +981,7 @@ describe(
                         world:commit()
 
                         -- Wildcard queries match through the container marker.
-                        local q = world:query({include = {Owes as tecs.Component}, temp = true})
+                        local q = world:query({include = {Owes as tecs.ecs.Component}, temp = true})
                         local found = false
                         for _, len, entities in q:iter() do
                             for r = 1, len do
@@ -1029,8 +1029,8 @@ describe(
                             "SparseBundle",
                             {
                                 with = {
-                                    [Follows as tecs.Component] = function(): tecs.Component
-                                        return Follows(target) as tecs.Component
+                                    [Follows as tecs.ecs.Component] = function(): tecs.ecs.Component
+                                        return Follows(target) as tecs.ecs.Component
                                     end,
                                 },
                             }

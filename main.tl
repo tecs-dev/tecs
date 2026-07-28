@@ -57,7 +57,7 @@ local function spawnField(world: tecs.World, width: number, height: number)
     world:batchSpawn(
         COUNT,
         {Transform, Tint, Renderable},
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+        function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
@@ -110,7 +110,7 @@ local function spawnLights(world: tecs.World, width: number, height: number)
     end
 end
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {
         title = "tecs",
         width = math.floor(tonumber(os.getenv("TECS_WIDTH")) or 1280),
@@ -127,7 +127,7 @@ return tecs.application.create({
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local width, height = app.window:getPixelSize()
         print(("tecs %s"):format(tecs.version))
         print(("  driver: %s"):format(app.device.driver))

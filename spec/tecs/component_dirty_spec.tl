@@ -27,15 +27,15 @@ local Vel = tecs.ecs.newComponent({
 })
 local Tag = tecs.ecs.newTagComponent({name = "ComponentDirtySpecTag"})
 
-local function clearDirty(arch: tecs.Archetype)
+local function clearDirty(arch: tecs.ecs.Archetype)
     (arch as internal.ArchetypeInternal):clearDirtyComponents()
 end
 
-local function findArchetype(world: tecs.World, components: {tecs.Component}): tecs.Archetype
+local function findArchetype(world: tecs.World, components: {tecs.ecs.Component}): tecs.ecs.Archetype
     -- forEachArchetype to avoid leaking a query scope (see
     -- project_query_iter_scope_trap memory).
-    local match: tecs.Archetype = nil
-    world:forEachArchetype(function(arch: tecs.Archetype)
+    local match: tecs.ecs.Archetype = nil
+    world:forEachArchetype(function(arch: tecs.ecs.Archetype)
         if match ~= nil then
             return
         end
@@ -367,13 +367,13 @@ describe(
                         arch:markComponentDirty(Pos)
                         -- Vel intentionally not marked.
 
-                        local seen: {tecs.Component: boolean} = {}
+                        local seen: {tecs.ecs.Component: boolean} = {}
                         for comp in arch:dirtyComponents() do
                             seen[comp] = true
                         end
 
-                        assert.is_true(seen[Pos as tecs.Component], "Pos should appear in dirty iterator")
-                        assert.is_nil(seen[Vel as tecs.Component], "Vel should NOT appear in dirty iterator")
+                        assert.is_true(seen[Pos as tecs.ecs.Component], "Pos should appear in dirty iterator")
+                        assert.is_nil(seen[Vel as tecs.ecs.Component], "Vel should NOT appear in dirty iterator")
                     end
                 )
             end

@@ -76,7 +76,7 @@ local function spawnField(world: tecs.World)
     world:batchSpawn(
         COUNT,
         {Transform, Tint, Renderable},
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+        function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
@@ -115,14 +115,14 @@ timing.enable()
 local injected = 0
 local reactions = 0
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "latency", width = WIDTH, height = HEIGHT},
     presentMode = os.getenv("BENCH_PRESENT") or "immediate",
     ambientLight = {1.0, 1.0, 1.0},
     capacity = COUNT + 64,
     debugMaxFrames = TOTAL,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local input = app.input
         spawnField(world)
 

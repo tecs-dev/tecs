@@ -30,13 +30,14 @@
 --- carries each step's offset from it.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local components <const> = require("tecs.components")
 local sheet <const> = require("tecs.gfx.sheet")
 local frametable <const> = require("tecs.gfx.frametable")
 
 local type Component = ecs.Component
-local type World = ecs.World
-local type Query = ecs.Query
+local type World = types.World
+local type Query = types.Query
 local type Sheet = sheet.Sheet
 
 local Sprite <const> = components.Sprite

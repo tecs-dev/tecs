@@ -40,7 +40,7 @@ describe(
                             exclusive = true,
                             reverseIndex = true,
                         })
-                        local instance = Follows(123) as tecs.Component
+                        local instance = Follows(123) as tecs.ecs.Component
 
                         luassert.is_equal(Follows, behavior.behaviorOwner(instance))
                         luassert.is_true(behavior.hasBits(instance, behavior.NeedsSet))
@@ -62,7 +62,7 @@ describe(
 
                         local worldA = tecs.ecs.newWorld()
                         local leaderA = worldA:spawn()
-                        local followerA = worldA:spawn(Follows(leaderA) as tecs.Component)
+                        local followerA = worldA:spawn(Follows(leaderA) as tecs.ecs.Component)
                         worldA:update(0)
                         local foundA: {integer: boolean} = {}
                         worldA:targets(leaderA, Follows, function(srcId: integer) foundA[srcId] = true end)
@@ -93,8 +93,8 @@ describe(
                         })
 
                         local leader = world:spawn()
-                        local f1 = world:spawn(Follows(leader) as tecs.Component)
-                        local f2 = world:spawn(Follows(leader) as tecs.Component)
+                        local f1 = world:spawn(Follows(leader) as tecs.ecs.Component)
+                        local f2 = world:spawn(Follows(leader) as tecs.ecs.Component)
                         world:update(0)
 
                         local found: {integer: boolean} = {}
@@ -114,14 +114,14 @@ describe(
                         })
 
                         local leader = world:spawn()
-                        local follower = world:spawn(Follows(leader) as tecs.Component)
+                        local follower = world:spawn(Follows(leader) as tecs.ecs.Component)
                         world:update(0)
 
                         local count = 0
                         world:targets(leader, Follows, function(_: integer) count = count + 1 end)
                         luassert.equals(1, count)
 
-                        world:remove(follower, Follows(leader) as tecs.Component)
+                        world:remove(follower, Follows(leader) as tecs.ecs.Component)
                         world:update(0)
 
                         count = 0
@@ -141,11 +141,11 @@ describe(
 
                         local leader1 = world:spawn()
                         local leader2 = world:spawn()
-                        local follower = world:spawn(Follows(leader1) as tecs.Component)
+                        local follower = world:spawn(Follows(leader1) as tecs.ecs.Component)
                         world:update(0)
 
                         -- Reparent
-                        world:set(follower, Follows(leader2) as tecs.Component)
+                        world:set(follower, Follows(leader2) as tecs.ecs.Component)
                         world:update(0)
 
                         local count1 = 0
@@ -168,7 +168,7 @@ describe(
                         })
 
                         local leader = world:spawn()
-                        local follower = world:spawn(Follows(leader) as tecs.Component)
+                        local follower = world:spawn(Follows(leader) as tecs.ecs.Component)
                         world:update(0)
 
                         world:despawn(follower)
@@ -190,14 +190,14 @@ describe(
                         })
 
                         local leader = world:spawn()
-                        local follower = world:spawn(Follows(leader) as tecs.Component)
+                        local follower = world:spawn(Follows(leader) as tecs.ecs.Component)
                         world:update(0)
 
                         world:despawn(leader)
                         world:update(0)
 
                         luassert.is_true(world:isAlive(follower), "follower should still be alive (no cascade)")
-                        local rel = world:get(follower, Follows(leader) as tecs.Component)
+                        local rel = world:get(follower, Follows(leader) as tecs.ecs.Component)
                         luassert.is_nil(rel, "follower should no longer have Follows(leader)")
                     end
                 )
@@ -217,9 +217,9 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local child1 = world:spawn(OwnedBy(root) as tecs.Component)
-                        local child2 = world:spawn(OwnedBy(root) as tecs.Component)
-                        local grandchild = world:spawn(OwnedBy(child1) as tecs.Component)
+                        local child1 = world:spawn(OwnedBy(root) as tecs.ecs.Component)
+                        local child2 = world:spawn(OwnedBy(root) as tecs.ecs.Component)
+                        local grandchild = world:spawn(OwnedBy(child1) as tecs.ecs.Component)
                         world:update(0)
 
                         local visited: {integer: integer} = {} -- entityId -> depth
@@ -249,8 +249,8 @@ describe(
                         })
 
                         local owner = world:spawn()
-                        local item1 = world:spawn(OwnedBy(owner) as tecs.Component)
-                        local item2 = world:spawn(OwnedBy(owner) as tecs.Component)
+                        local item1 = world:spawn(OwnedBy(owner) as tecs.ecs.Component)
+                        local item2 = world:spawn(OwnedBy(owner) as tecs.ecs.Component)
                         world:update(0)
 
                         world:despawn(owner)
@@ -272,8 +272,8 @@ describe(
                         })
 
                         local root = world:spawn()
-                        local child = world:spawn(OwnedBy(root) as tecs.Component)
-                        local grandchild = world:spawn(OwnedBy(child) as tecs.Component)
+                        local child = world:spawn(OwnedBy(root) as tecs.ecs.Component)
+                        local grandchild = world:spawn(OwnedBy(child) as tecs.ecs.Component)
                         world:update(0)
 
                         world:despawn(root)
@@ -290,7 +290,7 @@ describe(
         describe(
             "consistency across mutation kinds",
             function()
-                local function count_sources(w: tecs.World, target: integer, rel: tecs.Component): integer
+                local function count_sources(w: tecs.World, target: integer, rel: tecs.ecs.Component): integer
                     local n = 0
                     w:targets(target, rel, function(_: integer) n = n + 1 end)
                     return n
@@ -306,9 +306,9 @@ describe(
                         })
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
-                        local f = w:spawn(Follows(leader) as tecs.Component)
+                        local f = w:spawn(Follows(leader) as tecs.ecs.Component)
                         luassert.equals(1, count_sources(w, leader, Follows))
-                        w:remove(f, Follows(leader) as tecs.Component)
+                        w:remove(f, Follows(leader) as tecs.ecs.Component)
                         luassert.equals(0, count_sources(w, leader, Follows))
                     end
                 )
@@ -325,11 +325,11 @@ describe(
                         local leader = w:spawn()
                         local follower = w:spawn()
                         w:defer()
-                        w:set(follower, Follows(leader) as tecs.Component)
+                        w:set(follower, Follows(leader) as tecs.ecs.Component)
                         w:commit()
                         luassert.equals(1, count_sources(w, leader, Follows))
                         w:defer()
-                        w:remove(follower, Follows(leader) as tecs.Component)
+                        w:remove(follower, Follows(leader) as tecs.ecs.Component)
                         w:commit()
                         luassert.equals(0, count_sources(w, leader, Follows))
                     end
@@ -340,7 +340,7 @@ describe(
                     function()
                         local function build_world(
                             deferred: boolean
-                        ): (integer, integer, integer, tecs.World, tecs.Component)
+                        ): (integer, integer, integer, tecs.World, tecs.ecs.Component)
                             local Follows = tecs.ecs.newRelationship({
                                 name = "RevIdx_Parity_" .. (deferred and "Deferred" or "Instant"),
                                 exclusive = true,
@@ -348,9 +348,9 @@ describe(
                             })
                             local w = tecs.ecs.newWorld()
                             local l1, l2 = w:spawn(), w:spawn()
-                            local a = w:spawn(Follows(l1) as tecs.Component)
+                            local a = w:spawn(Follows(l1) as tecs.ecs.Component)
                             local function run()
-                                w:set(a, Follows(l2) as tecs.Component)
+                                w:set(a, Follows(l2) as tecs.ecs.Component)
                             end
                             if deferred then
                                 w:defer()
@@ -398,8 +398,8 @@ describe(
                         local l1, l2 = w:spawn(), w:spawn()
                         w:defer()
                         local a = w:spawn()
-                        w:set(a, Follows(l1) as tecs.Component)
-                        w:set(a, Follows(l2) as tecs.Component) -- reparent, same scope
+                        w:set(a, Follows(l1) as tecs.ecs.Component)
+                        w:set(a, Follows(l2) as tecs.ecs.Component) -- reparent, same scope
                         w:commit()
 
                         luassert.equals(
@@ -421,8 +421,8 @@ describe(
                         })
                         local w = tecs.ecs.newWorld()
                         local l1, l2 = w:spawn(), w:spawn()
-                        local f = w:spawn(Follows(l1) as tecs.Component)
-                        w:set(f, Follows(l2) as tecs.Component)
+                        local f = w:spawn(Follows(l1) as tecs.ecs.Component)
+                        w:set(f, Follows(l2) as tecs.ecs.Component)
 
                         luassert.equals(
                             0,
@@ -445,14 +445,14 @@ describe(
                         local leader = w:spawn()
                         local followers: {integer} = {}
                         for i = 1, 10 do
-                            followers[i] = w:spawn(Follows(leader) as tecs.Component)
+                            followers[i] = w:spawn(Follows(leader) as tecs.ecs.Component)
                         end
                         luassert.equals(10, count_sources(w, leader, Follows))
 
-                        w:remove(followers[2], Follows(leader) as tecs.Component)
+                        w:remove(followers[2], Follows(leader) as tecs.ecs.Component)
                         w:defer()
-                        w:remove(followers[4], Follows(leader) as tecs.Component)
-                        w:remove(followers[6], Follows(leader) as tecs.Component)
+                        w:remove(followers[4], Follows(leader) as tecs.ecs.Component)
+                        w:remove(followers[6], Follows(leader) as tecs.ecs.Component)
                         w:commit()
                         w:despawn(followers[8])
                         luassert.equals(6, count_sources(w, leader, Follows))
@@ -477,7 +477,7 @@ describe(
                         })
                         local w = tecs.ecs.newWorld()
                         local leader = w:spawn()
-                        local follower = w:spawn(Follows(leader) as tecs.Component)
+                        local follower = w:spawn(Follows(leader) as tecs.ecs.Component)
 
                         local function count(): integer
                             local n = 0

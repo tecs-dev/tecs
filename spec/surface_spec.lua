@@ -191,6 +191,16 @@ describe("the public surface", function()
             local value = tecs[name]
             assert.is_not_nil(value, "tecs." .. name .. " resolves to nil")
 
+            -- A name declared as a function is one member lifted off a module
+            -- rather than the module itself, which is what a root-level
+            -- constructor is: `tecs.newApplication` is the function
+            -- `tecs.Application` declares, and reading it loads that module
+            -- and nothing else.
+            if field.declared:match("^function%(") then
+                assert.are.equal("function", type(value), "tecs." .. name .. " is not the function it declares")
+                return
+            end
+
             local primitive = PRIMITIVE[field.declared]
             if primitive then
                 assert.are.equal(
@@ -305,6 +315,34 @@ describe("the public surface", function()
             -- is what `newCamera` means: the module owns the type.
             assert.are.equal(require("tecs.gfx.Camera").newCamera, tecs.gfx.newCamera)
             assert.are.equal(require("tecs.Renderer").newRenderer, tecs.gfx.newRenderer)
+        end)
+    end)
+
+    describe("the root", function()
+        it("carries the constructor rather than the module that declares it", function()
+            -- One function, reached one way. `tecs.Application` types what a
+            -- plugin is handed and declares no constructor of its own, so
+            -- there is no second spelling for a game to write.
+            assert.are.equal(require("tecs.Application").newApplication, tecs.newApplication)
+        end)
+
+        it("carries the two classes that belong to no subsystem", function()
+            assert.is_true(rawequal(tecs.Application, require("tecs.Application")))
+            assert.is_true(rawequal(tecs.Future, require("tecs.Future")))
+        end)
+
+        it("does not answer at the module names they moved off", function()
+            assert.is_nil(tecs.application)
+            assert.is_nil(tecs.future)
+        end)
+
+        it("keeps the ECS vocabulary on tecs.ecs and not beside it", function()
+            -- The four cross-cutting types are types rather than values, so
+            -- there is nothing here to read either way. What can be checked is
+            -- that the rest of the vocabulary did not gain a second home: a
+            -- component registry lives on `tecs.ecs` and nowhere else.
+            assert.is_not_nil(require("tecs.ecs").componentByName)
+            assert.is_nil(rawget(tecs, "componentByName"))
         end)
     end)
 

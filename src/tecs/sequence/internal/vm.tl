@@ -6,7 +6,7 @@
 --- before anything advances, so a cursor woken by one runs in the same tick
 --- rather than a tick later.
 
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local platformtime <const> = require("tecs.platform.time")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
@@ -16,7 +16,7 @@ local seqcursors <const> = require("tecs.sequence.internal.cursors")
 local seqprogram <const> = require("tecs.sequence.internal.program")
 local seqtypes <const> = require("tecs.sequence.internal.types")
 
-local type World = ecs.World
+local type World = types.World
 local type Cursor = seqtypes.Cursor
 local type WorldState = seqtypes.WorldState
 

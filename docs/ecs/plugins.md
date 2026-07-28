@@ -26,10 +26,10 @@ local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 local Renderable <const> = tecs.gfx.Renderable
 
-return tecs.application.create({
+return tecs.newApplication({
     window = { title = "my game", width = 1280, height = 720 },
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         world:spawn(Transform(100, 100), Tint(1, 0.4, 0.3, 1), Renderable())
     end,
 })
@@ -78,7 +78,7 @@ local tecs <const> = require("tecs")
 local Transform <const> = tecs.Transform
 
 --- Health, declared by the game rather than by the engine.
-local record Health is tecs.Component
+local record Health is tecs.ecs.Component
     current: number
     max: number
 
@@ -125,7 +125,7 @@ end
 Install it from the entry plugin:
 
 ```teal
-plugin = function(world: tecs.World, app: tecs.application.Application)
+plugin = function(world: tecs.World, app: tecs.Application)
     world:addPlugin(healthPlugin)
 end,
 ```
@@ -171,7 +171,7 @@ A plugin that needs another plugin's resource reads it and fails loudly when it 
 mistake surfaces at setup rather than as a nil three frames later.
 
 ```teal
-local SPAWNER <const>: tecs.Key<Spawner> = tecs.ecs.newKey("game.spawner")
+local SPAWNER <const>: tecs.ecs.Key<Spawner> = tecs.ecs.newKey("game.spawner")
 
 local function wavePlugin(world: tecs.World)
     local spawner <const> = world.resources[SPAWNER]

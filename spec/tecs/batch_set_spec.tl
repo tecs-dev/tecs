@@ -438,12 +438,12 @@ describe(
                     name = "BatchSetNoBulkDenseRelationship",
                 })
                 local parent = world:spawn()
-                world:spawn(ParentOf(parent) as tecs.Component, Tag)
+                world:spawn(ParentOf(parent) as tecs.ecs.Component, Tag)
                 world:commit()
 
                 local q = world:query({include = {Tag}})
                 luassert.has_error(function()
-                    world:batchSet(q, ParentOf as tecs.Component, function(_arch, _first, _last, _count) end)
+                    world:batchSet(q, ParentOf as tecs.ecs.Component, function(_arch, _first, _last, _count) end)
                 end)
             end
         )
@@ -455,10 +455,10 @@ describe(
     function()
         local WorldImpl <const> = require("tecs.internal.world")
 
-        local record SwapPos is tecs.Component
+        local record SwapPos is tecs.ecs.Component
             x: number
         end
-        local record SwapExtra is tecs.Component
+        local record SwapExtra is tecs.ecs.Component
             e: number
         end
 
@@ -523,7 +523,7 @@ describe(
 describe(
     "world:batchSpawn() handle generations",
     function()
-        local function fill(arch: tecs.Archetype, s: integer, l: integer, _c: integer)
+        local function fill(arch: tecs.ecs.Archetype, s: integer, l: integer, _c: integer)
             local ps = arch:getMut(Position)
             for i = s, l do
                 ps[i] = Position(i, i)

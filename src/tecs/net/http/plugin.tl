@@ -33,11 +33,12 @@
 --- every other pooled resource here gives.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local Future <const> = require("tecs.Future")
 local client <const> = require("tecs.net.http.client")
 local DataStream <const> = require("tecs.net.http.DataStream")
 
-local type World = ecs.World
+local type World = types.World
 local type Component = ecs.Component
 local type Options = client.Options
 local type Client = client.Client
@@ -144,7 +145,7 @@ function plugin.close(world: World)
 end
 
 --- Starts every request that has been spawned and not yet sent.
-local function start(world: World, owned: Client, waiting: ecs.Query)
+local function start(world: World, owned: Client, waiting: types.Query)
     for archetype, length, entities in waiting:iter() do
         local requests <const> = archetype:get(plugin.Request) as {Request}
         for row = 1, length do
@@ -167,7 +168,7 @@ local function start(world: World, owned: Client, waiting: ecs.Query)
 end
 
 --- Turns every settled future into a `Response`.
-local function finish(world: World, inFlight: ecs.Query)
+local function finish(world: World, inFlight: types.Query)
     for archetype, length, entities in inFlight:iter() do
         local pendings <const> = archetype:get(plugin.Pending) as {Pending}
         for row = 1, length do

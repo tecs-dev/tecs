@@ -85,8 +85,8 @@ through `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. A pla
 back has no loop to block in, which is why the shape is this and not a `run()`.
 
 ```teal
-return tecs.application.create({
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
         -- register systems, observers and entities here
     end,
 })
@@ -117,8 +117,8 @@ plugin the world takes is `function(world)`, so the entry reads as that shape wi
 ```teal
 local Transform <const> = tecs.Transform
 
-return tecs.application.create({
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
         local movers = world:query({ include = { Transform } })
 
         world:addSystem({

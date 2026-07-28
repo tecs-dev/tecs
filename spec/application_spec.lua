@@ -32,7 +32,7 @@ local CHECKPOINT = "spec-checkpoint.bin"
 --- and no `debug`, so nothing here writes one.
 local function build(config)
     config.window = { title = "application", width = 64, height = 64 }
-    return Application.create(config)
+    return Application.newApplication(config)
 end
 
 describe("Application", function()

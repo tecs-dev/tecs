@@ -46,6 +46,7 @@
 --- costing three dispatches and no per-frame host writes.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
@@ -59,7 +60,7 @@ local sheet <const> = require("tecs.gfx.sheet")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 local log <const> = require("tecs.log")
 
-local type World = ecs.World
+local type World = types.World
 local type Frame = require("tecs.gpu.Frame")
 local type Renderer = require("tecs.Renderer")
 local type Sheet = sheet.Sheet
@@ -1762,7 +1763,7 @@ local pools: {World: Pool} = setmetatable({}, {__mode = "k"} as metatable<{World
 --- schedule advances without anything writing anything. Emitters are counted
 --- in tens, so the walk is cheaper than any arrangement that tried to avoid it
 --- would be to get right.
-local function walkEmitters(self: Pool, query: ecs.Query, advancing: boolean): integer
+local function walkEmitters(self: Pool, query: types.Query, advancing: boolean): integer
     local seen <const> = self._seen
     local step <const> = self._step
     local timestep <const> = self._timestep
@@ -1818,7 +1819,7 @@ local function walkEmitters(self: Pool, query: ecs.Query, advancing: boolean): i
     return live
 end
 
-local function sync(self: Pool, world: World, running: ecs.Query, held: ecs.Query)
+local function sync(self: Pool, world: World, running: types.Query, held: types.Query)
     local timestep, accumulator = world:getFixedTiming()
     self._timestep = timestep
     self._alpha = timestep > 0.0 and accumulator / timestep or 1.0

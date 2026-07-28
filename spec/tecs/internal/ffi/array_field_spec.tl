@@ -2,7 +2,7 @@ require("busted")
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
-local record ArrHolder is tecs.Component
+local record ArrHolder is tecs.ecs.Component
     vals: {number}
 end
 

@@ -11,7 +11,7 @@ describe(
                 local ctx = tecs.ecs.newContext()
                 luassert.is_not_nil(ctx, "newContext() should return a non-nil value")
 
-                local key: tecs.Key<integer> = tecs.ecs.newKey("spec.context.create")
+                local key: tecs.ecs.Key<integer> = tecs.ecs.newKey("spec.context.create")
                 luassert.is_not_nil(key, "newKey() should return a non-nil value")
             end
         )
@@ -20,8 +20,8 @@ describe(
             "stores and retrieves values using keys",
             function()
                 local ctx = tecs.ecs.newContext()
-                local STRING_KEY: tecs.Key<string> = tecs.ecs.newKey("spec.context.string")
-                local NUMBER_KEY: tecs.Key<number> = tecs.ecs.newKey("spec.context.number")
+                local STRING_KEY: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.context.string")
+                local NUMBER_KEY: tecs.ecs.Key<number> = tecs.ecs.newKey("spec.context.number")
 
                 ctx[STRING_KEY] = "test"
                 ctx[NUMBER_KEY] = 42
@@ -37,7 +37,7 @@ describe(
             function()
                 local ctx1 = tecs.ecs.newContext()
                 local ctx2 = tecs.ecs.newContext()
-                local SHARED_KEY: tecs.Key<string> = tecs.ecs.newKey("spec.context.shared")
+                local SHARED_KEY: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.context.shared")
 
                 ctx1[SHARED_KEY] = "context1"
                 ctx2[SHARED_KEY] = "context2"
@@ -51,7 +51,7 @@ describe(
             "updates and removes values",
             function()
                 local ctx = tecs.ecs.newContext()
-                local KEY: tecs.Key<string> = tecs.ecs.newKey("spec.context.updates")
+                local KEY: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.context.updates")
 
                 ctx[KEY] = "original"
                 luassert.is_equal("original", ctx[KEY], "Initial value should be set")
@@ -67,8 +67,8 @@ describe(
         it(
             "still creates distinct keys without a name",
             function()
-                local a: tecs.Key<string> = tecs.ecs.newKey()
-                local b: tecs.Key<string> = tecs.ecs.newKey()
+                local a: tecs.ecs.Key<string> = tecs.ecs.newKey()
+                local b: tecs.ecs.Key<string> = tecs.ecs.newKey()
                 luassert.is_not_nil(a)
                 luassert.is_not_nil(b)
                 luassert.is_not_equal(a, b, "Unnamed keys are fresh identities")
@@ -78,7 +78,7 @@ describe(
         it(
             "finds named keys and returns the same identity on re-creation",
             function()
-                local KEY: tecs.Key<string> = tecs.ecs.newKey("spec.context.findable")
+                local KEY: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.context.findable")
                 luassert.is_equal(
                     KEY,
                     tecs.ecs.findKey("spec.context.findable"),
@@ -96,7 +96,7 @@ describe(
                 -- The stored value is reachable through the re-created key.
                 local ctx = tecs.ecs.newContext()
                 ctx[KEY] = "kept"
-                local again: tecs.Key<string> = tecs.ecs.newKey("spec.context.findable")
+                local again: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.context.findable")
                 luassert.is_equal(
                     "kept", ctx[again], "values survive module re-execution because the identity is stable"
                 )

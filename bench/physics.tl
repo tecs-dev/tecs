@@ -152,14 +152,14 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
     end
 end
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "physics", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
     capacity = BODIES + 64,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer
 
         -- Iterations completed, which is what the drop schedule and the warmup

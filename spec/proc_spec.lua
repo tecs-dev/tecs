@@ -392,7 +392,7 @@ describe("proc", function()
         --- `logFile` nor `debug` is set, so no log file is written.
         local function build(config)
             config.window = { title = "proc", width = 64, height = 64 }
-            return Application.create(config)
+            return Application.newApplication(config)
         end
 
         it("resolves a run without the game pumping it", function()

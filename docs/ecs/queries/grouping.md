@@ -42,7 +42,7 @@ local Kind <const> = { Textured = 1, Shaded = 2, Flat = 3 }
 
 local renderables = world:query({
     include = {Transform, Renderable},
-    groupBy = function(archetype: tecs.Archetype): integer
+    groupBy = function(archetype: tecs.ecs.Archetype): integer
         if archetype:get(Sprite) then return Kind.Textured end
         if archetype:get(Material) then return Kind.Shaded end
         return Kind.Flat

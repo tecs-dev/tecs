@@ -2,36 +2,36 @@ local tecs <const> = require("tecs")
 local Archetype <const> = require("tecs.internal.Archetype")
 local ffi <const> = require("tecs.internal.ffi")
 
-local type DoubleArray = tecs.DoubleArray
+local type DoubleArray = tecs.ecs.DoubleArray
 local setDoubleArraySize <const> = ffi.setDoubleArraySize
 
 local record TestHelpers
     -- Export types using record definitions
-    record Pos is tecs.Component
+    record Pos is tecs.ecs.Component
         x: number
         y: number
     end
 
-    record Vel is tecs.Component
+    record Vel is tecs.ecs.Component
         x: number
         y: number
     end
 
-    record Health is tecs.Component
+    record Health is tecs.ecs.Component
         value: number
         max: number
     end
 
-    record Dead is tecs.Component
+    record Dead is tecs.ecs.Component
     end
 
-    record Sprite is tecs.Component
+    record Sprite is tecs.ecs.Component
         texture: string
         width: number
         height: number
     end
 
-    record Transform is tecs.Component
+    record Transform is tecs.ecs.Component
         scale: number
         rotation: number
     end
@@ -45,7 +45,7 @@ local record TestHelpers
         TransformComponent: Transform
 
         -- Relationship creators
-        createRelationship: function(self: ComponentProvider, name: string, exclusive: boolean): tecs.Relationship
+        createRelationship: function(self: ComponentProvider, name: string, exclusive: boolean): tecs.ecs.Relationship
     end
 
     -- Create component providers for a test suite
@@ -55,13 +55,13 @@ local record TestHelpers
     countTable: function<T>(t: {any: T}): integer
 
     -- Assert that an archetype contains specific components
-    assertArchetypeHasComponents: function(archetype: Archetype, expectedComponents: {tecs.Component})
+    assertArchetypeHasComponents: function(archetype: Archetype, expectedComponents: {tecs.ecs.Component})
 
     -- Create a simple archetype for testing
-    createTestArchetype: function(comps: {tecs.Component}, id: integer): Archetype
+    createTestArchetype: function(comps: {tecs.ecs.Component}, id: integer): Archetype
 
     -- Create an archetype with mocked change observers
-    createArchetypeWithMockObservers: function(comps: {tecs.Component}, id: integer): Archetype
+    createArchetypeWithMockObservers: function(comps: {tecs.ecs.Component}, id: integer): Archetype
 
     -- Mock file type for testing
     record MockFile
@@ -77,7 +77,9 @@ local record TestHelpers
     createMockFile: function(): MockFile
 
     -- Add entities to an archetype with optional component data
-    addEntitiesToArchetype: function(archetype: Archetype, entityIds: {integer}, componentData: {{tecs.Component: any}})
+    addEntitiesToArchetype: function(
+        archetype: Archetype, entityIds: {integer}, componentData: {{tecs.ecs.Component: any}}
+    )
 end
 
 function TestHelpers.createComponentProvider(prefix: string, testId: integer): TestHelpers.ComponentProvider
@@ -132,7 +134,7 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
         defaults = {1, 0},
     })
 
-    function provider:createRelationship(name: string, exclusive: boolean): tecs.Relationship
+    function provider:createRelationship(name: string, exclusive: boolean): tecs.ecs.Relationship
         return tecs.ecs.newRelationship({name = prefix .. name .. testId, exclusive = exclusive})
     end
 
@@ -147,7 +149,7 @@ function TestHelpers.countTable<T>(t: {any: T}): integer
     return count
 end
 
-function TestHelpers.assertArchetypeHasComponents(archetype: Archetype, expectedComps: {tecs.Component})
+function TestHelpers.assertArchetypeHasComponents(archetype: Archetype, expectedComps: {tecs.ecs.Component})
     local luassert <const> = require("luassert")
 
     for _, comp in ipairs(expectedComps) do
@@ -162,11 +164,11 @@ function TestHelpers.assertArchetypeHasComponents(archetype: Archetype, expected
     end
 end
 
-function TestHelpers.createTestArchetype(comps: {tecs.Component}, id: integer): Archetype
+function TestHelpers.createTestArchetype(comps: {tecs.ecs.Component}, id: integer): Archetype
     return Archetype.new(comps, id or 1)
 end
 
-function TestHelpers.createArchetypeWithMockObservers(comps: {tecs.Component}, id: integer): Archetype
+function TestHelpers.createArchetypeWithMockObservers(comps: {tecs.ecs.Component}, id: integer): Archetype
     local spy <const> = require("luassert.spy")
     local archetype = Archetype.new(comps, id or 1)
 
@@ -191,11 +193,11 @@ end
 -- Record for accessing archetype implementation fields
 local record ArchetypeImpl
     entities: DoubleArray -- FFI array
-    columns: {tecs.Component: any}
+    columns: {tecs.ecs.Component: any}
 end
 
 function TestHelpers.addEntitiesToArchetype(
-    archetype: Archetype, entityIds: {integer}, componentData: {{tecs.Component: any}}
+    archetype: Archetype, entityIds: {integer}, componentData: {{tecs.ecs.Component: any}}
 )
     local ffi = require("tecs.internal.ffi")
     local archImpl = archetype as ArchetypeImpl
@@ -211,7 +213,7 @@ function TestHelpers.addEntitiesToArchetype(
             for comp, value in pairs(componentData[i]) do
                 local column = archetype.columns[comp]
                 if column then
-                    column[newCount] = value as any as tecs.Component
+                    column[newCount] = value as any as tecs.ecs.Component
                 end
             end
         end

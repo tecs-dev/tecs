@@ -15,7 +15,7 @@ runs at all this frame.
 Add systems to a world with `world:addSystem()`, passing a configuration table. The `run` function receives the
 frame's delta time and the world.
 
-Systems are registered from a plugin, and a game's entry plugin is the one `tecs.application.create` takes. That is
+Systems are registered from a plugin, and a game's entry plugin is the one `tecs.newApplication` takes. That is
 where queries are built once and the systems that use them are declared:
 
 ```teal
@@ -24,8 +24,8 @@ local Transform <const> = tecs.Transform
 local Tint <const> = tecs.gfx.Tint
 local Renderable <const> = tecs.gfx.Renderable
 
-return tecs.application.create({
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
         local movers <const> = world:query({ include = { Transform, Renderable } })
 
         world:addSystem({

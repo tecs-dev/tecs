@@ -40,6 +40,7 @@
 --- are the machine, and worlds step serially on the game thread.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
 local World <const> = require("tecs.box2d.World")
 local binding <const> = require("tecs.ffi.box2d")
@@ -538,7 +539,7 @@ local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 --- @return The world's own live simulation, not a copy, so stepping or
 ---     destroying what comes back acts on the one the plugin's systems drive.
 ---     Nil before the plugin is added and again after `Shutdown` has run.
-function box2d.of(world: ecs.World): World
+function box2d.of(world: types.World): World
     return world.resources[simulationKey]
 end
 
@@ -594,7 +595,7 @@ end
 ---     `Body` or `Collider`, which the fixed step reapplies to the live body.
 ---     An unrecognized `type` raises, and so does a `capsuleLength` without a
 ---     positive `radius`; both blame the caller's line rather than this one.
-function box2d.attach(world: ecs.World, entity: integer, options: BodyOptions)
+function box2d.attach(world: types.World, entity: integer, options: BodyOptions)
     options = options or {}
 
     if box2d.of(world) == nil then
@@ -638,7 +639,7 @@ end
 --- @param options Only the shape, material, filter and offset fields are read.
 ---     `type`, damping, gravity and the sleep and bullet flags belong to the
 ---     body and are ignored here.
-function box2d.attachCollider(world: ecs.World, entity: integer, body: integer, options: BodyOptions)
+function box2d.attachCollider(world: types.World, entity: integer, body: integer, options: BodyOptions)
     options = options or {}
     if world:get(body, Body) == nil then
         error("tecs: ColliderOf target has no Body", 2)
@@ -657,7 +658,7 @@ end
 --- @param entity Loses `Body` only. `Collider`, `Motion` and `Transform` stay,
 ---     so what the body was is still readable and `attach` can declare it
 ---     again. Not an error for an entity that never had a body.
-function box2d.detach(world: ecs.World, entity: integer)
+function box2d.detach(world: types.World, entity: integer)
     world:remove(entity, Body)
 end
 
@@ -703,7 +704,7 @@ end
 ---     acts on it, so this is not a way to check a declaration landed. False
 ---     too for a handle whose world has since been destroyed, because the
 ---     check covers the generation and the world as well as the slot.
-function box2d.hasBody(world: ecs.World, entity: integer): boolean
+function box2d.hasBody(world: types.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return false
@@ -729,7 +730,7 @@ end
 --- @param y The same along y, positive downward. Applied at the center of
 ---     mass, so neither component imparts spin; `applyImpulseAt` is the one
 ---     that does.
-function box2d.applyImpulse(world: ecs.World, entity: integer, x: number, y: number)
+function box2d.applyImpulse(world: types.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil then
         return
@@ -764,7 +765,7 @@ end
 ---     the impulse becomes spin and the less becomes travel.
 --- @param pointY The same along y. A point at the center of mass makes this
 ---     exactly `applyImpulse`.
-function box2d.applyImpulseAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function box2d.applyImpulseAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -788,7 +789,7 @@ end
 --- @return X in pixels per second, then y, positive downward. Linear only: a
 ---     body that is only spinning reads zero on both, and
 ---     `box2d.angularVelocity` is where that shows.
-function box2d.velocity(world: ecs.World, entity: integer): number, number
+function box2d.velocity(world: types.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0, 0.0
@@ -810,7 +811,7 @@ end
 --- @param vy The same along y, positive downward. Angular velocity is left
 ---     alone, and the `Motion` column is not written: it is a store for pauses
 ---     and saves, so it still holds whatever the last of those left.
-function box2d.setVelocity(world: ecs.World, entity: integer, vx: number, vy: number)
+function box2d.setVelocity(world: types.World, entity: integer, vx: number, vy: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -829,7 +830,7 @@ end
 ---     kilograms gives the acceleration in pixels per second squared.
 --- @param y The same along y, positive downward. Applied at the center of
 ---     mass, so neither component imparts spin.
-function box2d.applyForce(world: ecs.World, entity: integer, x: number, y: number)
+function box2d.applyForce(world: types.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -849,7 +850,7 @@ end
 ---     the body's frame. Off the center of mass it produces torque as well as
 ---     acceleration.
 --- @param pointY The same along y.
-function box2d.applyForceAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function box2d.applyForceAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -868,7 +869,7 @@ end
 ---     distance and so would need `box2d.pixelsPerMeter` squared rather than the
 ---     single factor everything else takes. Positive raises the body's angular
 ---     velocity, and so the `Transform.rotation` the sync writes.
-function box2d.applyTorque(world: ecs.World, entity: integer, torque: number)
+function box2d.applyTorque(world: types.World, entity: integer, torque: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -886,7 +887,7 @@ end
 ---     raising.
 --- @return Radians per second, in the direction a rising `Transform.rotation`
 ---     turns. Live from Box2D, not the `Motion` column.
-function box2d.angularVelocity(world: ecs.World, entity: integer): number
+function box2d.angularVelocity(world: types.World, entity: integer): number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0
@@ -902,7 +903,7 @@ end
 ---     Discarded by Box2D for a static body and for one declared with
 ---     `fixedRotation`, so those two read back zero rather than the value just
 ---     written.
-function box2d.setAngularVelocity(world: ecs.World, entity: integer, omega: number)
+function box2d.setAngularVelocity(world: types.World, entity: integer, omega: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -918,7 +919,7 @@ end
 --- @return Whether the body is still being solved. Bodies sleep as an island
 ---     rather than one at a time, so a body at rest touching a moving one
 ---     stays awake.
-function box2d.isAwake(world: ecs.World, entity: integer): boolean
+function box2d.isAwake(world: types.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     return row ~= nil and row.index1 ~= 0 and World.isAwake(handleOf(row))
 end
@@ -930,7 +931,7 @@ end
 --- @param awake True wakes it. False puts it to sleep at once rather than
 ---     waiting for it to come to rest, so a body still moving stops where it
 ---     is until something touches it or it is woken again.
-function box2d.setAwake(world: ecs.World, entity: integer, awake: boolean)
+function box2d.setAwake(world: types.World, entity: integer, awake: boolean)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -961,7 +962,7 @@ end
 ---     which is what makes this usable as a move that does not turn anything.
 ---     Nothing sweeps the gap: a body put across a wall is through it, and a
 ---     bullet body does not catch that.
-function box2d.teleport(world: ecs.World, entity: integer, x: number, y: number, angle: number)
+function box2d.teleport(world: types.World, entity: integer, x: number, y: number, angle: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -989,7 +990,7 @@ end
 ---     A fresh table each call, so it is the caller's to keep, and a cast in a
 ---     per-frame loop allocates one per call.
 function box2d.raycast(
-    world: ecs.World, x1: number, y1: number, x2: number, y2: number, options: QueryOptions
+    world: types.World, x1: number, y1: number, x2: number, y2: number, options: QueryOptions
 ): RaycastHit
     local simulation = box2d.of(world)
     if simulation == nil then
@@ -1022,11 +1023,11 @@ end
 ---     bodies; the solver's threads go the other way and are shared, so a
 ---     second world naming a `workerCount` the first did not raises rather
 ---     than resizing the pool.
-function box2d.plugin(options: PhysicsOptions): function(ecs.World)
+function box2d.plugin(options: PhysicsOptions): function(types.World)
     options = options or {}
     local gravity = options.gravity or {0.0, 980.0}
 
-    return function(world: ecs.World)
+    return function(world: types.World)
         -- Per world, so two worlds each installing this get a simulation each
         -- and neither sees the other's bodies. Hoisted into a local here and
         -- closed over by the systems below, so a step costs no resource lookup.
@@ -1541,7 +1542,7 @@ function box2d.plugin(options: PhysicsOptions): function(ecs.World)
             -- whatever this module is called. See `AGENTS.md` on externally
             -- typed strings.
             name = "tecs.physics",
-            save = function(_world: ecs.World): any
+            save = function(_world: types.World): any
                 for archetype, length in snapshotBodies:iter() do
                     local rows = archetype:get(RigidBody)
                     local motions = archetype:getMut(Motion)

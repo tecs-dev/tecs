@@ -3,8 +3,8 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 local StringBuffer <const> = require("string.buffer")
 
-local function saveTableSnapshot(world: tecs.World, opts?: tecs.SnapshotOptions): tecs.Snapshot
-    local actualOpts: tecs.SnapshotOptions
+local function saveTableSnapshot(world: tecs.World, opts?: tecs.ecs.SnapshotOptions): tecs.ecs.Snapshot
+    local actualOpts: tecs.ecs.SnapshotOptions
     if opts then
         actualOpts = opts
         actualOpts.format = "table"
@@ -18,7 +18,7 @@ local function saveTableSnapshot(world: tecs.World, opts?: tecs.SnapshotOptions)
     return out.snapshot
 end
 
-local function saveBinarySnapshot(world: tecs.World, opts?: tecs.SnapshotOptions): StringBuffer
+local function saveBinarySnapshot(world: tecs.World, opts?: tecs.ecs.SnapshotOptions): StringBuffer
     local out = world:saveSnapshot(opts)
     if out.buffer == nil then
         error("saveSnapshot(binary) returned no buffer")
@@ -29,13 +29,13 @@ end
 describe(
     "snapshot save/load",
     function()
-        local record Position is tecs.Component
+        local record Position is tecs.ecs.Component
             x: number
             y: number
             metamethod __call: function(self, x: number, y: number): Position
         end
 
-        local record Health is tecs.Component
+        local record Health is tecs.ecs.Component
             hp: integer
             metamethod __call: function(self, hp: integer): Health
         end
@@ -121,7 +121,7 @@ describe(
                 local data <const> = require("tecs.data")
                 local testId = math.random(1, 1000000)
 
-                local record FFIStruct is tecs.Component
+                local record FFIStruct is tecs.ecs.Component
                     x: number
                     y: number
                     layer: integer
@@ -141,7 +141,7 @@ describe(
                     defaults = {0, 0, 1, -1},
                 })
 
-                local record Cell is tecs.Component
+                local record Cell is tecs.ecs.Component
                     col: integer
                     row: integer
                     colorIdx: integer
@@ -161,7 +161,7 @@ describe(
 
                 local snap = saveTableSnapshot(world)
                 local jsonStr = data.encodeJSON(snap as {string: any})
-                local parsed = data.decodeJSON(jsonStr) as tecs.Snapshot
+                local parsed = data.decodeJSON(jsonStr) as tecs.ecs.Snapshot
 
                 world:loadSnapshot(parsed)
 
@@ -191,7 +191,7 @@ describe(
                 local buffer = require("string.buffer")
                 local testId = math.random(1, 1000000)
 
-                local record Vec3 is tecs.Component
+                local record Vec3 is tecs.ecs.Component
                     x: number
                     y: number
                     z: number
@@ -255,7 +255,7 @@ describe(
 
                 local snap = saveTableSnapshot(world)
                 local jsonStr = data.encodeJSON(snap as {string: any})
-                local parsed = data.decodeJSON(jsonStr) as tecs.Snapshot
+                local parsed = data.decodeJSON(jsonStr) as tecs.ecs.Snapshot
 
                 world:loadSnapshot(parsed)
 
@@ -397,7 +397,7 @@ describe(
                 local descriptor: tecs.Query.Descriptor = {
                     include = {PositionComp},
                 }
-                local opts: tecs.SnapshotOptions = {
+                local opts: tecs.ecs.SnapshotOptions = {
                     format = "table",
                     filterQuery = descriptor,
                 }
@@ -416,7 +416,7 @@ describe(
             "keeps table columns aligned when a serialize hook returns nil",
             function()
                 local testId = math.random(1, 1000000)
-                local record Skippy is tecs.Component
+                local record Skippy is tecs.ecs.Component
                     v: number
                     skip: number
                 end
@@ -460,7 +460,7 @@ describe(
             "round-trips a binary snapshot with a custom-serialize-only FFI component",
             function()
                 local testId = math.random(1, 1000000)
-                local record HalfCustom is tecs.Component
+                local record HalfCustom is tecs.ecs.Component
                     a: number
                     metamethod __call: function(self, a: number): HalfCustom
                 end
@@ -472,7 +472,7 @@ describe(
                     -- BOTH directions or the binary stream desyncs.
                     serialize = function(value: HalfCustom): {string: any} return {a = value.a} end,
                 })
-                local record PlainFFI is tecs.Component
+                local record PlainFFI is tecs.ecs.Component
                     b: number
                     metamethod __call: function(self, b: number): PlainFFI
                 end
@@ -579,7 +579,7 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local record NeedsWorld is tecs.Component
+                local record NeedsWorld is tecs.ecs.Component
                     value: integer
                     metamethod __call: function(self, value: integer): NeedsWorld
                 end
@@ -604,7 +604,7 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn()
-                local owner = world:spawn(NeedsWorldComp(7), SparseTagRel(target) as tecs.Component)
+                local owner = world:spawn(NeedsWorldComp(7), SparseTagRel(target) as tecs.ecs.Component)
                 world:commit()
 
                 local buf = saveBinarySnapshot(world)
@@ -614,7 +614,7 @@ describe(
                 luassert.is_true(fresh:isAlive(owner))
                 local restoredComp = fresh:get(owner, NeedsWorldComp) as NeedsWorld
                 luassert.equals(7, restoredComp.value)
-                luassert.is_not_nil(fresh:get(owner, SparseTagRel as tecs.Component))
+                luassert.is_not_nil(fresh:get(owner, SparseTagRel as tecs.ecs.Component))
             end
         )
 
@@ -631,8 +631,8 @@ describe(
 
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn()
-                local wildcardOnly = world:spawn(PositionComp(1, 2), SparseMaybeRel as tecs.Component)
-                local withValue = world:spawn(PositionComp(3, 4), SparseMaybeRel(target) as tecs.Component)
+                local wildcardOnly = world:spawn(PositionComp(1, 2), SparseMaybeRel as tecs.ecs.Component)
+                local withValue = world:spawn(PositionComp(3, 4), SparseMaybeRel(target) as tecs.ecs.Component)
                 world:commit()
 
                 local buf = saveBinarySnapshot(world)
@@ -643,8 +643,8 @@ describe(
                 luassert.is_true(fresh:isAlive(withValue))
                 luassert.equals(1, fresh:get(wildcardOnly, PositionComp).x)
                 luassert.equals(3, fresh:get(withValue, PositionComp).x)
-                luassert.is_nil(fresh:get(wildcardOnly, SparseMaybeRel as tecs.Component))
-                luassert.is_not_nil(fresh:get(withValue, SparseMaybeRel as tecs.Component))
+                luassert.is_nil(fresh:get(wildcardOnly, SparseMaybeRel as tecs.ecs.Component))
+                luassert.is_not_nil(fresh:get(withValue, SparseMaybeRel as tecs.ecs.Component))
             end
         )
 
@@ -729,7 +729,7 @@ describe(
                 local sourceValue = 7
                 local loadedValue = 0
                 local order: {string} = {}
-                local finishPrelude: tecs.SnapshotPrelude | nil
+                local finishPrelude: tecs.ecs.SnapshotPrelude | nil
 
                 world:addSnapshotHandler({
                     name = "spec.snapshotHandler",
@@ -741,7 +741,7 @@ describe(
                         table.insert(order, "load")
                         loadedValue = (value as {string: integer}).value
                     end,
-                    finish = function(_world: tecs.World, prelude: tecs.SnapshotPrelude)
+                    finish = function(_world: tecs.World, prelude: tecs.ecs.SnapshotPrelude)
                         table.insert(order, "finish")
                         finishPrelude = prelude
                     end,
@@ -756,7 +756,7 @@ describe(
                 luassert.equals("load", order[2])
                 luassert.equals("finish", order[3])
                 luassert.is_not_nil(finishPrelude)
-                luassert.equals(2, (finishPrelude as tecs.SnapshotPrelude).version)
+                luassert.equals(2, (finishPrelude as tecs.ecs.SnapshotPrelude).version)
             end
         )
 
@@ -798,12 +798,12 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local record RuntimeData is tecs.Component
+                local record RuntimeData is tecs.ecs.Component
                     slot: integer
                     metamethod __call: function(self, slot: integer): RuntimeData
                 end
 
-                local record DurableData is tecs.Component
+                local record DurableData is tecs.ecs.Component
                     value: integer
                     metamethod __call: function(self, value: integer): DurableData
                 end
@@ -861,7 +861,7 @@ describe(
                     transient = true,
                 })
 
-                local record TransientFFI is tecs.Component
+                local record TransientFFI is tecs.ecs.Component
                     value: integer
                     metamethod __call: function(self, value: integer): TransientFFI
                 end
@@ -900,7 +900,7 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local record Link is tecs.Relationship
+                local record Link is tecs.ecs.Relationship
                     weight: integer
                     metamethod __call: function(self, target: integer, weight: integer): Link
                 end
@@ -935,7 +935,7 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local record BadTable is tecs.Component
+                local record BadTable is tecs.ecs.Component
                     value: integer
                     metamethod __call: function(self, value: integer): BadTable
                 end
@@ -951,7 +951,7 @@ describe(
                 end)
                 luassert.is_false(okTable)
 
-                local record BadFFI is tecs.Component
+                local record BadFFI is tecs.ecs.Component
                     value: integer
                     metamethod __call: function(self, value: integer): BadFFI
                 end
@@ -967,7 +967,7 @@ describe(
                 end)
                 luassert.is_false(okFFI)
 
-                local record BadRel is tecs.Relationship
+                local record BadRel is tecs.ecs.Relationship
                     value: integer
                     metamethod __call: function(self, target: integer, value: integer): BadRel
                 end
@@ -1175,7 +1175,7 @@ describe(
                 local testId = math.random(1, 1000000)
                 local compName = "SchemaDriftAdd" .. testId
 
-                local record V3 is tecs.Component
+                local record V3 is tecs.ecs.Component
                     x: number
                     y: number
                     z: number
@@ -1238,7 +1238,7 @@ describe(
                 local compName = "SchemaDriftRemove" .. testId
 
                 -- Current schema: one field x.
-                local record V1 is tecs.Component
+                local record V1 is tecs.ecs.Component
                     x: number
                     metamethod __call: function(self, x: number): V1
                 end
@@ -1296,7 +1296,7 @@ describe(
                 -- Custom hooks mean the saved column holds STRUCTURED payloads,
                 -- so the byte migrator must not engage; the deserialize hook is
                 -- the manual-migration path and fills the new field itself.
-                local record CV is tecs.Component
+                local record CV is tecs.ecs.Component
                     a: number
                     b: number
                     metamethod __call: function(self, a: number, b: number): CV

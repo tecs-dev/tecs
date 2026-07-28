@@ -20,7 +20,7 @@
 --- `renderer.images` is the backend's array, named here so neither half has to
 --- be reached for by name.
 
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
 local Frame <const> = require("tecs.gpu.Frame")
@@ -211,7 +211,7 @@ end
 --- @param world The queries and both systems are added here and nowhere else,
 ---     so a renderer that was created and never installed draws an empty
 ---     packet rather than failing.
-function Renderer:install(world: ecs.World)
+function Renderer:install(world: types.World)
     self._extractor:install(
         world,
         self._packet,

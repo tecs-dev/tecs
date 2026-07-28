@@ -28,10 +28,17 @@ local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local WorldImpl <const> = require("tecs.internal.world")
 local Context <const> = require("tecs.internal.Context")
 
+-- `World`, `Query`, `System` and `Plugin` are `tecs.World` and its three
+-- neighbours rather than names on this record. A plugin is handed a world, a
+-- system is a `System`, a plugin is a `Plugin`, and what either iterates is a
+-- `Query`, and physics, drawing, audio and the sequencer all write those four
+-- in their own public signatures, so they cross subsystems and sit at the root
+-- with one spelling each. Engine code that needs only the type reaches for
+-- `tecs.types`, which sits below both; here `World` is aliased because the
+-- signatures below name it constantly.
+local type World = types.World
+
 local record ecs
-    type World = types.World
-    type System = types.System
-    type Plugin = types.Plugin
     type Pipeline = types.Pipeline
     type FixedOverload = types.FixedOverload
     type Component = types.components.Component
@@ -43,7 +50,6 @@ local record ecs
     type Relationship = types.components.Relationship
     type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
     type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
-    type Query = types.Query
     type QueryDescriptor = types.Query.Descriptor
     type QueryCursor = types.Query.Cursor
     type Archetype = types.Archetype

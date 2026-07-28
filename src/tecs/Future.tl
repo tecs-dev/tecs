@@ -57,12 +57,15 @@
 
 local log <const> = require("tecs.log")
 local time <const> = require("tecs.platform.time")
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local Context <const> = require("tecs.internal.Context")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
 
-local type World = ecs.World
+local type World = types.World
 
+-- A logger name is what `SDL_SetLogPriority` filters on, so it is configuration
+-- a developer types into a shell rather than a name this tree can rename in one
+-- commit. It stays `"tecs.future"` now that the public name is `tecs.Future`.
 local LOGGER <const> = log.get("tecs.future")
 
 --- Reads the monotonic counter, in milliseconds.
@@ -927,6 +930,9 @@ function Future.track<U>(world: World, entity: integer, key: string, future: Fut
     end)
 end
 
+-- The provider name a program writes into `sequence.await`, so it is reached
+-- from a saved program rather than from code this tree can see. It stays
+-- `"tecs.future"` now that the public name is `tecs.Future`.
 seqawaitables.register(
     "tecs.future",
     {

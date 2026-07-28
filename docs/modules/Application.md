@@ -3,9 +3,9 @@ description: "The application object an entry file returns and the host drives: 
 outline: [2, 3]
 ---
 
-# tecs.application.Application
+# tecs.Application
 
-`tecs.application.Application` is the lifecycle the C host drives. An entry file ends with `return tecs.application.create(config)`,
+`tecs.Application` is the lifecycle the C host drives. An entry file ends with `return tecs.newApplication(config)`,
 and the host calls into the returned object to initialize, for each event, for each iteration, and to shut down.
 
 It is not a function that runs until done. A platform that never hands control back has no loop to block in, so
@@ -14,9 +14,9 @@ the loop lives below Lua and the application is what it calls.
 ```teal
 local tecs <const> = require("tecs")
 
-return tecs.application.create({
+return tecs.newApplication({
     window = { title = "Hello", width = 1280, height = 960 },
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         -- everything the game registers goes here
     end,
 })
@@ -279,29 +279,29 @@ the platforms the suite runs on.
 
 Every function and type this module carries, rendered from `src/tecs/Application.tl`.
 
-<a id="tecs.application.Application.Config"></a>
+<a id="tecs.Application.Config"></a>
 
-### tecs.application.Application.Config
+### tecs.Application.Config
 
-<pre><code v-pre>record <a href="#tecs.application.Application.Config">tecs.application.Application.Config</a>
+<pre><code v-pre>record <a href="#tecs.Application.Config">tecs.Application.Config</a>
 </code></pre>
 
-<a id="tecs.application.Application.Config.window"></a>
+<a id="tecs.Application.Config.window"></a>
 
-### tecs.application.Application.Config.window
+### tecs.Application.Config.window
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.window">tecs.application.Application.Config.window</a>: Window.Options
+<pre><code v-pre><a href="#tecs.Application.Config.window">tecs.Application.Config.window</a>: Window.Options
 </code></pre>
 
 The window to open, as `Window.Options` describes it. Passed
 through whole rather than copied field by field, so everything a
 window can be created with is reachable from here and a field
 added there needs nothing added here.
-<a id="tecs.application.Application.Config.debug"></a>
+<a id="tecs.Application.Config.debug"></a>
 
-### tecs.application.Application.Config.debug
+### tecs.Application.Config.debug
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.debug">tecs.application.Application.Config.debug</a>: boolean
+<pre><code v-pre><a href="#tecs.Application.Config.debug">tecs.Application.Config.debug</a>: boolean
 </code></pre>
 
 Marks this run as a development one, which two things read.
@@ -311,25 +311,25 @@ file below is written without being asked for. It is also one of
 the three settings `clearCrash` looks at, beside `mcpPort` and
 `watch`, to decide whether resuming after a gameplay crash is
 something this build does at all.
-<a id="tecs.application.Application.Config.framesInFlight"></a>
+<a id="tecs.Application.Config.framesInFlight"></a>
 
-### tecs.application.Application.Config.framesInFlight
+### tecs.Application.Config.framesInFlight
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.framesInFlight">tecs.application.Application.Config.framesInFlight</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.framesInFlight">tecs.Application.Config.framesInFlight</a>: integer
 </code></pre>
 
-<a id="tecs.application.Application.Config.presentMode"></a>
+<a id="tecs.Application.Config.presentMode"></a>
 
-### tecs.application.Application.Config.presentMode
+### tecs.Application.Config.presentMode
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.presentMode">tecs.application.Application.Config.presentMode</a>: string
+<pre><code v-pre><a href="#tecs.Application.Config.presentMode">tecs.Application.Config.presentMode</a>: string
 </code></pre>
 
-<a id="tecs.application.Application.Config.ambientLight"></a>
+<a id="tecs.Application.Config.ambientLight"></a>
 
-### tecs.application.Application.Config.ambientLight
+### tecs.Application.Config.ambientLight
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.ambientLight">tecs.application.Application.Config.ambientLight</a>: {number}
+<pre><code v-pre><a href="#tecs.Application.Config.ambientLight">tecs.Application.Config.ambientLight</a>: {number}
 </code></pre>
 
 Light every surface receives before any light entity contributes,
@@ -340,20 +340,20 @@ lights is the first thing anyone builds and it should look like
 what it is: sprites at their own color, with lights adding on top
 of them. A game doing its own lighting turns this down to the
 level it wants the unlit parts of the scene to sit at.
-<a id="tecs.application.Application.Config.audio"></a>
+<a id="tecs.Application.Config.audio"></a>
 
-### tecs.application.Application.Config.audio
+### tecs.Application.Config.audio
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.audio">tecs.application.Application.Config.audio</a>: Audio.Config
+<pre><code v-pre><a href="#tecs.Application.Config.audio">tecs.Application.Config.audio</a>: Audio.Config
 </code></pre>
 
 Sound output. Omitted takes the defaults, which open the
 platform's default device.
-<a id="tecs.application.Application.Config.logFile"></a>
+<a id="tecs.Application.Config.logFile"></a>
 
-### tecs.application.Application.Config.logFile
+### tecs.Application.Config.logFile
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.logFile">tecs.application.Application.Config.logFile</a>: string
+<pre><code v-pre><a href="#tecs.Application.Config.logFile">tecs.Application.Config.logFile</a>: string
 </code></pre>
 
 Log file name, under the writable root, written as JSON Lines
@@ -369,11 +369,11 @@ dispatches to a destination a human can read on every platform;
 see `log`. A shipped game that wants a crash log in the field
 names one here, since where a game writes user data is the game's
 decision and not the engine's.
-<a id="tecs.application.Application.Config.logLevel"></a>
+<a id="tecs.Application.Config.logLevel"></a>
 
-### tecs.application.Application.Config.logLevel
+### tecs.Application.Config.logLevel
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.logLevel">tecs.application.Application.Config.logLevel</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.logLevel">tecs.Application.Config.logLevel</a>: integer
 </code></pre>
 
 Lowest priority that reaches the log at all, as one of
@@ -384,11 +384,11 @@ Applies to every category, ours and SDL's, and it is set before
 anything here has had a chance to say something. Separate from
 `logFile` above, which decides durability rather than volume: a
 game wanting everything kept and little of it shown sets both.
-<a id="tecs.application.Application.Config.checkpoint"></a>
+<a id="tecs.Application.Config.checkpoint"></a>
 
-### tecs.application.Application.Config.checkpoint
+### tecs.Application.Config.checkpoint
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.checkpoint">tecs.application.Application.Config.checkpoint</a>: string
+<pre><code v-pre><a href="#tecs.Application.Config.checkpoint">tecs.Application.Config.checkpoint</a>: string
 </code></pre>
 
 File name, under the writable root, that a checkpoint is written
@@ -397,31 +397,31 @@ Omitted means no checkpoint, and `stageCheckpoint` says so.
 
 See `Application:stageCheckpoint` for what a game has to do, which
 is the part that matters.
-<a id="tecs.application.Application.Config.mcpPort"></a>
+<a id="tecs.Application.Config.mcpPort"></a>
 
-### tecs.application.Application.Config.mcpPort
+### tecs.Application.Config.mcpPort
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.mcpPort">tecs.application.Application.Config.mcpPort</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.mcpPort">tecs.Application.Config.mcpPort</a>: integer
 </code></pre>
 
 Port for the MCP server. Omitted means no server, since a game
 should not open a socket nobody asked for.
-<a id="tecs.application.Application.Config.watch"></a>
+<a id="tecs.Application.Config.watch"></a>
 
-### tecs.application.Application.Config.watch
+### tecs.Application.Config.watch
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.watch">tecs.application.Application.Config.watch</a>: watch.Config
+<pre><code v-pre><a href="#tecs.Application.Config.watch">tecs.Application.Config.watch</a>: watch.Config
 </code></pre>
 
 Watches the content files this run has loaded and reloads them when
 they change. Omitted means no watcher, on the same footing as the
 server above: a poll of the filesystem is not something to start
 because a build happened to be able to. A release refuses it.
-<a id="tecs.application.Application.Config.capacity"></a>
+<a id="tecs.Application.Config.capacity"></a>
 
-### tecs.application.Application.Config.capacity
+### tecs.Application.Config.capacity
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.capacity">tecs.application.Application.Config.capacity</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.capacity">tecs.Application.Config.capacity</a>: integer
 </code></pre>
 
 Instances the renderer's buffers are sized for. Defaults to 65536.
@@ -436,39 +436,39 @@ Sized independently of `maxEntities` beside it, because the two
 count different things: a world full of entities that carry no
 `Renderable` needs no instances at all, and one text entity needs
 one instance per character.
-<a id="tecs.application.Application.Config.timestep"></a>
+<a id="tecs.Application.Config.timestep"></a>
 
-### tecs.application.Application.Config.timestep
+### tecs.Application.Config.timestep
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.timestep">tecs.application.Application.Config.timestep</a>: number
+<pre><code v-pre><a href="#tecs.Application.Config.timestep">tecs.Application.Config.timestep</a>: number
 </code></pre>
 
 Seconds one fixed step covers. Must be greater than zero. Defaults
 to 1/60.
-<a id="tecs.application.Application.Config.fixedMaxSteps"></a>
+<a id="tecs.Application.Config.fixedMaxSteps"></a>
 
-### tecs.application.Application.Config.fixedMaxSteps
+### tecs.Application.Config.fixedMaxSteps
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.fixedMaxSteps">tecs.application.Application.Config.fixedMaxSteps</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.fixedMaxSteps">tecs.Application.Config.fixedMaxSteps</a>: integer
 </code></pre>
 
 The most fixed steps one update runs before the overload policy
 applies. Must be a positive integer. Defaults to 10.
-<a id="tecs.application.Application.Config.fixedOverload"></a>
+<a id="tecs.Application.Config.fixedOverload"></a>
 
-### tecs.application.Application.Config.fixedOverload
+### tecs.Application.Config.fixedOverload
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.fixedOverload">tecs.application.Application.Config.fixedOverload</a>: ecs.FixedOverload
+<pre><code v-pre><a href="#tecs.Application.Config.fixedOverload">tecs.Application.Config.fixedOverload</a>: ecs.FixedOverload
 </code></pre>
 
 What becomes of the catch-up that did not fit. Defaults to "drop",
 which bounds a frame's work and reports the loss through
 `world:getStats`. "accumulate" keeps every second instead.
-<a id="tecs.application.Application.Config.maxEntities"></a>
+<a id="tecs.Application.Config.maxEntities"></a>
 
-### tecs.application.Application.Config.maxEntities
+### tecs.Application.Config.maxEntities
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.maxEntities">tecs.application.Application.Config.maxEntities</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.maxEntities">tecs.Application.Config.maxEntities</a>: integer
 </code></pre>
 
 Entity slots the world is sized for. Defaults to 2^20, and 2^22 - 1
@@ -479,11 +479,11 @@ when the entity is despawned and reused by the next one. The arena
 is preallocated for this many, so it is a memory decision as much
 as a limit, and a game that knows its population sets it rather
 than paying for a million slots it will not use.
-<a id="tecs.application.Application.Config.reserveRuns"></a>
+<a id="tecs.Application.Config.reserveRuns"></a>
 
-### tecs.application.Application.Config.reserveRuns
+### tecs.Application.Config.reserveRuns
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.reserveRuns">tecs.application.Application.Config.reserveRuns</a>: boolean
+<pre><code v-pre><a href="#tecs.Application.Config.reserveRuns">tecs.Application.Config.reserveRuns</a>: boolean
 </code></pre>
 
 Give each archetype a run with room to grow rather than packing the
@@ -506,22 +506,22 @@ Not named for debugging, unlike `debugMaxFrames` below, because it
 is not a debugging setting: it is a tuning one, measured at 15.4x
 on a mixed-archetype spawner scene. A name with `debug` in it would
 warn off exactly the shipped games that should turn it on.
-<a id="tecs.application.Application.Config.packImages"></a>
+<a id="tecs.Application.Config.packImages"></a>
 
-### tecs.application.Application.Config.packImages
+### tecs.Application.Config.packImages
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.packImages">tecs.application.Application.Config.packImages</a>: boolean
+<pre><code v-pre><a href="#tecs.Application.Config.packImages">tecs.Application.Config.packImages</a>: boolean
 </code></pre>
 
 Fit many images into each layer of the renderer's image array
 rather than one. Defaults to false, where the ceiling on distinct
 images is the array's layer count and a small image costs a whole
 cell. On, the ceiling is the array's area instead.
-<a id="tecs.application.Application.Config.shadows"></a>
+<a id="tecs.Application.Config.shadows"></a>
 
-### tecs.application.Application.Config.shadows
+### tecs.Application.Config.shadows
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.shadows">tecs.application.Application.Config.shadows</a>: Deferred.ShadowOptions
+<pre><code v-pre><a href="#tecs.Application.Config.shadows">tecs.Application.Config.shadows</a>: Deferred.ShadowOptions
 </code></pre>
 
 Let entities cast shadows, and tune what they cost. Nil, the
@@ -529,20 +529,20 @@ default, means an `Occluder` or a `DropShadow` on an entity draws
 the entity and casts nothing, because the targets that would hold a
 shadow are never built. An empty table turns them on with every
 default; see `Deferred.ShadowOptions` for the seven numbers.
-<a id="tecs.application.Application.Config.debugMaxFrames"></a>
+<a id="tecs.Application.Config.debugMaxFrames"></a>
 
-### tecs.application.Application.Config.debugMaxFrames
+### tecs.Application.Config.debugMaxFrames
 
-<pre><code v-pre><a href="#tecs.application.Application.Config.debugMaxFrames">tecs.application.Application.Config.debugMaxFrames</a>: integer
+<pre><code v-pre><a href="#tecs.Application.Config.debugMaxFrames">tecs.Application.Config.debugMaxFrames</a>: integer
 </code></pre>
 
 Stops after this many iterations. Lets an automated run drive a
 real window to completion without a human closing it.
-<a id="tecs.application.Application.Config.plugin"></a>
+<a id="tecs.Application.Config.plugin"></a>
 
-### tecs.application.Application.Config.plugin
+### tecs.Application.Config.plugin
 
-<pre><code v-pre>function <a href="#tecs.application.Application.Config.plugin">tecs.application.Application.Config.plugin</a>(ecs.World, Application)
+<pre><code v-pre>function <a href="#tecs.Application.Config.plugin">tecs.Application.Config.plugin</a>(types.World, Application)
 </code></pre>
 
 The game, as one function handed the world and this application.
@@ -554,7 +554,7 @@ next one.
 
 One entry point rather than a list, because composing plugins is
 something the world already does: `world:addPlugin` takes an
-`ecs.Plugin` and is how the engine installs its own, so a game with
+`tecs.Plugin` and is how the engine installs its own, so a game with
 several calls it from in here and needs no second mechanism.
 
 The world comes first because every plugin the world takes is
@@ -566,21 +566,21 @@ argument swap.
 
 | Type                           | Name | Description |
 | ------------------------------ | ---- | ----------- |
-| <code v-pre>ecs.World</code>   |      |             |
+| <code v-pre>types.World</code> |      |             |
 | <code v-pre>Application</code> |      |             |
 
-<a id="tecs.application.Application.audio"></a>
+<a id="tecs.Application.audio"></a>
 
-### tecs.application.Application.audio
+### tecs.Application.audio
 
-<pre><code v-pre><a href="#tecs.application.Application.audio">tecs.application.Application.audio</a>: Audio
+<pre><code v-pre><a href="#tecs.Application.audio">tecs.Application.audio</a>: Audio
 </code></pre>
 
-<a id="tecs.application.Application.checkpointPath"></a>
+<a id="tecs.Application.checkpointPath"></a>
 
-### tecs.application.Application.checkpointPath
+### tecs.Application.checkpointPath
 
-<pre><code v-pre>function <a href="#tecs.application.Application.checkpointPath">tecs.application.Application.checkpointPath</a>(self: Application): string
+<pre><code v-pre>function <a href="#tecs.Application.checkpointPath">tecs.Application.checkpointPath</a>(self: Application): string
 </code></pre>
 
 Where the checkpoint is written, or nil when none was configured.
@@ -597,11 +597,11 @@ Where the checkpoint is written, or nil when none was configured.
 | ------------------------- | ----------- |
 | <code v-pre>string</code> |             |
 
-<a id="tecs.application.Application.clearCrash"></a>
+<a id="tecs.Application.clearCrash"></a>
 
-### tecs.application.Application.clearCrash
+### tecs.Application.clearCrash
 
-<pre><code v-pre>function <a href="#tecs.application.Application.clearCrash">tecs.application.Application.clearCrash</a>(self: Application): boolean, string
+<pre><code v-pre>function <a href="#tecs.Application.clearCrash">tecs.Application.clearCrash</a>(self: Application): boolean, string
 </code></pre>
 
 Another frame to look at and a chance to reload; the world may be
@@ -655,11 +655,11 @@ of is not obviously a solver that can be stepped again.
 | <code v-pre>boolean</code> | Whether the loop resumed, and why it did not. |
 | <code v-pre>string</code>  |                                               |
 
-<a id="tecs.application.Application.crashed"></a>
+<a id="tecs.Application.crashed"></a>
 
-### tecs.application.Application.crashed
+### tecs.Application.crashed
 
-<pre><code v-pre>function <a href="#tecs.application.Application.crashed">tecs.application.Application.crashed</a>(self: Application): string
+<pre><code v-pre>function <a href="#tecs.Application.crashed">tecs.Application.crashed</a>(self: Application): string
 </code></pre>
 
 The gameplay traceback, or nil while the game is healthy.
@@ -676,79 +676,84 @@ The gameplay traceback, or nil while the game is healthy.
 | ------------------------- | ----------- |
 | <code v-pre>string</code> |             |
 
-<a id="tecs.application.Application.create"></a>
+<a id="tecs.Application.device"></a>
 
-### tecs.application.Application.create
+### tecs.Application.device
 
-<pre><code v-pre>function <a href="#tecs.application.Application.create">tecs.application.Application.create</a>(config: Application.Config): Application
+<pre><code v-pre><a href="#tecs.Application.device">tecs.Application.device</a>: Device
 </code></pre>
 
-Builds an application. Return the result from the entry chunk.
+<a id="tecs.Application.elapsed"></a>
 
-#### Parameters
+### tecs.Application.elapsed
 
-| Type                                  | Name                      | Description |
-| ------------------------------------- | ------------------------- | ----------- |
-| <code v-pre>Application.Config</code> | <code v-pre>config</code> |             |
-
-#### Returns
-
-| Type                           | Description |
-| ------------------------------ | ----------- |
-| <code v-pre>Application</code> |             |
-
-<a id="tecs.application.Application.device"></a>
-
-### tecs.application.Application.device
-
-<pre><code v-pre><a href="#tecs.application.Application.device">tecs.application.Application.device</a>: Device
-</code></pre>
-
-<a id="tecs.application.Application.elapsed"></a>
-
-### tecs.application.Application.elapsed
-
-<pre><code v-pre><a href="#tecs.application.Application.elapsed">tecs.application.Application.elapsed</a>: number
+<pre><code v-pre><a href="#tecs.Application.elapsed">tecs.Application.elapsed</a>: number
 </code></pre>
 
 Seconds of simulated time, advanced by the frame dt so a replay
 reproduces it exactly.
-<a id="tecs.application.Application.frame"></a>
+<a id="tecs.Application.frame"></a>
 
-### tecs.application.Application.frame
+### tecs.Application.frame
 
-<pre><code v-pre><a href="#tecs.application.Application.frame">tecs.application.Application.frame</a>: integer
+<pre><code v-pre><a href="#tecs.Application.frame">tecs.Application.frame</a>: integer
 </code></pre>
 
 Iterations completed.
-<a id="tecs.application.Application.input"></a>
+<a id="tecs.Application.input"></a>
 
-### tecs.application.Application.input
+### tecs.Application.input
 
-<pre><code v-pre><a href="#tecs.application.Application.input">tecs.application.Application.input</a>: Input
+<pre><code v-pre><a href="#tecs.Application.input">tecs.Application.input</a>: Input
 </code></pre>
 
-<a id="tecs.application.Application.mcp"></a>
+<a id="tecs.Application.mcp"></a>
 
-### tecs.application.Application.mcp
+### tecs.Application.mcp
 
-<pre><code v-pre><a href="#tecs.application.Application.mcp">tecs.application.Application.mcp</a>: mcp.Server
+<pre><code v-pre><a href="#tecs.Application.mcp">tecs.Application.mcp</a>: mcp.Server
 </code></pre>
 
 The debug server, when one was asked for.
-<a id="tecs.application.Application.quitRequested"></a>
+<a id="tecs.Application.newApplication"></a>
 
-### tecs.application.Application.quitRequested
+### tecs.Application.newApplication
 
-<pre><code v-pre><a href="#tecs.application.Application.quitRequested">tecs.application.Application.quitRequested</a>: boolean
+<pre><code v-pre>function <a href="#tecs.Application.newApplication">tecs.Application.newApplication</a>(config: Application.Config): Application
+</code></pre>
+
+Builds an application. Return the result from the entry chunk.
+
+Reached as `tecs.newApplication`, at the root rather than under a module,
+because an application is not a subsystem: it owns the window, the device,
+the input, the renderer and the audio, and is handed to the entry plugin
+beside the world.
+
+#### Parameters
+
+| Type                                  | Name                      | Description                                                                               |
+| ------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------- |
+| <code v-pre>Application.Config</code> | <code v-pre>config</code> | Read here, so a field changed on the table afterwards is not seen. Nothing is opened yet. |
+
+#### Returns
+
+| Type                           | Description                                               |
+| ------------------------------ | --------------------------------------------------------- |
+| <code v-pre>Application</code> | The application, at rest until the host's first callback. |
+
+<a id="tecs.Application.quitRequested"></a>
+
+### tecs.Application.quitRequested
+
+<pre><code v-pre><a href="#tecs.Application.quitRequested">tecs.Application.quitRequested</a>: boolean
 </code></pre>
 
 Set to true to leave the loop at the end of the current iteration.
-<a id="tecs.application.Application.readCheckpoint"></a>
+<a id="tecs.Application.readCheckpoint"></a>
 
-### tecs.application.Application.readCheckpoint
+### tecs.Application.readCheckpoint
 
-<pre><code v-pre>function <a href="#tecs.application.Application.readCheckpoint">tecs.application.Application.readCheckpoint</a>(self: Application): string
+<pre><code v-pre>function <a href="#tecs.Application.readCheckpoint">tecs.Application.readCheckpoint</a>(self: Application): string
 </code></pre>
 
 The bytes the last run left, or nil when there are none.
@@ -770,18 +775,18 @@ None of those is an error, so none of them raises.
 | ------------------------- | ----------- |
 | <code v-pre>string</code> |             |
 
-<a id="tecs.application.Application.renderer"></a>
+<a id="tecs.Application.renderer"></a>
 
-### tecs.application.Application.renderer
+### tecs.Application.renderer
 
-<pre><code v-pre><a href="#tecs.application.Application.renderer">tecs.application.Application.renderer</a>: Renderer
+<pre><code v-pre><a href="#tecs.Application.renderer">tecs.Application.renderer</a>: Renderer
 </code></pre>
 
-<a id="tecs.application.Application.stageCheckpoint"></a>
+<a id="tecs.Application.stageCheckpoint"></a>
 
-### tecs.application.Application.stageCheckpoint
+### tecs.Application.stageCheckpoint
 
-<pre><code v-pre>function <a href="#tecs.application.Application.stageCheckpoint">tecs.application.Application.stageCheckpoint</a>(self: Application, bytes: string)
+<pre><code v-pre>function <a href="#tecs.Application.stageCheckpoint">tecs.Application.stageCheckpoint</a>(self: Application, bytes: string)
 </code></pre>
 
 Hands the engine the bytes to write when the platform backgrounds us.
@@ -816,25 +821,25 @@ that will never be written is the one failure a game would not notice.
 | <code v-pre>Application</code> | <code v-pre>self</code>  |             |
 | <code v-pre>string</code>      | <code v-pre>bytes</code> |             |
 
-<a id="tecs.application.Application.suspended"></a>
+<a id="tecs.Application.suspended"></a>
 
-### tecs.application.Application.suspended
+### tecs.Application.suspended
 
-<pre><code v-pre><a href="#tecs.application.Application.suspended">tecs.application.Application.suspended</a>: boolean
+<pre><code v-pre><a href="#tecs.Application.suspended">tecs.Application.suspended</a>: boolean
 </code></pre>
 
 True while the platform has the application in the background. The
 loop still runs, but simulation and rendering do not.
-<a id="tecs.application.Application.window"></a>
+<a id="tecs.Application.window"></a>
 
-### tecs.application.Application.window
+### tecs.Application.window
 
-<pre><code v-pre><a href="#tecs.application.Application.window">tecs.application.Application.window</a>: Window
+<pre><code v-pre><a href="#tecs.Application.window">tecs.Application.window</a>: Window
 </code></pre>
 
-<a id="tecs.application.Application.world"></a>
+<a id="tecs.Application.world"></a>
 
-### tecs.application.Application.world
+### tecs.Application.world
 
-<pre><code v-pre><a href="#tecs.application.Application.world">tecs.application.Application.world</a>: ecs.World
+<pre><code v-pre><a href="#tecs.Application.world">tecs.Application.world</a>: types.World
 </code></pre>

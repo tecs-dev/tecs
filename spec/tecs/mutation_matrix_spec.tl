@@ -121,7 +121,7 @@ local function forEachMode(
     end
 end
 
-local function countMatching(w: tecs.World, component: tecs.Component): integer
+local function countMatching(w: tecs.World, component: tecs.ecs.Component): integer
     local q = w:query({include = {component}})
     local n = 0
     for _arch, len in q:iter() do
@@ -278,7 +278,7 @@ describe(
                 w:batchSet(
                     q,
                     MatArmor,
-                    function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
+                    function(arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
                         local col = arch:getMut(MatArmor)
                         for r = firstRow, lastRow do
                             col[r] = MatArmor(9)
@@ -304,7 +304,7 @@ describe(
                 local firstId = w:batchSpawn(
                     2,
                     {MatArmor, MatHealth},
-                    function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
+                    function(arch: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
                         local armor = arch:getMut(MatArmor)
                         local health = arch:getMut(MatHealth)
                         for r = firstRow, lastRow do

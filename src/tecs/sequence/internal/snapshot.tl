@@ -10,7 +10,7 @@
 --- register under their original (name, version), leaving the newest version
 --- untouched for later `play` calls.
 
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local log <const> = require("tecs.log")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 local seqcursors <const> = require("tecs.sequence.internal.cursors")
@@ -19,7 +19,7 @@ local seqprogram <const> = require("tecs.sequence.internal.program")
 local seqregistry <const> = require("tecs.sequence.internal.registry")
 local seqtypes <const> = require("tecs.sequence.internal.types")
 
-local type World = ecs.World
+local type World = types.World
 local type Cursor = seqtypes.Cursor
 local type ProgramImpl = seqtypes.ProgramImpl
 local type PlaybackState = seqtypes.PlaybackState

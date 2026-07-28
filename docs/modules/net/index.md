@@ -29,7 +29,7 @@ result on the thread that owns the future.
 
 ```teal
 local address <const> = net.resolve("game.example")
-local connection: tecs.future.Future<net.Stream>
+local connection: tecs.Future<net.Stream>
 
 function update()
     net.poll()

@@ -49,7 +49,7 @@ describe("phases", function()
             end
         end
 
-        local app = Application.create({
+        local app = Application.newApplication({
             window = { title = "phases", width = 64, height = 64 },
             plugin = plugin,
         })

@@ -25,7 +25,7 @@ describe(
                     "should prune dead archetypes whose relationship target was despawned",
                     function()
                         local target = world:spawn()
-                        local follower = world:spawn(Follows(target) as tecs.Component)
+                        local follower = world:spawn(Follows(target) as tecs.ecs.Component)
                         world:commit()
 
                         world:despawn(follower)
@@ -63,7 +63,7 @@ describe(
                     "should not prune ephemeral archetypes whose target is still alive",
                     function()
                         local target = world:spawn()
-                        local _follower = world:spawn(Follows(target) as tecs.Component)
+                        local _follower = world:spawn(Follows(target) as tecs.ecs.Component)
                         world:commit()
 
                         local pruned, _ = world:compact()
@@ -87,7 +87,7 @@ describe(
                     "should be idempotent",
                     function()
                         local target = world:spawn()
-                        local follower = world:spawn(Follows(target) as tecs.Component)
+                        local follower = world:spawn(Follows(target) as tecs.ecs.Component)
                         world:commit()
                         world:despawn(follower)
                         world:despawn(target)
@@ -106,7 +106,7 @@ describe(
                     function()
                         -- Create several archetypes, then prune one in the middle
                         local t1 = world:spawn()
-                        local _f1 = world:spawn(Follows(t1) as tecs.Component)
+                        local _f1 = world:spawn(Follows(t1) as tecs.ecs.Component)
                         world:commit()
 
                         local e2 = world:spawn(Tag)
@@ -127,7 +127,7 @@ describe(
                     "should maintain query coherence across compact",
                     function()
                         local target = world:spawn()
-                        local follower = world:spawn(Follows(target) as tecs.Component)
+                        local follower = world:spawn(Follows(target) as tecs.ecs.Component)
                         world:commit()
 
                         local query = world:query({include = {Follows}})
@@ -150,7 +150,7 @@ describe(
 
                         -- New entities should be picked up by the query
                         local t2 = world:spawn()
-                        local _f2 = world:spawn(Follows(t2) as tecs.Component)
+                        local _f2 = world:spawn(Follows(t2) as tecs.ecs.Component)
                         world:commit()
                         count = 0
                         for _ in query:iter() do
@@ -166,7 +166,7 @@ describe(
                         -- Freelist regression: after destroy, the next archetype
                         -- creation should grab the freed id before bumping maxId.
                         local t1 = world:spawn()
-                        local _f1 = world:spawn(Follows(t1) as tecs.Component)
+                        local _f1 = world:spawn(Follows(t1) as tecs.ecs.Component)
                         world:commit()
 
                         local index = (world as {string: any}).archetypeIndex as {string: integer}
@@ -180,7 +180,7 @@ describe(
 
                         -- Spawn a new ephemeral-arch entity. Should reuse the freed id.
                         local t2 = world:spawn()
-                        local _f2 = world:spawn(Follows(t2) as tecs.Component)
+                        local _f2 = world:spawn(Follows(t2) as tecs.ecs.Component)
                         world:commit()
 
                         luassert.equals(

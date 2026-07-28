@@ -60,7 +60,7 @@ The recommended path for table components is to declare field names and let Tecs
 omits; use `nil` for fields that have no default.
 
 ```teal
-local record Health is tecs.Component
+local record Health is tecs.ecs.Component
     value: number
     max: number
     metamethod __call: function(self, value?: number, max?: number): Health
@@ -82,12 +82,12 @@ Instances carry a metatable whose `__index` is the container, so `instance.compo
 container-level fields resolve without being stamped on every instance.
 
 ::: details Typing `new` config
-`Health.new` in the above example is inherited from `tecs.Component`'s base signature
+`Health.new` in the above example is inherited from `tecs.ecs.Component`'s base signature
 `function(data: {string: any}): self`. Override it with a nested config record when you want field-by-field
 type checking on callers:
 
 ```teal
-local record Health is tecs.Component
+local record Health is tecs.ecs.Component
     value: number
     max: number
 
@@ -127,7 +127,7 @@ The common case: `fields` alongside an `init` hook that adds validation or deriv
 the base shape and `.new` unpacking; your `init` refines the allocated instance.
 
 ```teal
-local record Inventory is tecs.Component
+local record Inventory is tecs.ecs.Component
     slots: {string}
     capacity: integer
     metamethod __call: function(self, slots: {string}, capacity?: integer): Inventory

@@ -85,7 +85,7 @@ local function phrase(seed: integer, length: integer): string
     return table.concat(out)
 end
 
-return tecs.application.create({
+return tecs.newApplication({
     window = {title = "text", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
@@ -93,7 +93,7 @@ return tecs.application.create({
     maxEntities = TEXTS * (LENGTH + 4) + 4096,
     debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.application.Application)
+    plugin = function(world: tecs.World, app: tecs.Application)
         local renderer = app.renderer
         -- Real time, recorded where both values are visible. The world's dt is
         -- whatever the loop measured, and this is that same measurement kept

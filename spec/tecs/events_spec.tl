@@ -2,7 +2,7 @@ require("busted")
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
-local type Event = tecs.Event
+local type Event = tecs.ecs.Event
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Test fixtures

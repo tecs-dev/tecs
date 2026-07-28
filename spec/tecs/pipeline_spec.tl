@@ -5,7 +5,7 @@ local luassert = require("luassert")
 
 local record Test
     world: tecs.World
-    pipeline: tecs.Pipeline
+    pipeline: tecs.ecs.Pipeline
     counter: integer
     fixedCounter: integer
     updateCounter: integer
@@ -68,7 +68,7 @@ describe(
         it(
             "exposes concrete phase positions through the public Phase type",
             function()
-                local update: tecs.Phase = tecs.ecs.phases.Update
+                local update: tecs.ecs.Phase = tecs.ecs.phases.Update
                 luassert.is_true(update.position > 0)
                 luassert.equals("Update", update.name)
             end
@@ -466,7 +466,7 @@ describe(
                 })
 
                 local other = pipeline.new(FPS)
-                local custom = {name = "CrossPipelineCustom"} as tecs.Phase
+                local custom = {name = "CrossPipelineCustom"} as tecs.ecs.Phase
                 other:registerPhase(custom)
                 other:addSystem({
                     phase = custom,
@@ -498,7 +498,7 @@ describe(
             return {commit = function(_self: tecs.World) end} as tecs.World
         end
 
-        local function counting(p: tecs.Pipeline): tecs.Pipeline
+        local function counting(p: tecs.ecs.Pipeline): tecs.ecs.Pipeline
             p:addSystem({
                 phase = tecs.ecs.phases.FixedUpdate,
                 name = "overloadStep",
@@ -616,7 +616,7 @@ describe(
                     pipeline.new(1 / 60, 0)
                 end), "a frame that may run no steps never advances")
                 luassert.is_false(pcall(function() pipeline.new(1 / 60, 2.5 as integer) end))
-                luassert.is_false(pcall(function() pipeline.new(1 / 60, 10, "clamp" as tecs.FixedOverload) end))
+                luassert.is_false(pcall(function() pipeline.new(1 / 60, 10, "clamp" as tecs.ecs.FixedOverload) end))
             end
         )
     end

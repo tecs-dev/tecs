@@ -22,6 +22,7 @@
 ---   sequence.play(world, intro, {owner = encounter, bindings = {boss = bossId}})
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local seqtypes <const> = require("tecs.sequence.internal.types")
 local seqprogram <const> = require("tecs.sequence.internal.program")
 local seqregistry <const> = require("tecs.sequence.internal.registry")
@@ -34,7 +35,7 @@ local seqjson <const> = require("tecs.sequence.internal.json")
 local seqtweenrun <const> = require("tecs.sequence.internal.tweenrun")
 local tweeneval <const> = require("tecs.sequence.internal.tweeneval")
 
-local type World = ecs.World
+local type World = types.World
 
 -- Who holds a pause when the caller does not say.
 local DEFAULT_HOLDER <const> = "user"
@@ -592,7 +593,7 @@ local record sequence
 
     --- Play a registered tween preset on a bound entity.
     ---
-    --- Needs the sequencer, which `tecs.application.create` installs. A binding
+    --- Needs the sequencer, which `tecs.newApplication` installs. A binding
     --- that is missing or dead is not a fault: nothing plays, and a following
     --- `waitTween` resumes at once reporting `targetLost`.
     ---
@@ -757,7 +758,7 @@ local record sequence
     ---     `onEntitiesAdded` and `onEntitiesRemoved` are wrapped rather than
     ---     replaced: the ones you supply are still called, after the name is
     ---     marked. A non-table raises.
-    registerQuery: function(world: World, name: string, descriptor: ecs.Query.Descriptor)
+    registerQuery: function(world: World, name: string, descriptor: types.Query.Descriptor)
 
     --- Whether a query name is registered on this world.
     ---
@@ -968,7 +969,7 @@ local record sequence
     ---     the format is free to change.
     disassemble: function(program: Program, pc?: integer): string
 
-    --- Install the sequencer. Auto-installed by `tecs.application.create`, and safe
+    --- Install the sequencer. Auto-installed by `tecs.newApplication`, and safe
     --- to call again: a second install on the same world does nothing.
     plugin: function(world: World)
 end
@@ -1210,7 +1211,7 @@ function sequence.hasAction(world: World, name: string): boolean
     return seqcursors.stateFor(world).actions[name] ~= nil
 end
 
-function sequence.registerQuery(world: World, name: string, descriptor: ecs.Query.Descriptor)
+function sequence.registerQuery(world: World, name: string, descriptor: types.Query.Descriptor)
     if type(name) ~= "string" or name == "" then
         error("sequence.registerQuery requires a non-empty query name", 2)
     end
@@ -1223,7 +1224,7 @@ function sequence.registerQuery(world: World, name: string, descriptor: ecs.Quer
     -- step for every name that moved, not once per entity.
     local userAdded = descriptor.onEntitiesAdded
     local userRemoved = descriptor.onEntitiesRemoved
-    local spec: ecs.Query.Descriptor = {}
+    local spec: types.Query.Descriptor = {}
     for key, value in pairs(descriptor as {string: any}) do
         (spec as {string: any})[key] = value
     end

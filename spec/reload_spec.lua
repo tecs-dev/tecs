@@ -526,7 +526,7 @@ describe("reload_shaders against a running application", function()
     local watch = require("tecs.platform.watch")
 
     it("rebuilds the pipelines of the application that is running", function()
-        local app = Application.create({
+        local app = Application.newApplication({
             window = { title = "reload", width = 64, height = 64 },
             -- Binding the tools is what registering a port turns on, and the
             -- reload is registered beside them.
@@ -561,7 +561,7 @@ describe("reload_shaders against a running application", function()
     -- registered without a port being opened: an edit picked up is worth having
     -- whether or not a debug server was wanted.
     it("runs the watcher an application was configured with", function()
-        local app = Application.create({
+        local app = Application.newApplication({
             window = { title = "watch", width = 64, height = 64 },
             watch = { interval = 0 },
         })

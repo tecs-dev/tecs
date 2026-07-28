@@ -247,7 +247,7 @@ end
 
 --- Builds an application over a still scene with one moving entity.
 local function scene()
-    return Application.create({
+    return Application.newApplication({
         window = { title = "allocation", width = 320, height = 240 },
         presentMode = "immediate",
         ambientLight = { 1.0, 1.0, 1.0 },

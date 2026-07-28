@@ -111,15 +111,16 @@ export default defineConfig({
             // somebody invented: the parent is a name a game writes.
             //
             // `tecs.ecs` is the group below rather than a row here, and
-            // `tecs.version` is a string with no page of its own; both are in
-            // the index, which is the list of names.
+            // `tecs.version`, `tecs.Transform` and `tecs.newApplication` are a
+            // string, a component and a function rather than pages of their
+            // own; all of them are in the index, which is the list of names.
             {
                 text: "Modules",
                 collapsed: false,
                 items: [
                     { text: "Overview", link: "/modules/" },
                     { text: "Generated signatures", link: "/modules/" },
-                    { text: "tecs.application", link: "/modules/application" },
+                    { text: "tecs.Application", link: "/modules/Application" },
                     { text: "tecs.assets", link: "/modules/assets" },
                     { text: "tecs.audio", link: "/modules/audio" },
                     { text: "tecs.box2d", link: "/modules/box2d" },
@@ -133,7 +134,7 @@ export default defineConfig({
                             { text: "tecs.filesystem.watch", link: "/modules/filesystem/watch" },
                         ],
                     },
-                    { text: "tecs.future", link: "/modules/future" },
+                    { text: "tecs.Future", link: "/modules/Future" },
                     {
                         text: "tecs.gfx",
                         collapsed: false,

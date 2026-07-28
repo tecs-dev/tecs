@@ -25,7 +25,7 @@ open a socket nobody asked for. The application binds the renderer and the world
 two tool modules so their registrations run, and calls `poll` once per frame before the crash guard.
 
 ```teal
-tecs.application.create({
+tecs.newApplication({
     mcpPort = 7100,
     plugin = registerEverything,
 })

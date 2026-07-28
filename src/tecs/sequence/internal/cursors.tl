@@ -11,14 +11,14 @@
 --- report a final state; once reused, the generation check makes the old
 --- handle report nothing rather than another playback's state.
 
-local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local log <const> = require("tecs.log")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 local seqregistry <const> = require("tecs.sequence.internal.registry")
 local seqtypes <const> = require("tecs.sequence.internal.types")
 
-local type World = ecs.World
+local type World = types.World
 local type Cursor = seqtypes.Cursor
 local type WorldState = seqtypes.WorldState
 local type FaultReason = seqtypes.FaultReason

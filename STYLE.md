@@ -207,7 +207,7 @@ is a name that matches nothing the library's own documentation says.
 - Declare the container record with the interface:
 
   ```teal
-  local record Velocity is tecs.Component
+  local record Velocity is tecs.ecs.Component
       x: number
       y: number
   end
@@ -241,7 +241,7 @@ is a name that matches nothing the library's own documentation says.
   condition is state-shaped. Use `tecs.ecs.runif.*` predicates for common gates
   and custom predicates when combining checks.
 - Systems receive `dt`; never read wall clocks in game logic.
-- The host owns the loop. An entry file returns `tecs.application.create(config)`
+- The host owns the loop. An entry file returns `tecs.newApplication(config)`
   and its callbacks run from there; nothing drives frames itself.
 
 ## Queries

@@ -37,7 +37,7 @@ local world = tecs.ecs.newWorld({
 An [`Application`](/modules/application) owns a world and drives it: it calls `world:startup` at the end of
 initialization, once the entry plugin has run, so everything the plugin spawned is resident before the first
 frame; `world:update(dt)` once per host iteration; and `world:shutdown` before anything is destroyed. A game
-does not call these itself. It reaches the world through the entry plugin `tecs.application.create` takes; see
+does not call these itself. It reaches the world through the entry plugin `tecs.newApplication` takes; see
 [Getting started](/getting-started). Call them yourself only when you drive a world with no application, as
 tests, tools and benchmarks do.
 
@@ -844,7 +844,7 @@ function World:addPlugin(plugin: function(world: World))
 local Transform <const> = tecs.Transform
 local Renderable <const> = tecs.gfx.Renderable
 
-local SPIN: tecs.Key<number> = tecs.ecs.newKey("game.spinRate")
+local SPIN: tecs.ecs.Key<number> = tecs.ecs.newKey("game.spinRate")
 
 local function spinPlugin(world: tecs.World)
     -- Build the query once, here, and never inside `run`.
@@ -890,7 +890,7 @@ local gameSettings: GameSettings = {
 }
 
 -- Define a key for the resource.
-local GAME_SETTINGS: tecs.Key<GameSettings> = tecs.ecs.newKey("game.settings")
+local GAME_SETTINGS: tecs.ecs.Key<GameSettings> = tecs.ecs.newKey("game.settings")
 
 -- Add a resource to the world
 world.resources[GAME_SETTINGS] = gameSettings
@@ -903,7 +903,7 @@ print("Difficulty:", settings.difficulty)
 You can define resource keys for numbers, strings, and any other type too.
 
 ```teal
-local GAME_UUID: tecs.Key<string> = tecs.ecs.newKey("game.uuid")
+local GAME_UUID: tecs.ecs.Key<string> = tecs.ecs.newKey("game.uuid")
 world.resources[GAME_UUID] = "abc"
 ```
 

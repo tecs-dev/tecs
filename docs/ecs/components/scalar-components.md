@@ -41,7 +41,7 @@ function tecs.ecs.newScalarComponent<T>(options: ScalarComponentOptions<T>): Sca
 | `requires`  | `{Component}`                       | no       | Declarative auto-dependencies. When this component is added to an entity, any listed components not already present are added in the same archetype transition. Entries may be component types (constructed with no args) or instances. Transitive. |
 | `transient` | `boolean`                           | no       | If `true`, omit this scalar component from snapshots.                                                                                                                                                                                               |
 
-**Returns:** the registered component, typed `tecs.ScalarComponent<T>`. It also carries `scalarKind` and
+**Returns:** the registered component, typed `tecs.ecs.ScalarComponent<T>`. It also carries `scalarKind` and
 `scalarDefault` fields describing the registration.
 
 ### Typed exports
@@ -54,7 +54,7 @@ registration result to it:
 local tecs <const> = require("tecs")
 
 local record mymodule
-    Health: tecs.ScalarComponent<number>
+    Health: tecs.ecs.ScalarComponent<number>
 end
 
 mymodule.Health = tecs.ecs.newScalarComponent({

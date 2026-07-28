@@ -1068,9 +1068,9 @@ describe(
             function()
                 local Add <const> = tecs.ecs.newComponent({
                     name = "SpecSequenceAdd",
-                    container = {} as tecs.Component,
+                    container = {} as tecs.ecs.Component,
                     fields = {"hp"},
-                    init = function(instance: tecs.Component, hp: number) (instance as {string: any}).hp = hp end,
+                    init = function(instance: tecs.ecs.Component, hp: number) (instance as {string: any}).hp = hp end,
                 })
 
                 local calls: integer
@@ -1084,7 +1084,7 @@ describe(
                     sequence.registerAction(
                         world,
                         "spec.spawnAdd",
-                        function(w) spawned[#spawned + 1] = w:spawn(Add(1) as tecs.Component) end
+                        function(w) spawned[#spawned + 1] = w:spawn(Add(1) as tecs.ecs.Component) end
                     )
                     sequence.registerAction(
                         world,
@@ -1122,7 +1122,7 @@ describe(
                         luassert.equals("any", status.waitingCondition)
                         luassert.is_nil(status.wakeAt)
 
-                        world:spawn(Add(1) as tecs.Component)
+                        world:spawn(Add(1) as tecs.ecs.Component)
                         world:commit()
                         stepWorld(world, 1)
                         luassert.equals(1, calls)
@@ -1184,7 +1184,7 @@ describe(
                                     return
                                 end
                                 pending = false
-                                spawned[1] = world:spawn(Add(1) as tecs.Component)
+                                spawned[1] = world:spawn(Add(1) as tecs.ecs.Component)
                             end,
                         })
 
@@ -1269,7 +1269,7 @@ describe(
                         stepWorld(world, 2)
 
                         luassert.is_true(sequence.cancel(world, handle))
-                        world:spawn(Add(1) as tecs.Component)
+                        world:spawn(Add(1) as tecs.ecs.Component)
                         world:commit()
                         stepWorld(world, 2)
                         luassert.equals(0, calls)
@@ -1292,7 +1292,7 @@ describe(
                         luassert.equals("spec.adds", sequence.status(world, handle).waitingQuery)
 
                         local saved = world:saveSnapshot().buffer
-                        world:spawn(Add(1) as tecs.Component)
+                        world:spawn(Add(1) as tecs.ecs.Component)
                         world:commit()
                         stepWorld(world, 2)
                         luassert.equals(1, calls)
@@ -1306,7 +1306,7 @@ describe(
                         luassert.equals(0, calls)
                         luassert.equals("spec.adds", sequence.status(world, handle).waitingQuery)
 
-                        world:spawn(Add(1) as tecs.Component)
+                        world:spawn(Add(1) as tecs.ecs.Component)
                         world:commit()
                         stepWorld(world, 1)
                         luassert.equals(1, calls)

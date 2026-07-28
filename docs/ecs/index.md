@@ -45,7 +45,7 @@ A `World` owns the entities, components, systems, plugins, resources, queries an
 local world = tecs.ecs.newWorld()
 ```
 
-A game rarely calls this: `tecs.application.create` builds the world and hands it to the entry plugin. Constructing one
+A game rarely calls this: `tecs.newApplication` builds the world and hands it to the entry plugin. Constructing one
 directly is what a test, a tool or a headless server does.
 
 > See the [World reference](/ecs/world).
@@ -118,7 +118,7 @@ world:spawn(
 **Your own**, registered with `tecs.ecs.newComponent`. Declare a Teal record, then wire it up:
 
 ```teal
-local record Health is tecs.Component
+local record Health is tecs.ecs.Component
     current: number
     max: number
     metamethod __call: function(self, current: number, max: number): Health
@@ -174,7 +174,7 @@ world:addPlugin(function(world: tecs.World)
 end)
 ```
 
-There is one composition mechanism rather than two. The entry plugin `tecs.application.create` takes is the same shape
+There is one composition mechanism rather than two. The entry plugin `tecs.newApplication` takes is the same shape
 with the application passed alongside, and a game with several modules calls `world:addPlugin` from inside it.
 The engine installs its own pieces the same way: `tecs.gfx.textPlugin({renderer = app.renderer})` is an ordinary
 plugin.
@@ -271,7 +271,7 @@ local record Score
     points: integer
 end
 
-local SCORE <const>: tecs.Key<Score> = tecs.ecs.newKey("game.score")
+local SCORE <const>: tecs.ecs.Key<Score> = tecs.ecs.newKey("game.score")
 ```
 
 The key carries the type, so reads and writes through it are checked:
@@ -571,20 +571,6 @@ from `Disabled`: a paused world is one that renders and does not think.
 <pre><code v-pre>type <a href="#tecs.ecs.Pipeline">tecs.ecs.Pipeline</a> = types.Pipeline
 </code></pre>
 
-<a id="tecs.ecs.Plugin"></a>
-
-### tecs.ecs.Plugin
-
-<pre><code v-pre>type <a href="#tecs.ecs.Plugin">tecs.ecs.Plugin</a> = types.Plugin
-</code></pre>
-
-<a id="tecs.ecs.Query"></a>
-
-### tecs.ecs.Query
-
-<pre><code v-pre>type <a href="#tecs.ecs.Query">tecs.ecs.Query</a> = types.Query
-</code></pre>
-
 <a id="tecs.ecs.QueryCursor"></a>
 
 ### tecs.ecs.QueryCursor
@@ -753,13 +739,6 @@ Emitted at the state regaining focus when the one above it is popped.
 <pre><code v-pre>type <a href="#tecs.ecs.Stats">tecs.ecs.Stats</a> = types.World.Stats
 </code></pre>
 
-<a id="tecs.ecs.System"></a>
-
-### tecs.ecs.System
-
-<pre><code v-pre>type <a href="#tecs.ecs.System">tecs.ecs.System</a> = types.System
-</code></pre>
-
 <a id="tecs.ecs.SystemConfig"></a>
 
 ### tecs.ecs.SystemConfig
@@ -795,13 +774,6 @@ Positions everything a world holds: the hierarchy, physics, the
 sequencer and the renderer all move the same one. Not a drawing
 component, which is why it is here and not on `tecs.gfx`, and why a
 headless world has it.
-<a id="tecs.ecs.World"></a>
-
-### tecs.ecs.World
-
-<pre><code v-pre>type <a href="#tecs.ecs.World">tecs.ecs.World</a> = types.World
-</code></pre>
-
 <a id="tecs.ecs.componentByName"></a>
 
 ### tecs.ecs.componentByName
@@ -1196,7 +1168,7 @@ Creates and registers a new tag component that uses bitset storage for efficienc
 
 ### tecs.ecs.newWorld
 
-<pre><code v-pre>function <a href="#tecs.ecs.newWorld">tecs.ecs.newWorld</a>(config: types.World.Config): <a href="#tecs.ecs.World">World</a>
+<pre><code v-pre>function <a href="#tecs.ecs.newWorld">tecs.ecs.newWorld</a>(config: types.World.Config): World
 </code></pre>
 
 Create a new World.
@@ -1209,9 +1181,9 @@ Create a new World.
 
 #### Returns
 
-| Type                                                   | Description                                                                                                                                                                                                                                  |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.ecs.World">World</a></code> | A world with the builtin components already registered and no systems. Worlds are independent: an entity id is meaningful only in the world that issued it, while a component id is process-wide and shared by every world that carries one. |
+| Type                     | Description                                                                                                                                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code> | A world with the builtin components already registered and no systems. Worlds are independent: an entity id is meaningful only in the world that issued it, while a component id is process-wide and shared by every world that carries one. |
 
 <a id="tecs.ecs.phases"></a>
 

@@ -29,6 +29,7 @@
 --- Sprite samples it and textured and untextured geometry share one path.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
 local Camera <const> = require("tecs.gfx.Camera")
 local FramePacket <const> = require("tecs.FramePacket")
@@ -189,9 +190,9 @@ local record Extractor
     --- Alpha the previous sync drew at, so a frame that lands at the same
     --- point in the step as the last one rewrites nothing.
     _lastAlpha: number
-    _world: ecs.World
-    _renderables: ecs.Query
-    _lightSources: ecs.Query
+    _world: types.World
+    _renderables: types.Query
+    _lightSources: types.Query
     --- Producers, in the order they were added, which is the order their runs
     --- are laid out after the archetypes.
     _producers: {InstanceProducer}
@@ -1158,7 +1159,7 @@ end
 --- command buffer and the render needs no world.
 --- @param published Called once the packet is filled, which is the moment it
 ---     would be handed over. What flips a slot's state when there is one.
-function Extractor:install(world: ecs.World, packet: FramePacket, published: function())
+function Extractor:install(world: types.World, packet: FramePacket, published: function())
     self._world = world
 
     -- Snapshotting before anything in the step moves is what makes the pair a

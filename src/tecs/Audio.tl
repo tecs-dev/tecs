@@ -57,6 +57,7 @@
 --- replaces the earlier one rather than layering over it.
 
 local ecs <const> = require("tecs.ecs")
+local type types = require("tecs.types")
 local assets <const> = require("tecs.assets")
 local random <const> = require("tecs.random")
 local loader <const> = require("tecs.ffi.loader")
@@ -273,7 +274,7 @@ ecs.newFFIComponent({
             group = groupNames[instance.group as integer],
         }
     end,
-    deserialize = function(_world: ecs.World, data: {string: any}): Sound
+    deserialize = function(_world: types.World, data: {string: any}): Sound
         local path = data.clip as string
         local clip = 0
         if path ~= nil and path ~= "" then
@@ -637,7 +638,7 @@ local AudioMT <const>: metatable<Audio> = {__index = Audio}
 ---
 --- Declared here rather than beside `Audio.of`, because `destroy` clears the
 --- entries naming it and reads this well before that point in the file.
-local installed <const>: {ecs.World: Audio} = setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
+local installed <const>: {types.World: Audio} = setmetatable({}, {__mode = "k"} as metatable<{types.World: Audio}>)
 
 Audio.Sound = Sound
 
@@ -2008,7 +2009,7 @@ local rowOptions <const>: Audio.PlayOptions = {}
 --- Archetype-shaped rather than per-row: a disabled entity is in an archetype
 --- of its own, so a world with nothing disabled matches nothing and this walks
 --- nothing. Only the frame something is disabled on writes.
-local function hush(hushed: ecs.Query)
+local function hush(hushed: types.Query)
     for archetype, length in hushed:iter() do
         local rows = archetype:get(Sound) as {Sound}
         local mutable: {Sound} = nil
@@ -2039,7 +2040,7 @@ end
 --- on the list is one a game changes without wanting the sound to restart,
 --- and every field left off it takes a stop and a fresh start to change
 --- anyway, so nothing here is paid for on behalf of a case that cannot use it.
-local function reconcile(self: Audio, sounds: ecs.Query, hushed: ecs.Query)
+local function reconcile(self: Audio, sounds: types.Query, hushed: types.Query)
     local voices = self._voices
     for slot = 1, #voices do
         voices[slot].referenced = false
@@ -2227,7 +2228,7 @@ end
 ---
 --- @return nil before `install` and again after the instance is destroyed,
 ---     since a destroyed one stops answering for every world it was in.
-function Audio.of(world: ecs.World): Audio
+function Audio.of(world: types.World): Audio
     return installed[world]
 end
 
@@ -2241,7 +2242,7 @@ end
 --- @param world Repoints this instance's pitch variance at the world's
 ---     `tecs.audio` random stream, so installing into a second world moves the
 ---     variance to that one's. One `Audio` per world is the shape this expects.
-function Audio:install(world: ecs.World)
+function Audio:install(world: types.World)
     installed[world] = self
 
     -- Pitch variance moves onto the world's stream, so it is seeded with
@@ -2273,8 +2274,8 @@ function Audio:install(world: ecs.World)
 
     world:addSnapshotHandler({
         name = "tecs.audio",
-        save = function(_world: ecs.World): any return saveMixer(self) end,
-        load = function(_world: ecs.World, value: any) loadMixer(self, value as {string: any}) end,
+        save = function(_world: types.World): any return saveMixer(self) end,
+        load = function(_world: types.World, value: any) loadMixer(self, value as {string: any}) end,
     })
 end
 
