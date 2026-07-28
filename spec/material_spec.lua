@@ -56,10 +56,16 @@ end
 
 --- True when `wanted` appears anywhere inside a nest of tables.
 local function holds(value, wanted)
-    if value == wanted then return true end
-    if type(value) ~= "table" then return false end
+    if value == wanted then
+        return true
+    end
+    if type(value) ~= "table" then
+        return false
+    end
     for _, item in pairs(value) do
-        if holds(item, wanted) then return true end
+        if holds(item, wanted) then
+            return true
+        end
     end
     return false
 end
@@ -161,7 +167,9 @@ describe("material identity across a snapshot", function()
         rebuild()
 
         local restored = tecs.newWorld()
-        local ok, err = pcall(function() restored:loadSnapshot(snapshot) end)
+        local ok, err = pcall(function()
+            restored:loadSnapshot(snapshot)
+        end)
 
         assert.is_false(ok, "a material the build has lost cannot be guessed at")
         assert.is_truthy(
