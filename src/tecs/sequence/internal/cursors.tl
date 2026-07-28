@@ -54,22 +54,20 @@ local record cursors
     childSlots: function(cursor: Cursor): {integer}
 
     claimChannel: function(state: WorldState, cursor: Cursor)
-    retire: function(
-        state: WorldState, cursor: Cursor, finalState: PlaybackState,
-        reason?: seqtypes.TweenOutcome
-    )
+    retire: function(state: WorldState, cursor: Cursor, finalState: PlaybackState, reason?: seqtypes.TweenOutcome)
     fault: function(state: WorldState, cursor: Cursor, reason: FaultReason, message: string)
 
     pauseTree: function(state: WorldState, cursor: Cursor, holder: string): boolean
     resumeTree: function(state: WorldState, cursor: Cursor, holder: string): boolean
 end
 
-local states: {World: WorldState} =
-    setmetatable({}, {__mode = "k"} as metatable<{World: WorldState}>)
+local states: {World: WorldState} = setmetatable({}, {__mode = "k"} as metatable<{World: WorldState}>)
 
 function cursors.stateFor(world: World): WorldState
     local state = states[world]
-    if state then return state end
+    if state then
+        return state
+    end
     state = {
         world = world,
         cursors = {},
@@ -103,8 +101,9 @@ end
 
 function cursors.schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
     cursor.wakeAt = wakeAt
-    cursor.seq = seqclock.schedule(state.clocks[cursor.clock], wakeAt,
-        cursors.packHandle(cursor.slot, cursor.generation))
+    cursor.seq = seqclock.schedule(
+        state.clocks[cursor.clock], wakeAt, cursors.packHandle(cursor.slot, cursor.generation)
+    )
 end
 
 --- The clock a cursor is scheduled against.
@@ -113,11 +112,15 @@ function cursors.clockOf(state: WorldState, cursor: Cursor): seqclock.Clock
 end
 
 function cursors.resolve(state: WorldState, handle: seqtypes.Handle): Cursor
-    if type(handle) ~= "number" then return nil end
+    if type(handle) ~= "number" then
+        return nil
+    end
     local slot = handle % SLOT_LIMIT
     local generation = (handle - slot) / SLOT_LIMIT
     local cursor = state.cursors[slot]
-    if not cursor or cursor.generation ~= generation then return nil end
+    if not cursor or cursor.generation ~= generation then
+        return nil
+    end
     return cursor
 end
 
@@ -156,7 +159,9 @@ end
 -- leaving is a swap with the last entry rather than a scan: 20k evaluating
 -- playbacks would otherwise make every completion linear in the rest.
 function cursors.activate(state: WorldState, cursor: Cursor)
-    if cursor.activeIndex then return end
+    if cursor.activeIndex then
+        return
+    end
     local active <const> = cursors.clockOf(state, cursor).active
     local at <const> = #active + 1
     active[at] = cursor
@@ -165,7 +170,9 @@ end
 
 function cursors.deactivate(state: WorldState, cursor: Cursor)
     local at <const> = cursor.activeIndex
-    if not at then return end
+    if not at then
+        return
+    end
     cursor.activeIndex = nil
     local active <const> = cursors.clockOf(state, cursor).active
     local last <const> = #active
@@ -180,11 +187,7 @@ function cursors.deactivate(state: WorldState, cursor: Cursor)
     active[last] = nil
 end
 
-function cursors.park(
-    index: {string: {integer: boolean}},
-    key: string,
-    slot: integer
-)
+function cursors.park(index: {string: {integer: boolean}}, key: string, slot: integer)
     local blocked = index[key]
     if not blocked then
         blocked = {}
@@ -193,15 +196,15 @@ function cursors.park(
     blocked[slot] = true
 end
 
-function cursors.unpark(
-    index: {string: {integer: boolean}},
-    key: string,
-    slot: integer
-)
+function cursors.unpark(index: {string: {integer: boolean}}, key: string, slot: integer)
     local blocked = index[key]
-    if not blocked then return end
+    if not blocked then
+        return
+    end
     blocked[slot] = nil
-    if next(blocked) == nil then index[key] = nil end
+    if next(blocked) == nil then
+        index[key] = nil
+    end
 end
 
 -- Drop a cursor from whichever wait index holds it. Every wait that is not
@@ -231,7 +234,9 @@ end
 -- nothing is following it no longer reports back.
 function cursors.releaseTween(state: WorldState, cursor: Cursor)
     local handle = cursor.tweenPlayback
-    if not handle then return end
+    if not handle then
+        return
+    end
     local started = cursors.resolve(state, handle)
     if started and started.awaitedBy == cursor.slot then
         started.awaitedBy = nil
@@ -248,7 +253,9 @@ end
 --- Take the cursor's channel, cancelling whatever held it.
 function cursors.claimChannel(state: WorldState, cursor: Cursor)
     local channel <const> = cursor.channel
-    if not channel then return end
+    if not channel then
+        return
+    end
     local key <const> = channelKey(cursor.owner, channel)
     local held <const> = state.channelled[key]
     if held then
@@ -262,7 +269,9 @@ end
 
 local function releaseChannel(state: WorldState, cursor: Cursor)
     local channel <const> = cursor.channel
-    if not channel then return end
+    if not channel then
+        return
+    end
     local key <const> = channelKey(cursor.owner, channel)
     if state.channelled[key] == cursor.slot then
         state.channelled[key] = nil
@@ -271,24 +280,26 @@ end
 
 -- Whatever was parked on this playback finishing hears how it ended, then
 -- runs on the next tick of its own clock rather than inside this one.
-local function wakeAwaiter(
-    state: WorldState, cursor: Cursor, finalState: PlaybackState,
-    reason: seqtypes.TweenOutcome
-)
+local function wakeAwaiter(state: WorldState, cursor: Cursor, finalState: PlaybackState, reason: seqtypes.TweenOutcome)
     local slot <const> = cursor.awaitedBy
-    if not slot then return end
+    if not slot then
+        return
+    end
     cursor.awaitedBy = nil
     local waiter = state.cursors[slot]
-    if not waiter or not waiter.alive or not waiter.waitingTween then return end
-    waiter.tweenOutcome = reason
-        or (finalState == "completed" and "completed" or "cancelled")
+    if not waiter or not waiter.alive or not waiter.waitingTween then
+        return
+    end
+    waiter.tweenOutcome = reason or (finalState == "completed" and "completed" or "cancelled")
     waiter.waitingTween = false
     waiter.tweenPlayback = nil
     cursors.schedule(state, waiter, cursors.clockOf(state, waiter).step)
 end
 
 function cursors.linkOwner(state: WorldState, cursor: Cursor)
-    if cursor.owner == 0 then return end
+    if cursor.owner == 0 then
+        return
+    end
     local owned = state.ownerIndex[cursor.owner]
     if not owned then
         owned = {}
@@ -298,11 +309,15 @@ function cursors.linkOwner(state: WorldState, cursor: Cursor)
 end
 
 local function unlinkOwner(state: WorldState, cursor: Cursor)
-    if cursor.owner == 0 then return end
+    if cursor.owner == 0 then
+        return
+    end
     local owned = state.ownerIndex[cursor.owner]
     if owned then
         owned[cursor.slot] = nil
-        if next(owned) == nil then state.ownerIndex[cursor.owner] = nil end
+        if next(owned) == nil then
+            state.ownerIndex[cursor.owner] = nil
+        end
     end
 end
 
@@ -311,34 +326,45 @@ end
 function cursors.childSlots(cursor: Cursor): {integer}
     local slots: {integer} = {}
     local children = cursor.children
-    if not children then return slots end
-    for slot in pairs(children) do slots[#slots + 1] = slot end
+    if not children then
+        return slots
+    end
+    for slot in pairs(children) do
+        slots[#slots + 1] = slot
+    end
     table.sort(slots)
     return slots
 end
 
-local function detachFromParent(
-    state: WorldState,
-    cursor: Cursor,
-    finalState: PlaybackState
-)
+local function detachFromParent(state: WorldState, cursor: Cursor, finalState: PlaybackState)
     local slot = cursor.parentSlot
-    if not slot then return end
+    if not slot then
+        return
+    end
     cursor.parentSlot = nil
     local parent = state.cursors[slot]
-    if not parent or parent.generation ~= cursor.parentGeneration then return end
+    if not parent or parent.generation ~= cursor.parentGeneration then
+        return
+    end
 
     local children = parent.children
-    if children then children[cursor.slot] = nil end
-    if not parent.alive then return end
+    if children then
+        children[cursor.slot] = nil
+    end
+    if not parent.alive then
+        return
+    end
 
     -- A faulted branch is a defect in the program, so it surfaces rather
     -- than leaving a join quietly one branch short. A cancelled branch is
     -- deliberate, and the join simply proceeds without it.
     if finalState == "faulted" then
-        cursors.fault(state, parent, "branchFaulted",
-            "branch at pc=" .. tostring(cursor.pc) .. " faulted: "
-            .. tostring(cursor.faultMessage))
+        cursors.fault(
+            state,
+            parent,
+            "branchFaulted",
+            "branch at pc=" .. tostring(cursor.pc) .. " faulted: " .. tostring(cursor.faultMessage)
+        )
         return
     end
 
@@ -353,13 +379,10 @@ end
 -- stays until the slot is handed out again, which lets `status` report the
 -- final state; once reused, the generation check makes the old handle report
 -- nil instead of another playback's state.
-function cursors.retire(
-    state: WorldState,
-    cursor: Cursor,
-    finalState: PlaybackState,
-    reason?: seqtypes.TweenOutcome
-)
-    if not cursor.alive then return end
+function cursors.retire(state: WorldState, cursor: Cursor, finalState: PlaybackState, reason?: seqtypes.TweenOutcome)
+    if not cursor.alive then
+        return
+    end
     cursor.state = finalState
     cursor.alive = false
     cursor.joining = false
@@ -377,7 +400,9 @@ function cursors.retire(
         local slots = cursors.childSlots(cursor)
         for i = 1, #slots do
             local child = state.cursors[slots[i]]
-            if child and child.alive then cursors.retire(state, child, "cancelled") end
+            if child and child.alive then
+                cursors.retire(state, child, "cancelled")
+            end
         end
     end
     cursor.children = nil
@@ -387,16 +412,10 @@ function cursors.retire(
     state.freeSlots[#state.freeSlots + 1] = cursor.slot
 end
 
-function cursors.fault(
-    state: WorldState,
-    cursor: Cursor,
-    reason: FaultReason,
-    message: string
-)
+function cursors.fault(state: WorldState, cursor: Cursor, reason: FaultReason, message: string)
     cursor.fault = reason
     cursor.faultMessage = message
-    LOGGER:error("%s v%d pc=%d: %s (%s)",
-        cursor.program.name, cursor.program.version, cursor.pc, message, reason)
+    LOGGER:error("%s v%d pc=%d: %s (%s)", cursor.program.name, cursor.program.version, cursor.pc, message, reason)
     cursors.retire(state, cursor, "faulted")
 end
 
@@ -410,18 +429,20 @@ end
 -- The tree is branches and started playbacks alike: a timeline a cutscene
 -- began is a playback of its own, so cascading to it is what makes pausing
 -- the cutscene stop the animation it was driving.
-local function eachDescendant(
-    state: WorldState, cursor: Cursor, visit: function(Cursor)
-)
+local function eachDescendant(state: WorldState, cursor: Cursor, visit: function(Cursor))
     local slots = cursors.childSlots(cursor)
     for i = 1, #slots do
         local child = state.cursors[slots[i]]
-        if child and child.alive then visit(child) end
+        if child and child.alive then
+            visit(child)
+        end
     end
     local handle = cursor.tweenPlayback
     if handle then
         local started = cursors.resolve(state, handle)
-        if started and started.alive then visit(started) end
+        if started and started.alive then
+            visit(started)
+        end
     end
 end
 
@@ -430,18 +451,22 @@ end
 -- parked on rather than leaving it running underneath.
 local function setAwaitPaused(state: WorldState, cursor: Cursor, paused: boolean)
     local name = cursor.awaitProvider
-    if not name then return end
+    if not name then
+        return
+    end
     local provider = seqawaitables.get(name)
-    if not provider or not provider.setPaused then return end
+    if not provider or not provider.setPaused then
+        return
+    end
     local world = state.world
-    if not world or not world:isAlive(cursor.awaitEntity) then return end
+    if not world or not world:isAlive(cursor.awaitEntity) then
+        return
+    end
     provider.setPaused(world, cursor.awaitEntity, cursor.awaitKey, paused)
 end
 
 function cursors.pauseTree(state: WorldState, cursor: Cursor, holder: string): boolean
-    eachDescendant(state, cursor, function(child: Cursor)
-        cursors.pauseTree(state, child, holder)
-    end)
+    eachDescendant(state, cursor, function(child: Cursor) cursors.pauseTree(state, child, holder) end)
     local holders = cursor.pauseHolders
     if not holders then
         holders = {}
@@ -451,22 +476,28 @@ function cursors.pauseTree(state: WorldState, cursor: Cursor, holder: string): b
     -- The result says whether the playback stopped, not whether the hold
     -- registered: a second holder on an already-paused playback changes
     -- nothing observable.
-    if cursor.state ~= "running" then return false end
+    if cursor.state ~= "running" then
+        return false
+    end
     cursor.state = "paused"
     setAwaitPaused(state, cursor, true)
     return true
 end
 
 function cursors.resumeTree(state: WorldState, cursor: Cursor, holder: string): boolean
-    eachDescendant(state, cursor, function(child: Cursor)
-        cursors.resumeTree(state, child, holder)
-    end)
+    eachDescendant(state, cursor, function(child: Cursor) cursors.resumeTree(state, child, holder) end)
     local holders = cursor.pauseHolders
-    if not holders or not holders[holder] then return false end
+    if not holders or not holders[holder] then
+        return false
+    end
     holders[holder] = nil
-    if next(holders) ~= nil then return false end
+    if next(holders) ~= nil then
+        return false
+    end
     cursor.pauseHolders = nil
-    if cursor.state ~= "paused" then return false end
+    if cursor.state ~= "paused" then
+        return false
+    end
     cursor.state = "running"
     setAwaitPaused(state, cursor, false)
     -- A cursor blocked on a signal or parked at a join has no wake time and

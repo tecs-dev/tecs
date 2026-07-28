@@ -109,7 +109,7 @@ local record Bitset
     nextSetBit: function(self, start: integer): integer
 end
 
-local BITSET_MT <const>: metatable<Bitset> = { __index = Bitset }
+local BITSET_MT <const>: metatable<Bitset> = {__index = Bitset}
 
 local macro bitsToWords!(nExpr: Expression)
     return `rshift($nExpr + 31, 5)`
@@ -127,10 +127,9 @@ for i = 0, 255 do
 end
 
 local function popcount32(word: integer): integer
-    return POPCOUNT_TABLE[band(word, 0xFF)]
-        + POPCOUNT_TABLE[band(rshift(word, 8), 0xFF)]
-        + POPCOUNT_TABLE[band(rshift(word, 16), 0xFF)]
-        + POPCOUNT_TABLE[band(rshift(word, 24), 0xFF)]
+    return POPCOUNT_TABLE[band(word, 0xFF)] + POPCOUNT_TABLE[band(rshift(word, 8), 0xFF)] + POPCOUNT_TABLE[band(
+        rshift(word, 16), 0xFF
+    )] + POPCOUNT_TABLE[band(rshift(word, 24), 0xFF)]
 end
 
 local function trimUsedWordCount(self: Bitset)
@@ -147,16 +146,19 @@ end
 function Bitset.new(initialCapacity?: integer): Bitset
     local capacity = initialCapacity or 64
     local wordCount = max(1, bitsToWords!(capacity)) as integer
-    return setmetatable({
-        _data = cffi.new("uint32_t[?]", wordCount) as {integer},
-        wordCount = wordCount,
-        usedWordCount = 0,
-        count = 0,
-        _scanActive = false,
-        _scanWordIndex = 0,
-        _scanWord = 0,
-        _scanUsed = 0,
-    }, BITSET_MT)
+    return setmetatable(
+        {
+            _data = cffi.new("uint32_t[?]", wordCount) as {integer},
+            wordCount = wordCount,
+            usedWordCount = 0,
+            count = 0,
+            _scanActive = false,
+            _scanWordIndex = 0,
+            _scanWord = 0,
+            _scanUsed = 0,
+        },
+        BITSET_MT
+    )
 end
 
 function Bitset:ensureCapacity(n: integer)
@@ -193,7 +195,9 @@ function Bitset:set(index: integer)
 end
 
 function Bitset:setRange(lo: integer, hi: integer)
-    if hi < lo then return end
+    if hi < lo then
+        return
+    end
     -- Grow backing storage before we start issuing word writes.
     local neededWords = bitsToWords!(hi + 1)
     if neededWords > self.wordCount then
@@ -318,7 +322,7 @@ end
 
 -- 256-byte lookup table for CTZ of a single byte
 local CTZ_TABLE = cffi.new("uint8_t[256]") as {integer}
-CTZ_TABLE[0] = 8  -- no bits set in this byte
+CTZ_TABLE[0] = 8 -- no bits set in this byte
 for i = 1, 255 do
     local n = 0
     local v = i
@@ -403,7 +407,9 @@ end
 
 function Bitset:orWith(other: Bitset)
     local otherUsed = other.usedWordCount
-    if otherUsed == 0 then return end
+    if otherUsed == 0 then
+        return
+    end
     if otherUsed > self.wordCount then
         self:ensureCapacity(lshift(otherUsed, 5))
     end
@@ -427,7 +433,9 @@ end
 
 function Bitset:andWith(other: Bitset)
     local selfUsed = self.usedWordCount
-    if selfUsed == 0 then return end
+    if selfUsed == 0 then
+        return
+    end
 
     local otherUsed = other.usedWordCount
     local selfData = self._data
@@ -457,7 +465,9 @@ end
 
 function Bitset:andNotWith(other: Bitset)
     local limit = self.usedWordCount < other.usedWordCount and self.usedWordCount or other.usedWordCount
-    if limit == 0 then return end
+    if limit == 0 then
+        return
+    end
 
     local selfData = self._data
     local otherData = other._data

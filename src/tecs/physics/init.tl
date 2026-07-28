@@ -44,11 +44,11 @@ ecs.newFFIComponent({
     name = "RigidBody",
     container = RigidBody,
     fields = {
-        { "index1", "int32_t" },
-        { "world0", "uint16_t" },
-        { "generation", "uint16_t" },
+        {"index1", "int32_t"},
+        {"world0", "uint16_t"},
+        {"generation", "uint16_t"},
     },
-    defaults = { 0, 0, 0 },
+    defaults = {0, 0, 0},
     serialize = function(_instance: RigidBody): {string: any}
         -- The handle stays out of the file. It is this run's numbering:
         -- Box2D keeps `index1` dense and reuses it, so a saved one names
@@ -117,8 +117,7 @@ end
 ---
 --- Reads the entity's Transform for the initial pose, so an entity is
 --- positioned the same way whether or not it simulates.
-function physics.attach(world: ecs.World, entity: integer,
-                        options: BodyOptions): loader.CValue
+function physics.attach(world: ecs.World, entity: integer, options: BodyOptions): loader.CValue
     options = options or {}
 
     local transform = world:get(entity, Transform)
@@ -129,39 +128,42 @@ function physics.attach(world: ecs.World, entity: integer,
 
     local body = physics.world:createBody({
         type = options.type or "dynamic",
-        position = { x = toMetres(x), y = toMetres(y) },
+        position = {x = toMetres(x), y = toMetres(y)},
         angle = angle,
         fixedRotation = options.fixedRotation,
     })
 
     if options.radius ~= nil then
-        World.addCircle(body, toMetres(options.radius), {
-            density = options.density,
-            friction = options.friction,
-            restitution = options.restitution,
-        })
-    else
-        World.addBox(body,
-            toMetres(options.halfWidth or 8.0),
-            toMetres(options.halfHeight or 8.0), {
+        World.addCircle(
+            body,
+            toMetres(options.radius),
+            {
                 density = options.density,
                 friction = options.friction,
                 restitution = options.restitution,
-            })
+            }
+        )
+    else
+        World.addBox(
+            body,
+            toMetres(options.halfWidth or 8.0),
+            toMetres(options.halfHeight or 8.0),
+            {
+                density = options.density,
+                friction = options.friction,
+                restitution = options.restitution,
+            }
+        )
     end
 
     local handle = body as loader.CStruct
-    world:set(entity, RigidBody(
-        handle.index1 as number,
-        handle.world0 as number,
-        handle.generation as number))
+    world:set(entity, RigidBody(handle.index1 as number, handle.world0 as number, handle.generation as number))
 
     -- Seeded from where the body starts, so the first frame interpolates
     -- between a real position and a real position rather than from the
     -- origin. A body advances in fixed steps while frames arrive whenever the
     -- display asks, so without this it steps visibly instead of moving.
-    world:set(entity, components.PreviousTransform(
-        transform.x, transform.y, transform.rotation))
+    world:set(entity, components.PreviousTransform(transform.x, transform.y, transform.rotation))
 
     return body
 end
@@ -192,7 +194,9 @@ end
 --- rebuilds a body on load.
 function physics.hasBody(world: ecs.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
-    if row == nil or row.index1 == 0 then return false end
+    if row == nil or row.index1 == 0 then
+        return false
+    end
     -- Box2D's own check, which covers the generation and the world as well
     -- as the slot, so a handle left over from a destroyed world answers
     -- false rather than addressing whatever took its place.
@@ -204,10 +208,11 @@ end
 --- An impulse rather than a force, so the effect does not depend on how long
 --- the step happened to be. Wakes the body: Box2D lets a resting island sleep,
 --- and pushing a sleeping body without waking it does nothing.
-function physics.applyImpulse(world: ecs.World, entity: integer,
-                              x: number, y: number)
+function physics.applyImpulse(world: ecs.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
-    if row == nil then return end
+    if row == nil then
+        return
+    end
     physics.applyImpulseTo(row, x, y)
 end
 
@@ -219,7 +224,9 @@ function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
     -- The null handle is what a snapshot load leaves behind, and Box2D
     -- indexes its body array from the slot without checking it, so passing
     -- one through would read off the front of that array.
-    if row.index1 == 0 then return end
+    if row.index1 == 0 then
+        return
+    end
     local body = handleOf(row)
     local impulse = loader.newStruct("b2Vec2")
     local fields = impulse as loader.CStruct
@@ -231,14 +238,16 @@ end
 --- Reads a body's velocity, in pixels per second.
 function physics.velocity(world: ecs.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
-    if row == nil or row.index1 == 0 then return 0.0, 0.0 end
+    if row == nil or row.index1 == 0 then
+        return 0.0, 0.0
+    end
     return World.getVelocity(handleOf(row))
 end
 
 --- Installs the simulation and its sync.
 function physics.plugin(options: PhysicsOptions): function(ecs.World)
     options = options or {}
-    local gravity = options.gravity or { 0.0, 980.0 }
+    local gravity = options.gravity or {0.0, 980.0}
 
     return function(world: ecs.World)
         physics.world = World.create({
@@ -261,25 +270,32 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
         local bodies = world:query({
             name = "tecs.SimulatedBodies",
             type = "logic",
-            include = { Transform, RigidBody },
+            include = {Transform, RigidBody},
         })
 
         -- A body outlives its entity otherwise. Box2D owns it until something
         -- says so, and nothing else knows the entity is gone, so it keeps
         -- being solved for the rest of the session.
-        world:observe(0, ecs.builtins.OnDespawn,
+        world:observe(
+            0,
+            ecs.builtins.OnDespawn,
             function(event: ecs.builtins.OnDespawn)
                 local row = world:get(event.entity, RigidBody)
-                if row == nil or row.index1 == 0 then return end
+                if row == nil or row.index1 == 0 then
+                    return
+                end
                 local body = handleOf(row)
                 -- The handle names its own world, so this reaches the right
                 -- one whatever `physics.world` currently points at. The
                 -- validity check is what makes a row restored from a
                 -- snapshot, or one whose world has been destroyed, safe to
                 -- meet here.
-                if not (B.b2Body_IsValid(body) as boolean) then return end
+                if not (B.b2Body_IsValid(body) as boolean) then
+                    return
+                end
                 B.b2DestroyBody(body)
-            end)
+            end
+        )
 
         -- The fixed phases, always. A simulation that advanced by the frame
         -- would take a different number of steps on every machine and produce
@@ -325,8 +341,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                     local transforms: {any} = nil
 
                     for row = 1, length do
-                        local px, py, cosine, sine =
-                            simulation:moveOf(rows[row].index1 as integer)
+                        local px, py, cosine, sine = simulation:moveOf(rows[row].index1 as integer)
                         if px ~= nil then
                             if transforms == nil then
                                 transforms = archetype:getMut(Transform) as {any}

@@ -71,9 +71,7 @@ local LOGGER <const> = log.get("tecs.future")
 --- wall time and `clock.now` is documented as the one reading a replay
 --- provider does not reach. A recorded run must not shorten or lengthen how
 --- long a decode is waited for.
-local now <const> = function(): number
-    return clock.now() * 1000.0
-end
+local now <const> = function(): number return clock.now() * 1000.0 end
 
 --- Milliseconds a wait spends when neither the caller nor the source says.
 local DEFAULT_WAIT_MS <const> = 5000
@@ -302,7 +300,7 @@ end
 
 local type Source = Future.Source
 
-local FutureMT <const>: metatable<Future<any>> = { __index = Future }
+local FutureMT <const>: metatable<Future<any>> = {__index = Future}
 
 -------------------------------------------------------------------------------
 -- The drain
@@ -325,7 +323,9 @@ local queuedCount = 0
 
 local function runListeners(future: Future<any>)
     local listeners = future._listeners
-    if listeners == nil then return end
+    if listeners == nil then
+        return
+    end
     -- Re-read the count each turn: a listener may register another.
     local index = future._delivered
     while index < future._listenerCount do
@@ -345,7 +345,9 @@ end
 local function drain(future: Future<any>)
     queuedCount = queuedCount + 1
     queued[queuedCount] = future
-    if draining then return end
+    if draining then
+        return
+    end
 
     draining = true
     local index = 1
@@ -361,7 +363,9 @@ end
 
 --- Writes a settlement and drains, if nothing has settled this already.
 local function settle(future: Future<any>, status: string, value: any, err: string)
-    if future.status ~= "pending" then return end
+    if future.status ~= "pending" then
+        return
+    end
     future.status = status
     future.value = value
     future.error = err
@@ -420,7 +424,9 @@ local function listen(future: Future<any>, listener: function(Future<any>)): int
     -- Already settled: the listener still runs, on the next turn of the drain
     -- rather than from here. `_delivered` is what keeps the earlier listeners
     -- from running a second time when this future comes round again.
-    if future.status ~= "pending" then drain(future) end
+    if future.status ~= "pending" then
+        drain(future)
+    end
     return at
 end
 
@@ -444,8 +450,7 @@ local function derive(upstream: Future<any>): Future<any>
     return derived
 end
 
-local function attach(derived: Future<any>, upstream: Future<any>,
-                      listener: function(Future<any>))
+local function attach(derived: Future<any>, upstream: Future<any>, listener: function(Future<any>))
     derived._upstreamAt = listen(upstream, listener)
 end
 
@@ -457,7 +462,9 @@ end
 ---
 --- @return Whether the upstream was ready, so the caller's transform runs.
 local function propagate(derived: Future<any>, upstream: Future<any>): boolean
-    if upstream.status == "ready" then return true end
+    if upstream.status == "ready" then
+        return true
+    end
     settle(derived, upstream.status, nil, upstream.error)
     return false
 end
@@ -468,18 +475,26 @@ function Future:map<U>(transform: function(T): U): Future<U>
     end
     local upstreamOf <const> = self as Future<any>
     local derived <const> = derive(upstreamOf)
-    attach(derived, upstreamOf, function(upstream: Future<any>)
-        -- Cancelled while the upstream was still going: this link is settled
-        -- and there is nothing left to transform for.
-        if derived.status ~= "pending" then return end
-        if not propagate(derived, upstream) then return end
-        local ok, result = pcall(transform, upstream.value as T) as (boolean, any)
-        if ok then
-            settle(derived, "ready", result, nil)
-        else
-            settle(derived, "failed", nil, tostring(result))
+    attach(
+        derived,
+        upstreamOf,
+        function(upstream: Future<any>)
+            -- Cancelled while the upstream was still going: this link is settled
+            -- and there is nothing left to transform for.
+            if derived.status ~= "pending" then
+                return
+            end
+            if not propagate(derived, upstream) then
+                return
+            end
+            local ok, result = pcall(transform, upstream.value as T) as (boolean, any)
+            if ok then
+                settle(derived, "ready", result, nil)
+            else
+                settle(derived, "failed", nil, tostring(result))
+            end
         end
-    end)
+    )
     return derived as Future<U>
 end
 
@@ -489,38 +504,50 @@ function Future:flatMap<U>(transform: function(T): Future<U>): Future<U>
     end
     local upstreamOf <const> = self as Future<any>
     local derived <const> = derive(upstreamOf)
-    attach(derived, upstreamOf, function(upstream: Future<any>)
-        -- The window this combinator is alone in having. `transform` starts
-        -- work rather than transforming work already done, so a chain cancelled
-        -- before its outer settled has to stop the inner from ever existing;
-        -- there is no inner to cancel afterwards. The settled status is that
-        -- flag, checked here, before the call.
-        if derived.status ~= "pending" then return end
-        if not propagate(derived, upstream) then return end
+    attach(
+        derived,
+        upstreamOf,
+        function(upstream: Future<any>)
+            -- The window this combinator is alone in having. `transform` starts
+            -- work rather than transforming work already done, so a chain cancelled
+            -- before its outer settled has to stop the inner from ever existing;
+            -- there is no inner to cancel afterwards. The settled status is that
+            -- flag, checked here, before the call.
+            if derived.status ~= "pending" then
+                return
+            end
+            if not propagate(derived, upstream) then
+                return
+            end
 
-        local ok, result = pcall(transform, upstream.value as T) as (boolean, any)
-        if not ok then
-            settle(derived, "failed", nil, tostring(result))
-            return
-        end
-        local inner = result as Future<any>
-        if inner == nil then
-            settle(derived, "failed", nil, "tecs: flatMap returned no future")
-            return
-        end
+            local ok, result = pcall(transform, upstream.value as T) as (boolean, any)
+            if not ok then
+                settle(derived, "failed", nil, tostring(result))
+                return
+            end
+            local inner = result as Future<any>
+            if inner == nil then
+                settle(derived, "failed", nil, "tecs: flatMap returned no future")
+                return
+            end
 
-        -- The chain moves. A manifest read that starts on the asset worker and
-        -- finishes on an HTTP transfer is one future whose source changed
-        -- underneath it, which is why `wait` re-reads the source each slice.
-        derived._source = inner._source
-        derived._upstream = inner
-        inner._watchers = inner._watchers + 1
-        derived._upstreamAt = listen(inner, function(settledInner: Future<any>)
-            if derived.status ~= "pending" then return end
-            settle(derived, settledInner.status, settledInner.value,
-                settledInner.error)
-        end)
-    end)
+            -- The chain moves. A manifest read that starts on the asset worker and
+            -- finishes on an HTTP transfer is one future whose source changed
+            -- underneath it, which is why `wait` re-reads the source each slice.
+            derived._source = inner._source
+            derived._upstream = inner
+            inner._watchers = inner._watchers + 1
+            derived._upstreamAt = listen(
+                inner,
+                function(settledInner: Future<any>)
+                    if derived.status ~= "pending" then
+                        return
+                    end
+                    settle(derived, settledInner.status, settledInner.value, settledInner.error)
+                end
+            )
+        end
+    )
     return derived as Future<U>
 end
 
@@ -530,19 +557,25 @@ function Future:recover(recovery: function(string): T): Future<T>
     end
     local upstreamOf <const> = self as Future<any>
     local derived <const> = derive(upstreamOf)
-    attach(derived, upstreamOf, function(upstream: Future<any>)
-        if derived.status ~= "pending" then return end
-        if upstream.status ~= "failed" then
-            settle(derived, upstream.status, upstream.value, upstream.error)
-            return
+    attach(
+        derived,
+        upstreamOf,
+        function(upstream: Future<any>)
+            if derived.status ~= "pending" then
+                return
+            end
+            if upstream.status ~= "failed" then
+                settle(derived, upstream.status, upstream.value, upstream.error)
+                return
+            end
+            local ok, result = pcall(recovery, upstream.error) as (boolean, any)
+            if ok then
+                settle(derived, "ready", result, nil)
+            else
+                settle(derived, "failed", nil, tostring(result))
+            end
         end
-        local ok, result = pcall(recovery, upstream.error) as (boolean, any)
-        if ok then
-            settle(derived, "ready", result, nil)
-        else
-            settle(derived, "failed", nil, tostring(result))
-        end
-    end)
+    )
     return derived as Future<T>
 end
 
@@ -567,13 +600,19 @@ end
 -------------------------------------------------------------------------------
 
 function Future:wait(timeoutMs?: number): Future<T>
-    if self.status ~= "pending" then return self end
+    if self.status ~= "pending" then
+        return self
+    end
 
     local source = self._source
-    if source == nil then return self end
+    if source == nil then
+        return self
+    end
 
     local budget = timeoutMs
-    if budget == nil then budget = source.defaultWaitMs or DEFAULT_WAIT_MS end
+    if budget == nil then
+        budget = source.defaultWaitMs or DEFAULT_WAIT_MS
+    end
     -- Wall clock, not a count of slices. A source returns from `advance` as
     -- soon as one message arrives, and subtracting the nominal slice size for
     -- it turns "wait 5000 ms" into "wait for at most 312 messages".
@@ -581,12 +620,18 @@ function Future:wait(timeoutMs?: number): Future<T>
 
     while self.status == "pending" do
         local remaining = deadline - now()
-        if remaining <= 0 then break end
+        if remaining <= 0 then
+            break
+        end
         -- Re-read rather than cache: a `flatMap` link moves it mid-wait.
         source = self._source
-        if source == nil then break end
+        if source == nil then
+            break
+        end
         local slice = source.sliceMs or DEFAULT_SLICE_MS
-        if slice > remaining then slice = remaining end
+        if slice > remaining then
+            slice = remaining
+        end
         source:advance(slice)
     end
     return self
@@ -598,7 +643,9 @@ end
 
 --- Drops a link's listener from what it was watching.
 local function unlisten(upstream: Future<any>, at: integer)
-    if upstream._listeners == nil or at == nil then return end
+    if upstream._listeners == nil or at == nil then
+        return
+    end
     -- Cleared rather than removed: the slot numbers of every later listener are
     -- what their own links recorded, and `runListeners` counts rather than
     -- measures, so a hole costs nothing and moving them would cost correctness.
@@ -606,10 +653,14 @@ local function unlisten(upstream: Future<any>, at: integer)
 end
 
 function Future:cancel()
-    if self.status ~= "pending" then return end
+    if self.status ~= "pending" then
+        return
+    end
 
     self._watchers = self._watchers - 1
-    if self._watchers > 0 then return end
+    if self._watchers > 0 then
+        return
+    end
 
     self.status = "cancelled"
     self.error = "cancelled"
@@ -632,7 +683,9 @@ function Future:cancel()
     local upstreams = self._upstreams
     if upstreams ~= nil then
         self._upstreams = nil
-        for index = 1, #upstreams do upstreams[index]:cancel() end
+        for index = 1, #upstreams do
+            upstreams[index]:cancel()
+        end
     end
 
     drain(self as Future<any>)
@@ -657,19 +710,23 @@ local record RoundRobin
     advance: function(self: RoundRobin, ms: number): integer
 end
 
-local RoundRobinMT <const>: metatable<RoundRobin> = { __index = RoundRobin }
+local RoundRobinMT <const>: metatable<RoundRobin> = {__index = RoundRobin}
 
 function RoundRobin:poll(): integer
     local settled = 0
     local sources = self.sources
-    for index = 1, #sources do settled = settled + sources[index]:poll() end
+    for index = 1, #sources do
+        settled = settled + sources[index]:poll()
+    end
     return settled
 end
 
 function RoundRobin:advance(ms: number): integer
     local sources = self.sources
     local count = #sources
-    if count == 0 then return 0 end
+    if count == 0 then
+        return 0
+    end
     -- One source blocks per slice, taken in turn. Dividing the slice between
     -- them instead would divide the responsiveness of each by their number, and
     -- a join is usually waiting on the slowest of them.
@@ -699,12 +756,21 @@ local function sourceFor(inputs: {Future<any>}): Source
         end
     end
 
-    if count == 0 then return nil end
-    if count == 1 then return distinct[1] end
-    return setmetatable({
-        sources = distinct, at = 0,
-        sliceMs = distinct[1].sliceMs, defaultWaitMs = distinct[1].defaultWaitMs,
-    } as RoundRobin, RoundRobinMT) as Source
+    if count == 0 then
+        return nil
+    end
+    if count == 1 then
+        return distinct[1]
+    end
+    return setmetatable(
+        {
+            sources = distinct,
+            at = 0,
+            sliceMs = distinct[1].sliceMs,
+            defaultWaitMs = distinct[1].defaultWaitMs,
+        } as RoundRobin,
+        RoundRobinMT
+    ) as Source
 end
 
 function Future.all<U>(inputs: {Future<U>}): Future<{U}>
@@ -714,7 +780,9 @@ function Future.all<U>(inputs: {Future<U>}): Future<{U}>
     local watched = inputs as {Future<any>}
     local count = #watched
     local values: {U} = {}
-    if count == 0 then return Future.settled(values) end
+    if count == 0 then
+        return Future.settled(values)
+    end
 
     local joined = newFuture(sourceFor(watched))
     joined._upstreams = watched
@@ -724,16 +792,23 @@ function Future.all<U>(inputs: {Future<U>}): Future<{U}>
         local input = watched[index]
         local at = index
         input._watchers = input._watchers + 1
-        listen(input, function(settledInput: Future<any>)
-            if joined.status ~= "pending" then return end
-            if settledInput.status ~= "ready" then
-                settle(joined, settledInput.status, nil, settledInput.error)
-                return
+        listen(
+            input,
+            function(settledInput: Future<any>)
+                if joined.status ~= "pending" then
+                    return
+                end
+                if settledInput.status ~= "ready" then
+                    settle(joined, settledInput.status, nil, settledInput.error)
+                    return
+                end
+                values[at] = settledInput.value as U
+                remaining = remaining - 1
+                if remaining == 0 then
+                    settle(joined, "ready", values, nil)
+                end
             end
-            values[at] = settledInput.value as U
-            remaining = remaining - 1
-            if remaining == 0 then settle(joined, "ready", values, nil) end
-        end)
+        )
     end
     return joined as Future<{U}>
 end
@@ -779,23 +854,34 @@ function Future.track<U>(world: World, entity: integer, key: string, future: Fut
     end
 
     byEntity[key] = watched
-    watched:onSettle(function()
-        -- Only if this is still the future under that key: tracking a second
-        -- one replaces the first, and the first settling afterwards must not
-        -- erase its successor.
-        if byEntity[key] == watched then byEntity[key] = nil end
-    end)
+    watched:onSettle(
+        function()
+            -- Only if this is still the future under that key: tracking a second
+            -- one replaces the first, and the first settling afterwards must not
+            -- erase its successor.
+            if byEntity[key] == watched then
+                byEntity[key] = nil
+            end
+        end
+    )
 end
 
-seqawaitables.register("tecs.future", {
-    isPending = function(world: World, entity: integer, key: string): boolean
-        local tracked = world.resources[TRACKED]
-        if tracked == nil then return false end
-        local byEntity = tracked[entity]
-        if byEntity == nil then return false end
-        local future = byEntity[key]
-        return future ~= nil and future.status == "pending"
-    end,
-})
+seqawaitables.register(
+    "tecs.future",
+    {
+        isPending = function(world: World, entity: integer, key: string): boolean
+            local tracked = world.resources[TRACKED]
+            if tracked == nil then
+                return false
+            end
+            local byEntity = tracked[entity]
+            if byEntity == nil then
+                return false
+            end
+            local future = byEntity[key]
+            return future ~= nil and future.status == "pending"
+        end,
+    }
+)
 
 return Future

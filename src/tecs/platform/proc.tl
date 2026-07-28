@@ -455,7 +455,7 @@ end
 local type Result = proc.Result
 local type Options = proc.Options
 
-local ResultMT <const>: metatable<Result> = { __index = Result }
+local ResultMT <const>: metatable<Result> = {__index = Result}
 
 --- How long a wait on a run spends when the caller names nothing.
 ---
@@ -492,14 +492,15 @@ local byFuture: {Future<Result>: Entry} = {}
 --- Every run's result by its future, which outlives the entry because a child
 --- that was killed settles with no value and what it wrote is still worth
 --- having. Weak in its keys, so it holds nothing the caller has let go of.
-local results <const>: {Future<Result>: Result} = setmetatable(
-    {} as {Future<Result>: Result}, { __mode = "k" })
+local results <const>: {Future<Result>: Result} = setmetatable({} as {Future<Result>: Result}, {__mode = "k"})
 local pendingCount = 0
 local nextId = 1
 local worker: workers.Worker = nil
 
 function proc.install(luaPath?: string)
-    if worker ~= nil then return end
+    if worker ~= nil then
+        return
+    end
     worker = workers.spawn({
         source = RUNNER,
         luaPath = luaPath or package.path,
@@ -526,7 +527,9 @@ end
 --- @return Whether it was the message that ended a run.
 local function complete(message: {string: any}): boolean
     local entry = pending[message.id as integer]
-    if entry == nil then return false end
+    if entry == nil then
+        return false
+    end
 
     if message.started == true then
         entry.result.pid = message.pid as integer
@@ -575,23 +578,33 @@ local record Runner
     cancel: function(self: Runner, future: Future<any>)
 end
 
-local RunnerMT <const>: metatable<Runner> = { __index = Runner }
+local RunnerMT <const>: metatable<Runner> = {__index = Runner}
 
 function Runner:poll(): integer
-    if worker == nil then return 0 end
+    if worker == nil then
+        return 0
+    end
     local finished = 0
     while true do
         local message = worker:receive(0)
-        if message == nil then break end
-        if complete(message as {string: any}) then finished = finished + 1 end
+        if message == nil then
+            break
+        end
+        if complete(message as {string: any}) then
+            finished = finished + 1
+        end
     end
     return finished
 end
 
 function Runner:advance(ms: number): integer
-    if worker == nil then return 0 end
+    if worker == nil then
+        return 0
+    end
     local message = worker:receive(ms)
-    if message == nil then return 0 end
+    if message == nil then
+        return 0
+    end
     return complete(message as {string: any}) and 1 or 0
 end
 
@@ -606,15 +619,21 @@ end
 --- `proc.kill(run, false)`, which is that question spelled out.
 function Runner:cancel(future: Future<any>)
     local entry = byFuture[future as Future<Result>]
-    if entry == nil or worker == nil then return end
-    worker:send({ kind = "kill", id = entry.id, force = true })
+    if entry == nil or worker == nil then
+        return
+    end
+    worker:send({kind = "kill", id = entry.id, force = true})
 end
 
-local runner <const> = setmetatable({
-    -- Both live here rather than in `Future`, which is what lets a child
-    -- process keep a longer default than a decode without a second convention.
-    sliceMs = SLICE_MS, defaultWaitMs = DEFAULT_WAIT_MS,
-} as Runner, RunnerMT)
+local runner <const> = setmetatable(
+    {
+        -- Both live here rather than in `Future`, which is what lets a child
+        -- process keep a longer default than a decode without a second convention.
+        sliceMs = SLICE_MS,
+        defaultWaitMs = DEFAULT_WAIT_MS,
+    } as Runner,
+    RunnerMT
+)
 
 local source <const> = runner as Future.Source
 
@@ -641,10 +660,16 @@ function proc.run(options: Options): Future<Result>
     local entry: Entry = {
         id = id,
         future = future,
-        result = setmetatable({
-            args = options.args, pid = 0, exitCode = 0,
-            output = "", errorOutput = "",
-        } as Result, ResultMT),
+        result = setmetatable(
+            {
+                args = options.args,
+                pid = 0,
+                exitCode = 0,
+                output = "",
+                errorOutput = "",
+            } as Result,
+            ResultMT
+        ),
     }
     pending[id] = entry
     byFuture[future] = entry
@@ -665,15 +690,21 @@ function proc.run(options: Options): Future<Result>
 end
 
 function proc.result(run: Future<Result>): Result
-    if run == nil then return nil end
+    if run == nil then
+        return nil
+    end
     return results[run]
 end
 
 function proc.kill(run: Future<Result>, force?: boolean)
-    if worker == nil or run == nil then return end
+    if worker == nil or run == nil then
+        return
+    end
     local entry = byFuture[run]
-    if entry == nil then return end
-    worker:send({ kind = "kill", id = entry.id, force = force == true })
+    if entry == nil then
+        return
+    end
+    worker:send({kind = "kill", id = entry.id, force = force == true})
 end
 
 function proc.update(): integer
@@ -697,24 +728,28 @@ local function drainFor(ms: number)
     local deadline = clock.now() * 1000.0 + ms
     while pendingCount > 0 do
         local remaining = deadline - clock.now() * 1000.0
-        if remaining <= 0 then break end
+        if remaining <= 0 then
+            break
+        end
         runner:advance(remaining < runner.sliceMs and remaining or runner.sliceMs)
     end
 end
 
 function proc.shutdown(graceMs?: number)
-    if worker == nil then return end
+    if worker == nil then
+        return
+    end
 
     if pendingCount > 0 then
         for _, entry in pairs(pending) do
-            worker:send({ kind = "kill", id = entry.id, force = false })
+            worker:send({kind = "kill", id = entry.id, force = false})
         end
         drainFor(graceMs or DEFAULT_GRACE_MS)
     end
 
     if pendingCount > 0 then
         for _, entry in pairs(pending) do
-            worker:send({ kind = "kill", id = entry.id, force = true })
+            worker:send({kind = "kill", id = entry.id, force = true})
         end
         drainFor(FORCED_WAIT_MS)
     end

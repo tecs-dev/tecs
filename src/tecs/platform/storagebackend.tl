@@ -208,7 +208,9 @@ end
 --- constness in the binding is the ownership, and `adapter` reads
 --- `SDL_GetBasePath` and `SDL_GetPrefPath` under the same rule.
 local function take(pointer: loader.CValue): string
-    if pointer == nil then return nil end
+    if pointer == nil then
+        return nil
+    end
     local text = loader.toString(pointer)
     C.SDL_free(pointer)
     return text
@@ -225,19 +227,25 @@ local sdlBackend <const>: Backend = {
     read = function(path: string): string
         local size <const> = loader.newArray("size_t[1]")
         local data <const> = C.SDL_LoadFile(path, size)
-        if data == nil then return nil end
+        if data == nil then
+            return nil
+        end
         local bytes <const> = loader.toBytes(data, tonumber(size[0]) as integer)
         C.SDL_free(data)
         return bytes
     end,
 
     write = function(path: string, bytes: string): boolean, string
-        if C.SDL_SaveFile(path, bytes, #bytes) then return true end
+        if C.SDL_SaveFile(path, bytes, #bytes) then
+            return true
+        end
         return false, sdl.error()
     end,
 
     info = function(path: string): Info, string
-        if not C.SDL_GetPathInfo(path, INFO) then return nil, sdl.error() end
+        if not C.SDL_GetPathInfo(path, INFO) then
+            return nil, sdl.error()
+        end
         return {
             kind = PATH_TYPES[tonumber(FIELDS.type) as integer],
             size = tonumber(FIELDS.size) as integer,
@@ -247,15 +255,16 @@ local sdlBackend <const>: Backend = {
         }
     end,
 
-    glob = function(path: string, pattern: string,
-                    options: GlobOptions): {string}, string
+    glob = function(path: string, pattern: string, options: GlobOptions): {string}, string
         local flags = 0
         if options ~= nil and options.caseInsensitive then
             flags = CASE_INSENSITIVE
         end
 
         local list = C.SDL_GlobDirectory(path, pattern, flags, countOut)
-        if list == nil then return nil, sdl.error() end
+        if list == nil then
+            return nil, sdl.error()
+        end
 
         local found: {string} = {}
         local items = loader.castPointer("char **", list)
@@ -271,34 +280,46 @@ local sdlBackend <const>: Backend = {
     end,
 
     createDirectory = function(path: string): boolean, string
-        if C.SDL_CreateDirectory(path) then return true end
+        if C.SDL_CreateDirectory(path) then
+            return true
+        end
         return false, sdl.error()
     end,
 
     remove = function(path: string): boolean, string
-        if C.SDL_RemovePath(path) then return true end
+        if C.SDL_RemovePath(path) then
+            return true
+        end
         return false, sdl.error()
     end,
 
     rename = function(from: string, to: string): boolean, string
-        if C.SDL_RenamePath(from, to) then return true end
+        if C.SDL_RenamePath(from, to) then
+            return true
+        end
         return false, sdl.error()
     end,
 
     copy = function(from: string, to: string): boolean, string
-        if C.SDL_CopyFile(from, to) then return true end
+        if C.SDL_CopyFile(from, to) then
+            return true
+        end
         return false, sdl.error()
     end,
 
     currentDirectory = function(): string, string
         local directory = take(C.SDL_GetCurrentDirectory())
-        if directory == nil then return nil, sdl.error() end
+        if directory == nil then
+            return nil, sdl.error()
+        end
         return directory
     end,
 
     userFolder = function(which: UserFolder): string, string
         local path = C.SDL_GetUserFolder(FOLDERS[which])
-        if path == nil then return nil, sdl.error() end
+        if path == nil then
+            return nil, sdl.error()
+        end
         return loader.toString(path)
     end,
 }

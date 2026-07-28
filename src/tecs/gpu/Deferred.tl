@@ -198,18 +198,20 @@ local record Deferred
     _destroyed: boolean
 end
 
-local DeferredMT <const>: metatable<Deferred> = { __index = Deferred }
+local DeferredMT <const>: metatable<Deferred> = {__index = Deferred}
 
-local function buildPipeline(device: loader.CPtr, fragmentName: string,
-                             format: integer, name: string): GraphicsPipeline
+local function buildPipeline(device: loader.CPtr, fragmentName: string, format: integer, name: string): GraphicsPipeline
     local vertex = Shader.load(device, "deferred.fullscreen.vert", {})
     local fragment = Shader.load(device, fragmentName, {})
-    local pipeline = GraphicsPipeline.create(device, {
-        vertexShader = vertex,
-        fragmentShader = fragment,
-        colorFormat = format,
-        name = name,
-    })
+    local pipeline = GraphicsPipeline.create(
+        device,
+        {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormat = format,
+            name = name,
+        }
+    )
     vertex:destroy()
     fragment:destroy()
     return pipeline
@@ -223,22 +225,24 @@ end
 --- @param swapchainFormat What present writes to, from
 ---     `Device:getSwapchainFormat`. Every other target's format is the
 ---     graph's; the G-buffer's two come back out of `geometryFormats`.
-function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
-                         options: DeferredOptions): Deferred
+function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options: DeferredOptions): Deferred
     options = options or {}
 
     local self = setmetatable({} as Deferred, DeferredMT)
     self._device = device
     self.lightCount = 0
-    self.ambient = options.ambient or { 0.08, 0.08, 0.10 }
+    self.ambient = options.ambient or {0.08, 0.08, 0.10}
     self._destroyed = false
 
-    self._lightBuffer = Buffer.create(device, {
-        -- Read by a compute pass as well as by the lighting pass, since the
-        -- binning dispatch is what turns the buffer into per-tile lists.
-        usage = { "storage", "computeRead" },
-        size = MAX_LIGHTS * LIGHT_STRIDE,
-    })
+    self._lightBuffer = Buffer.create(
+        device,
+        {
+            -- Read by a compute pass as well as by the lighting pass, since the
+            -- binning dispatch is what turns the buffer into per-tile lists.
+            usage = {"storage", "computeRead"},
+            size = MAX_LIGHTS * LIGHT_STRIDE,
+        }
+    )
     self._lightScratch = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
     self._sceneUniform = loader.newArray("float[16]")
     self._binUniform = loader.newArray("float[8]")
@@ -259,84 +263,93 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
     -- One binding for the pass that fills them and one for the pass that
     -- reads them, and a fixed size, so a resized window replaces the graph's
     -- targets and leaves these where they are.
-    self._tileCounts = Buffer.create(device, {
-        usage = { "storage", "computeWrite" },
-        size = TILE_COUNT * 4,
-        name = "tecs.lightTileCounts",
-    })
-    self._tileLights = Buffer.create(device, {
-        usage = { "storage", "computeWrite" },
-        size = TILE_COUNT * TILE_SLOTS * 4,
-        name = "tecs.lightTiles",
-    })
-    self._binPipeline = ComputePipeline.load(device, "deferred.lightbin.comp",
-        {})
+    self._tileCounts = Buffer.create(
+        device,
+        {
+            usage = {"storage", "computeWrite"},
+            size = TILE_COUNT * 4,
+            name = "tecs.lightTileCounts",
+        }
+    )
+    self._tileLights = Buffer.create(
+        device,
+        {
+            usage = {"storage", "computeWrite"},
+            size = TILE_COUNT * TILE_SLOTS * 4,
+            name = "tecs.lightTiles",
+        }
+    )
+    self._binPipeline = ComputePipeline.load(device, "deferred.lightbin.comp", {})
 
     -- Seeded with what the buffers hold now, which gives each list its length.
-    self._binWrites = { self._tileCounts.handle, self._tileLights.handle }
-    self._binReads = { self._lightBuffer.handle }
-    self._lightingBuffers = { self._lightBuffer.handle, self._tileCounts.handle,
-        self._tileLights.handle }
+    self._binWrites = {self._tileCounts.handle, self._tileLights.handle}
+    self._binReads = {self._lightBuffer.handle}
+    self._lightingBuffers = {self._lightBuffer.handle, self._tileCounts.handle, self._tileLights.handle}
 
     local graph = PassGraph.create(device, swapchainFormat)
     graph:target({
         name = "albedo",
         format = RGBA8,
-        clear = { r = 0, g = 0, b = 0, a = 0 },
+        clear = {r = 0, g = 0, b = 0, a = 0},
     })
-    graph:target({
-        name = "normal",
-        format = RGBA8,
-        -- The alpha is what carries here. Zero marks a pixel as unlit, so
-        -- anything nothing drew over composites as the albedo clear instead of
-        -- picking up ambient over a normal it never wrote. The rgb encodes a
-        -- surface facing the viewer, which is what geometry writes, so the
-        -- attachment reads consistently either way.
-        clear = { r = 0.5, g = 0.5, b = 1.0, a = 0 },
-    })
+    graph:target(
+        {
+            name = "normal",
+            format = RGBA8,
+            -- The alpha is what carries here. Zero marks a pixel as unlit, so
+            -- anything nothing drew over composites as the albedo clear instead of
+            -- picking up ambient over a normal it never wrote. The rgb encodes a
+            -- surface facing the viewer, which is what geometry writes, so the
+            -- attachment reads consistently either way.
+            clear = {r = 0.5, g = 0.5, b = 1.0, a = 0},
+        }
+    )
     graph:target({
         name = "lit",
         format = RGBA8,
-        clear = { r = 0, g = 0, b = 0, a = 1 },
+        clear = {r = 0, g = 0, b = 0, a = 1},
     })
-    graph:target({
-        -- No clear: this is what anything running between composite and
-        -- present writes into, and a clear here would be applied by each of
-        -- those passes in turn. Composite covers every pixel and goes first,
-        -- so there is nothing undefined for a later pass to load.
-        name = "scene",
-        format = RGBA8,
-    })
+    graph:target(
+        {
+            -- No clear: this is what anything running between composite and
+            -- present writes into, and a clear here would be applied by each of
+            -- those passes in turn. Composite covers every pixel and goes first,
+            -- so there is nothing undefined for a later pass to load.
+            name = "scene",
+            format = RGBA8,
+        }
+    )
 
-    self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag",
-        RGBA8, "lighting")
-    self._compositePipeline = buildPipeline(device, "deferred.composite.frag",
-        RGBA8, "composite")
-    self._presentPipeline = buildPipeline(device, "deferred.present.frag",
-        swapchainFormat, "present")
+    self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
+    self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
+    self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present")
 
-    graph:pass({
-        name = "geometry",
-        outputs = { "albedo", "normal" },
-        -- Cleared to the far plane every frame, and "lessOrEqual" rather than
-        -- "less" so equal depths still resolve to whatever drew last. Draw
-        -- order is deterministic and means something here, so depth decides
-        -- between instances that differ and leaves the rest alone.
-        depth = {
-            test = true,
-            write = true,
-            compare = "lessOrEqual",
-            clear = 1.0,
-        },
-        execute = function(context: PassGraph.PassContext)
-            if options.geometry ~= nil then options.geometry(context) end
-        end,
-    })
+    graph:pass(
+        {
+            name = "geometry",
+            outputs = {"albedo", "normal"},
+            -- Cleared to the far plane every frame, and "lessOrEqual" rather than
+            -- "less" so equal depths still resolve to whatever drew last. Draw
+            -- order is deterministic and means something here, so depth decides
+            -- between instances that differ and leaves the rest alone.
+            depth = {
+                test = true,
+                write = true,
+                compare = "lessOrEqual",
+                clear = 1.0,
+            },
+            execute = function(context: PassGraph.PassContext)
+                if options.geometry ~= nil then
+                    options.geometry(context)
+                end
+            end,
+        }
+    )
 
     graph:pass({
         name = "lighting",
-        inputs = { "albedo", "normal" },
-        outputs = { "lit" },
+        inputs = {"albedo", "normal"},
+        outputs = {"lit"},
         execute = function(context: PassGraph.PassContext)
             local scene = self._sceneUniform
             scene[0] = self.ambient[1]
@@ -376,26 +389,28 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
 
     graph:pass({
         name = "composite",
-        inputs = { "lit" },
-        outputs = { "scene" },
+        inputs = {"lit"},
+        outputs = {"scene"},
         execute = function(context: PassGraph.PassContext)
             context.pass:bindPipeline(self._compositePipeline.handle)
             context.pass:draw(3)
         end,
     })
 
-    graph:pass({
-        -- Declared last and executed last, since the graph runs passes in
-        -- declaration order and this is the one that writes the swapchain.
-        -- Anything added to the seam is declared above this, not after it.
-        name = "present",
-        inputs = { "scene" },
-        outputs = {},
-        execute = function(context: PassGraph.PassContext)
-            context.pass:bindPipeline(self._presentPipeline.handle)
-            context.pass:draw(3)
-        end,
-    })
+    graph:pass(
+        {
+            -- Declared last and executed last, since the graph runs passes in
+            -- declaration order and this is the one that writes the swapchain.
+            -- Anything added to the seam is declared above this, not after it.
+            name = "present",
+            inputs = {"scene"},
+            outputs = {},
+            execute = function(context: PassGraph.PassContext)
+                context.pass:bindPipeline(self._presentPipeline.handle)
+                context.pass:draw(3)
+            end,
+        }
+    )
 
     self.graph = graph
     return self
@@ -419,8 +434,7 @@ end
 ---     dividing through, since a view that shows nothing is not what a caller
 ---     assigning a zoom of zero meant.
 --- @param rotation Radians, the same sense the camera turns in.
-function Deferred:setView(x: number, y: number, zoom: number,
-                          rotation: number)
+function Deferred:setView(x: number, y: number, zoom: number, rotation: number)
     self._viewSet = true
     self._viewX = x
     self._viewY = y
@@ -443,9 +457,13 @@ end
 --- @param count Lights in `data`. Zero leaves the buffer as it was and lights
 ---     nothing, since the count is what the shader loops over.
 function Deferred:setLightData(data: loader.CArray, count: integer)
-    if count > MAX_LIGHTS then count = MAX_LIGHTS end
+    if count > MAX_LIGHTS then
+        count = MAX_LIGHTS
+    end
     self.lightCount = count
-    if count == 0 then return end
+    if count == 0 then
+        return
+    end
 
     local bytes <const> = count * LIGHT_STRIDE
     loader.copyTo(self._lightBuffer:map(), data as loader.CValue, bytes)
@@ -551,8 +569,7 @@ function Deferred:render(frame: Frame)
     local reads <const> = self._binReads
     reads[1] = self._lightBuffer.handle
 
-    local pass <const> = ComputePass.begin(frame.commandBuffer, writes,
-        self._binPass)
+    local pass <const> = ComputePass.begin(frame.commandBuffer, writes, self._binPass)
     self._binPass = pass
     pass:bindPipeline(self._binPipeline.handle)
     pass:bindStorageBuffers(0, reads)
@@ -580,20 +597,27 @@ function Deferred:rebuildPipelines()
     local composite: GraphicsPipeline = nil
     local present: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
-    local built, reason = pcall(function(): string
-        lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8,
-            "lighting")
-        composite = buildPipeline(device, "deferred.composite.frag", RGBA8,
-            "composite")
-        present = buildPipeline(device, "deferred.present.frag",
-            self.graph.swapchainFormat, "present")
-        bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
-    end)
+    local built, reason = pcall(
+        function(): string
+            lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8, "lighting")
+            composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite")
+            present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present")
+            bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
+        end
+    )
     if not built then
-        if lighting ~= nil then lighting:destroy() end
-        if composite ~= nil then composite:destroy() end
-        if present ~= nil then present:destroy() end
-        if bin ~= nil then bin:destroy() end
+        if lighting ~= nil then
+            lighting:destroy()
+        end
+        if composite ~= nil then
+            composite:destroy()
+        end
+        if present ~= nil then
+            present:destroy()
+        end
+        if bin ~= nil then
+            bin:destroy()
+        end
         error(reason, 0)
     end
 
@@ -630,7 +654,9 @@ end
 
 --- Releases everything the pipeline owns. Safe to call more than once.
 function Deferred:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     self.graph:destroy()
     self._lightingPipeline:destroy()

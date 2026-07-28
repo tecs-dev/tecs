@@ -284,7 +284,7 @@ local record Application
     _shutdownDone: boolean
 end
 
-local ApplicationMT <const>: metatable<Application> = { __index = Application }
+local ApplicationMT <const>: metatable<Application> = {__index = Application}
 
 -------------------------------------------------------------------------------
 -- The crash guard
@@ -319,7 +319,9 @@ end
 --- call site that forgot it would be a leak nobody could see.
 local function guard(self: Application, what: string, body: function): boolean
     local ok, failure = xpcall(body, traceback) as (boolean, string)
-    if ok then return true end
+    if ok then
+        return true
+    end
 
     LOGGER:error("%s crashed, still serving:\n%s", what, failure)
 
@@ -383,8 +385,7 @@ function Application:_recover()
     if world ~= nil then
         local ok, failure = pcall(world.unwind, world) as (boolean, any)
         if not ok then
-            LOGGER:error("the world could not be unwound: %s",
-                tostring(failure))
+            LOGGER:error("the world could not be unwound: %s", tostring(failure))
         end
     end
 
@@ -443,28 +444,27 @@ end
 --- the game its orderly shutdown.
 local function flushCheckpoint(self: Application, occasion: string): boolean
     local path <const> = self._checkpointPath
-    if path == nil or not self._checkpointStaged then return false end
+    if path == nil or not self._checkpointStaged then
+        return false
+    end
 
     local bytes <const> = self._checkpointBytes
     local pending <const> = path .. ".new"
     local wrote, writeFailure = filesystem.write(pending, bytes)
     if not wrote then
-        LOGGER:error("the checkpoint could not be written to %s: %s", pending,
-            tostring(writeFailure))
+        LOGGER:error("the checkpoint could not be written to %s: %s", pending, tostring(writeFailure))
         return false
     end
 
     local moved, moveFailure = filesystem.rename(pending, path)
     if not moved then
-        LOGGER:error("the checkpoint could not be moved into place at %s: %s",
-            path, tostring(moveFailure))
+        LOGGER:error("the checkpoint could not be moved into place at %s: %s", path, tostring(moveFailure))
         filesystem.remove(pending)
         return false
     end
 
     self._checkpointStaged = false
-    LOGGER:info("checkpoint written on %s: %d bytes to %s", occasion, #bytes,
-        path)
+    LOGGER:info("checkpoint written on %s: %d bytes to %s", occasion, #bytes, path)
     return true
 end
 
@@ -494,9 +494,12 @@ end
 --- that will never be written is the one failure a game would not notice.
 function Application:stageCheckpoint(bytes: string)
     if self._checkpointPath == nil then
-        error("tecs: no checkpoint file is configured, so there is nowhere to "
-            .. "write this; name one as `checkpoint` in the application "
-            .. "config", 2)
+        error(
+            "tecs: no checkpoint file is configured, so there is nowhere to "
+                .. "write this; name one as `checkpoint` in the application "
+                .. "config",
+            2
+        )
     end
     if bytes == nil then
         error("tecs: a checkpoint is bytes to write, and none were given", 2)
@@ -513,7 +516,9 @@ end
 --- None of those is an error, so none of them raises.
 function Application:readCheckpoint(): string
     local path <const> = self._checkpointPath
-    if path == nil then return nil end
+    if path == nil then
+        return nil
+    end
     return filesystem.read(path, "checkpoint")
 end
 
@@ -532,10 +537,11 @@ function Application:_init(): boolean
 
     -- First of all, so it governs what everything below has to say about
     -- itself. SDL owns the priorities, so this needs no subsystem started.
-    if config.logLevel ~= nil then log.setLevel(config.logLevel) end
+    if config.logLevel ~= nil then
+        log.setLevel(config.logLevel)
+    end
 
-    sdl.check(C.SDL_Init(K.SDL_INIT_VIDEO + K.SDL_INIT_GAMEPAD) as boolean,
-        "SDL_Init")
+    sdl.check(C.SDL_Init(K.SDL_INIT_VIDEO + K.SDL_INIT_GAMEPAD) as boolean, "SDL_Init")
 
     -- Before anything else that might have something to say. The platform
     -- destination works without this; the file is what makes a log queryable
@@ -565,13 +571,12 @@ function Application:_init(): boolean
     if pack ~= nil then
         shadercompiler.usePack(pack)
     elseif not shadercompiler.available() then
-        error(("tecs: this build links no shader compiler and there is no "
-            .. "pack at %s"):format(packPath))
+        error(("tecs: this build links no shader compiler and there is no " .. "pack at %s"):format(packPath))
     end
 
     self.window = Window.create(config.window or {} as Window.Options)
 
-    self.device = Device.create(self.window, { debug = config.debug })
+    self.device = Device.create(self.window, {debug = config.debug})
     if config.framesInFlight ~= nil then
         self.device:setFramesInFlight(config.framesInFlight)
     end
@@ -581,7 +586,7 @@ function Application:_init(): boolean
 
     -- The window is what text input and the cursor modes act on, so input is
     -- created knowing it rather than being told later.
-    self.input = Input.create({ window = self.window.handle })
+    self.input = Input.create({window = self.window.handle})
     -- Passed through rather than validated here. `pipeline.new` is where a
     -- timestep of zero or a negative step count is refused, so there is one
     -- description of what is legal and it is the one the world enforces.
@@ -591,12 +596,15 @@ function Application:_init(): boolean
         fixedMaxSteps = config.fixedMaxSteps,
         fixedOverload = config.fixedOverload,
     })
-    self.renderer = Renderer.create(self.device.handle,
-        self.device:getSwapchainFormat(), {
+    self.renderer = Renderer.create(
+        self.device.handle,
+        self.device:getSwapchainFormat(),
+        {
             ambient = config.ambientLight,
             capacity = config.capacity,
             reserveRuns = config.reserveRuns,
-        })
+        }
+    )
     self.renderer:install(self.world)
 
     -- Opened before the game's load, so a game may load a clip there. A
@@ -669,7 +677,7 @@ function Application:_init(): boolean
                 .. "the game's are not, so reload before trusting the world.",
             destructive = true,
             whenCrashed = true,
-            inputSchema = { type = "object", properties = cjson.empty_array },
+            inputSchema = {type = "object", properties = cjson.empty_array},
             handler = function(_: {string: any}): {string: any}
                 local resumed, refusal = self:clearCrash()
                 return {
@@ -722,26 +730,14 @@ function Application:_init(): boolean
     -- never reaches it: the reload refused, so nothing has changed.
     if config.watch ~= nil then
         local tools = require("tecs.mcp.tools")
-        watch.on("shader", function()
-            tools.reloadShaders()
-            self:clearCrash()
-        end)
-        watch.on("image", function(change: watch.Change)
-            tools.reloadImage(change.path)
-            self:clearCrash()
-        end)
-        watch.on("sound", function(change: watch.Change)
-            tools.reloadSound(change.path)
-            self:clearCrash()
-        end)
+        watch.on("shader", function() tools.reloadShaders(); self:clearCrash() end)
+        watch.on("image", function(change: watch.Change) tools.reloadImage(change.path); self:clearCrash() end)
+        watch.on("sound", function(change: watch.Change) tools.reloadSound(change.path); self:clearCrash() end)
         -- The metrics, not the atlas beside them. The atlas was loaded as an
         -- image and reloads as one, under the rect it already occupies; the
         -- metrics are what decides where a glyph is and how wide it is, so they
         -- are what has to be read again and laid out from.
-        watch.on("font", function(change: watch.Change)
-            tools.reloadFont(change.path)
-            self:clearCrash()
-        end)
+        watch.on("font", function(change: watch.Change) tools.reloadFont(change.path); self:clearCrash() end)
         watch.install(config.watch)
     end
 
@@ -775,8 +771,7 @@ end
 function Application:_receive(event: events.Event)
     -- Before anything acts on the event, so what is measured is the wait from
     -- the host's stamp rather than from some point inside the reaction.
-    if timing.enabled and event.arrival ~= nil
-        and events.isInput(event.kind) then
+    if timing.enabled and event.arrival ~= nil and events.isInput(event.kind) then
         timing.inputArrived(event.arrival)
     end
 
@@ -806,13 +801,19 @@ function Application:_receive(event: events.Event)
     -- than a vague risk: an observer that throws is a second crash, and the
     -- traceback it produces is the one nobody needed. Delivery resumes when
     -- `clearCrash` does.
-    if self._crashed ~= nil then return end
+    if self._crashed ~= nil then
+        return
+    end
 
     local eventType = events.typeOf(kind)
-    if eventType == nil then return end
+    if eventType == nil then
+        return
+    end
 
     local world = self.world
-    if not world:hasObservers(0, eventType) then return end
+    if not world:hasObservers(0, eventType) then
+        return
+    end
 
     -- The bus routes on this and reads nothing else off the record, so stamping
     -- it is the whole of what delivery costs beyond the dispatch itself.
@@ -827,8 +828,7 @@ end
 ---
 --- `arrivals` is the host's parallel array of arrival stamps, one per queued
 --- event.
-function Application:_iterate(queue: loader.CValue, count: integer,
-                              arrivals: loader.CValue): boolean
+function Application:_iterate(queue: loader.CValue, count: integer, arrivals: loader.CValue): boolean
     local dt = clock.step()
     local frameStart = timing.begin()
 
@@ -839,7 +839,9 @@ function Application:_iterate(queue: loader.CValue, count: integer,
     receiving = self
     events.drain(queue, count, receive, arrivals)
 
-    if self.quitRequested then return false end
+    if self.quitRequested then
+        return false
+    end
 
     -- The loading worker answers whenever it finishes, and nothing else in a
     -- frame is obliged to ask. A subsystem that loads assets of its own drains
@@ -865,7 +867,9 @@ function Application:_iterate(queue: loader.CValue, count: integer,
         -- Answered on this thread, inside the frame, so a tool reads a world
         -- that is not mid-update. Polled before the guard below, so it keeps
         -- answering after a crash.
-        if self.mcp ~= nil then self.mcp:poll() end
+        if self.mcp ~= nil then
+            self.mcp:poll()
+        end
 
         if self._crashed == nil then
             -- Simulated time, so it advances when simulation does and not
@@ -884,7 +888,9 @@ function Application:_iterate(queue: loader.CValue, count: integer,
     -- a second failure on top of the first. The step goes in because a keyed
     -- cooldown is measured against it, which is also why it is this dt and not
     -- the suspension-guarded one: time passes while a game is suspended.
-    if self.audio ~= nil then self.audio:update(dt) end
+    if self.audio ~= nil then
+        self.audio:update(dt)
+    end
 
     timing.finish(FRAME, frameStart)
 
@@ -895,7 +901,6 @@ function Application:_iterate(queue: loader.CValue, count: integer,
     end
     return true
 end
-
 
 --- What a guarded frame runs, as one function rather than one per frame. Held
 --- here for the reason `deliver` is: a frame should not allocate a closure to
@@ -915,7 +920,9 @@ local function step()
     -- line can throw and the recovery path has no other way to reach it.
     self._frame = frame
     local t2 = timing.begin()
-    if frame == nil then return end
+    if frame == nil then
+        return
+    end
 
     self.renderer:render(frame)
     local t3 = timing.begin()
@@ -1003,22 +1010,26 @@ end
 --- of is not obviously a solver that can be stepped again.
 --- @return Whether the loop resumed, and why it did not.
 function Application:clearCrash(): boolean, string
-    if self._crashed == nil then return true end
+    if self._crashed == nil then
+        return true
+    end
 
     local config <const> = self._config
     if not config.debug and config.mcpPort == nil and config.watch == nil then
-        return false, "this build sets none of debug, mcpPort or watch, so it "
-            .. "does not resume after a crash"
+        return false, "this build sets none of debug, mcpPort or watch, so it " .. "does not resume after a crash"
     end
     if self._forcedRecovery ~= nil then
         return false, "recovery was not clean, so the device is not in the "
-            .. "state the engine intended: " .. self._forcedRecovery
+            .. "state the engine intended: "
+            .. self._forcedRecovery
     end
 
     self._crashed = nil
     mcp.setCrashed(nil)
-    LOGGER:warn("resuming after a crash; engine state is restored and the "
-        .. "world may be inconsistent, so reload before trusting it")
+    LOGGER:warn(
+        "resuming after a crash; engine state is restored and the "
+            .. "world may be inconsistent, so reload before trusting it"
+    )
     return true
 end
 
@@ -1037,8 +1048,7 @@ function Application:_lowMemory()
     local before <const> = collectgarbage("count")
     collectgarbage("collect")
     local after <const> = collectgarbage("count")
-    LOGGER:warn("low memory: gave back %.0f KB, still holding %.0f KB",
-        before - after, after)
+    LOGGER:warn("low memory: gave back %.0f KB, still holding %.0f KB", before - after, after)
 end
 
 --- The platform is about to put the application in the background.
@@ -1079,7 +1089,9 @@ end
 --- come back; the checkpoint above is what makes that survivable, which is why
 --- it landed first.
 function Application:_didEnterBackground()
-    if self.device ~= nil then self.device:waitForIdle() end
+    if self.device ~= nil then
+        self.device:waitForIdle()
+    end
 end
 
 --- The application is in the foreground again.
@@ -1110,12 +1122,16 @@ end
 
 --- Called once by the host, however the loop ended.
 function Application:_shutdown(): boolean
-    if self._shutdownDone then return true end
+    if self._shutdownDone then
+        return true
+    end
     self._shutdownDone = true
 
     if timing.auto then
         local report = timing.format()
-        if report ~= "" then io.stderr:write(report .. "\n") end
+        if report ~= "" then
+            io.stderr:write(report .. "\n")
+        end
     end
 
     -- The game's teardown, and the first thing here for the same reason the
@@ -1134,11 +1150,17 @@ function Application:_shutdown(): boolean
     end
 
     watch.uninstall()
-    if self.mcp ~= nil then self.mcp:destroy() end
+    if self.mcp ~= nil then
+        self.mcp:destroy()
+    end
     -- Before SDL_Quit, since closing a device after the subsystem it belongs
     -- to has gone is undefined.
-    if self.input ~= nil then self.input:destroy() end
-    if self.audio ~= nil then self.audio:destroy() end
+    if self.input ~= nil then
+        self.input:destroy()
+    end
+    if self.audio ~= nil then
+        self.audio:destroy()
+    end
     -- After the audio, which drains its own outstanding loads through the
     -- worker this stops. A thread still decoding into a state that is being
     -- torn down is the one way asset loading can outlive the process it
@@ -1152,10 +1174,14 @@ function Application:_shutdown(): boolean
 
     if self.device ~= nil then
         self.device:waitForIdle()
-        if self.renderer ~= nil then self.renderer:destroy() end
+        if self.renderer ~= nil then
+            self.renderer:destroy()
+        end
         self.device:destroy()
     end
-    if self.window ~= nil then self.window:destroy() end
+    if self.window ~= nil then
+        self.window:destroy()
+    end
     C.SDL_Quit()
     return true
 end

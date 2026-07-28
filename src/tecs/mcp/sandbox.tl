@@ -27,21 +27,43 @@ local G <const> = _G as {string: any}
 
 -- Reached through _G because Teal targets 5.4's standard library, where these
 -- were removed; LuaJIT is 5.1 and has both.
-local loadstring <const> =
-    G["loadstring"] as function(string, string): function(any): any..., string
+local loadstring <const> = G["loadstring"] as function(string, string): function(any): any..., string
 local setfenv <const> = G["setfenv"] as function(any, {string: any})
 
 --- Fields of `os` that cannot touch the machine.
-local SAFE_OS <const>: {string} = { "time", "clock", "date", "difftime", "getenv" }
+local SAFE_OS <const>: {string} = {"time", "clock", "date", "difftime", "getenv"}
 
 --- Names passed through untouched. Everything absent from this list is absent
 --- from the environment, so a new global in the host does not silently become
 --- reachable.
 local PASSED <const>: {string} = {
-    "assert", "error", "ipairs", "next", "pairs", "pcall", "print", "select",
-    "setmetatable", "getmetatable", "rawget", "rawset", "rawequal", "rawlen",
-    "tonumber", "tostring", "type", "unpack", "xpcall", "require",
-    "string", "table", "math", "coroutine", "bit", "jit", "ffi",
+    "assert",
+    "error",
+    "ipairs",
+    "next",
+    "pairs",
+    "pcall",
+    "print",
+    "select",
+    "setmetatable",
+    "getmetatable",
+    "rawget",
+    "rawset",
+    "rawequal",
+    "rawlen",
+    "tonumber",
+    "tostring",
+    "type",
+    "unpack",
+    "xpcall",
+    "require",
+    "string",
+    "table",
+    "math",
+    "coroutine",
+    "bit",
+    "jit",
+    "ffi",
 }
 
 local environment: {string: any} = nil
@@ -68,7 +90,9 @@ end
 
 --- The persistent environment, built on first use.
 local function current(): {string: any}
-    if environment == nil then environment = build() end
+    if environment == nil then
+        environment = build()
+    end
     return environment
 end
 
@@ -80,14 +104,14 @@ function sandbox.compile(code: string): function(any): any..., string
     -- Wrapped so a bare expression and a statement block both work, and so
     -- `world` is a parameter rather than something the caller has to close
     -- over. Returning is optional, which is why the envelope reports a count.
-    local chunk, reason = loadstring(
-        "local world = ...\n" .. code, "=run_lua")
+    local chunk, reason = loadstring("local world = ...\n" .. code, "=run_lua")
     if chunk == nil then
         -- A bare expression is the common typo, so try it as one before
         -- reporting a syntax error the agent would have to work out.
-        local expression = loadstring("local world = ...\nreturn " .. code,
-            "=run_lua")
-        if expression == nil then return nil, reason end
+        local expression = loadstring("local world = ...\nreturn " .. code, "=run_lua")
+        if expression == nil then
+            return nil, reason
+        end
         chunk = expression
     end
 
@@ -135,8 +159,7 @@ function sandbox.describe(value: any, depth?: integer): any
             isArray = false
             break
         end
-        if isArray and type(key) == "number" and key == math.floor(key as number)
-            and (key as number) >= 1 then
+        if isArray and type(key) == "number" and key == math.floor(key as number) and (key as number) >= 1 then
             list[key as integer] = sandbox.describe(entry, depth + 1)
         else
             isArray = false
@@ -145,14 +168,18 @@ function sandbox.describe(value: any, depth?: integer): any
     end
 
     if isArray then
-        if #list == 0 then return cjson.empty_array end
+        if #list == 0 then
+            return cjson.empty_array
+        end
         return list
     end
 
     -- A table that turned out to be mixed loses nothing: the numeric keys were
     -- written into `list` and are copied across as strings.
     for index = 1, #list do
-        if out[tostring(index)] == nil then out[tostring(index)] = list[index] end
+        if out[tostring(index)] == nil then
+            out[tostring(index)] = list[index]
+        end
     end
     return out
 end

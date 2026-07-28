@@ -60,7 +60,7 @@ local record Frame
     state: FrameState
 end
 
-local FrameMT <const>: metatable<Frame> = { __index = Frame }
+local FrameMT <const>: metatable<Frame> = {__index = Frame}
 
 --- Wraps an acquired command buffer and swapchain texture.
 ---
@@ -72,8 +72,9 @@ local FrameMT <const>: metatable<Frame> = { __index = Frame }
 ---     costing a table. What it costs: the object describes the frame being
 ---     recorded now, so nothing may keep one and expect it to still describe
 ---     the frame it was handed.
-function Frame.wrap(commandBuffer: loader.CPtr, swapchainTexture: loader.CPtr,
-                    width: integer, height: integer, reuse?: Frame): Frame
+function Frame.wrap(
+    commandBuffer: loader.CPtr, swapchainTexture: loader.CPtr, width: integer, height: integer, reuse?: Frame
+): Frame
     local self = reuse or setmetatable({} as Frame, FrameMT)
     self.commandBuffer = commandBuffer
     self.swapchainTexture = swapchainTexture
@@ -86,9 +87,12 @@ end
 
 --- Begins a render pass targeting the swapchain.
 function Frame:beginRenderPass(options: RenderPassOptions): RenderPass
-    return RenderPass.begin(self.commandBuffer, {
-        { texture = self.swapchainTexture, clear = options and options.clear },
-    })
+    return RenderPass.begin(
+        self.commandBuffer,
+        {
+            {texture = self.swapchainTexture, clear = options and options.clear},
+        }
+    )
 end
 
 --- Begins a compute pass on this frame's command buffer.
@@ -101,12 +105,13 @@ end
 
 --- Submits the frame's recorded work for execution and presentation.
 function Frame:submit()
-    if self.state ~= "recording" then return end
+    if self.state ~= "recording" then
+        return
+    end
     self.state = "submitted"
     local commandBuffer <const> = self.commandBuffer
     self.commandBuffer = nil
-    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
-        "SDL_SubmitGPUCommandBuffer")
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean, "SDL_SubmitGPUCommandBuffer")
 end
 
 --- Discards the frame without presenting, releasing the command buffer.
@@ -116,11 +121,15 @@ end
 --- makes the call: the frame is still recoverable at that point, and
 --- `abandon` is what recovers it.
 function Frame:cancel()
-    if self.state ~= "recording" then return end
+    if self.state ~= "recording" then
+        return
+    end
     if self.acquired then
-        error("tecs: a frame that acquired a swapchain texture cannot be "
-            .. "cancelled; submit it, or use abandon to resolve it either way",
-            2)
+        error(
+            "tecs: a frame that acquired a swapchain texture cannot be "
+                .. "cancelled; submit it, or use abandon to resolve it either way",
+            2
+        )
     end
     self.state = "cancelled"
     local commandBuffer <const> = self.commandBuffer
@@ -147,12 +156,13 @@ end
 --- @return Why resolving failed, or nil when it did not. A failure here is
 ---     reported beside whatever went wrong first and never in place of it.
 function Frame:abandon(): string
-    if self.state ~= "recording" then return nil end
+    if self.state ~= "recording" then
+        return nil
+    end
 
     -- Cast because neither call declares a return `pcall` could carry the
     -- failure in, and the failure is the whole point of protecting them.
-    local ended, endFailure =
-        pcall(passscope.endOpen, self.commandBuffer) as (boolean, any)
+    local ended, endFailure = pcall(passscope.endOpen, self.commandBuffer) as (boolean, any)
 
     local resolved, resolveFailure: boolean, any
     if self.acquired then
@@ -161,8 +171,12 @@ function Frame:abandon(): string
         resolved, resolveFailure = pcall(self.cancel, self) as (boolean, any)
     end
 
-    if not ended then return tostring(endFailure) end
-    if not resolved then return tostring(resolveFailure) end
+    if not ended then
+        return tostring(endFailure)
+    end
+    if not resolved then
+        return tostring(resolveFailure)
+    end
     return nil
 end
 

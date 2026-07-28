@@ -84,7 +84,9 @@ end
 
 function InverseIndexImpl:unlink(sourceId: integer, targetId: integer)
     local sources = self._inverse[targetId]
-    if not sources then return end
+    if not sources then
+        return
+    end
     sources[sourceId] = nil
     if next(sources) == nil then
         self._inverse[targetId] = nil

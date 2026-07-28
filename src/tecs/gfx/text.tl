@@ -252,8 +252,7 @@ local record text
     measure: function(item: Text): number, number
     plugin: function(options: TextOptions): function(World)
     layouts: function(world: World): integer
-    glyphAt: function(world: World, entity: integer,
-                      index: integer): number, number, number, number
+    glyphAt: function(world: World, entity: integer, index: integer): number, number, number, number
 end
 
 -------------------------------------------------------------------------------
@@ -266,14 +265,18 @@ local fontsByName <const>: {string: Font} = {}
 
 --- Resolves a path against the asset root unless it already names one.
 local function resolve(path: string): string
-    if path:sub(1, 1) == "/" then return path end
+    if path:sub(1, 1) == "/" then
+        return path
+    end
     return paths.asset(path)
 end
 
 --- Everything up to and including the final separator, or the empty string.
 local function directoryOf(path: string): string
     local cut = path:match("^.*()/")
-    if cut == nil then return "" end
+    if cut == nil then
+        return ""
+    end
     return path:sub(1, cut as integer)
 end
 
@@ -370,7 +373,9 @@ function text.loadFont(options: FontOptions): Font
     end
 
     local existing = fontsByName[options.metrics]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
     local metricsPath = resolve(options.metrics)
     -- Named as a font, because the bytes are a document like any other and the
@@ -386,8 +391,7 @@ function text.loadFont(options: FontOptions): Font
         local root = decodeMetrics(document, metricsPath)
         local pages = root.pages as {string}
         if pages == nil or pages[1] == nil then
-            error(("tecs: '%s' names no atlas page; pass `atlas`")
-                :format(metricsPath), 2)
+            error(("tecs: '%s' names no atlas page; pass `atlas`"):format(metricsPath), 2)
         end
         atlas = directoryOf(options.metrics) .. pages[1]
     end
@@ -399,7 +403,7 @@ end
 
 --- The font the engine ships, loaded on first use.
 function text.defaultFont(): Font
-    return text.loadFont({ metrics = DEFAULT_METRICS })
+    return text.loadFont({metrics = DEFAULT_METRICS})
 end
 
 --- A loaded font by the metrics path it was loaded from, or nil.
@@ -415,16 +419,19 @@ end
 --- looked at, which is that name resolved. Both have to find the one font.
 local function fontAt(path: string): Font
     local named = fontsByName[path]
-    if named ~= nil then return named end
+    if named ~= nil then
+        return named
+    end
     for _, font in pairs(fontsByName) do
-        if resolve(font.name) == path then return font end
+        if resolve(font.name) == path then
+            return font
+        end
     end
     return nil
 end
 
 --- The font's atlas on this renderer, or nil while it is still decoding.
-local function residency(known: {Font: Atlas}, font: Font,
-                         renderer: Renderer): Atlas
+local function residency(known: {Font: Atlas}, font: Font, renderer: Renderer): Atlas
     local atlas = known[font]
     if atlas == nil then
         -- Already on the renderer answers without the worker. Re-reading a
@@ -436,31 +443,42 @@ local function residency(known: {Font: Atlas}, font: Font,
         local resident <const> = renderer:regionOf(font.atlas)
         if resident ~= nil then
             local sprite <const> = renderer:sprite(font.atlas)
-            atlas = { image = sprite.image, slot = sprite.slot,
-                u = resident.u1, v = resident.v1,
+            atlas = {
+                image = sprite.image,
+                slot = sprite.slot,
+                u = resident.u1,
+                v = resident.v1,
                 param = font.distanceRange * resident.u1 / font.atlasWidth,
-                handle = nil, failed = false }
+                handle = nil,
+                failed = false,
+            }
             known[font] = atlas
             return atlas
         end
 
         -- The worker is what decodes the atlas, and a game that only ever
         -- draws text has no other reason to have started it.
-        if not assets.installed() then assets.install() end
-        atlas = { image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0,
-            handle = assets.loadImage(font.atlas), failed = false }
+        if not assets.installed() then
+            assets.install()
+        end
+        atlas = {
+            image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0, handle = assets.loadImage(font.atlas), failed = false
+        }
         known[font] = atlas
     end
 
     if atlas.handle == nil then
-        if atlas.failed then return nil end
+        if atlas.failed then
+            return nil
+        end
         return atlas
     end
-    if atlas.handle.status == "loading" then return nil end
+    if atlas.handle.status == "loading" then
+        return nil
+    end
 
     if atlas.handle.status ~= "ready" then
-        logger:error("cannot load the font atlas '%s': %s",
-            font.atlas, atlas.handle.error or atlas.handle.status)
+        logger:error("cannot load the font atlas '%s': %s", font.atlas, atlas.handle.error or atlas.handle.status)
         atlas.handle = nil
         atlas.failed = true
         return nil
@@ -530,23 +548,27 @@ local record Glyphs
     _taken: boolean
 end
 
-local GlyphsMT <const>: metatable<Glyphs> = { __index = Glyphs }
+local GlyphsMT <const>: metatable<Glyphs> = {__index = Glyphs}
 
 --- Grows the arrays to hold at least `slots`, preserving what is in them.
 local function reserveCapacity(self: Glyphs, slots: integer)
-    if slots <= self.capacity then return end
+    if slots <= self.capacity then
+        return
+    end
 
     local capacity = self.capacity
-    if capacity < MINIMUM_SLOTS then capacity = MINIMUM_SLOTS end
-    while capacity < slots do capacity = capacity * 2 end
+    if capacity < MINIMUM_SLOTS then
+        capacity = MINIMUM_SLOTS
+    end
+    while capacity < slots do
+        capacity = capacity * 2
+    end
 
     local instances = loader.newArray("float[?]", capacity * INSTANCE_FLOATS)
     local bounds = loader.newArray("float[?]", capacity * BOUND_FLOATS)
     if self.high > 0 then
-        loader.copyBytes(instances, self.instances as loader.CValue,
-            self.high * INSTANCE_BYTES)
-        loader.copyBytes(bounds, self.bounds as loader.CValue,
-            self.high * BOUND_BYTES)
+        loader.copyBytes(instances, self.instances as loader.CValue, self.high * INSTANCE_BYTES)
+        loader.copyBytes(bounds, self.bounds as loader.CValue, self.high * BOUND_BYTES)
     end
 
     self.instances = instances
@@ -558,14 +580,18 @@ end
 
 local function clearDirty(self: Glyphs)
     local ranges = self._dirty
-    for index = self._dirtyCount, 1, -1 do ranges[index] = nil end
+    for index = self._dirtyCount, 1, -1 do
+        ranges[index] = nil
+    end
     self._dirtyCount = 0
     self._taken = false
 end
 
 --- Drops the ranges the last sync consumed.
 local function settle(self: Glyphs)
-    if not self._taken then return end
+    if not self._taken then
+        return
+    end
     clearDirty(self)
 end
 
@@ -576,9 +602,13 @@ end
 local function reset(self: Glyphs)
     self.high = 0
     local free = self._free
-    for size in pairs(free) do free[size] = nil end
+    for size in pairs(free) do
+        free[size] = nil
+    end
     local owners = self._owners
-    for entity in pairs(owners) do owners[entity] = nil end
+    for entity in pairs(owners) do
+        owners[entity] = nil
+    end
     self._ownerCount = 0
     self._sweptOwners = 0
     self._sweptLive = 0
@@ -597,7 +627,9 @@ local function mark(self: Glyphs, first: integer, last: integer)
         local previousFirst = ranges[count - 1]
         local previousLast = ranges[count]
         if first >= previousFirst and first <= previousLast + 1 then
-            if last > previousLast then ranges[count] = last end
+            if last > previousLast then
+                ranges[count] = last
+            end
             return
         end
     end
@@ -634,7 +666,9 @@ end
 --- list, so the last text on screen going away leaves the run empty rather
 --- than leaving a hole the length of it.
 local function release(self: Glyphs, first: integer, count: integer)
-    if count <= 0 then return end
+    if count <= 0 then
+        return
+    end
     if first + count - 1 == self.high then
         self.high = first - 1
         return
@@ -676,7 +710,9 @@ end
 local function reserve(self: Glyphs, item: Text, count: integer)
     local first = item._span
     local held = item._spanCount
-    if count == held then return end
+    if count == held then
+        return
+    end
 
     if held == 0 then
         item._span = allocate(self, count)
@@ -711,7 +747,9 @@ end
 
 --- Drops the record of `entity` holding a span.
 local function disown(self: Glyphs, entity: integer)
-    if self._owners[entity] == nil then return end
+    if self._owners[entity] == nil then
+        return
+    end
     self._owners[entity] = nil
     self._ownerCount = self._ownerCount - 1
 end
@@ -732,7 +770,9 @@ local function own(self: Glyphs, entity: integer, item: Text)
         disown(self, entity)
         return
     end
-    if held == nil then self._ownerCount = self._ownerCount + 1 end
+    if held == nil then
+        self._ownerCount = self._ownerCount + 1
+    end
     owners[entity] = item
 end
 
@@ -767,19 +807,22 @@ function Glyphs:takeDirty(): {integer}
     return self._dirty
 end
 
-function Glyphs:write(floats: loader.CArray, bounds: loader.CArray,
-                      base: integer, first: integer, last: integer)
+function Glyphs:write(floats: loader.CArray, bounds: loader.CArray, base: integer, first: integer, last: integer)
     local count = last - first + 1
-    if count <= 0 then return end
+    if count <= 0 then
+        return
+    end
 
-    loader.copyTo(loader.bytePointer(floats as loader.CValue)
-        + (base + first - 1) * INSTANCE_BYTES,
+    loader.copyTo(
+        loader.bytePointer(floats as loader.CValue) + (base + first - 1) * INSTANCE_BYTES,
         (self._instanceBytes + (first - 1) * INSTANCE_BYTES) as loader.CValue,
-        count * INSTANCE_BYTES)
-    loader.copyTo(loader.bytePointer(bounds as loader.CValue)
-        + (base + first - 1) * BOUND_BYTES,
+        count * INSTANCE_BYTES
+    )
+    loader.copyTo(
+        loader.bytePointer(bounds as loader.CValue) + (base + first - 1) * BOUND_BYTES,
         (self._boundBytes + (first - 1) * BOUND_BYTES) as loader.CValue,
-        count * BOUND_BYTES)
+        count * BOUND_BYTES
+    )
 end
 
 local function newGlyphs(): Glyphs
@@ -808,7 +851,9 @@ end
 --- out as Latin-1 rather than failing.
 local function codepointAt(source: string, index: integer): integer, integer
     local first = byte(source, index)
-    if first < 0x80 then return first, index + 1 end
+    if first < 0x80 then
+        return first, index + 1
+    end
 
     local length: integer
     local value: integer
@@ -822,7 +867,9 @@ local function codepointAt(source: string, index: integer): integer, integer
         return first, index + 1
     end
 
-    if index + length - 1 > #source then return first, index + 1 end
+    if index + length - 1 > #source then
+        return first, index + 1
+    end
     for offset = 1, length - 1 do
         local continuation = byte(source, index + offset)
         if continuation < 0x80 or continuation > 0xBF then
@@ -881,7 +928,9 @@ local function layout(item: Text): integer, number, number
         if codepoint == 10 then
             lineLast[lines] = count
             lineWidth[lines] = pen
-            if pen > blockWidth then blockWidth = pen end
+            if pen > blockWidth then
+                blockWidth = pen
+            end
             lines = lines + 1
             lineFirst[lines] = count + 1
             pen = 0.0
@@ -922,7 +971,9 @@ local function layout(item: Text): integer, number, number
 
     lineLast[lines] = count
     lineWidth[lines] = pen
-    if pen > blockWidth then blockWidth = pen end
+    if pen > blockWidth then
+        blockWidth = pen
+    end
 
     -- Alignment moves whole lines within the block, which is why it waits
     -- until the widest one is known.
@@ -961,7 +1012,8 @@ end
 --- Layouts run, by world, for a test or a tool that wants to see the gate
 --- working. Weak keys, so a discarded world is not held alive by its count.
 local layoutCounts <const>: {World: integer} = setmetatable(
-    {} as {World: integer}, { __mode = "k" } as metatable<{World: integer}>)
+    {} as {World: integer}, {__mode = "k"} as metatable<{World: integer}>
+)
 
 --- What the plugin holds on one world, for the same reason and on the same
 --- terms: a reload is asked for from outside any frame and has to reach the run
@@ -983,7 +1035,8 @@ local record Install
 end
 
 local installs <const>: {World: Install} = setmetatable(
-    {} as {World: Install}, { __mode = "k" } as metatable<{World: Install}>)
+    {} as {World: Install}, {__mode = "k"} as metatable<{World: Install}>
+)
 
 -------------------------------------------------------------------------------
 -- Re-reading a font
@@ -1001,11 +1054,15 @@ local installs <const>: {World: Install} = setmetatable(
 --- able to come back.
 local function evict(install: Install, font: Font)
     local atlas = install.known[font]
-    if atlas == nil then return end
+    if atlas == nil then
+        return
+    end
     -- A decode still in flight is reachable through this record and through
     -- nothing else, so what the worker answers with has to be given back before
     -- the record goes.
-    if atlas.handle ~= nil then atlas.handle:release() end
+    if atlas.handle ~= nil then
+        atlas.handle:release()
+    end
     install.known[font] = nil
 end
 
@@ -1039,8 +1096,7 @@ function text.reloadFont(path: string): Font
 
     local font = fontAt(path)
     if font == nil then
-        error(("tecs: no font is loaded from '%s', so there is nothing to "
-            .. "re-read"):format(path), 0)
+        error(("tecs: no font is loaded from '%s', so there is nothing to " .. "re-read"):format(path), 0)
     end
 
     local document = filesystem.read(resolve(font.name), "font")
@@ -1052,13 +1108,15 @@ function text.reloadFont(path: string): Font
     -- parsing, and the font every text is holding has to end up as the one it
     -- was or as the whole new one, never as half of each.
     local fresh = parseMetrics(document, font.name, font.atlas)
-    if fresh.atlasWidth ~= font.atlasWidth
-        or fresh.atlasHeight ~= font.atlasHeight then
-        error(("tecs: '%s' was loaded against a %dx%d atlas and now names one "
-            .. "of %dx%d; a re-read keeps the size, because the glyphs already "
-            .. "drawn hold rects measured against the old one"):format(
-            font.name, font.atlasWidth, font.atlasHeight,
-            fresh.atlasWidth, fresh.atlasHeight), 0)
+    if fresh.atlasWidth ~= font.atlasWidth or fresh.atlasHeight ~= font.atlasHeight then
+        error(
+            (
+                "tecs: '%s' was loaded against a %dx%d atlas and now names one "
+                .. "of %dx%d; a re-read keeps the size, because the glyphs already "
+                .. "drawn hold rects measured against the old one"
+            ):format(font.name, font.atlasWidth, font.atlasHeight, fresh.atlasWidth, fresh.atlasHeight),
+            0
+        )
     end
 
     font.size = fresh.size
@@ -1097,18 +1155,20 @@ end
 --- Read back out of the instance the producer wrote, so this is where the
 --- glyph is drawn rather than where a layout intended it. Nothing when the
 --- text has no such glyph.
-function text.glyphAt(world: World, entity: integer,
-                      index: integer): number, number, number, number
+function text.glyphAt(world: World, entity: integer, index: integer): number, number, number, number
     local install = installs[world]
-    if install == nil then return nil end
+    if install == nil then
+        return nil
+    end
     local glyphs = install.glyphs
     local item = world:get(entity, text.Text)
-    if item == nil or index < 1 or index > item._spanCount then return nil end
+    if item == nil or index < 1 or index > item._spanCount then
+        return nil
+    end
 
     local base = (item._span + index - 2) * INSTANCE_FLOATS
     local instances = glyphs.instances
-    return instances[base + 4] as number, instances[base + 5] as number,
-        instances[base + 1] as number, instances[base + 2] as number
+    return instances[base + 4] as number, instances[base + 5] as number, instances[base + 1] as number, instances[base + 2] as number
 end
 
 --- The material id, resolved on first use: reading the material files needs
@@ -1116,14 +1176,22 @@ end
 local materialId = -1
 
 local function glyphMaterial(): integer
-    if materialId < 0 then materialId = materials.id(MATERIAL) end
+    if materialId < 0 then
+        materialId = materials.id(MATERIAL)
+    end
     return materialId
 end
 
 --- Rewrites one text's glyph instances. False when its font has not arrived.
-local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
-                     item: Text, transform: TransformInstance,
-                     tint: TintInstance, clip: integer): boolean
+local function build(
+    renderer: Renderer,
+    known: {Font: Atlas},
+    glyphs: Glyphs,
+    item: Text,
+    transform: TransformInstance,
+    tint: TintInstance,
+    clip: integer
+): boolean
     local font = item.font
     local atlas = font ~= nil and residency(known, font, renderer) or nil
     if atlas == nil then
@@ -1136,7 +1204,9 @@ local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
     end
 
     local r, g, b, a = 1.0, 1.0, 1.0, 1.0
-    if tint ~= nil then r, g, b, a = tint.r, tint.g, tint.b, tint.a end
+    if tint ~= nil then
+        r, g, b, a = tint.r, tint.g, tint.b, tint.a
+    end
 
     local count, width, height = layout(item)
     item.width = width
@@ -1241,7 +1311,9 @@ local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
         bounds[bound + 3] = ey
     end
 
-    if count > 0 then mark(glyphs, span, span + count - 1) end
+    if count > 0 then
+        mark(glyphs, span, span + count - 1)
+    end
 
     item._builtText = item.text
     item._builtFont = font
@@ -1260,37 +1332,40 @@ local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
 end
 
 --- Whether `item` differs from what its glyphs were built from.
-local function stale(item: Text, transform: TransformInstance,
-                     tint: TintInstance, clip: integer): boolean
-    if item._builtClip ~= clip then return true end
+local function stale(item: Text, transform: TransformInstance, tint: TintInstance, clip: integer): boolean
+    if item._builtClip ~= clip then
+        return true
+    end
 
-    if item._builtText ~= item.text
+    if
+        item._builtText ~= item.text
         or item._builtFont ~= item.font
         or item._builtSize ~= item.size
         or item._builtAlign ~= item.align
         or item._builtSpacing ~= item.lineSpacing
-        or item._builtTracking ~= item.tracking then
+        or item._builtTracking ~= item.tracking
+    then
         return true
     end
 
     -- A glyph carries an absolute position, so the transform the text was laid
     -- out at is part of what its glyphs were built from.
-    if item._builtX ~= transform.x
+    if
+        item._builtX ~= transform.x
         or item._builtY ~= transform.y
         or item._builtZ ~= transform.z
         or item._builtLayer ~= transform.layer
         or item._builtRotation ~= transform.rotation
         or item._builtScaleX ~= transform.scaleX
-        or item._builtScaleY ~= transform.scaleY then
+        or item._builtScaleY ~= transform.scaleY
+    then
         return true
     end
 
     if tint == nil then
-        return item._builtR ~= 1.0 or item._builtG ~= 1.0
-            or item._builtB ~= 1.0 or item._builtA ~= 1.0
+        return item._builtR ~= 1.0 or item._builtG ~= 1.0 or item._builtB ~= 1.0 or item._builtA ~= 1.0
     end
-    return item._builtR ~= tint.r or item._builtG ~= tint.g
-        or item._builtB ~= tint.b or item._builtA ~= tint.a
+    return item._builtR ~= tint.r or item._builtG ~= tint.g or item._builtB ~= tint.b or item._builtA ~= tint.a
 end
 
 --- Registers the layout system and the producer on a world.
@@ -1308,7 +1383,7 @@ function text.plugin(options: TextOptions): function(World)
     return function(world: World)
         local texts <const> = world:query({
             name = "tecs.Text",
-            include = { text.Text, Transform },
+            include = {text.Text, Transform},
         })
         local install <const>: Install = {
             glyphs = newGlyphs(),
@@ -1325,7 +1400,7 @@ function text.plugin(options: TextOptions): function(World)
         world:addSystem({
             name = "tecs.TextLayout",
             phase = ecs.phases.PostUpdate,
-            after = { "RelativeTransform" },
+            after = {"RelativeTransform"},
             run = function()
                 -- A font that has not arrived leaves its texts unbuilt and
                 -- their archetypes clean, so the gate is held open until it
@@ -1333,7 +1408,9 @@ function text.plugin(options: TextOptions): function(World)
                 -- holds it open for the same reason: its atlas was given up and
                 -- has to be resolved again.
                 local all = install.waiting
-                if all then assets.update() end
+                if all then
+                    assets.update()
+                end
                 install.waiting = false
                 -- Read once and dropped, because clearing what it marks is the
                 -- text's own build record and that survives until a build
@@ -1346,10 +1423,13 @@ function text.plugin(options: TextOptions): function(World)
                 local live = 0
                 for archetype, length, entities in texts:iter() do
                     live = live + length
-                    if all or archetype:isComponentDirty(text.Text)
+                    if
+                        all
+                        or archetype:isComponentDirty(text.Text)
                         or archetype:isComponentDirty(Tint)
                         or archetype:isComponentDirty(Clip)
-                        or archetype:isComponentDirty(Transform) then
+                        or archetype:isComponentDirty(Transform)
+                    then
                         local column = archetype:get(text.Text)
                         local transforms = archetype:get(Transform)
                         local tints = archetype:get(Tint)
@@ -1376,8 +1456,7 @@ function text.plugin(options: TextOptions): function(World)
                             end
                             if stale(item, transform, tint, clip) then
                                 built = built + 1
-                                if not build(renderer, known, glyphs, item,
-                                             transform, tint, clip) then
+                                if not build(renderer, known, glyphs, item, transform, tint, clip) then
                                     install.waiting = true
                                 end
                                 own(glyphs, entities[row] as integer, item)
@@ -1391,9 +1470,10 @@ function text.plugin(options: TextOptions): function(World)
                 -- counts the last sweep saw are remembered so a scene that
                 -- keeps texts out of this query, by disabling them, is walked
                 -- once rather than every frame.
-                if glyphs._ownerCount > live
-                    and (glyphs._ownerCount ~= glyphs._sweptOwners
-                        or live ~= glyphs._sweptLive) then
+                if
+                    glyphs._ownerCount > live
+                    and (glyphs._ownerCount ~= glyphs._sweptOwners or live ~= glyphs._sweptLive)
+                then
                     sweepOwners(glyphs, world)
                     glyphs._sweptOwners = glyphs._ownerCount
                     glyphs._sweptLive = live
@@ -1407,22 +1487,28 @@ function text.plugin(options: TextOptions): function(World)
 
         -- A span outlives its text otherwise: nothing else knows the slots are
         -- free, and the glyphs in them keep being drawn.
-        world:observe(0, ecs.builtins.OnDespawn,
+        world:observe(
+            0,
+            ecs.builtins.OnDespawn,
             function(event: ecs.builtins.OnDespawn)
                 local item = world:get(event.entity, text.Text)
-                if item == nil then return end
+                if item == nil then
+                    return
+                end
                 disown(glyphs, event.entity)
-                if item._spanCount == 0 then return end
+                if item._spanCount == 0 then
+                    return
+                end
                 reserve(glyphs, item, 0)
-            end)
+            end
+        )
 
         -- A load replaces the world in place rather than despawning what was
         -- in it, so the observer above never hears about the texts it removed
         -- and the run has to be given up whole.
-        world:observe(0, ecs.builtins.FinishSnapshotLoad,
-            function(_event: ecs.builtins.FinishSnapshotLoad)
-                reset(glyphs)
-            end)
+        world:observe(
+            0, ecs.builtins.FinishSnapshotLoad, function(_event: ecs.builtins.FinishSnapshotLoad) reset(glyphs) end
+        )
     end
 end
 
@@ -1430,52 +1516,73 @@ end
 -- The component
 -------------------------------------------------------------------------------
 
-text.Text = ecs.newComponent({
-    name = "Text",
-    container = Text,
-    -- A text is a position and a string. Requiring the position means one is
-    -- never accidentally left off, which would make the text quietly not
-    -- appear rather than fail.
-    requires = { Transform },
-    fields = {
-        "text", "font", "size", "align", "lineSpacing", "tracking",
-    },
-    init = function(item: Text)
-        if item.text == nil then item.text = "" end
-        if item.size == nil then item.size = 16 end
-        if item.align == nil then item.align = "left" end
-        if item.lineSpacing == nil then item.lineSpacing = 1.0 end
-        if item.tracking == nil then item.tracking = 0.0 end
-        if ALIGNMENTS[item.align] == nil then
-            error(("tecs: '%s' is not an alignment; use left, centre or right")
-                :format(tostring(item.align)), 3)
-        end
-        item.width = 0.0
-        item.height = 0.0
-        item._span = 0
-        item._spanCount = 0
-    end,
-    serialize = function(item: Text): {string: any}
-        -- The authored fields and the font by name. The span is one process's
-        -- answer and the font is a shared table; neither belongs in a save.
-        return {
-            text = item.text,
-            font = item.font ~= nil and item.font.name or nil,
-            size = item.size,
-            align = item.align,
-            lineSpacing = item.lineSpacing,
-            tracking = item.tracking,
-        }
-    end,
-    deserialize = function(_world: World, data: {string: any}): Text
-        -- A font that was never loaded in this process leaves the text
-        -- without one, which lays out nothing rather than failing a load.
-        local name = data.font as string
-        local font = name ~= nil and fontsByName[name] or nil
-        return text.Text(data.text as string, font, data.size as number,
-            data.align as string, data.lineSpacing as number,
-            data.tracking as number)
-    end,
-})
+text.Text = ecs.newComponent(
+    {
+        name = "Text",
+        container = Text,
+        -- A text is a position and a string. Requiring the position means one is
+        -- never accidentally left off, which would make the text quietly not
+        -- appear rather than fail.
+        requires = {Transform},
+        fields = {
+            "text",
+            "font",
+            "size",
+            "align",
+            "lineSpacing",
+            "tracking",
+        },
+        init = function(item: Text)
+            if item.text == nil then
+                item.text = ""
+            end
+            if item.size == nil then
+                item.size = 16
+            end
+            if item.align == nil then
+                item.align = "left"
+            end
+            if item.lineSpacing == nil then
+                item.lineSpacing = 1.0
+            end
+            if item.tracking == nil then
+                item.tracking = 0.0
+            end
+            if ALIGNMENTS[item.align] == nil then
+                error(("tecs: '%s' is not an alignment; use left, centre or right"):format(tostring(item.align)), 3)
+            end
+            item.width = 0.0
+            item.height = 0.0
+            item._span = 0
+            item._spanCount = 0
+        end,
+        serialize = function(item: Text): {string: any}
+            -- The authored fields and the font by name. The span is one process's
+            -- answer and the font is a shared table; neither belongs in a save.
+            return {
+                text = item.text,
+                font = item.font ~= nil and item.font.name or nil,
+                size = item.size,
+                align = item.align,
+                lineSpacing = item.lineSpacing,
+                tracking = item.tracking,
+            }
+        end,
+        deserialize = function(_world: World, data: {string: any}): Text
+            -- A font that was never loaded in this process leaves the text
+            -- without one, which lays out nothing rather than failing a load.
+            local name = data.font as string
+            local font = name ~= nil and fontsByName[name] or nil
+            return text.Text(
+                data.text as string,
+                font,
+                data.size as number,
+                data.align as string,
+                data.lineSpacing as number,
+                data.tracking as number
+            )
+        end,
+    }
+)
 
 return text

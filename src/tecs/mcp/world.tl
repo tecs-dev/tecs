@@ -41,7 +41,9 @@ end
 --- The declared components, sorted by name.
 local function sortedNames(declared: {string: ecs.Component}): {string}
     local names: {string} = {}
-    for name in pairs(declared) do names[#names + 1] = name end
+    for name in pairs(declared) do
+        names[#names + 1] = name
+    end
     table.sort(names)
     return names
 end
@@ -55,8 +57,7 @@ local function component(name: string): ecs.Component
     local found = name ~= nil and ecs.componentByName(name) or nil
     if found == nil then
         local names = sortedNames(ecs.declaredComponents())
-        error(("no component named '%s'; known: %s")
-            :format(tostring(name), table.concat(names, ", ")), 0)
+        error(("no component named '%s'; known: %s"):format(tostring(name), table.concat(names, ", ")), 0)
     end
     return found
 end
@@ -64,7 +65,9 @@ end
 --- Resolves a list of component names.
 local function componentList(names: {any}): {ecs.Component}
     local list: {ecs.Component} = {}
-    if names == nil then return list end
+    if names == nil then
+        return list
+    end
     for index = 1, #names do
         list[index] = component(names[index] as string)
     end
@@ -75,10 +78,18 @@ end
 --- component serializes to nothing but these, so without the filter its
 --- storage class and signature index would read as fields it has.
 local METADATA <const>: {string: boolean} = {
-    componentType = true, componentName = true, componentId = true,
-    relationshipType = true, wildcardContainer = true, target = true,
-    transient = true, serialize = true, deserialize = true,
-    storageType = true, signatureIndex = true, signatureWordIndex = true,
+    componentType = true,
+    componentName = true,
+    componentId = true,
+    relationshipType = true,
+    wildcardContainer = true,
+    target = true,
+    transient = true,
+    serialize = true,
+    deserialize = true,
+    storageType = true,
+    signatureIndex = true,
+    signatureWordIndex = true,
 }
 
 --- The data fields of a serialized component, without its interface members.
@@ -95,12 +106,16 @@ end
 --- Serializes an instance, or returns nil for a component that carries no
 --- data. A tag is presence, so it has nothing to show.
 local function valueOf(kind: ecs.Component, instance: any): {string: any}
-    local ok, serialized = pcall(function(): {string: any}
-        return (kind.serialize as function(any): {string: any})(instance)
-    end)
-    if not ok or serialized == nil then return nil end
+    local ok, serialized = pcall(
+        function(): {string: any} return (kind.serialize as function(any): {string: any})(instance) end
+    )
+    if not ok or serialized == nil then
+        return nil
+    end
     local fields = dataFields(serialized)
-    if next(fields) == nil then return nil end
+    if next(fields) == nil then
+        return nil
+    end
     return fields
 end
 
@@ -111,17 +126,15 @@ end
 --- saying so.
 local function nameOf(w: ecs.World, entity: integer): string
     local Name <const> = ecs.builtins.Name
-    if not w:has(entity, Name as ecs.Component) then return nil end
-    local ok, value = pcall(function(): any
-        return w:get(entity, Name as ecs.Component)
-    end)
+    if not w:has(entity, Name as ecs.Component) then
+        return nil
+    end
+    local ok, value = pcall(function(): any return w:get(entity, Name as ecs.Component) end)
     return ok and value ~= nil and tostring(value) or nil
 end
 
 --- Reads one entity's components as plain tables.
-local function describe(
-    w: ecs.World, entity: integer, declared: {string: ecs.Component}
-): {string: any}
+local function describe(w: ecs.World, entity: integer, declared: {string: ecs.Component}): {string: any}
     local values: {string: any} = {}
     local count = 0
     for name, kind in pairs(declared) do
@@ -130,9 +143,7 @@ local function describe(
             -- crosses as numbers rather than as cdata JSON cannot carry. A tag
             -- has no data, so it reports as present rather than as an empty
             -- object a client would have to special-case.
-            local ok, instance = pcall(function(): any
-                return w:get(entity, kind)
-            end)
+            local ok, instance = pcall(function(): any return w:get(entity, kind) end)
             local data = ok and valueOf(kind, instance) or nil
             values[name] = data ~= nil and data or true
             count = count + 1
@@ -163,12 +174,20 @@ end
 --- both rather than conflating them.
 local function presentIn(w: ecs.World): {ecs.Component: boolean}
     local present: {ecs.Component: boolean} = {}
-    if w == nil then return present end
-    w:forEachArchetype(function(archetype: ecs.Archetype)
-        if archetype.entities[0] == 0 then return end
-        local list = archetype.componentList
-        for index = 1, #list do present[list[index]] = true end
-    end)
+    if w == nil then
+        return present
+    end
+    w:forEachArchetype(
+        function(archetype: ecs.Archetype)
+            if archetype.entities[0] == 0 then
+                return
+            end
+            local list = archetype.componentList
+            for index = 1, #list do
+                present[list[index]] = true
+            end
+        end
+    )
     return present
 end
 
@@ -177,7 +196,7 @@ mcp.register({
     description = "Lists the components these tools can name, with the fields "
         .. "each carries and whether the bound world carries any.",
     readOnly = true,
-    inputSchema = { type = "object", properties = cjson.empty_array },
+    inputSchema = {type = "object", properties = cjson.empty_array},
     handler = function(_: {string: any}): {string: any}
         local declared = ecs.declaredComponents()
         local names = sortedNames(declared)
@@ -189,12 +208,12 @@ mcp.register({
             -- Fields are read from a default instance rather than declared
             -- again here, so this cannot describe a component incorrectly.
             local fields: {string} = {}
-            local built, sample = pcall(function(): any
-                return (kind as function(): any)()
-            end)
+            local built, sample = pcall(function(): any return (kind as function(): any)() end)
             local data = built and valueOf(kind, sample) or nil
             if data ~= nil then
-                for field in pairs(data) do fields[#fields + 1] = field end
+                for field in pairs(data) do
+                    fields[#fields + 1] = field
+                end
                 table.sort(fields)
             end
             described[index] = {
@@ -210,7 +229,7 @@ mcp.register({
                 present = present[kind] == true,
             }
         end
-        return { components = described, bound = bound ~= nil }
+        return {components = described, bound = bound ~= nil}
     end,
 })
 
@@ -224,16 +243,16 @@ mcp.register({
         properties = {
             include = {
                 type = "array",
-                items = { type = "string" },
+                items = {type = "string"},
                 description = "Component names an entity must have.",
             },
-            limit = { type = "integer", description = "Default 50." },
+            limit = {type = "integer", description = "Default 50."},
             values = {
                 type = "boolean",
                 description = "Include component values. Default true.",
             },
         },
-        required = { "include" },
+        required = {"include"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
@@ -248,7 +267,7 @@ mcp.register({
         -- it whole and the registry cannot change while this runs.
         local declared = ecs.declaredComponents()
 
-        local query = w:query({ include = include })
+        local query = w:query({include = include})
         local rows: {any} = {}
         local total = 0
 
@@ -288,14 +307,14 @@ mcp.register({
     readOnly = true,
     inputSchema = {
         type = "object",
-        properties = { entity = { type = "integer" } },
-        required = { "entity" },
+        properties = {entity = {type = "integer"}},
+        required = {"entity"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
         local entity = math.floor(tonumber(args.entity) or 0) as integer
         if not w:isAlive(entity) then
-            return { entity = entity, alive = false }
+            return {entity = entity, alive = false}
         end
         local described = describeOne(w, entity)
         described.alive = true
@@ -315,7 +334,9 @@ mcp.register({
 --- replacement rather than a merge.
 local function construct(kind: ecs.Component, values: {string: any}): any
     local instance = (kind as function(): any)()
-    if values == nil then return instance end
+    if values == nil then
+        return instance
+    end
     local fields = instance as {string: any}
     for field, value in pairs(values) do
         fields[field] = value
@@ -335,7 +356,7 @@ mcp.register({
                 description = "Component name to its field values.",
             },
         },
-        required = { "components" },
+        required = {"components"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
@@ -346,15 +367,12 @@ mcp.register({
 
         local instances: {any} = {}
         for name, values in pairs(requested) do
-            instances[#instances + 1] =
-                construct(component(name), values as {string: any})
+            instances[#instances + 1] = construct(component(name), values as {string: any})
         end
 
         -- LuaJIT is 5.1, where unpack is a global rather than table.unpack.
-        local unpackAll = (_G as {string: any})["unpack"]
-            as function({any}): any...
-        local entity = (w.spawn as function(ecs.World, ...: any): integer)(
-            w, unpackAll(instances))
+        local unpackAll = (_G as {string: any})["unpack"] as function({any}): any...
+        local entity = (w.spawn as function(ecs.World, ...: any): integer)(w, unpackAll(instances))
         return describeOne(w, entity)
     end,
 })
@@ -368,11 +386,11 @@ mcp.register({
     inputSchema = {
         type = "object",
         properties = {
-            entity = { type = "integer" },
-            component = { type = "string" },
-            values = { type = "object" },
+            entity = {type = "integer"},
+            component = {type = "string"},
+            values = {type = "object"},
         },
-        required = { "entity", "component" },
+        required = {"entity", "component"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
@@ -400,18 +418,18 @@ mcp.register({
     inputSchema = {
         type = "object",
         properties = {
-            entity = { type = "integer" },
-            component = { type = "string" },
-            values = { type = "object" },
+            entity = {type = "integer"},
+            component = {type = "string"},
+            values = {type = "object"},
         },
-        required = { "entity", "component", "values" },
+        required = {"entity", "component", "values"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
         local entity = math.floor(tonumber(args.entity) or 0) as integer
         local kind = component(args.component as string)
         if not w:isAlive(entity) or not w:has(entity, kind) then
-            return { entity = entity, skipped = true }
+            return {entity = entity, skipped = true}
         end
 
         local values = args.values as {string: any}
@@ -440,17 +458,17 @@ mcp.register({
     inputSchema = {
         type = "object",
         properties = {
-            entity = { type = "integer" },
-            component = { type = "string" },
+            entity = {type = "integer"},
+            component = {type = "string"},
         },
-        required = { "entity", "component" },
+        required = {"entity", "component"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
         local entity = math.floor(tonumber(args.entity) or 0) as integer
         local kind = component(args.component as string)
         if not w:isAlive(entity) or not w:has(entity, kind) then
-            return { entity = entity, skipped = true }
+            return {entity = entity, skipped = true}
         end
         w:remove(entity, kind)
         local described = describeOne(w, entity)
@@ -465,17 +483,17 @@ mcp.register({
     destructive = true,
     inputSchema = {
         type = "object",
-        properties = { entity = { type = "integer" } },
-        required = { "entity" },
+        properties = {entity = {type = "integer"}},
+        required = {"entity"},
     },
     handler = function(args: {string: any}): {string: any}
         local w = current()
         local entity = math.floor(tonumber(args.entity) or 0) as integer
         if not w:isAlive(entity) then
-            return { entity = entity, skipped = true }
+            return {entity = entity, skipped = true}
         end
         w:despawn(entity)
-        return { entity = entity, skipped = false }
+        return {entity = entity, skipped = false}
     end,
 })
 

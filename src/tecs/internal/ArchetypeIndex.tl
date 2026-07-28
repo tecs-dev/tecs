@@ -11,9 +11,7 @@ local type Archetype = internal.ArchetypeInternal
 local type Component = types.components.Component
 local type CompiledQueryMasks = internal.CompiledQueryMasks
 
-local COMPARE_BY_ID <const> = function(a: Component, b: Component): boolean
-    return a.componentId < b.componentId
-end
+local COMPARE_BY_ID <const> = function(a: Component, b: Component): boolean return a.componentId < b.componentId end
 
 local record ArchetypeIndex is internal.ArchetypeIndexInternal
     componentIndex: {Component: {Archetype: boolean}}
@@ -33,21 +31,22 @@ local record ArchetypeIndex is internal.ArchetypeIndexInternal
     destroy: function(self, archetype: Archetype)
 end
 
-local ARCHETYPE_INDEX_MT <const>: metatable<ArchetypeIndex> = {
-    __index = ArchetypeIndex
-}
+local ARCHETYPE_INDEX_MT <const>: metatable<ArchetypeIndex> = {__index = ArchetypeIndex}
 
 function ArchetypeIndex.new(dirtySet?: {Archetype: boolean}): ArchetypeIndex
-    local self: ArchetypeIndex = setmetatable({
-        componentIndex = {},
-        dirtySet = dirtySet,
-        relationshipStoreGetter = nil,
-        onNewArchetype = nil,
-        emptyArchetype = nil as Archetype,
-        maxId = 0,
-        freeIds = {},
-        freeIdCount = 0,
-    }, ARCHETYPE_INDEX_MT)
+    local self: ArchetypeIndex = setmetatable(
+        {
+            componentIndex = {},
+            dirtySet = dirtySet,
+            relationshipStoreGetter = nil,
+            onNewArchetype = nil,
+            emptyArchetype = nil as Archetype,
+            maxId = 0,
+            freeIds = {},
+            freeIdCount = 0,
+        },
+        ARCHETYPE_INDEX_MT
+    )
 
     -- Eagerly create the empty archetype.
     do
@@ -105,8 +104,11 @@ local function matchesQuerySignatures(
     if not includeAnyBits:isEmpty() and signatureBits:disjoint(includeAnyBits) then
         return false
     end
-    if not excludeWordBits:isEmpty() and not signatureWordBits:disjoint(excludeWordBits)
-        and not excludeBits:isEmpty() and signatureBits:overlaps(excludeBits)
+    if
+        not excludeWordBits:isEmpty()
+        and not signatureWordBits:disjoint(excludeWordBits)
+        and not excludeBits:isEmpty()
+        and signatureBits:overlaps(excludeBits)
     then
         return false
     end
@@ -126,13 +128,7 @@ local function filterMatchingBySignatures(
     local j = 1
     while j <= count do
         if not matchesQuerySignatures(
-            result[j],
-            includeBits,
-            includeWordBits,
-            includeAnyBits,
-            includeAnyWordBits,
-            excludeBits,
-            excludeWordBits
+            result[j], includeBits, includeWordBits, includeAnyBits, includeAnyWordBits, excludeBits, excludeWordBits
         ) then
             result[j] = result[count]
             result[count] = nil
@@ -242,14 +238,7 @@ function ArchetypeIndex:findMatching(include: {Component}, masks: CompiledQueryM
         end
 
         n = filterMatchingBySignatures(
-            result,
-            n,
-            includeBits,
-            includeWordBits,
-            includeAnyBits,
-            includeAnyWordBits,
-            excludeBits,
-            excludeWordBits
+            result, n, includeBits, includeWordBits, includeAnyBits, includeAnyWordBits, excludeBits, excludeWordBits
         )
         if n == 0 then
             return result
@@ -258,14 +247,7 @@ function ArchetypeIndex:findMatching(include: {Component}, masks: CompiledQueryM
 
     local n = #result
     n = filterMatchingBySignatures(
-        result,
-        n,
-        includeBits,
-        includeWordBits,
-        includeAnyBits,
-        includeAnyWordBits,
-        excludeBits,
-        excludeWordBits
+        result, n, includeBits, includeWordBits, includeAnyBits, includeAnyWordBits, excludeBits, excludeWordBits
     )
 
     return result

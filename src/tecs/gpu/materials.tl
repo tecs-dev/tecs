@@ -82,7 +82,9 @@ local roots: {string} = nil
 local built = false
 
 local function searchRoots(): {string}
-    if roots == nil then roots = { paths.asset("materials/") } end
+    if roots == nil then
+        roots = {paths.asset("materials/")}
+    end
     return roots
 end
 
@@ -105,7 +107,7 @@ end
 --- of the same name in any root, and renumbers the set on the next `install`
 --- as adding a file would.
 function materials.define(name: string, source: string)
-    byName[name] = { name = name, id = 0, source = source }
+    byName[name] = {name = name, id = 0, source = source}
     defined[name] = true
     built = false
 end
@@ -124,7 +126,7 @@ local function collect()
                 if byName[name] == nil then
                     local source = filesystem.read(root .. file)
                     if source ~= nil then
-                        byName[name] = { name = name, id = 0, source = source }
+                        byName[name] = {name = name, id = 0, source = source}
                     end
                 end
             end
@@ -134,14 +136,22 @@ local function collect()
 
     local rest: {string} = {}
     for name in pairs(byName) do
-        if name ~= DEFAULT then rest[#rest + 1] = name end
+        if name ~= DEFAULT then
+            rest[#rest + 1] = name
+        end
     end
     table.sort(rest)
 
     order = {}
-    if byName[DEFAULT] ~= nil then order[1] = DEFAULT end
-    for _, name in ipairs(rest) do order[#order + 1] = name end
-    for index, name in ipairs(order) do byName[name].id = index - 1 end
+    if byName[DEFAULT] ~= nil then
+        order[1] = DEFAULT
+    end
+    for _, name in ipairs(rest) do
+        order[#order + 1] = name
+    end
+    for index, name in ipairs(order) do
+        byName[name].id = index - 1
+    end
 end
 
 --- Builds the dispatch and hands it to the shader loader as an include.
@@ -155,8 +165,7 @@ local function assemble(): string
         local material = byName[name]
         -- Renamed rather than namespaced, because GLSL has no namespaces and
         -- two materials both defining `material` would collide.
-        local renamed = material.source:gsub("%f[%w]material%s*%(",
-            mangle(name) .. "(")
+        local renamed = material.source:gsub("%f[%w]material%s*%(", mangle(name) .. "(")
         parts[#parts + 1] = ("// %s (id %d)"):format(name, material.id)
         parts[#parts + 1] = renamed
         parts[#parts + 1] = ""
@@ -165,8 +174,7 @@ local function assemble(): string
     parts[#parts + 1] = "MaterialOutput materialDispatch(int id, MaterialInput frag) {"
     for _, name in ipairs(order) do
         local material = byName[name]
-        parts[#parts + 1] = ("    if (id == %d) { return %s(frag); }")
-            :format(material.id, mangle(name))
+        parts[#parts + 1] = ("    if (id == %d) { return %s(frag); }"):format(material.id, mangle(name))
     end
     -- An unknown id is a bug rather than a state to render, so it is loud:
     -- magenta at full coverage is visible in any scene. Built from the
@@ -187,7 +195,9 @@ end
 --- be built before the materials it dispatches to are known. Adding a root or
 --- defining a material puts this back on, and the next load rebuilds.
 function materials.install()
-    if built then return end
+    if built then
+        return
+    end
     built = true
     collect()
     shaders.provide(DISPATCH, assemble())
@@ -201,8 +211,7 @@ end
 function materials.id(name: string): integer
     local id = materials.find(name)
     if id == nil then
-        error(("tecs: no material named '%s'; found %s")
-            :format(name, table.concat(materials.names(), ", ")), 2)
+        error(("tecs: no material named '%s'; found %s"):format(name, table.concat(materials.names(), ", ")), 2)
     end
     return id
 end
@@ -216,7 +225,9 @@ end
 function materials.find(name: string): integer
     materials.install()
     local material = byName[name]
-    if material == nil then return nil end
+    if material == nil then
+        return nil
+    end
     return material.id
 end
 
@@ -228,7 +239,9 @@ end
 --- assigned from rather than a second copy of it.
 function materials.name(id: integer): string
     materials.install()
-    if id == nil then return nil end
+    if id == nil then
+        return nil
+    end
     return order[id + 1]
 end
 
@@ -241,7 +254,9 @@ end
 function materials.names(): {string}
     materials.install()
     local list: {string} = {}
-    for index, name in ipairs(order) do list[index] = name end
+    for index, name in ipairs(order) do
+        list[index] = name
+    end
     return list
 end
 
@@ -262,17 +277,23 @@ function materials.reload(): boolean, string
 
     local previousOrder = order
     local previousByName: {string: materials.Material} = {}
-    for name, material in pairs(byName) do previousByName[name] = material end
+    for name, material in pairs(byName) do
+        previousByName[name] = material
+    end
 
     for name in pairs(byName) do
-        if not defined[name] then byName[name] = nil end
+        if not defined[name] then
+            byName[name] = nil
+        end
     end
     collect()
 
     local changed = #order ~= #previousOrder
     if not changed then
         for index, name in ipairs(order) do
-            if name ~= previousOrder[index] then changed = true end
+            if name ~= previousOrder[index] then
+                changed = true
+            end
         end
     end
     if not changed then
@@ -283,20 +304,31 @@ function materials.reload(): boolean, string
     -- Put back exactly what was dispatched before, ids included: the re-read
     -- renumbered whatever it kept, and a refusal has to leave nothing changed.
     local found = table.concat(order, ", ")
-    for name in pairs(byName) do byName[name] = nil end
-    for name, material in pairs(previousByName) do byName[name] = material end
+    for name in pairs(byName) do
+        byName[name] = nil
+    end
+    for name, material in pairs(previousByName) do
+        byName[name] = material
+    end
     order = previousOrder
-    for index, name in ipairs(order) do byName[name].id = index - 1 end
-    return false, ("the material set changed from [%s] to [%s]; ids are "
+    for index, name in ipairs(order) do
+        byName[name].id = index - 1
+    end
+    return false, (
+        "the material set changed from [%s] to [%s]; ids are "
         .. "assigned by name order, so reloading would change what every "
-        .. "Material component in the world means")
-        :format(table.concat(previousOrder, ", "), found)
+        .. "Material component in the world means"
+    ):format(table.concat(previousOrder, ", "), found)
 end
 
 --- Forgets everything read, so a spec can start from the files again.
 function materials.reset()
-    for name in pairs(byName) do byName[name] = nil end
-    for name in pairs(defined) do defined[name] = nil end
+    for name in pairs(byName) do
+        byName[name] = nil
+    end
+    for name in pairs(defined) do
+        defined[name] = nil
+    end
     order = {}
     roots = nil
     built = false

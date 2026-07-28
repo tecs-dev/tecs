@@ -74,14 +74,12 @@ end
 
 -- EMPTY implementation
 
-local READONLY_MT <const>: {string:any} = {
-    __newindex = function(_t: any, _k: any, _v: any)
-        error("Attempt to modify read-only EMPTY table")
-    end,
-    __metatable = "protected"
+local READONLY_MT <const>: {string: any} = {
+    __newindex = function(_t: any, _k: any, _v: any) error("Attempt to modify read-only EMPTY table") end,
+    __metatable = "protected",
 }
 
-local GLOBAL_EMPTY <const> = setmetatable({}, READONLY_MT as metatable<{any:any}>)
+local GLOBAL_EMPTY <const> = setmetatable({}, READONLY_MT as metatable<{any: any}>)
 pool.EMPTY = GLOBAL_EMPTY
 
 -- TablePool
@@ -117,22 +115,25 @@ function TablePool:clear()
     self._size = 0
 end
 
-local TABLE_POOL_MT <const> = { __index = TablePool }
+local TABLE_POOL_MT <const> = {__index = TablePool}
 
 function pool.newTablePool(opts?: TablePoolOpts): TablePool
     local clearOn: ClearPolicy = opts and opts.clearOn or "acquire"
     local maxSize = opts and opts.maxSize or DEFAULT_MAX_SIZE
     local arrayHint = opts and opts.arrayHint or 0
     local hashHint = opts and opts.hashHint or 0
-    local p: TablePool = setmetatable({
-        _stack = table_new(maxSize, 0),
-        _size = 0,
-        _maxSize = maxSize,
-        _arrayHint = arrayHint,
-        _hashHint = hashHint,
-        _clearOnAcquire = clearOn == "acquire",
-        _clearOnRelease = clearOn == "release",
-    }, TABLE_POOL_MT)
+    local p: TablePool = setmetatable(
+        {
+            _stack = table_new(maxSize, 0),
+            _size = 0,
+            _maxSize = maxSize,
+            _arrayHint = arrayHint,
+            _hashHint = hashHint,
+            _clearOnAcquire = clearOn == "acquire",
+            _clearOnRelease = clearOn == "release",
+        },
+        TABLE_POOL_MT
+    )
     return p
 end
 

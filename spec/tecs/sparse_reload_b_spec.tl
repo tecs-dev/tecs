@@ -3,16 +3,22 @@ local luassert <const> = require("luassert")
 local ChildOf <const> = tecs.builtins.ChildOf
 local Name <const> = tecs.builtins.Name
 
-describe("sparse relationship module reload", function()
-    it("reads a committed ChildOf through the public API", function()
-        local w = tecs.newWorld()
-        local parent = w:spawn(Name("parent"))
-        local child = w:spawn(Name("child"), ChildOf(parent))
-        w:commit()
+describe(
+    "sparse relationship module reload",
+    function()
+        it(
+            "reads a committed ChildOf through the public API",
+            function()
+                local w = tecs.newWorld()
+                local parent = w:spawn(Name("parent"))
+                local child = w:spawn(Name("child"), ChildOf(parent))
+                w:commit()
 
-        luassert.is_not_nil(w:get(child, ChildOf))
-        luassert.is_true(w:has(child, ChildOf))
-        luassert.is_not_nil(w:getFirstRelationship(child, ChildOf))
-        luassert.is_not_nil(w:get(child, ChildOf(parent)))
-    end)
-end)
+                luassert.is_not_nil(w:get(child, ChildOf))
+                luassert.is_true(w:has(child, ChildOf))
+                luassert.is_not_nil(w:getFirstRelationship(child, ChildOf))
+                luassert.is_not_nil(w:get(child, ChildOf(parent)))
+            end
+        )
+    end
+)

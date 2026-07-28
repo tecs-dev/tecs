@@ -18,8 +18,7 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("zlib")
 
-local namespace <const>, libraryPath <const> =
-    loader.library("z", "zlib", "TECS_ZLIB_PATH", "zlib")
+local namespace <const>, libraryPath <const> = loader.library("z", "zlib", "TECS_ZLIB_PATH", "zlib")
 
 local record zlib
     --- Functions and enum constants, resolved through the loaded library.

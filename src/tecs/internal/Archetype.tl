@@ -134,7 +134,7 @@ local ARCHETYPE_MT <const>: metatable<Archetype> = {
         end
         table_insert(buf, "])")
         return table_concat(buf)
-    end
+    end,
 }
 
 -- Sparse relationships return a row-indexed proxy that resolves
@@ -143,7 +143,9 @@ local ARCHETYPE_MT <const>: metatable<Archetype> = {
 -- return the underlying FFI cdata array or table from `self.columns`.
 function Archetype:get<T is Component>(component: T): {T}
     local proxy = rawget(self as table, component)
-    if proxy ~= nil then return proxy as {T} end
+    if proxy ~= nil then
+        return proxy as {T}
+    end
     return rawget(self.columns, component) as {T}
 end
 
@@ -162,7 +164,9 @@ function Archetype:getMut<T is Component>(component: T): {T}
         end
     end
     local proxy = rawget(self as table, component)
-    if proxy ~= nil then return proxy as {T} end
+    if proxy ~= nil then
+        return proxy as {T}
+    end
     return column as {T}
 end
 
@@ -187,7 +191,7 @@ function Archetype:withComponent(component: Component, archetypeIndex: Archetype
     table_move(componentList, 1, n, 1, dest)
     dest[n + 1] = component
 
-    local idx = archetypeIndex as {string:any}
+    local idx = archetypeIndex as {string: any}
     local getOrCreate = idx.getOrCreate as function(any, {Component}): Archetype
     local target = getOrCreate(idx, dest)
     self.addEdges[component] = target
@@ -217,7 +221,7 @@ function Archetype:withoutComponent(component: Component, archetypeIndex: Archet
         end
     end
 
-    local idx = archetypeIndex as {string:any}
+    local idx = archetypeIndex as {string: any}
     local getOrCreate = idx.getOrCreate as function(any, {Component}): Archetype
     local target = getOrCreate(idx, dest)
     self.removeEdges[component] = target
@@ -288,7 +292,9 @@ end
 function Archetype:forEachRelationship<T is Relationship>(relContainer: T, row: integer, callback: function(T))
     local instances = self._relInstancesByContainer
     local list = instances and instances[relContainer as Component]
-    if not list then return end
+    if not list then
+        return
+    end
     local columns = self.columns
     for i = 1, #list do
         local col = columns[list[i]] as {Component}
@@ -299,7 +305,9 @@ end
 function Archetype:getFirstRelationship<T is Relationship>(relContainer: T, row: integer): T
     local instances = self._relInstancesByContainer
     local list = instances and instances[relContainer as Component]
-    if not list then return nil end
+    if not list then
+        return nil
+    end
     local col = self.columns[list[1]] as {Component}
     return col[row] as T
 end
@@ -328,7 +336,9 @@ local function notifyMove(self: Archetype, entity: integer, fromRow: integer, to
     for i = 1, self.observerCount do
         local obs = observers[i]
         local cb = obs.onEntityMove
-        if cb then cb(obs, self, entity, fromRow, toRow) end
+        if cb then
+            cb(obs, self, entity, fromRow, toRow)
+        end
     end
 end
 
@@ -337,7 +347,9 @@ local function notifyActivated(self: Archetype)
     for i = 1, self.observerCount do
         local obs = observers[i]
         local cb = obs.onActivated
-        if cb then cb(obs, self) end
+        if cb then
+            cb(obs, self)
+        end
     end
 end
 
@@ -346,16 +358,16 @@ local function notifyDeactivated(self: Archetype)
     for i = 1, self.observerCount do
         local obs = observers[i]
         local cb = obs.onDeactivated
-        if cb then cb(obs, self) end
+        if cb then
+            cb(obs, self)
+        end
     end
 end
 
-function Archetype:onRowsAdded(
-    rowStart: integer,
-    count: integer,
-    sourceArchetype?: Archetype
-)
-    if count <= 0 then return end
+function Archetype:onRowsAdded(rowStart: integer, count: integer, sourceArchetype?: Archetype)
+    if count <= 0 then
+        return
+    end
     -- Newly-added rows are by definition new bytes for every column on
     -- this archetype, so consumers gated on per-component dirty
     -- (shadow buffers, incremental serialization, reactive systems) need to
@@ -367,7 +379,9 @@ function Archetype:onRowsAdded(
 end
 
 function Archetype:notifyAdded(rowStart: integer, count: integer, sourceArchetype?: Archetype)
-    if count <= 0 then return end
+    if count <= 0 then
+        return
+    end
     if self.hasAddObservers > 0 then
         local observers = self._observers
         local firstRow = rowStart + 1
@@ -375,7 +389,9 @@ function Archetype:notifyAdded(rowStart: integer, count: integer, sourceArchetyp
         for i = 1, self.observerCount do
             local obs = observers[i]
             local cb = obs.onEntitiesAdded
-            if cb then cb(obs, self, firstRow, lastRow, count, sourceArchetype) end
+            if cb then
+                cb(obs, self, firstRow, lastRow, count, sourceArchetype)
+            end
         end
     end
     if rowStart == 0 and self.observerCount > 0 then
@@ -384,14 +400,18 @@ function Archetype:notifyAdded(rowStart: integer, count: integer, sourceArchetyp
 end
 
 function Archetype:notifyRemoved(rowStart: integer, count: integer, destArchetype?: Archetype)
-    if count <= 0 or self.hasRemoveObservers == 0 then return end
+    if count <= 0 or self.hasRemoveObservers == 0 then
+        return
+    end
     local observers = self._observers
     local firstRow = rowStart + 1
     local lastRow = rowStart + count
     for i = 1, self.observerCount do
         local obs = observers[i]
         local cb = obs.onEntitiesRemoved
-        if cb then cb(obs, self, firstRow, lastRow, count, destArchetype) end
+        if cb then
+            cb(obs, self, firstRow, lastRow, count, destArchetype)
+        end
     end
 end
 
@@ -427,10 +447,14 @@ end
 
 -- Reserve column capacity for `targetRows`.
 function Archetype:reserveCapacity(targetRows: integer)
-    if targetRows <= self.capacity then return end
+    if targetRows <= self.capacity then
+        return
+    end
 
     local newCap = self.capacity * 2
-    if newCap < targetRows + 64 then newCap = targetRows + 64 end
+    if newCap < targetRows + 64 then
+        newCap = targetRows + 64
+    end
 
     local columns = self.columns
     local columnArray = self.columnArray
@@ -439,7 +463,7 @@ function Archetype:reserveCapacity(targetRows: integer)
     for j = 1, self.columnsCount do
         local comp = componentList[j]
         local column = columns[comp]
-        local storage = (comp as ComponentInternal).storage as {string:any}
+        local storage = (comp as ComponentInternal).storage as {string: any}
         if storage.ensureCapacity then
             local ensureFn = storage.ensureCapacity as function(any, {Component}, integer): {Component}
             local newColumn = ensureFn(storage, column, newCap)
@@ -468,7 +492,9 @@ function Archetype:removeEntity(row: integer, destArchetype?: Archetype): intege
         for _i = 1, self.observerCount do
             local _obs = _observers[_i]
             local _cb = _obs.onEntitiesRemoved
-            if _cb then _cb(_obs, self, luaRow, luaRow, 1, destArchetype) end
+            if _cb then
+                _cb(_obs, self, luaRow, luaRow, 1, destArchetype)
+            end
         end
     end
 
@@ -524,7 +550,7 @@ function Archetype:clearEntities()
     for j = 1, self.columnsCount do
         local comp = self.componentList[j] as ComponentInternal
         local col = self.columnArray[j]
-        local storage = comp.storage as {string:any}
+        local storage = comp.storage as {string: any}
         (storage.clear as function(any, any))(storage, col)
     end
     self._componentDirty:clearAll()
@@ -546,7 +572,7 @@ function Archetype:compact()
 
     for j = 1, self.columnsCount do
         local comp = self.componentList[j] as ComponentInternal
-        local compStorage = comp.storage as {string:any}
+        local compStorage = comp.storage as {string: any}
         local adjust = compStorage.adjustCapacity as function(any, {Component}, integer): {Component}
         if adjust then
             local col = self.columnArray[j]
@@ -591,12 +617,16 @@ function Archetype:resetPending()
     end
     if self.batchSpawnQueueCount > 0 then
         local q = self.batchSpawnQueue
-        for j = 1, self.batchSpawnQueueCount do q[j] = nil end
+        for j = 1, self.batchSpawnQueueCount do
+            q[j] = nil
+        end
         self.batchSpawnQueueCount = 0
     end
     if self.batchSpawnAtQueueCount > 0 then
         local q = self.batchSpawnAtQueue
-        for j = 1, self.batchSpawnAtQueueCount do q[j] = nil end
+        for j = 1, self.batchSpawnAtQueueCount do
+            q[j] = nil
+        end
         self.batchSpawnAtQueueCount = 0
     end
     self.pendingBundleDrainCount = 0
@@ -623,10 +653,12 @@ end
 
 function Archetype:findPendingValue(slot: integer, componentType: Component): any
     local vals = self.pendingValues[slot]
-    if not vals then return nil end
+    if not vals then
+        return nil
+    end
     for i = #vals, 1, -1 do
         local inst = vals[i]
-        if ((inst as {string:any}).componentType as Component) == componentType then
+        if ((inst as {string: any}).componentType as Component) == componentType then
             return inst
         end
     end
@@ -635,7 +667,9 @@ end
 
 function Archetype:movePendingValuesTo(dst: Archetype, slot: integer)
     local vals = self.pendingValues[slot]
-    if not vals then return end
+    if not vals then
+        return
+    end
     self.pendingValues[slot] = nil
     dst.pendingValues[slot] = vals
     local count = dst.pendingValueCount + 1
@@ -654,7 +688,9 @@ end
 
 function Archetype:isComponentDirty(component: Component): boolean
     local idx = self.columnIndexByComponent[component]
-    if not idx then return false end
+    if not idx then
+        return false
+    end
     return self._componentDirty:get(idx)
 end
 
@@ -664,7 +700,9 @@ end
 
 function Archetype:markComponentDirty(component: Component)
     local idx = self.columnIndexByComponent[component]
-    if not idx then return end
+    if not idx then
+        return
+    end
     if self._fixedTracking then
         fixedtracking.mark(self, component)
     end
@@ -681,14 +719,20 @@ function Archetype:markAllComponentsDirty()
     -- Runs per swap-pop and per move-in; after the first call in a frame
     -- every later call is a guaranteed no-op, so short-circuit on a flag
     -- instead of re-walking the bitset per entity.
-    if self._allDirty then return end
+    if self._allDirty then
+        return
+    end
     self._allDirty = true
     local bits = self._componentDirty
     local n = self.columnsCount
     for i = 1, n do
-        if not bits:get(i) then bits:set(i) end
+        if not bits:get(i) then
+            bits:set(i)
+        end
     end
-    if n > 0 then self._dirtySet[self] = true end
+    if n > 0 then
+        self._dirtySet[self] = true
+    end
 end
 
 function Archetype:clearDirtyComponents()
@@ -751,22 +795,18 @@ local function createSparseColumnProxy(archetypeTable: table, store: Relationshi
             local entityId = (entities as {integer})[row]
             return store:get(entityId) as Component
         end,
-        __newindex = function()
-            error("Cannot write to sparse column via row index. Use world:set() instead.")
-        end,
+        __newindex = function() error("Cannot write to sparse column via row index. Use world:set() instead.") end,
     }
     return setmetatable(proxy, mt)
 end
 
 -- Construct an archetype for a sorted component list.
 function Archetype.new(
-    components: {Component},
-    dirtySet: {Archetype: boolean},
-    relationshipStoreGetter?: function(Component): any
+    components: {Component}, dirtySet: {Archetype: boolean}, relationshipStoreGetter?: function(Component): any
 ): Archetype
     AUTO_ID = AUTO_ID + 1
     local columnsCount = #components
-    local columns = table_new(0, columnsCount) as {Component:{Component}}
+    local columns = table_new(0, columnsCount) as {Component: {Component}}
     local componentList: {Component} = table_new(columnsCount, 0) as {Component}
     local columnArray: {{Component}} = table_new(columnsCount, 0) as {{Component}}
     local columnIndexByComponent = table_new(0, columnsCount) as {Component: integer}
@@ -807,7 +847,9 @@ function Archetype.new(
         signatureBits:set(signatureIndex)
         signatureWordBits:set(signatureWordIndex)
 
-        if comp.target ~= nil then isEphemeral = true end
+        if comp.target ~= nil then
+            isEphemeral = true
+        end
         if behavior.hasBits(comp, behavior.NeedsDespawn) then
             onDespawnCount = onDespawnCount + 1
             onDespawnComponents[onDespawnCount] = comp
@@ -886,7 +928,7 @@ function Archetype.new(
     for i = 1, columnsCount do
         local comp = componentList[i]
         local compI = comp as ComponentInternal
-        local compStorage = compI.storage as {string:any}
+        local compStorage = compI.storage as {string: any}
         local createColumn = compStorage.createColumn as function(any, integer): {Component}
         local store = createColumn(compStorage, 0)
         columns[comp] = store

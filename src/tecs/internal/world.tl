@@ -53,14 +53,12 @@ local UINT32_ARR_T <const> = C.typeof("uint32_t[?]")
 -- world/*.tl attach implementations.
 local WorldImpl = internal.WorldImpl
 
-local WORLD_MT <const>: metatable<WorldImpl> = { __index = WorldImpl }
+local WORLD_MT <const>: metatable<WorldImpl> = {__index = WorldImpl}
 
 -- Per-world relationshipStores map with lazy store creation.
 local function makeRelationshipStoresMT(world: WorldImpl): metatable<{Component: RelationshipStore}>
     local refCounts = world._targetRefCounts
-    local onAdded = function(targetId: integer)
-        refCounts[targetId] = (refCounts[targetId] or 0) + 1
-    end
+    local onAdded = function(targetId: integer) refCounts[targetId] = (refCounts[targetId] or 0) + 1 end
     local onRemoved = function(targetId: integer)
         local c = refCounts[targetId]
         if c and c <= 1 then
@@ -87,7 +85,7 @@ local function makeRelationshipStoresMT(world: WorldImpl): metatable<{Component:
                 world._hasRelationshipStores = true
             end
             return store
-        end
+        end,
     }
 end
 
@@ -98,67 +96,67 @@ function WorldImpl.new(config?: types.World.Config): World
     local archetypeIndex = ArchetypeIndex.new(dirtyArchetypes)
     local maxSlotCount = allocator.maxSlotCount
 
-    local instance: WorldImpl = setmetatable({
-        resources = Context.new(),
-        messages = events.MessageBus.new(),
-        _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
-        _eventPool = pool.newTablePool({ clearOn = "acquire", maxSize = 32 }),
-        allocator = allocator,
-        _slots = allocator.slots as {integer: EntitySlot},
-        archetypeIndex = archetypeIndex,
-        _targetRefCounts = {},
-        _hasRelationshipStores = false,
-        relationshipStores = nil as {Component: RelationshipStore},
-        _bundles = {},
-        _dirtyArchetypes = dirtyArchetypes,
-        _stateStack = {},
-        _stateComponents = {},
-        _statePolicies = {},
-        _keyIndex = {},
-        _transitionObserver = nil,
-        _archetypeSnapshotPool = pool.newTablePool({ clearOn = "release" }),
-        _scopeDepth = 0,
+    local instance: WorldImpl = setmetatable(
+        {
+            resources = Context.new(),
+            messages = events.MessageBus.new(),
+            _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
+            _eventPool = pool.newTablePool({clearOn = "acquire", maxSize = 32}),
+            allocator = allocator,
+            _slots = allocator.slots as {integer: EntitySlot},
+            archetypeIndex = archetypeIndex,
+            _targetRefCounts = {},
+            _hasRelationshipStores = false,
+            relationshipStores = nil as {Component: RelationshipStore},
+            _bundles = {},
+            _dirtyArchetypes = dirtyArchetypes,
+            _stateStack = {},
+            _stateComponents = {},
+            _statePolicies = {},
+            _keyIndex = {},
+            _transitionObserver = nil,
+            _archetypeSnapshotPool = pool.newTablePool({clearOn = "release"}),
+            _scopeDepth = 0,
 
-        -- Transaction staging state.
-        _dirtyEpoch = 1,
-        dirtyArchetypeList = {},
-        dirtyArchetypeCount = 0,
-        -- Epoch-stamped slot arrays. uint8 state holds STATE_SPAWN/MUTATE/
-        -- DESPAWN (1/2/3) or 0 for unset. uint32 pendingArch holds the
-        -- target Archetype.id (0 for unset). A slot's value is only valid
-        -- when the parallel stamp equals `_transactionEpoch`. Starting
-        -- epoch is 1 so uninitialised memory (zero) compares unequal.
-        _stateArr = C.new(UINT8_ARR_T, maxSlotCount + 1),
-        _pendingArchArr = C.new(UINT32_ARR_T, maxSlotCount + 1),
-        _slotStamp = C.new(UINT32_ARR_T, maxSlotCount + 1),
-        _transactionEpoch = 1,
-        _maxSlotCount = maxSlotCount,
-        entityStateCount = 0,
-        sparseSets = {},
-        sparseSetCount = 0,
-        _swapRemoveQueue = {},
-        batchMutations = {},
-        batchMutationCount = 0,
-        _valsPool = {},
-        _valsPoolSize = 0,
-        _valsPoolNext = 1,
-        _sparseArraysPool = pool.newTablePool({ clearOn = "release" }),
-        _exclusivePool = pool.newTablePool({ clearOn = "acquire" }),
-        isDirty = false,
-        emptyArchetype = archetypeIndex.emptyArchetype,
-    }, WORLD_MT)
+            -- Transaction staging state.
+            _dirtyEpoch = 1,
+            dirtyArchetypeList = {},
+            dirtyArchetypeCount = 0,
+            -- Epoch-stamped slot arrays. uint8 state holds STATE_SPAWN/MUTATE/
+            -- DESPAWN (1/2/3) or 0 for unset. uint32 pendingArch holds the
+            -- target Archetype.id (0 for unset). A slot's value is only valid
+            -- when the parallel stamp equals `_transactionEpoch`. Starting
+            -- epoch is 1 so uninitialised memory (zero) compares unequal.
+            _stateArr = C.new(UINT8_ARR_T, maxSlotCount + 1),
+            _pendingArchArr = C.new(UINT32_ARR_T, maxSlotCount + 1),
+            _slotStamp = C.new(UINT32_ARR_T, maxSlotCount + 1),
+            _transactionEpoch = 1,
+            _maxSlotCount = maxSlotCount,
+            entityStateCount = 0,
+            sparseSets = {},
+            sparseSetCount = 0,
+            _swapRemoveQueue = {},
+            batchMutations = {},
+            batchMutationCount = 0,
+            _valsPool = {},
+            _valsPoolSize = 0,
+            _valsPoolNext = 1,
+            _sparseArraysPool = pool.newTablePool({clearOn = "release"}),
+            _exclusivePool = pool.newTablePool({clearOn = "acquire"}),
+            isDirty = false,
+            emptyArchetype = archetypeIndex.emptyArchetype,
+        },
+        WORLD_MT
+    )
 
     instance.relationshipStores = setmetatable({}, makeRelationshipStoresMT(instance))
 
     -- Used by archetype creation during edge walks.
-    archetypeIndex.relationshipStoreGetter = function(c: Component): any
-        return instance.relationshipStores[c]
-    end
+    archetypeIndex.relationshipStoreGetter = function(c: Component): any return instance.relationshipStores[c] end
 
     -- Create pipeline.
     config.pipelineFactory = config.pipelineFactory or pipeline.new
-    instance.pipeline = config.pipelineFactory(config.timestep, config.fixedMaxSteps,
-        config.fixedOverload)
+    instance.pipeline = config.pipelineFactory(config.timestep, config.fixedMaxSteps, config.fixedOverload)
 
     -- Forward archetype creation into the world event bus.
     instance.archetypeIndex.onNewArchetype = function(archetype: Archetype)
@@ -232,11 +230,15 @@ function WorldImpl:has(id: integer, component: Component): boolean
         return false
     end
     local archetype = self.archetypeIndex[s.archetypeId]
-    if not archetype then return false end
+    if not archetype then
+        return false
+    end
     return rawget(archetype.columns, component) ~= nil
         or rawget(archetype as table, component) ~= nil
-        or ((component as ComponentInternal).isSparseInstance ~= nil
-            and self.relationshipStores[component.relationshipType]:getTarget(id, component.target) ~= nil)
+        or (
+            (component as ComponentInternal).isSparseInstance ~= nil
+            and self.relationshipStores[component.relationshipType]:getTarget(id, component.target) ~= nil
+        )
 end
 
 function WorldImpl:getFirstRelationship<T is Relationship>(id: integer, relationship: T): T
@@ -299,7 +301,6 @@ function WorldImpl:_releaseKeyForEntity(id: integer)
 end
 
 function WorldImpl:set(id: integer, component: Component, value?: any)
-
     local componentType: Component = component.componentType as Component
 
     if value == nil then
@@ -311,7 +312,7 @@ function WorldImpl:set(id: integer, component: Component, value?: any)
             if component == componentType then
                 value = (component as types.components.ScalarComponent<any>).scalarDefault
             else
-                value = (component as {string:any}).value
+                value = (component as {string: any}).value
             end
         else
             value = component
@@ -335,7 +336,9 @@ end
 
 function WorldImpl:markComponentDirty(id: integer, component: Component)
     local slot = IdAllocator.slotOf(id)
-    if slot < 1 or slot > self._maxSlotCount then return end
+    if slot < 1 or slot > self._maxSlotCount then
+        return
+    end
     local s = self._slots[slot]
     if IdAllocator.generationOfWithSlot(id, slot) ~= s.generation then
         return
@@ -385,9 +388,11 @@ function WorldImpl:currentArchetype(id: integer): Archetype
     local slot = IdAllocator.slotOf(id)
     -- _slotStamp/_pendingArchArr resolution inlined rather than calling
     -- getPendingArch to avoid the shared.tl import dance here.
-    if (self._slotStamp as {integer:integer})[slot] == self._transactionEpoch then
-        local pid = (self._pendingArchArr as {integer:integer})[slot]
-        if pid ~= 0 then return self.archetypeIndex[pid] end
+    if (self._slotStamp as {integer: integer})[slot] == self._transactionEpoch then
+        local pid = (self._pendingArchArr as {integer: integer})[slot]
+        if pid ~= 0 then
+            return self.archetypeIndex[pid]
+        end
     end
     local s = self._slots[slot]
     return self.archetypeIndex[s.archetypeId]
@@ -408,7 +413,9 @@ function WorldImpl:spawn(...: Component): integer
     -- committed entity.
     if not self:hasObservers(0, builtins.OnSpawn) then
         local ok, id = self:_instantSpawn(...)
-        if ok then return id end
+        if ok then
+            return id
+        end
     end
     self._scopeDepth = 1
     local sid = self:_deferSpawn(...)
@@ -438,7 +445,9 @@ function WorldImpl:forEachArchetype(callback: function(Archetype))
     -- `maxId` + nil-check tolerates holes left by compact().
     for i = 1, index.maxId do
         local arch = index[i]
-        if arch then callback(arch) end
+        if arch then
+            callback(arch)
+        end
     end
 end
 
@@ -446,11 +455,7 @@ function WorldImpl:dirtyArchetypes(): function(): Archetype
     local set = self._dirtyArchetypes
     local nextFn, t = pairs(set)
     local key: Archetype = nil
-    return function(): Archetype
-        local k, _ = nextFn(t, key)
-        key = k
-        return k
-    end
+    return function(): Archetype local k, _ = nextFn(t, key); key = k; return k end
 end
 
 local function hasKeyBatch(componentTypes: {Component}): boolean
@@ -465,8 +470,11 @@ end
 
 local function assertNoKeyBatch(componentTypes: {Component}, op: string)
     if hasKeyBatch(componentTypes) then
-        error(op .. " does not support Key because keys must be claimed per entity. " ..
-            "Use world:spawn/world:spawnAt or add Key with world:set per entity.")
+        error(
+            op
+                .. " does not support Key because keys must be claimed per entity. "
+                .. "Use world:spawn/world:spawnAt or add Key with world:set per entity."
+        )
     end
 end
 
@@ -474,9 +482,7 @@ end
 -- mutations. Outside a scope we self-drain; inside a scope we stage and
 -- let the outer boundary drain.
 function WorldImpl:batchSpawn(
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 ): integer | nil, {integer} | nil
     assertNoKeyBatch(componentTypes, "batchSpawn")
     if self._scopeDepth > 0 then
@@ -490,9 +496,7 @@ function WorldImpl:batchSpawn(
 end
 
 function WorldImpl:batchSpawnAt(
-    ids: {integer},
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    ids: {integer}, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 )
     assertNoKeyBatch(componentTypes, "batchSpawnAt")
     if self._scopeDepth > 0 then
@@ -506,10 +510,7 @@ function WorldImpl:batchSpawnAt(
 end
 
 function WorldImpl:batchSpawnAtRaw(
-    ids: any,
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    ids: any, count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 )
     local hasKey = hasKeyBatch(componentTypes)
     if self._scopeDepth > 0 then
@@ -545,8 +546,10 @@ end
 local function archetypesOf(world: WorldImpl, query: Query): {Archetype}
     local items = (query as {string: any})._activeItems
     if not items then
-        error("batch op requires a Query object (built via world:query(...)). " ..
-            "Build the query once outside your hot loop and reuse it.")
+        error(
+            "batch op requires a Query object (built via world:query(...)). "
+                .. "Build the query once outside your hot loop and reuse it."
+        )
     end
     local src = items as {Archetype}
     -- Pooled snapshot: released after commit (batch ops) or immediately
@@ -568,7 +571,9 @@ end
 function WorldImpl:batchDespawn(query: Query)
     local targetArchetypes = archetypesOf(self, query)
     local inScope = self._scopeDepth > 0
-    if not inScope then self._scopeDepth = 1 end
+    if not inScope then
+        self._scopeDepth = 1
+    end
     self:_deferBatchDespawn(targetArchetypes)
     if not inScope then
         self:_drain()
@@ -581,7 +586,9 @@ end
 -- Forms:
 --   world:batchSet(query, instance)
 --   world:batchSet(query, componentType, callback)
-function WorldImpl:batchSet(query: Query, componentOrInstance: Component, callback?: function(Archetype, integer, integer, integer))
+function WorldImpl:batchSet(
+    query: Query, componentOrInstance: Component, callback?: function(Archetype, integer, integer, integer)
+)
     local targetArchetypes = archetypesOf(self, query)
 
     -- Tecs components: the container (type) has `componentType == self`;
@@ -595,17 +602,22 @@ function WorldImpl:batchSet(query: Query, componentOrInstance: Component, callba
     local componentType = asAny.componentType as Component
     local isContainer = componentType == componentOrInstance
     if not componentType then
-        error("batchSet: second argument must be a component (container or instance with " ..
-            "a `componentType` field)")
+        error(
+            "batchSet: second argument must be a component (container or instance with " .. "a `componentType` field)"
+        )
     end
 
     local inScope = self._scopeDepth > 0
-    if not inScope then self._scopeDepth = 1 end
+    if not inScope then
+        self._scopeDepth = 1
+    end
     if callback then
         -- Callback form requires a component type.
         if not isContainer then
-            error("batchSet callback form requires the component type (container), not an " ..
-                "instance. Pass `MyComponent` rather than `MyComponent(...)`.")
+            error(
+                "batchSet callback form requires the component type (container), not an "
+                    .. "instance. Pass `MyComponent` rather than `MyComponent(...)`."
+            )
         end
         self:_deferBatchSetCallback(targetArchetypes, componentOrInstance, callback)
     else
@@ -621,7 +633,9 @@ end
 function WorldImpl:batchRemove(query: Query, componentType: Component)
     local targetArchetypes = archetypesOf(self, query)
     local inScope = self._scopeDepth > 0
-    if not inScope then self._scopeDepth = 1 end
+    if not inScope then
+        self._scopeDepth = 1
+    end
     self:_deferBatchRemove(targetArchetypes, componentType)
     if not inScope then
         self:_drain()
@@ -654,7 +668,9 @@ function WorldImpl:clearEntities()
     -- `maxId` + nil-check tolerates holes left by compact().
     for i = 1, archetypeIndex.maxId do
         local arch = archetypeIndex[i]
-        if arch then arch:clearEntities() end
+        if arch then
+            arch:clearEntities()
+        end
     end
 
     self.messages:clearEntityObservers()
@@ -701,8 +717,7 @@ function WorldImpl:compact(): integer, integer
                     local targetSlot = IdAllocator.slotOf(target)
                     local s = slots[targetSlot]
                     -- Dead if slot is free or generation mismatches.
-                    if s.archetypeId == 0
-                            or IdAllocator.generationOfWithSlot(target, targetSlot) ~= s.generation then
+                    if s.archetypeId == 0 or IdAllocator.generationOfWithSlot(target, targetSlot) ~= s.generation then
                         toDestroy[#toDestroy + 1] = arch
                         destroyedSet[arch] = true
                         break
@@ -723,8 +738,7 @@ function WorldImpl:compact(): integer, integer
         for i = 1, index.maxId do
             local arch = index[i]
             if arch then
-                local plans = (arch as {string: any}).movePlansOut
-                    as {Archetype: internal.MovePlan}
+                local plans = (arch as {string: any}).movePlansOut as {Archetype: internal.MovePlan}
                 if plans then
                     for target in pairs(plans) do
                         if destroyedSet[target] then
@@ -761,7 +775,9 @@ end
 function WorldImpl:isAlive(id: integer): boolean
     local slot = IdAllocator.slotOf(id)
     local s = self._slots[slot]
-    if s.archetypeId == 0 then return false end
+    if s.archetypeId == 0 then
+        return false
+    end
     -- Generation check detects ABA: id was captured when the slot held
     -- a prior (now-dead) entity, and the slot got recycled to a new one.
     -- id's generation part != current slot generation => id is stale.
@@ -776,10 +792,7 @@ end
 -- despawn can create archetypes mid-walk (edge walks, cascade
 -- removals), and adding keys to the live component-archetype set during
 -- its next() traversal is undefined, so entries can be skipped.
-local function snapshotStateArchetypes(
-    self: WorldImpl,
-    component: Component
-): {Archetype}, {integer}
+local function snapshotStateArchetypes(self: WorldImpl, component: Component): {Archetype}, {integer}
     local archs: {Archetype} = {}
     local lens: {integer} = {}
     for archetype, len in self:findArchetypes(component) do
@@ -837,7 +850,7 @@ local ACTIONS <const>: {string: function(WorldImpl, Component)} = {
                 end
             end
         end
-    end
+    end,
 }
 
 -- Execute a built-in state action on matching entities.
@@ -930,7 +943,9 @@ function WorldImpl:pushState(name: string)
     end
     self:emit(0, builtins.StateEnter(name))
     local observer = self._transitionObserver
-    if observer then observer.state("push", before, name, name) end
+    if observer then
+        observer.state("push", before, name, name)
+    end
 end
 
 function WorldImpl:popState()
@@ -964,7 +979,9 @@ function WorldImpl:popState()
         self.autoStateComponent = nil
     end
     local observer = self._transitionObserver
-    if observer then observer.state("pop", poppedName, stack[#stack], poppedName) end
+    if observer then
+        observer.state("pop", poppedName, stack[#stack], poppedName)
+    end
 end
 
 function WorldImpl:peekState(): string
@@ -995,16 +1012,22 @@ function WorldImpl:walkUp<T>(
     local current = id
     for depth = 1, cap do
         local rel = self:getFirstRelationship(current, relationship)
-        if not rel then return end
+        if not rel then
+            return
+        end
         current = rel.target
         if callback(current, depth, context) == false then
             return
         end
     end
-    error(string.format(
-        "world:walkUp exceeded maxDepth %d from id %d via %s (likely a cycle)",
-        cap, id, tostring(relationship.componentName)
-    ))
+    error(
+        string.format(
+            "world:walkUp exceeded maxDepth %d from id %d via %s (likely a cycle)",
+            cap,
+            id,
+            tostring(relationship.componentName)
+        )
+    )
 end
 
 function WorldImpl:traverse(root: integer, relationship: Relationship): function(): (integer, integer)
@@ -1037,7 +1060,9 @@ function WorldImpl:traverse(root: integer, relationship: Relationship): function
             local entityId = top[1]
             local depth = top[2]
             -- Push this entity's children (reverse order so first child is visited first)
-            for i = #pendingChildren, 1, -1 do pendingChildren[i] = nil end
+            for i = #pendingChildren, 1, -1 do
+                pendingChildren[i] = nil
+            end
             store:forEachSource(entityId, childCollector, pendingChildren)
             for i = #pendingChildren, 1, -1 do
                 dfsStack[#dfsStack + 1] = {pendingChildren[i], depth + 1}
@@ -1102,9 +1127,7 @@ function WorldImpl:query(descriptor: QueryDescriptor): Query
     return QueryImpl.new(descriptor, matchingArchetypes, masks, self)
 end
 
-local NO_ENTITY_FUNCTION <const> = function(): Archetype, integer, DoubleArray
-    return nil, 0, nil
-end
+local NO_ENTITY_FUNCTION <const> = function(): Archetype, integer, DoubleArray return nil, 0, nil end
 
 function WorldImpl:findArchetypes(component: Component): function(): (Archetype, integer, DoubleArray)
     local archetypes = self.archetypeIndex:getArchetypesWithComponent(component)
@@ -1189,30 +1212,36 @@ function WorldImpl:addSnapshotHandler(handler: types.World.SnapshotHandler)
     local key <const> = handler.name
     local save <const> = handler.save
     if save then
-        self:observe(0, builtins.OnSnapshotSave, function(ev: builtins.OnSnapshotSave)
-            local value = save(self)
-            if value ~= nil then
-                ev:addData(key, value)
+        self:observe(
+            0,
+            builtins.OnSnapshotSave,
+            function(ev: builtins.OnSnapshotSave)
+                local value = save(self)
+                if value ~= nil then
+                    ev:addData(key, value)
+                end
             end
-        end)
+        )
     end
 
     local loadHandler <const> = handler.load
     if loadHandler then
         local loadFn <const> = loadHandler as function(types.World, any)
-        self:observe(0, builtins.StartSnapshotLoad, function(ev: builtins.StartSnapshotLoad)
-            ev:onData(key, function(value: any)
-                loadFn(self, value)
-            end)
-        end)
+        self:observe(
+            0,
+            builtins.StartSnapshotLoad,
+            function(ev: builtins.StartSnapshotLoad) ev:onData(key, function(value: any) loadFn(self, value) end) end
+        )
     end
 
     local finish <const> = handler.finish
     if finish then
         local finishFn <const> = finish as function(types.World, types.World.SnapshotPrelude)
-        self:observe(0, builtins.FinishSnapshotLoad, function(ev: builtins.FinishSnapshotLoad)
-            finishFn(self, ev.prelude as types.World.SnapshotPrelude)
-        end)
+        self:observe(
+            0,
+            builtins.FinishSnapshotLoad,
+            function(ev: builtins.FinishSnapshotLoad) finishFn(self, ev.prelude as types.World.SnapshotPrelude) end
+        )
     end
 end
 
@@ -1233,9 +1262,13 @@ end
 -- deferring anything.
 function WorldImpl:_popQueryScope()
     local depth = self._scopeDepth - 1
-    if depth < 0 then depth = 0 end
+    if depth < 0 then
+        depth = 0
+    end
     self._scopeDepth = depth
-    if depth == 0 and self.isDirty then self:_drain() end
+    if depth == 0 and self.isDirty then
+        self:_drain()
+    end
 end
 
 function WorldImpl:defer()
@@ -1246,12 +1279,16 @@ function WorldImpl:commit()
     if self._scopeDepth > 0 then
         self._scopeDepth = self._scopeDepth - 1
     end
-    if self._scopeDepth == 0 and self.isDirty then self:_drain() end
+    if self._scopeDepth == 0 and self.isDirty then
+        self:_drain()
+    end
 end
 
 function WorldImpl:unwind()
     self._scopeDepth = 0
-    if self.isDirty then self:_drain() end
+    if self.isDirty then
+        self:_drain()
+    end
 end
 
 function WorldImpl:update(dt: number)
@@ -1402,21 +1439,23 @@ end
 function WorldImpl:_rebuildKeyIndex()
     local nextIndex: {string: integer} = {}
     local Key <const> = builtins.Key
-    self:forEachArchetype(function(arch: Archetype)
-        local col = arch.columns[Key] as {string}
-        if col then
-            local entities = arch.entities as {integer}
-            for row = 1, entities[0] do
-                local key = col[row]
-                validateKey(key)
-                local owner = nextIndex[key]
-                if owner ~= nil and owner ~= entities[row] then
-                    error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
+    self:forEachArchetype(
+        function(arch: Archetype)
+            local col = arch.columns[Key] as {string}
+            if col then
+                local entities = arch.entities as {integer}
+                for row = 1, entities[0] do
+                    local key = col[row]
+                    validateKey(key)
+                    local owner = nextIndex[key]
+                    if owner ~= nil and owner ~= entities[row] then
+                        error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
+                    end
+                    nextIndex[key] = entities[row]
                 end
-                nextIndex[key] = entities[row]
             end
         end
-    end)
+    )
     table_clear(self._keyIndex)
     for key, id in pairs(nextIndex) do
         self._keyIndex[key] = id

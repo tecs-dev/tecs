@@ -100,7 +100,7 @@ mcp.register({
         .. "crash rather than refusing to answer after one.",
     readOnly = true,
     whenCrashed = true,
-    inputSchema = { type = "object", properties = cjson.empty_array },
+    inputSchema = {type = "object", properties = cjson.empty_array},
     handler = function(_: {string: any}): {string: any}
         local crash = mcp.crashed()
         return {
@@ -120,10 +120,14 @@ mcp.register({
 --- carries, and the difference between the two is what an agent looking for a
 --- component it cannot find needs to see.
 local function worldContext(): {string: any}
-    if boundWorld == nil then return nil end
+    if boundWorld == nil then
+        return nil
+    end
     local stats = boundWorld:getStats()
     local declared = 0
-    for _ in pairs(ecs.declaredComponents()) do declared = declared + 1 end
+    for _ in pairs(ecs.declaredComponents()) do
+        declared = declared + 1
+    end
     return {
         entities = stats.entities,
         archetypes = stats.archetypes,
@@ -140,11 +144,10 @@ end
 
 mcp.register({
     name = "context",
-    description = "What this build is, what it can do, and what the world it "
-        .. "is running holds.",
+    description = "What this build is, what it can do, and what the world it " .. "is running holds.",
     readOnly = true,
     whenCrashed = true,
-    inputSchema = { type = "object", properties = cjson.empty_array },
+    inputSchema = {type = "object", properties = cjson.empty_array},
     handler = function(_: {string: any}): {string: any}
         local caps = capabilities.get()
         return {
@@ -171,8 +174,7 @@ local WINDOW <const> = 65536
 
 mcp.register({
     name = "get_logs",
-    description = "Reads the log file from a byte offset. Poll with the "
-        .. "returned offset to follow it.",
+    description = "Reads the log file from a byte offset. Poll with the " .. "returned offset to follow it.",
     readOnly = true,
     whenCrashed = true,
     inputSchema = {
@@ -191,7 +193,7 @@ mcp.register({
     handler = function(args: {string: any}): {string: any}
         local path = log.filePath()
         if path == nil then
-            return { lines = cjson.empty_array, offset = 0, path = cjson.null }
+            return {lines = cjson.empty_array, offset = 0, path = cjson.null}
         end
 
         -- The path is returned so an agent sharing a filesystem with the game
@@ -199,12 +201,14 @@ mcp.register({
         -- what cmd_screenshot already does with artifacts.
         local file = io.open(path, "rb")
         if file == nil then
-            return { lines = cjson.empty_array, offset = 0, path = path }
+            return {lines = cjson.empty_array, offset = 0, path = path}
         end
 
         local after = math.floor(tonumber(args.after) or 0) as integer
         local size = file:seek("end")
-        if after > size then after = 0 end   -- the file was truncated
+        if after > size then
+            after = 0
+        end -- the file was truncated
         file:seek("set", after)
         local text = file:read(WINDOW) or ""
         file:close()
@@ -212,7 +216,9 @@ mcp.register({
         -- Only whole lines, so a cursor never lands mid-record and the next
         -- read does not start with a fragment.
         local lastBreak = text:find("\n[^\n]*$")
-        if lastBreak ~= nil then text = text:sub(1, lastBreak) end
+        if lastBreak ~= nil then
+            text = text:sub(1, lastBreak)
+        end
 
         local contains = args.contains as string
         local lines: {string} = {}
@@ -230,7 +236,6 @@ mcp.register({
     end,
 })
 
-
 --- Writes the last composited frame to a PNG under the writable root.
 ---
 --- A file rather than inline base64, because an agent that shares a filesystem
@@ -239,16 +244,14 @@ mcp.register({
 --- protocol is worth avoiding. The path is returned either way.
 mcp.register({
     name = "screenshot",
-    description = "Captures the last rendered frame to a PNG and returns its "
-        .. "path.",
+    description = "Captures the last rendered frame to a PNG and returns its " .. "path.",
     readOnly = true,
     inputSchema = {
         type = "object",
         properties = {
             name = {
                 type = "string",
-                description = "File name under the writable root. Defaults to "
-                    .. "screenshot.png.",
+                description = "File name under the writable root. Defaults to " .. "screenshot.png.",
             },
         },
     },
@@ -264,8 +267,7 @@ mcp.register({
         -- lit target carries the G-buffer's alpha, which is zero everywhere
         -- nothing was drawn, and a screenshot that came back transparent would
         -- show as white in every viewer rather than as the black it was.
-        local surface = C.SDL_CreateSurfaceFrom(width, height,
-            C.SDL_PIXELFORMAT_XBGR8888, pixels, width * 4)
+        local surface = C.SDL_CreateSurfaceFrom(width, height, C.SDL_PIXELFORMAT_XBGR8888, pixels, width * 4)
         if surface == nil then
             error("SDL_CreateSurfaceFrom failed: " .. sdl.error(), 0)
         end
@@ -278,7 +280,7 @@ mcp.register({
             error("IMG_SavePNG failed: " .. sdl.error(), 0)
         end
 
-        return { path = path, width = width, height = height }
+        return {path = path, width = width, height = height}
     end,
 })
 
@@ -297,10 +299,10 @@ mcp.register({
             points = {
                 type = "array",
                 description = "Points to sample, as {x, y} pairs.",
-                items = { type = "array", items = { type = "integer" } },
+                items = {type = "array", items = {type = "integer"}},
             },
         },
-        required = { "points" },
+        required = {"points"},
     },
     handler = function(args: {string: any}): {string: any}
         local points = args.points as {any}
@@ -318,17 +320,21 @@ mcp.register({
             local x = math.floor(tonumber(point[1]) or 0) as integer
             local y = math.floor(tonumber(point[2]) or 0) as integer
             if x < 0 or y < 0 or x >= width or y >= height then
-                sampled[index] = { x = x, y = y, outside = true }
+                sampled[index] = {x = x, y = y, outside = true}
             else
                 local pixel = texture:getPixel(pixels, x, y)
                 sampled[index] = {
-                    x = x, y = y,
-                    r = pixel.r, g = pixel.g, b = pixel.b, a = pixel.a,
+                    x = x,
+                    y = y,
+                    r = pixel.r,
+                    g = pixel.g,
+                    b = pixel.b,
+                    a = pixel.a,
                 }
             end
         end
 
-        return { width = width, height = height, pixels = sampled }
+        return {width = width, height = height, pixels = sampled}
     end,
 })
 
@@ -339,8 +345,7 @@ mcp.register({
 --- window nobody can close is worse than one that is not drawing.
 mcp.register({
     name = "send_event",
-    description = "Pushes an event into the input stream, as if it had come "
-        .. "from the platform.",
+    description = "Pushes an event into the input stream, as if it had come " .. "from the platform.",
     destructive = true,
     whenCrashed = true,
     inputSchema = {
@@ -350,22 +355,21 @@ mcp.register({
                 type = "string",
                 description = "Event kind. Call with no kind to list them.",
             },
-            scancode = { type = "integer", description = "For keyDown, keyUp." },
-            button = { type = "integer", description = "For mouseDown, mouseUp." },
-            x = { type = "number" },
-            y = { type = "number" },
+            scancode = {type = "integer", description = "For keyDown, keyUp."},
+            button = {type = "integer", description = "For mouseDown, mouseUp."},
+            x = {type = "number"},
+            y = {type = "number"},
             clicks = {
                 type = "integer",
-                description = "Clicks in the run, for mouseDown and mouseUp. "
-                    .. "One when omitted.",
+                description = "Clicks in the run, for mouseDown and mouseUp. " .. "One when omitted.",
             },
-            wheelX = { type = "number", description = "For mouseWheel." },
-            wheelY = { type = "number", description = "For mouseWheel." },
+            wheelX = {type = "number", description = "For mouseWheel."},
+            wheelY = {type = "number", description = "For mouseWheel."},
             wheelTicksX = {
                 type = "integer",
                 description = "Whole notches, for mouseWheel.",
             },
-            wheelTicksY = { type = "integer", description = "Whole notches." },
+            wheelTicksY = {type = "integer", description = "Whole notches."},
             flipped = {
                 type = "boolean",
                 description = "Send the wheel event as a platform with "
@@ -375,7 +379,7 @@ mcp.register({
                 type = "integer",
                 description = "SDL_PEN_INPUT_* mask, for the pen kinds.",
             },
-            repeated = { type = "boolean", description = "For keyDown." },
+            repeated = {type = "boolean", description = "For keyDown."},
             which = {
                 type = "integer",
                 description = "Device, window or display the event is about.",
@@ -384,7 +388,7 @@ mcp.register({
                 type = "integer",
                 description = "First payload, for the window and display kinds.",
             },
-            data2 = { type = "integer", description = "Second payload." },
+            data2 = {type = "integer", description = "Second payload."},
             scale = {
                 type = "number",
                 description = "Zoom factor, for the pinch kinds.",
@@ -398,30 +402,33 @@ mcp.register({
     handler = function(args: {string: any}): {string: any}
         local kind = args.kind as string
         if kind == nil then
-            return { kinds = events.kinds() }
+            return {kinds = events.kinds()}
         end
         -- events.push validates the kind against the same table the drain
         -- decodes with, so an unknown one cannot be pushed and then ignored.
-        events.push(kind, {
-            scancode = args.scancode as integer,
-            button = args.button as integer,
-            x = args.x as number,
-            y = args.y as number,
-            clicks = args.clicks as integer,
-            wheelX = args.wheelX as number,
-            wheelY = args.wheelY as number,
-            wheelTicksX = args.wheelTicksX as integer,
-            wheelTicksY = args.wheelTicksY as integer,
-            flipped = args.flipped as boolean,
-            penState = args.penState as integer,
-            repeated = args.repeated as boolean,
-            which = args.which as number,
-            data1 = args.data1 as integer,
-            data2 = args.data2 as integer,
-            scale = args.scale as number,
-            recording = args.recording as boolean,
-        } as events.Event)
-        return { pushed = kind }
+        events.push(
+            kind,
+            {
+                scancode = args.scancode as integer,
+                button = args.button as integer,
+                x = args.x as number,
+                y = args.y as number,
+                clicks = args.clicks as integer,
+                wheelX = args.wheelX as number,
+                wheelY = args.wheelY as number,
+                wheelTicksX = args.wheelTicksX as integer,
+                wheelTicksY = args.wheelTicksY as integer,
+                flipped = args.flipped as boolean,
+                penState = args.penState as integer,
+                repeated = args.repeated as boolean,
+                which = args.which as number,
+                data1 = args.data1 as integer,
+                data2 = args.data2 as integer,
+                scale = args.scale as number,
+                recording = args.recording as boolean,
+            } as events.Event
+        )
+        return {pushed = kind}
     end,
 })
 
@@ -437,7 +444,7 @@ mcp.register({
     description = "Sound output: the clips loaded, the voices sounding, and "
         .. "the gains, mutes and pauses over them.",
     readOnly = true,
-    inputSchema = { type = "object", properties = cjson.empty_array },
+    inputSchema = {type = "object", properties = cjson.empty_array},
     handler = function(_: {string: any}): {string: any}
         local sound = audio()
         -- What this build linked rather than what it asked for, which is the
@@ -474,7 +481,9 @@ mcp.register({
                 stopping = voice.stopping,
                 owned = voice.owned,
                 spatial = voice.spatial,
-                x = voice.x, y = voice.y, z = voice.z,
+                x = voice.x,
+                y = voice.y,
+                z = voice.z,
             }
         end
 
@@ -531,16 +540,20 @@ function tools.reloadShaders(): {string}
     -- build without a compiler has nothing to put in its place and no way to
     -- change what it draws with while it is running.
     if not shadercompiler.available() then
-        error("this build links no shader compiler, so its shaders are "
-            .. "fixed at the pack it was built against", 0)
+        error("this build links no shader compiler, so its shaders are " .. "fixed at the pack it was built against", 0)
     end
     if boundReload == nil then
-        error("no shader rebuild is registered, so the sources would be "
-            .. "re-read and nothing would draw differently", 0)
+        error(
+            "no shader rebuild is registered, so the sources would be "
+                .. "re-read and nothing would draw differently",
+            0
+        )
     end
 
     local reloaded, refused = materials.reload()
-    if not reloaded then error(refused, 0) end
+    if not reloaded then
+        error(refused, 0)
+    end
     shaders.invalidate()
     boundReload()
     return materials.names()
@@ -560,8 +573,7 @@ function tools.reloadImage(path: string): integer, integer, integer
     end
     local target = renderer()
     if not assets.installed() then
-        error("no asset loader is running, so there is nothing here that "
-            .. "decodes an image file", 0)
+        error("no asset loader is running, so there is nothing here that " .. "decodes an image file", 0)
     end
 
     -- Nothing in `assets` is a cache, so this decodes the file as it is now
@@ -591,7 +603,9 @@ function tools.reloadSound(path: string): boolean
     end
     local sound = audio()
     local reloaded, refused = sound:reload(path)
-    if not reloaded then error(refused, 0) end
+    if not reloaded then
+        error(refused, 0)
+    end
     local clip = sound:clip(Audio.clipId(path))
     return clip ~= nil and clip.resident
 end
@@ -610,7 +624,9 @@ function tools.reloadFont(path: string): string, integer
     end
     local font = text.reloadFont(path)
     local glyphs = 0
-    for _ in pairs(font.glyphs) do glyphs = glyphs + 1 end
+    for _ in pairs(font.glyphs) do
+        glyphs = glyphs + 1
+    end
     return font.name, glyphs
 end
 
@@ -621,10 +637,8 @@ mcp.register({
         .. "rebuilds the pipelines. Refuses where a reload would change what "
         .. "already-drawn entities mean.",
     destructive = true,
-    inputSchema = { type = "object", properties = cjson.empty_array },
-    handler = function(_: {string: any}): {string: any}
-        return { materials = tools.reloadShaders() }
-    end,
+    inputSchema = {type = "object", properties = cjson.empty_array},
+    handler = function(_: {string: any}): {string: any} return {materials = tools.reloadShaders()} end,
 })
 
 mcp.register({
@@ -641,12 +655,12 @@ mcp.register({
                 description = "The path the image was registered under.",
             },
         },
-        required = { "path" },
+        required = {"path"},
     },
     handler = function(args: {string: any}): {string: any}
         local path = args.path as string
         local layer, width, height = tools.reloadImage(path)
-        return { path = path, layer = layer, width = width, height = height }
+        return {path = path, layer = layer, width = width, height = height}
     end,
 })
 
@@ -672,12 +686,12 @@ mcp.register({
                 description = "The path the clip was loaded from.",
             },
         },
-        required = { "path" },
+        required = {"path"},
     },
     handler = function(args: {string: any}): {string: any}
         local path = args.path as string
         local resident = tools.reloadSound(path)
-        return { path = path, resident = resident, replaced = resident }
+        return {path = path, resident = resident, replaced = resident}
     end,
 })
 
@@ -704,12 +718,12 @@ mcp.register({
                 description = "The path the font's metrics were loaded from.",
             },
         },
-        required = { "path" },
+        required = {"path"},
     },
     handler = function(args: {string: any}): {string: any}
         local path = args.path as string
         local name, glyphs = tools.reloadFont(path)
-        return { path = path, font = name, glyphs = glyphs }
+        return {path = path, font = name, glyphs = glyphs}
     end,
 })
 
@@ -731,20 +745,21 @@ mcp.register({
         properties = {
             enabled = {
                 type = "boolean",
-                description = "Starts or stops the watcher. Omit to leave it "
-                    .. "as it is.",
+                description = "Starts or stops the watcher. Omit to leave it " .. "as it is.",
             },
             poll = {
                 type = "boolean",
-                description = "Looks at every watched file now, without "
-                    .. "waiting for the interval.",
+                description = "Looks at every watched file now, without " .. "waiting for the interval.",
             },
         },
     },
     handler = function(args: {string: any}): {string: any}
         if not watch.available() then
-            error("this build links no shader compiler, so it is a release "
-                .. "and has no business polling the filesystem", 0)
+            error(
+                "this build links no shader compiler, so it is a release "
+                    .. "and has no business polling the filesystem",
+                0
+            )
         end
 
         local enabled = args.enabled as boolean
@@ -755,7 +770,9 @@ mcp.register({
         end
 
         local fired = 0
-        if args.poll == true then fired = watch.scan() end
+        if args.poll == true then
+            fired = watch.scan()
+        end
 
         local watching = watch.watching()
         local unsettled = watch.unsettled()
@@ -795,7 +812,7 @@ mcp.register({
                 description = "Lua to run. A bare expression is returned.",
             },
         },
-        required = { "code" },
+        required = {"code"},
     },
     handler = function(args: {string: any}): {string: any}
         local code = args.code as string
@@ -812,7 +829,9 @@ mcp.register({
         -- not have: it is 5.1, while the type checker describes 5.4. A
         -- returning nil has to be distinguishable from returning nothing.
         local function collect(ok: boolean, ...: any): integer, {any}
-            if not ok then error(tostring((...)), 0) end
+            if not ok then
+                error(tostring((...)), 0)
+            end
             local count = select("#", ...)
             local values: {any} = {}
             for index = 1, count do

@@ -120,22 +120,29 @@ local record sequence
 
     --- Interpolate to an absolute destination.
     tweenTo: function(
-        duration: number, curve: EasingName | EasingFunction,
+        duration: number,
+        curve: EasingName | EasingFunction,
         target: TargetName | Target,
-        t1: number, t2?: number, t3?: number, t4?: number
+        t1: number,
+        t2?: number,
+        t3?: number,
+        t4?: number
     ): TimelineNode
 
     --- Interpolate by a relative delta, read from wherever the value starts.
     tweenAdjust: function(
-        duration: number, curve: EasingName | EasingFunction,
+        duration: number,
+        curve: EasingName | EasingFunction,
         target: TargetName | Target,
-        t1: number, t2?: number, t3?: number, t4?: number
+        t1: number,
+        t2?: number,
+        t3?: number,
+        t4?: number
     ): TimelineNode
 
     --- Interpolate toward a destination that keeps moving.
     tweenTrack: function(
-        duration: number, curve: EasingName | EasingFunction,
-        target: TargetName | Target, from: TrackSource
+        duration: number, curve: EasingName | EasingFunction, target: TargetName | Target, from: TrackSource
     ): TimelineNode
 
     --- Advance the timeline cursor without changing anything.
@@ -228,9 +235,7 @@ local record sequence
     ---         sequence.tweenTo(0.4, "quadOut", "color.a", 0),
     ---     })
     ---     sequence.play(world, fade, {owner = e, params = {delay = 0.2}})
-    timeline: function(
-        name: string, spec: TimelineSpec, options?: TimelineOptions
-    ): Program
+    timeline: function(name: string, spec: TimelineSpec, options?: TimelineOptions): Program
 
     --- Look up a defined program: the newest version, or a specific one.
     --- Every version a playback still runs stays reachable.
@@ -309,9 +314,7 @@ local record sequence
     --- Needs the sequencer, which `tecs.application` installs. A binding
     --- that is missing or dead is not a fault: nothing plays, and a following
     --- `waitTween` resumes at once reporting `targetLost`.
-    playTween: function(
-        timeline: string, target: EntityRef, params?: {string: any}
-    ): Node
+    playTween: function(timeline: string, target: EntityRef, params?: {string: any}): Node
 
     --- Evaluate a registered evaluator every tick until it finishes.
     ---
@@ -450,9 +453,7 @@ local record sequence
     --- `reason` is what anything waiting on one of them is told. The owner
     --- despawning reports `targetLost`, which is what a waiter needs to tell
     --- "it was stopped" from "what it was moving is gone".
-    cancelOwnedBy: function(
-        world: World, owner: integer, reason?: TweenOutcome
-    ): integer
+    cancelOwnedBy: function(world: World, owner: integer, reason?: TweenOutcome): integer
 
     --- Number of live playbacks, for tests and diagnostics.
     activeCount: function(world: World): integer
@@ -554,18 +555,14 @@ function sequence.waitSignal(name: string): sequence.Node
     return {kind = "waitSignal", text = name} as sequence.Node
 end
 
-function sequence.waitQuery(
-    name: string,
-    condition: sequence.QueryCondition
-): sequence.Node
+function sequence.waitQuery(name: string, condition: sequence.QueryCondition): sequence.Node
     if type(name) ~= "string" or name == "" then
         error("sequence.waitQuery requires a non-empty query name", 2)
     end
     if condition ~= "any" and condition ~= "empty" then
         error("sequence.waitQuery condition must be 'any' or 'empty'", 2)
     end
-    return {kind = "waitQuery", text = name, count = condition == "any" and 1 or 0}
-        as sequence.Node
+    return {kind = "waitQuery", text = name, count = condition == "any" and 1 or 0} as sequence.Node
 end
 
 function sequence.emit(event: string, ...: sequence.Argument): sequence.Node
@@ -585,19 +582,14 @@ function sequence.loop(count: integer, nodes: {sequence.Node}): sequence.Node
     return {kind = "loop", count = count, nodes = nodes} as sequence.Node
 end
 
-function sequence.playTween(
-    timeline: string,
-    target: sequence.EntityRef,
-    params?: {string: any}
-): sequence.Node
+function sequence.playTween(timeline: string, target: sequence.EntityRef, params?: {string: any}): sequence.Node
     if type(timeline) ~= "string" or timeline == "" then
         error("sequence.playTween requires a non-empty timeline name", 2)
     end
     if not seqprogram.isEntityRef(target) then
         error("sequence.playTween requires a sequence.bind(name) target", 2)
     end
-    return {kind = "playTween", text = timeline, args = {target, params}}
-        as sequence.Node
+    return {kind = "playTween", text = timeline, args = {target, params}} as sequence.Node
 end
 
 function sequence.eval(evaluator: string, data?: any): sequence.Node
@@ -607,9 +599,7 @@ function sequence.eval(evaluator: string, data?: any): sequence.Node
     return {kind = "eval", text = evaluator, args = data as {any}} as sequence.Node
 end
 
-function sequence.await(
-    provider: string, target: sequence.EntityRef, key?: string
-): sequence.Node
+function sequence.await(provider: string, target: sequence.EntityRef, key?: string): sequence.Node
     if type(provider) ~= "string" or provider == "" then
         error("sequence.await requires a non-empty provider name", 2)
     end
@@ -656,11 +646,7 @@ end
 -- Compiler
 -------------------------------------------------------------------------------
 
-function sequence.define(
-    name: string,
-    nodes: {sequence.Node},
-    options?: sequence.DefineOptions
-): sequence.Program
+function sequence.define(name: string, nodes: {sequence.Node}, options?: sequence.DefineOptions): sequence.Program
     if type(name) ~= "string" or name == "" then
         error("sequence.define requires a non-empty program name", 2)
     end
@@ -677,13 +663,11 @@ function sequence.define(
     return prog
 end
 
-function sequence.defineData(
-    name: string,
-    rows: {any},
-    options?: sequence.DefineOptions
-): sequence.Program, string
+function sequence.defineData(name: string, rows: {any}, options?: sequence.DefineOptions): sequence.Program, string
     local nodes, err = seqjson.decode(sequence as seqjson.Builders, rows)
-    if not nodes then return nil, err end
+    if not nodes then
+        return nil, err
+    end
     return sequence.define(name, nodes, options)
 end
 
@@ -692,9 +676,7 @@ function sequence.dataOps(): {string}
 end
 
 function sequence.timeline(
-    name: string,
-    spec: sequence.TimelineSpec,
-    options?: sequence.TimelineOptions
+    name: string, spec: sequence.TimelineSpec, options?: sequence.TimelineOptions
 ): sequence.Program
     local clock: seqtypes.ClockId = options and options.clock or "presentation"
     if clock ~= "fixed" and clock ~= "presentation" then
@@ -703,13 +685,19 @@ function sequence.timeline(
     local compiled <const> = tweeneval.compile(spec)
     -- The serialized form is what the const pool carries; the evaluator
     -- resolves it back once, when the first playback of it starts.
-    return sequence.define(name, {
-        sequence.eval(seqtweenrun.EVALUATOR, tweeneval.serializeTimeline(compiled)),
-    }, {clock = clock})
+    return sequence.define(
+        name,
+        {
+            sequence.eval(seqtweenrun.EVALUATOR, tweeneval.serializeTimeline(compiled)),
+        },
+        {clock = clock}
+    )
 end
 
 function sequence.program(name: string, version?: integer): sequence.Program
-    if version then return seqregistry.version(name, version) end
+    if version then
+        return seqregistry.version(name, version)
+    end
     return seqregistry.newest(name)
 end
 
@@ -743,11 +731,7 @@ function sequence.hasAction(world: World, name: string): boolean
     return seqcursors.stateFor(world).actions[name] ~= nil
 end
 
-function sequence.registerQuery(
-    world: World,
-    name: string,
-    descriptor: ecs.Query.Descriptor
-)
+function sequence.registerQuery(world: World, name: string, descriptor: ecs.Query.Descriptor)
     if type(name) ~= "string" or name == "" then
         error("sequence.registerQuery requires a non-empty query name", 2)
     end
@@ -764,23 +748,17 @@ function sequence.registerQuery(
     for key, value in pairs(descriptor as {string: any}) do
         (spec as {string: any})[key] = value
     end
-    spec.onEntitiesAdded = function(
-        archetype: ecs.Archetype,
-        firstRow: integer,
-        lastRow: integer,
-        count: integer
-    )
+    spec.onEntitiesAdded = function(archetype: ecs.Archetype, firstRow: integer, lastRow: integer, count: integer)
         state.dirtyQueries[name] = true
-        if userAdded then userAdded(archetype, firstRow, lastRow, count) end
+        if userAdded then
+            userAdded(archetype, firstRow, lastRow, count)
+        end
     end
-    spec.onEntitiesRemoved = function(
-        archetype: ecs.Archetype,
-        firstRow: integer,
-        lastRow: integer,
-        count: integer
-    )
+    spec.onEntitiesRemoved = function(archetype: ecs.Archetype, firstRow: integer, lastRow: integer, count: integer)
         state.dirtyQueries[name] = true
-        if userRemoved then userRemoved(archetype, firstRow, lastRow, count) end
+        if userRemoved then
+            userRemoved(archetype, firstRow, lastRow, count)
+        end
     end
 
     state.queries[name] = world:query(spec)
@@ -796,9 +774,7 @@ function sequence.signalOnEvent<T is ecs.Event>(world: World, name: string, even
     if type(name) ~= "string" or name == "" then
         error("sequence.signalOnEvent requires a non-empty signal name", 2)
     end
-    world:observe(0, event, function()
-        sequence.signal(world, name)
-    end)
+    world:observe(0, event, function() sequence.signal(world, name) end)
 end
 
 -------------------------------------------------------------------------------
@@ -815,9 +791,13 @@ function sequence.signal(world: World, name: string): integer
     end
     local state = seqcursors.stateFor(world)
     local blocked = state.channels[name]
-    if not blocked then return 0 end
+    if not blocked then
+        return 0
+    end
     local count = 0
-    for _ in pairs(blocked) do count = count + 1 end
+    for _ in pairs(blocked) do
+        count = count + 1
+    end
     -- Delivery is deferred to the next step so a signal raised from inside a
     -- running cursor cannot cascade within the same step.
     state.pendingSignals[#state.pendingSignals + 1] = name
@@ -826,17 +806,17 @@ end
 
 function sequence.waitingOn(world: World, name: string): integer
     local blocked = seqcursors.stateFor(world).channels[name]
-    if not blocked then return 0 end
+    if not blocked then
+        return 0
+    end
     local count = 0
-    for _ in pairs(blocked) do count = count + 1 end
+    for _ in pairs(blocked) do
+        count = count + 1
+    end
     return count
 end
 
-function sequence.play(
-    world: World,
-    program: sequence.Program,
-    options?: sequence.PlayOptions
-): sequence.Handle
+function sequence.play(world: World, program: sequence.Program, options?: sequence.PlayOptions): sequence.Handle
     if type(program) ~= "table" or (program as ProgramImpl).code == nil then
         error("sequence.play requires a program from sequence.define", 2)
     end
@@ -853,7 +833,9 @@ function sequence.play(
         cursor.bindings = options.bindings
         cursor.params = options.params
         cursor.channel = options.channel
-        if options.budget then cursor.budget = options.budget end
+        if options.budget then
+            cursor.budget = options.budget
+        end
     end
 
     seqcursors.linkOwner(state, cursor)
@@ -870,37 +852,43 @@ end
 function sequence.cancel(world: World, handle: sequence.Handle): boolean
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
-    if not cursor or not cursor.alive then return false end
+    if not cursor or not cursor.alive then
+        return false
+    end
     seqcursors.retire(state, cursor, "cancelled")
     return true
 end
 
-function sequence.pause(
-    world: World, handle: sequence.Handle, holder?: string
-): boolean
+function sequence.pause(world: World, handle: sequence.Handle, holder?: string): boolean
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
-    if not cursor or not cursor.alive then return false end
+    if not cursor or not cursor.alive then
+        return false
+    end
     return seqcursors.pauseTree(state, cursor, holder or DEFAULT_HOLDER)
 end
 
-function sequence.resume(
-    world: World, handle: sequence.Handle, holder?: string
-): boolean
+function sequence.resume(world: World, handle: sequence.Handle, holder?: string): boolean
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
-    if not cursor or not cursor.alive then return false end
+    if not cursor or not cursor.alive then
+        return false
+    end
     return seqcursors.resumeTree(state, cursor, holder or DEFAULT_HOLDER)
 end
 
 function sequence.status(world: World, handle: sequence.Handle): sequence.Status
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
-    if not cursor then return nil end
+    if not cursor then
+        return nil
+    end
     local branches = 0
     local children = cursor.children
     if children then
-        for _ in pairs(children) do branches = branches + 1 end
+        for _ in pairs(children) do
+            branches = branches + 1
+        end
     end
 
     local status: sequence.Status = {
@@ -915,8 +903,8 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
         waitingAwaitable = cursor.alive and cursor.awaitProvider or nil,
         waitingAwaitableEntity = cursor.alive and cursor.awaitEntity or nil,
         tweenOutcome = cursor.tweenOutcome,
-        waitingCondition = cursor.alive and cursor.waitQuery
-            and (cursor.waitCondition == 1 and "any" or "empty") or nil,
+        waitingCondition = cursor.alive and cursor.waitQuery and (cursor.waitCondition == 1 and "any" or "empty")
+            or nil,
         branches = branches,
         joining = cursor.joining or false,
         fault = cursor.fault,
@@ -925,14 +913,16 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
     return status
 end
 
-function sequence.cancelOwnedBy(
-    world: World, owner: integer, reason?: sequence.TweenOutcome
-): integer
+function sequence.cancelOwnedBy(world: World, owner: integer, reason?: sequence.TweenOutcome): integer
     local state = seqcursors.stateFor(world)
     local owned = state.ownerIndex[owner]
-    if not owned then return 0 end
+    if not owned then
+        return 0
+    end
     local slots: {integer} = {}
-    for slot in pairs(owned) do slots[#slots + 1] = slot end
+    for slot in pairs(owned) do
+        slots[#slots + 1] = slot
+    end
     table.sort(slots)
     local cancelled = 0
     for i = 1, #slots do
@@ -949,7 +939,9 @@ function sequence.activeCount(world: World): integer
     local state = seqcursors.stateFor(world)
     local count = 0
     for _, cursor in pairs(state.cursors) do
-        if cursor.alive then count = count + 1 end
+        if cursor.alive then
+            count = count + 1
+        end
     end
     return count
 end
@@ -958,7 +950,9 @@ function sequence.playbacks(world: World): {sequence.Handle}
     local state = seqcursors.stateFor(world)
     local slots: {integer} = {}
     for slot, cursor in pairs(state.cursors) do
-        if cursor.alive then slots[#slots + 1] = slot end
+        if cursor.alive then
+            slots[#slots + 1] = slot
+        end
     end
     table.sort(slots)
     local handles: {sequence.Handle} = {}
@@ -980,20 +974,19 @@ function sequence.currentStep(world: World, clock?: sequence.ClockId): integer
     return seqcursors.stateFor(world).clocks[clock or "fixed"].step
 end
 
-function sequence.upcoming(
-    world: World,
-    handle: sequence.Handle,
-    withinTicks?: integer
-): {sequence.Step}
+function sequence.upcoming(world: World, handle: sequence.Handle, withinTicks?: integer): {sequence.Step}
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
-    if not cursor or not cursor.alive then return {} end
+    if not cursor or not cursor.alive then
+        return {}
+    end
     -- A scheduled cursor is already some ticks out; one parked on a signal,
     -- a query, a join, or a tween has no predictable start at all.
-    if not cursor.wakeAt then return {} end
+    if not cursor.wakeAt then
+        return {}
+    end
     local offset <const> = cursor.wakeAt - seqcursors.clockOf(state, cursor).step
-    return seqprogram.ahead(cursor.program, cursor.pc,
-        offset > 0 and offset or 0, withinTicks)
+    return seqprogram.ahead(cursor.program, cursor.pc, offset > 0 and offset or 0, withinTicks)
 end
 
 -------------------------------------------------------------------------------
@@ -1015,11 +1008,12 @@ end
 -- Worlds that script input install the sequencer themselves rather than
 -- relying on the application having done it, so installing twice has to be
 -- safe.
-local installed: {World: boolean} =
-    setmetatable({}, {__mode = "k"} as metatable<{World: boolean}>)
+local installed: {World: boolean} = setmetatable({}, {__mode = "k"} as metatable<{World: boolean}>)
 
 function sequence.plugin(world: World)
-    if installed[world] then return end
+    if installed[world] then
+        return
+    end
     installed[world] = true
     local state = seqcursors.stateFor(world)
 
@@ -1030,9 +1024,7 @@ function sequence.plugin(world: World)
     world:addSystem({
         name = "sequence.Advance",
         phase = ecs.phases.FixedFirst,
-        run = function(dt: number)
-            seqvm.tick(world, state, "fixed", dt)
-        end,
+        run = function(dt: number) seqvm.tick(world, state, "fixed", dt) end,
     })
 
     -- phases.First is the earliest gameplay phase, ahead of the fixed group,
@@ -1043,9 +1035,7 @@ function sequence.plugin(world: World)
     world:addSystem({
         name = "sequence.AdvanceFrame",
         phase = ecs.phases.First,
-        run = function(dt: number)
-            seqvm.tick(world, state, "frame", dt)
-        end,
+        run = function(dt: number) seqvm.tick(world, state, "frame", dt) end,
     })
 
     -- Presentation runs in Update with the frame's real dt: what it carries
@@ -1053,28 +1043,25 @@ function sequence.plugin(world: World)
     world:addSystem({
         name = "sequence.AdvancePresentation",
         phase = ecs.phases.Update,
-        run = function(dt: number)
-            seqvm.tick(world, state, "presentation", dt)
-        end,
+        run = function(dt: number) seqvm.tick(world, state, "presentation", dt) end,
     })
 
     world:addSnapshotHandler({
         name = "tecs.sequence",
-        save = function(w: World): any
-            return seqsnapshot.save(w)
-        end,
-        load = function(w: World, value: any)
-            seqsnapshot.load(w, value)
-        end,
+        save = function(w: World): any return seqsnapshot.save(w) end,
+        load = function(w: World, value: any) seqsnapshot.load(w, value) end,
     })
 
     -- Owner lifetime: a despawned owner cancels the playbacks it governs.
-    world:observe(0, ecs.builtins.OnDespawn, function(event: ecs.builtins.OnDespawn)
-        if state.ownerIndex[event.entity] then
-            sequence.cancelOwnedBy(world, event.entity, "targetLost")
+    world:observe(
+        0,
+        ecs.builtins.OnDespawn,
+        function(event: ecs.builtins.OnDespawn)
+            if state.ownerIndex[event.entity] then
+                sequence.cancelOwnedBy(world, event.entity, "targetLost")
+            end
         end
-    end)
-
+    )
 end
 
 return sequence

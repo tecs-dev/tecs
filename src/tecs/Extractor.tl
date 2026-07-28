@@ -89,7 +89,6 @@ local RESERVE_FULL <const> = 2
 local RESERVE_FLOOR <const> = 1
 local RESERVE_NONE <const> = 0
 
-
 --- Something that draws instances without owning entities.
 ---
 --- Text is the reason this exists. A glyph is a textured quad like any other,
@@ -115,9 +114,14 @@ local record InstanceProducer
     --- Writes instances `first` through `last` of its run. `base` is the
     --- instance index the run starts at, so instance `first` is written at
     --- `base + first - 1`.
-    write: function(self: InstanceProducer, floats: loader.CArray,
-                    bounds: loader.CArray, base: integer,
-                    first: integer, last: integer)
+    write: function(
+        self: InstanceProducer,
+        floats: loader.CArray,
+        bounds: loader.CArray,
+        base: integer,
+        first: integer,
+        last: integer
+    )
 end
 
 --- One archetype's contiguous run in the instance buffer.
@@ -222,7 +226,7 @@ local record Extractor
     _missingImage: integer
 end
 
-local ExtractorMT <const>: metatable<Extractor> = { __index = Extractor }
+local ExtractorMT <const>: metatable<Extractor> = {__index = Extractor}
 
 --- Builds an extractor. Nothing here needs a device.
 function Extractor.create(options: ExtractorOptions): Extractor
@@ -254,8 +258,7 @@ end
 --- The backend owns the buffers, because the device does. What crosses is an
 --- address and the slot it belongs to, which is the same thing that crosses
 --- once the two halves are on different threads.
-function Extractor:setStaging(slot: integer, instances: loader.CArray,
-                              bounds: loader.CArray)
+function Extractor:setStaging(slot: integer, instances: loader.CArray, bounds: loader.CArray)
     self._slot = slot
     self._instances = instances
     self._bounds = bounds
@@ -270,15 +273,16 @@ end
 local function missingImageMessage(image: integer): string
     local name = components.imageName(image)
     if name == nil then
-        return "tecs: a Sprite names no image; build one with "
-            .. "Renderer:registerImage or Renderer:sprite"
+        return "tecs: a Sprite names no image; build one with " .. "Renderer:registerImage or Renderer:sprite"
     end
     return ("tecs: no image is registered as '%s'"):format(name)
 end
 
 local function slotOf(self: Extractor, image: integer): integer
     local slot = self._slotByImage[image]
-    if slot ~= nil then return slot end
+    if slot ~= nil then
+        return slot
+    end
     error(missingImageMessage(image), 2)
 end
 
@@ -316,8 +320,7 @@ end
 ---
 --- Fails on a name nothing is registered under, because the alternative is a
 --- quad that draws whichever image happens to hold that layer.
-function Extractor:sprite(name: string, u0?: number, v0?: number,
-                          u1?: number, v1?: number): components.Sprite
+function Extractor:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
     local image = components.imageId(name)
     local slot = slotOf(self, image)
     local region = self._regionByImage[image]
@@ -325,9 +328,14 @@ function Extractor:sprite(name: string, u0?: number, v0?: number,
     -- which is a sub-rect of the cell and starts wherever the packer put it.
     local spanU <const> = region.u1 - region.u0
     local spanV <const> = region.v1 - region.v0
-    return components.Sprite(image,
-        region.u0 + (u0 or 0.0) * spanU, region.v0 + (v0 or 0.0) * spanV,
-        region.u0 + (u1 or 1.0) * spanU, region.v0 + (v1 or 1.0) * spanV, slot)
+    return components.Sprite(
+        image,
+        region.u0 + (u0 or 0.0) * spanU,
+        region.v0 + (v0 or 0.0) * spanV,
+        region.u0 + (u1 or 1.0) * spanU,
+        region.v0 + (v1 or 1.0) * spanV,
+        slot
+    )
 end
 
 --- Adds a producer, laid out after the archetypes in the order added.
@@ -344,9 +352,9 @@ end
 --- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
 --- would mark these components dirty on every archetype every frame, which
 --- would make the gate below always true and defeat its own purpose.
-local function writeRun(self: Extractor, packet: FramePacket,
-                        archetype: ecs.Archetype, length: integer,
-                        offset: integer)
+local function writeRun(
+    self: Extractor, packet: FramePacket, archetype: ecs.Archetype, length: integer, offset: integer
+)
     local floats = self._instances
     local bounds = self._bounds
     local transforms = archetype:get(components.Transform)
@@ -489,8 +497,7 @@ local function writeRun(self: Extractor, packet: FramePacket,
                 -- quad and turns with it. `extentOf` covers a box of that size
                 -- at this rotation, which is exactly the travel unturned and
                 -- conservative in the safe direction turned.
-                growX, growY = extentOf(angle, halfX * 2.0 * scaleX,
-                    halfY * 2.0 * scaleY)
+                growX, growY = extentOf(angle, halfX * 2.0 * scaleX, halfY * 2.0 * scaleY)
             end
             if angle == 0.0 then
                 centreX = originX - px * scaleX
@@ -518,8 +525,7 @@ local function writeRun(self: Extractor, packet: FramePacket,
         -- which is the whole reason a pivot at the feet is worth having: two
         -- characters standing on the same line sort together however tall
         -- either drawing is.
-        floats[base + 3] = layers.depthOf(entityLayer, transform.z,
-            originX, originY)
+        floats[base + 3] = layers.depthOf(entityLayer, transform.z, originX, originY)
 
         floats[base + 4] = centreX
         floats[base + 5] = centreY
@@ -565,14 +571,15 @@ local function writeRun(self: Extractor, packet: FramePacket,
         bounds[bound + 3] = ey
     end
 
-    packet.instanceRanges:mark(offset * INSTANCE_BYTES,
-        length * INSTANCE_BYTES)
+    packet.instanceRanges:mark(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)
     packet.boundsRanges:mark(offset * BOUND_BYTES, length * BOUND_BYTES)
 end
 
 --- Marks the bytes a run of instances occupies, in both range lists.
 local function markRun(packet: FramePacket, offset: integer, count: integer)
-    if count <= 0 then return end
+    if count <= 0 then
+        return
+    end
     packet.instanceRanges:mark(offset * INSTANCE_BYTES, count * INSTANCE_BYTES)
     packet.boundsRanges:mark(offset * BOUND_BYTES, count * BOUND_BYTES)
 end
@@ -584,9 +591,10 @@ end
 --- that reached the draw could occlude, and a cull bound out where no finite
 --- view overlaps it. The mark pass rejects it on that bound, so a hidden slot
 --- costs a bounds read and a scan lane and never reaches the draw.
-local function hideRun(self: Extractor, packet: FramePacket, offset: integer,
-                       count: integer)
-    if count <= 0 then return end
+local function hideRun(self: Extractor, packet: FramePacket, offset: integer, count: integer)
+    if count <= 0 then
+        return
+    end
     local floats = self._instances
     local bounds = self._bounds
     for slot = offset, offset + count - 1 do
@@ -608,19 +616,28 @@ end
 --- A fresh run for an archetype nothing has laid out yet.
 local function newRun(): Run
     return {
-        offset = 0, length = 0, capacity = 0, pending = 0,
-        moved = false, grown = false,
+        offset = 0,
+        length = 0,
+        capacity = 0,
+        pending = 0,
+        moved = false,
+        grown = false,
     }
 end
 
 --- Slots a run of this length is given under a reservation, its room to grow
 --- included. `RESERVE_NONE` is what a packed layout would give it.
-local function reservedIn(reserve: integer, length: integer,
-                          grown: boolean): integer
-    if reserve == RESERVE_NONE then return length end
-    if reserve == RESERVE_FLOOR or not grown then return length + MIN_SLACK end
+local function reservedIn(reserve: integer, length: integer, grown: boolean): integer
+    if reserve == RESERVE_NONE then
+        return length
+    end
+    if reserve == RESERVE_FLOOR or not grown then
+        return length + MIN_SLACK
+    end
     local slack = floor(length * SLACK_RATIO)
-    if slack < MIN_SLACK then slack = MIN_SLACK end
+    if slack < MIN_SLACK then
+        slack = MIN_SLACK
+    end
     return length + slack
 end
 
@@ -638,8 +655,12 @@ local function allocateRun(self: Extractor, run: Run, length: integer)
     local high <const> = self._high
     local want = reservedFor(length, run.grown)
     local room <const> = self.capacity - high
-    if want > room then want = room end
-    if want < 0 then want = 0 end
+    if want > room then
+        want = room
+    end
+    if want < 0 then
+        want = 0
+    end
     run.offset = high
     run.capacity = want
     run.moved = true
@@ -652,12 +673,13 @@ end
 --- scene with one growing archetype does, and moved to the end otherwise. The
 --- slots a move leaves behind stay inside the extent the cull walks until a
 --- compaction reclaims them, so they are hidden on the way out.
-local function growRun(self: Extractor, packet: FramePacket, run: Run,
-                       length: integer)
+local function growRun(self: Extractor, packet: FramePacket, run: Run, length: integer)
     if run.offset + run.capacity == self._high then
         local want = reservedFor(length, true)
         local room <const> = self.capacity - run.offset
-        if want > room then want = room end
+        if want > room then
+            want = room
+        end
         run.capacity = want
         run.moved = true
         self._high = run.offset + want
@@ -688,10 +710,11 @@ local function compactRuns(self: Extractor)
         local total = 0
         for archetype, length in pairs(seen) do
             local run = runs[archetype]
-            total = total + reservedIn(reserve, length,
-                run ~= nil and run.grown)
+            total = total + reservedIn(reserve, length, run ~= nil and run.grown)
         end
-        if total <= capacity then break end
+        if total <= capacity then
+            break
+        end
         reserve = reserve - 1
     end
 
@@ -704,8 +727,12 @@ local function compactRuns(self: Extractor)
         end
         local want = reservedIn(reserve, length, run.grown)
         local room <const> = capacity - offset
-        if want > room then want = room end
-        if want < 0 then want = 0 end
+        if want > room then
+            want = room
+        end
+        if want < 0 then
+            want = 0
+        end
         run.offset = offset
         run.capacity = want
         run.moved = true
@@ -739,8 +766,12 @@ local function layoutPacked(self: Extractor): integer, integer, boolean
 
         local placed = length
         local room <const> = capacity - total
-        if placed > room then placed = room end
-        if placed < 0 then placed = 0 end
+        if placed > room then
+            placed = room
+        end
+        if placed < 0 then
+            placed = 0
+        end
         run.offset = total
         run.capacity = placed
         run.pending = placed
@@ -755,7 +786,9 @@ local function layoutPacked(self: Extractor): integer, integer, boolean
         end
     end
 
-    if total > capacity then return capacity, total - capacity, relayout end
+    if total > capacity then
+        return capacity, total - capacity, relayout
+    end
     return total, 0, relayout
 end
 
@@ -775,8 +808,7 @@ end
 --- another one: the moment it runs the gap it triggers on is zero, and it
 --- cannot open again until growth and shrinkage have put `RECLAIM_RATIO` of a
 --- packed layout back into it.
-local function layoutReserved(self: Extractor,
-                              packet: FramePacket): integer, integer, boolean
+local function layoutReserved(self: Extractor, packet: FramePacket): integer, integer, boolean
     local runs <const> = self._runs
     local seen <const> = self._seen
     local capacity <const> = self.capacity
@@ -803,8 +835,7 @@ local function layoutReserved(self: Extractor,
 
     local high <const> = self._high
     local waste <const> = high - packed
-    local compacting <const> = high + needed > capacity
-        or (waste > packed * RECLAIM_RATIO and waste > MIN_RECLAIM)
+    local compacting <const> = high + needed > capacity or (waste > packed * RECLAIM_RATIO and waste > MIN_RECLAIM)
 
     for archetype, run in pairs(runs) do
         if seen[archetype] == nil then
@@ -818,7 +849,9 @@ local function layoutReserved(self: Extractor,
         end
     end
 
-    if compacting then compactRuns(self) end
+    if compacting then
+        compactRuns(self)
+    end
 
     local dropped = 0
     for archetype, length in pairs(seen) do
@@ -832,7 +865,9 @@ local function layoutReserved(self: Extractor,
         end
 
         local pending = length
-        if pending > run.capacity then pending = run.capacity end
+        if pending > run.capacity then
+            pending = run.capacity
+        end
         run.pending = pending
         dropped = dropped + (length - pending)
     end
@@ -849,7 +884,9 @@ end
 local function syncInstances(self: Extractor, packet: FramePacket)
     local runs = self._runs
     local seen = self._seen
-    for archetype in pairs(seen) do seen[archetype] = nil end
+    for archetype in pairs(seen) do
+        seen[archetype] = nil
+    end
 
     local reserve <const> = self._reserve
     local total, dropped, relayout: integer, integer, boolean
@@ -869,12 +906,15 @@ local function syncInstances(self: Extractor, packet: FramePacket)
     for index = 1, #producers do
         local count = producers[index]:count()
         producerBase[index] = total
-        if producerRuns[index * 2 - 1] ~= total
-            or producerRuns[index * 2] ~= count then
+        if producerRuns[index * 2 - 1] ~= total or producerRuns[index * 2] ~= count then
             -- Reserved, the archetypes are laid out where a producer cannot
             -- reach them, so a producer that moved rewrites the producers and
             -- nothing else.
-            if reserve then producerMoved = true else relayout = true end
+            if reserve then
+                producerMoved = true
+            else
+                relayout = true
+            end
         end
         producerRuns[index * 2 - 1] = total
         producerRuns[index * 2] = count
@@ -909,16 +949,19 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         -- what the world holds by then.
         local run = runs[archetype] or newRun()
         local pending = run.pending
-        if pending > length then pending = length end
-        local dirty = relayout or run.moved or run.length ~= pending
+        if pending > length then
+            pending = length
+        end
+        local dirty = relayout
+            or run.moved
+            or run.length ~= pending
             or archetype:isComponentDirty(components.Transform)
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
             or archetype:isComponentDirty(components.Clip)
             or archetype:isComponentDirty(Pivot)
-            or (interpolating
-                and archetype:get(components.PreviousTransform) ~= nil)
+            or (interpolating and archetype:get(components.PreviousTransform) ~= nil)
 
         if dirty then
             writeRun(self, packet, archetype, pending, run.offset)
@@ -961,7 +1004,9 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             local count = producerRuns[index * 2]
             if base + count > self.capacity then
                 count = self.capacity - base
-                if count < 0 then count = 0 end
+                if count < 0 then
+                    count = 0
+                end
             end
 
             local ranges = producer:takeDirty()
@@ -973,7 +1018,9 @@ local function syncInstances(self: Extractor, packet: FramePacket)
                 for entry = 1, #ranges, 2 do
                     local first = ranges[entry]
                     local last = ranges[entry + 1]
-                    if last > count then last = count end
+                    if last > count then
+                        last = count
+                    end
                     if first <= last then
                         producer:write(floats, bounds, base, first, last)
                         markRun(packet, base + first - 1, last - first + 1)
@@ -997,8 +1044,9 @@ local function syncLights(self: Extractor, packet: FramePacket)
         for row = 1, length do
             local transform = transforms[row]
             local source = sources[row]
-            packet:addLight(transform.x, transform.y, source.height,
-                source.radius, source.r, source.g, source.b, source.intensity)
+            packet:addLight(
+                transform.x, transform.y, source.height, source.radius, source.r, source.g, source.b, source.intensity
+            )
         end
     end
 end
@@ -1016,7 +1064,9 @@ function Extractor:extract(packet: FramePacket)
     -- Read here rather than per row: it is the same for the whole frame.
     local timestep, accumulator = self._world:getFixedTiming()
     self._alpha = timestep > 0.0 and accumulator / timestep or 1.0
-    if self._alpha > 1.0 then self._alpha = 1.0 end
+    if self._alpha > 1.0 then
+        self._alpha = 1.0
+    end
 
     -- Read once and carried, so every pass drawing this frame resolves an
     -- animation against the same step. Whole steps rather than seconds, which
@@ -1037,15 +1087,14 @@ end
 --- command buffer and the render needs no world.
 --- @param published Called once the packet is filled, which is the moment it
 ---     would be handed over. What flips a slot's state when there is one.
-function Extractor:install(world: ecs.World, packet: FramePacket,
-                           published: function())
+function Extractor:install(world: ecs.World, packet: FramePacket, published: function())
     self._world = world
 
     -- Snapshotting before anything in the step moves is what makes the pair a
     -- pair: taken later, the two would be the same value and every frame would
     -- draw the entity where the step left it.
     local interpolated = world:query({
-        include = { components.Transform, components.PreviousTransform },
+        include = {components.Transform, components.PreviousTransform},
     })
     world:addSystem({
         name = "tecs.SnapshotTransforms",
@@ -1069,11 +1118,13 @@ function Extractor:install(world: ecs.World, packet: FramePacket,
 
     self._renderables = world:query({
         include = {
-            components.Transform, components.Tint, components.Renderable,
+            components.Transform,
+            components.Tint,
+            components.Renderable,
         },
     })
     self._lightSources = world:query({
-        include = { components.Transform, components.PointLight },
+        include = {components.Transform, components.PointLight},
     })
 
     world:addSystem({
@@ -1081,7 +1132,9 @@ function Extractor:install(world: ecs.World, packet: FramePacket,
         phase = ecs.phases.RenderFirst,
         run = function()
             self:extract(packet)
-            if published ~= nil then published() end
+            if published ~= nil then
+                published()
+            end
         end,
     })
 end

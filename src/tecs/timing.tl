@@ -50,8 +50,7 @@ end
 
 --- Frames retained per stage. A bench measures hundreds; the ceiling exists so
 --- a long session cannot grow without bound.
-local CAPACITY <const> = math.floor(
-    tonumber(os.getenv("TECS_TIMING_SAMPLES")) or 65536) as integer
+local CAPACITY <const> = math.floor(tonumber(os.getenv("TECS_TIMING_SAMPLES")) or 65536) as integer
 
 timing.enabled = os.getenv("TECS_TIMING") ~= nil
 timing.auto = timing.enabled
@@ -66,7 +65,9 @@ local byName: {string: timing.Stage} = {}
 --- `timing.enabled` at the point of measurement rather than at setup.
 function timing.stage(name: string): timing.Stage
     local existing = byName[name]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
     local stage: timing.Stage = {
         name = name,
@@ -85,7 +86,9 @@ end
 --- here. A benchmark calls this rather than requiring its runner to remember
 --- an environment variable.
 function timing.enable()
-    if timing.enabled then return end
+    if timing.enabled then
+        return
+    end
     timing.enabled = true
     for index = 1, #stages do
         local stage = stages[index]
@@ -100,16 +103,22 @@ end
 --- Past capacity the sample is dropped rather than wrapping, so a long run
 --- reports its beginning honestly instead of an arbitrary window of it.
 function timing.mark(stage: timing.Stage, seconds: number)
-    if not timing.enabled then return end
+    if not timing.enabled then
+        return
+    end
     local count = stage.count
-    if count >= stage.capacity then return end
+    if count >= stage.capacity then
+        return
+    end
     (stage.samples as {integer: number})[count] = seconds
     stage.count = count + 1
 end
 
 --- Starts a span. Returns the value `finish` subtracts from.
 function timing.begin(): number
-    if not timing.enabled then return 0.0 end
+    if not timing.enabled then
+        return 0.0
+    end
     return clock.now()
 end
 
@@ -118,7 +127,9 @@ end
 --- The return exists for a caller that needs the value as well as the record,
 --- such as one stage that has to be subtracted out of another.
 function timing.finish(stage: timing.Stage, started: number): number
-    if not timing.enabled then return 0.0 end
+    if not timing.enabled then
+        return 0.0
+    end
     local elapsed = clock.now() - started
     timing.mark(stage, elapsed)
     return elapsed
@@ -157,7 +168,9 @@ local consumedAt = 0.0
 --- Stamped where the platform handed the event over, not where a step picked
 --- it up: the interval between those two is what the measurement exists for.
 function timing.inputArrived(at: number)
-    if not timing.enabled then return end
+    if not timing.enabled then
+        return
+    end
     if pendingArrival == nil or at < pendingArrival then
         pendingArrival = at
     end
@@ -170,7 +183,9 @@ end
 --- no input records nothing: a frame nobody was waiting on has no latency, and
 --- averaging it in only makes the number smaller.
 function timing.inputConsumed(at: number)
-    if not timing.enabled then return end
+    if not timing.enabled then
+        return
+    end
     takenArrival = pendingArrival
     pendingArrival = nil
     consumedAt = at
@@ -179,9 +194,13 @@ end
 --- Records the frame that step produced being submitted, and completes the
 --- sample. `drawStarted` is where simulation ended and drawing began.
 function timing.inputPresented(drawStarted: number, at: number)
-    if not timing.enabled then return end
+    if not timing.enabled then
+        return
+    end
     local arrival = takenArrival
-    if arrival == nil then return end
+    if arrival == nil then
+        return
+    end
     takenArrival = nil
 
     timing.mark(LATENCY_WAIT, consumedAt - arrival)
@@ -203,7 +222,9 @@ end
 --- frames that built the scene are not in the distribution of frames that ran
 --- it.
 function timing.reset()
-    for index = 1, #stages do stages[index].count = 0 end
+    for index = 1, #stages do
+        stages[index].count = 0
+    end
     pendingArrival = nil
     takenArrival = nil
     consumedAt = 0.0
@@ -214,8 +235,12 @@ local sorted: {number} = {}
 --- Reads a percentile from an already sorted list.
 local function percentile(count: integer, fraction: number): number
     local at = math.floor(count * fraction)
-    if at < 1 then at = 1 end
-    if at > count then at = count end
+    if at < 1 then
+        at = 1
+    end
+    if at > count then
+        at = count
+    end
     return sorted[at]
 end
 
@@ -233,7 +258,9 @@ function timing.report(): {timing.Report}
                 sorted[sample] = value
                 total = total + value
             end
-            for extra = count + 1, #sorted do sorted[extra] = nil end
+            for extra = count + 1, #sorted do
+                sorted[extra] = nil
+            end
             table.sort(sorted)
 
             out[#out + 1] = {
@@ -256,19 +283,21 @@ end
 --- rather than being read side by side and compared by eye.
 function timing.format(): string
     local report = timing.report()
-    if #report == 0 then return "" end
+    if #report == 0 then
+        return ""
+    end
 
     local lines: {string} = {
-        ("%-12s %8s %8s %8s %8s %8s %7s")
-            :format("stage", "p50", "p95", "p99", "mean", "max", "frames"),
-        ("%s %s %s %s %s %s %s"):format(("-"):rep(12), ("-"):rep(8),
-            ("-"):rep(8), ("-"):rep(8), ("-"):rep(8), ("-"):rep(8), ("-"):rep(7)),
+        ("%-12s %8s %8s %8s %8s %8s %7s"):format("stage", "p50", "p95", "p99", "mean", "max", "frames"),
+        ("%s %s %s %s %s %s %s"):format(
+            ("-"):rep(12), ("-"):rep(8), ("-"):rep(8), ("-"):rep(8), ("-"):rep(8), ("-"):rep(8), ("-"):rep(7)
+        ),
     }
     for index = 1, #report do
         local row = report[index]
-        lines[#lines + 1] = ("%-12s %8.3f %8.3f %8.3f %8.3f %8.3f %7d")
-            :format(row.name, row.p50, row.p95, row.p99, row.mean, row.max,
-                    row.frames)
+        lines[#lines + 1] = ("%-12s %8.3f %8.3f %8.3f %8.3f %8.3f %7d"):format(
+            row.name, row.p50, row.p95, row.p99, row.mean, row.max, row.frames
+        )
     end
     return table.concat(lines, "\n")
 end

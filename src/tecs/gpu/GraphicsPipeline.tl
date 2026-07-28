@@ -153,18 +153,15 @@ local COMPARE_OPS <const>: {string: integer} = {
 -- it. Copying went wrong here once: these enums open with an INVALID member,
 -- so every name sits one above where the header appears to list it, and
 -- source alpha spent that time meaning destination colour.
-local BLEND_FACTOR_SRC_ALPHA <const> =
-    tonumber(C.SDL_GPU_BLENDFACTOR_SRC_ALPHA) as integer
-local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> =
-    tonumber(C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA) as integer
+local BLEND_FACTOR_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_SRC_ALPHA) as integer
+local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA) as integer
 local BLEND_FACTOR_ONE <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE) as integer
 local BLEND_OP_ADD <const> = tonumber(C.SDL_GPU_BLENDOP_ADD) as integer
 
 function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
     local primitive = PRIMITIVES[options.primitive or "triangleList"]
     if primitive == nil then
-        error(("tecs: unknown primitive type '%s'"):format(
-            tostring(options.primitive)), 2)
+        error(("tecs: unknown primitive type '%s'"):format(tostring(options.primitive)), 2)
     end
     local cull = CULL_MODES[options.cull or "none"]
     if cull == nil then
@@ -176,7 +173,7 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         if options.colorFormat == nil then
             error("tecs: a pipeline needs colorFormat or colorFormats", 2)
         end
-        formats = { options.colorFormat }
+        formats = {options.colorFormat}
     end
 
     local targets = loader.newArray("SDL_GPUColorTargetDescription[?]", #formats)
@@ -225,8 +222,7 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
         end
         local compare = COMPARE_OPS[depth.compare or "lessOrEqual"]
         if compare == nil then
-            error(("tecs: unknown depth compare op '%s'")
-                :format(tostring(depth.compare)), 2)
+            error(("tecs: unknown depth compare op '%s'"):format(tostring(depth.compare)), 2)
         end
         targetInfo.has_depth_stencil_target = true
         targetInfo.depth_stencil_format = depth.format
@@ -241,7 +237,9 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
     end
 
     local handle = C.SDL_CreateGPUGraphicsPipeline(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUGraphicsPipeline") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUGraphicsPipeline")
+    end
 
     local self = setmetatable({} as GraphicsPipeline, GraphicsPipelineMT)
     self.handle = handle
@@ -251,7 +249,9 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
 end
 
 function GraphicsPipeline:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.SDL_ReleaseGPUGraphicsPipeline(self._device, self.handle)
     self.handle = nil

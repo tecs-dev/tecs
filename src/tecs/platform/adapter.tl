@@ -163,7 +163,7 @@ function adapter.install(platform: adapter.Platform)
     if platform == nil then
         error("tecs: a platform is required", 2)
     end
-    for _, required in ipairs({ "basePath", "prefPath", "shaderFormat" }) do
+    for _, required in ipairs({"basePath", "prefPath", "shaderFormat"}) do
         if (platform as {string: any})[required] == nil then
             error(("tecs: a platform must supply %s"):format(required), 2)
         end
@@ -174,12 +174,9 @@ function adapter.install(platform: adapter.Platform)
     -- that are left out are `currentDirectory` and `userFolder`, which have no
     -- answer on a target that is not a desktop and are documented as absent.
     if platform.storage ~= nil then
-        for _, operation in ipairs({ "read", "write", "info", "glob",
-                                     "createDirectory", "remove", "rename",
-                                     "copy" }) do
+        for _, operation in ipairs({"read", "write", "info", "glob", "createDirectory", "remove", "rename", "copy"}) do
             if (platform.storage as {string: any})[operation] == nil then
-                error(("tecs: a storage backend must supply %s")
-                    :format(operation), 2)
+                error(("tecs: a storage backend must supply %s"):format(operation), 2)
             end
         end
     end

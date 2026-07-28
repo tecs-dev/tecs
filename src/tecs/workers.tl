@@ -21,8 +21,7 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("worker")
 
-local C <const>, libraryPath <const> =
-    loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "worker")
+local C <const>, libraryPath <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "worker")
 
 --- Waits indefinitely in `receive`.
 local FOREVER <const> = -1
@@ -52,8 +51,8 @@ workers.Channel = Channel
 workers.Worker = Worker
 workers.path = libraryPath
 
-local ChannelMT <const>: metatable<Channel> = { __index = Channel }
-local WorkerMT <const>: metatable<Worker> = { __index = Worker }
+local ChannelMT <const>: metatable<Channel> = {__index = Channel}
+local WorkerMT <const>: metatable<Worker> = {__index = Worker}
 
 local messageOut <const> = loader.newArray("void*[1]")
 
@@ -64,7 +63,9 @@ local messageOut <const> = loader.newArray("void*[1]")
 --- Creates a channel.
 function Channel.create(): Channel
     local handle = C.tecsChannelCreate()
-    if handle == nil then error("tecs: cannot create channel", 2) end
+    if handle == nil then
+        error("tecs: cannot create channel", 2)
+    end
     local self = setmetatable({} as Channel, ChannelMT)
     self.handle = handle
     self._destroyed = false
@@ -84,7 +85,10 @@ end
 --- with the state that spawned it, so anything holding a reference into this
 --- state cannot cross.
 local SENDABLE <const>: {string: boolean} = {
-    number = true, string = true, boolean = true, ["nil"] = true,
+    number = true,
+    string = true,
+    boolean = true,
+    ["nil"] = true,
 }
 
 --- Reports the path to the first value that cannot cross, or nil.
@@ -96,7 +100,9 @@ local SENDABLE <const>: {string: boolean} = {
 --- call it with something it will reject keeps that path unreached.
 local function unsendable(value: any, path: string, depth: integer): string
     local kind = type(value)
-    if SENDABLE[kind] then return nil end
+    if SENDABLE[kind] then
+        return nil
+    end
     if kind ~= "table" then
         return ("%s is a %s"):format(path, kind)
     end
@@ -107,9 +113,10 @@ local function unsendable(value: any, path: string, depth: integer): string
         if not SENDABLE[type(key)] then
             return ("%s has a %s key"):format(path, type(key))
         end
-        local found = unsendable(item, ("%s.%s"):format(path, tostring(key)),
-            depth + 1)
-        if found ~= nil then return found end
+        local found = unsendable(item, ("%s.%s"):format(path, tostring(key)), depth + 1)
+        if found ~= nil then
+            return found
+        end
     end
     return nil
 end
@@ -134,9 +141,10 @@ end
 --- `timeoutMs` of zero polls, a negative value waits indefinitely, and any
 --- other value waits that long.
 function Channel:receive(timeoutMs?: number): any
-    local size = tonumber(
-        C.tecsChannelPop(self.handle, messageOut, timeoutMs or 0)) as integer
-    if size == 0 then return nil end
+    local size = tonumber(C.tecsChannelPop(self.handle, messageOut, timeoutMs or 0)) as integer
+    if size == 0 then
+        return nil
+    end
 
     local message = messageOut[0]
     local payload = C.tecsChannelData(message)
@@ -159,7 +167,9 @@ end
 
 --- Releases the channel. Safe to call more than once.
 function Channel:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.tecsChannelDestroy(self.handle)
     self.handle = nil
@@ -187,8 +197,9 @@ function workers.spawn(options: SpawnOptions): Worker
     local toWorker = Channel.create()
     local fromWorker = Channel.create()
 
-    local handle = C.tecsWorkerSpawn(options.source,
-        options.luaPath or package.path, toWorker.handle, fromWorker.handle)
+    local handle = C.tecsWorkerSpawn(
+        options.source, options.luaPath or package.path, toWorker.handle, fromWorker.handle
+    )
     if handle == nil then
         toWorker:destroy()
         fromWorker:destroy()
@@ -225,7 +236,9 @@ end
 --- A worker is expected to leave its loop when `receive` returns nil on a
 --- closed channel, so closing is how it is asked to stop.
 function Worker:stop(): integer
-    if self._joined then return 0 end
+    if self._joined then
+        return 0
+    end
     self._joined = true
     self._toWorker:close()
     local status = tonumber(C.tecsWorkerJoin(self._handle)) as integer
@@ -259,17 +272,19 @@ end
 ---
 --- Returns a function that writes the report, or nil when nothing is watching.
 local function watchTraces(): function()
-    if os.getenv("TECS_TRACEPROF") == nil then return nil end
+    if os.getenv("TECS_TRACEPROF") == nil then
+        return nil
+    end
     local profile <const> = require("tecs.utils.profile")
     local session <const> = profile.trace()
     return function()
         local report <const> = session:stop()
-        local lines <const> = { ("worker traces: %d aborts, %d blacklisted")
-            :format(report.totalAborts, report.blacklisted) }
+        local lines <const> = {
+            ("worker traces: %d aborts, %d blacklisted"):format(report.totalAborts, report.blacklisted)
+        }
         for index = 1, math.min(#report.sites, 5) do
             local site <const> = report.sites[index]
-            lines[#lines + 1] = ("  %7d  %s  %s")
-                :format(site.count, site.reason, site.location)
+            lines[#lines + 1] = ("  %7d  %s  %s"):format(site.count, site.reason, site.location)
         end
         io.stderr:write(table.concat(lines, "\n") .. "\n")
     end
@@ -304,9 +319,7 @@ function workers.current(): Self
             end
             return value
         end,
-        send = function(_self: Self, value: any)
-            results:send(value)
-        end,
+        send = function(_self: Self, value: any) results:send(value) end,
     }
 end
 

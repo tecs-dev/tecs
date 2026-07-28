@@ -261,8 +261,7 @@ end
 --- @param pattern `*` and `?` wildcards, or nil for everything, recursively.
 --- @return The entries, or nil and the reason `path` could not be enumerated.
 ---     An empty list means an empty directory, which nil does not.
-function filesystem.glob(path: string, pattern?: string,
-                         options?: GlobOptions): {string}, string
+function filesystem.glob(path: string, pattern?: string, options?: GlobOptions): {string}, string
     required(path, "glob")
     return adapter.storage().glob(path, pattern, options)
 end
@@ -367,7 +366,9 @@ end
 function filesystem.read(path: string, kind?: string): string
     required(path, "read")
     local bytes <const> = adapter.storage().read(path)
-    if bytes == nil then return nil end
+    if bytes == nil then
+        return nil
+    end
     filesystem.note(path, kind or "document")
     return bytes
 end
@@ -426,8 +427,7 @@ end
 --- @return The folder, or nil and the reason.
 function filesystem.userFolder(which: UserFolder): string, string
     if not storagebackend.folders[which] then
-        error(("tecs: filesystem.userFolder does not know '%s'")
-            :format(tostring(which)), 2)
+        error(("tecs: filesystem.userFolder does not know '%s'"):format(tostring(which)), 2)
     end
     local storage <const> = adapter.storage()
     if storage.userFolder == nil then

@@ -25,14 +25,8 @@ if not loaded["jit.zone"] and not preload["jit.zone"] then
         end
 
         local tbl = {
-            flush = function(t: {any: any})
-                local arr = t as {any}
-                for i = #arr, 1, -1 do arr[i] = nil end
-            end,
-            get = function(t: {any: any}): any
-                local arr = t as {any}
-                return arr[#arr]
-            end,
+            flush = function(t: {any: any}) local arr = t as {any}; for i = #arr, 1, -1 do arr[i] = nil end end,
+            get = function(t: {any: any}): any local arr = t as {any}; return arr[#arr] end,
         }
         local mt = {
             __call = noopCall,

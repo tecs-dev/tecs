@@ -73,18 +73,15 @@ end
 -- any of the ids see them as valid. Actual placement runs at commit in
 -- `_drainArchBatchSpawnAt`.
 local function stakePendingSpawnAt(
-    self: WorldImpl,
-    archetype: Archetype,
-    count: integer,
-    readId: function(integer): integer
+    self: WorldImpl, archetype: Archetype, count: integer, readId: function(integer): integer
 )
     local arena = self.allocator
     local slots = arena.slots as {integer: EntitySlot}
     -- Cache FFI arrays + epoch. Hot-loop inline reads/writes trace
     -- better than per-iter helper dispatch.
-    local pendingArr = self._pendingArchArr as {integer:integer}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local pendingArr = self._pendingArchArr as {integer: integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archId = archetype.id
     local stateCount = self.entityStateCount
@@ -199,10 +196,7 @@ local macro placeFreshRow!(idExpr: Expression, slotExpr: Expression)
     ```
 end
 
-local function resolveBatchSpawnArchetype(
-    self: WorldImpl,
-    componentTypes: {Component}
-): Archetype, {RequireEntry}
+local function resolveBatchSpawnArchetype(self: WorldImpl, componentTypes: {Component}): Archetype, {RequireEntry}
     local archetypeIndex = self.archetypeIndex
     local archetype = archetypeIndex.emptyArchetype
     local requiredList: {RequireEntry} = nil
@@ -239,9 +233,7 @@ local function resolveBatchSpawnArchetype(
 end
 
 function WorldImpl:_deferBatchSpawn(
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 ): integer | nil, {integer} | nil
     validateBatchCount("World:batchSpawn", count)
 
@@ -266,9 +258,9 @@ function WorldImpl:_deferBatchSpawn(
     -- rely on `firstId + i` for handle reconstruction, so a non-contiguous
     -- fallback would silently hand back wrong ids. Errors on overflow.
     local firstSlot = IdAllocator.allocContiguousSlots(self.allocator, count)
-    local pendingArr = self._pendingArchArr as {integer:integer}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local pendingArr = self._pendingArchArr as {integer: integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archId = archetype.id
     for i = 0, count - 1 do
@@ -299,16 +291,14 @@ function WorldImpl:_deferBatchSpawn(
 end
 
 function WorldImpl:_deferBatchSpawnList(
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 ): {integer}
     local archetype, requiredList = resolveBatchSpawnArchetype(self, componentTypes)
 
     local allocator = self.allocator
-    local pendingArr = self._pendingArchArr as {integer:integer}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local pendingArr = self._pendingArchArr as {integer: integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archId = archetype.id
     local freshAvail = allocator.maxSlotCount - allocator.nextFreshSlot + 1
@@ -365,8 +355,8 @@ end
 
 function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
     local slots = self.allocator.slots as {integer: EntitySlot}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archId = archetype.id
     local q = archetype.batchSpawnQueue
@@ -442,10 +432,7 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
     archetype.batchSpawnQueueCount = 0
 end
 
-local function resolveBatchArchetype(
-    self: WorldImpl,
-    componentTypes: {Component}
-): Archetype, {RequireEntry}
+local function resolveBatchArchetype(self: WorldImpl, componentTypes: {Component}): Archetype, {RequireEntry}
     local archetypeIndex = self.archetypeIndex
     local archetype = archetypeIndex.emptyArchetype
     local requiredList: {RequireEntry} = nil
@@ -480,17 +467,15 @@ local function resolveBatchArchetype(
 end
 
 function WorldImpl:_deferBatchSpawnAt(
-    ids: {integer},
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    ids: {integer}, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 )
     local n = #ids
-    if n == 0 then return end
+    if n == 0 then
+        return
+    end
 
     local archetype, requiredList = resolveBatchArchetype(self, componentTypes)
-    stakePendingSpawnAt(self, archetype, n, function(i: integer): integer
-        return ids[i + 1]
-    end)
+    stakePendingSpawnAt(self, archetype, n, function(i: integer): integer return ids[i + 1] end)
 
     local c = archetype.batchSpawnAtQueueCount
     local q = archetype.batchSpawnAtQueue
@@ -504,18 +489,15 @@ function WorldImpl:_deferBatchSpawnAt(
 end
 
 function WorldImpl:_deferBatchSpawnAtRaw(
-    ids: any,
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
+    ids: any, count: integer, componentTypes: {Component}, callback: function(Archetype, integer, integer, integer)
 )
-    if count == 0 then return end
+    if count == 0 then
+        return
+    end
 
     local archetype, requiredList = resolveBatchArchetype(self, componentTypes)
     local idsArr = ids as {integer: integer}
-    stakePendingSpawnAt(self, archetype, count, function(i: integer): integer
-        return idsArr[i]
-    end)
+    stakePendingSpawnAt(self, archetype, count, function(i: integer): integer return idsArr[i] end)
 
     local c = archetype.batchSpawnAtQueueCount
     local q = archetype.batchSpawnAtQueue
@@ -530,8 +512,8 @@ end
 
 function WorldImpl:_drainArchBatchSpawnAt(archetype: Archetype)
     local slots = self.allocator.slots as {integer: EntitySlot}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archId = archetype.id
     local q = archetype.batchSpawnAtQueue
@@ -590,13 +572,13 @@ end
 
 function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
     local world = self
-    local refCounts = (world as {string:any})._targetRefCounts as {integer:integer}
+    local refCounts = (world as {string: any})._targetRefCounts as {integer: integer}
 
     -- OnDespawn fan-out: cached once for the whole call.
     local OnDespawnBuiltin <const> = builtins.OnDespawn
     local despawnEventId <const> = OnDespawnBuiltin.eventId
     local hasGlobalObs <const> = world:hasObservers(0, OnDespawnBuiltin)
-    local messagesAny = (world as {string:any}).messages as {string:any}
+    local messagesAny = (world as {string: any}).messages as {string: any}
     local entityObsCount <const> = messagesAny._entityObserverCount as integer
     local busObservers = messagesAny._observers as {integer: {integer: {any}}}
     local anyPerEntityObs = false
@@ -661,11 +643,15 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
                         if anyPerEntityObs and world:hasObservers(id, OnDespawnBuiltin) then
                             world:emit(id, OnDespawnBuiltin, id)
                         end
-                        if hasGlobalObs then world:emit(0, OnDespawnBuiltin, id) end
+                        if hasGlobalObs then
+                            world:emit(0, OnDespawnBuiltin, id)
+                        end
                     end
                 end
                 if entityObsCount > 0 then
-                    if not clearedArchIds then clearedArchIds = {} end
+                    if not clearedArchIds then
+                        clearedArchIds = {}
+                    end
                     clearedArchIds[arch.id] = true
                 end
                 arch.pendingClear = true
@@ -703,19 +689,17 @@ local function batchMutationSlot(self: WorldImpl, c: integer): BatchMutation
     return mut
 end
 
-function WorldImpl:_deferBatchSet(
-    archetypes: {Archetype},
-    componentType: Component,
-    value: Component
-)
-    if #archetypes == 0 then return end
+function WorldImpl:_deferBatchSet(archetypes: {Archetype}, componentType: Component, value: Component)
+    if #archetypes == 0 then
+        return
+    end
     local ci = componentType as ComponentInternal
     local storedValue: any = value
     if ci.storageType == "scalar" then
         if value == componentType then
             storedValue = (componentType as types.components.ScalarComponent<any>).scalarDefault
         else
-            storedValue = (value as {string:any}).value
+            storedValue = (value as {string: any}).value
         end
     end
     local c = self.batchMutationCount + 1
@@ -724,7 +708,7 @@ function WorldImpl:_deferBatchSet(
     mut.archetypes = archetypes
     mut.componentType = componentType
     mut.value = storedValue
-    mut.callback = nil  -- clear inactive union slot
+    mut.callback = nil -- clear inactive union slot
     mut.isTag = ci.storageType == "tag"
     mut.canBulk = canBulkBatchComponent(componentType)
     self.batchMutationCount = c
@@ -732,14 +716,16 @@ function WorldImpl:_deferBatchSet(
 end
 
 function WorldImpl:_deferBatchSetCallback(
-    archetypes: {Archetype},
-    componentType: Component,
-    callback: function(Archetype, integer, integer, integer)
+    archetypes: {Archetype}, componentType: Component, callback: function(Archetype, integer, integer, integer)
 )
-    if #archetypes == 0 then return end
+    if #archetypes == 0 then
+        return
+    end
     if not canBulkBatchComponent(componentType) then
-        error("batchSet callback form requires a bulk-safe component. Use the constant-value form " ..
-            "`world:batchSet(query, instance)` for relationship components.")
+        error(
+            "batchSet callback form requires a bulk-safe component. Use the constant-value form "
+                .. "`world:batchSet(query, instance)` for relationship components."
+        )
     end
     local c = self.batchMutationCount + 1
     local mut = batchMutationSlot(self, c)
@@ -747,25 +733,24 @@ function WorldImpl:_deferBatchSetCallback(
     mut.archetypes = archetypes
     mut.componentType = componentType
     mut.callback = callback
-    mut.value = nil  -- clear inactive union slot
+    mut.value = nil -- clear inactive union slot
     mut.isTag = (componentType as ComponentInternal).storageType == "tag"
-    mut.canBulk = true  -- `canBulkBatchComponent` asserted above
+    mut.canBulk = true -- `canBulkBatchComponent` asserted above
     self.batchMutationCount = c
     self.isDirty = true
 end
 
-function WorldImpl:_deferBatchRemove(
-    archetypes: {Archetype},
-    componentType: Component
-)
-    if #archetypes == 0 then return end
+function WorldImpl:_deferBatchRemove(archetypes: {Archetype}, componentType: Component)
+    if #archetypes == 0 then
+        return
+    end
     local c = self.batchMutationCount + 1
     local mut = batchMutationSlot(self, c)
     mut.op = BATCH_OP_REMOVE
     mut.archetypes = archetypes
     mut.componentType = componentType
-    mut.value = nil       -- not used by REMOVE
-    mut.callback = nil    -- not used by REMOVE
+    mut.value = nil -- not used by REMOVE
+    mut.callback = nil -- not used by REMOVE
     mut.isTag = (componentType as ComponentInternal).storageType == "tag"
     mut.canBulk = canBulkBatchComponent(componentType)
     self.batchMutationCount = c
@@ -781,7 +766,9 @@ end
 
 function WorldImpl:_drainBatchMutations()
     local count = self.batchMutationCount
-    if count == 0 then return end
+    if count == 0 then
+        return
+    end
     local queue = self.batchMutations as {BatchMutation}
     for i = 1, count do
         local mut = queue[i]
@@ -825,6 +812,5 @@ function WorldImpl:_drainBatchMutations()
         self.batchMutationCount = 0
     end
 end
-
 
 return {}

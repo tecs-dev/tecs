@@ -12,12 +12,11 @@
 --- second is what the comparison's work per rendered frame looks like. Both are
 --- reported rather than one being chosen.
 
-local root = os.getenv("TECS_LUA")
-    or (_G as {string: any})["__tecsContent"] as string
-    or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then root = root:sub(1, -2) end
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local Transform <const> = tecs.components.Transform
@@ -44,7 +43,6 @@ local FRAMES <const> = math.floor(tonumber(os.getenv("BENCH_FRAMES")) or 300)
 local WIDTH <const> = 1280
 local HEIGHT <const> = 720
 
-
 --- Fills the area, centred on the viewport so the visible fraction matches.
 local function spawnField(world: tecs.World)
     local originX <const> = (WIDTH - AREA_W) * 0.5
@@ -64,40 +62,43 @@ local function spawnField(world: tecs.World)
     --- reference scene's size distribution.
     local function fill(material: string, param: number, base: number, spread: number)
         local id = materials.id(material)
-        world:batchSpawn(PER_KIND, { Transform, Tint, Material, Renderable },
-        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
-            -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform)
-            local tints = archetype:getMut(Tint)
-            local materialColumn = archetype:getMut(Material)
+        world:batchSpawn(
+            PER_KIND,
+            {Transform, Tint, Material, Renderable},
+            function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+                -- batchSpawn skips FFI defaults, so every field is written here.
+                local transforms = archetype:getMut(Transform)
+                local tints = archetype:getMut(Tint)
+                local materialColumn = archetype:getMut(Material)
 
-            for row = firstRow, lastRow do
-                local entry = materialColumn[row]
-                entry.id = id
-                entry.param = param
+                for row = firstRow, lastRow do
+                    local entry = materialColumn[row]
+                    entry.id = id
+                    entry.param = param
 
-                local transform = transforms[row]
-                transform.x = originX + rand() * AREA_W
-                transform.y = originY + rand() * AREA_H
-                -- Written because batchSpawn skips defaults, so an unset field
-                -- holds whatever the column's memory held before. Neither is
-                -- read while depth comes from elsewhere, and both would be read
-                -- as garbage the moment it does.
-                transform.z = 0.0
-                transform.layer = 1
-                -- Unrotated, as the reference is. Rotation would not change
-                -- what the sync costs, since the basis is built either way.
-                transform.rotation = 0.0
-                transform.scaleX = base + rand() * spread
-                transform.scaleY = base + rand() * spread
+                    local transform = transforms[row]
+                    transform.x = originX + rand() * AREA_W
+                    transform.y = originY + rand() * AREA_H
+                    -- Written because batchSpawn skips defaults, so an unset field
+                    -- holds whatever the column's memory held before. Neither is
+                    -- read while depth comes from elsewhere, and both would be read
+                    -- as garbage the moment it does.
+                    transform.z = 0.0
+                    transform.layer = 1
+                    -- Unrotated, as the reference is. Rotation would not change
+                    -- what the sync costs, since the basis is built either way.
+                    transform.rotation = 0.0
+                    transform.scaleX = base + rand() * spread
+                    transform.scaleY = base + rand() * spread
 
-                local tint = tints[row]
-                tint.r = rand()
-                tint.g = rand()
-                tint.b = rand()
-                tint.a = 1.0
+                    local tint = tints[row]
+                    tint.r = rand()
+                    tint.g = rand()
+                    tint.b = rand()
+                    tint.a = 1.0
+                end
             end
-        end)
+        )
     end
 
     fill("circle", 0.0, 6.0, 10.0)
@@ -112,77 +113,88 @@ timing.enable()
 --- the two is the host loop and the presentation wait around it.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.application({
-    window = { title = "shapes", width = WIDTH, height = HEIGHT },
-    presentMode = "immediate",
-    ambientLight = { 1.0, 1.0, 1.0 },
-    capacity = COUNT + 64,
-    -- The default ceiling is a million slots, so a scale run has to raise it
-    -- rather than discovering the limit as a spawn failure.
-    maxEntities = COUNT + 1024,
-    debugMaxFrames = WARMUP + FRAMES,
+return tecs.application(
+    {
+        window = {title = "shapes", width = WIDTH, height = HEIGHT},
+        presentMode = "immediate",
+        ambientLight = {1.0, 1.0, 1.0},
+        capacity = COUNT + 64,
+        -- The default ceiling is a million slots, so a scale run has to raise it
+        -- rather than discovering the limit as a spawn failure.
+        maxEntities = COUNT + 1024,
+        debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
-        local renderer = app.renderer
-        spawnField(world)
+        plugin = function(world: tecs.World, app: tecs.Application)
+            local renderer = app.renderer
+            spawnField(world)
 
-        -- Translation only, matching the reference scene. Rotation would make
-        -- the sync recompute a basis per entity per frame, which is a different
-        -- amount of work and would not be comparable.
-        local moving = world:query({ include = { Transform, Renderable } })
-        local phase = MODE == "fixed" and tecs.phases.FixedUpdate
-            or tecs.phases.Update
+            -- Translation only, matching the reference scene. Rotation would make
+            -- the sync recompute a basis per entity per frame, which is a different
+            -- amount of work and would not be comparable.
+            local moving = world:query({include = {Transform, Renderable}})
+            local phase = MODE == "fixed" and tecs.phases.FixedUpdate or tecs.phases.Update
 
-        world:addSystem({
-            name = "bench.Drift",
-            phase = phase,
-            run = function(dt: number)
-                local step = dt * 40.0
-                for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform)
-                    for row = 1, length do
-                        local transform = transforms[row]
-                        local x = transform.x + step
-                        -- Wrap rather than branch on a bound per axis, so the
-                        -- field stays put and the work per frame is constant.
-                        if x > AREA_W then x = x - AREA_W end
-                        transform.x = x
+            world:addSystem({
+                name = "bench.Drift",
+                phase = phase,
+                run = function(dt: number)
+                    local step = dt * 40.0
+                    for archetype, length in moving:iter() do
+                        local transforms = archetype:getMut(Transform)
+                        for row = 1, length do
+                            local transform = transforms[row]
+                            local x = transform.x + step
+                            -- Wrap rather than branch on a bound per axis, so the
+                            -- field stays put and the work per frame is constant.
+                            if x > AREA_W then
+                                x = x - AREA_W
+                            end
+                            transform.x = x
+                        end
                     end
-                end
-            end,
-        })
+                end,
+            })
 
-        -- The bench's own bookkeeping, in `First` so it runs ahead of every
-        -- system whose cost it is about to record. Counting frames here rather
-        -- than reading the loop's counter keeps the harness inside the world
-        -- like everything else it measures.
-        local frame = 0
-        world:addSystem({
-            name = "bench.Sample",
-            phase = tecs.phases.First,
-            run = function(dt: number)
-                -- Warmup frames are the ones that built and first uploaded the
-                -- scene. Dropping them from every stage at once is what makes
-                -- the report a distribution of the steady state rather than of
-                -- the run.
-                if frame == WARMUP then timing.reset() end
-                if frame >= WARMUP then timing.mark(DELTA, dt) end
-                frame = frame + 1
-            end,
-        })
+            -- The bench's own bookkeeping, in `First` so it runs ahead of every
+            -- system whose cost it is about to record. Counting frames here rather
+            -- than reading the loop's counter keeps the harness inside the world
+            -- like everything else it measures.
+            local frame = 0
+            world:addSystem({
+                name = "bench.Sample",
+                phase = tecs.phases.First,
+                run = function(dt: number)
+                    -- Warmup frames are the ones that built and first uploaded the
+                    -- scene. Dropping them from every stage at once is what makes
+                    -- the report a distribution of the steady state rather than of
+                    -- the run.
+                    if frame == WARMUP then
+                        timing.reset()
+                    end
+                    if frame >= WARMUP then
+                        timing.mark(DELTA, dt)
+                    end
+                    frame = frame + 1
+                end,
+            })
 
-        world:addSystem({
-            name = "bench.Report",
-            phase = tecs.phases.Shutdown,
-            run = function()
-                print(("frames after %d warmup, %d of %d instances synced")
-                    :format(WARMUP, renderer.count, COUNT))
-                local report = timing.format()
-                if report ~= "" then print(report) end
-            end,
-        })
+            world:addSystem({
+                name = "bench.Report",
+                phase = tecs.phases.Shutdown,
+                run = function()
+                    print(("frames after %d warmup, %d of %d instances synced"):format(WARMUP, renderer.count, COUNT))
+                    local report = timing.format()
+                    if report ~= "" then
+                        print(report)
+                    end
+                end,
+            })
 
-        print(("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s")
-            :format(PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE))
-    end,
-})
+            print(
+                ("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s"):format(
+                    PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE
+                )
+            )
+        end,
+    }
+)

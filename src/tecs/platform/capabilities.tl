@@ -75,7 +75,9 @@ local cachedGeneration = -1
 local function hasTouch(): boolean
     local count = loader.newArray("int[1]")
     local devices = C.SDL_GetTouchDevices(count)
-    if devices == nil then return false end
+    if devices == nil then
+        return false
+    end
     C.SDL_free(devices)
     return tonumber(count[0]) > 0
 end
@@ -86,9 +88,13 @@ end
 --- honestly instead of failing to load.
 local function jitEnabled(): boolean
     local ok, module = pcall(require, "jit")
-    if not ok then return false end
+    if not ok then
+        return false
+    end
     local status = (module as {string: any}).status
-    if status == nil then return false end
+    if status == nil then
+        return false
+    end
     local running = (status as function(): boolean)()
     return running == true
 end
@@ -111,19 +117,23 @@ function capabilities.get(): capabilities
         cachedGeneration = generation
         resolved = nil
     end
-    if resolved ~= nil then return resolved end
+    if resolved ~= nil then
+        return resolved
+    end
 
     -- The platform in use, which is not always SDL: a licensed port installs
     -- its own and everything here has to describe that one.
     local platform = loader.toString(C.SDL_GetPlatform())
     local installed = adapter.current()
-    if installed.name ~= "sdl" then platform = installed.name end
+    if installed.name ~= "sdl" then
+        platform = installed.name
+    end
 
     -- The shader pipeline is asked rather than guessed at: whether a compiler
     -- was linked is a property of the build, and a loaded pack narrows the
     -- format to the one it holds.
     local pack = shadercompiler.pack()
-    local formats: {string} = { shaderpack.formatName(shadercompiler.format()) }
+    local formats: {string} = {shaderpack.formatName(shadercompiler.format())}
 
     resolved = {
         target = platform,

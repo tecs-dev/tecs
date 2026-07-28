@@ -29,8 +29,7 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("curl")
 
-local namespace <const>, libraryPath <const> =
-    loader.library("curl", "curl", "TECS_CURL_PATH", "curl")
+local namespace <const>, libraryPath <const> = loader.library("curl", "curl", "TECS_CURL_PATH", "curl")
 
 local record curl
     --- Functions and enum constants, resolved through the loaded library.

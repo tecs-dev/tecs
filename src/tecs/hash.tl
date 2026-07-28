@@ -86,8 +86,7 @@ local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
 --- Typed over Lua numbers on the way in, since LuaJIT converts an integer
 --- argument to the parameter's type. The result is a `uLong`, 64 bits on every
 --- target here, so it comes back as cdata and has to be converted.
-local adler32 <const> = zlib.C.adler32_z
-    as function(seed: integer, bytes: string, length: integer): loader.CValue
+local adler32 <const> = zlib.C.adler32_z as function(seed: integer, bytes: string, length: integer): loader.CValue
 
 local record hash
 end

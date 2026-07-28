@@ -222,13 +222,7 @@ end
 
 -- Append a scalar staging pair to the archetype's parallel arrays.
 -- Scalars stay separate so drain can skip wrapper checks.
-local function stageScalar(
-    self: WorldImpl,
-    arch: Archetype,
-    slot: integer,
-    componentType: Component,
-    value: any
-)
+local function stageScalar(self: WorldImpl, arch: Archetype, slot: integer, componentType: Component, value: any)
     local ctList = arch.pendingScalarTypes[slot]
     local values: {any}
     if ctList then
@@ -250,10 +244,7 @@ end
 -- scalars stage raw values, tags stage nothing (archetype membership is
 -- their whole payload).
 local function stageRequiredDefaults(
-    self: WorldImpl,
-    missing: {internal.RequireEntry},
-    stagingArch: Archetype,
-    slot: integer
+    self: WorldImpl, missing: {internal.RequireEntry}, stagingArch: Archetype, slot: integer
 )
     for i = 1, #missing do
         local entry = missing[i]
@@ -263,7 +254,7 @@ local function stageRequiredDefaults(
             v = (entry.factory as function(...: any): Component)()
         end
         if (rType as ComponentInternal).storageType == "scalar" then
-            stageScalar(self, stagingArch, slot, rType, (v as {string:any}).value)
+            stageScalar(self, stagingArch, slot, rType, (v as {string: any}).value)
         elseif entry.writeColumn then
             appendPendingValue(self, stagingArch, slot, v)
         end
@@ -276,7 +267,9 @@ end
 -- touched scalars this transaction pay nothing.
 local function migratePending(src: Archetype, dst: Archetype, slot: integer)
     src:movePendingValuesTo(dst, slot)
-    if not src.hasScalarPending then return end
+    if not src.hasScalarPending then
+        return
+    end
     local ctList = src.pendingScalarTypes[slot]
     if ctList then
         local values = src.pendingScalarValues[slot]
@@ -382,8 +375,9 @@ local function deferSpawn3(self: WorldImpl, slot: integer, id: integer, c1: Comp
     deferFinish!()
 end
 
-local function deferSpawn4(self: WorldImpl, slot: integer, id: integer,
-                           c1: Component, c2: Component, c3: Component, c4: Component)
+local function deferSpawn4(
+    self: WorldImpl, slot: integer, id: integer, c1: Component, c2: Component, c3: Component, c4: Component
+)
     deferBegin!()
     deferOne!(c1)
     deferOne!(c2)
@@ -434,10 +428,16 @@ function WorldImpl:_deferSpawnAt(id: integer, ...: Component)
     local allocator = self.allocator
     -- Guard against out-of-range decoded slots before touching arena cdata.
     if slot < 1 or slot > allocator.maxSlotCount then
-        error("spawnAt: id " .. tostring(id) .. " decodes to slot " .. tostring(slot) ..
-            " which is outside the configured slot range [1, " ..
-            tostring(allocator.maxSlotCount) .. "]. Check the encoding " ..
-            "(IdAllocator.encodeId: slot + generation * 2^22).")
+        error(
+            "spawnAt: id "
+                .. tostring(id)
+                .. " decodes to slot "
+                .. tostring(slot)
+                .. " which is outside the configured slot range [1, "
+                .. tostring(allocator.maxSlotCount)
+                .. "]. Check the encoding "
+                .. "(IdAllocator.encodeId: slot + generation * 2^22)."
+        )
     end
     if slot >= allocator.nextFreshSlot then
         allocator.nextFreshSlot = slot + 1
@@ -450,12 +450,7 @@ function WorldImpl:_deferSpawnAt(id: integer, ...: Component)
     deferSpawn(self, slot, id, ...)
 end
 
-function WorldImpl:findOldValue(
-    slot: integer,
-    componentType: Component,
-    sourceArch: Archetype,
-    sourceRow: integer
-): any
+function WorldImpl:findOldValue(slot: integer, componentType: Component, sourceArch: Archetype, sourceRow: integer): any
     -- Check pending staging first.
     local pendingArch = getPendingArch(self, slot)
     if pendingArch then
@@ -566,14 +561,12 @@ function WorldImpl:deferSetRaw(id: integer, componentType: Component, value: any
     self:_deferSetSlow(id, componentType as Component, value)
 end
 
-function WorldImpl:_deferSetSlow(
-    id: integer,
-    componentType: Component,
-    value: any
-)
+function WorldImpl:_deferSetSlow(id: integer, componentType: Component, value: any)
     local slot = IdAllocator.slotOf(id)
     local st = getEntityState(self, slot)
-    if st == STATE_DESPAWN then return end
+    if st == STATE_DESPAWN then
+        return
+    end
 
     -- Stale-handle guard: staged entities carry matching generations, so
     -- one compare rejects recycled-slot handles on every slow-path set.
@@ -771,12 +764,14 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
         if st == 0 then
             local slots = self.allocator.slots as {integer: EntitySlot}
             -- Stale or dead handle: removal is a no-op.
-            if IdAllocator.isStale(slots, id, slot) then return end
+            if IdAllocator.isStale(slots, id, slot) then
+                return
+            end
             local s = slots[slot]
             local archetype = self.archetypeIndex[s.archetypeId]
             if archetype then
                 if archetype.columns[component] == nil then
-                    return  -- component not present
+                    return -- component not present
                 end
 
                 local newArch = (archetype.removeEdges as {Component: Archetype})[component]
@@ -825,7 +820,9 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
         end
     end
 
-    if st == STATE_DESPAWN then return end
+    if st == STATE_DESPAWN then
+        return
+    end
 
     -- Sparse routing lives in the defer-remove handler. This path is reached
     -- only for components without that handler.
@@ -835,7 +832,9 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
     if not prevArch then
         local slots = self.allocator.slots as {integer: EntitySlot}
         -- Stale or dead handle: removal is a no-op.
-        if IdAllocator.isStale(slots, id, slot) then return end
+        if IdAllocator.isStale(slots, id, slot) then
+            return
+        end
         if st == STATE_SPAWN then
             prevArch = self.emptyArchetype
         else
@@ -908,7 +907,9 @@ function WorldImpl:_deferDespawn(id: integer)
     -- Record despawn state before any observer-visible work runs so
     -- re-entrant despawns of this id hit the double-despawn guard above
     -- instead of enqueueing the entity twice.
-    if st == 0 then self.entityStateCount = self.entityStateCount + 1 end
+    if st == 0 then
+        self.entityStateCount = self.entityStateCount + 1
+    end
     setEntityState(self, slot, STATE_DESPAWN)
     self.isDirty = true
 
@@ -975,8 +976,12 @@ function WorldImpl:_deferDespawn(id: integer)
     -- Emit OnDespawn, then clear the slot's address whenever any
     -- per-entity observers exist: observers for other events must not
     -- survive into the slot's next entity.
-    if hasObs then world:emit(id, OnDespawn, id) end
-    if hasGlobalObs then world:emit(0, OnDespawn, id) end
+    if hasObs then
+        world:emit(id, OnDespawn, id)
+    end
+    if hasGlobalObs then
+        world:emit(0, OnDespawn, id)
+    end
     if (((world.messages as {string: any})._entityObserverCount) as integer) > 0 then
         world:clearObservers(id)
     end

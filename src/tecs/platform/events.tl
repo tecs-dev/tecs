@@ -353,7 +353,9 @@ end
 
 local function map(name: string, kind: string)
     local value = C[name]
-    if value == nil then return end
+    if value == nil then
+        return
+    end
     KINDS[tonumber(value) as integer] = kind
     declare(kind)
 end
@@ -550,7 +552,9 @@ end
 
 --- Copies a C array of strings out, so nothing above holds a pointer.
 local function strings(array: loader.CValue, count: integer): {string}
-    if array == nil or count == nil or count <= 0 then return nil end
+    if array == nil or count == nil or count <= 0 then
+        return nil
+    end
     local out: {string} = {}
     local items = array as loader.CArray
     for index = 0, count - 1 do
@@ -608,8 +612,7 @@ local function convert(raw: loader.CValue): Event
         event.dx = tonumber(motion.xrel) as number
         event.dy = tonumber(motion.yrel) as number
         event.which = tonumber(motion.which) as number
-        event.synthetic = event.which == TOUCH_MOUSE
-            or event.which == PEN_MOUSE
+        event.synthetic = event.which == TOUCH_MOUSE or event.which == PEN_MOUSE
     elseif kind == "mouseDown" or kind == "mouseUp" then
         local pressed = raw.button
         event.timestamp = tonumber(pressed.timestamp) as number
@@ -622,8 +625,7 @@ local function convert(raw: loader.CValue): Event
         event.y = tonumber(pressed.y) as number
         event.down = pressed.down as boolean
         event.which = tonumber(pressed.which) as number
-        event.synthetic = event.which == TOUCH_MOUSE
-            or event.which == PEN_MOUSE
+        event.synthetic = event.which == TOUCH_MOUSE or event.which == PEN_MOUSE
     elseif kind == "mouseWheel" then
         local wheel = raw.wheel
         event.timestamp = tonumber(wheel.timestamp) as number
@@ -631,8 +633,7 @@ local function convert(raw: loader.CValue): Event
         -- sends both axes negated and sets the flag. Undoing it here is what
         -- lets everything above mean one thing by a positive scroll, instead
         -- of each reader learning that the flag exists and half of them not.
-        local flipped =
-            (tonumber(wheel.direction) as integer) == WHEEL_FLIPPED
+        local flipped = (tonumber(wheel.direction) as integer) == WHEEL_FLIPPED
         local wheelX = tonumber(wheel.x) as number
         local wheelY = tonumber(wheel.y) as number
         local ticksX = tonumber(wheel.integer_x) as integer
@@ -648,8 +649,7 @@ local function convert(raw: loader.CValue): Event
         event.x = tonumber(wheel.mouse_x) as number
         event.y = tonumber(wheel.mouse_y) as number
         event.which = tonumber(wheel.which) as number
-        event.synthetic = event.which == TOUCH_MOUSE
-            or event.which == PEN_MOUSE
+        event.synthetic = event.which == TOUCH_MOUSE or event.which == PEN_MOUSE
     elseif kind == "mouseAdded" or kind == "mouseRemoved" then
         local device = raw.mdevice
         event.timestamp = tonumber(device.timestamp) as number
@@ -658,8 +658,7 @@ local function convert(raw: loader.CValue): Event
         local device = raw.kdevice
         event.timestamp = tonumber(device.timestamp) as number
         event.which = tonumber(device.which) as number
-    elseif kind == "fingerDown" or kind == "fingerUp"
-        or kind == "fingerMotion" or kind == "fingerCanceled" then
+    elseif kind == "fingerDown" or kind == "fingerUp" or kind == "fingerMotion" or kind == "fingerCanceled" then
         local touch = raw.tfinger
         event.timestamp = tonumber(touch.timestamp) as number
         -- A finger id and a touch device id are both 64 bits. Formatting them
@@ -695,8 +694,7 @@ local function convert(raw: loader.CValue): Event
     elseif kind == "textCandidates" then
         local offered = raw.edit_candidates
         event.timestamp = tonumber(offered.timestamp) as number
-        event.candidates = strings(offered.candidates as loader.CValue,
-            tonumber(offered.num_candidates) as integer)
+        event.candidates = strings(offered.candidates as loader.CValue, tonumber(offered.num_candidates) as integer)
         event.selected = tonumber(offered.selected_candidate) as integer
         event.horizontal = offered.horizontal as boolean
         event.which = tonumber(offered.windowID) as number
@@ -746,8 +744,7 @@ local function convert(raw: loader.CValue): Event
         event.sensorX = tonumber(data[0]) as number
         event.sensorY = tonumber(data[1]) as number
         event.sensorZ = tonumber(data[2]) as number
-    elseif kind == "gamepadTouchpadDown" or kind == "gamepadTouchpadUp"
-        or kind == "gamepadTouchpadMotion" then
+    elseif kind == "gamepadTouchpadDown" or kind == "gamepadTouchpadUp" or kind == "gamepadTouchpadMotion" then
         local pad = raw.gtouchpad
         event.timestamp = tonumber(pad.timestamp) as number
         event.which = tonumber(pad.which) as number
@@ -757,8 +754,7 @@ local function convert(raw: loader.CValue): Event
         event.normalY = tonumber(pad.y) as number
         event.pressure = tonumber(pad.pressure) as number
         event.down = kind ~= "gamepadTouchpadUp"
-    elseif kind == "gamepadAdded" or kind == "gamepadRemoved"
-        or kind == "gamepadRemapped" then
+    elseif kind == "gamepadAdded" or kind == "gamepadRemoved" or kind == "gamepadRemapped" then
         local device = raw.gdevice
         event.timestamp = tonumber(device.timestamp) as number
         event.which = tonumber(device.which) as number
@@ -774,7 +770,9 @@ local function convert(raw: loader.CValue): Event
         -- A standalone sensor reports six components where a gamepad reports
         -- three, so the whole reading is carried as well as the first three.
         event.sensorData = {
-            event.sensorX, event.sensorY, event.sensorZ,
+            event.sensorX,
+            event.sensorY,
+            event.sensorZ,
             tonumber(data[3]) as number,
             tonumber(data[4]) as number,
             tonumber(data[5]) as number,
@@ -791,8 +789,7 @@ local function convert(raw: loader.CValue): Event
         local clipboard = raw.clipboard
         event.timestamp = tonumber(clipboard.timestamp) as number
         event.owner = clipboard.owner as boolean
-        event.mimeTypes = strings(clipboard.mime_types as loader.CValue,
-            tonumber(clipboard.num_mime_types) as integer)
+        event.mimeTypes = strings(clipboard.mime_types as loader.CValue, tonumber(clipboard.num_mime_types) as integer)
     elseif kind:sub(1, 11) == "audioDevice" then
         local device = raw.adevice
         event.timestamp = tonumber(device.timestamp) as number
@@ -854,21 +851,21 @@ end
 --- one per event, converted there from the stamp SDL put on each event as it
 --- was produced. Given it, every converted event carries `arrival` in the
 --- units `clock.now` reports.
-function events.drain(queue: loader.CValue, count: integer,
-                      handler: function(Event), arrivals?: loader.CValue)
+function events.drain(queue: loader.CValue, count: integer, handler: function(Event), arrivals?: loader.CValue)
     local replay = events.source
     if replay ~= nil then
         replay(handler)
         return
     end
 
-    if count == 0 or queue == nil then return end
+    if count == 0 or queue == nil then
+        return
+    end
 
     local stamps: loader.CArray = nil
     if arrivals ~= nil then
         if counterFrequency == 0.0 then
-            counterFrequency =
-                tonumber(C.SDL_GetPerformanceFrequency()) as number
+            counterFrequency = tonumber(C.SDL_GetPerformanceFrequency()) as number
         end
         stamps = ffi.cast(StampCast, arrivals) as loader.CArray
     end
@@ -877,8 +874,7 @@ function events.drain(queue: loader.CValue, count: integer,
     for index = 0, count - 1 do
         local event = convert(queued[index] as loader.CValue)
         if stamps ~= nil then
-            event.arrival =
-                (tonumber(stamps[index]) as number) / counterFrequency
+            event.arrival = (tonumber(stamps[index]) as number) / counterFrequency
         end
         handler(event)
     end
@@ -906,7 +902,10 @@ end
 function events.push(kind: string, fields: Event)
     local sdlType: integer = nil
     for value, name in pairs(KINDS) do
-        if name == kind then sdlType = value break end
+        if name == kind then
+            sdlType = value
+            break
+        end
     end
     if sdlType == nil then
         error(("tecs: no event kind named '%s'"):format(tostring(kind)), 2)
@@ -947,7 +946,9 @@ function events.push(kind: string, fields: Event)
             -- that is what the platform sends and the conversion is what
             -- reads the flag. A scroll pushed without one is an ordinary one.
             local direction = WHEEL_NORMAL
-            if fields.flipped == true then direction = WHEEL_FLIPPED end
+            if fields.flipped == true then
+                direction = WHEEL_FLIPPED
+            end
             wheel.direction = direction
             wheel.x = fields.wheelX or 0.0
             wheel.y = fields.wheelY or 0.0
@@ -1027,7 +1028,9 @@ end
 --- Every kind this build recognises, for tooling that enumerates them.
 function events.kinds(): {string}
     local out: {string} = {}
-    for _, name in pairs(KINDS) do out[#out + 1] = name end
+    for _, name in pairs(KINDS) do
+        out[#out + 1] = name
+    end
     table.sort(out)
     return out
 end

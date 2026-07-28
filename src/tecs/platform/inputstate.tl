@@ -70,11 +70,13 @@ local record inputstate
     Gate: Gate
 end
 
-local ButtonsMT <const>: metatable<Buttons> = { __index = Buttons }
-local GateMT <const>: metatable<Gate> = { __index = Gate }
+local ButtonsMT <const>: metatable<Buttons> = {__index = Buttons}
+local GateMT <const>: metatable<Gate> = {__index = Gate}
 
 local function clear(set: {integer: boolean})
-    for code in pairs(set) do set[code] = nil end
+    for code in pairs(set) do
+        set[code] = nil
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -83,10 +85,16 @@ end
 
 --- Creates an empty set, with nothing held and no edges recorded.
 function Buttons.create(): Buttons
-    return setmetatable({
-        down = {}, pressed = {}, released = {},
-        latchedPressed = {}, latchedReleased = {},
-    } as Buttons, ButtonsMT)
+    return setmetatable(
+        {
+            down = {},
+            pressed = {},
+            released = {},
+            latchedPressed = {},
+            latchedReleased = {},
+        } as Buttons,
+        ButtonsMT
+    )
 end
 
 --- Records a press in all three tiers.
@@ -173,16 +181,21 @@ end
 --- The base layer blocks, which is what makes it the thing everything beneath
 --- would be hidden from if there were anything beneath it.
 function Gate.create(): Gate
-    return setmetatable({
-        layers = { { name = "base", blocking = true, index = 1 } },
-        fixed = false,
-    } as Gate, GateMT)
+    return setmetatable(
+        {
+            layers = {{name = "base", blocking = true, index = 1}},
+            fixed = false,
+        } as Gate,
+        GateMT
+    )
 end
 
 --- The lowest layer index still allowed to read.
 local function readableFrom(self: Gate): integer
     for index = #self.layers, 1, -1 do
-        if self.layers[index].blocking then return index end
+        if self.layers[index].blocking then
+            return index
+        end
     end
     return 1
 end
@@ -216,7 +229,9 @@ end
 --- was crossed.
 function Gate:pop(): Layer, boolean
     local count = #self.layers
-    if count <= 1 then return nil, false end
+    if count <= 1 then
+        return nil, false
+    end
     local before = readableFrom(self)
     local layer = self.layers[count]
     self.layers[count] = nil

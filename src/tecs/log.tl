@@ -31,8 +31,7 @@ local C <const> = sdl.C
 loader.declare("logsink")
 
 --- The native sink, which shares the worker library.
-local sink <const> = loader.library("tecsworker", "tecs",
-    "TECS_WORKER_PATH", "logsink")
+local sink <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "logsink")
 
 --- Where our categories begin. SDL's own occupy everything below, and the
 --- boundary is read from SDL rather than counted here, since the enum has
@@ -65,7 +64,7 @@ log.WARN = 5
 log.ERROR = 6
 log.CRITICAL = 7
 
-local LoggerMT <const>: metatable<log.Logger> = { __index = log.Logger }
+local LoggerMT <const>: metatable<log.Logger> = {__index = log.Logger}
 
 local byName <const>: {string: log.Logger} = {}
 local names <const>: {integer: string} = {}
@@ -78,7 +77,9 @@ local nextCategory = CUSTOM
 --- is what `SDL_SetLogPriority` takes.
 function log.get(name: string): log.Logger
     local existing = byName[name]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
     local self = setmetatable({} as log.Logger, LoggerMT)
     self.name = name
@@ -100,7 +101,9 @@ end
 --- Every registered logger name, for tooling that enumerates them.
 function log.loggers(): {string}
     local list: {string} = {}
-    for name in pairs(byName) do list[#list + 1] = name end
+    for name in pairs(byName) do
+        list[#list + 1] = name
+    end
     table.sort(list)
     return list
 end
@@ -137,7 +140,9 @@ local filePath: string = nil
 
 function log.openFile(path: string): boolean
     local ok = sink.tecsLogSinkOpen(path) as boolean
-    if ok then filePath = path end
+    if ok then
+        filePath = path
+    end
     return ok
 end
 
@@ -153,9 +158,10 @@ function log.closeFile()
     filePath = nil
 end
 
-local function emit(self: log.Logger, priority: integer, message: string,
-                    ...: any)
-    if tonumber(C.SDL_GetLogPriority(self.category)) > priority then return end
+local function emit(self: log.Logger, priority: integer, message: string, ...: any)
+    if tonumber(C.SDL_GetLogPriority(self.category)) > priority then
+        return
+    end
     if select("#", ...) > 0 then
         message = message:format(...)
     end

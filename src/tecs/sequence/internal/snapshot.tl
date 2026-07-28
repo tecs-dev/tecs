@@ -56,7 +56,6 @@ local record snapshot
     load: function(world: World, value: any)
 end
 
-
 -------------------------------------------------------------------------------
 -- Snapshot
 --
@@ -77,11 +76,10 @@ local function clockCounters(state: seqtypes.WorldState): {string: {string: inte
     return out
 end
 
-local function restoreClockCounters(
-    state: seqtypes.WorldState,
-    saved: {string: {string: integer}}
-)
-    if not saved then return end
+local function restoreClockCounters(state: seqtypes.WorldState, saved: {string: {string: integer}})
+    if not saved then
+        return
+    end
     for id, counters in pairs(saved) do
         local c = state.clocks[id as seqtypes.ClockId]
         if c then
@@ -136,7 +134,9 @@ function snapshot.save(world: World): any
     local cursors: {{string: any}} = {}
 
     local slots: {integer} = {}
-    for slot in pairs(state.cursors) do slots[#slots + 1] = slot end
+    for slot in pairs(state.cursors) do
+        slots[#slots + 1] = slot
+    end
     table.sort(slots)
 
     for i = 1, #slots do
@@ -217,16 +217,10 @@ end
 -- it has no wake time, only work to do every tick. An evaluator this build no
 -- longer registers is not fatal; the playback gives up its working state and
 -- carries on at the instruction after its eval.
-local function restoreEvaluator(
-    state: seqtypes.WorldState,
-    cursor: Cursor,
-    prog: ProgramImpl,
-    saved: any
-)
+local function restoreEvaluator(state: seqtypes.WorldState, cursor: Cursor, prog: ProgramImpl, saved: any)
     local evaluator <const> = seqevaluators.get(cursor.evaluator)
     if not evaluator then
-        LOGGER:warn("%s v%d: evaluator '%s' is gone; resuming past it",
-            prog.name, prog.version, cursor.evaluator)
+        LOGGER:warn("%s v%d: evaluator '%s' is gone; resuming past it", prog.name, prog.version, cursor.evaluator)
         cursor.evaluator = nil
         cursor.evalIndex = nil
         seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step + 1)
@@ -235,10 +229,8 @@ local function restoreEvaluator(
     if cursor.evalIndex then
         cursor.evalData = seqevaluators.resolve(prog, evaluator, cursor.evalIndex)
     end
-    cursor.evalState = evaluator.load
-        and evaluator.load(prog, cursor.evalData, saved)
-        or (evaluator.newState
-            and evaluator.newState(prog, cursor.evalData, cursor) or nil)
+    cursor.evalState = evaluator.load and evaluator.load(prog, cursor.evalData, saved)
+        or (evaluator.newState and evaluator.newState(prog, cursor.evalData, cursor) or nil)
     cursor.evalImpl = evaluator
     seqcursors.activate(state, cursor)
 end
@@ -252,8 +244,7 @@ function snapshot.load(world: World, value: any)
         end
         local header = value as {string: any}
         if header.version ~= SNAPSHOT_VERSION then
-            error("unsupported tecs.sequence snapshot version: "
-                .. tostring(header.version), 2)
+            error("unsupported tecs.sequence snapshot version: " .. tostring(header.version), 2)
         end
     end
 
@@ -262,14 +253,16 @@ function snapshot.load(world: World, value: any)
     -- versions they were running, so a version this world was the last user
     -- of goes with them.
     for _, cursor in pairs(state.cursors) do
-        if cursor.alive then seqregistry.release(cursor.program) end
+        if cursor.alive then
+            seqregistry.release(cursor.program)
+        end
     end
 
     -- Actions stay registered: they are code, rebound by name, not data.
     state.cursors = {}
     state.freeSlots = {}
     state.ownerIndex = {}
-    
+
     state.channels = {}
     state.pendingSignals = {}
     -- Registered queries are code, kept like actions; only the parked
@@ -283,10 +276,14 @@ function snapshot.load(world: World, value: any)
     state.argScratch = {}
     state.nextSlot = 1
     state.generations = {}
-    for _, c in pairs(state.clocks) do seqclock.clear(c) end
+    for _, c in pairs(state.clocks) do
+        seqclock.clear(c)
+    end
 
     local data = value as {string: any}
-    if not data then return end
+    if not data then
+        return
+    end
 
     restoreClockCounters(state, data.clocks as {string: {string: integer}})
     state.budget = (data.budget as integer) or DEFAULT_BUDGET
@@ -344,8 +341,7 @@ function snapshot.load(world: World, value: any)
             state.cursors[cursor.slot] = cursor
             seqcursors.linkOwner(state, cursor)
             if cursor.channel then
-                state.channelled[tostring(cursor.owner) .. "\0" .. cursor.channel] =
-                    cursor.slot
+                state.channelled[tostring(cursor.owner) .. "\0" .. cursor.channel] = cursor.slot
             end
 
             -- Rebuild the wake indexes rather than serializing them. A
@@ -370,8 +366,12 @@ function snapshot.load(world: World, value: any)
                 -- Nothing to rebuild: the playback it waits on carries the
                 -- back reference and wakes it when it ends.
             elseif not cursor.joining then
-                seqclock.requeue(seqcursors.clockOf(state, cursor), cursor.wakeAt, cursor.seq,
-                    seqcursors.packHandle(cursor.slot, cursor.generation))
+                seqclock.requeue(
+                    seqcursors.clockOf(state, cursor),
+                    cursor.wakeAt,
+                    cursor.seq,
+                    seqcursors.packHandle(cursor.slot, cursor.generation)
+                )
             end
         else
             LOGGER:warn("dropping cursor for missing program %s", key)
@@ -381,7 +381,9 @@ function snapshot.load(world: World, value: any)
     -- Restored slots in a stable order, so relinking and any recovery below
     -- happen the same way on every load.
     local liveSlots: {integer} = {}
-    for slot in pairs(state.cursors) do liveSlots[#liveSlots + 1] = slot end
+    for slot in pairs(state.cursors) do
+        liveSlots[#liveSlots + 1] = slot
+    end
     table.sort(liveSlots)
 
     -- Relink the branch tree from the parent references the cursors carry.
@@ -409,8 +411,12 @@ function snapshot.load(world: World, value: any)
     for i = 1, #liveSlots do
         local cursor = state.cursors[liveSlots[i]]
         if cursor.joining and (not cursor.children or next(cursor.children) == nil) then
-            LOGGER:warn("%s v%d: join at pc=%d lost its branches; resuming",
-                cursor.program.name, cursor.program.version, cursor.pc)
+            LOGGER:warn(
+                "%s v%d: join at pc=%d lost its branches; resuming",
+                cursor.program.name,
+                cursor.program.version,
+                cursor.pc
+            )
             cursor.joining = false
             seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step + 1)
         end

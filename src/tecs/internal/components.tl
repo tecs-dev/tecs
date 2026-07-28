@@ -46,11 +46,9 @@ local record components
 end
 
 components.registeredComponents = {}
-components.componentsById = setmetatable({} as {integer: Component}, {
-    __newindex = function()
-        error("componentsById is read-only")
-    end
-})
+components.componentsById = setmetatable(
+    {} as {integer: Component}, {__newindex = function() error("componentsById is read-only") end}
+)
 
 -------------------------------------------------------------------------------
 -- Component creation
@@ -107,7 +105,7 @@ local INSTANCE_METADATA_KEYS <const>: {string: boolean} = {
     transient = true,
 }
 
-local function applyPositionalDefaults(instance: {string:any}, fields: {string}, defaults: {any})
+local function applyPositionalDefaults(instance: {string: any}, fields: {string}, defaults: {any})
     if not defaults then
         return
     end
@@ -123,16 +121,19 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     local opts = assert(options, "Missing component options")
     local name = assert(opts.name, "Missing component name")
     local container = assert(opts.container, "Missing component container")
-    local optsAny = opts as {string:any}
+    local optsAny = opts as {string: any}
     local userStorage = optsAny.storage
     if userStorage ~= nil and optsAny.__internalStorageToken ~= INTERNAL_STORAGE_TOKEN then
-        error("Component " .. name .. ": `storage` is not a user option. "
-            .. "Use one of newComponent / newTagComponent / newFFIComponent "
-            .. "/ newScalarComponent (or the relationship variants) to pick "
-            .. "a component layout.")
+        error(
+            "Component "
+                .. name
+                .. ": `storage` is not a user option. "
+                .. "Use one of newComponent / newTagComponent / newFFIComponent "
+                .. "/ newScalarComponent (or the relationship variants) to pick "
+                .. "a component layout."
+        )
     end
-    local componentStorage = userStorage as Storage
-        or storage.newTableStorage()
+    local componentStorage = userStorage as Storage or storage.newTableStorage()
 
     if opts.defaults and not opts.fields then
         error("Component " .. name .. ": `defaults` requires `fields`")
@@ -170,7 +171,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     containerI.storage = componentStorage
     containerI.storageType = componentStorage.storageType
 
-    local anyStorage = componentStorage as {string:any}
+    local anyStorage = componentStorage as {string: any}
 
     -- Serialization priority: user-provided > storage-provided > default.
     if opts.transient then
@@ -184,10 +185,10 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         -- instance). Detect the wrapper shape and unwrap so the on-disk
         -- representation is always `{value = <raw>}`.
         container.serialize = function(instance: C): {string: any}
-            if type(instance) == "table" and (instance as {string:any}).componentType == container then
-                return { value = (instance as {string:any}).value }
+            if type(instance) == "table" and (instance as {string: any}).componentType == container then
+                return {value = (instance as {string: any}).value}
             end
-            return { value = instance as any }
+            return {value = instance as any}
         end
     elseif anyStorage.serialize then
         container.serialize = function(instance: C): {string: any}
@@ -216,7 +217,9 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         -- spawn (`comp.componentType` lookup), matching the in-process API.
         container.deserialize = function(_world: types.World, data: {string: any}): C
             local v: any
-            if data ~= nil then v = data.value end
+            if data ~= nil then
+                v = data.value
+            end
             return (container as function(...: any): C)(v)
         end
     elseif anyStorage.deserialize then
@@ -252,16 +255,22 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         if kind == "string" then
             local cache = setmetatable({} as {string: any}, {__mode = "v"})
             callFn = function(_c: C, value?: any): C
-                if value == nil then value = scalarDefault end
+                if value == nil then
+                    value = scalarDefault
+                end
                 local hit = cache[value as string]
-                if hit then return hit as C end
+                if hit then
+                    return hit as C
+                end
                 local w = {componentType = container, value = value}
                 cache[value as string] = w
                 return w as C
             end
         else
             callFn = function(_c: C, value?: any): C
-                if value == nil then value = scalarDefault end
+                if value == nil then
+                    value = scalarDefault
+                end
                 return {componentType = container, value = value} as C
             end
         end
@@ -279,7 +288,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         if customCall then
             callFn = function(_c: C, ...: any): C
                 local instance = ffiAllocator() as C
-                applyPositionalDefaults(instance as {string:any}, ffiFields, ffiDefaults)
+                applyPositionalDefaults(instance as {string: any}, ffiFields, ffiDefaults)
                 customCall(instance, ...)
                 return instance
             end
@@ -315,8 +324,8 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
             local tableFields = opts.fields
             local tableDefaults = opts.defaults
             callFn = function(_c: C, ...: any): C
-                local instance = setmetatable({} as {string:any}, tableInstanceMt as metatable<{string:any}>) as C
-                applyPositionalDefaults(instance as {string:any}, tableFields, tableDefaults)
+                local instance = setmetatable({} as {string: any}, tableInstanceMt as metatable<{string: any}>) as C
+                applyPositionalDefaults(instance as {string: any}, tableFields, tableDefaults)
                 customCall(instance, ...)
                 return instance
             end
@@ -361,9 +370,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     if opts.new then
         local userNew <const> = opts.new
         if tableInstanceMt then
-            container.new = function(data: {string: any}): C
-                return setmetatable(userNew(data), tableInstanceMt)
-            end
+            container.new = function(data: {string: any}): C return setmetatable(userNew(data), tableInstanceMt) end
         else
             container.new = userNew
         end
@@ -374,22 +381,20 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         -- same wrapper the positional form does.
         container.new = function(data: {string: any}): C
             local v: any
-            if data ~= nil then v = data.value end
+            if data ~= nil then
+                v = data.value
+            end
             return (container as function(...: any): C)(v)
         end
     else
-        container.new = function(data: {string: any}): C
-            return (container as function({string: any}): C)(data)
-        end
+        container.new = function(data: {string: any}): C return (container as function({string: any}): C)(data) end
     end
 
     -- If no explicit deserialize, route through `.new` for uniform table-form
     -- reconstruction. Storage-provided and user-provided paths already set
     -- container.deserialize above; this overrides only the default fallback.
     if not opts.deserialize and not anyStorage.deserialize then
-        container.deserialize = function(_world: types.World, data: {string: any}): C
-            return container.new(data)
-        end
+        container.deserialize = function(_world: types.World, data: {string: any}): C return container.new(data) end
     end
 
     return components.registerComponent(container)
@@ -399,9 +404,7 @@ end
 -- Relationships
 -------------------------------------------------------------------------------
 
-local DEFAULT_RELATIONSHIP_CTOR <const> = function(_id: integer, _: any): Relationship
-    return {}
-end
+local DEFAULT_RELATIONSHIP_CTOR <const> = function(_id: integer, _: any): Relationship return {} end
 
 function components.newRelationship<R is Relationship>(config: RelationshipOptions<R>): R
     local cfg = assert(config, "Missing relationship config")
@@ -428,17 +431,23 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
 
     -- Reject user-supplied `storage` on the public factory (only internal
     -- callers pass it, authenticated via the sentinel token).
-    local cfgAny = cfg as {string:any}
+    local cfgAny = cfg as {string: any}
     if cfgAny.storage ~= nil and cfgAny.__internalStorageToken ~= INTERNAL_STORAGE_TOKEN then
-        error("Relationship " .. name .. ": `storage` is not a user option. "
-            .. "Use newRelationship / newFFIRelationship "
-            .. "to pick a relationship layout.")
+        error(
+            "Relationship "
+                .. name
+                .. ": `storage` is not a user option. "
+                .. "Use newRelationship / newFFIRelationship "
+                .. "to pick a relationship layout."
+        )
     end
 
     -- `init` without `fields` or `new` leaves `.new` with no way to
     -- unpack a table into positional args. Match the behavior of newComponent.
     if cfg.init and not cfg.fields and not cfg.new then
-        error("Relationship " .. name .. ": `init` requires either `fields` (auto-codegens `.new`) or an explicit `new`")
+        error(
+            "Relationship " .. name .. ": `init` requires either `fields` (auto-codegens `.new`) or an explicit `new`"
+        )
     end
 
     -- Target-only edge (name plus flags, no data): the only datum is the
@@ -462,8 +471,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     end
 
     -- `storage` is an internal options field (see newComponent). Cast.
-    local relationshipStorage = (cfg as {string:any}).storage as Storage
-        or storage.newTableStorage()
+    local relationshipStorage = (cfg as {string: any}).storage as Storage or storage.newTableStorage()
 
     -- Cache one relationship instance per target id.
     local cache: {number: R} = setmetatable({}, {__mode = "v"})
@@ -491,13 +499,14 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     local customCall = cfgAny["__call"] as function(R, ...: any)
     if relationshipStorage.storageType == "ffi" then
         local relationshipFields = (cfg.fields or {}) as {string}
-        local relationshipAllocator = relationshipStorage:createComponent(relContainer as Component)
-            as function(...: any): any
+        local relationshipAllocator = relationshipStorage:createComponent(relContainer as Component) as function(
+            ...: any
+        ): any
         if customCall then
             local relationshipDefaults = cfg.defaults
             ctor = function(id: integer, ...: any): R
                 local instance = relationshipAllocator(id) as R
-                applyPositionalDefaults(instance as {string:any}, relationshipFields, relationshipDefaults)
+                applyPositionalDefaults(instance as {string: any}, relationshipFields, relationshipDefaults)
                 customCall(instance, id, ...)
                 return instance
             end
@@ -520,7 +529,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
             local relationshipDefaults = cfg.defaults
             ctor = function(id: integer, ...: any): R
                 local instance = {} as R
-                applyPositionalDefaults(instance as {string:any}, relationshipFields, relationshipDefaults)
+                applyPositionalDefaults(instance as {string: any}, relationshipFields, relationshipDefaults)
                 customCall(instance, id, ...)
                 return instance
             end
@@ -561,8 +570,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         relContainer.serialize = cfg.serialize
     elseif storageAny.serialize then
         relContainer.serialize = function(instance: R): {string: any}
-            return (storageAny.serialize as function(Storage, R): {string: any})(
-                relationshipStorage, instance)
+            return (storageAny.serialize as function(Storage, R): {string: any})(relationshipStorage, instance)
         end
     elseif cfg.fields then
         -- Declared fields ARE the payload: serialize exactly them plus
@@ -572,7 +580,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         local declaredFields <const> = cfg.fields as {string}
         relContainer.serialize = function(instance: R): {string: any}
             local inst = instance as {string: any}
-            local data: {string: any} = { target = inst.target }
+            local data: {string: any} = {target = inst.target}
             for i = 1, #declaredFields do
                 local f = declaredFields[i]
                 data[f] = inst[f]
@@ -586,9 +594,11 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         relContainer.serialize = function(instance: R): {string: any}
             local data: {string: any} = {}
             for k, v in pairs(instance as {string: any}) do
-                if type(k) == "string"
-                        and not (k as string):match("^component")
-                        and not INSTANCE_METADATA_KEYS[k as string] then
+                if
+                    type(k) == "string"
+                    and not (k as string):match("^component")
+                    and not INSTANCE_METADATA_KEYS[k as string]
+                then
                     local vtype = type(v)
                     if vtype == "number" or vtype == "string" or vtype == "boolean" or vtype == "table" then
                         data[k] = v
@@ -606,15 +616,10 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- and target-stamping still happen the same way as for positional calls.
     if cfg.new then
         local userNew <const> = cfg.new
-        relContainer.new = function(data: {string: any}): R
-            return userNew(data)
-        end
+        relContainer.new = function(data: {string: any}): R return userNew(data) end
     elseif cfg.fields then
         relContainer.new = componentcodegen.createNewFn(
-            relContainer,
-            cfg.fields as {string},
-            {"target"},
-            {target = "Relationship .new: missing 'target' field"}
+            relContainer, cfg.fields as {string}, {"target"}, {target = "Relationship .new: missing 'target' field"}
         ) as function(data: {string: any}): R
     else
         relContainer.new = function(data: {string: any}): R
@@ -650,60 +655,61 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         end,
     }
 
-    setmetatable(relContainer, {
-        __tostring = function(self: R): string
-            return self.componentName
-        end,
-        __call = function(self: Relationship, id: integer, ...: any): R
-            assert(id, "Missing entity ID")
-            local instance = cache[id]
-            if not instance then -- create if it doesn't exist
-                instance = assert(ctor(id, ...), "Relationship allocation returned nil")
-                if cfg.init and not customCall then
-                    cfg.init(instance, id, ...)
+    setmetatable(
+        relContainer,
+        {
+            __tostring = function(self: R): string return self.componentName end,
+            __call = function(self: Relationship, id: integer, ...: any): R
+                assert(id, "Missing entity ID")
+                local instance = cache[id]
+                if not instance then -- create if it doesn't exist
+                    instance = assert(ctor(id, ...), "Relationship allocation returned nil")
+                    if cfg.init and not customCall then
+                        cfg.init(instance, id, ...)
+                    end
+                    local mt = getmetatable(instance)
+                    if type(mt) == "string" then
+                        -- FFI relationship metadata is installed on the storage
+                        -- metatype, so cdata instances don't need table stamping.
+                        cache[id] = instance
+                    elseif isSparse then
+                        -- Sparse table instances live in sparse storage, not in
+                        -- archetype columns, so they are not registered.
+                        local instanceI = instance as ComponentInternal
+                        instance.target = id
+                        instance.componentName = self.componentName .. "->" .. id
+                        instance.componentType = self -- points to container, not self
+                        instance.exclusiveRelationship = self.exclusiveRelationship
+                        instance.relationshipType = self
+                        instanceI.wildcardContainer = self as Component
+                        instanceI.isContainer = false -- shadow the container's true via __index
+                        instanceI.isSparseInstance = true
+                        instanceI.storage = relationshipStorage
+                        instanceI.storageType = relationshipStorage.storageType
+                        instanceI.transient = relContainerI.transient
+                        setmetatable(instance, instance_mt)
+                        cache[id] = instance
+                    else
+                        local instanceI = instance as ComponentInternal
+                        instance.target = id
+                        instance.componentName = self.componentName .. "->" .. id
+                        instance.componentType = instance
+                        instance.exclusiveRelationship = self.exclusiveRelationship
+                        instance.relationshipType = self
+                        instanceI.wildcardContainer = self as Component
+                        instanceI.isContainer = false -- shadow the container's true via __index
+                        instanceI.storage = relationshipStorage
+                        instanceI.storageType = relationshipStorage.storageType
+                        instanceI.transient = relContainerI.transient
+                        setmetatable(instance, instance_mt)
+                        components.registerComponent(instance)
+                        cache[id] = instance
+                    end
                 end
-                local mt = getmetatable(instance)
-                if type(mt) == "string" then
-                    -- FFI relationship metadata is installed on the storage
-                    -- metatype, so cdata instances don't need table stamping.
-                    cache[id] = instance
-                elseif isSparse then
-                    -- Sparse table instances live in sparse storage, not in
-                    -- archetype columns, so they are not registered.
-                    local instanceI = instance as ComponentInternal
-                    instance.target = id
-                    instance.componentName = self.componentName .. "->" .. id
-                    instance.componentType = self  -- points to container, not self
-                    instance.exclusiveRelationship = self.exclusiveRelationship
-                    instance.relationshipType = self
-                    instanceI.wildcardContainer = self as Component
-                    instanceI.isContainer = false  -- shadow the container's true via __index
-                    instanceI.isSparseInstance = true
-                    instanceI.storage = relationshipStorage
-                    instanceI.storageType = relationshipStorage.storageType
-                    instanceI.transient = relContainerI.transient
-                    setmetatable(instance, instance_mt)
-                    cache[id] = instance
-                else
-                    local instanceI = instance as ComponentInternal
-                    instance.target = id
-                    instance.componentName = self.componentName .. "->" .. id
-                    instance.componentType = instance
-                    instance.exclusiveRelationship = self.exclusiveRelationship
-                    instance.relationshipType = self
-                    instanceI.wildcardContainer = self as Component
-                    instanceI.isContainer = false  -- shadow the container's true via __index
-                    instanceI.storage = relationshipStorage
-                    instanceI.storageType = relationshipStorage.storageType
-                    instanceI.transient = relContainerI.transient
-                    setmetatable(instance, instance_mt)
-                    components.registerComponent(instance)
-                    cache[id] = instance
-                end
-            end
-            return instance
-        end,
-    })
+                return instance
+            end,
+        }
+    )
 
     -- Dense relationships can expose a concrete component type for queries.
     if not isSparse then
@@ -757,13 +763,15 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
 
     local isSparse = cfg.sparse or false
 
-    local ffiStorage = storage.newFFIStorage({
-        name = name .. "_FFIRelationship",
-        bindingName = name,
-        fields = allFields,
-        metatable = cfg.metatable,
-        perEntityComponent = not isSparse,  -- sparse relationships don't need per-instance IDs
-    })
+    local ffiStorage = storage.newFFIStorage(
+        {
+            name = name .. "_FFIRelationship",
+            bindingName = name,
+            fields = allFields,
+            metatable = cfg.metatable,
+            perEntityComponent = not isSparse, -- sparse relationships don't need per-instance IDs
+        }
+    )
 
     -- Convert FFI field tuples to plain names so newRelationship can
     -- codegen `.new` (unpack-by-name into positional args for the ctor).
@@ -782,15 +790,15 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
         fields = fieldNames,
         defaults = cfg.defaults,
         init = cfg.init,
-        __call = (cfg as {string:any})["__call"],
+        __call = (cfg as {string: any})["__call"],
         new = cfg.new,
         exclusive = cfg.exclusive,
         sparse = cfg.sparse,
         reverseIndex = cfg.reverseIndex,
         cascadeDelete = cfg.cascadeDelete,
         transient = cfg.transient,
-        serialize = (cfg as {string:any}).serialize,
-        deserialize = (cfg as {string:any}).deserialize,
+        serialize = (cfg as {string: any}).serialize,
+        deserialize = (cfg as {string: any}).deserialize,
         storage = ffiStorage,
         __internalStorageToken = INTERNAL_STORAGE_TOKEN,
     })
@@ -801,7 +809,7 @@ end
 -------------------------------------------------------------------------------
 
 function components.newTagComponent(options: TagComponentOptions): Component
-    if options.transient and (options as {string:any}).serialize then
+    if options.transient and (options as {string: any}).serialize then
         error("Tag component " .. tostring(options.name) .. ": `transient` cannot be combined with `serialize`")
     end
     local container = options.container or {}
@@ -815,11 +823,9 @@ function components.newTagComponent(options: TagComponentOptions): Component
     })
 end
 
-function components.newScalarComponent<T>(
-    options: ScalarComponentOptions<T>
-): types.components.ScalarComponent<T>
+function components.newScalarComponent<T>(options: ScalarComponentOptions<T>): types.components.ScalarComponent<T>
     local opts = assert(options, "Missing scalar component options")
-    if opts.transient and (opts as {string:any}).serialize then
+    if opts.transient and (opts as {string: any}).serialize then
         error("Scalar component " .. tostring(opts.name) .. ": `transient` cannot be combined with `serialize`")
     end
     -- Scalar columns store raw primitives. `newComponent` installs the small
@@ -830,8 +836,7 @@ function components.newScalarComponent<T>(
 
     -- Keep scalar storage truly scalar (no table/object payloads).
     if kind ~= "number" and kind ~= "boolean" and kind ~= "string" then
-        error("Scalar component " .. tostring(opts.name) ..
-            ": `kind` must be one of 'number', 'boolean', or 'string'")
+        error("Scalar component " .. tostring(opts.name) .. ": `kind` must be one of 'number', 'boolean', or 'string'")
     end
 
     -- Zero-value defaults by kind when omitted.
@@ -847,16 +852,18 @@ function components.newScalarComponent<T>(
 
     -- `newComponent` provides scalar-specific callFn, `.new`, serialize, and
     -- deserialize for storageType=="scalar" -- no need to forward them here.
-    local component = ((components.newComponent as function(any): any)({
-        name = assert(opts.name, "Missing scalar component name"),
-        container = container,
-        storage = storage.newScalarStorage(kind, defaultValue),
-        __internalStorageToken = INTERNAL_STORAGE_TOKEN,
-        requires = opts.requires,
-        transient = opts.transient,
-    })) as types.components.ScalarComponent<T>
+    local component = (
+        (components.newComponent as function(any): any)({
+            name = assert(opts.name, "Missing scalar component name"),
+            container = container,
+            storage = storage.newScalarStorage(kind, defaultValue),
+            __internalStorageToken = INTERNAL_STORAGE_TOKEN,
+            requires = opts.requires,
+            transient = opts.transient,
+        })
+    ) as types.components.ScalarComponent<T>
 
-    local cAny = component as {string:any}
+    local cAny = component as {string: any}
     cAny.scalarKind = kind
     cAny.scalarDefault = defaultValue
     return component
@@ -873,10 +880,7 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     assert(opts.fields, "Missing FFI fields definition")
 
     local componentStorage = storage.newFFIStorage({
-        name = opts.name,
-        bindingName = opts.name,
-        fields = opts.fields,
-        metatable = opts.metatable
+        name = opts.name, bindingName = opts.name, fields = opts.fields, metatable = opts.metatable
     })
 
     -- Default `.new(data)` unpacks FFI field tuples by name and routes through
@@ -899,7 +903,7 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
         container = opts.container,
         fields = opts.fields,
         defaults = opts.defaults,
-        __call = (opts as {string:any})["__call"],
+        __call = (opts as {string: any})["__call"],
         init = opts.init,
         storage = componentStorage,
         __internalStorageToken = INTERNAL_STORAGE_TOKEN,
@@ -922,8 +926,12 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     -- binary stream desyncs.
     local anyStorage = componentStorage as {string: any}
     local componentI = component as ComponentInternal
-    if anyStorage.serializeRaw and anyStorage.deserializeRaw
-        and not opts.serialize and not opts.deserialize and not opts.transient
+    if
+        anyStorage.serializeRaw
+        and anyStorage.deserializeRaw
+        and not opts.serialize
+        and not opts.deserialize
+        and not opts.transient
     then
         componentI.serializeRaw = function(inst: Component, buf: any)
             (anyStorage.serializeRaw as function(Storage, Component, any))(componentStorage, inst, buf)

@@ -210,7 +210,7 @@ local record Window
     end
 end
 
-local WindowMT <const>: metatable<Window> = { __index = Window }
+local WindowMT <const>: metatable<Window> = {__index = Window}
 
 -- Reused out-parameters. Nothing here is asked per frame, but there is no
 -- reason to allocate for it either.
@@ -272,7 +272,9 @@ end
 --- Read from SDL each time rather than remembered, so a flag the window
 --- manager changed on its own reports honestly.
 local function hasFlag(self: Window, flag: integer): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return bit.band(C.SDL_GetWindowFlags(self.handle) as integer, flag) ~= 0
 end
 
@@ -282,13 +284,17 @@ end
 --- reused, so returning them unchecked would report whatever the last
 --- successful call happened to leave there.
 local function pair(wrote: boolean): integer, integer
-    if not wrote then return 0, 0 end
+    if not wrote then
+        return 0, 0
+    end
     return widthOut[0] as integer, heightOut[0] as integer
 end
 
 --- Converts an `SDL_DisplayMode *` to a mode record, or nil for null.
 local function toMode(pointer: loader.CValue): Window.DisplayMode
-    if pointer == nil then return nil end
+    if pointer == nil then
+        return nil
+    end
     return {
         display = tonumber(pointer.displayID) as integer,
         width = tonumber(pointer.w) as integer,
@@ -304,7 +310,9 @@ end
 --- Zero without video, which is the id SDL uses for "no display" and what
 --- every display function here already answers empty for.
 local function display(id?: integer): integer
-    if id ~= nil then return id end
+    if id ~= nil then
+        return id
+    end
     return tonumber(C.SDL_GetPrimaryDisplay()) as integer
 end
 
@@ -318,7 +326,9 @@ local function applyIcon(handle: loader.CPtr, path: string): boolean
     -- only asks a window about itself does not load an image decoder.
     local sdl3image <const> = require("tecs.ffi.sdl3image")
     local surface = sdl3image.C.IMG_Load(path)
-    if surface == nil then return false end
+    if surface == nil then
+        return false
+    end
     local set = C.SDL_SetWindowIcon(handle, surface) as boolean
     C.SDL_DestroySurface(surface)
     return set
@@ -359,9 +369,10 @@ function Window.create(options: Window.Options): Window
     end
 
     local title = options.title or "tecs"
-    local handle = C.SDL_CreateWindow(title,
-        options.width or 1280, options.height or 720, flags)
-    if handle == nil then sdl.fail("SDL_CreateWindow") end
+    local handle = C.SDL_CreateWindow(title, options.width or 1280, options.height or 720, flags)
+    if handle == nil then
+        sdl.fail("SDL_CreateWindow")
+    end
 
     local self = setmetatable({} as Window, WindowMT)
     self.handle = handle
@@ -388,7 +399,9 @@ end
 --- Every getter answers zero, false or nil afterwards rather than reading
 --- through a null handle.
 function Window:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.SDL_DestroyWindow(self.handle)
     self.handle = nil
@@ -397,7 +410,9 @@ end
 --- The id events name this window by, which is what an event's `which` field
 --- carries. Zero once the window is gone.
 function Window:id(): integer
-    if self.handle == nil then return 0 end
+    if self.handle == nil then
+        return 0
+    end
     return tonumber(C.SDL_GetWindowID(self.handle)) as integer
 end
 
@@ -412,7 +427,9 @@ end
 --- Returns false when the changes did not land in SDL's timeout, and false
 --- with no window.
 function Window:sync(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SyncWindow(self.handle) as boolean
 end
 
@@ -426,14 +443,18 @@ end
 --- layout positioned against the pointer uses. `getPixelSize` is what a render
 --- target is sized to.
 function Window:getSize(): integer, integer
-    if self.handle == nil then return 0, 0 end
+    if self.handle == nil then
+        return 0, 0
+    end
     return pair(C.SDL_GetWindowSize(self.handle, widthOut, heightOut) as boolean)
 end
 
 --- Returns the drawable size in pixels, which differs from `getSize` on
 --- high-density displays.
 function Window:getPixelSize(): integer, integer
-    if self.handle == nil then return 0, 0 end
+    if self.handle == nil then
+        return 0, 0
+    end
     return pair(C.SDL_GetWindowSizeInPixels(self.handle, widthOut, heightOut) as boolean)
 end
 
@@ -444,14 +465,18 @@ end
 --- fullscreen window ignores this, and a window whose size the compositor has
 --- to agree to reports the old size until `sync` returns.
 function Window:setSize(width: integer, height: integer): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowSize(self.handle, width, height) as boolean
 end
 
 --- Ratio of pixels to screen coordinates: 2.0 on a display where the drawable
 --- is twice the window. 1.0 without `highPixelDensity`, and 0 with no window.
 function Window:pixelDensity(): number
-    if self.handle == nil then return 0 end
+    if self.handle == nil then
+        return 0
+    end
     return tonumber(C.SDL_GetWindowPixelDensity(self.handle)) as number
 end
 
@@ -462,13 +487,17 @@ end
 --- metric is multiplied by, and it changes without the window resizing.
 --- `events.windowDisplayScaleChanged` reports that it has.
 function Window:displayScale(): number
-    if self.handle == nil then return 0 end
+    if self.handle == nil then
+        return 0
+    end
     return tonumber(C.SDL_GetWindowDisplayScale(self.handle)) as number
 end
 
 --- Position of the window's top-left corner in screen coordinates.
 function Window:position(): integer, integer
-    if self.handle == nil then return 0, 0 end
+    if self.handle == nil then
+        return 0, 0
+    end
     return pair(C.SDL_GetWindowPosition(self.handle, widthOut, heightOut) as boolean)
 end
 
@@ -477,13 +506,17 @@ end
 --- The coordinate space spans every display, so a negative or very large
 --- position is how a window is put on a second monitor.
 function Window:setPosition(x: integer, y: integer): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowPosition(self.handle, x, y) as boolean
 end
 
 --- Centres the window on `display`, or on the display it is already on.
 function Window:center(displayId?: integer): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     local centered = K.SDL_WINDOWPOS_CENTERED
     if displayId ~= nil then
         centered = bit.bor(K.SDL_WINDOWPOS_CENTERED_MASK, displayId)
@@ -497,12 +530,14 @@ end
 --- All zero on a platform that does not decorate windows and on a borderless
 --- one, which is the honest answer rather than a failure.
 function Window:borderSize(): integer, integer, integer, integer
-    if self.handle == nil then return 0, 0, 0, 0 end
-    local wrote = C.SDL_GetWindowBordersSize(self.handle,
-        widthOut, heightOut, thirdOut, fourthOut) as boolean
-    if not wrote then return 0, 0, 0, 0 end
-    return widthOut[0] as integer, heightOut[0] as integer,
-        thirdOut[0] as integer, fourthOut[0] as integer
+    if self.handle == nil then
+        return 0, 0, 0, 0
+    end
+    local wrote = C.SDL_GetWindowBordersSize(self.handle, widthOut, heightOut, thirdOut, fourthOut) as boolean
+    if not wrote then
+        return 0, 0, 0, 0
+    end
+    return widthOut[0] as integer, heightOut[0] as integer, thirdOut[0] as integer, fourthOut[0] as integer
 end
 
 --- The part of the window nothing is drawn over, as x, y, width and height in
@@ -513,48 +548,62 @@ end
 --- to keep a health bar out from under. `events.windowSafeAreaChanged` reports
 --- that it moved.
 function Window:safeArea(): integer, integer, integer, integer
-    if self.handle == nil then return 0, 0, 0, 0 end
+    if self.handle == nil then
+        return 0, 0, 0, 0
+    end
     if not (C.SDL_GetWindowSafeArea(self.handle, rectOut) as boolean) then
         return 0, 0, 0, 0
     end
-    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer,
-        tonumber(rectOut.w) as integer, tonumber(rectOut.h) as integer
+    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer, tonumber(rectOut.w) as integer, tonumber(
+        rectOut.h
+    ) as integer
 end
 
 --- Smallest size the window may be resized to, in screen coordinates.
 function Window:minimumSize(): integer, integer
-    if self.handle == nil then return 0, 0 end
+    if self.handle == nil then
+        return 0, 0
+    end
     return pair(C.SDL_GetWindowMinimumSize(self.handle, widthOut, heightOut) as boolean)
 end
 
 --- Sets the smallest size the window may be resized to. Zero for either
 --- dimension removes the limit on it.
 function Window:setMinimumSize(width: integer, height: integer): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowMinimumSize(self.handle, width, height) as boolean
 end
 
 --- Largest size the window may be resized to, in screen coordinates. Zero for
 --- a dimension that has no limit.
 function Window:maximumSize(): integer, integer
-    if self.handle == nil then return 0, 0 end
+    if self.handle == nil then
+        return 0, 0
+    end
     return pair(C.SDL_GetWindowMaximumSize(self.handle, widthOut, heightOut) as boolean)
 end
 
 --- Sets the largest size the window may be resized to. Zero for either
 --- dimension removes the limit on it.
 function Window:setMaximumSize(width: integer, height: integer): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowMaximumSize(self.handle, width, height) as boolean
 end
 
 --- Narrowest and widest width-over-height the window may be resized to. Zero
 --- for a bound that is not set.
 function Window:aspectRatio(): number, number
-    if self.handle == nil then return 0, 0 end
-    local wrote = C.SDL_GetWindowAspectRatio(self.handle,
-        minAspectOut, maxAspectOut) as boolean
-    if not wrote then return 0, 0 end
+    if self.handle == nil then
+        return 0, 0
+    end
+    local wrote = C.SDL_GetWindowAspectRatio(self.handle, minAspectOut, maxAspectOut) as boolean
+    if not wrote then
+        return 0, 0
+    end
     return minAspectOut[0] as number, maxAspectOut[0] as number
 end
 
@@ -563,7 +612,9 @@ end
 --- The same value for both pins the window to one shape, which is what a game
 --- that will not letterbox wants. Zero for either removes that bound.
 function Window:setAspectRatio(minimum: number, maximum: number): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowAspectRatio(self.handle, minimum, maximum) as boolean
 end
 
@@ -574,7 +625,9 @@ end
 --- Maps the window onto the desktop. What a window created `hidden` needs
 --- before anything it draws is seen.
 function Window:show(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_ShowWindow(self.handle) as boolean
 end
 
@@ -583,7 +636,9 @@ end
 --- Safe while a device holds it: no swapchain texture is acquired while the
 --- window is hidden and the frame is skipped whole rather than drawn nowhere.
 function Window:hide(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_HideWindow(self.handle) as boolean
 end
 
@@ -591,7 +646,9 @@ end
 --- that `hide` was called on, and true for a minimised window, which is mapped
 --- and not visible.
 function Window:isVisible(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return not hasFlag(self, K.SDL_WINDOW_HIDDEN)
 end
 
@@ -601,13 +658,17 @@ end
 --- allow to interrupt whatever the user was doing. Ask for attention instead
 --- unless the user just did something that expects a window to come forward.
 function Window:raise(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_RaiseWindow(self.handle) as boolean
 end
 
 --- Minimises the window to the taskbar or dock.
 function Window:minimize(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_MinimizeWindow(self.handle) as boolean
 end
 
@@ -619,7 +680,9 @@ end
 
 --- Maximises the window to fill the display's usable bounds.
 function Window:maximize(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_MaximizeWindow(self.handle) as boolean
 end
 
@@ -630,7 +693,9 @@ end
 
 --- Returns a minimised or maximised window to its previous size and position.
 function Window:restore(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_RestoreWindow(self.handle) as boolean
 end
 
@@ -678,7 +743,9 @@ end
 --- change actually landed, which on a compositing window system is later than
 --- this returns; `sync` is the other way to wait for it.
 function Window:setFullscreen(fullscreen: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowFullscreen(self.handle, fullscreen ~= false) as boolean
 end
 
@@ -690,7 +757,9 @@ end
 --- The video mode fullscreen will use, or nil for borderless fullscreen at
 --- whatever the desktop is already running.
 function Window:fullscreenMode(): Window.DisplayMode
-    if self.handle == nil then return nil end
+    if self.handle == nil then
+        return nil
+    end
     return toMode(C.SDL_GetWindowFullscreenMode(self.handle))
 end
 
@@ -703,13 +772,18 @@ end
 --- exist. Takes effect the next time the window is made fullscreen, and
 --- immediately if it already is.
 function Window:setFullscreenMode(mode: Window.DisplayMode): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     if mode == nil then
         return C.SDL_SetWindowFullscreenMode(self.handle, nil) as boolean
     end
     if mode._mode == nil then
-        error("tecs: Window:setFullscreenMode needs a mode from " ..
-            "Window.fullscreenModes or Window.closestFullscreenMode", 2)
+        error(
+            "tecs: Window:setFullscreenMode needs a mode from "
+                .. "Window.fullscreenModes or Window.closestFullscreenMode",
+            2
+        )
     end
     return C.SDL_SetWindowFullscreenMode(self.handle, mode._mode) as boolean
 end
@@ -724,7 +798,9 @@ function Window:setTitle(title: string): boolean
         error("tecs: Window:setTitle needs a string", 2)
     end
     self.title = title
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowTitle(self.handle, title) as boolean
 end
 
@@ -738,7 +814,9 @@ function Window:setIcon(path: string): boolean
     if path == nil then
         error("tecs: Window:setIcon needs a path", 2)
     end
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return applyIcon(self.handle, path)
 end
 
@@ -750,20 +828,26 @@ end
 
 --- Allows or forbids the user resizing the window.
 function Window:setResizable(resizable: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowResizable(self.handle, resizable ~= false) as boolean
 end
 
 --- Whether the window has a title bar and a frame.
 function Window:isBordered(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return not hasFlag(self, K.SDL_WINDOW_BORDERLESS)
 end
 
 --- Adds or removes the title bar and the frame. The client area keeps its
 --- size, so the window as a whole changes size by the border thickness.
 function Window:setBordered(bordered: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowBordered(self.handle, bordered ~= false) as boolean
 end
 
@@ -774,36 +858,48 @@ end
 
 --- Keeps the window above others, or stops doing so.
 function Window:setAlwaysOnTop(onTop: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowAlwaysOnTop(self.handle, onTop ~= false) as boolean
 end
 
 --- Whether the window can take keyboard focus. True for an ordinary window.
 function Window:isFocusable(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return not hasFlag(self, K.SDL_WINDOW_NOT_FOCUSABLE)
 end
 
 --- Allows or forbids the window taking keyboard focus. A window that cannot
 --- take focus is what an overlay uses to stay out of the way.
 function Window:setFocusable(focusable: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowFocusable(self.handle, focusable ~= false) as boolean
 end
 
 --- How opaque the window is, 0 for invisible and 1 for solid. Zero with no
 --- window, and 1 on a platform that composites nothing.
 function Window:opacity(): number
-    if self.handle == nil then return 0 end
+    if self.handle == nil then
+        return 0
+    end
     local value = tonumber(C.SDL_GetWindowOpacity(self.handle)) as number
-    if value < 0 then return 0 end
+    if value < 0 then
+        return 0
+    end
     return value
 end
 
 --- Sets how opaque the window is, 0 to 1. Whether the desktop honours it is
 --- the desktop's business; false says it did not.
 function Window:setOpacity(opacity: number): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowOpacity(self.handle, opacity) as boolean
 end
 
@@ -822,16 +918,22 @@ function Window:flash(operation: Window.Flash): boolean
     if value == nil then
         error(("tecs: unknown flash operation '%s'"):format(tostring(operation)), 2)
     end
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_FlashWindow(self.handle, value) as boolean
 end
 
 --- What the taskbar or dock is showing over the application's icon, and how
 --- far along it is. "none" and 0 with no window.
 function Window:progress(): Window.Progress, number
-    if self.handle == nil then return "none", 0 end
+    if self.handle == nil then
+        return "none", 0
+    end
     local state = PROGRESS_NAMES[tonumber(C.SDL_GetWindowProgressState(self.handle)) as integer]
-    if state == nil then return "none", 0 end
+    if state == nil then
+        return "none", 0
+    end
     return state, tonumber(C.SDL_GetWindowProgressValue(self.handle)) as number
 end
 
@@ -845,11 +947,15 @@ function Window:setProgress(state: Window.Progress, value?: number): boolean
     if resolved == nil then
         error(("tecs: unknown progress state '%s'"):format(tostring(state)), 2)
     end
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     if not (C.SDL_SetWindowProgressState(self.handle, resolved) as boolean) then
         return false
     end
-    if value == nil then return true end
+    if value == nil then
+        return true
+    end
     return C.SDL_SetWindowProgressValue(self.handle, value) as boolean
 end
 
@@ -863,7 +969,9 @@ end
 --- succeeded, since a window that is not receiving the pointer is not holding
 --- it either. Becomes true again when focus returns.
 function Window:mouseGrab(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_GetWindowMouseGrab(self.handle) as boolean
 end
 
@@ -877,13 +985,17 @@ end
 --- what `mouseGrab` answers: an unfocused window records the request and holds
 --- nothing until focus comes back.
 function Window:setMouseGrab(grabbed: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowMouseGrab(self.handle, grabbed ~= false) as boolean
 end
 
 --- Whether the desktop's own keyboard shortcuts are being intercepted.
 function Window:keyboardGrab(): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_GetWindowKeyboardGrab(self.handle) as boolean
 end
 
@@ -894,18 +1006,25 @@ end
 --- Some desktops refuse it outright and some require a permission the user
 --- grants once.
 function Window:setKeyboardGrab(grabbed: boolean): boolean
-    if self.handle == nil then return false end
+    if self.handle == nil then
+        return false
+    end
     return C.SDL_SetWindowKeyboardGrab(self.handle, grabbed ~= false) as boolean
 end
 
 --- The region within the window the pointer is confined to, as x, y, width and
 --- height in screen coordinates. All zero when there is none.
 function Window:mouseRect(): integer, integer, integer, integer
-    if self.handle == nil then return 0, 0, 0, 0 end
+    if self.handle == nil then
+        return 0, 0, 0, 0
+    end
     local rect = C.SDL_GetWindowMouseRect(self.handle)
-    if rect == nil then return 0, 0, 0, 0 end
-    return tonumber(rect.x) as integer, tonumber(rect.y) as integer,
-        tonumber(rect.w) as integer, tonumber(rect.h) as integer
+    if rect == nil then
+        return 0, 0, 0, 0
+    end
+    return tonumber(rect.x) as integer, tonumber(rect.y) as integer, tonumber(rect.w) as integer, tonumber(
+        rect.h
+    ) as integer
 end
 
 --- Confines the pointer to part of the window, in screen coordinates.
@@ -913,9 +1032,10 @@ end
 --- Independent of `setMouseGrab`, which confines it to the window as a whole;
 --- this applies while the window has focus whether or not the window is
 --- grabbed. Called with nothing, the region is removed.
-function Window:setMouseRect(x?: integer, y?: integer,
-                             width?: integer, height?: integer): boolean
-    if self.handle == nil then return false end
+function Window:setMouseRect(x?: integer, y?: integer, width?: integer, height?: integer): boolean
+    if self.handle == nil then
+        return false
+    end
     if x == nil then
         return C.SDL_SetWindowMouseRect(self.handle, nil) as boolean
     end
@@ -934,7 +1054,9 @@ end
 
 --- The display this window is mostly on. Zero with no window.
 function Window:display(): integer
-    if self.handle == nil then return 0 end
+    if self.handle == nil then
+        return 0
+    end
     return tonumber(C.SDL_GetDisplayForWindow(self.handle)) as integer
 end
 
@@ -945,10 +1067,14 @@ end
 --- than polling.
 function Window.displays(): {integer}
     local found: {integer} = {}
-    if not Window.available() then return found end
+    if not Window.available() then
+        return found
+    end
 
     local list = C.SDL_GetDisplays(countOut)
-    if list == nil then return found end
+    if list == nil then
+        return found
+    end
     local count = countOut[0] as integer
     for index = 0, count - 1 do
         found[index + 1] = tonumber((list as loader.CArray)[index]) as integer
@@ -959,14 +1085,18 @@ end
 
 --- The display the desktop treats as primary, or zero with no video.
 function Window.primaryDisplay(): integer
-    if not Window.available() then return 0 end
+    if not Window.available() then
+        return 0
+    end
     return tonumber(C.SDL_GetPrimaryDisplay()) as integer
 end
 
 --- A display's name as the desktop shows it, for a menu that lets the player
 --- choose one. Empty with no video.
 function Window.displayName(displayId?: integer): string
-    if not Window.available() then return "" end
+    if not Window.available() then
+        return ""
+    end
     return loader.toString(C.SDL_GetDisplayName(display(displayId)))
 end
 
@@ -976,12 +1106,15 @@ end
 --- The width and height are the desktop dimensions, and the x and y are what
 --- makes the coordinates `setPosition` takes span every monitor.
 function Window.displayBounds(displayId?: integer): integer, integer, integer, integer
-    if not Window.available() then return 0, 0, 0, 0 end
+    if not Window.available() then
+        return 0, 0, 0, 0
+    end
     if not (C.SDL_GetDisplayBounds(display(displayId), rectOut) as boolean) then
         return 0, 0, 0, 0
     end
-    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer,
-        tonumber(rectOut.w) as integer, tonumber(rectOut.h) as integer
+    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer, tonumber(rectOut.w) as integer, tonumber(
+        rectOut.h
+    ) as integer
 end
 
 --- The part of a display not covered by a taskbar, dock or menu bar, in the
@@ -991,12 +1124,15 @@ end
 --- which `displayBounds` does not answer. `events.displayUsableBoundsChanged`
 --- reports that it moved.
 function Window.usableBounds(displayId?: integer): integer, integer, integer, integer
-    if not Window.available() then return 0, 0, 0, 0 end
+    if not Window.available() then
+        return 0, 0, 0, 0
+    end
     if not (C.SDL_GetDisplayUsableBounds(display(displayId), rectOut) as boolean) then
         return 0, 0, 0, 0
     end
-    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer,
-        tonumber(rectOut.w) as integer, tonumber(rectOut.h) as integer
+    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer, tonumber(rectOut.w) as integer, tonumber(
+        rectOut.h
+    ) as integer
 end
 
 --- A display's content scale, the same quantity `Window:displayScale` reports
@@ -1005,14 +1141,18 @@ end
 --- Named for what SDL calls it rather than matching the method, because a
 --- record holds one `displayScale` and the two would be the same field.
 function Window.contentScale(displayId?: integer): number
-    if not Window.available() then return 0 end
+    if not Window.available() then
+        return 0
+    end
     return tonumber(C.SDL_GetDisplayContentScale(display(displayId))) as number
 end
 
 --- How a display is rotated right now. `events.displayOrientation` reports
 --- that it turned.
 function Window.orientation(displayId?: integer): Window.Orientation
-    if not Window.available() then return "unknown" end
+    if not Window.available() then
+        return "unknown"
+    end
     local value = tonumber(C.SDL_GetCurrentDisplayOrientation(display(displayId))) as integer
     return ORIENTATIONS[value] or "unknown"
 end
@@ -1023,7 +1163,9 @@ end
 --- begin with, and so what a game deciding whether to letterbox or rotate its
 --- own content asks alongside `orientation`.
 function Window.naturalOrientation(displayId?: integer): Window.Orientation
-    if not Window.available() then return "unknown" end
+    if not Window.available() then
+        return "unknown"
+    end
     local value = tonumber(C.SDL_GetNaturalDisplayOrientation(display(displayId))) as integer
     return ORIENTATIONS[value] or "unknown"
 end
@@ -1031,14 +1173,18 @@ end
 --- The mode a display was in when the desktop started, which is what leaving
 --- fullscreen returns it to. Nil with no video.
 function Window.desktopMode(displayId?: integer): Window.DisplayMode
-    if not Window.available() then return nil end
+    if not Window.available() then
+        return nil
+    end
     return toMode(C.SDL_GetDesktopDisplayMode(display(displayId)))
 end
 
 --- The mode a display is in right now, which differs from `desktopMode` while
 --- something holds it fullscreen at another resolution.
 function Window.currentMode(displayId?: integer): Window.DisplayMode
-    if not Window.available() then return nil end
+    if not Window.available() then
+        return nil
+    end
     return toMode(C.SDL_GetCurrentDisplayMode(display(displayId)))
 end
 
@@ -1049,10 +1195,14 @@ end
 --- desktop's own resolution.
 function Window.fullscreenModes(displayId?: integer): {Window.DisplayMode}
     local found: {Window.DisplayMode} = {}
-    if not Window.available() then return found end
+    if not Window.available() then
+        return found
+    end
 
     local list = C.SDL_GetFullscreenDisplayModes(display(displayId), countOut)
-    if list == nil then return found end
+    if list == nil then
+        return found
+    end
     local count = countOut[0] as integer
     for index = 0, count - 1 do
         found[index + 1] = toMode((list as loader.CArray)[index] as loader.CValue)
@@ -1071,17 +1221,21 @@ end
 --- @param refreshRate Hertz, or 0 or nil for the highest the size allows.
 --- @param highDensity Whether modes whose pixel density is above 1 may be
 ---     chosen. Defaults to false.
-function Window.closestFullscreenMode(width: integer, height: integer,
-                                      refreshRate?: number,
-                                      highDensity?: boolean,
-                                      displayId?: integer): Window.DisplayMode
-    if not Window.available() then return nil end
+function Window.closestFullscreenMode(
+    width: integer, height: integer, refreshRate?: number, highDensity?: boolean, displayId?: integer
+): Window.DisplayMode
+    if not Window.available() then
+        return nil
+    end
     -- Allocated per call rather than shared, because the record keeps it and
     -- SDL reads it again on every `setFullscreenMode`.
     local mode = loader.newStruct("SDL_DisplayMode")
-    local found = C.SDL_GetClosestFullscreenDisplayMode(display(displayId),
-        width, height, refreshRate or 0, highDensity == true, mode) as boolean
-    if not found then return nil end
+    local found = C.SDL_GetClosestFullscreenDisplayMode(
+        display(displayId), width, height, refreshRate or 0, highDensity == true, mode
+    ) as boolean
+    if not found then
+        return nil
+    end
     return toMode(mode)
 end
 
@@ -1093,7 +1247,9 @@ end
 --- dark. "unknown" where the platform has no such preference, and with no
 --- video.
 function Window.theme(): Window.Theme
-    if not Window.available() then return "unknown" end
+    if not Window.available() then
+        return "unknown"
+    end
     return THEMES[tonumber(C.SDL_GetSystemTheme()) as integer] or "unknown"
 end
 
@@ -1105,7 +1261,9 @@ end
 --- keyboard and mouse are what the desktop watches. Turn it back on for a menu
 --- or a cutscene nobody is playing through.
 function Window.screenSaverEnabled(): boolean
-    if not Window.available() then return false end
+    if not Window.available() then
+        return false
+    end
     return C.SDL_ScreenSaverEnabled() as boolean
 end
 
@@ -1114,7 +1272,9 @@ end
 --- Applies to the whole application rather than to one window, which is why it
 --- is here and not a method. False with no video.
 function Window.setScreenSaverEnabled(enabled: boolean): boolean
-    if not Window.available() then return false end
+    if not Window.available() then
+        return false
+    end
     if enabled ~= false then
         return C.SDL_EnableScreenSaver() as boolean
     end

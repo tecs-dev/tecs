@@ -30,7 +30,9 @@ local assetsCache: string = nil
 --- Drops cached roots when the platform has changed under us.
 local function fresh()
     local generation = adapter.generation()
-    if generation == cachedGeneration then return end
+    if generation == cachedGeneration then
+        return
+    end
     cachedGeneration = generation
     baseCache = nil
     prefCache = nil
@@ -43,7 +45,9 @@ end
 --- rather than an error: callers fall back to a relative path.
 function paths.base(): string
     fresh()
-    if baseCache ~= nil then return baseCache end
+    if baseCache ~= nil then
+        return baseCache
+    end
     baseCache = adapter.current().basePath()
     return baseCache
 end
@@ -54,7 +58,9 @@ end
 --- one target, and finding that out at run time on a device is expensive.
 function paths.pref(): string
     fresh()
-    if prefCache ~= nil then return prefCache end
+    if prefCache ~= nil then
+        return prefCache
+    end
     prefCache = adapter.current().prefPath(paths.organisation, paths.application)
     return prefCache
 end
@@ -68,7 +74,9 @@ end
 --- directory, which is where a single-directory build puts everything.
 function paths.assets(): string
     fresh()
-    if assetsCache ~= nil then return assetsCache end
+    if assetsCache ~= nil then
+        return assetsCache
+    end
 
     local override = os.getenv("TECS_ASSETS")
     if override == nil or override == "" then

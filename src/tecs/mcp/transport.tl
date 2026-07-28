@@ -47,13 +47,15 @@ local record transport
     end
 end
 
-local ServerMT <const>: metatable<transport.Server> = { __index = transport.Server }
+local ServerMT <const>: metatable<transport.Server> = {__index = transport.Server}
 
 local started = false
 
 --- Brings SDL3_net up once. Safe to call repeatedly.
 local function ensure()
-    if started then return end
+    if started then
+        return
+    end
     if not C.NET_Init() then
         error(("tecs: NET_Init failed: %s"):format(sdl.error()), 3)
     end
@@ -70,8 +72,7 @@ function transport.listen(port: integer): transport.Server
 
     local handle = C.NET_CreateServer(nil, port, 0)
     if handle == nil then
-        error(("tecs: cannot listen on port %d: %s")
-            :format(port, sdl.error()), 2)
+        error(("tecs: cannot listen on port %d: %s"):format(port, sdl.error()), 2)
     end
 
     local self = setmetatable({} as transport.Server, ServerMT)
@@ -93,17 +94,22 @@ end
 --- way to be difficult.
 local function parse(text: string): transport.Request, boolean
     local headEnd = text:find("\r\n\r\n", 1, true)
-    if headEnd == nil then return nil, false end
+    if headEnd == nil then
+        return nil, false
+    end
 
     local head = text:sub(1, headEnd - 1)
     local method, path = head:match("^(%u+) (%S+)")
-    if method == nil then return nil, true end
+    if method == nil then
+        return nil, true
+    end
 
-    local length = math.floor(
-        tonumber(head:lower():match("content%-length:%s*(%d+)")) or 0) as integer
+    local length = math.floor(tonumber(head:lower():match("content%-length:%s*(%d+)")) or 0) as integer
     local bodyStart = headEnd + 4
     local available = #text - bodyStart + 1
-    if available < length then return nil, false end
+    if available < length then
+        return nil, false
+    end
 
     return {
         method = method,
@@ -114,7 +120,9 @@ end
 
 --- Drops the current connection.
 function transport.Server:close()
-    if self._client == nil then return end
+    if self._client == nil then
+        return
+    end
     C.NET_DestroyStreamSocket(self._client)
     self._client = nil
     self._pending = ""
@@ -125,9 +133,10 @@ end
 --- The write is not checked for a partial send: `NET_WriteToStreamSocket`
 --- queues the whole buffer and drains it in the background, which is the
 --- difference from a raw socket and the reason there is no resume loop here.
-function transport.Server:respond(status: integer, reason: string, body: string,
-                                  contentType?: string)
-    if self._client == nil then return end
+function transport.Server:respond(status: integer, reason: string, body: string, contentType?: string)
+    if self._client == nil then
+        return
+    end
     local payload = table.concat({
         ("HTTP/1.1 %d %s\r\n"):format(status, reason),
         ("Content-Type: %s\r\n"):format(contentType or "application/json"),
@@ -146,7 +155,9 @@ end
 --- Returns true when a request was dispatched. `now` is the engine clock, used
 --- only to time out a connection that stopped mid-request.
 function transport.Server:poll(now: number, handler: function(transport.Request)): boolean
-    if self._destroyed then return false end
+    if self._destroyed then
+        return false
+    end
 
     if self._client == nil then
         local out = loader.newArray("NET_StreamSocket *[1]")
@@ -154,22 +165,22 @@ function transport.Server:poll(now: number, handler: function(transport.Request)
             LOGGER:warn("accept failed: %s", sdl.error())
             return false
         end
-        if out[0] == nil then return false end
+        if out[0] == nil then
+            return false
+        end
         self._client = out[0] as loader.CPtr
         self._pending = ""
         self._since = now
     end
 
-    local read = tonumber(C.NET_ReadFromStreamSocket(self._client,
-        self._buffer, CHUNK)) as integer
+    local read = tonumber(C.NET_ReadFromStreamSocket(self._client, self._buffer, CHUNK)) as integer
     if read < 0 then
         -- The peer went away mid-request.
         self:close()
         return false
     end
     if read > 0 then
-        self._pending = self._pending
-            .. loader.toBytes(self._buffer as loader.CValue, read)
+        self._pending = self._pending .. loader.toBytes(self._buffer as loader.CValue, read)
     end
 
     local request, malformed = parse(self._pending)
@@ -194,7 +205,9 @@ end
 
 --- Releases the server and any connection. Safe to call more than once.
 function transport.Server:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     self:close()
     C.NET_DestroyServer(self._handle)

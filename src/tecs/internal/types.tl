@@ -34,10 +34,8 @@ local record internal
     --- transitions. Debug tooling installs this only while a breakpoint is
     --- armed; normal worlds pay one nil check at structural mutation sites.
     record TransitionObserver
-        entity: function(id: integer, before: ArchetypeInternal,
-            after: ArchetypeInternal)
-        state: function(kind: string, before: string, after: string,
-            changed: string)
+        entity: function(id: integer, before: ArchetypeInternal, after: ArchetypeInternal)
+        state: function(kind: string, before: string, after: string, changed: string)
     end
 
     --- A single resolved entry in a component's `_requiresClosure`.
@@ -131,8 +129,12 @@ local record internal
 
         -- Mutation / drain methods
         reserveCapacity: function(self, targetRows: integer)
-        withComponent: function(self, component: types.components.Component, archetypeIndex: ArchetypeIndexInternal): ArchetypeInternal
-        withoutComponent: function(self, component: types.components.Component, archetypeIndex: ArchetypeIndexInternal): ArchetypeInternal
+        withComponent: function(
+            self, component: types.components.Component, archetypeIndex: ArchetypeIndexInternal
+        ): ArchetypeInternal
+        withoutComponent: function(
+            self, component: types.components.Component, archetypeIndex: ArchetypeIndexInternal
+        ): ArchetypeInternal
         getMovePlanTo: function(self, dstArch: ArchetypeInternal): MovePlan
         removeEntity: function(self, row: integer, destArchetype?: ArchetypeInternal): integer, integer
         onRowsAdded: function(self, rowStart: integer, count: integer, sourceArchetype?: ArchetypeInternal)
@@ -364,9 +366,9 @@ local record internal
         -- (since its stored bytes are stale). Reset bumps
         -- `_transactionEpoch` in O(1); on 32-bit wrap the stamp array is
         -- cleared (every ~4B transactions -- effectively never).
-        _stateArr: any                  -- uint8[maxSlotCount+1]
-        _pendingArchArr: any            -- uint32[maxSlotCount+1]  -- archetype ids
-        _slotStamp: any                 -- uint32[maxSlotCount+1]  -- shared stamp
+        _stateArr: any -- uint8[maxSlotCount+1]
+        _pendingArchArr: any -- uint32[maxSlotCount+1]  -- archetype ids
+        _slotStamp: any -- uint32[maxSlotCount+1]  -- shared stamp
         _transactionEpoch: integer
         _maxSlotCount: integer
         entityStateCount: integer
@@ -402,16 +404,33 @@ local record internal
         spawnAt: function(self: WorldImpl, id: integer, ...: Component)
         forEachArchetype: function(self: WorldImpl, callback: function(ArchetypeInternal))
         dirtyArchetypes: function(self: WorldImpl): function(): ArchetypeInternal
-        batchSpawn: function(self: WorldImpl, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer)): integer | nil, {integer} | nil
-        batchSpawnAt: function(self: WorldImpl, ids: {integer}, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer))
-        batchSpawnAtRaw: function(self: WorldImpl, ids: any, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer))
+        batchSpawn: function(
+            self: WorldImpl,
+            count: integer,
+            componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        ): integer | nil, {integer} | nil
+        batchSpawnAt: function(
+            self: WorldImpl,
+            ids: {integer},
+            componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        )
+        batchSpawnAtRaw: function(
+            self: WorldImpl,
+            ids: any,
+            count: integer,
+            componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        )
         despawn: function(self: WorldImpl, id: integer)
         batchDespawn: function(self: WorldImpl, query: Query)
-        batchSet: function(self: WorldImpl, query: Query, componentOrInstance: Component,
-            callback?: function(ArchetypeInternal, integer, integer, integer))
+        batchSet: function(
+            self: WorldImpl,
+            query: Query,
+            componentOrInstance: Component,
+            callback?: function(ArchetypeInternal, integer, integer, integer)
+        )
         batchRemove: function(self: WorldImpl, query: Query, componentType: Component)
         clearEntities: function(self: WorldImpl)
         compact: function(self: WorldImpl): integer, integer
@@ -420,19 +439,30 @@ local record internal
         pushState: function(self: WorldImpl, name: string)
         popState: function(self: WorldImpl)
         peekState: function(self: WorldImpl): string
-        targets: function<T>(self: WorldImpl, id: integer, relationship: Relationship,
-            callback: function(integer, T), context: T)
-        walkUp: function<T>(self: WorldImpl, id: integer, relationship: Relationship,
-            callback: function(integer, integer, T): boolean, context: T, maxDepth?: number)
+        targets: function<T>(
+            self: WorldImpl, id: integer, relationship: Relationship, callback: function(integer, T), context: T
+        )
+        walkUp: function<T>(
+            self: WorldImpl,
+            id: integer,
+            relationship: Relationship,
+            callback: function(integer, integer, T): boolean,
+            context: T,
+            maxDepth?: number
+        )
         traverse: function(self: WorldImpl, root: integer, relationship: Relationship): function(): (integer, integer)
         addSystem: function(self: WorldImpl, config: SystemConfig)
         removeSystem: function(self: WorldImpl, systemName: string)
         query: function(self: WorldImpl, descriptor: QueryDescriptor): Query
-        findArchetypes: function(self: WorldImpl, component: Component): function(): (ArchetypeInternal, integer, DoubleArray)
-        observe: function<E is Event>(self: WorldImpl, address: integer, eventType: E,
-            observer: function(E), id?: string)
-        stopObserving: function<E is Event>(self: WorldImpl, address: integer, eventType: E,
-            observer: function(E) | string)
+        findArchetypes: function(
+            self: WorldImpl, component: Component
+        ): function(): (ArchetypeInternal, integer, DoubleArray)
+        observe: function<E is Event>(
+            self: WorldImpl, address: integer, eventType: E, observer: function(E), id?: string
+        )
+        stopObserving: function<E is Event>(
+            self: WorldImpl, address: integer, eventType: E, observer: function(E) | string
+        )
         hasObservers: function<E is Event>(self: WorldImpl, address: integer, eventType: E): boolean
         emit: function<E is Event>(self: WorldImpl, address: integer, eventOrType: E, ...: any)
         clearObservers: function(self: WorldImpl, address: integer)
@@ -458,8 +488,9 @@ local record internal
         addSnapshotHandler: function(self: WorldImpl, handler: types.World.SnapshotHandler)
 
         -- ----- Internal staging / drain / batch / sparse methods -----
-        findOldValue: function(self: WorldImpl, slot: integer, componentType: Component,
-            sourceArch: ArchetypeInternal, sourceRow: integer): any
+        findOldValue: function(
+            self: WorldImpl, slot: integer, componentType: Component, sourceArch: ArchetypeInternal, sourceRow: integer
+        ): any
         _deferSpawn: function(self: WorldImpl, ...: Component): integer
         _deferSpawnAt: function(self: WorldImpl, id: integer, ...: Component)
         _deferDespawn: function(self: WorldImpl, id: integer)
@@ -488,28 +519,50 @@ local record internal
         applySparseRaw: function(self: WorldImpl, id: integer, value: any)
         removeSparseRaw: function(self: WorldImpl, id: integer, container: Component)
         removeSparseOneRaw: function(self: WorldImpl, id: integer, container: Component, targetId: integer)
-        _resolveSpawnArchetype: function(self: WorldImpl, componentTypes: {Component}): ArchetypeInternal, {RequireEntry}
+        _resolveSpawnArchetype: function(
+            self: WorldImpl, componentTypes: {Component}
+        ): ArchetypeInternal, {RequireEntry}
 
         -- Pure-mechanism workers; component-specific callbacks do not call
         -- these directly.
         _deferSetSlow: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         _instantSpawn: function(self: WorldImpl, ...: Component): boolean, integer
         _instantDespawn: function(self: WorldImpl, id: integer): boolean
-        _deferBatchSpawn: function(self: WorldImpl, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer)): integer | nil, {integer} | nil
-        _deferBatchSpawnList: function(self: WorldImpl, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer)): {integer}
-        _deferBatchSpawnAt: function(self: WorldImpl, ids: {integer}, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer))
-        _deferBatchSpawnAtRaw: function(self: WorldImpl, ids: any, count: integer,
+        _deferBatchSpawn: function(
+            self: WorldImpl,
+            count: integer,
             componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer))
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        ): integer | nil, {integer} | nil
+        _deferBatchSpawnList: function(
+            self: WorldImpl,
+            count: integer,
+            componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        ): {integer}
+        _deferBatchSpawnAt: function(
+            self: WorldImpl,
+            ids: {integer},
+            componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        )
+        _deferBatchSpawnAtRaw: function(
+            self: WorldImpl,
+            ids: any,
+            count: integer,
+            componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        )
         _deferBatchDespawn: function(self: WorldImpl, archetypes: {ArchetypeInternal})
-        _deferBatchSet: function(self: WorldImpl, archetypes: {ArchetypeInternal}, componentType: Component,
-            value: Component)
-        _deferBatchSetCallback: function(self: WorldImpl, archetypes: {ArchetypeInternal},
+        _deferBatchSet: function(
+            self: WorldImpl, archetypes: {ArchetypeInternal}, componentType: Component, value: Component
+        )
+        _deferBatchSetCallback: function(
+            self: WorldImpl,
+            archetypes: {ArchetypeInternal},
             componentType: Component,
-            callback: function(ArchetypeInternal, integer, integer, integer))
+            callback: function(ArchetypeInternal, integer, integer, integer)
+        )
         _deferBatchRemove: function(self: WorldImpl, archetypes: {ArchetypeInternal}, componentType: Component)
         _drainArchBatchSpawn: function(self: WorldImpl, archetype: ArchetypeInternal)
         _drainArchBatchSpawnAt: function(self: WorldImpl, archetype: ArchetypeInternal)
@@ -518,9 +571,9 @@ local record internal
         _drainPendingSpawns: function(self: WorldImpl, arch: ArchetypeInternal)
         _drainPendingMoves: function(self: WorldImpl, srcArch: ArchetypeInternal)
         _drainPendingDespawns: function(self: WorldImpl, arch: ArchetypeInternal)
-        _codegenBundleSpawn: function(self: WorldImpl, typeArray: {Component},
-            factoryArray: {function(): Component},
-            requiredCount: integer): function(any, ...: Component): integer
+        _codegenBundleSpawn: function(
+            self: WorldImpl, typeArray: {Component}, factoryArray: {function(): Component}, requiredCount: integer
+        ): function(any, ...: Component): integer
         _drain: function(self: WorldImpl)
         _resetTxn: function(self: WorldImpl)
         _validateIntegrity: function(self: WorldImpl)

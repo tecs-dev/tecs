@@ -118,8 +118,16 @@ local EMPTY_GROUP <const>: FlatGroup = {
 -- The list of phases for each span of flatSystems.
 local BEFORE_FIXED_PHASES <const> = {phases.First, phases.PreUpdate}
 local FIXED_PHASES <const> = phases.FixedUpdateGroup.children
-local AFTER_FIXED_PHASES <const> = {phases.Update, phases.PostUpdate, phases.RenderFirst,
-    phases.PreRender, phases.Render, phases.PostRender, phases.RenderLast, phases.Last}
+local AFTER_FIXED_PHASES <const> = {
+    phases.Update,
+    phases.PostUpdate,
+    phases.RenderFirst,
+    phases.PreRender,
+    phases.Render,
+    phases.PostRender,
+    phases.RenderLast,
+    phases.Last,
+}
 
 function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverload?: FixedOverload): Pipeline
     -- Validated here rather than on the first overloaded frame, which may be
@@ -134,26 +142,29 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
         error("tecs: fixedOverload must be 'drop' or 'accumulate', got " .. tostring(fixedOverload), 2)
     end
 
-    local result: PipelineImpl = setmetatable({
-        dirty = true,
-        systems = {},
-        phaseStates = table_new(#phases.index, 0) as {boolean},
-        fixedTimestep = fixedTimestep or DEFAULT_TIMESTEP,
-        fixedAccumulator = 0,
-        fixedStepCount = 0,
-        fixedMaxSteps = fixedMaxSteps or DEFAULT_MAX_STEPS,
-        fixedOverload = fixedOverload or DEFAULT_OVERLOAD,
-        fixedTimeDropped = 0,
-        fixedStepsDropped = 0,
-        nextDropReport = 1,
-        count = 0,
-        beforeFixedGroup = EMPTY_GROUP,
-        fixedGroup = EMPTY_GROUP,
-        afterFixedGroup = EMPTY_GROUP,
-        phaseGroups = {},
-        systemNameRegistry = {},
-        anonymousSystemCount = 0,
-    }, { __index = PipelineImpl })
+    local result: PipelineImpl = setmetatable(
+        {
+            dirty = true,
+            systems = {},
+            phaseStates = table_new(#phases.index, 0) as {boolean},
+            fixedTimestep = fixedTimestep or DEFAULT_TIMESTEP,
+            fixedAccumulator = 0,
+            fixedStepCount = 0,
+            fixedMaxSteps = fixedMaxSteps or DEFAULT_MAX_STEPS,
+            fixedOverload = fixedOverload or DEFAULT_OVERLOAD,
+            fixedTimeDropped = 0,
+            fixedStepsDropped = 0,
+            nextDropReport = 1,
+            count = 0,
+            beforeFixedGroup = EMPTY_GROUP,
+            fixedGroup = EMPTY_GROUP,
+            afterFixedGroup = EMPTY_GROUP,
+            phaseGroups = {},
+            systemNameRegistry = {},
+            anonymousSystemCount = 0,
+        },
+        {__index = PipelineImpl}
+    )
 
     -- Initialize each phase.
     for i = 1, #phases.index do
@@ -169,7 +180,9 @@ end
 -- function stay distinct; unconstrained systems keep registration order.
 local function topologicalSort(systems: {RegisteredSystem}): {RegisteredSystem}
     local n = #systems
-    if n < 2 then return systems end
+    if n < 2 then
+        return systems
+    end
 
     local systemNameMap: {string: RegisteredSystem} = {}
     for i = 1, n do
@@ -190,13 +203,17 @@ local function topologicalSort(systems: {RegisteredSystem}): {RegisteredSystem}
     end
 
     local function addEdge(first: RegisteredSystem, second: RegisteredSystem)
-        if first == second then return end
+        if first == second then
+            return
+        end
         local seen = edgeSeen[first]
         if not seen then
             seen = {}
             edgeSeen[first] = seen
         end
-        if seen[second] then return end
+        if seen[second] then
+            return
+        end
         seen[second] = true
         local list = succs[first]
         if not list then
@@ -213,14 +230,18 @@ local function topologicalSort(systems: {RegisteredSystem}): {RegisteredSystem}
         if after then
             for j = 1, #after do
                 local dep = systemNameMap[after[j]]
-                if dep then addEdge(dep, config) end
+                if dep then
+                    addEdge(dep, config)
+                end
             end
         end
         local before = config.before
         if before then
             for j = 1, #before do
                 local target = systemNameMap[before[j]]
-                if target then addEdge(config, target) end
+                if target then
+                    addEdge(config, target)
+                end
             end
         end
     end
@@ -259,10 +280,14 @@ end
 -- Build a FlatGroup from a list of registered systems.
 local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
     local n = #configs
-    if n == 0 then return EMPTY_GROUP end
+    if n == 0 then
+        return EMPTY_GROUP
+    end
 
     local runs: {System} = table_new(n, 0) as {System}
-    local runIfs: {function(number, World, string): boolean} = table_new(n, 0) as {function(number, World, string): boolean}
+    local runIfs: {function(number, World, string): boolean} = table_new(n, 0) as {function(
+        number, World, string
+    ): boolean}
     local ids: {string} = table_new(n, 0) as {string}
     local names: {string} = table_new(n, 0) as {string}
 
@@ -284,10 +309,7 @@ local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
 end
 
 -- Collect systems from a list of phases into one flat registered-system list.
-local function collectPhaseSystems(
-    self: PipelineImpl,
-    phaseList: {Phase}
-): {RegisteredSystem}
+local function collectPhaseSystems(self: PipelineImpl, phaseList: {Phase}): {RegisteredSystem}
     local result: {RegisteredSystem} = {}
     local n = 0
     for i = 1, #phaseList do
@@ -344,7 +366,9 @@ end
 -- so profiling can attribute samples. This does not commit the world.
 local function runGroup(group: FlatGroup, dt: number, world: World)
     local n = group.count
-    if n == 0 then return end
+    if n == 0 then
+        return
+    end
 
     local runs = group.runs
     local runIfArr = group.runIfs
@@ -370,7 +394,9 @@ end
 local function dropCatchUp(self: PipelineImpl, fixedTimestep: number)
     local owed = self.fixedAccumulator
     local dropped = owed - (owed % fixedTimestep)
-    if dropped <= 0 then return end
+    if dropped <= 0 then
+        return
+    end
 
     self.fixedAccumulator = owed - dropped
     self.fixedTimeDropped = self.fixedTimeDropped + dropped
@@ -379,7 +405,9 @@ local function dropCatchUp(self: PipelineImpl, fixedTimestep: number)
     -- into a two.
     self.fixedStepsDropped = self.fixedStepsDropped + math.floor(dropped / fixedTimestep + 0.5)
 
-    if self.fixedStepsDropped < self.nextDropReport then return end
+    if self.fixedStepsDropped < self.nextDropReport then
+        return
+    end
     while self.nextDropReport <= self.fixedStepsDropped do
         self.nextDropReport = self.nextDropReport * 2
     end
@@ -397,8 +425,10 @@ local function dropCatchUp(self: PipelineImpl, fixedTimestep: number)
             .. "in total. The simulation is now that far behind wall time. "
             .. "Raise fixedMaxSteps, lower the timestep cost, or set "
             .. "fixedOverload to 'accumulate' to keep the time instead.",
-        math.floor(dropped / fixedTimestep + 0.5), self.fixedStepsDropped,
-        self.fixedTimeDropped)
+        math.floor(dropped / fixedTimestep + 0.5),
+        self.fixedStepsDropped,
+        self.fixedTimeDropped
+    )
 end
 
 -- Execute fixed timestep systems with death-spiral protection. This does

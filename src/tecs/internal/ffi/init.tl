@@ -33,9 +33,9 @@ end
 
 ffi.FFIStorage = FFIStorage
 
-local SHRINK_THRESHOLD <const> = 8          -- Shrink when using less than 1/8 capacity
-local MIN_SHRINK_SIZE <const> = 512         -- Minimum capacity after shrinking
-local MIN_SHRINK_CHECK_SIZE <const> = 2048  -- Only consider shrinking arrays this size or larger
+local SHRINK_THRESHOLD <const> = 8 -- Shrink when using less than 1/8 capacity
+local MIN_SHRINK_SIZE <const> = 512 -- Minimum capacity after shrinking
+local MIN_SHRINK_CHECK_SIZE <const> = 2048 -- Only consider shrinking arrays this size or larger
 
 local SIZEOF_DOUBLE <const> = C.sizeof("double")
 
@@ -47,13 +47,13 @@ end
 
 -- Capacity metadata keyed by cdata array. Weak keys allow old arrays to drop
 -- after resize.
-local arrayMetadata: {any:ArrayMeta} = setmetatable({}, {__mode = "k"})
+local arrayMetadata: {any: ArrayMeta} = setmetatable({}, {__mode = "k"})
 
 ffi.newDouble = function(capacity: integer): DoubleArray
     capacity = max(16, capacity)
     local data = C.new(DOUBLE_ARRAY_T, capacity + 1) as DoubleArray
-    arrayMetadata[data] = { capacity = capacity }
-    (data as {integer: number})[0] = 0  -- Initialize length to 0
+    arrayMetadata[data] = {capacity = capacity}
+    (data as {integer: number})[0] = 0 -- Initialize length to 0
     return data
 end
 
@@ -71,7 +71,7 @@ function ffi.ensureCapacityDouble(array: DoubleArray, neededCount: integer): Dou
             (newData as {integer: number})[0] = currentLength
         end
 
-        arrayMetadata[newData] = { capacity = neededCount }
+        arrayMetadata[newData] = {capacity = neededCount}
         arrayMetadata[array] = nil
         return newData
     end
@@ -95,7 +95,7 @@ function ffi.adjustCapacityDouble(array: DoubleArray, usedCount: integer): Doubl
         end
         (newData as {integer: number})[0] = usedCount
 
-        arrayMetadata[newData] = { capacity = newCapacity }
+        arrayMetadata[newData] = {capacity = newCapacity}
         arrayMetadata[array] = nil
         return newData
     end

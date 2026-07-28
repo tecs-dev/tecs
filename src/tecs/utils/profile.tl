@@ -27,7 +27,6 @@ local log <const> = require("tecs.log")
 local LOGGER <const> = log.get("tecs.profile")
 
 local record profile
-
     record SampleOptions
         --- Sampler interval in ms. Default 10 (100 samples/sec). Raise for
         --- longer low-overhead sessions; don't go below 10 unless you've
@@ -133,7 +132,8 @@ end
 local zone = loadUntyped("jit.zone") as {string}
 local zoneMeta <const> = getmetatable(zone) as {any: any}
 
-local function noopCall(_t: {any: any}, _name: any): any end
+local function noopCall(_t: {any: any}, _name: any): any
+end
 
 -- Monotonic counter bumped on every zone push/pop. Lets the sample callback
 -- detect when the zone stack has changed without scanning it on every sample.
@@ -167,16 +167,22 @@ local function releaseZones()
     if zoneRefs <= 0 then
         zoneRefs = 0
         local arr = zone as {any}
-        for i = #arr, 1, -1 do arr[i] = nil end
+        for i = #arr, 1, -1 do
+            arr[i] = nil
+        end
         zoneMeta.__call = noopCall
     end
 end
 
 local function activeZpath(): string
     local d = #zone
-    if d == 0 then return "" end
+    if d == 0 then
+        return ""
+    end
     local buf: {string} = {}
-    for i = 1, d do buf[i] = zone[i] end
+    for i = 1, d do
+        buf[i] = zone[i]
+    end
     return table_concat(buf, "/", 1, d)
 end
 
@@ -209,16 +215,26 @@ end
 local function dominantVm(r: SampleRecord): string
     local best = "N"
     local bestCount = r.N
-    if r.I > bestCount then best, bestCount = "I", r.I end
-    if r.C > bestCount then best, bestCount = "C", r.C end
-    if r.G > bestCount then best, bestCount = "G", r.G end
-    if r.J > bestCount then best, bestCount = "J", r.J end
+    if r.I > bestCount then
+        best, bestCount = "I", r.I
+    end
+    if r.C > bestCount then
+        best, bestCount = "C", r.C
+    end
+    if r.G > bestCount then
+        best, bestCount = "G", r.G
+    end
+    if r.J > bestCount then
+        best, bestCount = "J", r.J
+    end
     return best
 end
 
 local function splitInto(s: string, sep: string, out: {string}, offset: integer): integer
     local n = offset
-    if s == "" or s == ROOT then return n end
+    if s == "" or s == ROOT then
+        return n
+    end
     local start = 1
     local len = #s
     for i = 1, len do
@@ -252,19 +268,30 @@ local function encodeCollapsed(agg: SampleAgg): string
             entries[count] = rec
         end
     end
-    if count == 0 then return "" end
+    if count == 0 then
+        return ""
+    end
 
-    table_sort(entries, function(a: SampleRecord, b: SampleRecord): boolean
-        if a.n ~= b.n then return a.n > b.n end
-        if a.zpath ~= b.zpath then return a.zpath < b.zpath end
-        return a.stack < b.stack
-    end)
+    table_sort(
+        entries,
+        function(a: SampleRecord, b: SampleRecord): boolean
+            if a.n ~= b.n then
+                return a.n > b.n
+            end
+            if a.zpath ~= b.zpath then
+                return a.zpath < b.zpath
+            end
+            return a.stack < b.stack
+        end
+    )
 
     local lines: {string} = {}
     local frames: {string} = {}
     for i = 1, count do
         local rec = entries[i]
-        for k = #frames, 1, -1 do frames[k] = nil end
+        for k = #frames, 1, -1 do
+            frames[k] = nil
+        end
         local n = splitInto(rec.zpath, "/", frames, 0)
         n = splitInto(rec.stack, ";", frames, n)
         if n == 0 then
@@ -278,7 +305,9 @@ local function encodeCollapsed(agg: SampleAgg): string
 end
 
 local function filterByZone(agg: SampleAgg, prefix: string): SampleAgg
-    if not prefix or prefix == "" then return agg end
+    if not prefix or prefix == "" then
+        return agg
+    end
     local out: SampleAgg = {}
     local plen = #prefix
     for zpath, inner in pairs(agg) do
@@ -318,7 +347,9 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
     local cachedInner: {string: SampleRecord} = nil
 
     local function callback(th: any, n: integer, vmstate: string)
-        if paused then return end
+        if paused then
+            return
+        end
         local zpath: string
         local inner: {string: SampleRecord}
         if zoneVersion == cachedVersion then
@@ -329,7 +360,9 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
             if d == 0 then
                 zpath = ROOT
             else
-                for i = 1, d do zbuf[i] = zone[i] end
+                for i = 1, d do
+                    zbuf[i] = zone[i]
+                end
                 zpath = table_concat(zbuf, "/", 1, d)
             end
             inner = agg[zpath]
@@ -353,11 +386,16 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
             inner[stack] = r
         end
         r.n = r.n + n
-        if vmstate == "N" then r.N = r.N + n
-        elseif vmstate == "I" then r.I = r.I + n
-        elseif vmstate == "C" then r.C = r.C + n
-        elseif vmstate == "G" then r.G = r.G + n
-        elseif vmstate == "J" then r.J = r.J + n
+        if vmstate == "N" then
+            r.N = r.N + n
+        elseif vmstate == "I" then
+            r.I = r.I + n
+        elseif vmstate == "C" then
+            r.C = r.C + n
+        elseif vmstate == "G" then
+            r.G = r.G + n
+        elseif vmstate == "J" then
+            r.J = r.J + n
         end
     end
 
@@ -365,15 +403,17 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
     profileStart("li" .. string_format("%d", intervalMs), callback)
     sampleActive = true
 
-    LOGGER:info("sample session started (intervalMs=%d, zone=%s)",
-        intervalMs, zoneFilter or "*")
+    LOGGER:info("sample session started (intervalMs=%d, zone=%s)", intervalMs, zoneFilter or "*")
 
-    local session = setmetatable({
-        _agg = agg,
-        _zoneFilter = zoneFilter,
-        _stopped = false,
-        _setPaused = function(v: boolean) paused = v end,
-    } as profile.SampleSession, SAMPLE_MT)
+    local session = setmetatable(
+        {
+            _agg = agg,
+            _zoneFilter = zoneFilter,
+            _stopped = false,
+            _setPaused = function(v: boolean) paused = v end,
+        } as profile.SampleSession,
+        SAMPLE_MT
+    )
     return session
 end
 
@@ -433,8 +473,7 @@ end
 -- Trace channel
 -------------------------------------------------------------------------------
 
-local jitAttach <const> = ((_G as {string: any}).jit as {string: any}).attach
-    as function(any, ?string)
+local jitAttach <const> = ((_G as {string: any}).jit as {string: any}).attach as function(any, ?string)
 
 -- traceerr (error code -> reason) and bcnames (packed opcode name string) come from jit.vmdef
 local vmdef <const> = loadUntyped("jit.vmdef") as {string: any}
@@ -450,37 +489,61 @@ do
 end
 
 local function bcName(opcode: integer): string
-    if not bcnames then return string_format("op%d", opcode) end
+    if not bcnames then
+        return string_format("op%d", opcode)
+    end
     local idx = opcode * 6 + 1
     local s = bcnames:sub(idx, idx + 5)
     return (s:gsub("%s+$", ""))
 end
 
 local function reasonText(otr: integer, oex: any): string
-    if not otr then return "abort" end
+    if not otr then
+        return "abort"
+    end
     local fmt = traceerr[otr]
-    if not fmt then return string_format("error %d", otr) end
+    if not fmt then
+        return string_format("error %d", otr)
+    end
     if fmt:find("NYI: bytecode", 1, true) and type(oex) == "number" then
         return "NYI: bytecode " .. bcName(oex as integer)
     end
-    if oex == nil then return fmt end
+    if oex == nil then
+        return fmt
+    end
     local ok, s = pcall(string_format, fmt, oex)
-    if ok then return s as string end
+    if ok then
+        return s as string
+    end
     return fmt
 end
 
 local function classify(reason: string): string
-    if reason:find("blacklist", 1, true) then return "blacklist" end
-    if reason:find("leaving loop", 1, true) then return "info" end
-    if reason:find("inner loop", 1, true) then return "info" end
-    if reason:find("down%-recursion") then return "info" end
-    if reason:find("up%-recursion") then return "info" end
+    if reason:find("blacklist", 1, true) then
+        return "blacklist"
+    end
+    if reason:find("leaving loop", 1, true) then
+        return "info"
+    end
+    if reason:find("inner loop", 1, true) then
+        return "info"
+    end
+    if reason:find("down%-recursion") then
+        return "info"
+    end
+    if reason:find("up%-recursion") then
+        return "info"
+    end
     return "warn"
 end
 
 local function severityRank(s: string): integer
-    if s == "blacklist" then return 0 end
-    if s == "warn" then return 1 end
+    if s == "blacklist" then
+        return 0
+    end
+    if s == "warn" then
+        return 1
+    end
     return 2
 end
 
@@ -489,7 +552,9 @@ end
 -- '@path:line'. Leaves non-file sources (e.g. '=[C]', '[string "..."]')
 -- untouched since those don't start with '@'.
 local function trimAt(src: string): string
-    if src:sub(1, 1) == "@" then return src:sub(2) end
+    if src:sub(1, 1) == "@" then
+        return src:sub(2)
+    end
     return src
 end
 
@@ -524,21 +589,22 @@ local function serializeTraceReport(r: profile.TraceReport): string
     local lines: {string} = {"severity,count,reason,location,zone"}
     for i = 1, #r.sites do
         local s = r.sites[i]
-        lines[#lines + 1] = table_concat({
-            s.severity,
-            string_format("%d", s.count),
-            csvField(s.reason),
-            csvField(s.location),
-            csvField(s.zone),
-        }, ",")
+        lines[#lines + 1] = table_concat(
+            {
+                s.severity,
+                string_format("%d", s.count),
+                csvField(s.reason),
+                csvField(s.location),
+                csvField(s.zone),
+            },
+            ","
+        )
     end
     return table_concat(lines, "\n")
 end
 
 local TRACE_REPORT_MT <const>: metatable<profile.TraceReport> = {
-    __tostring = function(self: profile.TraceReport): string
-        return serializeTraceReport(self)
-    end,
+    __tostring = function(self: profile.TraceReport): string return serializeTraceReport(self) end,
 }
 
 local TRACE_MT <const>: metatable<profile.TraceSession> = {
@@ -560,13 +626,19 @@ function profile.trace(opts?: profile.TraceOptions): profile.TraceSession
     local paused = false
 
     local function callback(what: string, _tr: integer, func: any, pc: integer, otr: integer, oex: any)
-        if what ~= "abort" or paused then return end
+        if what ~= "abort" or paused then
+            return
+        end
         local reason = reasonText(otr, oex)
         local sev = classify(reason)
-        if not includeBenign and sev == "info" then return end
+        if not includeBenign and sev == "info" then
+            return
+        end
 
         counters.total = counters.total + 1
-        if sev == "blacklist" then counters.black = counters.black + 1 end
+        if sev == "blacklist" then
+            counters.black = counters.black + 1
+        end
 
         local location = describeLocation(func, pc)
         local zpath = activeZpath()
@@ -591,14 +663,17 @@ function profile.trace(opts?: profile.TraceOptions): profile.TraceSession
 
     LOGGER:info("trace session started (includeBenign=%s)", tostring(includeBenign))
 
-    local session = setmetatable({
-        _callback = callback,
-        _sites = sites,
-        _counters = counters,
-        _startTime = startTime,
-        _stopped = false,
-        _setPaused = function(v: boolean) paused = v end,
-    } as profile.TraceSession, TRACE_MT)
+    local session = setmetatable(
+        {
+            _callback = callback,
+            _sites = sites,
+            _counters = counters,
+            _startTime = startTime,
+            _stopped = false,
+            _setPaused = function(v: boolean) paused = v end,
+        } as profile.TraceSession,
+        TRACE_MT
+    )
     return session
 end
 
@@ -632,28 +707,49 @@ function profile.TraceSession:stop(filename?: string): profile.TraceReport
     for _, site in pairs(s._sites as {string: profile.AbortSite}) do
         sites[#sites + 1] = site
     end
-    table_sort(sites, function(a: profile.AbortSite, b: profile.AbortSite): boolean
-        local ra, rb = severityRank(a.severity), severityRank(b.severity)
-        if ra ~= rb then return ra < rb end
-        if a.count ~= b.count then return a.count > b.count end
-        if a.reason ~= b.reason then return a.reason < b.reason end
-        return a.location < b.location
-    end)
+    table_sort(
+        sites,
+        function(a: profile.AbortSite, b: profile.AbortSite): boolean
+            local ra, rb = severityRank(a.severity), severityRank(b.severity)
+            if ra ~= rb then
+                return ra < rb
+            end
+            if a.count ~= b.count then
+                return a.count > b.count
+            end
+            if a.reason ~= b.reason then
+                return a.reason < b.reason
+            end
+            return a.location < b.location
+        end
+    )
 
     local counters = s._counters as {string: integer}
-    local report = setmetatable({
-        durationSec = os.time() - (s._startTime as number),
-        totalAborts = counters.total,
-        blacklisted = counters.black,
-        sites = sites,
-    } as profile.TraceReport, TRACE_REPORT_MT)
+    local report = setmetatable(
+        {
+            durationSec = os.time() - (s._startTime as number),
+            totalAborts = counters.total,
+            blacklisted = counters.black,
+            sites = sites,
+        } as profile.TraceReport,
+        TRACE_REPORT_MT
+    )
     if filename then
         writeToFile(filename, tostring(report))
-        LOGGER:info("trace session stopped (%.2fs, %d aborts, %d blacklisted), report written to %s",
-            report.durationSec, report.totalAborts, report.blacklisted, filename)
+        LOGGER:info(
+            "trace session stopped (%.2fs, %d aborts, %d blacklisted), report written to %s",
+            report.durationSec,
+            report.totalAborts,
+            report.blacklisted,
+            filename
+        )
     else
-        LOGGER:info("trace session stopped (%.2fs, %d aborts, %d blacklisted)",
-            report.durationSec, report.totalAborts, report.blacklisted)
+        LOGGER:info(
+            "trace session stopped (%.2fs, %d aborts, %d blacklisted)",
+            report.durationSec,
+            report.totalAborts,
+            report.blacklisted
+        )
     end
     return report
 end

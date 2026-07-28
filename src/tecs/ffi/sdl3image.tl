@@ -8,8 +8,9 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("sdl3image")
 
-local namespace <const>, libraryPath <const> =
-    loader.library("SDL3_image", "sdl3_image", "TECS_SDL3IMAGE_PATH", "sdl3image")
+local namespace <const>, libraryPath <const> = loader.library(
+    "SDL3_image", "sdl3_image", "TECS_SDL3IMAGE_PATH", "sdl3image"
+)
 
 local record sdl3image
     C: loader.CNamespace

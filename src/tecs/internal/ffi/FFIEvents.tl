@@ -67,9 +67,7 @@ local function generateStructDef(name: string, fields: {{string, string}}): stri
 end
 
 local function ensureSliceArena(
-    manager: FFIEvents.Manager,
-    registration: FFIEvents.EventRegistration,
-    sliceId: integer
+    manager: FFIEvents.Manager, registration: FFIEvents.EventRegistration, sliceId: integer
 ): Arena<any>
     local arena = registration.arenasBySlice[sliceId]
     if not arena then
@@ -85,7 +83,7 @@ local function ensureSliceArena(
     return arena
 end
 
-local FFI_EVENTS_MANAGER_MT <const> = { __index = FFIEvents.Manager }
+local FFI_EVENTS_MANAGER_MT <const> = {__index = FFIEvents.Manager}
 
 function FFIEvents.new(): FFIEvents.Manager
     local manager: FFIEvents.Manager = {
@@ -160,7 +158,9 @@ end
 
 function FFIEvents.Manager:clearSlice(sliceId: integer)
     local list = self.arenasPerSlice[sliceId]
-    if not list then return end
+    if not list then
+        return
+    end
     for i = 1, #list do
         list[i]:clear()
     end

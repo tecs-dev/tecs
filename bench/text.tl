@@ -22,12 +22,11 @@
 --- `rewritten` beside the stage table for exactly that reason: if it tracks the
 --- instance count rather than the glyph count, the cliff is real.
 
-local root = os.getenv("TECS_LUA")
-    or (_G as {string: any})["__tecsContent"] as string
-    or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then root = root:sub(1, -2) end
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local timing <const> = require("tecs.timing")
@@ -87,9 +86,9 @@ local function phrase(seed: integer, length: integer): string
 end
 
 return tecs.application({
-    window = { title = "text", width = WIDTH, height = HEIGHT },
+    window = {title = "text", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
-    ambientLight = { 1.0, 1.0, 1.0 },
+    ambientLight = {1.0, 1.0, 1.0},
     capacity = TEXTS * (LENGTH + 4) + 256,
     maxEntities = TEXTS * (LENGTH + 4) + 4096,
     debugMaxFrames = WARMUP + FRAMES,
@@ -99,12 +98,9 @@ return tecs.application({
         -- Real time, recorded where both values are visible. The world's dt is
         -- whatever the loop measured, and this is that same measurement kept
         -- for the report.
-        clock.provider = function(realDt: number): number
-            timing.mark(DELTA, realDt)
-            return realDt
-        end
+        clock.provider = function(realDt: number): number timing.mark(DELTA, realDt); return realDt end
 
-        world:addPlugin(text.plugin({ renderer = renderer }))
+        world:addPlugin(text.plugin({renderer = renderer}))
         local font = text.defaultFont()
         transientFont = font
 
@@ -115,8 +111,7 @@ return tecs.application({
             local column = (index - 1) % columns
             local row = math.floor((index - 1) / columns)
             entities[index] = world:spawn(
-                Transform(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4,
-                    0.0, 1, 0.0, 1.0, 1.0),
+                Transform(column * (WIDTH / columns), 8.0 + row * SIZE * 1.4, 0.0, 1, 0.0, 1.0, 1.0),
                 Tint(0.9, 0.95, 1.0, 1.0),
                 text.Text.new({
                     text = phrase(index, LENGTH),
@@ -127,12 +122,16 @@ return tecs.application({
         end
 
         local spawnMs <const> = (clock.now() - spawnStart) * 1000.0
-        print(("text: spawned %d texts (%d glyphs) in %.1f ms, %.3f ms each")
-            :format(TEXTS, TEXTS * LENGTH, spawnMs, spawnMs / TEXTS))
-        print(("text: %d texts of %d characters, churn %.0f%%%s, "
-            .. "measuring %d frames after %d warmup")
-            :format(TEXTS, LENGTH, CHURN * 100.0,
-                RESIZE and " with length changes" or "", FRAMES, WARMUP))
+        print(
+            ("text: spawned %d texts (%d glyphs) in %.1f ms, %.3f ms each"):format(
+                TEXTS, TEXTS * LENGTH, spawnMs, spawnMs / TEXTS
+            )
+        )
+        print(
+            ("text: %d texts of %d characters, churn %.0f%%%s, " .. "measuring %d frames after %d warmup"):format(
+                TEXTS, LENGTH, CHURN * 100.0, RESIZE and " with length changes" or "", FRAMES, WARMUP
+            )
+        )
 
         -- In `First`, which is where the loop used to call this from: a text
         -- spawned here is laid out and extracted by the frame that spawned it.
@@ -141,7 +140,9 @@ return tecs.application({
             name = "bench.Churn",
             phase = tecs.phases.First,
             run = function()
-                if frame == WARMUP then timing.reset() end
+                if frame == WARMUP then
+                    timing.reset()
+                end
 
                 -- Damage numbers: a burst appears every frame and each is gone a
                 -- moment later, so the population is steady while the identities turn
@@ -149,8 +150,7 @@ return tecs.application({
                 for index = 1, SPAWN_RATE do
                     local at = (frame * SPAWN_RATE + index) % 997
                     transient[#transient + 1] = world:spawn(
-                        Transform(8.0 + (at % 60) * 20.0,
-                            8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
+                        Transform(8.0 + (at % 60) * 20.0, 8.0 + math.floor(at / 60) * 18.0, 0.0, 1, 0.0, 1.0, 1.0),
                         Tint(1.0, 0.8, 0.2, 1.0),
                         text.Text.new({
                             text = tostring(100 + at),
@@ -200,11 +200,15 @@ return tecs.application({
             phase = tecs.phases.Shutdown,
             run = function()
                 local frames <const> = math.max(1, frame - WARMUP)
-                print(("%d instances drawn, %d layouts, %.0f instances "
-                    .. "rewritten per frame")
-                    :format(glyphs, text.layouts(world), rewritten / frames))
+                print(
+                    ("%d instances drawn, %d layouts, %.0f instances " .. "rewritten per frame"):format(
+                        glyphs, text.layouts(world), rewritten / frames
+                    )
+                )
                 local report = timing.format()
-                if report ~= "" then print(report) end
+                if report ~= "" then
+                    print(report)
+                end
             end,
         })
     end,

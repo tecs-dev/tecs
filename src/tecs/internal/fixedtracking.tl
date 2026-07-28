@@ -38,28 +38,25 @@ local record fixedtracking
     currentStep: function(world: World): integer
 end
 
-local statesByWorld <const>: {World: State} =
-    setmetatable({}, {__mode = "k"} as metatable<{World: State}>)
-local statesByDirtySet <const>: {table: State} =
-    setmetatable({}, {__mode = "k"} as metatable<{table: State}>)
+local statesByWorld <const>: {World: State} = setmetatable({}, {__mode = "k"} as metatable<{World: State}>)
+local statesByDirtySet <const>: {table: State} = setmetatable({}, {__mode = "k"} as metatable<{table: State}>)
 
 local function dirtySetOf(world: World): table
-    return ((world as {string:any})._dirtyArchetypes as table)
+    return ((world as {string: any})._dirtyArchetypes as table)
 end
 
 local function stateFor(world: World): State
     local state = statesByWorld[world]
-    if state then return state end
+    if state then
+        return state
+    end
 
     state = {
         tracked = {},
         trackedList = {},
-        versions = setmetatable({}, {__mode = "k"})
-            as {Archetype: {Component: integer}},
-        fixedWrites = setmetatable({}, {__mode = "k"})
-            as {Archetype: {Component: integer}},
-        structureVersions = setmetatable({}, {__mode = "k"})
-            as {Archetype: integer},
+        versions = setmetatable({}, {__mode = "k"}) as {Archetype: {Component: integer}},
+        fixedWrites = setmetatable({}, {__mode = "k"}) as {Archetype: {Component: integer}},
+        structureVersions = setmetatable({}, {__mode = "k"}) as {Archetype: integer},
         beforeCallbacks = {},
         callbacks = {},
         step = 0,
@@ -72,12 +69,12 @@ end
 
 function fixedtracking.track(world: World, component: Component)
     local state = stateFor(world)
-    if state.tracked[component] then return end
+    if state.tracked[component] then
+        return
+    end
     state.tracked[component] = true
     state.trackedList[#state.trackedList + 1] = component
-    world:forEachArchetype(function(archetype: Archetype)
-        (archetype as {string:any})._fixedTracking = true
-    end)
+    world:forEachArchetype(function(archetype: Archetype) (archetype as {string: any})._fixedTracking = true end)
 end
 
 function fixedtracking.enabled(dirtySet: table): boolean
@@ -96,7 +93,9 @@ end
 
 function fixedtracking.beginStep(world: World)
     local state = statesByWorld[world]
-    if not state then return end
+    if not state then
+        return
+    end
     state.step = state.step + 1
     local callbacks = state.beforeCallbacks
     for i = 1, #callbacks do
@@ -107,7 +106,9 @@ end
 
 function fixedtracking.finishStep(world: World)
     local state = statesByWorld[world]
-    if not state then return end
+    if not state then
+        return
+    end
     local callbacks = state.callbacks
     for i = 1, #callbacks do
         callbacks[i](world)
@@ -116,9 +117,11 @@ function fixedtracking.finishStep(world: World)
 end
 
 function fixedtracking.mark(archetype: Archetype, component: Component)
-    local dirtySet = (archetype as {string:any})._dirtySet as table
+    local dirtySet = (archetype as {string: any})._dirtySet as table
     local state = statesByDirtySet[dirtySet]
-    if not state or not state.tracked[component] then return end
+    if not state or not state.tracked[component] then
+        return
+    end
 
     local versions = state.versions[archetype]
     if not versions then
@@ -142,11 +145,13 @@ function fixedtracking.mark(archetype: Archetype, component: Component)
 end
 
 function fixedtracking.markAll(archetype: Archetype)
-    local dirtySet = (archetype as {string:any})._dirtySet as table
+    local dirtySet = (archetype as {string: any})._dirtySet as table
     local state = statesByDirtySet[dirtySet]
-    if not state then return end
+    if not state then
+        return
+    end
 
-    local columns = (archetype as {string:any}).columns as table
+    local columns = (archetype as {string: any}).columns as table
     local tracked = state.trackedList
     local touched = false
     for i = 1, #tracked do
@@ -157,32 +162,31 @@ function fixedtracking.markAll(archetype: Archetype)
         end
     end
     if touched then
-        state.structureVersions[archetype] =
-            (state.structureVersions[archetype] or 0) + 1
+        state.structureVersions[archetype] = (state.structureVersions[archetype] or 0) + 1
     end
 end
 
 function fixedtracking.version(archetype: Archetype, component: Component): integer
-    local dirtySet = (archetype as {string:any})._dirtySet as table
+    local dirtySet = (archetype as {string: any})._dirtySet as table
     local state = statesByDirtySet[dirtySet]
-    if not state or not state.tracked[component] then return -1 end
+    if not state or not state.tracked[component] then
+        return -1
+    end
     local versions = state.versions[archetype]
     return versions and (versions[component] or 0) or 0
 end
 
 function fixedtracking.structureVersion(archetype: Archetype): integer
-    local dirtySet = (archetype as {string:any})._dirtySet as table
+    local dirtySet = (archetype as {string: any})._dirtySet as table
     local state = statesByDirtySet[dirtySet]
     return state and (state.structureVersions[archetype] or 0) or -1
 end
 
-function fixedtracking.wroteThisStep(
-    world: World,
-    archetype: Archetype,
-    component: Component
-): boolean
+function fixedtracking.wroteThisStep(world: World, archetype: Archetype, component: Component): boolean
     local state = statesByWorld[world]
-    if not state then return false end
+    if not state then
+        return false
+    end
     local writes = state.fixedWrites[archetype]
     return writes ~= nil and writes[component] == state.step
 end

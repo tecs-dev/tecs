@@ -196,7 +196,9 @@ function SparseImpl:removeOne(entityId: integer, targetId: integer): Component, 
         return nil, self._forward[entityId] ~= nil
     else
         local map = self._forward[entityId] as {integer: Component}
-        if not map then return nil, false end
+        if not map then
+            return nil, false
+        end
 
         local val = map[targetId]
         if val == nil then
@@ -223,11 +225,7 @@ end
 function SparseImpl:pairs(): (function(): (integer, any))
     local k: integer = nil
     local forward = self._forward
-    return function(): (integer, any)
-        local nextK, nextV = next(forward, k)
-        k = nextK
-        return nextK, nextV
-    end
+    return function(): (integer, any) local nextK, nextV = next(forward, k); k = nextK; return nextK, nextV end
 end
 
 function SparseImpl:link(sourceId: integer, targetId: integer)
@@ -243,7 +241,9 @@ function SparseImpl:unlink(sourceId: integer, targetId: integer)
 end
 
 function SparseImpl:forEachSource(targetId: integer, callback: function(integer, any), context: any)
-    if not self._inverse then return end
+    if not self._inverse then
+        return
+    end
     self._inverse:forEachSource(targetId, callback, context)
 end
 
@@ -291,15 +291,27 @@ local record DenseImpl
 end
 
 -- Forward storage methods are no-ops for dense -- forward data lives in archetype columns.
-function DenseImpl:get(_entityId: integer): any return nil end
-function DenseImpl:getFirst(_entityId: integer): Component return nil end
-function DenseImpl:getTarget(_entityId: integer, _targetId: integer): Component return nil end
-function DenseImpl:set(_entityId: integer, _value: Component): Component return nil end
-function DenseImpl:remove(_entityId: integer): any return nil end
+function DenseImpl:get(_entityId: integer): any
+    return nil
+end
+function DenseImpl:getFirst(_entityId: integer): Component
+    return nil
+end
+function DenseImpl:getTarget(_entityId: integer, _targetId: integer): Component
+    return nil
+end
+function DenseImpl:set(_entityId: integer, _value: Component): Component
+    return nil
+end
+function DenseImpl:remove(_entityId: integer): any
+    return nil
+end
 function DenseImpl:removeOne(_entityId: integer, _targetId: integer): Component, boolean
     return nil, false
 end
-function DenseImpl:has(_entityId: integer): boolean return false end
+function DenseImpl:has(_entityId: integer): boolean
+    return false
+end
 function DenseImpl:pairs(): (function(): (integer, any))
     return function(): (integer, any) return nil, nil end
 end

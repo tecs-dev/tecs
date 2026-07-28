@@ -128,8 +128,10 @@ local record RenderPass
     --- @return The open pass, which the caller must `finish` before beginning
     ---     another or submitting the frame.
     begin: function(
-        commandBuffer: loader.CValue, attachments: {RenderPass.Attachment},
-        depth?: RenderPass.DepthAttachment, reuse?: RenderPass
+        commandBuffer: loader.CValue,
+        attachments: {RenderPass.Attachment},
+        depth?: RenderPass.DepthAttachment,
+        reuse?: RenderPass
     ): RenderPass
 
     --- Binds a pipeline. All subsequent draws in this pass use its baked state.
@@ -243,7 +245,7 @@ local record RenderPass
     finish: function(self)
 end
 
-local RenderPassMT <const>: metatable<RenderPass> = { __index = RenderPass }
+local RenderPassMT <const>: metatable<RenderPass> = {__index = RenderPass}
 
 -- Reused across passes; a pass is begun and bound far too often to allocate
 -- for either. SDL copies out of these during the call it is given them in, so
@@ -253,14 +255,14 @@ local RenderPassMT <const>: metatable<RenderPass> = { __index = RenderPass }
 -- the two are bound in separate calls and neither reads the array afterwards.
 local targets <const> = loader.newArray("SDL_GPUColorTargetInfo[?]", MAX_COLOR_TARGETS)
 local depthTarget <const> = loader.newArray("SDL_GPUDepthStencilTargetInfo[1]")
-local bindings <const> = loader.newArray("SDL_GPUTextureSamplerBinding[?]",
-    MAX_TEXTURE_BINDINGS)
+local bindings <const> = loader.newArray("SDL_GPUTextureSamplerBinding[?]", MAX_TEXTURE_BINDINGS)
 local handles <const> = loader.newArray("SDL_GPUBuffer*[?]", MAX_BUFFER_BINDINGS)
 local indexBinding <const> = loader.newArray("SDL_GPUBufferBinding[1]")
 
 --- Fills `pass` in and records it as open. Shared by `wrap` and `begin`.
-local function open(pass: RenderPass, handle: loader.CPtr,
-                    commandBuffer: loader.CValue, targetCount: integer): RenderPass
+local function open(
+    pass: RenderPass, handle: loader.CPtr, commandBuffer: loader.CValue, targetCount: integer
+): RenderPass
     pass.handle = handle
     pass.commandBuffer = commandBuffer
     pass.targetCount = targetCount
@@ -270,21 +272,21 @@ local function open(pass: RenderPass, handle: loader.CPtr,
 end
 
 function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue, targetCount?: integer): RenderPass
-    return open(setmetatable({} as RenderPass, RenderPassMT), handle,
-        commandBuffer, targetCount or 1)
+    return open(setmetatable({} as RenderPass, RenderPassMT), handle, commandBuffer, targetCount or 1)
 end
 
 function RenderPass.begin(
-    commandBuffer: loader.CValue, attachments: {RenderPass.Attachment},
-    depth?: RenderPass.DepthAttachment, reuse?: RenderPass
+    commandBuffer: loader.CValue,
+    attachments: {RenderPass.Attachment},
+    depth?: RenderPass.DepthAttachment,
+    reuse?: RenderPass
 ): RenderPass
     local count = #attachments
     if count == 0 then
         error("tecs: a render pass needs at least one colour attachment", 2)
     end
     if count > MAX_COLOR_TARGETS then
-        error(("tecs: %d colour attachments exceeds the limit of %d")
-            :format(count, MAX_COLOR_TARGETS), 2)
+        error(("tecs: %d colour attachments exceeds the limit of %d"):format(count, MAX_COLOR_TARGETS), 2)
     end
 
     for index, attachment in ipairs(attachments) do
@@ -335,11 +337,11 @@ function RenderPass.begin(
         end
     end
 
-    local handle = C.SDL_BeginGPURenderPass(commandBuffer, targets, count,
-        depthInfo)
-    if handle == nil then sdl.fail("SDL_BeginGPURenderPass") end
-    return open(reuse or setmetatable({} as RenderPass, RenderPassMT), handle,
-        commandBuffer, count)
+    local handle = C.SDL_BeginGPURenderPass(commandBuffer, targets, count, depthInfo)
+    if handle == nil then
+        sdl.fail("SDL_BeginGPURenderPass")
+    end
+    return open(reuse or setmetatable({} as RenderPass, RenderPassMT), handle, commandBuffer, count)
 end
 
 function RenderPass:bindPipeline(pipeline: loader.CValue)
@@ -350,8 +352,7 @@ end
 local function stageBuffers(buffers: {loader.CValue}): integer
     local count <const> = #buffers
     if count > MAX_BUFFER_BINDINGS then
-        error(("tecs: %d storage buffers exceeds the limit of %d")
-            :format(count, MAX_BUFFER_BINDINGS), 3)
+        error(("tecs: %d storage buffers exceeds the limit of %d"):format(count, MAX_BUFFER_BINDINGS), 3)
     end
     for index = 1, count do
         handles[index - 1] = buffers[index]
@@ -362,8 +363,7 @@ end
 function RenderPass:bindTextures(firstSlot: integer, textures: {loader.CValue}, sampler: loader.CValue)
     local count <const> = #textures
     if count > MAX_TEXTURE_BINDINGS then
-        error(("tecs: %d sampled textures exceeds the limit of %d")
-            :format(count, MAX_TEXTURE_BINDINGS), 2)
+        error(("tecs: %d sampled textures exceeds the limit of %d"):format(count, MAX_TEXTURE_BINDINGS), 2)
     end
     for index = 1, count do
         local binding = bindings[index - 1] as loader.CStruct
@@ -392,8 +392,7 @@ function RenderPass:pushFragmentUniform(slot: integer, data: loader.CArray, byte
 end
 
 function RenderPass:draw(vertexCount: integer, instanceCount?: integer, firstVertex?: integer, firstInstance?: integer)
-    C.SDL_DrawGPUPrimitives(self.handle, vertexCount, instanceCount or 1,
-        firstVertex or 0, firstInstance or 0)
+    C.SDL_DrawGPUPrimitives(self.handle, vertexCount, instanceCount or 1, firstVertex or 0, firstInstance or 0)
 end
 
 function RenderPass:drawIndirect(buffer: loader.CValue, offset: integer, drawCount: integer)
@@ -404,17 +403,17 @@ function RenderPass:bindIndexBuffer(buffer: loader.CValue, offset?: integer)
     local slot = indexBinding[0] as loader.CStruct
     slot.buffer = buffer
     slot.offset = offset or 0
-    C.SDL_BindGPUIndexBuffer(self.handle, indexBinding,
-        C.SDL_GPU_INDEXELEMENTSIZE_16BIT)
+    C.SDL_BindGPUIndexBuffer(self.handle, indexBinding, C.SDL_GPU_INDEXELEMENTSIZE_16BIT)
 end
 
 function RenderPass:drawIndexedIndirect(buffer: loader.CValue, offset: integer, drawCount: integer)
-    C.SDL_DrawGPUIndexedPrimitivesIndirect(self.handle, buffer, offset,
-        drawCount)
+    C.SDL_DrawGPUIndexedPrimitivesIndirect(self.handle, buffer, offset, drawCount)
 end
 
 function RenderPass:finish()
-    if self._finished then return end
+    if self._finished then
+        return
+    end
     self._finished = true
     passscope.closed(self.commandBuffer)
     C.SDL_EndGPURenderPass(self.handle)

@@ -209,9 +209,13 @@ local sdlBackend <const>: Backend = {
         -- process's whole init over an output nobody may use is not the
         -- trade this makes.
         if tonumber(C.SDL_WasInit(K.SDL_INIT_AUDIO)) == 0 then
-            if not C.SDL_InitSubSystem(K.SDL_INIT_AUDIO) then return nil end
+            if not C.SDL_InitSubSystem(K.SDL_INIT_AUDIO) then
+                return nil
+            end
         end
-        if not sdl3mixer.init() then return nil end
+        if not sdl3mixer.init() then
+            return nil
+        end
 
         local fields = audioSpec as loader.CStruct
         fields.format = C.SDL_AUDIO_F32
@@ -220,9 +224,10 @@ local sdlBackend <const>: Backend = {
 
         -- The default id, so SDL keeps the logical device pointed at whatever
         -- the system default becomes. Tracks on it follow the move.
-        local mixer = MIX.MIX_CreateMixerDevice(
-            K.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, audioSpec)
-        if mixer == nil then return nil end
+        local mixer = MIX.MIX_CreateMixerDevice(K.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, audioSpec)
+        if mixer == nil then
+            return nil
+        end
         if playProps == 0 then
             playProps = tonumber(C.SDL_CreateProperties()) as integer
         end
@@ -240,19 +245,17 @@ local sdlBackend <const>: Backend = {
         sdl3mixer.quit()
     end,
 
-    setMixerGain = function(mixer: loader.CPtr, gain: number)
-        MIX.MIX_SetMixerGain(mixer, gain)
-    end,
+    setMixerGain = function(mixer: loader.CPtr, gain: number) MIX.MIX_SetMixerGain(mixer, gain) end,
 
     createTrack = function(mixer: loader.CPtr): loader.CPtr
         local track = MIX.MIX_CreateTrack(mixer)
-        if track == nil then return nil end
+        if track == nil then
+            return nil
+        end
         return track
     end,
 
-    destroyTrack = function(track: loader.CPtr)
-        MIX.MIX_DestroyTrack(track)
-    end,
+    destroyTrack = function(track: loader.CPtr) MIX.MIX_DestroyTrack(track) end,
 
     setTrackClip = function(track: loader.CPtr, clip: loader.CPtr): boolean
         return MIX.MIX_SetTrackAudio(track, clip) as boolean
@@ -260,20 +263,19 @@ local sdlBackend <const>: Backend = {
 
     setTrackFile = function(track: loader.CPtr, path: string): boolean
         local file = C.SDL_IOFromFile(path, "rb")
-        if file == nil then return false end
+        if file == nil then
+            return false
+        end
         -- Closed by the mixer when the track stops reading it, which is what
         -- keeps a streamed voice from leaking a descriptor per play.
         return MIX.MIX_SetTrackIOStream(track, file, true) as boolean
     end,
 
-    clearTrack = function(track: loader.CPtr)
-        MIX.MIX_SetTrackAudio(track, nil)
-    end,
+    clearTrack = function(track: loader.CPtr) MIX.MIX_SetTrackAudio(track, nil) end,
 
     play = function(track: loader.CPtr, params: PlayParams): boolean
         C.SDL_SetNumberProperty(playProps, PROP_LOOPS, params.loops)
-        C.SDL_SetNumberProperty(playProps, PROP_LOOP_START_MS,
-            params.loopStartMs)
+        C.SDL_SetNumberProperty(playProps, PROP_LOOP_START_MS, params.loopStartMs)
         C.SDL_SetNumberProperty(playProps, PROP_FADE_IN_MS, params.fadeInMs)
         C.SDL_SetNumberProperty(playProps, PROP_START_MS, params.startMs)
         return MIX.MIX_PlayTrack(track, playProps) as boolean
@@ -289,46 +291,34 @@ local sdlBackend <const>: Backend = {
         MIX.MIX_StopTrack(track, MIX.MIX_TrackMSToFrames(track, fadeMs))
     end,
 
-    pause = function(track: loader.CPtr)
-        MIX.MIX_PauseTrack(track)
-    end,
+    pause = function(track: loader.CPtr) MIX.MIX_PauseTrack(track) end,
 
-    resume = function(track: loader.CPtr)
-        MIX.MIX_ResumeTrack(track)
-    end,
+    resume = function(track: loader.CPtr) MIX.MIX_ResumeTrack(track) end,
 
-    playing = function(track: loader.CPtr): boolean
-        return MIX.MIX_TrackPlaying(track) as boolean
-    end,
+    playing = function(track: loader.CPtr): boolean return MIX.MIX_TrackPlaying(track) as boolean end,
 
-    setLoops = function(track: loader.CPtr, loops: integer)
-        MIX.MIX_SetTrackLoops(track, loops)
-    end,
+    setLoops = function(track: loader.CPtr, loops: integer) MIX.MIX_SetTrackLoops(track, loops) end,
 
     seek = function(track: loader.CPtr, ms: integer): boolean
         -- Sample frames, so that a seek is exact rather than rounded to a
         -- tick. Converted through the track, so the answer follows the rate
         -- the input decodes at.
-        return MIX.MIX_SetTrackPlaybackPosition(track,
-            MIX.MIX_TrackMSToFrames(track, ms)) as boolean
+        return MIX.MIX_SetTrackPlaybackPosition(track, MIX.MIX_TrackMSToFrames(track, ms)) as boolean
     end,
 
     tell = function(track: loader.CPtr): integer
         local frames = MIX.MIX_GetTrackPlaybackPosition(track)
-        if tonumber(frames) < 0 then return -1 end
+        if tonumber(frames) < 0 then
+            return -1
+        end
         return tonumber(MIX.MIX_TrackFramesToMS(track, frames)) as integer
     end,
 
-    setGain = function(track: loader.CPtr, gain: number)
-        MIX.MIX_SetTrackGain(track, gain)
-    end,
+    setGain = function(track: loader.CPtr, gain: number) MIX.MIX_SetTrackGain(track, gain) end,
 
-    setPitch = function(track: loader.CPtr, ratio: number)
-        MIX.MIX_SetTrackFrequencyRatio(track, ratio)
-    end,
+    setPitch = function(track: loader.CPtr, ratio: number) MIX.MIX_SetTrackFrequencyRatio(track, ratio) end,
 
-    setPosition = function(track: loader.CPtr, x: number, y: number,
-                           z: number)
+    setPosition = function(track: loader.CPtr, x: number, y: number, z: number)
         local fields = point as loader.CStruct
         fields.x = x
         fields.y = y
@@ -348,25 +338,15 @@ local sdlBackend <const>: Backend = {
         MIX.MIX_SetTrack3DPosition(track, nil)
     end,
 
-    tag = function(track: loader.CPtr, tag: string)
-        MIX.MIX_TagTrack(track, tag)
-    end,
+    tag = function(track: loader.CPtr, tag: string) MIX.MIX_TagTrack(track, tag) end,
 
-    untag = function(track: loader.CPtr, tag: string)
-        MIX.MIX_UntagTrack(track, tag)
-    end,
+    untag = function(track: loader.CPtr, tag: string) MIX.MIX_UntagTrack(track, tag) end,
 
-    pauseTag = function(mixer: loader.CPtr, tag: string)
-        MIX.MIX_PauseTag(mixer, tag)
-    end,
+    pauseTag = function(mixer: loader.CPtr, tag: string) MIX.MIX_PauseTag(mixer, tag) end,
 
-    resumeTag = function(mixer: loader.CPtr, tag: string)
-        MIX.MIX_ResumeTag(mixer, tag)
-    end,
+    resumeTag = function(mixer: loader.CPtr, tag: string) MIX.MIX_ResumeTag(mixer, tag) end,
 
-    stopTag = function(mixer: loader.CPtr, tag: string, fadeMs: integer)
-        MIX.MIX_StopTag(mixer, tag, fadeMs)
-    end,
+    stopTag = function(mixer: loader.CPtr, tag: string, fadeMs: integer) MIX.MIX_StopTag(mixer, tag, fadeMs) end,
 }
 
 audiobackend.sdl = sdlBackend

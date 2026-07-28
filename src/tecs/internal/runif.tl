@@ -134,7 +134,7 @@ function runIf.every(interval: number, jitter?: number): RunIfFn
 end
 
 function runIf.cooldown(duration: number): RunIfFn
-    local elapsed: number = duration  -- Start ready to fire
+    local elapsed: number = duration -- Start ready to fire
 
     return function(dt: number, _world: World, _systemName: string): boolean
         elapsed = elapsed + dt
@@ -149,9 +149,7 @@ function runIf.cooldown(duration: number): RunIfFn
 end
 
 function runIf.inState(name: string): RunIfFn
-    return function(_dt: number, world: World, _systemName: string): boolean
-        return world:peekState() == name
-    end
+    return function(_dt: number, world: World, _systemName: string): boolean return world:peekState() == name end
 end
 
 -- Both combinators short-circuit, so operand ORDER is part of the API

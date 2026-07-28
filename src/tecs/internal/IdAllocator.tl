@@ -23,13 +23,15 @@ Slot 0 is reserved as the "null entity" sentinel: never allocated, always dead. 
 
 local C <const> = require("ffi")
 
-C.cdef[[
+C.cdef(
+    [[
 typedef struct TecsEntitySlot {
     uint32_t generation;
     uint32_t archetypeId;
     uint32_t row;
 } TecsEntitySlot;
 ]]
+)
 
 local SLOT_ARRAY_T <const> = C.typeof("TecsEntitySlot[?]")
 local UINT32_ARRAY_T <const> = C.typeof("uint32_t[?]")
@@ -38,14 +40,14 @@ local floor <const> = math.floor
 
 local SLOT_BITS <const> = 22
 local GEN_BITS <const> = 31
-local SLOT_COUNT <const>: integer = (2^22) as integer
-local GEN_COUNT <const>: integer = (2^31) as integer
+local SLOT_COUNT <const>: integer = (2 ^ 22) as integer
+local GEN_COUNT <const>: integer = (2 ^ 31) as integer
 
 -- Per-world ceilings. Default sizes the allocator for ~1M entities;
 -- callers may raise up to the usable format cap (2^22 - 1, ~4M).
 -- Slot 0 is reserved, so a 22-bit slot field has 2^22 - 1 usable values.
 local ABSOLUTE_MAX_SLOT_COUNT <const> = SLOT_COUNT - 1 -- 4194303 usable slots
-local DEFAULT_MAX_SLOT_COUNT <const> = 1048576    -- ~1M (2^20)
+local DEFAULT_MAX_SLOT_COUNT <const> = 1048576 -- ~1M (2^20)
 
 local record IdAllocator
 
@@ -89,26 +91,26 @@ local record IdAllocator
     --- Pack (slot, generation) into a packed id.
     encodeId: function(slot: integer, generation: integer): integer
         = macroexp(slot: integer, generation: integer): integer
-            return slot + generation * 2^22
+            return slot + generation * 2 ^ 22
         end
 
     --- Extract slot from an id (low 22 bits).
     slotOf: function(id: integer): integer = macroexp(id: integer): integer
-        return id % 2^22
+        return id % 2 ^ 22
     end
 
     --- Extract generation from an id. Uses `floor(id / 2^22)` so the
     --- caller does not need slot in hand; if you already have slot,
     --- prefer `generationOfWithSlot` to avoid the floor call.
     generationPartOf: function(id: integer): integer = macroexp(id: integer): integer
-        return math.floor(id / 2^22)
+        return math.floor(id / 2 ^ 22)
     end
 
     --- Extract generation from an id given the caller already computed
     --- slot. `(id - slot)` is an exact multiple of 2^22, so the
     --- division produces an integer directly, with no floor or modulo.
     generationOfWithSlot: function(id: integer, slot: integer): integer = macroexp(id: integer, slot: integer): integer
-        return (id - slot) / 2^22
+        return (id - slot) / 2 ^ 22
     end
 
     --- True when a packed id's generation does not match the slot's
@@ -117,7 +119,7 @@ local record IdAllocator
     --- the floor form keeps each macroexp argument single-use.
     isStale: function(slots: {integer: EntitySlot}, id: integer, slot: integer): boolean
         = macroexp(slots: {integer: EntitySlot}, id: integer, slot: integer): boolean
-            return math.floor(id / 2^22) ~= slots[slot].generation
+            return math.floor(id / 2 ^ 22) ~= slots[slot].generation
         end
 
     reset: function(allocator: IdAllocator)
@@ -136,15 +138,21 @@ function IdAllocator.new(maxSlotCount?: integer): IdAllocator
         error("IdAllocator.new: maxSlotCount must be a positive integer, got " .. tostring(n))
     end
     if n > ABSOLUTE_MAX_SLOT_COUNT then
-        error("IdAllocator.new: maxSlotCount " .. n ..
-            " exceeds format limit " .. ABSOLUTE_MAX_SLOT_COUNT ..
-            " (packed id has " .. SLOT_BITS .. " bits for slot)")
+        error(
+            "IdAllocator.new: maxSlotCount "
+                .. n
+                .. " exceeds format limit "
+                .. ABSOLUTE_MAX_SLOT_COUNT
+                .. " (packed id has "
+                .. SLOT_BITS
+                .. " bits for slot)"
+        )
     end
     return {
         -- Index 0 is the null sentinel; configured slots are 1..n.
         slots = C.new(SLOT_ARRAY_T, n + 1) as C.CData,
         maxSlotCount = n,
-        nextFreshSlot = 1,                   -- slot 0 reserved as null
+        nextFreshSlot = 1, -- slot 0 reserved as null
         freeStack = C.new(UINT32_ARRAY_T, n),
         freeCount = 0,
     } as IdAllocator
@@ -251,7 +259,9 @@ function IdAllocator.reset(allocator: IdAllocator)
         local maxGen = 0
         for slot = 1, usedLimit do
             local g = slots[slot].generation
-            if g > maxGen then maxGen = g end
+            if g > maxGen then
+                maxGen = g
+            end
         end
         local newGen = maxGen + 1
         if newGen >= GEN_COUNT then

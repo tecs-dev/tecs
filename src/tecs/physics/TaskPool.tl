@@ -15,8 +15,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("taskpool")
 
 --- The pool shares the worker library.
-local C <const> = loader.library("tecsworker", "tecs",
-    "TECS_WORKER_PATH", "taskpool")
+local C <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "taskpool")
 
 local record TaskPool
     --- Worker slots, counting the thread that steps the world. This is what
@@ -29,7 +28,7 @@ local record TaskPool
     _destroyed: boolean
 end
 
-local TaskPoolMT <const>: metatable<TaskPool> = { __index = TaskPool }
+local TaskPoolMT <const>: metatable<TaskPool> = {__index = TaskPool}
 
 --- Creates a pool.
 ---
@@ -37,8 +36,7 @@ local TaskPoolMT <const>: metatable<TaskPool> = { __index = TaskPool }
 --- threads and every task runs inline, which is what a world given no executor
 --- does. Defaults to a count derived from the machine.
 function TaskPool.create(workerCount?: integer): TaskPool
-    local requested = workerCount
-        or tonumber(C.tecsTaskPoolDefaultWorkerCount()) as integer
+    local requested = workerCount or tonumber(C.tecsTaskPoolDefaultWorkerCount()) as integer
 
     local handle = C.tecsTaskPoolCreate(requested)
     if handle == nil then
@@ -72,7 +70,9 @@ end
 --- code, so releasing the pool while a step could still be in flight is a
 --- use-after-free.
 function TaskPool:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.tecsTaskPoolDestroy(self.handle)
     self.handle = nil

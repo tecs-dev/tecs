@@ -37,14 +37,14 @@ local Frame <const> = require("tecs.gpu.Frame")
 --- Default colour format for intermediate targets. Eight bits per channel is
 --- enough for albedo and composited output; targets holding normals or
 --- lighting values ask for a wider format explicitly.
-local DEFAULT_FORMAT <const> = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local DEFAULT_FORMAT <const> = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 
 --- The clear a pass asks for when what it wants is not to clear at all.
 ---
 --- A sentinel rather than a colour, matched by identity, because the field it
 --- goes in already uses nil for "the target decides" and a pass overriding a
 --- target that clears needs a third answer. Its contents are never read.
-local LOAD <const>: RenderPass.ClearColor = { r = 0, g = 0, b = 0, a = 0 }
+local LOAD <const>: RenderPass.ClearColor = {r = 0, g = 0, b = 0, a = 0}
 
 local record TargetSpec
     name: string
@@ -161,7 +161,7 @@ local record PassGraph
     _destroyed: boolean
 end
 
-local PassGraphMT <const>: metatable<PassGraph> = { __index = PassGraph }
+local PassGraphMT <const>: metatable<PassGraph> = {__index = PassGraph}
 
 PassGraph.LOAD = LOAD
 
@@ -175,12 +175,12 @@ function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGr
     self._order = {}
     self._passes = {}
     self._prepared = {}
-    self._sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
+    self._sampler = Sampler.create(device, {filter = "nearest", address = "clamp"})
     self.depthFormat = Texture.depthFormat(device)
     self._needsDepth = false
     -- Reused rather than rebuilt per pass per frame; only its texture and clear
     -- value ever differ, and both are known when the pass runs.
-    self._depthAttachment = { texture = nil, clear = nil }
+    self._depthAttachment = {texture = nil, clear = nil}
     self._width = 0
     self._height = 0
     self._built = false
@@ -213,19 +213,16 @@ function PassGraph:pass(spec: PassSpec): PassGraph
 
     for _, input in ipairs(spec.inputs or {}) do
         if self._targets[input] == nil then
-            error(("tecs: pass '%s' reads undeclared target '%s'")
-                :format(spec.name, input), 2)
+            error(("tecs: pass '%s' reads undeclared target '%s'"):format(spec.name, input), 2)
         end
         if not produced[input] then
-            error(("tecs: pass '%s' reads '%s' before any pass writes it")
-                :format(spec.name, input), 2)
+            error(("tecs: pass '%s' reads '%s' before any pass writes it"):format(spec.name, input), 2)
         end
     end
 
     for _, output in ipairs(spec.outputs or {}) do
         if self._targets[output] == nil then
-            error(("tecs: pass '%s' writes undeclared target '%s'")
-                :format(spec.name, output), 2)
+            error(("tecs: pass '%s' writes undeclared target '%s'"):format(spec.name, output), 2)
         end
     end
 
@@ -236,9 +233,13 @@ function PassGraph:pass(spec: PassSpec): PassGraph
         for _, output in ipairs(spec.outputs or {}) do
             local scale = self._targets[output].scale
             if scale ~= 1.0 then
-                error(("tecs: pass '%s' uses depth but writes '%s' at scale " ..
-                    "%s, and the depth attachment is frame sized")
-                    :format(spec.name, output, tostring(scale)), 2)
+                error(
+                    (
+                        "tecs: pass '%s' uses depth but writes '%s' at scale "
+                        .. "%s, and the depth attachment is frame sized"
+                    ):format(spec.name, output, tostring(scale)),
+                    2
+                )
             end
         end
         self._needsDepth = true
@@ -250,21 +251,26 @@ function PassGraph:pass(spec: PassSpec): PassGraph
     local outputs <const> = spec.outputs or {}
     local attachments: {RenderPass.Attachment} = {}
     for index = 1, math.max(#outputs, 1) do
-        attachments[index] = { texture = nil, clear = nil }
+        attachments[index] = {texture = nil, clear = nil}
     end
 
     -- Filled on the first execute, since a texture handle only exists once the
     -- graph has been sized, and reused unchanged after that.
     local textures: {loader.CValue} = nil
-    if #(spec.inputs or {}) > 0 then textures = {} end
+    if #(spec.inputs or {}) > 0 then
+        textures = {}
+    end
 
     self._passes[#self._passes + 1] = spec
     self._prepared[#self._passes] = {
         attachments = attachments,
         textures = textures,
         context = {
-            pass = nil, frame = nil, commandBuffer = nil,
-            width = 0, height = 0,
+            pass = nil,
+            frame = nil,
+            commandBuffer = nil,
+            width = 0,
+            height = 0,
         },
         pass = nil,
     }
@@ -303,7 +309,9 @@ function PassGraph:depthOf(passName: string): GraphicsPipeline.DepthConfig
     for _, spec in ipairs(self._passes) do
         if spec.name == passName then
             local state = spec.depth
-            if state == nil then return nil end
+            if state == nil then
+                return nil
+            end
             return {
                 format = self.depthFormat,
                 test = state.test,
@@ -331,13 +339,16 @@ local function resize(self: PassGraph, width: integer, height: integer)
             local spec = self._targets[name]
             local scaledWidth = math.max(1, math.floor(width * spec.scale))
             local scaledHeight = math.max(1, math.floor(height * spec.scale))
-            self._textures[name] = Texture.create(self.device, {
-                width = scaledWidth,
-                height = scaledHeight,
-                format = spec.format,
-                usage = { "colorTarget", "sampled" },
-                name = name,
-            })
+            self._textures[name] = Texture.create(
+                self.device,
+                {
+                    width = scaledWidth,
+                    height = scaledHeight,
+                    format = spec.format,
+                    usage = {"colorTarget", "sampled"},
+                    name = name,
+                }
+            )
         end
 
         if self._depth ~= nil then
@@ -355,13 +366,16 @@ local function resize(self: PassGraph, width: integer, height: integer)
     -- Gated on the attachment rather than on the frame size, because a pass may
     -- be declared after the graph has already run a frame.
     if self._needsDepth and self._depth == nil then
-        self._depth = Texture.create(self.device, {
-            width = width,
-            height = height,
-            format = self.depthFormat,
-            usage = { "depthTarget" },
-            name = "depth",
-        })
+        self._depth = Texture.create(
+            self.device,
+            {
+                width = width,
+                height = height,
+                format = self.depthFormat,
+                usage = {"depthTarget"},
+                name = "depth",
+            }
+        )
     end
 end
 
@@ -426,8 +440,7 @@ function PassGraph:execute(frame: Frame)
                 depth.clear = spec.depth.clear
             end
 
-            local pass = RenderPass.begin(frame.commandBuffer, attachments,
-                depth, prepared.pass)
+            local pass = RenderPass.begin(frame.commandBuffer, attachments, depth, prepared.pass)
             prepared.pass = pass
 
             local textures <const> = prepared.textures
@@ -454,7 +467,9 @@ end
 
 --- Releases every target the graph owns. Safe to call more than once.
 function PassGraph:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     for _, texture in pairs(self._textures) do
         texture:destroy()

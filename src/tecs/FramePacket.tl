@@ -68,7 +68,7 @@ local record FramePacket
     boundsRanges: dirtyranges
 end
 
-local FramePacketMT <const>: metatable<FramePacket> = { __index = FramePacket }
+local FramePacketMT <const>: metatable<FramePacket> = {__index = FramePacket}
 
 --- Builds an empty packet, with its storage allocated once.
 function FramePacket.create(): FramePacket
@@ -113,11 +113,13 @@ end
 ---
 --- Positions are in world units, like everything else a packet carries; see
 --- `Deferred.Light` for what each value means.
-function FramePacket:addLight(x: number, y: number, z: number, radius: number,
-                              r: number, g: number, b: number,
-                              intensity: number)
+function FramePacket:addLight(
+    x: number, y: number, z: number, radius: number, r: number, g: number, b: number, intensity: number
+)
     local index = self.lightCount
-    if index >= MAX_LIGHTS then return end
+    if index >= MAX_LIGHTS then
+        return
+    end
     self.lightCount = index + 1
 
     local base <const> = index * LIGHT_FLOATS

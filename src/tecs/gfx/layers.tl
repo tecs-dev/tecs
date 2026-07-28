@@ -249,28 +249,31 @@ local revision = 0
 --- Losing the order between two entities off the edge of the expected extent
 --- is the smaller of those two failures by a wide margin.
 local function saturate(value: number): number
-    if value < 0.0 then return 0.0 end
-    if value > 1.0 then return 1.0 end
+    if value < 0.0 then
+        return 0.0
+    end
+    if value > 1.0 then
+        return 1.0
+    end
     return value
 end
 
 function layers.configure(layer: integer, config: layers.Config)
     if layer < 1 or layer > layers.MAX then
-        error(("tecs: layer %d is outside 1..%d")
-            :format(layer, layers.MAX), 2)
+        error(("tecs: layer %d is outside 1..%d"):format(layer, layers.MAX), 2)
     end
     local sort = SORT_IDS[config.sort]
     if sort == nil then
-        error(("tecs: '%s' is not a sort mode")
-            :format(tostring(config.sort)), 2)
+        error(("tecs: '%s' is not a sort mode"):format(tostring(config.sort)), 2)
     end
     if config.screenSpace and config.virtualCoords then
-        error("tecs: a layer is positioned in screen pixels or in virtual "
-            .. "coordinates, not both", 2)
+        error("tecs: a layer is positioned in screen pixels or in virtual " .. "coordinates, not both", 2)
     end
 
     local parallax = config.parallax
-    if parallax == nil then parallax = 1.0 end
+    if parallax == nil then
+        parallax = 1.0
+    end
 
     local mode = MODE_CAMERA
     if config.screenSpace then
@@ -286,8 +289,7 @@ function layers.configure(layer: integer, config: layers.Config)
     litFlags[layer] = config.unlit and 0.0 or 1.0
     -- The cull tests a world rectangle against a world bound, which only means
     -- something where the camera places the contents where the bound says.
-    culledByView[layer] = mode == MODE_CAMERA and parallax == 1.0
-        and not config.ignoreZoom
+    culledByView[layer] = mode == MODE_CAMERA and parallax == 1.0 and not config.ignoreZoom
     revision = revision + 1
 end
 
@@ -300,13 +302,14 @@ function layers.revision(): integer
 end
 
 function layers.entryOf(layer: integer): number, number, number, number
-    return modes[layer], parallaxOffsets[layer],
-        zoomFlags[layer], litFlags[layer]
+    return modes[layer], parallaxOffsets[layer], zoomFlags[layer], litFlags[layer]
 end
 
 function layers.viewCulled(layer: integer): boolean
     local culled = culledByView[layer]
-    if culled == nil then return true end
+    if culled == nil then
+        return true
+    end
     return culled
 end
 
@@ -338,13 +341,16 @@ function layers.depthOf(layer: integer, z: number, x: number, y: number): number
         within = (1.0 - (nx + ny + nz) / ISOMETRIC_RANGE) * band * BAND_FILL
     else
         local ny <const> = saturate((y + layers.maxY) / (2.0 * layers.maxY))
-        within = (1.0 - (nz * TOPDOWN_Z_SHARE + ny * TOPDOWN_Y_SHARE))
-            * band * BAND_FILL
+        within = (1.0 - (nz * TOPDOWN_Z_SHARE + ny * TOPDOWN_Y_SHARE)) * band * BAND_FILL
     end
 
     local depth = base + within
-    if depth < 0.001 then return 0.001 end
-    if depth > 0.999 then return 0.999 end
+    if depth < 0.001 then
+        return 0.001
+    end
+    if depth > 0.999 then
+        return 0.999
+    end
     return depth
 end
 
@@ -363,7 +369,9 @@ function layers.depthResolution(): number
 
     local finest = steps[1]
     for index = 2, #steps do
-        if steps[index] < finest then finest = steps[index] end
+        if steps[index] < finest then
+            finest = steps[index]
+        end
     end
     return finest
 end

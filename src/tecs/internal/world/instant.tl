@@ -155,14 +155,18 @@ local function deferSetScoped(self: WorldImpl, id: integer, componentType: Compo
     self._scopeDepth = self._scopeDepth + 1
     self:_deferSet(id, componentType, value)
     self._scopeDepth = self._scopeDepth - 1
-    if self._scopeDepth == 0 and self.isDirty then self:_drain() end
+    if self._scopeDepth == 0 and self.isDirty then
+        self:_drain()
+    end
 end
 
 local function deferRemoveScoped(self: WorldImpl, id: integer, component: Component)
     self._scopeDepth = self._scopeDepth + 1
     self:_deferRemove(id, component)
     self._scopeDepth = self._scopeDepth - 1
-    if self._scopeDepth == 0 and self.isDirty then self:_drain() end
+    if self._scopeDepth == 0 and self.isDirty then
+        self:_drain()
+    end
 end
 
 -- Dispatcher: components with defer handlers either stage under a synthetic
@@ -236,7 +240,9 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
         addedContainer = wildcard
     end
 
-    if dstArch == srcArch then return end
+    if dstArch == srcArch then
+        return
+    end
 
     local newRow = (dstArch.entities as {integer})[0] as integer
     if newRow + 1 > dstArch.capacity then
@@ -282,7 +288,9 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
         slots[movedSlot].row = srcRow
     end
     local observer = self._transitionObserver
-    if observer then observer.entity(packedId, srcArch, dstArch) end
+    if observer then
+        observer.entity(packedId, srcArch, dstArch)
+    end
 end
 
 -- Dispatcher: components with defer handlers either stage under a synthetic
@@ -312,15 +320,23 @@ function WorldImpl:instantRemoveRaw(id: integer, component: Component)
     local slots = self.allocator.slots as {integer: EntitySlot}
     local s = slots[slot]
     -- Stale or dead handle: removing from a nonexistent entity is a no-op.
-    if IdAllocator.isStale(slots, id, slot) then return end
+    if IdAllocator.isStale(slots, id, slot) then
+        return
+    end
     local srcArch = self.archetypeIndex[s.archetypeId]
-    if not srcArch then return end
+    if not srcArch then
+        return
+    end
 
     -- Reverse-index unlink lives in the defer-remove handler. Plain components
     -- fall straight through the archetype transition.
-    if not srcArch.columns[component] then return end
+    if not srcArch.columns[component] then
+        return
+    end
     local dstArch = srcArch:withoutComponent(component, self.archetypeIndex)
-    if dstArch == srcArch then return end
+    if dstArch == srcArch then
+        return
+    end
 
     moveSingleEntity(self, slot, srcArch, s.row, dstArch, nil, nil)
 end
@@ -355,8 +371,9 @@ local function instantSpawn3(self: WorldImpl, c1: Component, c2: Component, c3: 
     instantFinish!()
 end
 
-local function instantSpawn4(self: WorldImpl,
-        c1: Component, c2: Component, c3: Component, c4: Component): boolean, integer
+local function instantSpawn4(
+    self: WorldImpl, c1: Component, c2: Component, c3: Component, c4: Component
+): boolean, integer
     instantBegin!()
     instantResolveOne!(c1)
     instantResolveOne!(c2)
@@ -373,7 +390,7 @@ end
 -- Fallback for N > 4: variable-index `select(i, ...)` (trace-hostile
 -- on LuaJIT). The unrolled 1..4 cases above are the fast paths.
 local function instantSpawnN(self: WorldImpl, ...: Component): boolean, integer
-    local n = select('#', ...)
+    local n = select("#", ...)
     instantBegin!()
     for i = 1, n do
         instantResolveOne!(select(i, ...))
@@ -386,7 +403,7 @@ local function instantSpawnN(self: WorldImpl, ...: Component): boolean, integer
 end
 
 function WorldImpl:_instantSpawn(...: Component): boolean, integer
-    local n = select('#', ...)
+    local n = select("#", ...)
     if n == 1 then
         return instantSpawn1(self, select(1, ...))
     elseif n == 2 then
@@ -447,7 +464,9 @@ function WorldImpl:_instantDespawn(id: integer): boolean
     end
 
     local observer = self._transitionObserver
-    if observer then observer.entity(id, srcArch, nil) end
+    if observer then
+        observer.entity(id, srcArch, nil)
+    end
     local movedEntId = srcArch:removeEntity(s.row, nil)
     if movedEntId ~= 0 then
         local movedSlot = IdAllocator.slotOf(movedEntId)

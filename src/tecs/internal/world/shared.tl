@@ -22,9 +22,7 @@ local SIZEOF_DOUBLE <const> = C.sizeof("double") as integer
 local ffi_add_rows: function(ptr: C.CData, rows: integer): C.CData
 do
     local loadfn = rawget(_G as table, "load") or rawget(_G as table, "loadstring")
-    local fn = (loadfn as function(string): function(): any)(
-        "return function(p, r) return p + r end"
-    )()
+    local fn = (loadfn as function(string): function(): any)("return function(p, r) return p + r end")()
     ffi_add_rows = fn as function(C.CData, integer): C.CData
 end
 
@@ -44,20 +42,20 @@ local STATE_DESPAWN <const> = 3
 
 -- Returns state value (1/2/3) or 0 if unset for this transaction.
 local function getEntityState(world: WorldImpl, slot: integer): integer
-    if (world._slotStamp as {integer:integer})[slot] == world._transactionEpoch then
-        return (world._stateArr as {integer:integer})[slot]
+    if (world._slotStamp as {integer: integer})[slot] == world._transactionEpoch then
+        return (world._stateArr as {integer: integer})[slot]
     end
     return 0
 end
 
 -- Write state for slot. Zeros pending-arch companion on first claim.
 local function setEntityState(world: WorldImpl, slot: integer, state: integer)
-    local stamp = world._slotStamp as {integer:integer}
+    local stamp = world._slotStamp as {integer: integer}
     local epoch = world._transactionEpoch
-    local stateArr = world._stateArr as {integer:integer}
+    local stateArr = world._stateArr as {integer: integer}
     if stamp[slot] ~= epoch then
         stamp[slot] = epoch
-        (world._pendingArchArr as {integer:integer})[slot] = 0
+        (world._pendingArchArr as {integer: integer})[slot] = 0
     end
     stateArr[slot] = state
 end
@@ -65,21 +63,23 @@ end
 -- Read pending archetype. Returns nil when unset; resolves stamp →
 -- archetype id → live Archetype via the world's archetype index.
 local function getPendingArch(world: WorldImpl, slot: integer): Archetype
-    if (world._slotStamp as {integer:integer})[slot] == world._transactionEpoch then
-        local id = (world._pendingArchArr as {integer:integer})[slot]
-        if id ~= 0 then return world.archetypeIndex[id] end
+    if (world._slotStamp as {integer: integer})[slot] == world._transactionEpoch then
+        local id = (world._pendingArchArr as {integer: integer})[slot]
+        if id ~= 0 then
+            return world.archetypeIndex[id]
+        end
     end
     return nil
 end
 
 -- Write pending archetype. Zeros state companion on first claim.
 local function setPendingArch(world: WorldImpl, slot: integer, arch: Archetype)
-    local stamp = world._slotStamp as {integer:integer}
+    local stamp = world._slotStamp as {integer: integer}
     local epoch = world._transactionEpoch
-    local pendingArchArr = world._pendingArchArr as {integer:integer}
+    local pendingArchArr = world._pendingArchArr as {integer: integer}
     if stamp[slot] ~= epoch then
         stamp[slot] = epoch
-        (world._stateArr as {integer:integer})[slot] = 0
+        (world._stateArr as {integer: integer})[slot] = 0
     end
     pendingArchArr[slot] = arch.id
 end
@@ -97,17 +97,17 @@ local function bumpTransactionEpoch(world: WorldImpl)
 end
 
 -- batchMutations op tags.
-local BATCH_OP_SET_CONST    <const> = 1  -- write constant value to column (move if arch lacks component)
-local BATCH_OP_SET_CALLBACK <const> = 2  -- invoke user callback per (arch, range) after ensuring component present
-local BATCH_OP_REMOVE       <const> = 3  -- remove component, moving entities to arch:withoutComponent
+local BATCH_OP_SET_CONST <const> = 1 -- write constant value to column (move if arch lacks component)
+local BATCH_OP_SET_CALLBACK <const> = 2 -- invoke user callback per (arch, range) after ensuring component present
+local BATCH_OP_REMOVE <const> = 3 -- remove component, moving entities to arch:withoutComponent
 
 --- A single deferred batch mutation operation.
 local record BatchMutation
     op: integer
     archetypes: {Archetype}
     componentType: Component
-    value: any               -- BATCH_OP_SET_CONST only
-    callback: function(Archetype, integer, integer, integer)  -- BATCH_OP_SET_CALLBACK only
+    value: any -- BATCH_OP_SET_CONST only
+    callback: function(Archetype, integer, integer, integer) -- BATCH_OP_SET_CALLBACK only
     -- Hoisted component invariants, computed once at enqueue.
     isTag: boolean
     canBulk: boolean
@@ -119,8 +119,8 @@ local function moveSingleEntity(
     srcArch: Archetype,
     srcRow: integer,
     dstArch: Archetype,
-    newColumn: {any},     -- may be nil (remove path)
-    newValue: Component   -- may be nil (remove path / tag)
+    newColumn: {any}, -- may be nil (remove path)
+    newValue: Component -- may be nil (remove path / tag)
 )
     local newRow = (dstArch.entities as {integer})[0] as integer
     if newRow + 1 > dstArch.capacity then
@@ -158,17 +158,17 @@ local function moveSingleEntity(
         slots[movedSlot].row = srcRow
     end
     local observer = self._transitionObserver
-    if observer then observer.entity(packedId, srcArch, dstArch) end
+    if observer then
+        observer.entity(packedId, srcArch, dstArch)
+    end
 end
 
-local function bulkMoveEntireArchetype(
-    self: WorldImpl,
-    srcArch: Archetype,
-    dstArch: Archetype
-): integer, integer
+local function bulkMoveEntireArchetype(self: WorldImpl, srcArch: Archetype, dstArch: Archetype): integer, integer
     local srcEntities = srcArch.entities as {integer}
     local count = srcEntities[0]
-    if count == 0 then return 0, 0 end
+    if count == 0 then
+        return 0, 0
+    end
     local observer = self._transitionObserver
     if observer then
         for i = 1, count do
@@ -179,7 +179,7 @@ local function bulkMoveEntireArchetype(
     local plan = srcArch:getMovePlanTo(dstArch) as internal.MovePlan
     local planCount = plan.count
     local dstEntities = dstArch.entities as {integer}
-    local dstBase = dstEntities[0] as integer    -- rows 0..dstBase-1 are existing
+    local dstBase = dstEntities[0] as integer -- rows 0..dstBase-1 are existing
     local dstArchId = dstArch.id
 
     -- O(1) swap fast path when destination is empty.
@@ -220,8 +220,8 @@ local function bulkMoveEntireArchetype(
         local dstEntitiesArr = dstArch.entities
         srcArch.entities = dstEntitiesArr
         dstArch.entities = srcEntitiesArr
-        srcEntities[0] = count        -- now dst's length pad
-        dstEntities[0] = 0            -- now src's length pad
+        srcEntities[0] = count -- now dst's length pad
+        dstEntities[0] = 0 -- now src's length pad
 
         -- Only plan (shared) columns swapped sides; a column present on one
         -- side only keeps its pre-swap size. Clamp both capacities to the
@@ -271,9 +271,8 @@ local function bulkMoveEntireArchetype(
         local structSize = planStructSizes[c]
         if structSize > 0 then
             ffi_copy(
-                ffi_add_rows(dstCol as C.CData, dstBase + 1),
-                ffi_add_rows(srcCol as C.CData, 1),
-                count * structSize)
+                ffi_add_rows(dstCol as C.CData, dstBase + 1), ffi_add_rows(srcCol as C.CData, 1), count * structSize
+            )
         else
             table_move(srcCol, 1, count, dstBase + 1, dstCol)
         end
@@ -282,7 +281,8 @@ local function bulkMoveEntireArchetype(
     ffi_copy(
         ffi_add_rows(dstEntities as C.CData, dstBase + 1),
         ffi_add_rows(srcEntities as C.CData, 1),
-        count * SIZEOF_DOUBLE)
+        count * SIZEOF_DOUBLE
+    )
     dstEntities[0] = dstBase + count
 
     local slots = self.allocator.slots as {integer: EntitySlot}
@@ -307,25 +307,17 @@ local function bulkMoveEntireArchetype(
 end
 
 local function copyPlanRow(
-    planDstCols: {integer: {any}},
-    planSrcCols: {integer: {any}},
-    dLuaRow: integer,
-    srcRow: integer,
-    count: integer
+    planDstCols: {integer: {any}}, planSrcCols: {integer: {any}}, dLuaRow: integer, srcRow: integer, count: integer
 )
     for c = 1, count do
         planDstCols[c][dLuaRow] = planSrcCols[c][srcRow]
     end
 end
 
-local function applyPendingVals(
-    vals: {any},
-    dstCols: {Component: {any}},
-    dLuaRow: integer
-)
+local function applyPendingVals(vals: {any}, dstCols: {Component: {any}}, dLuaRow: integer)
     for v = 1, #vals do
         local inst = vals[v]
-        local ct = (inst as {string:any}).componentType as ComponentInternal
+        local ct = (inst as {string: any}).componentType as ComponentInternal
         local col = dstCols[ct] as {any}
         if col and ct.storageType ~= "tag" then
             col[dLuaRow] = inst
@@ -333,12 +325,7 @@ local function applyPendingVals(
     end
 end
 
-local function applyPendingScalars(
-    ctList: {Component},
-    values: {any},
-    dstCols: {Component: {any}},
-    dLuaRow: integer
-)
+local function applyPendingScalars(ctList: {Component}, values: {any}, dstCols: {Component: {any}}, dLuaRow: integer)
     for i = 1, #ctList do
         local col = dstCols[ctList[i]] as {any}
         if col then
@@ -353,8 +340,8 @@ local type RequireEntry = internal.RequireEntry
 -- Build transitive `requires` closure for `comp`, flattened and deduped.
 local function buildRequiresClosure(comp: ComponentInternal): {RequireEntry}
     local entries: {RequireEntry} = {}
-    local visited: {Component: boolean} = { [comp] = true }
-    local stack: {ComponentInternal} = { comp }
+    local visited: {Component: boolean} = {[comp] = true}
+    local stack: {ComponentInternal} = {comp}
     local top = 1
 
     while top > 0 do
@@ -411,11 +398,11 @@ end
 
 -- Extend `dstArch` with missing required components and collect row writes.
 local function applyRequires(
-    dstArch: Archetype,
-    comp: ComponentInternal,
-    archetypeIndex: ArchetypeIndex
+    dstArch: Archetype, comp: ComponentInternal, archetypeIndex: ArchetypeIndex
 ): Archetype, {RequireEntry}
-    if not comp._hasRequires then return dstArch, nil end
+    if not comp._hasRequires then
+        return dstArch, nil
+    end
     local closure = getRequiresClosure(comp)
     local missing: {RequireEntry} = nil
     for i = 1, #closure do
@@ -434,12 +421,10 @@ end
 -- Write row values for missing required entries. Scalar required
 -- components produce wrapper instances from their factory; unwrap to
 -- the raw value here so columns stay raw.
-local function writeRequired(
-    missing: {RequireEntry},
-    dstArch: Archetype,
-    dLuaRow: integer
-)
-    if missing == nil then return end
+local function writeRequired(missing: {RequireEntry}, dstArch: Archetype, dLuaRow: integer)
+    if missing == nil then
+        return
+    end
     local cols = dstArch.columns
     for i = 1, #missing do
         local entry = missing[i]
@@ -450,7 +435,7 @@ local function writeRequired(
                 v = (entry.factory as function(...: any): Component)()
             end
             if (entry.type as ComponentInternal).storageType == "scalar" then
-                col[dLuaRow] = (v as {string:any}).value
+                col[dLuaRow] = (v as {string: any}).value
             else
                 col[dLuaRow] = v
             end
@@ -461,12 +446,7 @@ end
 -- Write `requires`-supplied defaults across a row range. Table storage
 -- gets a fresh factory value per row so rows never share one table;
 -- other storages resolve one value and fan it (scalars unwrapped).
-local function writeRequiredRange(
-    arch: Archetype,
-    requiredList: {RequireEntry},
-    rStart: integer,
-    rEnd: integer
-)
+local function writeRequiredRange(arch: Archetype, requiredList: {RequireEntry}, rStart: integer, rEnd: integer)
     local cols = arch.columns
     for k = 1, #requiredList do
         local entry = requiredList[k]
@@ -483,7 +463,7 @@ local function writeRequiredRange(
                     v = (entry.factory as function(...: any): Component)()
                 end
                 if storage == "scalar" then
-                    v = (v as {string:any}).value
+                    v = (v as {string: any}).value
                 end
                 for r = rStart, rEnd do
                     col[r] = v
@@ -499,7 +479,9 @@ local function applyBatchSet(self: WorldImpl, mut: BatchMutation, srcArch: Arche
 
     local entities = srcArch.entities as {integer}
     local count = entities[0] as integer
-    if count == 0 then return end
+    if count == 0 then
+        return
+    end
 
     local hasComponent = srcArch.columns[componentType] ~= nil
     local fast = mut.canBulk
@@ -538,16 +520,22 @@ local function applyBatchSet(self: WorldImpl, mut: BatchMutation, srcArch: Arche
     if ci._hasRequires then
         dstArch, requiredList = applyRequires(dstArch, ci, archetypeIndex)
     end
-    if dstArch == srcArch then return end
+    if dstArch == srcArch then
+        return
+    end
     local moved, firstRow = bulkMoveEntireArchetype(self, srcArch, dstArch)
-    if moved == 0 then return end
+    if moved == 0 then
+        return
+    end
     local lastRow = firstRow + moved - 1
     -- Required defaults first; the user's value or callback wins on
     -- any overlap.
     if requiredList then
         writeRequiredRange(dstArch, requiredList, firstRow, lastRow)
     end
-    if isTag then return end
+    if isTag then
+        return
+    end
 
     local newCol = dstArch.columns[componentType] as {any}
     if mut.op == BATCH_OP_SET_CONST then
@@ -562,11 +550,15 @@ end
 
 local function applyBatchRemove(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
     local componentType = mut.componentType
-    if srcArch.columns[componentType] == nil then return end
+    if srcArch.columns[componentType] == nil then
+        return
+    end
 
     local entities = srcArch.entities as {integer}
     local count = entities[0] as integer
-    if count == 0 then return end
+    if count == 0 then
+        return
+    end
 
     if not mut.canBulk then
         -- Slow path: per-entity `_instantRemove`.
@@ -578,7 +570,9 @@ local function applyBatchRemove(self: WorldImpl, mut: BatchMutation, srcArch: Ar
 
     local archetypeIndex = self.archetypeIndex
     local dstArch = srcArch:withoutComponent(componentType, archetypeIndex)
-    if dstArch == srcArch then return end
+    if dstArch == srcArch then
+        return
+    end
     bulkMoveEntireArchetype(self, srcArch, dstArch)
 end
 
@@ -595,23 +589,29 @@ local record shared
     SIZEOF_DOUBLE: integer
     ffi_add_rows: function(ptr: C.CData, rows: integer): C.CData
 
-    moveSingleEntity: function(self: WorldImpl, slot: integer, srcArch: Archetype,
-        srcRow: integer, dstArch: Archetype, newColumn: {any}, newValue: Component)
-    bulkMoveEntireArchetype: function(self: WorldImpl, srcArch: Archetype,
-        dstArch: Archetype): integer, integer
+    moveSingleEntity: function(
+        self: WorldImpl,
+        slot: integer,
+        srcArch: Archetype,
+        srcRow: integer,
+        dstArch: Archetype,
+        newColumn: {any},
+        newValue: Component
+    )
+    bulkMoveEntireArchetype: function(self: WorldImpl, srcArch: Archetype, dstArch: Archetype): integer, integer
     applyBatchSet: function(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
     applyBatchRemove: function(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
-    copyPlanRow: function(planDstCols: {integer: {any}}, planSrcCols: {integer: {any}},
-        dLuaRow: integer, srcRow: integer, count: integer)
+    copyPlanRow: function(
+        planDstCols: {integer: {any}}, planSrcCols: {integer: {any}}, dLuaRow: integer, srcRow: integer, count: integer
+    )
     applyPendingVals: function(vals: {any}, dstCols: {Component: {any}}, dLuaRow: integer)
-    applyPendingScalars: function(ctList: {Component}, values: {any},
-        dstCols: {Component: {any}}, dLuaRow: integer)
+    applyPendingScalars: function(ctList: {Component}, values: {any}, dstCols: {Component: {any}}, dLuaRow: integer)
     getRequiresClosure: function(comp: ComponentInternal): {RequireEntry}
-    applyRequires: function(dstArch: Archetype, comp: ComponentInternal,
-        archetypeIndex: ArchetypeIndex): Archetype, {RequireEntry}
+    applyRequires: function(
+        dstArch: Archetype, comp: ComponentInternal, archetypeIndex: ArchetypeIndex
+    ): Archetype, {RequireEntry}
     writeRequired: function(missing: {RequireEntry}, dstArch: Archetype, dLuaRow: integer)
-    writeRequiredRange: function(arch: Archetype, requiredList: {RequireEntry},
-        rStart: integer, rEnd: integer)
+    writeRequiredRange: function(arch: Archetype, requiredList: {RequireEntry}, rStart: integer, rEnd: integer)
 
     getEntityState: function(world: WorldImpl, slot: integer): integer
     setEntityState: function(world: WorldImpl, slot: integer, state: integer)

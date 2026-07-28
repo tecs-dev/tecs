@@ -359,7 +359,7 @@ local record Sheet
     sprite: function(self, frame?: integer): Sprite
 end
 
-local SheetMT <const>: metatable<Sheet> = { __index = Sheet }
+local SheetMT <const>: metatable<Sheet> = {__index = Sheet}
 
 --- Options for a sheet cut into a uniform grid.
 local record GridOptions
@@ -433,8 +433,7 @@ local record Builder
     --- @param duration Milliseconds it is held. Defaults to
     ---     `sheet.DEFAULT_DURATION`.
     --- @return The builder.
-    frame: function(self, x: number, y: number, w: number, h: number,
-                    duration?: number): Builder
+    frame: function(self, x: number, y: number, w: number, h: number, duration?: number): Builder
 
     --- Names an inclusive span of frames and how it walks them.
     --- @param name What an animation asks for.
@@ -442,8 +441,7 @@ local record Builder
     --- @param to Last frame, inclusive.
     --- @param direction Defaults to "forward".
     --- @return The builder.
-    tag: function(self, name: string, from: integer, to: integer,
-                  direction?: Direction): Builder
+    tag: function(self, name: string, from: integer, to: integer, direction?: Direction): Builder
 
     --- Adds a slice that never moves, with a pivot.
     --- @param name What a sprite names to take its pivot from.
@@ -455,16 +453,16 @@ local record Builder
     ---     Omitted, the slice carries no pivot and its middle stands in.
     --- @param pivotY
     --- @return The builder.
-    slice: function(self, name: string, x: number, y: number, w: number,
-                    h: number, pivotX?: number, pivotY?: number): Builder
+    slice: function(
+        self, name: string, x: number, y: number, w: number, h: number, pivotX?: number, pivotY?: number
+    ): Builder
 
     --- Adds a slice with its keys written out, which is what an importer uses.
     --- @param name The slice's name.
     --- @param data Free text to carry alongside it, or nil for none.
     --- @param keys Keys in frame order, at least one.
     --- @return The builder.
-    sliceKeys: function(self, name: string, data: string,
-                        keys: {SliceKey}): Builder
+    sliceKeys: function(self, name: string, data: string, keys: {SliceKey}): Builder
 
     --- Registers the sheet and hands it back.
     ---
@@ -473,7 +471,7 @@ local record Builder
     finish: function(self): Sheet
 end
 
-local BuilderMT <const>: metatable<Builder> = { __index = Builder }
+local BuilderMT <const>: metatable<Builder> = {__index = Builder}
 
 local record sheet
     type Direction = Direction
@@ -601,7 +599,6 @@ local record sheet
     revision: function(): integer
 end
 
-
 sheet.Sheet = Sheet
 sheet.DEFAULT_DURATION = DEFAULT_DURATION
 
@@ -611,8 +608,7 @@ sheet.DEFAULT_DURATION = DEFAULT_DURATION
 
 function Sheet:rect(frame: integer): number, number, number, number
     if frame == nil or frame < 1 or frame > self.count then
-        error(("tecs: sheet '%s' has no frame %s")
-            :format(self.name, tostring(frame)), 2)
+        error(("tecs: sheet '%s' has no frame %s"):format(self.name, tostring(frame)), 2)
     end
     local base = (frame - 1) * 4
     local rects = self._rects
@@ -621,16 +617,14 @@ end
 
 function Sheet:duration(frame: integer): number
     if frame == nil or frame < 1 or frame > self.count then
-        error(("tecs: sheet '%s' has no frame %s")
-            :format(self.name, tostring(frame)), 2)
+        error(("tecs: sheet '%s' has no frame %s"):format(self.name, tostring(frame)), 2)
     end
     return self._durations[frame]
 end
 
 function Sheet:uv(frame: integer): number, number, number, number
     if frame == nil or frame < 1 or frame > self.count then
-        error(("tecs: sheet '%s' has no frame %s")
-            :format(self.name, tostring(frame)), 2)
+        error(("tecs: sheet '%s' has no frame %s"):format(self.name, tostring(frame)), 2)
     end
     local base = (frame - 1) * 4
     local uvs = self._uvs
@@ -648,19 +642,22 @@ end
 function Sheet:tag(name: string): integer, integer, Direction
     local id = self._ids[name]
     if id == nil then
-        error(("tecs: sheet '%s' has no tag '%s'")
-            :format(self.name, tostring(name)), 2)
+        error(("tecs: sheet '%s' has no tag '%s'"):format(self.name, tostring(name)), 2)
     end
     return self._from[id], self._to[id], self._direction[id]
 end
 
 function Sheet:tagId(name: string): integer
-    if name == nil then return 0 end
+    if name == nil then
+        return 0
+    end
     return self._ids[name] or 0
 end
 
 function Sheet:tagName(id: integer): string
-    if id == nil or id < 1 then return "" end
+    if id == nil or id < 1 then
+        return ""
+    end
     return self._names[id] or ""
 end
 
@@ -670,7 +667,9 @@ end
 
 function Sheet:frameAt(id: integer, time: number): integer
     local order = self._order[id or 0]
-    if order == nil then return 1 end
+    if order == nil then
+        return 1
+    end
 
     -- A linear scan, because a tag is a handful of steps and the comparison is
     -- against a number already in cache. A binary search costs more branches
@@ -678,7 +677,9 @@ function Sheet:frameAt(id: integer, time: number): integer
     local timing = self._timing[id or 0]
     local steps <const> = #order
     for step = 1, steps do
-        if time <= timing[step] then return order[step] end
+        if time <= timing[step] then
+            return order[step]
+        end
     end
     return order[steps]
 end
@@ -689,76 +690,100 @@ end
 
 sheet.Pivot = Pivot
 
-ecs.newFFIComponent({
-    name = "Pivot",
-    container = Pivot,
-    fields = {
-        { "x", "float" }, { "y", "float" },
-        { "sheet", "int32_t" }, { "slice", "int32_t" },
-        { "halfX", "float" }, { "halfY", "float" },
-    },
-    -- The middle of the frame, which is where a quad with no Pivot at all
-    -- sits: adding the component without saying where moves nothing.
-    defaults = { 0.5, 0.5, 0, 0, 0.0, 0.0 },
-    -- A sheet id and a slice id are this process's answers, decided by the
-    -- order sheets and their slices were built in. What crosses a save is the
-    -- pair of names, resolved again on the way back in, and the fraction goes
-    -- with them so a pivot written directly survives as well. The travel is
-    -- deliberately dropped: it is the playback's answer rather than the
-    -- entity's, and the first step after a load writes it from the registration
-    -- this run made.
-    serialize = function(instance: Pivot): {string: any}
-        local source = sheet.byId(instance.sheet as integer)
-        local name: string = nil
-        local slice: string = nil
-        if source ~= nil then
-            name = source.name
-            slice = source:sliceName(instance.slice as integer)
-        end
-        return {
-            x = instance.x, y = instance.y, sheet = name, slice = slice,
-        }
-    end,
-    deserialize = function(_world: World, data: {string: any}): Pivot
-        local source = sheet.byName(data.sheet as string)
-        local id, slice = 0, 0
-        if source ~= nil then
-            id = source.id
-            slice = source:sliceId(data.slice as string)
-        end
-        return Pivot(data.x as number, data.y as number, id, slice)
-    end,
-})
+ecs.newFFIComponent(
+    {
+        name = "Pivot",
+        container = Pivot,
+        fields = {
+            {"x", "float"},
+            {"y", "float"},
+            {"sheet", "int32_t"},
+            {"slice", "int32_t"},
+            {"halfX", "float"},
+            {"halfY", "float"},
+        },
+        -- The middle of the frame, which is where a quad with no Pivot at all
+        -- sits: adding the component without saying where moves nothing.
+        defaults = {0.5, 0.5, 0, 0, 0.0, 0.0},
+        -- A sheet id and a slice id are this process's answers, decided by the
+        -- order sheets and their slices were built in. What crosses a save is the
+        -- pair of names, resolved again on the way back in, and the fraction goes
+        -- with them so a pivot written directly survives as well. The travel is
+        -- deliberately dropped: it is the playback's answer rather than the
+        -- entity's, and the first step after a load writes it from the registration
+        -- this run made.
+        serialize = function(instance: Pivot): {string: any}
+            local source = sheet.byId(instance.sheet as integer)
+            local name: string = nil
+            local slice: string = nil
+            if source ~= nil then
+                name = source.name
+                slice = source:sliceName(instance.slice as integer)
+            end
+            return {
+                x = instance.x,
+                y = instance.y,
+                sheet = name,
+                slice = slice,
+            }
+        end,
+        deserialize = function(_world: World, data: {string: any}): Pivot
+            local source = sheet.byName(data.sheet as string)
+            local id, slice = 0, 0
+            if source ~= nil then
+                id = source.id
+                slice = source:sliceId(data.slice as string)
+            end
+            return Pivot(data.x as number, data.y as number, id, slice)
+        end,
+    }
+)
 
 function Sheet:slice(name: string): Slice
-    if name == nil then return nil end
+    if name == nil then
+        return nil
+    end
     local id = self._sliceIds[name]
-    if id == nil then return nil end
+    if id == nil then
+        return nil
+    end
     return self._slices[id]
 end
 
 function Sheet:sliceId(name: string): integer
-    if name == nil then return 0 end
+    if name == nil then
+        return 0
+    end
     return self._sliceIds[name] or 0
 end
 
 function Sheet:sliceName(id: integer): string
-    if id == nil or id < 1 then return "" end
+    if id == nil or id < 1 then
+        return ""
+    end
     local entry = self._slices[id]
-    if entry == nil then return "" end
+    if entry == nil then
+        return ""
+    end
     return entry.name
 end
 
 function Sheet:sliceKeyAt(id: integer, frame: integer): SliceKey
-    if id == nil or id < 1 then return nil end
+    if id == nil or id < 1 then
+        return nil
+    end
     local entry = self._slices[id]
-    if entry == nil then return nil end
+    if entry == nil then
+        return nil
+    end
 
     local keys = entry.keys
     local found: SliceKey = nil
     for index = 1, #keys do
         local key = keys[index]
-        if key.frame > frame then break end
+        if key.frame > frame then
+            break
+        end
         found = key
     end
     return found
@@ -766,10 +791,14 @@ end
 
 function Sheet:pivotOf(id: integer, frame: integer): number, number
     local key = self:sliceKeyAt(id, frame)
-    if key == nil then return 0.5, 0.5 end
+    if key == nil then
+        return 0.5, 0.5
+    end
 
     local _, _, width, height = self:rect(frame)
-    if width <= 0 or height <= 0 then return 0.5, 0.5 end
+    if width <= 0 or height <= 0 then
+        return 0.5, 0.5
+    end
 
     local x, y = key.pivotX, key.pivotY
     if x == nil then
@@ -790,8 +819,7 @@ end
 function Sheet:pivot(name: string, frame?: integer): Pivot
     local id <const> = self:sliceId(name)
     if id < 1 then
-        error(("tecs: sheet '%s' has no slice '%s'")
-            :format(self.name, tostring(name)), 2)
+        error(("tecs: sheet '%s' has no slice '%s'"):format(self.name, tostring(name)), 2)
     end
     local x, y = self:pivotOf(id, frame or 1)
     return Pivot(x, y, self.id, id)
@@ -862,12 +890,16 @@ function sheet.revision(): integer
 end
 
 function sheet.byId(id: integer): Sheet
-    if id == nil or id < 1 then return nil end
+    if id == nil or id < 1 then
+        return nil
+    end
     return sheetsById[id]
 end
 
 function sheet.byName(name: string): Sheet
-    if name == nil then return nil end
+    if name == nil then
+        return nil
+    end
     return sheetsByName[name]
 end
 
@@ -876,8 +908,7 @@ end
 --- The direction is spent here rather than at every step of playback: what
 --- comes out is the frames in the order they are shown and the second each one
 --- ends on, so a lookup is a scan of numbers and never a branch on direction.
-local function planTag(self: Sheet, id: integer, from: integer, to: integer,
-                       direction: Direction)
+local function planTag(self: Sheet, id: integer, from: integer, to: integer, direction: Direction)
     local durations <const> = self._durations
     local order: {integer} = {}
     local timing: {number} = {}
@@ -892,13 +923,19 @@ local function planTag(self: Sheet, id: integer, from: integer, to: integer,
     end
 
     if direction == "reverse" then
-        for frame = to, from, -1 do step(frame) end
+        for frame = to, from, -1 do
+            step(frame)
+        end
     else
-        for frame = from, to do step(frame) end
+        for frame = from, to do
+            step(frame)
+        end
         if direction == "pingpong" and to > from then
             -- Neither end is repeated, so a three-frame tag is 1, 2, 3, 2 and
             -- the cycle is five frames long rather than six.
-            for frame = to - 1, from + 1, -1 do step(frame) end
+            for frame = to - 1, from + 1, -1 do
+                step(frame)
+            end
         end
     end
 
@@ -920,10 +957,14 @@ local function addTags(self: Sheet, tags: {string: Tag}, level: integer)
     self._from[0], self._to[0] = 1, self.count
     self._direction[0] = "forward"
     planTag(self, 0, 1, self.count, "forward")
-    if tags == nil then return end
+    if tags == nil then
+        return
+    end
 
     local names: {string} = {}
-    for name in pairs(tags) do names[#names + 1] = name end
+    for name in pairs(tags) do
+        names[#names + 1] = name
+    end
     sort(names)
 
     for i = 1, #names do
@@ -931,19 +972,22 @@ local function addTags(self: Sheet, tags: {string: Tag}, level: integer)
         local span = tags[name]
         local from, to = span.from, span.to
         if from == nil or to == nil then
-            error(("tecs: tag '%s' of sheet '%s' needs a from and a to")
-                :format(name, self.name), level)
+            error(("tecs: tag '%s' of sheet '%s' needs a from and a to"):format(name, self.name), level)
         end
         if from < 1 or to > self.count or from > to then
-            error(("tecs: tag '%s' of sheet '%s' spans %d to %d, outside "
-                .. "its %d frames")
-                :format(name, self.name, from, to, self.count), level)
+            error(
+                ("tecs: tag '%s' of sheet '%s' spans %d to %d, outside " .. "its %d frames"):format(
+                    name, self.name, from, to, self.count
+                ),
+                level
+            )
         end
         local direction <const> = span.direction or "forward"
-        if direction ~= "forward" and direction ~= "reverse"
-            and direction ~= "pingpong" then
-            error(("tecs: tag '%s' of sheet '%s' has no direction '%s'")
-                :format(name, self.name, tostring(direction)), level)
+        if direction ~= "forward" and direction ~= "reverse" and direction ~= "pingpong" then
+            error(
+                ("tecs: tag '%s' of sheet '%s' has no direction '%s'"):format(name, self.name, tostring(direction)),
+                level
+            )
         end
         self._from[i] = from
         self._to[i] = to
@@ -957,18 +1001,18 @@ end
 --- Assigns slices, in the order they were given.
 local function addSlices(self: Sheet, slices: {Slice}, level: integer)
     self._slices, self._sliceIds = {}, {}
-    if slices == nil then return end
+    if slices == nil then
+        return
+    end
 
     for index = 1, #slices do
         local entry = slices[index]
         if entry.name == nil or entry.name == "" then
-            error(("tecs: slice %d of sheet '%s' has no name")
-                :format(index, self.name), level)
+            error(("tecs: slice %d of sheet '%s' has no name"):format(index, self.name), level)
         end
         local keys = entry.keys
         if keys == nil or #keys < 1 then
-            error(("tecs: slice '%s' of sheet '%s' has no keys")
-                :format(entry.name, self.name), level)
+            error(("tecs: slice '%s' of sheet '%s' has no keys"):format(entry.name, self.name), level)
         end
         self._slices[index] = entry
         self._sliceIds[entry.name] = index
@@ -976,15 +1020,12 @@ local function addSlices(self: Sheet, slices: {Slice}, level: integer)
 end
 
 --- Fields every sheet needs whatever cut its frames.
-local function newSheet(name: string, imageWidth: number,
-                        imageHeight: number, level: integer): Sheet
+local function newSheet(name: string, imageWidth: number, imageHeight: number, level: integer): Sheet
     if name == nil or name == "" then
         error("tecs: a sheet needs a name", level)
     end
-    if imageWidth == nil or imageHeight == nil
-        or imageWidth <= 0 or imageHeight <= 0 then
-        error(("tecs: sheet '%s' needs the pixel size of its image")
-            :format(name), level)
+    if imageWidth == nil or imageHeight == nil or imageWidth <= 0 or imageHeight <= 0 then
+        error(("tecs: sheet '%s' needs the pixel size of its image"):format(name), level)
     end
     local self = setmetatable({} as Sheet, SheetMT)
     self.name = name
@@ -1008,8 +1049,7 @@ local function newSheet(name: string, imageWidth: number,
 end
 
 --- Registers a finished sheet and hands back its id.
-local function register(self: Sheet, tags: {string: Tag}, slices: {Slice},
-                        level: integer): Sheet
+local function register(self: Sheet, tags: {string: Tag}, slices: {Slice}, level: integer): Sheet
     if self.count < 1 then
         error(("tecs: sheet '%s' has no frames"):format(self.name), level)
     end
@@ -1031,16 +1071,21 @@ end
 --- the name a refusal should carry is the one that was edited rather than the
 --- first one the edit pushed along.
 --- @return Whether they agree, and the name that does not when they do not.
-local function sameIndices(before: {string: integer},
-                           after: {string: integer}): boolean, string
+local function sameIndices(before: {string: integer}, after: {string: integer}): boolean, string
     for name in pairs(before) do
-        if after[name] == nil then return false, name end
+        if after[name] == nil then
+            return false, name
+        end
     end
     for name in pairs(after) do
-        if before[name] == nil then return false, name end
+        if before[name] == nil then
+            return false, name
+        end
     end
     for name, id in pairs(before) do
-        if after[name] ~= id then return false, name end
+        if after[name] ~= id then
+            return false, name
+        end
     end
     return true
 end
@@ -1054,8 +1099,7 @@ function sheet.replace(built: Sheet): Sheet, string
     -- handed over.
     local live = displaced[built.name]
     if live == nil or live == built then
-        return nil, ("no sheet is registered as '%s', so there is nothing to "
-            .. "replace"):format(built.name)
+        return nil, ("no sheet is registered as '%s', so there is nothing to " .. "replace"):format(built.name)
     end
 
     -- Checked before anything is written, so a refusal leaves the live sheet
@@ -1063,14 +1107,16 @@ function sheet.replace(built: Sheet): Sheet, string
     local ok, moved = sameIndices(live._ids, built._ids)
     if not ok then
         sheetsByName[built.name] = live
-        return nil, ("sheet '%s' would renumber its tags at '%s', and an "
-            .. "Animation already holds a tag index"):format(built.name, moved)
+        return nil, (
+            "sheet '%s' would renumber its tags at '%s', and an " .. "Animation already holds a tag index"
+        ):format(built.name, moved)
     end
     ok, moved = sameIndices(live._sliceIds, built._sliceIds)
     if not ok then
         sheetsByName[built.name] = live
-        return nil, ("sheet '%s' would renumber its slices at '%s', and a "
-            .. "Pivot already holds a slice index"):format(built.name, moved)
+        return nil, (
+            "sheet '%s' would renumber its slices at '%s', and a " .. "Pivot already holds a slice index"
+        ):format(built.name, moved)
     end
 
     live.count = built.count
@@ -1112,8 +1158,7 @@ end
 -- Builder
 -------------------------------------------------------------------------------
 
-function sheet.build(name: string, imageWidth: number,
-                     imageHeight: number): Builder
+function sheet.build(name: string, imageWidth: number, imageHeight: number): Builder
     local self = setmetatable({} as Builder, BuilderMT)
     self._sheet = newSheet(name, imageWidth, imageHeight, 3)
     self._tags = {}
@@ -1121,12 +1166,10 @@ function sheet.build(name: string, imageWidth: number,
     return self
 end
 
-function Builder:frame(x: number, y: number, w: number, h: number,
-                       duration?: number): Builder
+function Builder:frame(x: number, y: number, w: number, h: number, duration?: number): Builder
     local target <const> = self._sheet
     if w == nil or h == nil or w <= 0 or h <= 0 then
-        error(("tecs: frame %d of sheet '%s' has no positive size")
-            :format(target.count + 1, target.name), 2)
+        error(("tecs: frame %d of sheet '%s' has no positive size"):format(target.count + 1, target.name), 2)
     end
     local index <const> = target.count + 1
     local base <const> = (index - 1) * 4
@@ -1143,27 +1186,39 @@ function Builder:frame(x: number, y: number, w: number, h: number,
     return self
 end
 
-function Builder:tag(name: string, from: integer, to: integer,
-                     direction?: Direction): Builder
+function Builder:tag(name: string, from: integer, to: integer, direction?: Direction): Builder
     if name == nil or name == "" then
         error("tecs: a tag needs a name", 2)
     end
-    self._tags[name] = { from = from, to = to, direction = direction }
+    self._tags[name] = {from = from, to = to, direction = direction}
     return self
 end
 
-function Builder:slice(name: string, x: number, y: number, w: number,
-                       h: number, pivotX?: number, pivotY?: number): Builder
-    return self:sliceKeys(name, nil, { {
-        frame = 1, x = x, y = y, w = w, h = h,
-        pivotX = pivotX, pivotY = pivotY,
-    } })
+function Builder:slice(
+    name: string, x: number, y: number, w: number, h: number, pivotX?: number, pivotY?: number
+): Builder
+    return self:sliceKeys(
+        name,
+        nil,
+        {
+            {
+                frame = 1,
+                x = x,
+                y = y,
+                w = w,
+                h = h,
+                pivotX = pivotX,
+                pivotY = pivotY,
+            },
+        }
+    )
 end
 
-function Builder:sliceKeys(name: string, data: string,
-                           keys: {SliceKey}): Builder
+function Builder:sliceKeys(name: string, data: string, keys: {SliceKey}): Builder
     self._slices[#self._slices + 1] = {
-        name = name, data = data or "", keys = keys,
+        name = name,
+        data = data or "",
+        keys = keys,
     }
     return self
 end
@@ -1177,15 +1232,12 @@ end
 -------------------------------------------------------------------------------
 
 function sheet.grid(options: GridOptions): Sheet
-    local self = newSheet(options.name, options.imageWidth,
-        options.imageHeight, 2)
+    local self = newSheet(options.name, options.imageWidth, options.imageHeight, 2)
 
     local frameWidth <const> = options.frameWidth
     local frameHeight <const> = options.frameHeight
-    if frameWidth == nil or frameHeight == nil
-        or frameWidth <= 0 or frameHeight <= 0 then
-        error(("tecs: sheet '%s' needs a positive frame size")
-            :format(self.name), 2)
+    if frameWidth == nil or frameHeight == nil or frameWidth <= 0 or frameHeight <= 0 then
+        error(("tecs: sheet '%s' needs a positive frame size"):format(self.name), 2)
     end
 
     local margin <const> = options.margin or 0.0
@@ -1193,22 +1245,20 @@ function sheet.grid(options: GridOptions): Sheet
 
     -- The last cell in a row has no spacing after it, so the spacing is added
     -- back once before dividing rather than subtracted from every cell.
-    local columns <const> = options.columns
-        or floor((self.imageWidth - 2 * margin + spacing)
-            / (frameWidth + spacing))
-    local rows <const> = options.rows
-        or floor((self.imageHeight - 2 * margin + spacing)
-            / (frameHeight + spacing))
+    local columns <const> = options.columns or floor((self.imageWidth - 2 * margin + spacing) / (frameWidth + spacing))
+    local rows <const> = options.rows or floor((self.imageHeight - 2 * margin + spacing) / (frameHeight + spacing))
     if columns < 1 or rows < 1 then
-        error(("tecs: sheet '%s' fits no %gx%g cells in %gx%g pixels")
-            :format(self.name, frameWidth, frameHeight,
-                self.imageWidth, self.imageHeight), 2)
+        error(
+            ("tecs: sheet '%s' fits no %gx%g cells in %gx%g pixels"):format(
+                self.name, frameWidth, frameHeight, self.imageWidth, self.imageHeight
+            ),
+            2
+        )
     end
 
     local count <const> = options.count or columns * rows
     if count < 1 or count > columns * rows then
-        error(("tecs: sheet '%s' asks for %d frames from a %dx%d grid")
-            :format(self.name, count, columns, rows), 2)
+        error(("tecs: sheet '%s' asks for %d frames from a %dx%d grid"):format(self.name, count, columns, rows), 2)
     end
 
     local duration <const> = (options.duration or DEFAULT_DURATION) / 1000.0
@@ -1229,8 +1279,7 @@ function sheet.grid(options: GridOptions): Sheet
 end
 
 function sheet.rects(options: RectsOptions): Sheet
-    local self = newSheet(options.name, options.imageWidth,
-        options.imageHeight, 2)
+    local self = newSheet(options.name, options.imageWidth, options.imageHeight, 2)
 
     local frames <const> = options.frames
     if frames == nil or #frames < 1 then
@@ -1241,8 +1290,7 @@ function sheet.rects(options: RectsOptions): Sheet
     for i = 1, #frames do
         local frame = frames[i]
         if frame.w == nil or frame.h == nil or frame.w <= 0 or frame.h <= 0 then
-            error(("tecs: frame %d of sheet '%s' has no positive size")
-                :format(i, self.name), 2)
+            error(("tecs: frame %d of sheet '%s' has no positive size"):format(i, self.name), 2)
         end
         local base = (i - 1) * 4
         rects[base + 1] = frame.x or 0.0
@@ -1272,23 +1320,28 @@ local function asepriteFrames(export: {string: any}): {{string: any}}
     end
 
     local list = raw as {{string: any}}
-    if #list > 0 then return list end
+    if #list > 0 then
+        return list
+    end
 
     local keyed = raw as {string: {string: any}}
     local names: {string} = {}
-    for name in pairs(keyed) do names[#names + 1] = name end
+    for name in pairs(keyed) do
+        names[#names + 1] = name
+    end
     sort(names)
 
     local ordered: {{string: any}} = {}
-    for index = 1, #names do ordered[index] = keyed[names[index]] end
+    for index = 1, #names do
+        ordered[index] = keyed[names[index]]
+    end
     return ordered
 end
 
 function sheet.fromAseprite(options: AsepriteOptions): Sheet
     local source = options.json
     if source is string then
-        source = (require("tecs.json") as
-            {string: function(string): any}).decode(source)
+        source = (require("tecs.json") as {string: function(string): any}).decode(source)
     end
     local export = source as {string: any}
     if export == nil then
@@ -1299,8 +1352,7 @@ function sheet.fromAseprite(options: AsepriteOptions): Sheet
     local size = (meta.size or {}) as {string: number}
     local name = options.name or (meta.image as string)
     if name == nil or name == "" then
-        error("tecs: the Aseprite export names no image, so the sheet "
-            .. "needs a name of its own", 2)
+        error("tecs: the Aseprite export names no image, so the sheet " .. "needs a name of its own", 2)
     end
 
     local builder <const> = sheet.build(name, size.w, size.h)
@@ -1310,11 +1362,9 @@ function sheet.fromAseprite(options: AsepriteOptions): Sheet
         local entry = frames[index]
         local rect = (entry.frame or {}) as {string: number}
         if rect.w == nil or rect.h == nil then
-            error(("tecs: frame %d of the Aseprite export has no rectangle")
-                :format(index), 2)
+            error(("tecs: frame %d of the Aseprite export has no rectangle"):format(index), 2)
         end
-        builder:frame(rect.x or 0.0, rect.y or 0.0, rect.w, rect.h,
-            entry.duration as number)
+        builder:frame(rect.x or 0.0, rect.y or 0.0, rect.w, rect.h, entry.duration as number)
     end
 
     -- Aseprite counts frames from zero and this model counts from one, so the
@@ -1325,11 +1375,9 @@ function sheet.fromAseprite(options: AsepriteOptions): Sheet
         local from = entry.from as integer
         local to = entry.to as integer
         if from == nil or to == nil then
-            error(("tecs: frame tag %d of the Aseprite export has no span")
-                :format(index), 2)
+            error(("tecs: frame tag %d of the Aseprite export has no span"):format(index), 2)
         end
-        builder:tag(entry.name as string, from + 1, to + 1,
-            entry.direction as Direction)
+        builder:tag(entry.name as string, from + 1, to + 1, entry.direction as Direction)
     end
 
     local slices = (meta.slices or {}) as {{string: any}}

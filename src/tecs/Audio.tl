@@ -122,7 +122,9 @@ local function clipId(path: string): integer
         error("tecs: a clip path cannot be empty", 2)
     end
     local id = clipIds[path]
-    if id ~= nil then return id end
+    if id ~= nil then
+        return id
+    end
     clipCount = clipCount + 1
     clipIds[path] = clipCount
     clipPaths[clipCount] = path
@@ -150,7 +152,9 @@ local function groupId(name: string): integer
         error("tecs: a group name cannot be empty", 2)
     end
     local id = groupIds[name]
-    if id ~= nil then return id end
+    if id ~= nil then
+        return id
+    end
     groupCount = groupCount + 1
     groupIds[name] = groupCount
     groupNames[groupCount] = name
@@ -239,19 +243,19 @@ ecs.newFFIComponent({
     name = "Sound",
     container = Sound,
     fields = {
-        { "clip", "int32_t" },
-        { "playing", "uint8_t" },
-        { "gain", "float" },
-        { "loop", "uint8_t" },
-        { "pitch", "float" },
-        { "spatial", "uint8_t" },
-        { "x", "float" },
-        { "y", "float" },
-        { "z", "float" },
-        { "group", "int32_t" },
-        { "voice", "int32_t" },
+        {"clip", "int32_t"},
+        {"playing", "uint8_t"},
+        {"gain", "float"},
+        {"loop", "uint8_t"},
+        {"pitch", "float"},
+        {"spatial", "uint8_t"},
+        {"x", "float"},
+        {"y", "float"},
+        {"z", "float"},
+        {"group", "int32_t"},
+        {"voice", "int32_t"},
     },
-    defaults = { 0, 1, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0 },
+    defaults = {0, 1, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0},
     serialize = function(instance: Sound): {string: any}
         -- Both the clip and the group cross as the names they were interned
         -- from. An index is this run's numbering, and a file that carried one
@@ -272,22 +276,34 @@ ecs.newFFIComponent({
     deserialize = function(_world: ecs.World, data: {string: any}): Sound
         local path = data.clip as string
         local clip = 0
-        if path ~= nil and path ~= "" then clip = clipId(path) end
+        if path ~= nil and path ~= "" then
+            clip = clipId(path)
+        end
         local name = data.group as string
         local group = 0
-        if name ~= nil and name ~= "" then group = groupId(name) end
+        if name ~= nil and name ~= "" then
+            group = groupId(name)
+        end
         -- A file written before `playing` existed carries no answer, and the
         -- one that matches what it recorded is that the sound was on.
         local playing = 1
-        if data.playing == false then playing = 0 end
+        if data.playing == false then
+            playing = 0
+        end
         -- The voice is not restored. A snapshot records that an entity has a
         -- sound, not how far through it the mixer had got, so it starts.
-        return Sound(clip, playing, data.gain as number,
+        return Sound(
+            clip,
+            playing,
+            data.gain as number,
             (data.loop as boolean) and 1 or 0,
             (data.pitch as number) or 1.0,
             (data.spatial as boolean) and 1 or 0,
-            (data.x as number) or 0.0, (data.y as number) or 0.0,
-            (data.z as number) or 0.0, group)
+            (data.x as number) or 0.0,
+            (data.y as number) or 0.0,
+            (data.z as number) or 0.0,
+            group
+        )
     end,
 })
 
@@ -490,15 +506,14 @@ local record Audio
     _now: number
 end
 
-local AudioMT <const>: metatable<Audio> = { __index = Audio }
+local AudioMT <const>: metatable<Audio> = {__index = Audio}
 
 --- The audio each world had installed into it. Weak, so a world that has gone
 --- takes its entry with it.
 ---
 --- Declared here rather than beside `Audio.of`, because `destroy` clears the
 --- entries naming it and reads this well before that point in the file.
-local installed <const>: {ecs.World: Audio} =
-    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
+local installed <const>: {ecs.World: Audio} = setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
 
 Audio.Sound = Sound
 
@@ -530,7 +545,9 @@ end
 --- What a build asked for and what it got are different questions: a decoder
 --- whose dependency was not found is dropped silently. This answers the second.
 function Audio.decoders(): {string}
-    if not sdl3mixer.init() then return {} end
+    if not sdl3mixer.init() then
+        return {}
+    end
     return sdl3mixer.decoders()
 end
 
@@ -541,8 +558,7 @@ end
 local function settleClip(clip: Audio.Clip, handle: assets.Handle)
     if handle.status == "ready" then
         clip.resident = handle.resident
-        clip.duration = handle.durationMs >= 0
-            and handle.durationMs / 1000 or 0.0
+        clip.duration = handle.durationMs >= 0 and handle.durationMs / 1000 or 0.0
         clip.status = "ready"
         return
     end
@@ -570,23 +586,33 @@ function Audio.create(config?: Audio.Config): Audio
         frequency = given.frequency or DEFAULT_FREQUENCY,
         channels = given.channels or DEFAULT_CHANNELS,
     }
-    self._streamMs = math.floor(
-        (given.streamSeconds or DEFAULT_STREAM_SECONDS) * 1000)
+    self._streamMs = math.floor((given.streamSeconds or DEFAULT_STREAM_SECONDS) * 1000)
 
     local maxVoices = given.maxVoices or DEFAULT_MAX_VOICES
     if maxVoices < 1 or maxVoices >= SLOT_SPAN then
-        error(("tecs: maxVoices must be between 1 and %d"):format(
-            SLOT_SPAN - 1), 2)
+        error(("tecs: maxVoices must be between 1 and %d"):format(SLOT_SPAN - 1), 2)
     end
     self._voices = {}
     self._free = {}
     for slot = 1, maxVoices do
         self._voices[slot] = {
-            gain = 1.0, applied = -1.0, pitch = 1.0, generation = 0,
-            sounding = false, stopping = false, paused = false, owned = false,
-            referenced = false, loop = false,
-            spatial = false, x = 0.0, y = 0.0, z = 0.0,
-            stereo = false, left = 1.0, right = 1.0,
+            gain = 1.0,
+            applied = -1.0,
+            pitch = 1.0,
+            generation = 0,
+            sounding = false,
+            stopping = false,
+            paused = false,
+            owned = false,
+            referenced = false,
+            loop = false,
+            spatial = false,
+            x = 0.0,
+            y = 0.0,
+            z = 0.0,
+            stereo = false,
+            left = 1.0,
+            right = 1.0,
         }
         -- Taken from the end, so the first sound of a run uses slot one and a
         -- log or a snapshot reads in the order things happened.
@@ -607,7 +633,7 @@ function Audio.create(config?: Audio.Config): Audio
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
     -- so nothing carries over from the previous voice.
-    self._params = { loops = 0, loopStartMs = 0, fadeInMs = 0, startMs = 0 }
+    self._params = {loops = 0, loopStartMs = 0, fadeInMs = 0, startMs = 0}
 
     self._mixer = self._backend.open(self._spec)
     self.available = self._mixer ~= nil
@@ -626,7 +652,9 @@ function Audio:destroy()
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
         if voice.track ~= nil then
-            if voice.sounding then self._backend.stop(voice.track, 0) end
+            if voice.sounding then
+                self._backend.stop(voice.track, 0)
+            end
             self._backend.destroyTrack(voice.track)
             voice.track = nil
         end
@@ -664,7 +692,9 @@ function Audio:destroy()
     -- indexed, because `install` takes a world and this holds no reference to
     -- any of them.
     for world, audio in pairs(installed) do
-        if audio == self then installed[world] = nil end
+        if audio == self then
+            installed[world] = nil
+        end
     end
 end
 
@@ -681,11 +711,15 @@ end
 function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     local id = clipId(path)
     local existing = self._clips[id]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
     -- The worker is what reads the file, and a game that only ever plays
     -- sound has no other reason to have started it.
-    if not assets.installed() then assets.install() end
+    if not assets.installed() then
+        assets.install()
+    end
 
     local given = options or {} as Audio.LoadOptions
     local mode = "auto"
@@ -755,15 +789,18 @@ function Audio:reload(path: string): boolean, string
     local id = clipIds[path]
     local clip = id ~= nil and self._clips[id] or nil
     if clip == nil then
-        return false, ("nothing has loaded '%s', so there is no clip to "
-            .. "re-read"):format(path)
+        return false, ("nothing has loaded '%s', so there is no clip to " .. "re-read"):format(path)
     end
     if clip.status == "loading" then
         return false, ("'%s' is still loading"):format(path)
     end
-    if not clip.resident then return true end
+    if not clip.resident then
+        return true
+    end
 
-    if not assets.installed() then assets.install() end
+    if not assets.installed() then
+        assets.install()
+    end
     local handle = assets.loadSound(path, "resident", self._streamMs)
     assets.waitAll()
     if handle.status ~= "ready" then
@@ -777,7 +814,9 @@ function Audio:reload(path: string): boolean, string
     local previous = clip._handle
     clip._handle = handle
     settleClip(clip, handle)
-    if previous ~= nil then previous:release() end
+    if previous ~= nil then
+        previous:release()
+    end
     return true
 end
 
@@ -787,11 +826,17 @@ end
 
 --- The voice a handle refers to, or nil when it refers to one that has ended.
 local function voiceOf(self: Audio, handle: integer): Voice
-    if handle == nil or handle <= 0 then return nil end
+    if handle == nil or handle <= 0 then
+        return nil
+    end
     local slot = handle % SLOT_SPAN
     local voice = self._voices[slot]
-    if voice == nil or not voice.sounding then return nil end
-    if voice.generation ~= (handle - slot) / SLOT_SPAN then return nil end
+    if voice == nil or not voice.sounding then
+        return nil
+    end
+    if voice.generation ~= (handle - slot) / SLOT_SPAN then
+        return nil
+    end
     return voice
 end
 
@@ -799,38 +844,49 @@ end
 --- master is the mixer's own number and is not multiplied in here.
 local function composedGain(self: Audio, voice: Voice): number
     local group = voice.group
-    if group == nil then return voice.gain end
-    if self._groupMuted[group] then return 0.0 end
+    if group == nil then
+        return voice.gain
+    end
+    if self._groupMuted[group] then
+        return 0.0
+    end
     local scale = self._groupGains[group]
-    if scale == nil then return voice.gain end
+    if scale == nil then
+        return voice.gain
+    end
     return voice.gain * scale
 end
 
 --- Pushes a voice's gain, skipping the call when nothing changed.
 local function applyGain(self: Audio, voice: Voice)
     local applied = composedGain(self, voice)
-    if applied == voice.applied then return end
+    if applied == voice.applied then
+        return
+    end
     voice.applied = applied
     self._backend.setGain(voice.track, applied)
 end
 
 --- Pushes a voice's rate, skipping the call when nothing changed.
 local function applyPitch(self: Audio, voice: Voice, ratio: number)
-    if voice.pitch == ratio then return end
+    if voice.pitch == ratio then
+        return
+    end
     voice.pitch = ratio
     self._backend.setPitch(voice.track, ratio)
 end
 
 --- Pushes whether a voice repeats, skipping the call when nothing changed.
 local function applyLoop(self: Audio, voice: Voice, loop: boolean)
-    if voice.loop == loop then return end
+    if voice.loop == loop then
+        return
+    end
     voice.loop = loop
     self._backend.setLoops(voice.track, loop and LOOP_FOREVER or 0)
 end
 
 --- Places a voice, skipping the call when it has not moved.
-local function applyPosition(self: Audio, voice: Voice,
-                             x: number, y: number, z: number)
+local function applyPosition(self: Audio, voice: Voice, x: number, y: number, z: number)
     if voice.spatial and voice.x == x and voice.y == y and voice.z == z then
         return
     end
@@ -844,8 +900,7 @@ local function applyPosition(self: Audio, voice: Voice,
 end
 
 --- Pans a voice, skipping the call when nothing changed.
-local function applyStereo(self: Audio, voice: Voice,
-                           left: number, right: number)
+local function applyStereo(self: Audio, voice: Voice, left: number, right: number)
     if voice.stereo and voice.left == left and voice.right == right then
         return
     end
@@ -858,7 +913,9 @@ end
 
 --- Returns a voice to unpositioned mixing, out of either placement.
 local function applyUnplaced(self: Audio, voice: Voice)
-    if not voice.spatial and not voice.stereo then return end
+    if not voice.spatial and not voice.stereo then
+        return
+    end
     voice.spatial = false
     voice.stereo = false
     self._backend.clearSpatial(voice.track)
@@ -867,7 +924,9 @@ end
 --- Gives a slot back, untagging and un-counting whatever it held.
 local function release(self: Audio, slot: integer)
     local voice = self._voices[slot]
-    if not voice.sounding then return end
+    if not voice.sounding then
+        return
+    end
 
     if voice.group ~= nil then
         self._backend.untag(voice.track, voice.group)
@@ -875,7 +934,9 @@ local function release(self: Audio, slot: integer)
     end
     if voice.key ~= nil then
         local bucket = self._buckets[voice.key]
-        if bucket ~= nil then bucket.count = bucket.count - 1 end
+        if bucket ~= nil then
+            bucket.count = bucket.count - 1
+        end
         voice.key = nil
     end
     -- Dropped rather than left attached, so a streamed voice closes its file
@@ -896,31 +957,40 @@ end
 --- Whether `key` has room for another voice right now.
 local function admits(self: Audio, key: string): boolean
     local limit = self._limits[key]
-    if limit == nil then return true end
+    if limit == nil then
+        return true
+    end
     local bucket = self._buckets[key]
-    if bucket == nil then return true end
-    if limit.cooldown ~= nil and limit.cooldown > 0
-        and self._now - bucket.last < limit.cooldown then
+    if bucket == nil then
+        return true
+    end
+    if limit.cooldown ~= nil and limit.cooldown > 0 and self._now - bucket.last < limit.cooldown then
         return false
     end
-    if limit.voices ~= nil and limit.voices > 0
-        and bucket.count >= limit.voices then
+    if limit.voices ~= nil and limit.voices > 0 and bucket.count >= limit.voices then
         return false
     end
     return true
 end
 
 --- Starts `clip` on a free voice and returns its handle, or zero.
-local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
-                     owned: boolean): integer
-    if not self.available then return 0 end
-    if clip == nil or clip.status ~= "ready" then return 0 end
+local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions, owned: boolean): integer
+    if not self.available then
+        return 0
+    end
+    if clip == nil or clip.status ~= "ready" then
+        return 0
+    end
 
     local key = options.key
-    if key ~= nil and not admits(self, key) then return 0 end
+    if key ~= nil and not admits(self, key) then
+        return 0
+    end
 
     local count = #self._free
-    if count == 0 then return 0 end
+    if count == 0 then
+        return 0
+    end
     local slot = self._free[count]
     self._free[count] = nil
 
@@ -947,7 +1017,9 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     end
 
     voice.generation = voice.generation + 1
-    if voice.generation > MAX_GENERATION then voice.generation = 1 end
+    if voice.generation > MAX_GENERATION then
+        voice.generation = 1
+    end
     voice.clip = clip
     voice.gain = options.gain or 1.0
     voice.applied = -1.0
@@ -959,7 +1031,9 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     voice.owned = owned
     voice.referenced = false
 
-    if voice.group ~= nil then self._backend.tag(voice.track, voice.group) end
+    if voice.group ~= nil then
+        self._backend.tag(voice.track, voice.group)
+    end
     applyGain(self, voice)
 
     local pitch = options.pitch or 1.0
@@ -974,8 +1048,7 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     -- The two placements are exclusive, and a position wins when a caller
     -- asks for both rather than one silently undoing the other.
     if options.spatial == true then
-        applyPosition(self, voice, options.x or 0.0, options.y or 0.0,
-            options.z or 0.0)
+        applyPosition(self, voice, options.x or 0.0, options.y or 0.0, options.z or 0.0)
     elseif options.stereo == true then
         applyStereo(self, voice, options.left or 1.0, options.right or 1.0)
     end
@@ -1019,7 +1092,7 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     if key ~= nil then
         local bucket = self._buckets[key]
         if bucket == nil then
-            bucket = { count = 0, last = 0.0 }
+            bucket = {count = 0, last = 0.0}
             self._buckets[key] = bucket
         end
         bucket.count = bucket.count + 1
@@ -1046,7 +1119,9 @@ end
 --- stays true until `update` sees the mixer finish it.
 function Audio:stop(handle: integer, fadeOut?: number)
     local voice = voiceOf(self, handle)
-    if voice == nil or voice.stopping then return end
+    if voice == nil or voice.stopping then
+        return
+    end
     local seconds = fadeOut or 0.0
     if seconds <= 0.0 then
         self._backend.stop(voice.track, 0)
@@ -1115,7 +1190,9 @@ end
 --- wants is a game's answer rather than this layer's.
 function Audio:pause(handle: integer)
     local voice = voiceOf(self, handle)
-    if voice == nil or voice.paused or voice.stopping then return end
+    if voice == nil or voice.paused or voice.stopping then
+        return
+    end
     voice.paused = true
     self._backend.pause(voice.track)
 end
@@ -1123,7 +1200,9 @@ end
 --- Lets a paused voice carry on.
 function Audio:resume(handle: integer)
     local voice = voiceOf(self, handle)
-    if voice == nil or not voice.paused then return end
+    if voice == nil or not voice.paused then
+        return
+    end
     voice.paused = false
     self._backend.resume(voice.track)
 end
@@ -1131,7 +1210,9 @@ end
 --- Sets a voice's gain, before its group and the master.
 function Audio:setGain(handle: integer, gain: number)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
+    if voice == nil then
+        return
+    end
     voice.gain = gain
     applyGain(self, voice)
 end
@@ -1139,7 +1220,9 @@ end
 --- Sets a voice's playback rate. 1 is unchanged.
 function Audio:setPitch(handle: integer, ratio: number)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
+    if voice == nil then
+        return
+    end
     applyPitch(self, voice, ratio)
 end
 
@@ -1151,7 +1234,9 @@ end
 --- only: a stopped one takes its count from the next play.
 function Audio:setLoop(handle: integer, loop: boolean)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
+    if voice == nil then
+        return
+    end
     applyLoop(self, voice, loop == true)
 end
 
@@ -1168,7 +1253,9 @@ end
 --- rather than an exact sample.
 function Audio:seek(handle: integer, seconds: number): boolean
     local voice = voiceOf(self, handle)
-    if voice == nil then return false end
+    if voice == nil then
+        return false
+    end
     return self._backend.seek(voice.track, math.floor(seconds * 1000))
 end
 
@@ -1179,9 +1266,13 @@ end
 --- sound back where it left off is built from.
 function Audio:tell(handle: integer): number
     local voice = voiceOf(self, handle)
-    if voice == nil then return nil end
+    if voice == nil then
+        return nil
+    end
     local ms = self._backend.tell(voice.track)
-    if ms < 0 then return nil end
+    if ms < 0 then
+        return nil
+    end
     return ms / 1000
 end
 
@@ -1190,7 +1281,9 @@ end
 --- Replaces a pan set by `setStereo` rather than combining with it.
 function Audio:setPosition(handle: integer, x: number, y: number, z: number)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
+    if voice == nil then
+        return
+    end
     applyPosition(self, voice, x, y, z)
 end
 
@@ -1207,14 +1300,18 @@ end
 --- the mixer holds one placement per track, and each call writes it.
 function Audio:setStereo(handle: integer, left: number, right: number)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
+    if voice == nil then
+        return
+    end
     applyStereo(self, voice, left, right)
 end
 
 --- Returns a voice to unpositioned mixing, out of either placement.
 function Audio:clearSpatial(handle: integer)
     local voice = voiceOf(self, handle)
-    if voice == nil then return end
+    if voice == nil then
+        return
+    end
     applyUnplaced(self, voice)
 end
 
@@ -1245,11 +1342,12 @@ end
 --- to zero, which is what a mute exists instead of.
 function Audio:setMuted(muted: boolean)
     local wanted = muted == true
-    if self._muted == wanted then return end
+    if self._muted == wanted then
+        return
+    end
     self._muted = wanted
     if self._mixer ~= nil then
-        self._backend.setMixerGain(self._mixer,
-            wanted and 0.0 or self._masterGain)
+        self._backend.setMixerGain(self._mixer, wanted and 0.0 or self._masterGain)
     end
 end
 
@@ -1302,7 +1400,9 @@ end
 --- `groupGain(name)`.
 function Audio:setGroupMuted(name: string, muted: boolean)
     local wanted = muted == true
-    if (self._groupMuted[name] == true) == wanted then return end
+    if (self._groupMuted[name] == true) == wanted then
+        return
+    end
     self._groupMuted[name] = wanted or nil
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
@@ -1325,22 +1425,30 @@ end
 --- paused group would be the one thing still heard.
 function Audio:pauseGroup(name: string)
     self._groupPaused[name] = true
-    if self._mixer == nil then return end
+    if self._mixer == nil then
+        return
+    end
     self._backend.pauseTag(self._mixer, name)
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
-        if voice.sounding and voice.group == name then voice.paused = true end
+        if voice.sounding and voice.group == name then
+            voice.paused = true
+        end
     end
 end
 
 --- Lets a paused group carry on, and lets later joiners start sounding.
 function Audio:resumeGroup(name: string)
     self._groupPaused[name] = nil
-    if self._mixer == nil then return end
+    if self._mixer == nil then
+        return
+    end
     self._backend.resumeTag(self._mixer, name)
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
-        if voice.sounding and voice.group == name then voice.paused = false end
+        if voice.sounding and voice.group == name then
+            voice.paused = false
+        end
     end
 end
 
@@ -1351,17 +1459,24 @@ end
 
 --- Appends a name to `names` unless `seen` already holds it.
 local function note(names: {string}, seen: {string: boolean}, name: string)
-    if seen[name] then return end
+    if seen[name] then
+        return
+    end
     seen[name] = true
     names[#names + 1] = name
 end
 
 --- Every group with a gain, a mute or a pause recorded against it.
-local function settledGroups(self: Audio, names: {string},
-                             seen: {string: boolean})
-    for name in pairs(self._groupGains) do note(names, seen, name) end
-    for name in pairs(self._groupMuted) do note(names, seen, name) end
-    for name in pairs(self._groupPaused) do note(names, seen, name) end
+local function settledGroups(self: Audio, names: {string}, seen: {string: boolean})
+    for name in pairs(self._groupGains) do
+        note(names, seen, name)
+    end
+    for name in pairs(self._groupMuted) do
+        note(names, seen, name)
+    end
+    for name in pairs(self._groupPaused) do
+        note(names, seen, name)
+    end
 end
 
 --- Every group this instance knows of: one whose gain, mute or pause has been
@@ -1386,7 +1501,9 @@ end
 --- A faded stop leaves the voices sounding until they finish, so they are
 --- reaped by `update` rather than here.
 function Audio:stopGroup(name: string, fadeOut?: number)
-    if self._mixer == nil then return end
+    if self._mixer == nil then
+        return
+    end
     local seconds = fadeOut or 0.0
     self._backend.stopTag(self._mixer, name, math.floor(seconds * 1000))
     for slot = 1, #self._voices do
@@ -1441,7 +1558,9 @@ function Audio:keys(): {string}
         names[#names + 1] = name
     end
     for name in pairs(self._buckets) do
-        if not seen[name] then names[#names + 1] = name end
+        if not seen[name] then
+            names[#names + 1] = name
+        end
     end
     table.sort(names)
     return names
@@ -1457,10 +1576,14 @@ end
 --- should read it.
 function Audio:clips(): {Audio.Clip}
     local ids: {integer} = {}
-    for id in pairs(self._clips) do ids[#ids + 1] = id end
+    for id in pairs(self._clips) do
+        ids[#ids + 1] = id
+    end
     table.sort(ids)
     local list: {Audio.Clip} = {}
-    for index = 1, #ids do list[index] = self._clips[ids[index]] end
+    for index = 1, #ids do
+        list[index] = self._clips[ids[index]]
+    end
     return list
 end
 
@@ -1514,8 +1637,7 @@ function Audio:update(dt?: number): integer
 
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
-        if voice.sounding and not voice.paused
-            and not self._backend.playing(voice.track) then
+        if voice.sounding and not voice.paused and not self._backend.playing(voice.track) then
             release(self, slot)
         end
     end
@@ -1620,8 +1742,7 @@ local function reconcile(self: Audio, sounds: ecs.Query, hushed: ecs.Query)
                 -- once, like the clip, and a sounding voice keeps the one it
                 -- joined.
                 rowOptions.group = groupNames[entry.group as integer]
-                local started = start(self,
-                    self._clips[entry.clip as integer], rowOptions, true)
+                local started = start(self, self._clips[entry.clip as integer], rowOptions, true)
                 if started ~= 0 then
                     if mutable == nil then
                         mutable = archetype:getMut(Sound) as {Sound}
@@ -1655,8 +1776,7 @@ local function reconcile(self: Audio, sounds: ecs.Query, hushed: ecs.Query)
                         applyLoop(self, voice, loop)
                     end
                     if (entry.spatial as integer) ~= 0 then
-                        applyPosition(self, voice, entry.x as number,
-                            entry.y as number, entry.z as number)
+                        applyPosition(self, voice, entry.x as number, entry.y as number, entry.z as number)
                     elseif voice.spatial then
                         applyUnplaced(self, voice)
                     end
@@ -1700,7 +1820,9 @@ local function saveMixer(self: Audio): {string: any}
         -- defaults out would make a save grow with what a run happened to play.
         if gain ~= nil or muted or paused then
             groups[name] = {
-                gain = gain or 1.0, muted = muted, paused = paused,
+                gain = gain or 1.0,
+                muted = muted,
+                paused = paused,
             }
         end
     end
@@ -1729,13 +1851,14 @@ local function loadMixer(self: Audio, value: {string: any})
     local seen: {string: boolean} = {}
     settledGroups(self, names, seen)
     if saved ~= nil then
-        for name in pairs(saved) do note(names, seen, name) end
+        for name in pairs(saved) do
+            note(names, seen, name)
+        end
     end
 
     for _, name in ipairs(names) do
         local entry = (saved ~= nil and saved[name] or nil) as {string: any}
-        self:setGroupGain(name,
-            entry ~= nil and (entry.gain as number) or 1.0)
+        self:setGroupGain(name, entry ~= nil and (entry.gain as number) or 1.0)
         self:setGroupMuted(name, entry ~= nil and entry.muted == true)
         if entry ~= nil and entry.paused == true then
             self:pauseGroup(name)
@@ -1744,8 +1867,7 @@ local function loadMixer(self: Audio, value: {string: any})
         end
     end
 
-    self:setMasterGain(
-        value ~= nil and (value.masterGain as number) or 1.0)
+    self:setMasterGain(value ~= nil and (value.masterGain as number) or 1.0)
     self:setMuted(value ~= nil and value.muted == true)
 end
 
@@ -1778,7 +1900,7 @@ function Audio:install(world: ecs.World)
 
     local sounds = world:query({
         name = "tecs.Sounds",
-        include = { Sound },
+        include = {Sound},
     })
 
     -- Naming `Disabled` opts out of the exclusion every other query gets, so
@@ -1786,25 +1908,23 @@ function Audio:install(world: ecs.World)
     -- their own, so it matches nothing until something is disabled.
     local hushed = world:query({
         name = "tecs.DisabledSounds",
-        include = { Sound, ecs.builtins.Disabled },
+        include = {Sound, ecs.builtins.Disabled},
     })
 
-    world:addSystem({
-        name = "tecs.PlaySounds",
-        -- After gameplay has decided what exists and before anything renders,
-        -- so a sound spawned this frame starts this frame.
-        phase = ecs.phases.PostUpdate,
-        run = function() reconcile(self, sounds, hushed) end,
-    })
+    world:addSystem(
+        {
+            name = "tecs.PlaySounds",
+            -- After gameplay has decided what exists and before anything renders,
+            -- so a sound spawned this frame starts this frame.
+            phase = ecs.phases.PostUpdate,
+            run = function() reconcile(self, sounds, hushed) end,
+        }
+    )
 
     world:addSnapshotHandler({
         name = "tecs.audio",
-        save = function(_world: ecs.World): any
-            return saveMixer(self)
-        end,
-        load = function(_world: ecs.World, value: any)
-            loadMixer(self, value as {string: any})
-        end,
+        save = function(_world: ecs.World): any return saveMixer(self) end,
+        load = function(_world: ecs.World, value: any) loadMixer(self, value as {string: any}) end,
     })
 end
 

@@ -110,7 +110,8 @@ end
 --- With playback resolved on the host the events are emitted whether or not
 --- this is carried, since the system that advances the frame is already looking
 --- at the row when it wraps.
-local record AnimationEvents is Component end
+local record AnimationEvents is Component
+end
 
 --- Emitted at address zero on the step a tag that does not loop runs past its
 --- last frame. The animation stops and holds that frame, so this fires once per
@@ -121,9 +122,7 @@ local record Completed is ecs.Event
     --- Name of the tag that finished, or the empty string for a whole sheet.
     tag: string
 
-    metamethod __call: function(
-        self, entity: integer, sheet: Sheet, tag: string
-    ): Completed
+    metamethod __call: function(self, entity: integer, sheet: Sheet, tag: string): Completed
 end
 
 --- Emitted at address zero on the step a looping tag passes its last frame
@@ -138,9 +137,7 @@ local record Looped is ecs.Event
     --- Name of the tag that wrapped, or the empty string for a whole sheet.
     tag: string
 
-    metamethod __call: function(
-        self, entity: integer, sheet: Sheet, tag: string
-    ): Looped
+    metamethod __call: function(self, entity: integer, sheet: Sheet, tag: string): Looped
 end
 
 --- How an animation should play.
@@ -287,52 +284,55 @@ local record animation
     usesGPU: function(): boolean
 end
 
-ecs.newFFIComponent({
-    name = "Animation",
-    container = Animation,
-    fields = {
-        { "sheet", "int32_t" },
-        { "tag", "int32_t" },
-        { "speed", "float" },
-        { "time", "float" },
-        { "frame", "int32_t" },
-        { "loop", "bool" },
-        { "playing", "bool" },
-    },
-    defaults = { 0, 0, DEFAULT_SPEED, 0, 0, true, true },
-    -- A sheet id and a tag id are this process's answers, decided by the
-    -- order sheets were built in. What crosses a save is the pair of names,
-    -- resolved again on the way back in. The frame is deliberately dropped:
-    -- zero makes the first step rewrite the Sprite's region, so a restored
-    -- entity does not depend on the region its Sprite was saved holding.
-    serialize = function(instance: Animation): {string: any}
-        local source = sheet.byId(instance.sheet as integer)
-        local name: string = nil
-        local tag: string = nil
-        if source ~= nil then
-            name = source.name
-            tag = source:tagName(instance.tag as integer)
-        end
-        return {
-            sheet = name,
-            tag = tag,
-            speed = instance.speed,
-            time = instance.time,
-            loop = instance.loop,
-            playing = instance.playing,
-        }
-    end,
-    deserialize = function(_world: World, data: {string: any}): Animation
-        local source = sheet.byName(data.sheet as string)
-        local id, tag = 0, 0
-        if source ~= nil then
-            id = source.id
-            tag = source:tagId(data.tag as string)
-        end
-        return Animation(id, tag, data.speed as number, data.time as number,
-            0, data.loop as boolean, data.playing as boolean)
-    end,
-})
+ecs.newFFIComponent(
+    {
+        name = "Animation",
+        container = Animation,
+        fields = {
+            {"sheet", "int32_t"},
+            {"tag", "int32_t"},
+            {"speed", "float"},
+            {"time", "float"},
+            {"frame", "int32_t"},
+            {"loop", "bool"},
+            {"playing", "bool"},
+        },
+        defaults = {0, 0, DEFAULT_SPEED, 0, 0, true, true},
+        -- A sheet id and a tag id are this process's answers, decided by the
+        -- order sheets were built in. What crosses a save is the pair of names,
+        -- resolved again on the way back in. The frame is deliberately dropped:
+        -- zero makes the first step rewrite the Sprite's region, so a restored
+        -- entity does not depend on the region its Sprite was saved holding.
+        serialize = function(instance: Animation): {string: any}
+            local source = sheet.byId(instance.sheet as integer)
+            local name: string = nil
+            local tag: string = nil
+            if source ~= nil then
+                name = source.name
+                tag = source:tagName(instance.tag as integer)
+            end
+            return {
+                sheet = name,
+                tag = tag,
+                speed = instance.speed,
+                time = instance.time,
+                loop = instance.loop,
+                playing = instance.playing,
+            }
+        end,
+        deserialize = function(_world: World, data: {string: any}): Animation
+            local source = sheet.byName(data.sheet as string)
+            local id, tag = 0, 0
+            if source ~= nil then
+                id = source.id
+                tag = source:tagId(data.tag as string)
+            end
+            return Animation(
+                id, tag, data.speed as number, data.time as number, 0, data.loop as boolean, data.playing as boolean
+            )
+        end,
+    }
+)
 
 ecs.newComponent({
     name = "AnimationEvents",
@@ -344,14 +344,12 @@ animation.Completed = Completed
 animation.Looped = Looped
 animation.AnimationEvents = AnimationEvents
 
-animation.Completed.init = function(event: Completed, entity: integer,
-                                    source: Sheet, tag: string)
+animation.Completed.init = function(event: Completed, entity: integer, source: Sheet, tag: string)
     event.entity, event.sheet, event.tag = entity, source, tag
 end
 ecs.newEvent(animation.Completed)
 
-animation.Looped.init = function(event: Looped, entity: integer,
-                                 source: Sheet, tag: string)
+animation.Looped.init = function(event: Looped, entity: integer, source: Sheet, tag: string)
     event.entity, event.sheet, event.tag = entity, source, tag
 end
 ecs.newEvent(animation.Looped)
@@ -372,11 +370,14 @@ function animation.of(source: Sheet, tag?: string, options?: PlayOptions): Anima
     end
     options = options or {}
     local loop = options.loop
-    if loop == nil then loop = true end
+    if loop == nil then
+        loop = true
+    end
     local playing = options.playing
-    if playing == nil then playing = true end
-    return Animation(source.id, tagId, options.speed or DEFAULT_SPEED,
-        0.0, 0, loop, playing)
+    if playing == nil then
+        playing = true
+    end
+    return Animation(source.id, tagId, options.speed or DEFAULT_SPEED, 0.0, 0, loop, playing)
 end
 
 function animation.play(world: World, entity: integer, source: Sheet, tag?: string, options?: PlayOptions)
@@ -396,7 +397,9 @@ function animation.play(world: World, entity: integer, source: Sheet, tag?: stri
 end
 
 function animation.restart(world: World, entity: integer): boolean
-    if not world:has(entity, Animation) then return false end
+    if not world:has(entity, Animation) then
+        return false
+    end
     local current <const> = world:getMut(entity, Animation)
     current.time = 0.0
     -- Zero is no frame written yet, so the next step writes the tag's first
@@ -466,8 +469,7 @@ local function advance(world: World, query: Query, dt: number)
                 -- inside the test rather than above it, so a row that is not
                 -- playing costs no table index to find that out.
                 local speed <const> = instance.speed
-                local cycle <const> = (instance.playing and speed > 0)
-                    and (source._cycle[tagId] or 0.0) or 0.0
+                local cycle <const> = (instance.playing and speed > 0) and (source._cycle[tagId] or 0.0) or 0.0
 
                 if cycle > 0 then
                     advanced = true
@@ -519,8 +521,7 @@ local function advance(world: World, query: Query, dt: number)
                 -- column. Most sprites in a large world are standing still at
                 -- any moment, and this is what stops them costing what a
                 -- playing one does.
-                if advanced or instance.frame == 0
-                    or (slot >= 0 and sprites[row].slot ~= slot) then
+                if advanced or instance.frame == 0 or (slot >= 0 and sprites[row].slot ~= slot) then
                     local frame <const> = source:frameAt(tagId, time)
                     local target <const> = sprites[row]
                     local changed <const> = frame ~= instance.frame
@@ -566,11 +567,9 @@ local function advance(world: World, query: Query, dt: number)
                 end
 
                 if completed and wantsCompleted then
-                    world:emit(0, animation.Completed, entities[row], source,
-                        source:tagName(tagId))
+                    world:emit(0, animation.Completed, entities[row], source, source:tagName(tagId))
                 elseif looped and wantsLooped then
-                    world:emit(0, animation.Looped, entities[row], source,
-                        source:tagName(tagId))
+                    world:emit(0, animation.Looped, entities[row], source, source:tagName(tagId))
                 end
             end
         end
@@ -624,8 +623,7 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
         -- slice as well as the tag: pointing an entity at another slice changes
         -- which playback it is on, and nothing about its Animation moved to say
         -- so. An archetype carrying no Pivot answers false and pays a lookup.
-        if archetype:isComponentDirty(Animation)
-            or archetype:isComponentDirty(Pivot) then
+        if archetype:isComponentDirty(Animation) or archetype:isComponentDirty(Pivot) then
             -- Mutable because the mark below is a write. The column is already
             -- dirty, which is why this archetype is being visited at all, so
             -- this declares the intent rather than changing what is gated.
@@ -661,8 +659,7 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
                     -- something else in another's, so the playback follows no
                     -- slice and the pivot stays where it was written.
                     local sliceId = 0
-                    if pivots ~= nil
-                        and pivots[row].sheet as integer == sheetId then
+                    if pivots ~= nil and pivots[row].sheet as integer == sheetId then
                         sliceId = pivots[row].slice as integer
                     end
 
@@ -717,15 +714,13 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
                     local ticks: number
                     if instance.frame ~= 0 and frametable.isPlayback(target) then
                         local was <const> = target.u1
-                        ticks = was == 0.0 and target.v0
-                            or (clock - target.v0) * was
+                        ticks = was == 0.0 and target.v0 or (clock - target.v0) * was
                     else
                         ticks = instance.time * TICK_HZ
                     end
 
                     local speed <const> = instance.speed
-                    local running <const> = not held and instance.playing
-                        and speed > 0.0
+                    local running <const> = not held and instance.playing and speed > 0.0
                     if running then
                         local rate <const> = timestep * speed * TICK_HZ
                         -- A one-shot parks one whole cycle in and stops, so
@@ -745,11 +740,9 @@ local function encode(world: World, query: Query, held: boolean, clock: number)
                         if not instance.loop and ticks >= count then
                             ticks = 0.0
                         end
-                        frametable.encode(target, playback,
-                            clock - ticks / rate, rate, instance.loop)
+                        frametable.encode(target, playback, clock - ticks / rate, rate, instance.loop)
                     else
-                        frametable.encode(target, playback, ticks, 0.0,
-                            instance.loop)
+                        frametable.encode(target, playback, ticks, 0.0, instance.loop)
                     end
 
                     -- Not a frame index on this path: which frame is showing is
@@ -808,15 +801,15 @@ local function report(world: World, query: Query, from: number, to: number)
                 -- at a clock this window opened before and would otherwise
                 -- read as having come round from behind zero.
                 local before = (from - start) * rate
-                if before < 0.0 then before = 0.0 end
+                if before < 0.0 then
+                    before = 0.0
+                end
                 local after <const> = (to - start) * rate
 
                 if count > 0 and after > before then
                     local instance <const> = animations[row]
-                    local looped <const> = instance.loop
-                        and floor(after / count) > floor(before / count)
-                    local completed <const> = not instance.loop
-                        and before < count and after >= count
+                    local looped <const> = instance.loop and floor(after / count) > floor(before / count)
+                    local completed <const> = not instance.loop and before < count and after >= count
 
                     if completed or looped then
                         local sheetId <const> = instance.sheet as integer
@@ -839,12 +832,12 @@ local function report(world: World, query: Query, from: number, to: number)
                         instance.playing = false
                         instance.time = count / TICK_HZ
                         if wantsCompleted then
-                            world:emit(0, animation.Completed, entities[row],
-                                cached, cached:tagName(instance.tag as integer))
+                            world:emit(
+                                0, animation.Completed, entities[row], cached, cached:tagName(instance.tag as integer)
+                            )
                         end
                     elseif looped and wantsLooped and cached ~= nil then
-                        world:emit(0, animation.Looped, entities[row], cached,
-                            cached:tagName(instance.tag as integer))
+                        world:emit(0, animation.Looped, entities[row], cached, cached:tagName(instance.tag as integer))
                     end
                 end
             end
@@ -863,10 +856,14 @@ end
 --- and this hands it over; with playback on the GPU the `Sprite` carries a
 --- start and a rate and the time comes out of them and the clock.
 local function phaseOf(world: World, entity: integer): Sheet, integer, number
-    if not world:has(entity, Animation) then return nil, 0, 0.0 end
+    if not world:has(entity, Animation) then
+        return nil, 0, 0.0
+    end
     local instance <const> = world:get(entity, Animation)
     local source <const> = sheet.byId(instance.sheet as integer)
-    if source == nil then return nil, 0, 0.0 end
+    if source == nil then
+        return nil, 0, 0.0
+    end
     local tagId <const> = instance.tag as integer
 
     if not useGPU or not world:has(entity, Sprite) then
@@ -881,11 +878,12 @@ local function phaseOf(world: World, entity: integer): Sheet, integer, number
 
     local id <const> = frametable.playbackOf(target)
     local count <const> = frametable.tickCount(id)
-    if count < 1 then return source, tagId, instance.time end
+    if count < 1 then
+        return source, tagId, instance.time
+    end
 
     local rate <const> = target.u1
-    local ticks = rate == 0.0 and target.v0
-        or (world:fixedStepCount() - target.v0) * rate
+    local ticks = rate == 0.0 and target.v0 or (world:fixedStepCount() - target.v0) * rate
     if instance.loop then
         ticks = ticks % count
     elseif ticks < 0.0 then
@@ -907,16 +905,19 @@ end
 
 function animation.frameOf(world: World, entity: integer): integer
     local source <const>, tagId <const>, time <const> = phaseOf(world, entity)
-    if source == nil then return 0 end
+    if source == nil then
+        return 0
+    end
     return source:frameAt(tagId, time)
 end
 
 --- Worlds the plugin has already installed into.
-local installed: {World: boolean} =
-    setmetatable({}, { __mode = "k" } as metatable<{World: boolean}>)
+local installed: {World: boolean} = setmetatable({}, {__mode = "k"} as metatable<{World: boolean}>)
 
 function animation.plugin(world: World)
-    if installed[world] then return end
+    if installed[world] then
+        return
+    end
     installed[world] = true
 
     if useGPU then
@@ -926,12 +927,12 @@ function animation.plugin(world: World)
         -- queries rather than one and a test per row.
         local running <const> = world:query({
             name = "tecs.EncodedSprites",
-            include = { Animation, Sprite },
-            exclude = { ecs.builtins.Paused },
+            include = {Animation, Sprite},
+            exclude = {ecs.builtins.Paused},
         })
         local paused <const> = world:query({
             name = "tecs.EncodedPausedSprites",
-            include = { Animation, Sprite, ecs.builtins.Paused },
+            include = {Animation, Sprite, ecs.builtins.Paused},
         })
 
         -- The step count each update began on, which is the count the last one
@@ -944,10 +945,7 @@ function animation.plugin(world: World)
         world:addSystem({
             name = "tecs.EncodeAnimation",
             phase = ecs.phases.PostUpdate,
-            run = function()
-                encode(world, running, false, began)
-                encode(world, paused, true, began)
-            end,
+            run = function() encode(world, running, false, began); encode(world, paused, true, began) end,
         })
 
         -- Beside the encoder rather than in the fixed phases, because what says
@@ -958,7 +956,7 @@ function animation.plugin(world: World)
         -- contract `Looped` already had.
         local subscribed <const> = world:query({
             name = "tecs.AnimationSubscribers",
-            include = { Animation, Sprite, AnimationEvents },
+            include = {Animation, Sprite, AnimationEvents},
         })
         world:addSystem({
             name = "tecs.ReportAnimation",
@@ -977,15 +975,13 @@ function animation.plugin(world: World)
     local animated <const> = world:query({
         name = "tecs.AnimatedSprites",
         type = "logic",
-        include = { Animation, Sprite },
+        include = {Animation, Sprite},
     })
 
     world:addSystem({
         name = "tecs.AdvanceAnimation",
         phase = ecs.phases.FixedPostUpdate,
-        run = function(dt: number)
-            advance(world, animated, dt)
-        end,
+        run = function(dt: number) advance(world, animated, dt) end,
     })
 end
 

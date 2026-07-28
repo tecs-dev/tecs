@@ -45,7 +45,7 @@ local record Device
     _destroyed: boolean
 end
 
-local DeviceMT <const>: metatable<Device> = { __index = Device }
+local DeviceMT <const>: metatable<Device> = {__index = Device}
 
 --- Shader formats this build can actually supply.
 ---
@@ -71,12 +71,12 @@ end
 function Device.create(window: Window, options: DeviceOptions): Device
     options = options or {}
 
-    local handle = C.SDL_CreateGPUDevice(supportedShaderFormats(),
-        options.debug == true, options.driver)
-    if handle == nil then sdl.fail("SDL_CreateGPUDevice") end
+    local handle = C.SDL_CreateGPUDevice(supportedShaderFormats(), options.debug == true, options.driver)
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUDevice")
+    end
 
-    sdl.check(C.SDL_ClaimWindowForGPUDevice(handle, window.handle) as boolean,
-        "SDL_ClaimWindowForGPUDevice")
+    sdl.check(C.SDL_ClaimWindowForGPUDevice(handle, window.handle) as boolean, "SDL_ClaimWindowForGPUDevice")
 
     local self = setmetatable({} as Device, DeviceMT)
     self.handle = handle
@@ -113,13 +113,15 @@ function Device:setPresentMode(mode: string): boolean
     if selected == nil then
         error(("tecs: unknown present mode '%s'"):format(tostring(mode)), 2)
     end
-    if not C.SDL_WindowSupportsGPUPresentMode(self.handle, self.window.handle,
-        selected) then
+    if not C.SDL_WindowSupportsGPUPresentMode(self.handle, self.window.handle, selected) then
         return false
     end
-    sdl.check(C.SDL_SetGPUSwapchainParameters(self.handle, self.window.handle,
-        C.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, selected) as boolean,
-        "SDL_SetGPUSwapchainParameters")
+    sdl.check(
+        C.SDL_SetGPUSwapchainParameters(
+            self.handle, self.window.handle, C.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, selected
+        ) as boolean,
+        "SDL_SetGPUSwapchainParameters"
+    )
     return true
 end
 
@@ -137,11 +139,14 @@ end
 --- clamping.
 function Device:setFramesInFlight(count: integer)
     if count > Buffer.slotCount then
-        error(("tecs: %d frames in flight needs at least that many staging "
-            .. "slots, and a buffer has %d"):format(count, Buffer.slotCount), 2)
+        error(
+            ("tecs: %d frames in flight needs at least that many staging " .. "slots, and a buffer has %d"):format(
+                count, Buffer.slotCount
+            ),
+            2
+        )
     end
-    sdl.check(C.SDL_SetGPUAllowedFramesInFlight(self.handle, count) as boolean,
-        "SDL_SetGPUAllowedFramesInFlight")
+    sdl.check(C.SDL_SetGPUAllowedFramesInFlight(self.handle, count) as boolean, "SDL_SetGPUAllowedFramesInFlight")
     self.framesInFlight = count
 end
 
@@ -165,10 +170,13 @@ end
 --- @return A frame to record into, or nil to skip this one.
 function Device:beginFrame(): Frame
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self.handle)
-    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
 
-    local ok = C.SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer,
-        self.window.handle, self._swapchainOut, self._widthOut, self._heightOut)
+    local ok = C.SDL_WaitAndAcquireGPUSwapchainTexture(
+        commandBuffer, self.window.handle, self._swapchainOut, self._widthOut, self._heightOut
+    )
     if not ok then
         C.SDL_CancelGPUCommandBuffer(commandBuffer)
         sdl.fail("SDL_WaitAndAcquireGPUSwapchainTexture")
@@ -180,9 +188,9 @@ function Device:beginFrame(): Frame
         return nil
     end
 
-    self._frame = Frame.wrap(commandBuffer, texture as loader.CPtr,
-        self._widthOut[0] as integer, self._heightOut[0] as integer,
-        self._frame)
+    self._frame = Frame.wrap(
+        commandBuffer, texture as loader.CPtr, self._widthOut[0] as integer, self._heightOut[0] as integer, self._frame
+    )
     return self._frame
 end
 
@@ -192,9 +200,7 @@ end
 --- The backend's choice, not a fixed value: asking is the only way to build a
 --- pipeline that matches on every machine.
 function Device:getSwapchainFormat(): integer
-    return tonumber(
-        C.SDL_GetGPUSwapchainTextureFormat(self.handle, self.window.handle)
-    ) as integer
+    return tonumber(C.SDL_GetGPUSwapchainTextureFormat(self.handle, self.window.handle)) as integer
 end
 
 --- Blocks until the GPU has finished all submitted work. Required before
@@ -205,7 +211,9 @@ end
 
 --- Releases the device. Safe to call more than once.
 function Device:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.SDL_WaitForGPUIdle(self.handle)
     if self.window ~= nil and self.window.handle ~= nil then

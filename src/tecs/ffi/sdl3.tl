@@ -8,8 +8,7 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("sdl3")
 
-local namespace <const>, libraryPath <const> =
-    loader.library("SDL3", "sdl3", "TECS_SDL3_PATH", "sdl3")
+local namespace <const>, libraryPath <const> = loader.library("SDL3", "sdl3", "TECS_SDL3_PATH", "sdl3")
 
 local record sdl3
     --- Functions and enum constants, resolved through the loaded library.
@@ -28,7 +27,9 @@ sdl3.path = libraryPath
 --- Returns the current SDL error as a Lua string.
 function sdl3.error(): string
     local message = sdl3.C.SDL_GetError()
-    if message == nil then return "(no error)" end
+    if message == nil then
+        return "(no error)"
+    end
     return loader.toString(message)
 end
 
@@ -39,7 +40,9 @@ end
 
 --- Asserts an SDL boolean result, raising with the pending error on failure.
 function sdl3.check(ok: boolean, what: string)
-    if not ok then sdl3.fail(what) end
+    if not ok then
+        sdl3.fail(what)
+    end
 end
 
 return sdl3

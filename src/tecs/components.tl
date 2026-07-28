@@ -41,9 +41,11 @@ ecs.newFFIComponent({
     name = "PreviousTransform",
     container = PreviousTransform,
     fields = {
-        { "x", "float" }, { "y", "float" }, { "rotation", "float" },
+        {"x", "float"},
+        {"y", "float"},
+        {"rotation", "float"},
     },
-    defaults = { 0, 0, 0 },
+    defaults = {0, 0, 0},
 })
 
 --- Base colour written into the G-buffer's albedo target.
@@ -58,10 +60,12 @@ ecs.newFFIComponent({
     name = "Tint",
     container = Tint,
     fields = {
-        { "r", "float" }, { "g", "float" },
-        { "b", "float" }, { "a", "float" },
+        {"r", "float"},
+        {"g", "float"},
+        {"b", "float"},
+        {"a", "float"},
     },
-    defaults = { 1, 1, 1, 1 },
+    defaults = {1, 1, 1, 1},
 })
 
 --- A light resolved by the deferred lighting pass.
@@ -81,11 +85,14 @@ ecs.newFFIComponent({
     name = "PointLight",
     container = PointLight,
     fields = {
-        { "height", "float" }, { "radius", "float" },
-        { "r", "float" }, { "g", "float" }, { "b", "float" },
-        { "intensity", "float" },
+        {"height", "float"},
+        {"radius", "float"},
+        {"r", "float"},
+        {"g", "float"},
+        {"b", "float"},
+        {"intensity", "float"},
     },
-    defaults = { 64, 256, 1, 1, 1, 1 },
+    defaults = {64, 256, 1, 1, 1, 1},
 })
 
 --- Interned image names.
@@ -137,8 +144,7 @@ local function normalisePath(name: string): string
     -- Nothing to drop is the common case, and it is answered without building
     -- a string. An interior `//` or `/./`, a leading `./` and a trailing
     -- separator are the whole of what the walk below removes.
-    if name:find("/%.?/") == nil and name:sub(1, 2) ~= "./"
-        and name:sub(-1) ~= "/" and name:sub(-2) ~= "/." then
+    if name:find("/%.?/") == nil and name:sub(1, 2) ~= "./" and name:sub(-1) ~= "/" and name:sub(-2) ~= "/." then
         return name
     end
 
@@ -149,7 +155,9 @@ local function normalisePath(name: string): string
 
     local segments <const>: {string} = {}
     for segment in rest:gmatch("[^/]+") do
-        if segment ~= "." then segments[#segments + 1] = segment end
+        if segment ~= "." then
+            segments[#segments + 1] = segment
+        end
     end
     return prefix .. table.concat(segments, "/")
 end
@@ -169,7 +177,9 @@ local function imageId(name: string): integer
     end
     name = normalisePath(name)
     local id = imageIds[name]
-    if id ~= nil then return id end
+    if id ~= nil then
+        return id
+    end
     imageCount = imageCount + 1
     imageIds[name] = imageCount
     imageNames[imageCount] = name
@@ -210,12 +220,14 @@ ecs.newFFIComponent({
     name = "Sprite",
     container = Sprite,
     fields = {
-        { "image", "int32_t" },
-        { "u0", "float" }, { "v0", "float" },
-        { "u1", "float" }, { "v1", "float" },
-        { "slot", "int32_t" },
+        {"image", "int32_t"},
+        {"u0", "float"},
+        {"v0", "float"},
+        {"u1", "float"},
+        {"v1", "float"},
+        {"slot", "int32_t"},
     },
-    defaults = { 0, 0, 0, 1, 1, -1 },
+    defaults = {0, 0, 0, 1, 1, -1},
     serialize = function(instance: Sprite): {string: any}
         -- A negative first coordinate is not a rect. The four UV lanes carry a
         -- playback instead when an animation resolves on the GPU, and what
@@ -228,21 +240,27 @@ ecs.newFFIComponent({
         if instance.u0 < 0.0 then
             return {
                 image = imageNames[instance.image as integer],
-                u0 = 0.0, v0 = 0.0, u1 = 1.0, v1 = 1.0,
+                u0 = 0.0,
+                v0 = 0.0,
+                u1 = 1.0,
+                v1 = 1.0,
             }
         end
         return {
             image = imageNames[instance.image as integer],
-            u0 = instance.u0, v0 = instance.v0,
-            u1 = instance.u1, v1 = instance.v1,
+            u0 = instance.u0,
+            v0 = instance.v0,
+            u1 = instance.u1,
+            v1 = instance.v1,
         }
     end,
     deserialize = function(_world: ecs.World, data: {string: any}): Sprite
         local name = data.image as string
         local image = 0
-        if name ~= nil and name ~= "" then image = imageId(name) end
-        return Sprite(image, data.u0 as number, data.v0 as number,
-            data.u1 as number, data.v1 as number)
+        if name ~= nil and name ~= "" then
+            image = imageId(name)
+        end
+        return Sprite(image, data.u0 as number, data.v0 as number, data.u1 as number, data.v1 as number)
     end,
 })
 
@@ -272,10 +290,10 @@ ecs.newFFIComponent({
     name = "Material",
     container = Material,
     fields = {
-        { "id", "int32_t" },
-        { "param", "float" },
+        {"id", "int32_t"},
+        {"param", "float"},
     },
-    defaults = { 0, 0.25 },
+    defaults = {0, 0.25},
     serialize = function(instance: Material): {string: any}
         -- The name, the way a Sprite writes its image and an Animation its
         -- sheet. The id is this build's answer, and the file has to hold
@@ -295,9 +313,12 @@ ecs.newFFIComponent({
             -- asked for, which is the failure a name is written to prevent;
             -- refusing is the only answer that is not a guess.
             if id == nil then
-                error(("loadSnapshot: snapshot references material '%s' "
-                    .. "which this build does not have; found %s")
-                    :format(name, table.concat(materials.names(), ", ")), 0)
+                error(
+                    (
+                        "loadSnapshot: snapshot references material '%s' " .. "which this build does not have; found %s"
+                    ):format(name, table.concat(materials.names(), ", ")),
+                    0
+                )
             end
         end
         return Material(id, data.param as number)
@@ -324,14 +345,15 @@ ecs.newFFIComponent({
     name = "Clip",
     container = Clip,
     fields = {
-        { "index", "int32_t" },
+        {"index", "int32_t"},
     },
-    defaults = { 0 },
+    defaults = {0},
 })
 
 --- Marks an entity as contributing geometry. Without it a Transform is just
 --- a position, which is what most entities in a world actually are.
-local record Renderable is Component end
+local record Renderable is Component
+end
 
 ecs.newComponent({
     name = "Renderable",

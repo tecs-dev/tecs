@@ -9,19 +9,12 @@ second opinion. On top of that, generated and third-party trees are named in
 EXCLUDED, and a file announcing itself as generated in its opening lines is
 skipped wherever it sits.
 
-Two languages in this tree deliberately have no formatter:
-
-  Teal   cerulean 1.8.0 loses source. A `local macro name!()` declaration is a
-         parse error and the file comes back empty; a `= macroexp(...) ... end`
-         body attached to a record field is dropped without a diagnostic. Six
-         files under src/ hit one or the other. See STYLE.md.
-
-  GLSL   clang-format has no GLSL mode and reads an interface block as a class
-         definition, so `layout(...) uniform View { ... } view;` comes back
-         with `view;` stranded on a line of its own. glslx 0.3.1 reads the
-         WebGL dialect, where `flat`, `switch` and a `u`-suffixed integer
-         literal do not exist, and its formatter returns such a file unchanged
-         without saying so. See STYLE.md.
+GLSL deliberately has no formatter. clang-format has no GLSL mode and reads an
+interface block as a class definition, so `layout(...) uniform View { ... }
+view;` comes back with `view;` stranded on a line of its own. glslx 0.3.1 reads
+the WebGL dialect, where `flat`, `switch` and a `u`-suffixed integer literal do
+not exist, and its formatter returns such a file unchanged without saying so.
+See STYLE.md.
 """
 
 import argparse
@@ -56,6 +49,7 @@ SUFFIXES = {
     ".c": "c",
     ".h": "c",
     ".lua": "lua",
+    ".tl": "teal",
     ".py": "python",
     ".cmake": "cmake",
     ".json": "prettier",
@@ -83,6 +77,11 @@ NAMES = {"CMakeLists.txt": "cmake"}
 TOOLS = {
     "c": ("clang-format", ["clang-format", "-i"], ["clang-format", "--dry-run", "--Werror"]),
     "lua": ("stylua", ["stylua"], ["stylua", "--check"]),
+    "teal": (
+        "vendor/bin/ceru",
+        ["vendor/bin/ceru"],
+        ["vendor/bin/ceru", "--check"],
+    ),
     "python": ("ruff", ["ruff", "format", "-q"], ["ruff", "format", "-q", "--check"]),
     "cmake": ("gersemi", ["gersemi", "-i"], ["gersemi", "--check"]),
     "prettier": (

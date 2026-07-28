@@ -75,8 +75,7 @@ local record Backend
     gamepadPower: function(handle: loader.CPtr): string, integer
     --- Turns a sensor on or off. Off by default, because a sensor that is on
     --- delivers an event stream nobody asked for.
-    setGamepadSensor: function(handle: loader.CPtr, sensor: integer,
-                               enabled: boolean): boolean
+    setGamepadSensor: function(handle: loader.CPtr, sensor: integer, enabled: boolean): boolean
     gamepadSensorEnabled: function(handle: loader.CPtr, sensor: integer): boolean
 
     ---------------------------------------------------------------- outputs
@@ -88,16 +87,13 @@ local record Backend
     --- False rather than an error where the device has no motor. Every output
     --- here answers that way: they are garnish, and a game should not have to
     --- guard them.
-    rumble: function(handle: loader.CPtr, low: number, high: number,
-                     milliseconds: integer): boolean
+    rumble: function(handle: loader.CPtr, low: number, high: number, milliseconds: integer): boolean
     --- The motors in the triggers, on the devices that have them, which is
     --- separate hardware from the body motors.
-    rumbleTriggers: function(handle: loader.CPtr, left: number, right: number,
-                             milliseconds: integer): boolean
+    rumbleTriggers: function(handle: loader.CPtr, left: number, right: number, milliseconds: integer): boolean
     --- Sets the device's light, in 0..1 per channel. The bar or ring, not the
     --- numbered player indicator.
-    setLED: function(handle: loader.CPtr, red: number, green: number,
-                     blue: number): boolean
+    setLED: function(handle: loader.CPtr, red: number, green: number, blue: number): boolean
     --- Assigns the player slot, zero-based, or -1 for none. What lights the
     --- numbered indicator on a device that has one.
     setPlayerIndex: function(handle: loader.CPtr, index: integer): boolean
@@ -113,9 +109,9 @@ local record Backend
     --- candidate window and its on-screen keyboard clear of it. Coordinates
     --- are window coordinates; `cursor` is the caret's offset from the left of
     --- the rectangle.
-    setTextInputArea: function(window: loader.CPtr, x: integer, y: integer,
-                               width: integer, height: integer,
-                               cursor: integer): boolean
+    setTextInputArea: function(
+        window: loader.CPtr, x: integer, y: integer, width: integer, height: integer, cursor: integer
+    ): boolean
     --- Whether the platform puts a keyboard on the screen for text input.
     screenKeyboardSupported: function(): boolean
 
@@ -184,7 +180,9 @@ end
 --- SDL renumbers cannot silently point at the wrong button.
 local function enumValue(name: string): integer
     local value = C[name]
-    if value == nil then return nil end
+    if value == nil then
+        return nil
+    end
     return tonumber(value) as integer
 end
 
@@ -286,52 +284,64 @@ local MODIFIERS <const>: {string: integer} = {
 
 --- Device family names, by SDL's type value.
 local GAMEPAD_TYPES <const>: {integer: string} = {}
-for name, kind in pairs({
-    SDL_GAMEPAD_TYPE_STANDARD = "standard",
-    SDL_GAMEPAD_TYPE_XBOX360 = "xbox360",
-    SDL_GAMEPAD_TYPE_XBOXONE = "xboxOne",
-    SDL_GAMEPAD_TYPE_PS3 = "ps3",
-    SDL_GAMEPAD_TYPE_PS4 = "ps4",
-    SDL_GAMEPAD_TYPE_PS5 = "ps5",
-    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO = "switchPro",
-    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT = "joyconLeft",
-    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT = "joyconRight",
-    SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR = "joyconPair",
-    SDL_GAMEPAD_TYPE_GAMECUBE = "gamecube",
-} as {string: string}) do
+for name, kind in pairs(
+    {
+        SDL_GAMEPAD_TYPE_STANDARD = "standard",
+        SDL_GAMEPAD_TYPE_XBOX360 = "xbox360",
+        SDL_GAMEPAD_TYPE_XBOXONE = "xboxOne",
+        SDL_GAMEPAD_TYPE_PS3 = "ps3",
+        SDL_GAMEPAD_TYPE_PS4 = "ps4",
+        SDL_GAMEPAD_TYPE_PS5 = "ps5",
+        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO = "switchPro",
+        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT = "joyconLeft",
+        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT = "joyconRight",
+        SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR = "joyconPair",
+        SDL_GAMEPAD_TYPE_GAMECUBE = "gamecube",
+    } as {string: string}
+) do
     local value = enumValue(name)
-    if value ~= nil then GAMEPAD_TYPES[value] = kind end
+    if value ~= nil then
+        GAMEPAD_TYPES[value] = kind
+    end
 end
 
 local POWER_STATES <const>: {integer: string} = {}
-for name, state in pairs({
-    SDL_POWERSTATE_ERROR = "error",
-    SDL_POWERSTATE_UNKNOWN = "unknown",
-    SDL_POWERSTATE_ON_BATTERY = "onBattery",
-    SDL_POWERSTATE_NO_BATTERY = "noBattery",
-    SDL_POWERSTATE_CHARGING = "charging",
-    SDL_POWERSTATE_CHARGED = "charged",
-} as {string: string}) do
+for name, state in pairs(
+    {
+        SDL_POWERSTATE_ERROR = "error",
+        SDL_POWERSTATE_UNKNOWN = "unknown",
+        SDL_POWERSTATE_ON_BATTERY = "onBattery",
+        SDL_POWERSTATE_NO_BATTERY = "noBattery",
+        SDL_POWERSTATE_CHARGING = "charging",
+        SDL_POWERSTATE_CHARGED = "charged",
+    } as {string: string}
+) do
     local value = enumValue(name)
-    if value ~= nil then POWER_STATES[value] = state end
+    if value ~= nil then
+        POWER_STATES[value] = state
+    end
 end
 
 --- Button labels, by SDL's label value. What is printed on the hardware, which
 --- is what a prompt has to show and what a positional name deliberately is
 --- not.
 local BUTTON_LABELS <const>: {integer: string} = {}
-for name, label in pairs({
-    SDL_GAMEPAD_BUTTON_LABEL_A = "a",
-    SDL_GAMEPAD_BUTTON_LABEL_B = "b",
-    SDL_GAMEPAD_BUTTON_LABEL_X = "x",
-    SDL_GAMEPAD_BUTTON_LABEL_Y = "y",
-    SDL_GAMEPAD_BUTTON_LABEL_CROSS = "cross",
-    SDL_GAMEPAD_BUTTON_LABEL_CIRCLE = "circle",
-    SDL_GAMEPAD_BUTTON_LABEL_SQUARE = "square",
-    SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE = "triangle",
-} as {string: string}) do
+for name, label in pairs(
+    {
+        SDL_GAMEPAD_BUTTON_LABEL_A = "a",
+        SDL_GAMEPAD_BUTTON_LABEL_B = "b",
+        SDL_GAMEPAD_BUTTON_LABEL_X = "x",
+        SDL_GAMEPAD_BUTTON_LABEL_Y = "y",
+        SDL_GAMEPAD_BUTTON_LABEL_CROSS = "cross",
+        SDL_GAMEPAD_BUTTON_LABEL_CIRCLE = "circle",
+        SDL_GAMEPAD_BUTTON_LABEL_SQUARE = "square",
+        SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE = "triangle",
+    } as {string: string}
+) do
     local value = enumValue(name)
-    if value ~= nil then BUTTON_LABELS[value] = label end
+    if value ~= nil then
+        BUTTON_LABELS[value] = label
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -341,8 +351,12 @@ end
 --- Rumble and LED take 0..1 and SDL takes fixed-point, so the conversion is
 --- here rather than in every caller.
 local function clamped(value: number, scale: number): integer
-    if value == nil or value < 0.0 then return 0 end
-    if value > 1.0 then return math.floor(scale) end
+    if value == nil or value < 0.0 then
+        return 0
+    end
+    if value > 1.0 then
+        return math.floor(scale)
+    end
     return math.floor(value * scale + 0.5)
 end
 
@@ -359,7 +373,9 @@ local sdlBackend <const>: Backend = {
     attachedGamepads = function(): {number}
         local ids: {number} = {}
         local list = C.SDL_GetGamepads(countOut)
-        if list == nil then return ids end
+        if list == nil then
+            return ids
+        end
         local total = countOut[0] as integer
         local array = list as loader.CArray
         for index = 0, total - 1 do
@@ -371,21 +387,20 @@ local sdlBackend <const>: Backend = {
 
     openGamepad = function(id: number): loader.CPtr
         local handle = C.SDL_OpenGamepad(id)
-        if handle == nil then return nil end
+        if handle == nil then
+            return nil
+        end
         return handle
     end,
 
-    closeGamepad = function(handle: loader.CPtr)
-        C.SDL_CloseGamepad(handle)
-    end,
+    closeGamepad = function(handle: loader.CPtr) C.SDL_CloseGamepad(handle) end,
 
     gamepadInfo = function(handle: loader.CPtr, id: number): GamepadInfo
         C.SDL_GUIDToString(C.SDL_GetGamepadGUIDForID(id), guidText, 33)
         return {
             id = id,
             name = loader.toString(C.SDL_GetGamepadName(handle)),
-            kind = GAMEPAD_TYPES[tonumber(C.SDL_GetGamepadType(handle)) as integer]
-                or "unknown",
+            kind = GAMEPAD_TYPES[tonumber(C.SDL_GetGamepadType(handle)) as integer] or "unknown",
             guid = loader.toString(guidText as loader.CValue),
             path = loader.toString(C.SDL_GetGamepadPath(handle)),
             playerIndex = tonumber(C.SDL_GetGamepadPlayerIndex(handle)) as integer,
@@ -415,8 +430,7 @@ local sdlBackend <const>: Backend = {
         return POWER_STATES[state] or "unknown", percentOut[0] as integer
     end,
 
-    setGamepadSensor = function(handle: loader.CPtr, sensor: integer,
-                                enabled: boolean): boolean
+    setGamepadSensor = function(handle: loader.CPtr, sensor: integer, enabled: boolean): boolean
         return C.SDL_SetGamepadSensorEnabled(handle, sensor, enabled) as boolean
     end,
 
@@ -424,22 +438,16 @@ local sdlBackend <const>: Backend = {
         return C.SDL_GamepadSensorEnabled(handle, sensor) as boolean
     end,
 
-    rumble = function(handle: loader.CPtr, low: number, high: number,
-                      milliseconds: integer): boolean
-        return C.SDL_RumbleGamepad(handle, clamped(low, 65535),
-            clamped(high, 65535), milliseconds) as boolean
+    rumble = function(handle: loader.CPtr, low: number, high: number, milliseconds: integer): boolean
+        return C.SDL_RumbleGamepad(handle, clamped(low, 65535), clamped(high, 65535), milliseconds) as boolean
     end,
 
-    rumbleTriggers = function(handle: loader.CPtr, left: number, right: number,
-                              milliseconds: integer): boolean
-        return C.SDL_RumbleGamepadTriggers(handle, clamped(left, 65535),
-            clamped(right, 65535), milliseconds) as boolean
+    rumbleTriggers = function(handle: loader.CPtr, left: number, right: number, milliseconds: integer): boolean
+        return C.SDL_RumbleGamepadTriggers(handle, clamped(left, 65535), clamped(right, 65535), milliseconds) as boolean
     end,
 
-    setLED = function(handle: loader.CPtr, red: number, green: number,
-                      blue: number): boolean
-        return C.SDL_SetGamepadLED(handle, clamped(red, 255),
-            clamped(green, 255), clamped(blue, 255)) as boolean
+    setLED = function(handle: loader.CPtr, red: number, green: number, blue: number): boolean
+        return C.SDL_SetGamepadLED(handle, clamped(red, 255), clamped(green, 255), clamped(blue, 255)) as boolean
     end,
 
     setPlayerIndex = function(handle: loader.CPtr, index: integer): boolean
@@ -447,87 +455,79 @@ local sdlBackend <const>: Backend = {
     end,
 
     startTextInput = function(window: loader.CPtr): boolean
-        if window == nil then return false end
+        if window == nil then
+            return false
+        end
         return C.SDL_StartTextInput(window) as boolean
     end,
 
     stopTextInput = function(window: loader.CPtr): boolean
-        if window == nil then return false end
+        if window == nil then
+            return false
+        end
         return C.SDL_StopTextInput(window) as boolean
     end,
 
-    setTextInputArea = function(window: loader.CPtr, x: integer, y: integer,
-                                width: integer, height: integer,
-                                cursor: integer): boolean
-        if window == nil then return false end
+    setTextInputArea = function(
+        window: loader.CPtr, x: integer, y: integer, width: integer, height: integer, cursor: integer
+    ): boolean
+        if window == nil then
+            return false
+        end
         local rect = textArea as loader.CStruct
         rect.x, rect.y, rect.w, rect.h = x, y, width, height
         return C.SDL_SetTextInputArea(window, textArea, cursor) as boolean
     end,
 
-    screenKeyboardSupported = function(): boolean
-        return C.SDL_HasScreenKeyboardSupport() as boolean
-    end,
+    screenKeyboardSupported = function(): boolean return C.SDL_HasScreenKeyboardSupport() as boolean end,
 
     setRelativeMouseMode = function(window: loader.CPtr, enabled: boolean): boolean
-        if window == nil then return false end
+        if window == nil then
+            return false
+        end
         return C.SDL_SetWindowRelativeMouseMode(window, enabled) as boolean
     end,
 
     relativeMouseMode = function(window: loader.CPtr): boolean
-        if window == nil then return false end
+        if window == nil then
+            return false
+        end
         return C.SDL_GetWindowRelativeMouseMode(window) as boolean
     end,
 
     warpMouse = function(window: loader.CPtr, x: number, y: number)
-        if window == nil then return end
+        if window == nil then
+            return
+        end
         C.SDL_WarpMouseInWindow(window, x, y)
     end,
 
-    captureMouse = function(enabled: boolean): boolean
-        return C.SDL_CaptureMouse(enabled) as boolean
-    end,
+    captureMouse = function(enabled: boolean): boolean return C.SDL_CaptureMouse(enabled) as boolean end,
 
     showCursor = function(visible: boolean): boolean
-        if visible then return C.SDL_ShowCursor() as boolean end
+        if visible then
+            return C.SDL_ShowCursor() as boolean
+        end
         return C.SDL_HideCursor() as boolean
     end,
 
-    cursorVisible = function(): boolean
-        return C.SDL_CursorVisible() as boolean
-    end,
+    cursorVisible = function(): boolean return C.SDL_CursorVisible() as boolean end,
 
-    scancodeFromName = function(name: string): integer
-        return tonumber(C.SDL_GetScancodeFromName(name)) as integer
-    end,
+    scancodeFromName = function(name: string): integer return tonumber(C.SDL_GetScancodeFromName(name)) as integer end,
 
-    scancodeName = function(scancode: integer): string
-        return loader.toString(C.SDL_GetScancodeName(scancode))
-    end,
+    scancodeName = function(scancode: integer): string return loader.toString(C.SDL_GetScancodeName(scancode)) end,
 
-    mouseButtonFromName = function(name: string): integer
-        return MOUSE_BUTTONS[name]
-    end,
+    mouseButtonFromName = function(name: string): integer return MOUSE_BUTTONS[name] end,
 
-    modifierFromName = function(name: string): integer
-        return MODIFIERS[name]
-    end,
+    modifierFromName = function(name: string): integer return MODIFIERS[name] end,
 
-    gamepadButtonFromName = function(name: string): integer
-        return GAMEPAD_BUTTONS[name]
-    end,
+    gamepadButtonFromName = function(name: string): integer return GAMEPAD_BUTTONS[name] end,
 
-    gamepadAxisFromName = function(name: string): integer
-        return GAMEPAD_AXES[name]
-    end,
+    gamepadAxisFromName = function(name: string): integer return GAMEPAD_AXES[name] end,
 
-    penAxisFromName = function(name: string): integer
-        return PEN_AXES[name]
-    end,
+    penAxisFromName = function(name: string): integer return PEN_AXES[name] end,
 
-    sensorFromName = function(name: string): integer
-        return SENSORS[name]
-    end,
+    sensorFromName = function(name: string): integer return SENSORS[name] end,
 }
 
 inputbackend.sdl = sdlBackend

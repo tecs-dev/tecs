@@ -18,18 +18,19 @@ local record BundleCodegen
     type DrainFn = function()
 
     codegenBundleSpawn: function(
-        world: WorldImpl,
-        typeArray: {Component},
-        factoryArray: {function(): Component},
-        requiredCount: integer
+        world: WorldImpl, typeArray: {Component}, factoryArray: {function(): Component}, requiredCount: integer
     ): SpawnFn
 end
 
 -- Build comma-separated "v1, v2, ..., vN" list from lo..hi.
 local function seq(prefix: string, lo: integer, hi: integer, sep: string): string
-    if hi < lo then return "" end
+    if hi < lo then
+        return ""
+    end
     local parts: {string} = {}
-    for i = lo, hi do parts[#parts + 1] = prefix .. i end
+    for i = lo, hi do
+        parts[#parts + 1] = prefix .. i
+    end
     return table.concat(parts, sep)
 end
 
@@ -38,8 +39,8 @@ local function requiredChecksSrc(requiredCount: integer): string
     local parts: {string} = {}
     for i = 1, requiredCount do
         parts[#parts + 1] = string.format(
-            "    if r%d == nil then error('Required component missing: ' .. T%d.componentName, 2) end",
-            i, i)
+            "    if r%d == nil then error('Required component missing: ' .. T%d.componentName, 2) end", i, i
+        )
     end
     return table.concat(parts, "\n")
 end
@@ -49,17 +50,28 @@ end
 -- entity becomes visible. `world:spawn` owns those semantics; the bundle
 -- fast path cannot express them.
 local function codegenKeyedSrc(n: integer, requiredCount: integer): string
-    local upvalueList: string do
+    local upvalueList: string
+    do
         local parts: {string} = {"world"}
-        for i = 1, n do parts[#parts + 1] = "T" .. i end
-        for i = requiredCount + 1, n do parts[#parts + 1] = "f" .. i end
+        for i = 1, n do
+            parts[#parts + 1] = "T" .. i
+        end
+        for i = requiredCount + 1, n do
+            parts[#parts + 1] = "f" .. i
+        end
         upvalueList = table.concat(parts, ", ")
     end
     local paramList = seq("r", 1, requiredCount, ", ")
-    if paramList ~= "" then paramList = ", " .. paramList end
+    if paramList ~= "" then
+        paramList = ", " .. paramList
+    end
     local argParts: {string} = {}
-    for i = 1, requiredCount do argParts[#argParts + 1] = "r" .. i end
-    for i = requiredCount + 1, n do argParts[#argParts + 1] = "f" .. i .. "()" end
+    for i = 1, requiredCount do
+        argParts[#argParts + 1] = "r" .. i
+    end
+    for i = requiredCount + 1, n do
+        argParts[#argParts + 1] = "f" .. i .. "()"
+    end
 
     local src: string = [[
 local __UPVALUES__ = ...
@@ -91,30 +103,41 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
             queueSlot[i] = nonSparseCount
         end
     end
-    local stride = 2 + nonSparseCount  -- target arch id + slot + non-sparse values
+    local stride = 2 + nonSparseCount -- target arch id + slot + non-sparse values
 
     -- Upvalues: world, allocSlot, OnSpawn, plus component types (T1..Tn)
     -- and factories for the non-required suffix.
-    local upvalueList: string do
+    local upvalueList: string
+    do
         local parts: {string} = {"world", "allocSlot", "OnSpawn"}
-        for i = 1, n do parts[#parts + 1] = "T" .. i end
-        for i = requiredCount + 1, n do parts[#parts + 1] = "f" .. i end
+        for i = 1, n do
+            parts[#parts + 1] = "T" .. i
+        end
+        for i = requiredCount + 1, n do
+            parts[#parts + 1] = "f" .. i
+        end
         upvalueList = table.concat(parts, ", ")
     end
 
     local paramList = seq("r", 1, requiredCount, ", ")
-    if paramList ~= "" then paramList = ", " .. paramList end
+    if paramList ~= "" then
+        paramList = ", " .. paramList
+    end
 
     local typeList = seq("T", 1, n, ", ")
 
-    local cachedColDecls: string do
+    local cachedColDecls: string
+    do
         local parts: {string} = {}
         for i = 1, n do
-            if not isSparse[i] then parts[#parts + 1] = "col" .. i end
+            if not isSparse[i] then
+                parts[#parts + 1] = "col" .. i
+            end
         end
         cachedColDecls = #parts > 0 and ("local " .. table.concat(parts, ", ")) or ""
     end
-    local fetchColsResolve: string do
+    local fetchColsResolve: string
+    do
         local parts: {string} = {}
         for i = 1, n do
             if not isSparse[i] then
@@ -123,7 +146,8 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         end
         fetchColsResolve = table.concat(parts, "\n")
     end
-    local fetchColsGrow: string do
+    local fetchColsGrow: string
+    do
         local parts: {string} = {}
         for i = 1, n do
             if not isSparse[i] then
@@ -140,13 +164,16 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
     -- the API boundary -- internals never see wrappers.
     local function valueExpr(i: integer): string
         local base = i <= requiredCount and ("r" .. i) or ("f" .. i .. "()")
-        if isScalar[i] then return "(" .. base .. ").value" end
+        if isScalar[i] then
+            return "(" .. base .. ").value"
+        end
         return base
     end
 
     -- Immediate path column/sparse writes. The entity is already placed,
     -- so sparse values apply to the store now instead of staging.
-    local columnWritesImmediate: string do
+    local columnWritesImmediate: string
+    do
         local parts: {string} = {}
         for i = 1, n do
             if isSparse[i] then
@@ -160,7 +187,8 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
 
     -- Deferred path: record = {target arch id, slot, non-sparse values};
     -- sparse goes to the world's staging buffer under the packed handle.
-    local enqueuePushes: string do
+    local enqueuePushes: string
+    do
         local parts: {string} = {}
         parts[#parts + 1] = "        spawnQueue[c + 1] = a.id"
         parts[#parts + 1] = "        spawnQueue[c + 2] = slot"
@@ -176,7 +204,8 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
 
     -- Deferred drain column writes: read value back from queue at the
     -- per-component offset (`i` points at the record's arch id).
-    local drainColumnWrites: string do
+    local drainColumnWrites: string
+    do
         local parts: {string} = {}
         for i = 1, n do
             if not isSparse[i] then
@@ -382,8 +411,10 @@ end
 
 return spawn, drain
 ]]
+
     -- Grow path for immediate: indentation differs (outer level).
-    local fetchColsGrowImmediate: string do
+    local fetchColsGrowImmediate: string
+    do
         local parts: {string} = {}
         for i = 1, n do
             if not isSparse[i] then
@@ -411,17 +442,12 @@ return spawn, drain
 end
 
 function BundleCodegen.codegenBundleSpawn(
-    world: WorldImpl,
-    typeArray: {Component},
-    factoryArray: {function(): Component},
-    requiredCount: integer
+    world: WorldImpl, typeArray: {Component}, factoryArray: {function(): Component}, requiredCount: integer
 ): BundleCodegen.SpawnFn
     local n = #typeArray
 
     if n == 0 then
-        return function(_self: any): integer
-            return world:spawn()
-        end
+        return function(_self: any): integer return world:spawn() end
     end
 
     local isSparse: {boolean} = {}
@@ -443,16 +469,21 @@ function BundleCodegen.codegenBundleSpawn(
         if not keyedChunk then
             error("bundle codegen failed: " .. tostring(keyedErr))
         end
-        local keyedArgs: {any} = { world }
-        for i = 1, n do keyedArgs[#keyedArgs + 1] = typeArray[i] end
-        for i = requiredCount + 1, n do keyedArgs[#keyedArgs + 1] = factoryArray[i] end
-        return (keyedChunk as function(any...): any)(
-            table.unpack(keyedArgs, 1, #keyedArgs)) as BundleCodegen.SpawnFn
+        local keyedArgs: {any} = {world}
+        for i = 1, n do
+            keyedArgs[#keyedArgs + 1] = typeArray[i]
+        end
+        for i = requiredCount + 1, n do
+            keyedArgs[#keyedArgs + 1] = factoryArray[i]
+        end
+        return (keyedChunk as function(...: any): any)(table.unpack(keyedArgs, 1, #keyedArgs)) as BundleCodegen.SpawnFn
     end
 
     local src = codegenSrc(n, requiredCount, isSparse, isScalar)
     local chunk, err = load(src, "=bundle_spawn", "t")
-    if not chunk then error("bundle codegen failed: " .. tostring(err)) end
+    if not chunk then
+        error("bundle codegen failed: " .. tostring(err))
+    end
 
     -- Upvalue order must match the generated `local ... = ...` line:
     -- world, allocSlot, OnSpawn, T1..Tn, f(requiredCount+1)..fn.
@@ -461,9 +492,13 @@ function BundleCodegen.codegenBundleSpawn(
         IdAllocator.allocSlot,
         builtins.OnSpawn,
     }
-    for i = 1, n do args[#args + 1] = typeArray[i] end
-    for i = requiredCount + 1, n do args[#args + 1] = factoryArray[i] end
-    local packed = {(chunk as function(any...): any...)(table.unpack(args, 1, #args))}
+    for i = 1, n do
+        args[#args + 1] = typeArray[i]
+    end
+    for i = requiredCount + 1, n do
+        args[#args + 1] = factoryArray[i]
+    end
+    local packed = {(chunk as function(...: any): any...)(table.unpack(args, 1, #args))}
     -- Generated chunk returns `spawn, drain`. `drain` is kept alive via
     -- the `drain = function() ... end` assignment inside the chunk's
     -- closure -- it's the upvalue that `pendingBundleDrains` points at

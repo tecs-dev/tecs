@@ -68,33 +68,35 @@ local record program
 end
 
 -- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
-local OP_WAIT <const> = 1     -- a = const index holding seconds, or -1
-                              -- b = literal step count when a is -1
-local OP_CALL <const> = 2     -- a = const index of action name
-                              -- b = const index of args array
-local OP_EMIT <const> = 3     -- a = const index of event name
-                              -- b = const index of args array
-local OP_JUMP <const> = 4     -- a = target pc
-                              -- b = loop register, or -1 for unconditional
+local OP_WAIT <const> = 1 -- a = const index holding seconds, or -1
+-- b = literal step count when a is -1
+local OP_CALL <const> = 2 -- a = const index of action name
+-- b = const index of args array
+local OP_EMIT <const> = 3 -- a = const index of event name
+-- b = const index of args array
+local OP_JUMP <const> = 4 -- a = target pc
+-- b = loop register, or -1 for unconditional
 local OP_END <const> = 5
-local OP_WAIT_SIGNAL <const> = 6  -- a = const index of signal name
-local OP_FORK <const> = 7     -- a = first pc of the branch body
-                              -- b = pc the forking cursor continues at
+local OP_WAIT_SIGNAL <const> = 6 -- a = const index of signal name
+local OP_FORK <const> = 7 -- a = first pc of the branch body
+-- b = pc the forking cursor continues at
 local OP_JOIN <const> = 8
-local OP_WAIT_QUERY <const> = 9   -- a = const index of query name
-                                  -- b = 1 to wait for a match, 0 for none
-local OP_PLAY_TWEEN <const> = 10  -- a = const index of preset name
-                                  -- b = const index of {bind, options}
+local OP_WAIT_QUERY <const> = 9 -- a = const index of query name
+-- b = 1 to wait for a match, 0 for none
+local OP_PLAY_TWEEN <const> = 10 -- a = const index of preset name
+-- b = const index of {bind, options}
 local OP_WAIT_TWEEN <const> = 11
-local OP_EVAL <const> = 12    -- a = const index of evaluator name
-                              -- b = const index of the data it carries, or -1
-local OP_AWAIT <const> = 13   -- a = const index of provider name
-                              -- b = const index of {bind, key}
+local OP_EVAL <const> = 12 -- a = const index of evaluator name
+-- b = const index of the data it carries, or -1
+local OP_AWAIT <const> = 13 -- a = const index of provider name
+-- b = const index of {bind, key}
 
 local STRIDE <const> = 3
 
 local function isEntityRef(value: any): boolean
-    if type(value) ~= "table" then return false end
+    if type(value) ~= "table" then
+        return false
+    end
     local ref = value as EntityRef
     return ref.isBinding == true and type(ref.bindName) == "string"
 end
@@ -110,7 +112,9 @@ local function intern(c: Compiler, value: any): integer
     -- Only scalars can be deduplicated by value; tables are appended as-is.
     if type(value) ~= "table" then
         local existing = c.constIndex[value]
-        if existing then return existing end
+        if existing then
+            return existing
+        end
     end
     local index = #c.consts + 1
     c.consts[index] = value
@@ -164,7 +168,9 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         local jumpPc = emitOp(c, OP_JUMP, top, node.count and slot or -1)
         -- Counts are keyed by the jump's own pc, so a cursor reaching that
         -- jump for the first time knows what to seed its register with.
-        if node.count then c.loopCounts[jumpPc] = node.count end
+        if node.count then
+            c.loopCounts[jumpPc] = node.count
+        end
     elseif kind == "fork" then
         compileFork(c, node.nodes, depth)
     elseif kind == "playTween" then
@@ -174,8 +180,7 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
     elseif kind == "await" then
         emitOp(c, OP_AWAIT, intern(c, node.text), intern(c, node.args))
     elseif kind == "eval" then
-        emitOp(c, OP_EVAL, intern(c, node.text),
-            node.args ~= nil and intern(c, node.args) or -1)
+        emitOp(c, OP_EVAL, intern(c, node.text), node.args ~= nil and intern(c, node.args) or -1)
     elseif kind == "join" then
         emitOp(c, OP_JOIN, -1, -1)
     elseif kind == "parallel" then
@@ -220,12 +225,7 @@ function program.indexBindingArgs(prog: ProgramImpl)
 end
 
 --- Compile authored nodes into a program under `name` at `version`.
-function program.compile(
-    name: string,
-    version: integer,
-    clock: seqtypes.ClockId,
-    nodes: {Node}
-): ProgramImpl
+function program.compile(name: string, version: integer, clock: seqtypes.ClockId, nodes: {Node}): ProgramImpl
     local c: Compiler = {
         code = {},
         consts = {},
@@ -249,7 +249,9 @@ function program.compile(
 end
 
 local function describeArgs(args: {any}): string
-    if not args or #args == 0 then return "" end
+    if not args or #args == 0 then
+        return ""
+    end
     local parts: {string} = {}
     for i = 1, #args do
         local value = args[i]
@@ -266,8 +268,7 @@ end
 
 function program.disassemble(prog: ProgramImpl, pc?: integer): string
     local out: {string} = {
-        string.format("%s v%d  (%d instructions)",
-            prog.name, prog.version, floor(#prog.code / STRIDE)),
+        string.format("%s v%d  (%d instructions)", prog.name, prog.version, floor(#prog.code / STRIDE)),
     }
     local counts = prog.loopCounts
     local marked = pc
@@ -278,41 +279,33 @@ function program.disassemble(prog: ProgramImpl, pc?: integer): string
         local b = prog.code[base + 3]
         local text: string
         if op == OP_WAIT then
-            text = a >= 0
-                and string.format("WAIT      %ss", tostring(prog.consts[a]))
+            text = a >= 0 and string.format("WAIT      %ss", tostring(prog.consts[a]))
                 or string.format("WAIT      %d step(s)", b)
         elseif op == OP_WAIT_SIGNAL then
             text = string.format("WAITSIG   %q", prog.consts[a] as string)
         elseif op == OP_WAIT_QUERY then
-            text = string.format("WAITQUERY %q %s",
-                prog.consts[a] as string, b == 1 and "any" or "empty")
+            text = string.format("WAITQUERY %q %s", prog.consts[a] as string, b == 1 and "any" or "empty")
         elseif op == OP_CALL then
-            text = string.format("CALL      %q%s",
-                prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
+            text = string.format("CALL      %q%s", prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
         elseif op == OP_EMIT then
-            text = string.format("EMIT      %q%s",
-                prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
+            text = string.format("EMIT      %q%s", prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
         elseif op == OP_JUMP then
             local count = counts and counts[at]
-            text = string.format("JUMP      -> %d  (%s)", a,
-                b < 0 and "forever" or ("x" .. tostring(count or 1)))
+            text = string.format("JUMP      -> %d  (%s)", a, b < 0 and "forever" or ("x" .. tostring(count or 1)))
         elseif op == OP_FORK then
             text = string.format("FORK      branch %d..%d, continue -> %d", a, b - 1, b)
         elseif op == OP_PLAY_TWEEN then
             local spec = prog.consts[b] as {any}
             local ref = spec[1] as EntityRef
-            text = string.format("PLAYTWEEN %q, bind(%s)",
-                prog.consts[a] as string, ref.bindName)
+            text = string.format("PLAYTWEEN %q, bind(%s)", prog.consts[a] as string, ref.bindName)
         elseif op == OP_WAIT_TWEEN then
             text = "WAITTWEEN"
         elseif op == OP_AWAIT then
             local spec = prog.consts[b] as {any}
             local ref = spec[1] as EntityRef
-            text = string.format("AWAIT     %q, bind(%s)",
-                prog.consts[a] as string, ref.bindName)
+            text = string.format("AWAIT     %q, bind(%s)", prog.consts[a] as string, ref.bindName)
         elseif op == OP_EVAL then
-            text = string.format("EVAL      %q%s", prog.consts[a] as string,
-                b >= 0 and "  (+data)" or "")
+            text = string.format("EVAL      %q%s", prog.consts[a] as string, b >= 0 and "  (+data)" or "")
         elseif op == OP_JOIN then
             text = "JOIN"
         elseif op == OP_END then
@@ -320,19 +313,13 @@ function program.disassemble(prog: ProgramImpl, pc?: integer): string
         else
             text = "?? " .. tostring(op)
         end
-        out[#out + 1] = string.format("%s %4d  %s",
-            at == marked and "->" or "  ", at, text)
+        out[#out + 1] = string.format("%s %4d  %s", at == marked and "->" or "  ", at, text)
     end
     return table.concat(out, "\n")
 end
 
 --- Walk the straight-line run ahead of `pc`.
-function program.ahead(
-    prog: ProgramImpl,
-    pc: integer,
-    offset: integer,
-    withinTicks: integer
-): {program.Step}
+function program.ahead(prog: ProgramImpl, pc: integer, offset: integer, withinTicks: integer): {program.Step}
     local out: {program.Step} = {}
     local code <const> = prog.code
     local consts <const> = prog.consts
@@ -349,9 +336,13 @@ function program.ahead(
         if op == OP_WAIT then
             -- Seconds convert against a clock the program does not carry, so
             -- only literal tick counts are predictable.
-            if a >= 0 then return out end
+            if a >= 0 then
+                return out
+            end
             ticks = ticks + (b > 0 and b or 1)
-            if withinTicks and ticks > withinTicks then return out end
+            if withinTicks and ticks > withinTicks then
+                return out
+            end
         elseif op == OP_CALL or op == OP_EMIT then
             out[#out + 1] = {
                 ticks = ticks,

@@ -45,14 +45,21 @@ function shaderbuild.build(): shaderpack.Pack
     }
 
     for _, variant in ipairs(shaders.buildList()) do
-        local compiled = shadercompiler.compile(variant.source, variant.stage, {
-            name = variant.key,
-            defines = variant.defines,
-        })
+        local compiled = shadercompiler.compile(
+            variant.source,
+            variant.stage,
+            {
+                name = variant.key,
+                defines = variant.defines,
+            }
+        )
         if compiled.format ~= pack.format then
-            error(("tecs: '%s' compiled to %s but the pack is %s"):format(
-                variant.key, shaderpack.formatName(compiled.format),
-                shaderpack.formatName(pack.format)), 2)
+            error(
+                ("tecs: '%s' compiled to %s but the pack is %s"):format(
+                    variant.key, shaderpack.formatName(compiled.format), shaderpack.formatName(pack.format)
+                ),
+                2
+            )
         end
         pack.shaders[variant.key] = {
             key = variant.key,
@@ -78,16 +85,18 @@ end
 --- diff between them is the change rather than the ordering.
 function shaderbuild.manifest(pack: shaderpack.Pack): string
     local keys: {string} = {}
-    for key in pairs(pack.shaders) do keys[#keys + 1] = key end
+    for key in pairs(pack.shaders) do
+        keys[#keys + 1] = key
+    end
     table.sort(keys)
 
     local lines: {string} = {}
     lines[#lines + 1] = ("tecs shader pack version %d"):format(pack.version)
     lines[#lines + 1] = ("target %s, format %s, %d shaders"):format(
-        pack.target, shaderpack.formatName(pack.format), #keys)
+        pack.target, shaderpack.formatName(pack.format), #keys
+    )
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "key                          stage     bytes  entry  "
-        .. "source            resources"
+    lines[#lines + 1] = "key                          stage     bytes  entry  " .. "source            resources"
     lines[#lines + 1] = ("-"):rep(104)
 
     for _, key in ipairs(keys) do
@@ -95,17 +104,19 @@ function shaderbuild.manifest(pack: shaderpack.Pack): string
         local counts = entry.counts
         local resources = ("sam %d, ro %d/%d, rw %d/%d, uni %d"):format(
             counts.samplers,
-            counts.readOnlyStorageTextures, counts.readOnlyStorageBuffers,
-            counts.readWriteStorageTextures, counts.readWriteStorageBuffers,
-            counts.uniformBuffers)
+            counts.readOnlyStorageTextures,
+            counts.readOnlyStorageBuffers,
+            counts.readWriteStorageTextures,
+            counts.readWriteStorageBuffers,
+            counts.uniformBuffers
+        )
         local threads = ""
         if entry.stage == "compute" then
-            threads = (" threads %dx%dx%d"):format(
-                entry.threadCount[1], entry.threadCount[2], entry.threadCount[3])
+            threads = (" threads %dx%dx%d"):format(entry.threadCount[1], entry.threadCount[2], entry.threadCount[3])
         end
         lines[#lines + 1] = ("%-28s %-9s %6d  %-6s %-17s %s%s"):format(
-            key, entry.stage, #entry.code, entry.entrypoint, entry.sourceHash,
-            resources, threads)
+            key, entry.stage, #entry.code, entry.entrypoint, entry.sourceHash, resources, threads
+        )
     end
 
     lines[#lines + 1] = ""

@@ -80,27 +80,35 @@ local record FFIShim
     typeof: function(ct: string): any
 end
 local _ffi <const> = require("ffi") as FFIShim
-local function ffiNew(ct: any, n: integer): any return _ffi.new(ct, n) end
-local function ffiCopy(dst: any, src: any, n: integer) _ffi.copy(dst, src, n) end
-local function ffiTypeof(ct: string): any return _ffi.typeof(ct) end
+local function ffiNew(ct: any, n: integer): any
+    return _ffi.new(ct, n)
+end
+local function ffiCopy(dst: any, src: any, n: integer)
+    _ffi.copy(dst, src, n)
+end
+local function ffiTypeof(ct: string): any
+    return _ffi.typeof(ct)
+end
 -- Instantiate a ctype with no count (one struct instance, not an array).
 -- LuaJIT idiom: `ctype(...)` calls the constructor for that ctype.
-local ffiNewOne <const>: function(any): any =
-    (load("return function(ct) return ct() end") as function(): any)() as function(any): any
+local ffiNewOne <const>: function(any): any = (load("return function(ct) return ct() end") as function(): any)(
+) as function(any): any
 -- Cast `src` to `char*` and offset by `byteOffset` bytes. Hides FFI pointer
 -- arithmetic from Teal's type checker (which doesn't model CData + integer).
 -- Compiled once at module load via `load()` so the hot path is just a
 -- function call into LuaJIT-friendly code.
-local ffiOffsetCharPtr <const>: function(any, integer): any =
-    (load("local cast = ...; return function(src, n) return cast('char*', src) + n end") as function(any): any)(_ffi.cast) as function(any, integer): any
+local ffiOffsetCharPtr <const>: function(any, integer): any = (
+    load("local cast = ...; return function(src, n) return cast('char*', src) + n end") as function(any): any
+)(_ffi.cast) as function(any, integer): any
 
 -- Double-level offset: returns `src + slots` as a `double*`. Used when
 -- downstream code needs to keep reading the pointer as doubles (e.g. the
 -- table writer, which does `ptr[k]` expecting one double per step).
 -- Entity IDs live in double[] arrays because the 53-bit packed id would
 -- overflow int32.
-local ffiOffsetDoublePtr <const>: function(any, integer): any =
-    (load("local cast = ...; return function(src, n) return cast('double*', src) + n end") as function(any): any)(_ffi.cast) as function(any, integer): any
+local ffiOffsetDoublePtr <const>: function(any, integer): any = (
+    load("local cast = ...; return function(src, n) return cast('double*', src) + n end") as function(any): any
+)(_ffi.cast) as function(any, integer): any
 
 local type World = types.World
 local type Component = types.components.Component
@@ -157,22 +165,22 @@ local record snapshot
         --- Emit the prelude. `componentTable` is the full set of components
         --- referenced by the snapshot's archetypes; archetype frames refer
         --- to entries by 1-based index.
-        writePrelude: function(self: Writer,
+        writePrelude: function(
+            self: Writer,
             version: integer,
             nextEntityId: integer,
             entityCount: integer,
             archetypeCount: integer,
-            componentTable: {ComponentTableEntry})
+            componentTable: {ComponentTableEntry}
+        )
 
         --- Open a new archetype frame. `columnIndices` references the
         --- prelude's componentTable. `mode` is 0 for column-major (dense
         --- archetype, FFI columns get bulk memcpy) or 1 for row-major
         --- (sparse-bearing archetype, fall back to per-entity emit).
-        startArchetype: function(self: Writer,
-            columnCount: integer,
-            entityCount: integer,
-            columnIndices: {integer},
-            mode: integer)
+        startArchetype: function(
+            self: Writer, columnCount: integer, entityCount: integer, columnIndices: {integer}, mode: integer
+        )
 
         --- Column-major mode only: bulk-write the entity ID array.
         --- `idsArray` is opaque (FFI double[] for binary writers, Lua
@@ -199,8 +207,7 @@ local record snapshot
         --- the column components; serializers resolve through them
         --- (values can be raw scalars with no componentType), mirroring
         --- how readers resolve deserializers from the component table.
-        writeEntity: function(self: Writer, id: integer, comps: {Component}, count: integer,
-            cols: {Component})
+        writeEntity: function(self: Writer, id: integer, comps: {Component}, count: integer, cols: {Component})
 
         endArchetype: function(self: Writer)
 
@@ -383,9 +390,9 @@ end
 -- aggregate shapes) still error inside LuaJIT, which is the right outcome.
 
 local record MigSchemaInfo
-    structType: any              -- ffi.typeof('struct __tecs_mig_N')
-    fields: {{string, string}}   -- saved schema fields as [{name, ctype}]
-    size: integer                -- savedSize in bytes
+    structType: any -- ffi.typeof('struct __tecs_mig_N')
+    fields: {{string, string}} -- saved schema fields as [{name, ctype}]
+    size: integer -- savedSize in bytes
 end
 
 local migStructCounter = 0
@@ -417,7 +424,9 @@ end
 -- component registrations (array syntax, type aliases, etc.).
 local function getOrBuildMigSchema(fingerprint: string): MigSchemaInfo
     local cached = migSchemaCache[fingerprint]
-    if cached then return cached end
+    if cached then
+        return cached
+    end
 
     local fields, size = parseSchema(fingerprint)
     migStructCounter = migStructCounter + 1
@@ -488,12 +497,13 @@ local record ArchetypeColumnsCache
 end
 -- Weak keys: destroyed archetypes (compact, discarded worlds) must not be
 -- pinned for the process lifetime by this module-global cache.
-local archetypeColumnsCache: {Archetype: ArchetypeColumnsCache} =
-    setmetatable({}, {__mode = "k"})
+local archetypeColumnsCache: {Archetype: ArchetypeColumnsCache} = setmetatable({}, {__mode = "k"})
 
 local function archetypeColumns(arch: Archetype): {Component}, boolean
     local cached = archetypeColumnsCache[arch]
-    if cached then return cached.cols, cached.hasSparse end
+    if cached then
+        return cached.cols, cached.hasSparse
+    end
 
     local cols: {Component} = {}
     local hasSparse = false
@@ -504,7 +514,9 @@ local function archetypeColumns(arch: Archetype): {Component}, boolean
             emit = false
         elseif (comp as ComponentInternal).isSparse and (comp as ComponentInternal).isContainer then
             emit = comp.serialize ~= nil
-            if emit then hasSparse = true end
+            if emit then
+                hasSparse = true
+            end
         elseif not (comp as ComponentInternal).isContainer then
             emit = comp.serialize ~= nil
         end
@@ -518,7 +530,9 @@ end
 
 local function captureStateStack(world: World): {string}
     local stack = (world as {string: any})._stateStack as {string}
-    if stack == nil or #stack == 0 then return nil end
+    if stack == nil or #stack == 0 then
+        return nil
+    end
     local out: {string} = {}
     for i = 1, #stack do
         out[i] = stack[i]
@@ -527,16 +541,22 @@ local function captureStateStack(world: World): {string}
 end
 
 local function restoreStateStack(world: World, saved: {string})
-    if saved == nil then return end
+    if saved == nil then
+        return
+    end
     local worldAny = world as {string: any}
     local states = worldAny._stateComponents as {string: Component}
     local stack: {string} = {}
     for i = 1, #saved do
         local name = saved[i]
         if states[name] == nil then
-            error("loadSnapshot: saved state '" .. tostring(name) ..
-                "' is not registered in this world; call world:createState('" ..
-                tostring(name) .. "') before loading")
+            error(
+                "loadSnapshot: saved state '"
+                    .. tostring(name)
+                    .. "' is not registered in this world; call world:createState('"
+                    .. tostring(name)
+                    .. "') before loading"
+            )
         end
         stack[#stack + 1] = name
     end
@@ -545,12 +565,16 @@ local function restoreStateStack(world: World, saved: {string})
     worldAny.autoStateComponent = top and states[top] or nil
 end
 
-local function capturePipelineState(world: World): {string:any}
-    local pipeline = (world as {string:any}).pipeline as {string:any}
-    if not pipeline then return nil end
-    if pipeline.fixedAccumulator == nil and pipeline.phaseStates == nil then return nil end
+local function capturePipelineState(world: World): {string: any}
+    local pipeline = (world as {string: any}).pipeline as {string: any}
+    if not pipeline then
+        return nil
+    end
+    if pipeline.fixedAccumulator == nil and pipeline.phaseStates == nil then
+        return nil
+    end
 
-    local out: {string:any} = {}
+    local out: {string: any} = {}
     if pipeline.fixedAccumulator ~= nil then
         out.fixedAccumulator = pipeline.fixedAccumulator
     end
@@ -566,10 +590,14 @@ local function capturePipelineState(world: World): {string:any}
     return out
 end
 
-local function restorePipelineState(world: World, saved: {string:any})
-    if saved == nil then return end
-    local pipeline = (world as {string:any}).pipeline as {string:any}
-    if not pipeline then return end
+local function restorePipelineState(world: World, saved: {string: any})
+    if saved == nil then
+        return
+    end
+    local pipeline = (world as {string: any}).pipeline as {string: any}
+    if not pipeline then
+        return
+    end
 
     if saved.fixedAccumulator ~= nil and pipeline.fixedAccumulator ~= nil then
         pipeline.fixedAccumulator = saved.fixedAccumulator
@@ -588,17 +616,23 @@ local function restorePipelineState(world: World, saved: {string:any})
 end
 
 local function cloneComponentList(list: {Component}): {Component}
-    if not list then return nil end
+    if not list then
+        return nil
+    end
     local out: {Component} = {}
-    for i = 1, #list do out[i] = list[i] end
+    for i = 1, #list do
+        out[i] = list[i]
+    end
     return out
 end
 
 local function cloneQueryDescriptor(d: types.Query.Descriptor): types.Query.Descriptor
-    if not d then return nil end
+    if not d then
+        return nil
+    end
     local out: types.Query.Descriptor = {}
-    for k, v in pairs(d as {string:any}) do
-        (out as {string:any})[k] = v
+    for k, v in pairs(d as {string: any}) do
+        (out as {string: any})[k] = v
     end
     out.include = cloneComponentList(d.include)
     out.includeAny = cloneComponentList(d.includeAny)
@@ -626,7 +660,9 @@ end
 -- applied per-archetype inside the main loop: archetypes that don't have
 -- Transform pass through unconditionally; archetypes that do get their
 -- entities filtered by layer.
-local function resolveSaveFilters(world: World, opts: SnapshotOptions, filterQuery: types.Query.Descriptor): types.Query, integer
+local function resolveSaveFilters(
+    world: World, opts: SnapshotOptions, filterQuery: types.Query.Descriptor
+): types.Query, integer
     local layerMask: integer = nil
     if opts.layers then
         layerMask = buildLayerMask(opts.layers)
@@ -652,8 +688,12 @@ end
 -- `startArchetype(count)` so the reader loops the right number of times.
 local function countFilteredArchetype(arch: Archetype, layerMask: integer, hasTransform: boolean): integer
     local full = arch.entities[0]
-    if full == 0 then return 0 end
-    if layerMask == nil or not hasTransform then return full end
+    if full == 0 then
+        return 0
+    end
+    if layerMask == nil or not hasTransform then
+        return full
+    end
     local transforms = arch.columns[builtins.Transform as types.components.Component] as {{string: integer}}
     local n = 0
     for row = 1, full do
@@ -704,12 +744,8 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
     do
         local saveEvent = builtins.OnSnapshotSave()
         local evAny = saveEvent as {string: any}
-        evAny.addData = function(_self: any, k: string, v: any)
-            pendingDataPairs[#pendingDataPairs + 1] = {k, v}
-        end
-        evAny.exclude = function(_self: any, comp: Component)
-            excludedComponents[#excludedComponents + 1] = comp
-        end
+        evAny.addData = function(_self: any, k: string, v: any) pendingDataPairs[#pendingDataPairs + 1] = {k, v} end
+        evAny.exclude = function(_self: any, comp: Component) excludedComponents[#excludedComponents + 1] = comp end
         world:emit(0, saveEvent as types.events.Event)
     end
 
@@ -757,7 +793,9 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
 
     local function addComponent(comp: Component): integer
         local idx = componentIndex[comp]
-        if idx then return idx end
+        if idx then
+            return idx
+        end
         idx = #componentTable + 1
         componentIndex[comp] = idx
         -- Dense relationship instance columns save as
@@ -781,7 +819,9 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
     local function processArchetype(arch: Archetype)
         local hasTransform = archetypeHasTransform(arch)
         local count = countFilteredArchetype(arch, layerMask, hasTransform)
-        if count == 0 then return end
+        if count == 0 then
+            return
+        end
 
         -- Archetypes with zero serializable columns (empty entities, or
         -- all components transient) still emit an id-only frame: entity
@@ -806,7 +846,9 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
     end
 
     if query then
-        for arch, _len in query:iter() do processArchetype(arch as Archetype) end
+        for arch, _len in query:iter() do
+            processArchetype(arch as Archetype)
+        end
     else
         world:forEachArchetype(processArchetype as function(types.Archetype))
     end
@@ -818,7 +860,8 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         ((world as {string: any}).allocator as {string: integer}).nextFreshSlot as integer,
         totalEntityCount,
         #emitList,
-        componentTable)
+        componentTable
+    )
 
     local stores = (world as {string: any}).relationshipStores as {any: any}
     local vals: {Component} = {}
@@ -862,7 +905,9 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                 -- (e.g. `Text`, which holds non-portable glyph slab pointers)
                 -- skip the auto-install of `serializeRaw`, so they fall back
                 -- to the per-entity path even though `structSize` is set.
-                local bulkEligible = hasBulkColumnRaw and structSize and (comp as ComponentInternal).serializeRaw
+                local bulkEligible = hasBulkColumnRaw
+                    and structSize
+                    and (comp as ComponentInternal).serializeRaw
                     and not (comp as ComponentInternal).isContainer
                 local column = arch.columns[comp]
                 if bulkEligible and not applyLayerFilter then
@@ -926,11 +971,12 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                             -- value per (entity, container), so these cannot
                             -- round-trip. Fail at save time instead of
                             -- corrupting the load.
-                            if value ~= nil
-                                    and not (comp as types.components.Relationship).exclusiveRelationship then
-                                error("snapshot: non-exclusive sparse relationship '"
-                                    .. comp.componentName
-                                    .. "' cannot be serialized; mark it transient")
+                            if value ~= nil and not (comp as types.components.Relationship).exclusiveRelationship then
+                                error(
+                                    "snapshot: non-exclusive sparse relationship '"
+                                        .. comp.componentName
+                                        .. "' cannot be serialized; mark it transient"
+                                )
                             end
                             vals[i] = value as Component
                         else
@@ -1048,12 +1094,11 @@ end
 -- from the buffer into the archetype column (no per-entity allocations).
 -- Non-FFI columns fall through to per-entity decode.
 local function loadColumnMajor(
-    world: internal.WorldImpl,
-    reader: snapshot.Reader,
-    componentTypes: {Component},
-    entityCount: integer
+    world: internal.WorldImpl, reader: snapshot.Reader, componentTypes: {Component}, entityCount: integer
 )
-    if entityCount == 0 then return end
+    if entityCount == 0 then
+        return
+    end
 
     -- Bulk-read ids into an FFI double[] and hand the pointer straight
     -- to `batchSpawnAtRaw` -- no per-entity copy to a Lua table. Only the
@@ -1061,12 +1106,14 @@ local function loadColumnMajor(
     -- mode), so `ids` is guaranteed to be cdata.
     local ids = reader:readIds(entityCount)
 
-    world:batchSpawnAtRaw(ids, entityCount, componentTypes,
+    world:batchSpawnAtRaw(
+        ids,
+        entityCount,
+        componentTypes,
         function(arch: Archetype, rowStart: integer, _rowEnd: integer, count: integer)
             for col = 1, #componentTypes do
                 local comp = assert(
-                    componentTypes[col],
-                    "loadSnapshot: unknown component in saved archetype"
+                    componentTypes[col], "loadSnapshot: unknown component in saved archetype"
                 ) as ComponentInternal
                 local structSize = (comp as {string: any}).structSize as integer
                 local archColumn = arch.columns[comp] as any
@@ -1097,14 +1144,15 @@ local function loadColumnMajor(
                         -- values like ``spriteId == 0` or `gpuSlot == -1`.
                         if val ~= nil then
                             if comp.storageType == "scalar" and type(val) == "table" then
-                                val = (val as {string:any}).value
+                                val = (val as {string: any}).value
                             end
                             (archColumn as {any})[rowStart + k] = val
                         end
                     end
                 end
             end
-    end)
+        end
+    )
 end
 
 -- Row-major fallback for sparse-bearing archetypes. Per-entity spawnAt
@@ -1115,10 +1163,13 @@ local function loadRowMajor(world: World, reader: snapshot.Reader)
     world:defer()
     while true do
         local row = reader:readRow()
-        if not row then break end
-        world:spawnAt(row.id,
-            (table.unpack as function({Component}, integer, integer): Component...)(
-                row.components, 1, row.count))
+        if not row then
+            break
+        end
+        world:spawnAt(
+            row.id,
+            (table.unpack as function({Component}, integer, integer): Component...)(row.components, 1, row.count)
+        )
     end
     world:commit()
 end
@@ -1135,8 +1186,7 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     local worldImpl <const> = world as internal.WorldImpl
     local prelude = reader:readPrelude()
     assert(prelude, "reader:readPrelude returned nil")
-    assert(prelude.version == SNAPSHOT_VERSION,
-        "unsupported snapshot version: " .. tostring(prelude.version))
+    assert(prelude.version == SNAPSHOT_VERSION, "unsupported snapshot version: " .. tostring(prelude.version))
 
     clearWorld(world)
 
@@ -1151,7 +1201,9 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
 
     while true do
         local componentTypes, _columnIndices, entityCount, mode = reader:nextArchetype()
-        if not componentTypes then break end
+        if not componentTypes then
+            break
+        end
 
         if mode == 0 then
             loadColumnMajor(worldImpl, reader, componentTypes, entityCount)
@@ -1180,7 +1232,7 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     IdAllocator.rebuildFreeStack(allocator)
 
     do
-        local rebuildKeyIndex = (world as {string:any})._rebuildKeyIndex as function(any)
+        local rebuildKeyIndex = (world as {string: any})._rebuildKeyIndex as function(any)
         if rebuildKeyIndex then
             rebuildKeyIndex(world)
         end
@@ -1205,13 +1257,15 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
 
     while true do
         local key, value = reader:nextData()
-        if key == nil then break end
+        if key == nil then
+            break
+        end
         if key == STATE_STACK_DATA_KEY then
             restoreStateStack(world, value as {string})
             goto continue_data
         end
         if key == PIPELINE_DATA_KEY then
-            restorePipelineState(world, value as {string:any})
+            restorePipelineState(world, value as {string: any})
             goto continue_data
         end
         local arr = handlers[key]
@@ -1308,18 +1362,26 @@ end
 -- process (fresh load) and FFI instances, which are not registered.
 local function resolveInstanceByName(byName: {string: Component}, name: string): Component
     local base, targetStr = name:match("^(.-)%->([%d%.]+)$")
-    if not base then return nil end
+    if not base then
+        return nil
+    end
     local container = byName[base]
-    if not container then return nil end
+    if not container then
+        return nil
+    end
     local target = tonumber(targetStr)
-    if not target then return nil end
+    if not target then
+        return nil
+    end
     return (container as function(number): Component)(target)
 end
 
 -- Deserialize a positional entry `{id, data_1, ..., data_N}` back into
 -- (id, component_1, ..., component_N) using a pre-resolved componentTypes
 -- array. Returns gaps as `nil` so positions remain aligned for the caller.
-local function expandEntry(entry: {any}, componentTypes: {Component}, comps: {Component}, world: World): integer, integer
+local function expandEntry(
+    entry: {any}, componentTypes: {Component}, comps: {Component}, world: World
+): integer, integer
     local rawId = entry[1]
     local id: integer
     local ty = type(rawId)
@@ -1328,7 +1390,9 @@ local function expandEntry(entry: {any}, componentTypes: {Component}, comps: {Co
     elseif ty == "string" then
         id = tonumber(rawId as string) as integer
     end
-    if not id then return nil, 0 end
+    if not id then
+        return nil, 0
+    end
 
     local width = #componentTypes
     for i = 1, width do
@@ -1352,7 +1416,9 @@ local worldAttachers: {snapshot.Reader: function(snapshot.Reader, World)} = setm
 
 attachWorld = function(reader: snapshot.Reader, world: World)
     local fn = worldAttachers[reader]
-    if fn then fn(reader, world) end
+    if fn then
+        fn(reader, world)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1366,8 +1432,8 @@ end
 local record TableWriterImpl is snapshot.Writer
     _snap: SnapshotTable
     _currentArch: snapshot.ArchetypeEntry
-    _columnBuffers: {{any}}           -- one array per column, filled by writeColumnValue
-    _columnCounts: {integer}          -- per-column write cursor; keeps nil serializations aligned
+    _columnBuffers: {{any}} -- one array per column, filled by writeColumnValue
+    _columnCounts: {integer} -- per-column write cursor; keeps nil serializations aligned
 end
 
 local TABLE_WRITER_MT <const>: metatable<TableWriterImpl> = {__index = TableWriterImpl}
@@ -1377,7 +1443,8 @@ function TableWriterImpl:writePrelude(
     nextEntityId: integer,
     _entityCount: integer,
     _archetypeCount: integer,
-    componentTable: {snapshot.ComponentTableEntry})
+    componentTable: {snapshot.ComponentTableEntry}
+)
     -- The table/JSON format doesn't use the FFI fingerprint: loads always
     -- go through per-component `deserialize` (keyed by field name), so
     -- schema drift is handled intrinsically. Strip fingerprints from the
@@ -1396,10 +1463,8 @@ function TableWriterImpl:writePrelude(
 end
 
 function TableWriterImpl:startArchetype(
-    _columnCount: integer,
-    _entityCount: integer,
-    columnIndices: {integer},
-    _mode: integer)
+    _columnCount: integer, _entityCount: integer, columnIndices: {integer}, _mode: integer
+)
     local entry: snapshot.ArchetypeEntry = {
         columnIndices = columnIndices,
         entities = {},
@@ -1484,13 +1549,17 @@ function TableWriterImpl:writeData(key: string, value: any)
     data[#data + 1] = {key = key, value = value}
 end
 
-function TableWriterImpl:writeDataEnd() end
+function TableWriterImpl:writeDataEnd()
+end
 
-function TableWriterImpl:writeEnd() end
+function TableWriterImpl:writeEnd()
+end
 
 function newTableWriterImpl(): snapshot.Writer, function(): SnapshotTable
     local impl: TableWriterImpl = setmetatable({} as TableWriterImpl, TABLE_WRITER_MT)
-    local function get(): SnapshotTable return impl._snap as SnapshotTable end
+    local function get(): SnapshotTable
+        return impl._snap as SnapshotTable
+    end
     return impl as snapshot.Writer, get
 end
 
@@ -1504,7 +1573,7 @@ local record TableReaderImpl is snapshot.Reader
     _dataCursor: integer
     _byName: {string: Component}
     _world: World
-    _currentTypes: {Component}     -- resolved once per archetype
+    _currentTypes: {Component} -- resolved once per archetype
     _rowScratch: snapshot.EntityRow
 end
 
@@ -1529,14 +1598,18 @@ end
 function TableReaderImpl:nextArchetype(): {Component}, {integer}, integer, integer
     local archs = self._snap.archetypes as {snapshot.ArchetypeEntry}
     local idx = self._archCursor + 1
-    if idx > #archs then return nil, nil, 0, 0 end
+    if idx > #archs then
+        return nil, nil, 0, 0
+    end
     self._archCursor = idx
     self._entityCursor = 0
     local entry = archs[idx]
     local ents = entry.entities as {any}
 
     -- Resolve component types via the snapshot's componentTable.
-    if not self._byName then self._byName = buildByName() end
+    if not self._byName then
+        self._byName = buildByName()
+    end
     local componentTable = self._snap.componentTable
     local columnIndices = entry.columnIndices
     local compTypes: {Component} = {}
@@ -1575,18 +1648,27 @@ end
 function TableReaderImpl:readRow(): snapshot.EntityRow
     local archs = self._snap.archetypes as {snapshot.ArchetypeEntry}
     local archIdx = self._archCursor
-    if archIdx == 0 or archIdx > #archs then return nil end
+    if archIdx == 0 or archIdx > #archs then
+        return nil
+    end
     local entities = archs[archIdx].entities as {{any}}
     local idx = self._entityCursor + 1
-    if idx > #entities then return nil end
+    if idx > #entities then
+        return nil
+    end
     self._entityCursor = idx
     local entry = entities[idx]
 
     local row = self._rowScratch
-    if not row then row = {components = {}}; self._rowScratch = row end
+    if not row then
+        row = {components = {}}
+        self._rowScratch = row
+    end
     local comps = row.components
     local id, width = expandEntry(entry, self._currentTypes, comps, self._world)
-    if not id then return nil end
+    if not id then
+        return nil
+    end
     local packed = 0
     for i = 1, width do
         local comp = comps[i]
@@ -1605,23 +1687,31 @@ end
 
 function TableReaderImpl:nextData(): string, any
     local data = self._snap.data as {snapshot.DataEntry}
-    if not data then return nil, nil end
+    if not data then
+        return nil, nil
+    end
     local idx = (self._dataCursor or 0) + 1
-    if idx > #data then return nil, nil end
+    if idx > #data then
+        return nil, nil
+    end
     self._dataCursor = idx
     local entry = data[idx]
     return entry.key, entry.value
 end
 
-function TableReaderImpl:readEnd() end
+function TableReaderImpl:readEnd()
+end
 
 function newTableReaderImpl(snap: SnapshotTable): snapshot.Reader
     assert(snap, "newTableReader requires a snapshot")
-    local impl: TableReaderImpl = setmetatable({
-        _snap = snap,
-        _archCursor = 0,
-        _entityCursor = 0,
-    } as TableReaderImpl, TABLE_READER_MT)
+    local impl: TableReaderImpl = setmetatable(
+        {
+            _snap = snap,
+            _archCursor = 0,
+            _entityCursor = 0,
+        } as TableReaderImpl,
+        TABLE_READER_MT
+    )
     worldAttachers[impl as snapshot.Reader] = function(r: snapshot.Reader, w: World)
         (r as TableReaderImpl)._world = w
     end
@@ -1672,7 +1762,8 @@ function BufferWriterImpl:writePrelude(
     nextEntityId: integer,
     entityCount: integer,
     archetypeCount: integer,
-    componentTable: {snapshot.ComponentTableEntry})
+    componentTable: {snapshot.ComponentTableEntry}
+)
     local buf = self._buf
     local encode <const> = (buf as {string: function}).encode as function(any, any)
     encode(buf, version as any)
@@ -1689,10 +1780,8 @@ function BufferWriterImpl:writePrelude(
 end
 
 function BufferWriterImpl:startArchetype(
-    columnCount: integer,
-    entityCount: integer,
-    columnIndices: {integer},
-    mode: integer)
+    columnCount: integer, entityCount: integer, columnIndices: {integer}, mode: integer
+)
     local buf = self._buf
     local encode <const> = (buf as {string: function}).encode as function(any, any)
     encode(buf, columnCount as any)
@@ -1766,7 +1855,8 @@ function BufferWriterImpl:writeEntity(id: integer, comps: {Component}, count: in
     end
 end
 
-function BufferWriterImpl:endArchetype() end
+function BufferWriterImpl:endArchetype()
+end
 
 function BufferWriterImpl:writeData(key: string, value: any)
     -- Sentinel-prefixed pair: `true` marks "another entry follows",
@@ -1784,21 +1874,25 @@ function BufferWriterImpl:writeDataEnd()
     encode(buf, false as any)
 end
 
-function BufferWriterImpl:writeEnd() end
+function BufferWriterImpl:writeEnd()
+end
 
 function newBufferWriterImpl(buf: any): snapshot.Writer
     assert(buf, "newBufferWriter requires a LuaJIT string.buffer")
-    local impl: BufferWriterImpl = setmetatable({
-        _buf = buf,
-    } as BufferWriterImpl, BUFFER_WRITER_MT)
+    local impl: BufferWriterImpl = setmetatable(
+        {
+            _buf = buf,
+        } as BufferWriterImpl,
+        BUFFER_WRITER_MT
+    )
     return impl as snapshot.Writer
 end
 
 -- Resolved entry per component-table position. Built once when readPrelude
 -- decodes the table; lookups are then O(1) per archetype frame.
 local record ResolvedComponent
-    comp: Component       -- nil if unknown to the loading world
-    schemaMatch: boolean  -- whether saved fingerprint matches current
+    comp: Component -- nil if unknown to the loading world
+    schemaMatch: boolean -- whether saved fingerprint matches current
     savedFingerprint: string
     -- Per-entity decoder closure used whenever the bulk memcpy path is
     -- unsafe (schema drift). Nil for matching schemas + non-FFI paths.
@@ -1809,12 +1903,12 @@ local record BufferReaderImpl is snapshot.Reader
     _buf: any
     _byName: {string: Component}
     _world: World
-    _resolvedTable: {ResolvedComponent}  -- index → resolved entry
-    _currentTypes: {Component}           -- archetype-local component types in column order
-    _currentIndices: {integer}           -- archetype-local column indices (for slow-path lookup)
+    _resolvedTable: {ResolvedComponent} -- index → resolved entry
+    _currentTypes: {Component} -- archetype-local component types in column order
+    _currentIndices: {integer} -- archetype-local column indices (for slow-path lookup)
     _currentMode: integer
-    _archRemaining: integer              -- entities left to read in row-major mode
-    _archetypesRemaining: integer        -- archetype frames still to consume in the buffer
+    _archRemaining: integer -- entities left to read in row-major mode
+    _archetypesRemaining: integer -- archetype frames still to consume in the buffer
     _rowScratch: snapshot.EntityRow
 end
 
@@ -1837,7 +1931,9 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
     -- column whether load can use the bulk fast path or must drop to
     -- per-entity translation.
     local componentCount = decode(buf) as integer
-    if not self._byName then self._byName = buildByName() end
+    if not self._byName then
+        self._byName = buildByName()
+    end
     local componentTable: {snapshot.ComponentTableEntry} = {}
     local resolved: {ResolvedComponent} = {}
     for i = 1, componentCount do
@@ -1852,8 +1948,12 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
         -- component makes the rest of the stream unreadable. Fail here,
         -- before the loader clears the world.
         if not comp then
-            error("loadSnapshot: snapshot references component '" .. name ..
-                "' which is not registered in this world; register it before loading", 0)
+            error(
+                "loadSnapshot: snapshot references component '"
+                    .. name
+                    .. "' which is not registered in this world; register it before loading",
+                0
+            )
         end
         local currentSchema = (comp as {string: any}).fingerprint as string or ""
         local match = (fingerprint == currentSchema)
@@ -1865,8 +1965,12 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
                 -- migrator so the load path projects them field by field.
                 migrate = buildMigrator(comp, fingerprint)
             elseif currentSchema == "" then
-                error("loadSnapshot: component '" .. name ..
-                    "' was saved as an FFI struct but is now registered without one; cannot migrate", 0)
+                error(
+                    "loadSnapshot: component '"
+                        .. name
+                        .. "' was saved as an FFI struct but is now registered without one; cannot migrate",
+                    0
+                )
             end
             -- Custom-hook components save structured payloads; their own
             -- deserialize receives the old payload directly, which is the
@@ -1892,13 +1996,19 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
 end
 
 function BufferReaderImpl:nextArchetype(): {Component}, {integer}, integer, integer
-    if self._archetypesRemaining <= 0 then return nil, nil, 0, 0 end
+    if self._archetypesRemaining <= 0 then
+        return nil, nil, 0, 0
+    end
     self._archetypesRemaining = self._archetypesRemaining - 1
-    if bufEmpty(self._buf) then return nil, nil, 0, 0 end
+    if bufEmpty(self._buf) then
+        return nil, nil, 0, 0
+    end
     local buf = self._buf
     local decode <const> = (buf as {string: function}).decode as function(any): any
     local columnCount = decode(buf) as integer
-    if columnCount == nil then return nil, nil, 0, 0 end
+    if columnCount == nil then
+        return nil, nil, 0, 0
+    end
     local entityCount = decode(buf) as integer
     local indices: {integer} = {}
     local compTypes: {Component} = {}
@@ -1964,7 +2074,9 @@ function BufferReaderImpl:_decodeOne(colIdx: integer, world: World): Component
         -- encoded stream carries nil in that slot; skip deserialize
         -- rather than passing nil through and risking crashes inside
         -- user code that assumes data is a table.
-        if payload == nil then return nil end
+        if payload == nil then
+            return nil
+        end
         return ct.deserialize(world, payload)
     else
         BUF_DECODE(buf)
@@ -1977,7 +2089,9 @@ function BufferReaderImpl:readColumnValue(colIdx: integer, world: World): Compon
 end
 
 function BufferReaderImpl:readRow(): snapshot.EntityRow
-    if self._archRemaining <= 0 then return nil end
+    if self._archRemaining <= 0 then
+        return nil
+    end
     self._archRemaining = self._archRemaining - 1
     local buf = self._buf
     local decode <const> = BUF_DECODE
@@ -1986,7 +2100,10 @@ function BufferReaderImpl:readRow(): snapshot.EntityRow
     local compTypes = self._currentTypes
     local width = #compTypes
     local row = self._rowScratch
-    if not row then row = {components = {}}; self._rowScratch = row end
+    if not row then
+        row = {components = {}}
+        self._rowScratch = row
+    end
     local comps = row.components
     for i = 1, width do
         local p = POW2[i]
@@ -2016,21 +2133,27 @@ function BufferReaderImpl:nextData(): string, any
     local buf = self._buf
     local decode <const> = (buf as {string: function}).decode as function(any): any
     local more = decode(buf) as boolean
-    if not more then return nil, nil end
+    if not more then
+        return nil, nil
+    end
     local key = decode(buf) as string
     local value = decode(buf)
     return key, value
 end
 
-function BufferReaderImpl:readEnd() end
+function BufferReaderImpl:readEnd()
+end
 
 function newBufferReaderImpl(buf: any): snapshot.Reader
     assert(buf, "newBufferReader requires a LuaJIT string.buffer")
-    local impl: BufferReaderImpl = setmetatable({
-        _buf = buf,
-        _archRemaining = 0,
-        _archetypesRemaining = 0,
-    } as BufferReaderImpl, BUFFER_READER_MT)
+    local impl: BufferReaderImpl = setmetatable(
+        {
+            _buf = buf,
+            _archRemaining = 0,
+            _archetypesRemaining = 0,
+        } as BufferReaderImpl,
+        BUFFER_READER_MT
+    )
     worldAttachers[impl as snapshot.Reader] = function(r: snapshot.Reader, w: World)
         (r as BufferReaderImpl)._world = w
     end

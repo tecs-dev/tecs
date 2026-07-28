@@ -49,8 +49,7 @@ function WorldImpl:applySparseRaw(id: integer, value: any)
     if store then
         store:set(id, value as Component)
         local slot = IdAllocator.slotOf(id)
-        local arch = self.archetypeIndex[
-            (self.allocator.slots as {integer: IdAllocator.EntitySlot})[slot].archetypeId]
+        local arch = self.archetypeIndex[(self.allocator.slots as {integer: IdAllocator.EntitySlot})[slot].archetypeId]
         if arch then
             arch:markComponentDirty(container)
         end
@@ -68,7 +67,9 @@ function WorldImpl:removeSparseRaw(id: integer, container: Component)
             local rel = v as types.components.Relationship
             if rel.relationshipType ~= container then
                 w = w + 1
-                if w ~= i then sets[w] = v end
+                if w ~= i then
+                    sets[w] = v
+                end
             end
         end
         for i = w + 1, n do
@@ -104,7 +105,9 @@ function WorldImpl:removeSparseOneRaw(id: integer, container: Component, targetI
                     stagedForContainer = true
                 end
                 w = w + 1
-                if w ~= i then sets[w] = v end
+                if w ~= i then
+                    sets[w] = v
+                end
             end
         end
         for i = w + 1, n do
@@ -123,8 +126,9 @@ function WorldImpl:removeSparseOneRaw(id: integer, container: Component, targetI
         else
             -- Partial removal keeps the container; mark it dirty so
             -- dirty-gated consumers see the store change.
-            local arch = self.archetypeIndex[
-                (self.allocator.slots as {integer: IdAllocator.EntitySlot})[slot].archetypeId]
+            local arch = self.archetypeIndex[(
+                self.allocator.slots as {integer: IdAllocator.EntitySlot}
+            )[slot].archetypeId]
             if arch then
                 arch:markComponentDirty(container)
             end

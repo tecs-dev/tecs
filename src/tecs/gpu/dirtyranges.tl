@@ -72,7 +72,7 @@ end
 
 dirtyranges.MAX = MAX_RANGES
 
-local dirtyrangesMT <const>: metatable<dirtyranges> = { __index = dirtyranges }
+local dirtyrangesMT <const>: metatable<dirtyranges> = {__index = dirtyranges}
 
 local min <const>, max <const> = math.min, math.max
 
@@ -86,14 +86,15 @@ function dirtyranges.create(): dirtyranges
 end
 
 function dirtyranges:mark(offset: integer, size: integer)
-    if size <= 0 then return end
+    if size <= 0 then
+        return
+    end
     self.bytes = self.bytes + size
 
     local entries = self.entries
     if self.collapsed then
         local start = min(entries[0] as integer, offset)
-        local finish = max((entries[0] as integer) + (entries[1] as integer),
-            offset + size)
+        local finish = max((entries[0] as integer) + (entries[1] as integer), offset + size)
         entries[0] = start
         entries[1] = finish - start
         return
@@ -117,8 +118,7 @@ function dirtyranges:mark(offset: integer, size: integer)
         local start = entries[0] as integer
         local finish = start
         for entry = 0, count - 1 do
-            local rangeEnd = (entries[entry * 2] as integer)
-                + (entries[entry * 2 + 1] as integer)
+            local rangeEnd = (entries[entry * 2] as integer) + (entries[entry * 2 + 1] as integer)
             start = min(start, entries[entry * 2] as integer)
             finish = max(finish, rangeEnd)
         end
@@ -137,8 +137,7 @@ function dirtyranges:mark(offset: integer, size: integer)
 end
 
 function dirtyranges:at(index: integer): integer, integer
-    return self.entries[index * 2] as integer,
-        self.entries[index * 2 + 1] as integer
+    return self.entries[index * 2] as integer, self.entries[index * 2 + 1] as integer
 end
 
 function dirtyranges:clear()

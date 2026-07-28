@@ -45,8 +45,12 @@ local SP: loader.CNamespace = nil
 local compilerMissing: string = nil
 
 local function loadCompiler(): boolean
-    if SC ~= nil then return true end
-    if compilerMissing ~= nil then return false end
+    if SC ~= nil then
+        return true
+    end
+    if compilerMissing ~= nil then
+        return false
+    end
     local okShaderc, shadercModule = pcall(require, "tecs.ffi.shaderc")
     if not okShaderc then
         compilerMissing = tostring(shadercModule)
@@ -63,9 +67,13 @@ local function loadCompiler(): boolean
 end
 
 local function requireCompiler(level: integer)
-    if loadCompiler() then return end
-    error("tecs: this build links no shader compiler, so every shader must "
-        .. "come from a pack: " .. compilerMissing, level + 1)
+    if loadCompiler() then
+        return
+    end
+    error(
+        "tecs: this build links no shader compiler, so every shader must " .. "come from a pack: " .. compilerMissing,
+        level + 1
+    )
 end
 
 -- SPIR-V decorations, from the SPIR-V core grammar.
@@ -87,9 +95,9 @@ end
 
 -- Per-stage descriptor sets, per SDL_GPU's documented layout.
 local SET_LAYOUTS <const>: {string: SetLayout} = {
-    vertex = { resources = 0, readWrite = -1, uniforms = 1 },
-    fragment = { resources = 2, readWrite = -1, uniforms = 3 },
-    compute = { resources = 0, readWrite = 1, uniforms = 2 },
+    vertex = {resources = 0, readWrite = -1, uniforms = 1},
+    fragment = {resources = 2, readWrite = -1, uniforms = 3},
+    compute = {resources = 0, readWrite = 1, uniforms = 2},
 }
 
 --- MSL reserves `main`, so SPIRV-Cross renames the entry point.
@@ -161,8 +169,7 @@ end
 ---
 --- `defines` become preprocessor macros, which is how material variants are
 --- produced from one source without string surgery at the call site.
-local function toSpirv(source: string, stage: string, name: string,
-                       defines: {string: string}): loader.CArray, integer
+local function toSpirv(source: string, stage: string, name: string, defines: {string: string}): loader.CArray, integer
     local compiler = shadercCompiler()
     local kind = STAGE_KINDS[stage]
     if kind == nil then
@@ -172,19 +179,15 @@ local function toSpirv(source: string, stage: string, name: string,
     local options = SC.shaderc_compile_options_initialize()
     -- Vulkan semantics give us real descriptor sets, which is what SDL_GPU's
     -- authoring layout is expressed in.
-    SC.shaderc_compile_options_set_target_env(options,
-        SC.shaderc_target_env_vulkan, SC.shaderc_env_version_vulkan_1_0)
-    SC.shaderc_compile_options_set_optimization_level(options,
-        SC.shaderc_optimization_level_performance)
+    SC.shaderc_compile_options_set_target_env(options, SC.shaderc_target_env_vulkan, SC.shaderc_env_version_vulkan_1_0)
+    SC.shaderc_compile_options_set_optimization_level(options, SC.shaderc_optimization_level_performance)
     if defines ~= nil then
         for key, value in pairs(defines) do
-            SC.shaderc_compile_options_add_macro_definition(options,
-                key, #key, value, #value)
+            SC.shaderc_compile_options_add_macro_definition(options, key, #key, value, #value)
         end
     end
 
-    local result = SC.shaderc_compile_into_spv(compiler, source, #source,
-        kind, name or "shader.glsl", "main", options)
+    local result = SC.shaderc_compile_into_spv(compiler, source, #source, kind, name or "shader.glsl", "main", options)
     SC.shaderc_compile_options_release(options)
 
     local status = SC.shaderc_result_get_compilation_status(result)
@@ -224,12 +227,10 @@ end
 
 --- Collects the (set, binding) of every resource of one SPIRV-Cross type,
 --- ordered by binding so that flattened Metal indices are stable across runs.
-local function collect(compiler: loader.CValue, resources: loader.CValue,
-                       resourceType: any): {Binding}
+local function collect(compiler: loader.CValue, resources: loader.CValue, resourceType: any): {Binding}
     local listOut = loader.newArray("const spvc_reflected_resource*[1]")
     local countOut = loader.newArray("size_t[1]")
-    SP.spvc_resources_get_resource_list_for_type(resources, resourceType,
-        listOut, countOut)
+    SP.spvc_resources_get_resource_list_for_type(resources, resourceType, listOut, countOut)
 
     local list = listOut[0]
     local count = tonumber(countOut[0]) as integer
@@ -238,23 +239,21 @@ local function collect(compiler: loader.CValue, resources: loader.CValue,
         local entry = (list as loader.CArray)[i] as loader.CValue
         local id = entry.id
         found[#found + 1] = {
-            set = tonumber(SP.spvc_compiler_get_decoration(compiler, id,
-                DECORATION_DESCRIPTOR_SET)) as integer,
-            binding = tonumber(SP.spvc_compiler_get_decoration(compiler, id,
-                DECORATION_BINDING)) as integer,
+            set = tonumber(SP.spvc_compiler_get_decoration(compiler, id, DECORATION_DESCRIPTOR_SET)) as integer,
+            binding = tonumber(SP.spvc_compiler_get_decoration(compiler, id, DECORATION_BINDING)) as integer,
             id = id,
         }
     end
-    table.sort(found, function(a: Binding, b: Binding): boolean
-        return a.binding < b.binding
-    end)
+    table.sort(found, function(a: Binding, b: Binding): boolean return a.binding < b.binding end)
     return found
 end
 
 local function inSet(bindings: {Binding}, set: integer): {Binding}
     local out: {Binding} = {}
     for _, entry in ipairs(bindings) do
-        if entry.set == set then out[#out + 1] = entry end
+        if entry.set == set then
+            out[#out + 1] = entry
+        end
     end
     return out
 end
@@ -270,8 +269,8 @@ local function localSize(compiler: loader.CValue): {integer}
     local size: {integer} = {}
     for axis = 0, 2 do
         size[axis + 1] = tonumber(
-            SP.spvc_compiler_get_execution_mode_argument_by_index(
-                compiler, EXECUTION_MODE_LOCAL_SIZE, axis)) as integer
+            SP.spvc_compiler_get_execution_mode_argument_by_index(compiler, EXECUTION_MODE_LOCAL_SIZE, axis)
+        ) as integer
     end
     return size
 end
@@ -284,8 +283,9 @@ end
 --- shader that is valid SPIR-V and that SPIRV-Cross cannot express in MSL
 --- would otherwise fail on Vulkan for a reason that has nothing to do with
 --- Vulkan. Reflection therefore runs on the no-output backend.
-local function reflect(words: loader.CArray, wordCount: integer,
-                       stage: string, translate: boolean): string, ResourceCounts, {integer}
+local function reflect(
+    words: loader.CArray, wordCount: integer, stage: string, translate: boolean
+): string, ResourceCounts, {integer}
     local contextOut = loader.newArray("spvc_context[1]")
     if tonumber(SP.spvc_context_create(contextOut)) ~= 0 then
         error("tecs: spvc_context_create failed", 3)
@@ -294,33 +294,33 @@ local function reflect(words: loader.CArray, wordCount: integer,
 
     local work = function(): string, ResourceCounts, {integer}
         local irOut = loader.newArray("spvc_parsed_ir[1]")
-        spvcCheck(context,
-            SP.spvc_context_parse_spirv(context, words, wordCount, irOut),
-            "spvc_context_parse_spirv")
+        spvcCheck(context, SP.spvc_context_parse_spirv(context, words, wordCount, irOut), "spvc_context_parse_spirv")
 
         local compilerOut = loader.newArray("spvc_compiler[1]")
         local backend = translate and SP.SPVC_BACKEND_MSL or SP.SPVC_BACKEND_NONE
-        spvcCheck(context, SP.spvc_context_create_compiler(context,
-            backend, irOut[0],
-            SP.SPVC_CAPTURE_MODE_TAKE_OWNERSHIP, compilerOut),
-            "spvc_context_create_compiler")
+        spvcCheck(
+            context,
+            SP.spvc_context_create_compiler(
+                context, backend, irOut[0], SP.SPVC_CAPTURE_MODE_TAKE_OWNERSHIP, compilerOut
+            ),
+            "spvc_context_create_compiler"
+        )
         local compiler = compilerOut[0] as loader.CValue
 
         local resourcesOut = loader.newArray("spvc_resources[1]")
-        spvcCheck(context,
+        spvcCheck(
+            context,
             SP.spvc_compiler_create_shader_resources(compiler, resourcesOut),
-            "spvc_compiler_create_shader_resources")
+            "spvc_compiler_create_shader_resources"
+        )
         local resources = resourcesOut[0] as loader.CValue
 
         local layout = SET_LAYOUTS[stage]
         if layout == nil then
-            error(("tecs: no descriptor layout for stage '%s'"):format(
-                tostring(stage)), 2)
+            error(("tecs: no descriptor layout for stage '%s'"):format(tostring(stage)), 2)
         end
 
-        local sampled = inSet(
-            collect(compiler, resources, SP.SPVC_RESOURCE_TYPE_SAMPLED_IMAGE),
-            layout.resources)
+        local sampled = inSet(collect(compiler, resources, SP.SPVC_RESOURCE_TYPE_SAMPLED_IMAGE), layout.resources)
         local images = collect(compiler, resources, SP.SPVC_RESOURCE_TYPE_STORAGE_IMAGE)
         local buffers = collect(compiler, resources, SP.SPVC_RESOURCE_TYPE_STORAGE_BUFFER)
         local uniforms = collect(compiler, resources, SP.SPVC_RESOURCE_TYPE_UNIFORM_BUFFER)
@@ -340,14 +340,11 @@ local function reflect(words: loader.CArray, wordCount: integer,
             uniformBuffers = #uniformBuffers,
         }
 
-        local executionModel = stage == "vertex" and 0
-            or stage == "fragment" and 4
-            or 5
+        local executionModel = stage == "vertex" and 0 or stage == "fragment" and 4 or 5
 
         -- Flatten to Metal's binding space in SDL_GPU's documented order.
         local binding = loader.newArray("spvc_msl_resource_binding[1]")
-        local function remap(entry: Binding, bufferIndex: integer,
-                             textureIndex: integer, samplerIndex: integer)
+        local function remap(entry: Binding, bufferIndex: integer, textureIndex: integer, samplerIndex: integer)
             SP.spvc_msl_resource_binding_init(binding)
             local slot = binding[0] as loader.CStruct
             slot.stage = executionModel
@@ -356,9 +353,11 @@ local function reflect(words: loader.CArray, wordCount: integer,
             slot.msl_buffer = bufferIndex
             slot.msl_texture = textureIndex
             slot.msl_sampler = samplerIndex
-            spvcCheck(context,
+            spvcCheck(
+                context,
                 SP.spvc_compiler_msl_add_resource_binding(compiler, binding),
-                "spvc_compiler_msl_add_resource_binding")
+                "spvc_compiler_msl_add_resource_binding"
+            )
         end
 
         if not translate then
@@ -368,36 +367,46 @@ local function reflect(words: loader.CArray, wordCount: integer,
 
         local bufferSlot = 0
         for _, entry in ipairs(uniformBuffers) do
-            remap(entry, bufferSlot, 0, 0); bufferSlot = bufferSlot + 1
+            remap(entry, bufferSlot, 0, 0)
+            bufferSlot = bufferSlot + 1
         end
         for _, entry in ipairs(roBuffers) do
-            remap(entry, bufferSlot, 0, 0); bufferSlot = bufferSlot + 1
+            remap(entry, bufferSlot, 0, 0)
+            bufferSlot = bufferSlot + 1
         end
         for _, entry in ipairs(rwBuffers) do
-            remap(entry, bufferSlot, 0, 0); bufferSlot = bufferSlot + 1
+            remap(entry, bufferSlot, 0, 0)
+            bufferSlot = bufferSlot + 1
         end
 
         local textureSlot = 0
         for _, entry in ipairs(sampled) do
-            remap(entry, 0, textureSlot, textureSlot); textureSlot = textureSlot + 1
+            remap(entry, 0, textureSlot, textureSlot)
+            textureSlot = textureSlot + 1
         end
         for _, entry in ipairs(roTextures) do
-            remap(entry, 0, textureSlot, 0); textureSlot = textureSlot + 1
+            remap(entry, 0, textureSlot, 0)
+            textureSlot = textureSlot + 1
         end
         for _, entry in ipairs(rwTextures) do
-            remap(entry, 0, textureSlot, 0); textureSlot = textureSlot + 1
+            remap(entry, 0, textureSlot, 0)
+            textureSlot = textureSlot + 1
         end
 
         local optionsOut = loader.newArray("spvc_compiler_options[1]")
-        spvcCheck(context,
+        spvcCheck(
+            context,
             SP.spvc_compiler_create_compiler_options(compiler, optionsOut),
-            "spvc_compiler_create_compiler_options")
-        spvcCheck(context, SP.spvc_compiler_install_compiler_options(
-            compiler, optionsOut[0]), "spvc_compiler_install_compiler_options")
+            "spvc_compiler_create_compiler_options"
+        )
+        spvcCheck(
+            context,
+            SP.spvc_compiler_install_compiler_options(compiler, optionsOut[0]),
+            "spvc_compiler_install_compiler_options"
+        )
 
         local sourceOut = loader.newArray("const char*[1]")
-        spvcCheck(context, SP.spvc_compiler_compile(compiler, sourceOut),
-            "spvc_compiler_compile")
+        spvcCheck(context, SP.spvc_compiler_compile(compiler, sourceOut), "spvc_compiler_compile")
 
         local threads = stage == "compute" and localSize(compiler) or nil
 
@@ -408,7 +417,9 @@ local function reflect(words: loader.CArray, wordCount: integer,
 
     local ok, source, counts, threads = pcall(work)
     SP.spvc_context_destroy(context)
-    if not ok then error(source, 3) end
+    if not ok then
+        error(source, 3)
+    end
     return source as string, counts as ResourceCounts, threads as {integer}
 end
 
@@ -432,8 +443,7 @@ end
 --- for this backend.
 --- @param source GLSL source text, with includes already expanded.
 --- @param stage "vertex", "fragment", or "compute".
-function shadercompiler.compile(source: string, stage: string,
-                                options: CompileOptions): CompiledShader
+function shadercompiler.compile(source: string, stage: string, options: CompileOptions): CompiledShader
     options = options or {}
     local name = options.name or ("<%s shader>"):format(stage)
 
@@ -472,11 +482,11 @@ end
 
 --- Compiles GLSL to MSL and returns the translated source.
 --- Exposed for inspection and tests; the pipeline uses `compile`.
-function shadercompiler.translate(source: string, stage: string,
-                                  options: CompileOptions): string, ResourceCounts, {integer}
+function shadercompiler.translate(
+    source: string, stage: string, options: CompileOptions
+): string, ResourceCounts, {integer}
     options = options or {}
-    local words, wordCount = toSpirv(source, stage,
-        options.name or "<shader>", options.defines)
+    local words, wordCount = toSpirv(source, stage, options.name or "<shader>", options.defines)
     return reflect(words, wordCount, stage, true)
 end
 
@@ -517,7 +527,9 @@ end
 --- getting it wrong selects a backend that then fails at shader creation
 --- rather than at device creation.
 function shadercompiler.format(): integer
-    if loadedPack ~= nil then return loadedPack.format end
+    if loadedPack ~= nil then
+        return loadedPack.format
+    end
     return require("tecs.platform.adapter").current().shaderFormat()
 end
 
@@ -548,30 +560,35 @@ end
 --- @param hasCompiler Whether compiling is available. Passed in rather than
 ---     asked for, so a test can put this on the branch a packaged build takes.
 --- @return "pack" or "compile". Raises where neither is possible.
-function shadercompiler.plan(name: string, defines: {string: string},
-                             hasCompiler: boolean): string
+function shadercompiler.plan(name: string, defines: {string: string}, hasCompiler: boolean): string
     local entry = shaders.get(name)
     local key = shaders.key(name, defines)
     local packed = loadedPack ~= nil and loadedPack.shaders[key] or nil
 
     if packed ~= nil then
         local hash = shaders.hash(entry.source)
-        if packed.sourceHash == hash then return "pack" end
+        if packed.sourceHash == hash then
+            return "pack"
+        end
         if not hasCompiler then
-            error(("tecs: packed shader '%s' was built from different source "
-                .. "(%s, now %s) and this build cannot recompile")
-                :format(key, packed.sourceHash, hash), 2)
+            error(
+                (
+                    "tecs: packed shader '%s' was built from different source "
+                    .. "(%s, now %s) and this build cannot recompile"
+                ):format(key, packed.sourceHash, hash),
+                2
+            )
         end
         return "compile"
     end
 
-    if hasCompiler then return "compile" end
-    if loadedPack == nil then
-        error(("tecs: no shader pack is loaded and this build cannot compile "
-            .. "'%s'"):format(key), 2)
+    if hasCompiler then
+        return "compile"
     end
-    error(("tecs: shader '%s' is not in the pack and this build cannot "
-        .. "compile it"):format(key), 2)
+    if loadedPack == nil then
+        error(("tecs: no shader pack is loaded and this build cannot compile " .. "'%s'"):format(key), 2)
+    end
+    error(("tecs: shader '%s' is not in the pack and this build cannot " .. "compile it"):format(key), 2)
 end
 
 --- Resolves a registered shader, from the pack if there is one.
@@ -589,10 +606,14 @@ function shadercompiler.load(name: string, defines?: {string: string}): Compiled
     if shadercompiler.plan(name, defines, shadercompiler.available()) == "pack" then
         return fromPack(loadedPack.shaders[shaders.key(name, defines)])
     end
-    return shadercompiler.compile(entry.source, entry.stage, {
-        name = name,
-        defines = defines,
-    })
+    return shadercompiler.compile(
+        entry.source,
+        entry.stage,
+        {
+            name = name,
+            defines = defines,
+        }
+    )
 end
 
 return shadercompiler

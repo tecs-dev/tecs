@@ -49,16 +49,22 @@ end
 --- Clamps to `maxDelta`, then offers the value to `provider`.
 function clock.step(): number
     local now = clock.now()
-    if last == 0.0 then last = now end
+    if last == 0.0 then
+        last = now
+    end
     local dt = now - last
     last = now
 
-    if dt > clock.maxDelta then dt = clock.maxDelta end
+    if dt > clock.maxDelta then
+        dt = clock.maxDelta
+    end
 
     local p = clock.provider
     if p ~= nil then
         local override = p(dt)
-        if override ~= nil then return override end
+        if override ~= nil then
+            return override
+        end
     end
     return dt
 end

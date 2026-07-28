@@ -69,13 +69,17 @@ function wakeheap.push(heap: wakeheap.Heap, key: integer, seq: integer, value: a
 end
 
 function wakeheap.peek(heap: wakeheap.Heap): integer
-    if heap.size == 0 then return nil end
+    if heap.size == 0 then
+        return nil
+    end
     return heap.keys[1]
 end
 
 function wakeheap.pop(heap: wakeheap.Heap): integer, integer, any
     local size = heap.size
-    if size == 0 then return nil, nil, nil end
+    if size == 0 then
+        return nil, nil, nil
+    end
     local keys, seqs, values = heap.keys, heap.seqs, heap.values
 
     local key <const> = keys[1]
@@ -91,7 +95,9 @@ function wakeheap.pop(heap: wakeheap.Heap): integer, integer, any
     local i = 1
     while true do
         local left = i * 2
-        if left > size then break end
+        if left > size then
+            break
+        end
         local child = left
         local right = left + 1
         if right <= size then

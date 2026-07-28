@@ -67,10 +67,12 @@ ecs.newWorld = WorldImpl.new
 ecs.newEvent = events.newEvent
 -- Cast, because Teal does not accept bare assignment of these polymorphic
 -- function values between record fields even when the signatures match.
-ecs.newComponent = components.newComponent
-    as function<C is types.components.Component>(options: types.components.ComponentOptions<C>): C
-ecs.newFFIComponent = components.newFFIComponent
-    as function<C is types.components.Component>(options: types.components.FFIComponentOptions<C>): C
+ecs.newComponent = components.newComponent as function<C is types.components.Component>(
+    options: types.components.ComponentOptions<C>
+): C
+ecs.newFFIComponent = components.newFFIComponent as function<C is types.components.Component>(
+    options: types.components.FFIComponentOptions<C>
+): C
 
 function ecs.componentByName(name: string): types.components.Component
     return components.registeredComponents[name]

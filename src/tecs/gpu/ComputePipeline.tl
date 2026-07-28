@@ -44,8 +44,7 @@ local ComputePipelineMT <const>: metatable<ComputePipeline> = {
 }
 
 --- Creates a pipeline from an already compiled compute shader.
-local function create(device: loader.CPtr,
-                      compiled: shadercompiler.CompiledShader): ComputePipeline
+local function create(device: loader.CPtr, compiled: shadercompiler.CompiledShader): ComputePipeline
     local info = loader.newArray("SDL_GPUComputePipelineCreateInfo[1]")
     local settings = info[0] as loader.CStruct
     settings.code = compiled.code
@@ -64,7 +63,9 @@ local function create(device: loader.CPtr,
     settings.props = 0
 
     local handle = C.SDL_CreateGPUComputePipeline(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUComputePipeline") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUComputePipeline")
+    end
 
     local self = setmetatable({} as ComputePipeline, ComputePipelineMT)
     self.handle = handle
@@ -80,13 +81,11 @@ end
 ---
 --- The path the engine uses: a name is what a pack is keyed by, so this works
 --- on a build that ships artifacts rather than a compiler.
-function ComputePipeline.load(device: loader.CPtr, name: string,
-                              options: ComputePipelineOptions): ComputePipeline
+function ComputePipeline.load(device: loader.CPtr, name: string, options: ComputePipelineOptions): ComputePipeline
     options = options or {}
     local entry = shaders.get(name)
     if entry.stage ~= "compute" then
-        error(("tecs: '%s' is a %s shader, not compute"):format(
-            name, entry.stage), 2)
+        error(("tecs: '%s' is a %s shader, not compute"):format(name, entry.stage), 2)
     end
     return create(device, shadercompiler.load(name, options.defines))
 end
@@ -94,18 +93,26 @@ end
 --- Compiles GLSL directly and creates a pipeline from it.
 ---
 --- Needs a shader compiler. Engine code goes through `load`.
-function ComputePipeline.fromGLSL(device: loader.CPtr, source: string,
-                                  options: ComputePipelineOptions): ComputePipeline
+function ComputePipeline.fromGLSL(device: loader.CPtr, source: string, options: ComputePipelineOptions): ComputePipeline
     options = options or {}
-    return create(device, shadercompiler.compile(source, "compute", {
-        name = options.name,
-        defines = options.defines,
-    }))
+    return create(
+        device,
+        shadercompiler.compile(
+            source,
+            "compute",
+            {
+                name = options.name,
+                defines = options.defines,
+            }
+        )
+    )
 end
 
 --- Releases the pipeline. Safe to call more than once.
 function ComputePipeline:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.SDL_ReleaseGPUComputePipeline(self._device, self.handle)
     self.handle = nil

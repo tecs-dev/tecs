@@ -18,7 +18,9 @@ end
 
 function WorldImpl:_validateIntegrity()
     -- Transaction state must be fully consumed.
-    if self.isDirty then fail("isDirty on a quiet world") end
+    if self.isDirty then
+        fail("isDirty on a quiet world")
+    end
     if self._scopeDepth ~= 0 then
         fail("scopeDepth " .. self._scopeDepth .. " on a quiet world")
     end
@@ -49,22 +51,23 @@ function WorldImpl:_validateIntegrity()
             if arch.pendingWrites ~= 0 then
                 fail("archetype " .. i .. " pendingWrites " .. arch.pendingWrites)
             end
-            if arch.hasPendingSpawns or arch.hasPendingMoveOut
-                    or arch.hasPendingDespawns or arch.pendingClear then
+            if arch.hasPendingSpawns or arch.hasPendingMoveOut or arch.hasPendingDespawns or arch.pendingClear then
                 fail("archetype " .. i .. " has pending flags set")
             end
-            if arch.pendingSpawnCount ~= 0 or arch.pendingDespawnCount ~= 0
-                    or arch.batchSpawnQueueCount ~= 0
-                    or arch.batchSpawnAtQueueCount ~= 0
-                    or arch.pendingBundleDrainCount ~= 0 then
+            if
+                arch.pendingSpawnCount ~= 0
+                or arch.pendingDespawnCount ~= 0
+                or arch.batchSpawnQueueCount ~= 0
+                or arch.batchSpawnAtQueueCount ~= 0
+                or arch.pendingBundleDrainCount ~= 0
+            then
                 fail("archetype " .. i .. " has pending queue entries")
             end
 
             local entities = arch.entities as {integer}
             local count = entities[0]
             if count > arch.capacity then
-                fail("archetype " .. i .. " count " .. count
-                    .. " exceeds capacity " .. arch.capacity)
+                fail("archetype " .. i .. " count " .. count .. " exceeds capacity " .. arch.capacity)
             end
 
             local keyCol = arch.columns[Key] as {string}
@@ -72,18 +75,17 @@ function WorldImpl:_validateIntegrity()
                 local id = entities[row]
                 local slot = IdAllocator.slotOf(id)
                 if seen[slot] then
-                    fail("slot " .. slot .. " placed in archetypes "
-                        .. seen[slot] .. " and " .. i)
+                    fail("slot " .. slot .. " placed in archetypes " .. seen[slot] .. " and " .. i)
                 end
                 seen[slot] = i
                 local s = slots[slot]
                 if s.archetypeId ~= arch.id then
-                    fail("slot " .. slot .. " records archetype " .. s.archetypeId
-                        .. " but its row lives in " .. arch.id)
+                    fail(
+                        "slot " .. slot .. " records archetype " .. s.archetypeId .. " but its row lives in " .. arch.id
+                    )
                 end
                 if s.row ~= row - 1 then
-                    fail("slot " .. slot .. " records row " .. s.row
-                        .. " but sits at row " .. (row - 1))
+                    fail("slot " .. slot .. " records row " .. s.row .. " but sits at row " .. (row - 1))
                 end
                 if IdAllocator.generationOfWithSlot(id, slot) ~= s.generation then
                     fail("slot " .. slot .. " generation mismatch")
@@ -105,8 +107,7 @@ function WorldImpl:_validateIntegrity()
     -- The key index must exactly mirror the Key columns.
     for key, id in pairs(self._keyIndex) do
         if keyed[key] ~= id then
-            fail("key index entry '" .. key .. "' -> " .. id
-                .. " not backed by a Key column")
+            fail("key index entry '" .. key .. "' -> " .. id .. " not backed by a Key column")
         end
         keyed[key] = nil
     end

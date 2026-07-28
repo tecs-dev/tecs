@@ -33,7 +33,8 @@ function ContextModule.newKey<T>(name?: string, _forType?: T): types.Context.Key
     log.get("tecs.context"):warn(
         "Context key #%d created without a name; pass a name to newKey so "
             .. "tools (MCP inspect, tecs info --keys) can find it",
-        KEY_COUNTER)
+        KEY_COUNTER
+    )
     -- Cast the numeric key as a kind of phantom type.
     -- It doesn't matter that it's actually a number as long as Teal thinks it's Key<T>.
     return KEY_COUNTER as types.Context.Key<T>
@@ -41,7 +42,9 @@ end
 
 function ContextModule.findKey<T>(name: string): types.Context.Key<T> | nil
     local id = NAMED_KEYS[name]
-    if id == nil then return nil end
+    if id == nil then
+        return nil
+    end
     return id as types.Context.Key<T>
 end
 

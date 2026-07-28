@@ -126,7 +126,7 @@ local record Camera
     toScreen: function(self, worldX: number, worldY: number, width: number, height: number): number, number
 end
 
-local CameraMT <const>: metatable<Camera> = { __index = Camera }
+local CameraMT <const>: metatable<Camera> = {__index = Camera}
 
 function Camera.create(options?: CameraOptions): Camera
     options = options or {}
@@ -139,7 +139,7 @@ function Camera.create(options?: CameraOptions): Camera
     -- Reused rather than allocated per frame: this is written every frame and
     -- read straight into a uniform.
     self._matrix = loader.newArray("float[16]")
-    self._view = { 0.0, 0.0, 0.0, 0.0 }
+    self._view = {0.0, 0.0, 0.0, 0.0}
     return self
 end
 
@@ -161,7 +161,9 @@ function Camera:matrix(width: number, height: number): loader.CArray
     local m10 = -sy * s
     local m11 = sy * c
 
-    for index = 0, 15 do m[index] = 0.0 end
+    for index = 0, 15 do
+        m[index] = 0.0
+    end
     m[0] = m00
     m[1] = m10
     m[4] = m01

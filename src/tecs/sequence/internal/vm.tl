@@ -34,10 +34,16 @@ end
 local function contextEntity(self: seqtypes.ActionContext, name: string): integer
     local cursor = self._cursor as Cursor
     local bindings = cursor.bindings
-    if not bindings then return nil end
+    if not bindings then
+        return nil
+    end
     local id = bindings[name]
-    if not id then return nil end
-    if not self.world:isAlive(id) then return nil end
+    if not id then
+        return nil
+    end
+    if not self.world:isAlive(id) then
+        return nil
+    end
     return id
 end
 
@@ -55,14 +61,11 @@ local function contextBind(self: seqtypes.ActionContext, name: string, entity: i
     bindings[name] = entity
 end
 
-local function resolveArgs(
-    world: World,
-    state: WorldState,
-    cursor: Cursor,
-    index: integer
-): {any}
+local function resolveArgs(world: World, state: WorldState, cursor: Cursor, index: integer): {any}
     local raw = cursor.program.consts[index] as {any}
-    if not cursor.program.bindingArgs[index] then return raw end
+    if not cursor.program.bindingArgs[index] then
+        return raw
+    end
 
     local out = state.argScratch
     local count = #raw
@@ -76,7 +79,9 @@ local function resolveArgs(
             out[i] = value
         end
     end
-    for i = #out, count + 1, -1 do out[i] = nil end
+    for i = #out, count + 1, -1 do
+        out[i] = nil
+    end
     return out
 end
 
@@ -85,24 +90,23 @@ end
 -- the same program waits the same wall-clock time on either. The nominal dt is
 -- the platform clock's to own, including what it is before the loop sets it.
 local function secondsToSteps(world: World, clockId: seqtypes.ClockId, seconds: number): integer
-    if seconds <= 0 then return 0 end
-    local timestep = clockId == "frame"
-        and platformclock.nominal
-        or world:getFixedTiming()
-    if not timestep or timestep <= 0 then return 1 end
+    if seconds <= 0 then
+        return 0
+    end
+    local timestep = clockId == "frame" and platformclock.nominal or world:getFixedTiming()
+    if not timestep or timestep <= 0 then
+        return 1
+    end
     local steps = math.floor(seconds / timestep + 0.5)
-    if steps < 1 then steps = 1 end
+    if steps < 1 then
+        steps = 1
+    end
     return steps
 end
 
 --- Run one cursor until it waits, finishes, or faults, returning the
 --- instruction budget it has left for this step.
-local function run(
-    world: World,
-    state: WorldState,
-    cursor: Cursor,
-    budget: integer
-): integer
+local function run(world: World, state: WorldState, cursor: Cursor, budget: integer): integer
     local prog = cursor.program
     local code = prog.code
     local consts = prog.consts
@@ -110,9 +114,12 @@ local function run(
     while true do
         budget = budget - 1
         if budget < 0 then
-            seqcursors.fault(state, cursor, "budgetExceeded",
-                "exceeded " .. tostring(cursor.budget)
-                .. " instructions in one step without waiting")
+            seqcursors.fault(
+                state,
+                cursor,
+                "budgetExceeded",
+                "exceeded " .. tostring(cursor.budget) .. " instructions in one step without waiting"
+            )
             return budget
         end
 
@@ -124,14 +131,11 @@ local function run(
         if op == seqprogram.END then
             seqcursors.retire(state, cursor, "completed")
             return budget
-
         elseif op == seqprogram.WAIT then
             local steps = a >= 0 and secondsToSteps(world, cursor.clock, consts[a] as number) or b
             cursor.pc = cursor.pc + 1
-            seqcursors.schedule(state, cursor,
-                seqcursors.clockOf(state, cursor).step + (steps > 0 and steps or 1))
+            seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step + (steps > 0 and steps or 1))
             return budget
-
         elseif op == seqprogram.WAIT_SIGNAL then
             local channel = consts[a] as string
             cursor.pc = cursor.pc + 1
@@ -139,12 +143,12 @@ local function run(
             cursor.wakeAt = nil
             seqcursors.park(state.channels, channel, cursor.slot)
             return budget
-
         elseif op == seqprogram.WAIT_QUERY then
             local name = consts[a] as string
             if not state.queries[name] then
-                seqcursors.fault(state, cursor, "unregisteredQuery",
-                    "query '" .. name .. "' is not registered on this world")
+                seqcursors.fault(
+                    state, cursor, "unregisteredQuery", "query '" .. name .. "' is not registered on this world"
+                )
                 return budget
             end
             cursor.pc = cursor.pc + 1
@@ -157,7 +161,6 @@ local function run(
             -- for the world this cursor has already asked for.
             state.dirtyQueries[name] = true
             return budget
-
         elseif op == seqprogram.PLAY_TWEEN then
             local preset = consts[a] as string
             local spec = consts[b] as {any}
@@ -167,8 +170,7 @@ local function run(
             cursor.tweenOutcome = nil
             local timeline = seqregistry.newest(preset)
             if not timeline then
-                seqcursors.fault(state, cursor, "unregisteredTween",
-                    "timeline '" .. preset .. "' is not defined")
+                seqcursors.fault(state, cursor, "unregisteredTween", "timeline '" .. preset .. "' is not defined")
                 return budget
             end
             if not id or not world:isAlive(id) then
@@ -194,18 +196,14 @@ local function run(
                 seqregistry.retain(timeline)
                 seqcursors.linkOwner(state, started)
                 seqcursors.claimChannel(state, started)
-                seqcursors.schedule(state, started,
-                    seqcursors.clockOf(state, started).step + 1)
-                cursor.tweenPlayback =
-                    seqcursors.packHandle(started.slot, started.generation)
+                seqcursors.schedule(state, started, seqcursors.clockOf(state, started).step + 1)
+                cursor.tweenPlayback = seqcursors.packHandle(started.slot, started.generation)
             end
             cursor.pc = cursor.pc + 1
-
         elseif op == seqprogram.AWAIT then
             local name = consts[a] as string
             if not seqawaitables.get(name) then
-                seqcursors.fault(state, cursor, "unregisteredAwaitable",
-                    "awaitable '" .. name .. "' is not registered")
+                seqcursors.fault(state, cursor, "unregisteredAwaitable", "awaitable '" .. name .. "' is not registered")
                 return budget
             end
             local spec = consts[b] as {any}
@@ -224,13 +222,11 @@ local function run(
                 state.awaitWaiters[cursor.slot] = true
                 return budget
             end
-
         elseif op == seqprogram.EVAL then
             local name <const> = consts[a] as string
             local evaluator <const> = seqevaluators.get(name)
             if not evaluator then
-                seqcursors.fault(state, cursor, "unregisteredEvaluator",
-                    "evaluator '" .. name .. "' is not registered")
+                seqcursors.fault(state, cursor, "unregisteredEvaluator", "evaluator '" .. name .. "' is not registered")
                 return budget
             end
             -- The cursor leaves the heap and joins the active set: from here
@@ -241,8 +237,7 @@ local function run(
             if b >= 0 then
                 -- Resolving and building state both run the evaluator's own
                 -- code, so both fault the playback rather than the tick.
-                local ok, resolved = pcall(seqevaluators.resolve, prog, evaluator, b)
-                    as (boolean, any)
+                local ok, resolved = pcall(seqevaluators.resolve, prog, evaluator, b) as (boolean, any)
                 if not ok then
                     seqcursors.fault(state, cursor, "actionError", tostring(resolved))
                     return budget
@@ -250,8 +245,7 @@ local function run(
                 cursor.evalData = resolved
             end
             if evaluator.newState then
-                local ok, built = pcall(
-                    evaluator.newState, prog, cursor.evalData, cursor) as (boolean, any)
+                local ok, built = pcall(evaluator.newState, prog, cursor.evalData, cursor) as (boolean, any)
                 if not ok then
                     seqcursors.fault(state, cursor, "actionError", tostring(built))
                     return budget
@@ -262,11 +256,9 @@ local function run(
             cursor.wakeAt = nil
             seqcursors.activate(state, cursor)
             return budget
-
         elseif op == seqprogram.WAIT_TWEEN then
             cursor.pc = cursor.pc + 1
-            local started = cursor.tweenPlayback
-                and seqcursors.resolve(state, cursor.tweenPlayback)
+            local started = cursor.tweenPlayback and seqcursors.resolve(state, cursor.tweenPlayback)
             if started and started.alive then
                 -- No wake time: the playback wakes this one when it ends,
                 -- however it ends, so a waiter never parks forever.
@@ -280,19 +272,18 @@ local function run(
                 cursor.tweenOutcome = "cancelled"
             end
             cursor.tweenPlayback = nil
-
         elseif op == seqprogram.CALL then
             local name = consts[a] as string
             local action = state.actions[name]
             if not action then
-                seqcursors.fault(state, cursor, "unregisteredAction",
-                    "action '" .. name .. "' is not registered on this world")
+                seqcursors.fault(
+                    state, cursor, "unregisteredAction", "action '" .. name .. "' is not registered on this world"
+                )
                 return budget
             end
             local ctx = state.context
             if not ctx then
-                ctx = {world = world, entity = contextEntity, bind = contextBind}
-                    as seqtypes.ActionContext
+                ctx = {world = world, entity = contextEntity, bind = contextBind} as seqtypes.ActionContext
                 state.context = ctx
             end
             ctx.handle = seqcursors.packHandle(cursor.slot, cursor.generation)
@@ -307,20 +298,22 @@ local function run(
                 return budget
             end
             -- An action may cancel its own playback.
-            if not cursor.alive then return budget end
+            if not cursor.alive then
+                return budget
+            end
             cursor.pc = cursor.pc + 1
-
         elseif op == seqprogram.EMIT then
             -- An emitted list is copied rather than borrowed: it leaves with
             -- the event, and an observer is entitled to keep it.
             local resolved = resolveArgs(world, state, cursor, b)
             local args: {any} = {}
-            for i = 1, #resolved do args[i] = resolved[i] end
-            world:emit(0, seqtypes.Event,
-                consts[a] as string, args,
-                seqcursors.packHandle(cursor.slot, cursor.generation))
+            for i = 1, #resolved do
+                args[i] = resolved[i]
+            end
+            world:emit(
+                0, seqtypes.Event, consts[a] as string, args, seqcursors.packHandle(cursor.slot, cursor.generation)
+            )
             cursor.pc = cursor.pc + 1
-
         elseif op == seqprogram.JUMP then
             if b < 0 then
                 cursor.pc = a
@@ -343,7 +336,6 @@ local function run(
                     cursor.pc = cursor.pc + 1
                 end
             end
-
         elseif op == seqprogram.FORK then
             -- The branch is queued for this same step rather than entered
             -- here: it runs once this cursor yields, which keeps a tree of
@@ -370,10 +362,8 @@ local function run(
             children[child.slot] = true
 
             seqcursors.linkOwner(state, child)
-            seqcursors.schedule(state, child,
-                seqcursors.clockOf(state, child).step)
+            seqcursors.schedule(state, child, seqcursors.clockOf(state, child).step)
             cursor.pc = b
-
         elseif op == seqprogram.JOIN then
             cursor.pc = cursor.pc + 1
             local children = cursor.children
@@ -383,10 +373,8 @@ local function run(
                 cursor.wakeAt = nil
                 return budget
             end
-
         else
-            seqcursors.fault(state, cursor, "actionError",
-                "unknown opcode " .. tostring(op))
+            seqcursors.fault(state, cursor, "actionError", "unknown opcode " .. tostring(op))
             return budget
         end
     end
@@ -405,7 +393,9 @@ end
 local function deliverSignals(state: WorldState)
     local pending = state.pendingSignals
     local count = #pending
-    if count == 0 then return end
+    if count == 0 then
+        return
+    end
     state.pendingSignals = {}
 
     for i = 1, count do
@@ -414,7 +404,9 @@ local function deliverSignals(state: WorldState)
             -- Sort by slot so wake order is reproducible regardless of the
             -- hash iteration order.
             local slots: {integer} = {}
-            for slot in pairs(blocked) do slots[#slots + 1] = slot end
+            for slot in pairs(blocked) do
+                slots[#slots + 1] = slot
+            end
             table.sort(slots)
             for j = 1, #slots do
                 local cursor = state.cursors[slots[j]]
@@ -433,11 +425,15 @@ end
 -- than the number of waiters.
 local function deliverQueryWaits(state: WorldState)
     local dirty = state.dirtyQueries
-    if next(dirty) == nil then return end
+    if next(dirty) == nil then
+        return
+    end
     state.dirtyQueries = {}
 
     local names: {string} = {}
-    for name in pairs(dirty) do names[#names + 1] = name end
+    for name in pairs(dirty) do
+        names[#names + 1] = name
+    end
     table.sort(names)
 
     for i = 1, #names do
@@ -447,7 +443,9 @@ local function deliverQueryWaits(state: WorldState)
         if waiting and query then
             local matched = query:count() > 0 and 1 or 0
             local slots: {integer} = {}
-            for slot in pairs(waiting) do slots[#slots + 1] = slot end
+            for slot in pairs(waiting) do
+                slots[#slots + 1] = slot
+            end
             table.sort(slots)
             for j = 1, #slots do
                 local cursor = state.cursors[slots[j]]
@@ -466,10 +464,14 @@ end
 -- the same way a query wait is.
 local function deliverAwaits(world: World, state: WorldState)
     local waiting = state.awaitWaiters
-    if next(waiting) == nil then return end
+    if next(waiting) == nil then
+        return
+    end
 
     local slots: {integer} = {}
-    for slot in pairs(waiting) do slots[#slots + 1] = slot end
+    for slot in pairs(waiting) do
+        slots[#slots + 1] = slot
+    end
     table.sort(slots)
 
     for i = 1, #slots do
@@ -480,8 +482,9 @@ local function deliverAwaits(world: World, state: WorldState)
             local provider = seqawaitables.get(cursor.awaitProvider)
             local pending = false
             if provider and world:isAlive(cursor.awaitEntity) then
-                local ok, result = pcall(provider.isPending, world,
-                    cursor.awaitEntity, cursor.awaitKey) as (boolean, any)
+                local ok, result = pcall(
+                    provider.isPending, world, cursor.awaitEntity, cursor.awaitKey
+                ) as (boolean, any)
                 if not ok then
                     seqcursors.fault(state, cursor, "actionError", tostring(result))
                     pending = true
@@ -546,11 +549,15 @@ end
 -- raise resumes it below the cursor that caused it.
 local function stepActive(world: World, state: WorldState, clock: seqclock.Clock, dt: number)
     walkAt = #clock.active
-    if walkAt == 0 then return end
+    if walkAt == 0 then
+        return
+    end
     walkWorld, walkState, walkClock, walkDt = world, state, clock, dt
     while walkAt >= 1 do
         local ok, err = pcall(walkActive) as (boolean, any)
-        if ok then break end
+        if ok then
+            break
+        end
         local cursor <const> = walkCursor
         if cursor and cursor.alive then
             seqcursors.fault(state, cursor, "actionError", tostring(err))
@@ -584,17 +591,15 @@ function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?
     local fixed <const> = clock
     while true do
         local due <const> = seqclock.next(fixed)
-        if not due or due > step then break end
+        if not due or due > step then
+            break
+        end
         local seq, packed = seqclock.take(fixed)
         local slot = packed % SLOT_LIMIT
         local generation = (packed - slot) / SLOT_LIMIT
         local cursor = state.cursors[slot]
         -- Stale entry: the cursor was cancelled, retired, or rescheduled.
-        if cursor
-            and cursor.generation == generation
-            and cursor.alive
-            and cursor.seq == seq
-        then
+        if cursor and cursor.generation == generation and cursor.alive and cursor.seq == seq then
             if cursor.state == "paused" then
                 -- Keep a paused cursor out of the heap; resume re-schedules.
                 cursor.wakeAt = step

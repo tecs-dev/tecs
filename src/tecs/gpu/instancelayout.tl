@@ -96,16 +96,14 @@ end
 --- entity's position: a pivoted quad hangs off some other point of itself, and
 --- the writer moves the centre with it rather than growing these to cover
 --- where the geometry went.
-function instancelayout.extentOf(rotation: number, scaleX: number,
-                                 scaleY: number): number, number
+function instancelayout.extentOf(rotation: number, scaleX: number, scaleY: number): number, number
     local ex: number
     local ey: number
     if rotation == 0.0 then
         ex = 0.5 * (scaleX < 0.0 and -scaleX or scaleX)
         ey = 0.5 * (scaleY < 0.0 and -scaleY or scaleY)
     else
-        ex = 0.5 * ((scaleX < 0.0 and -scaleX or scaleX)
-            + (scaleY < 0.0 and -scaleY or scaleY))
+        ex = 0.5 * ((scaleX < 0.0 and -scaleX or scaleX) + (scaleY < 0.0 and -scaleY or scaleY))
         ey = ex
     end
     return ex, ey

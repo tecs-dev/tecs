@@ -119,7 +119,9 @@ local function groupedIterStep(self: QueryImpl, var: any): (Archetype, integer, 
 end
 
 local function openCursor(self: QueryCursorImpl): boolean
-    if self._closed then return false end
+    if self._closed then
+        return false
+    end
     if not self._open then
         self._query._world:_pushQueryScope()
         self._open = true
@@ -128,7 +130,9 @@ local function openCursor(self: QueryCursorImpl): boolean
 end
 
 function QueryCursorImpl:close()
-    if self._closed then return end
+    if self._closed then
+        return
+    end
     self._closed = true
     if self._open then
         self._open = false
@@ -137,7 +141,9 @@ function QueryCursorImpl:close()
 end
 
 local function cursorIterStep(self: QueryCursorImpl, var: any): (Archetype, integer, any)
-    if not openCursor(self) then return end
+    if not openCursor(self) then
+        return
+    end
 
     local query = self._query
     local idx: integer
@@ -156,7 +162,9 @@ local function cursorIterStep(self: QueryCursorImpl, var: any): (Archetype, inte
 end
 
 local function cursorGroupedIterStep(self: QueryCursorImpl, var: any): (Archetype, integer, any)
-    if not openCursor(self) then return end
+    if not openCursor(self) then
+        return
+    end
 
     local query = self._query
     local groupList = query._activeGroupList
@@ -184,7 +192,9 @@ local function cursorGroupedIterStep(self: QueryCursorImpl, var: any): (Archetyp
 end
 
 local function cursorGroupsStep(self: QueryCursorImpl, prev: any): integer
-    if not openCursor(self) then return end
+    if not openCursor(self) then
+        return
+    end
 
     local query = self._query
     local i: integer
@@ -194,13 +204,17 @@ local function cursorGroupsStep(self: QueryCursorImpl, prev: any): integer
         i = query._activeGroupListIndices[prev as integer] + 1
     end
     local list = query._activeGroupList
-    if i <= #list then return list[i] end
+    if i <= #list then
+        return list[i]
+    end
     self:close()
     return nil
 end
 
 local function cursorGroupStep(self: QueryCursorImpl, prev: any): (Archetype, integer, {integer})
-    if not openCursor(self) then return end
+    if not openCursor(self) then
+        return
+    end
 
     local items = self._selectedGroup
     local i: integer
@@ -328,12 +342,15 @@ function QueryImpl:iter(): (Query.IterFn, Query, any)
 end
 
 function QueryImpl:cursor(): QueryCursor
-    local cursor: QueryCursorImpl = setmetatable({
-        _query = self,
-        _open = false,
-        _closed = false,
-        _prepared = false,
-    }, QUERY_CURSOR_MT)
+    local cursor: QueryCursorImpl = setmetatable(
+        {
+            _query = self,
+            _open = false,
+            _closed = false,
+            _prepared = false,
+        },
+        QUERY_CURSOR_MT
+    )
     return cursor
 end
 
@@ -354,7 +371,9 @@ local function groupsNext(self: QueryImpl, prev: any): integer
         i = self._activeGroupListIndices[prev as integer] + 1
     end
     local list = self._activeGroupList
-    if i <= #list then return list[i] end
+    if i <= #list then
+        return list[i]
+    end
     self._world:_popQueryScope()
     return nil
 end
@@ -448,7 +467,9 @@ local function archetypeMatches(query: QueryImpl, archetype: Archetype): boolean
     if not query._includeAnyBits:isEmpty() and signatureBits:disjoint(query._includeAnyBits) then
         return false
     end
-    if not query._excludeWordBits:isEmpty() and not signatureWordBits:disjoint(query._excludeWordBits)
+    if
+        not query._excludeWordBits:isEmpty()
+        and not signatureWordBits:disjoint(query._excludeWordBits)
         and signatureBits:overlaps(query._excludeBits)
     then
         return false
@@ -592,10 +613,14 @@ local function onDeactivatedWithGroupBy(self: QueryImpl, archetype: Archetype)
     local groupId = self._archetypeGroups[archetype]
     local items = self._activeGroupItems[groupId]
     local indices = self._activeGroupIndices[groupId]
-    if not items then return end
+    if not items then
+        return
+    end
 
     local gidx = indices[archetype]
-    if not gidx then return end
+    if not gidx then
+        return
+    end
 
     local lastGIdx = #items
     if gidx ~= lastGIdx then
@@ -657,7 +682,9 @@ function QueryImpl:onArchetypeDestroyed(archetype: Archetype)
         indices[archetype] = nil
     end
 
-    if self._archetypeGroups then self._archetypeGroups[archetype] = nil end
+    if self._archetypeGroups then
+        self._archetypeGroups[archetype] = nil
+    end
 end
 
 function QueryImpl:onNewArchetype(archetype: Archetype)
@@ -700,16 +727,15 @@ end
 -------------------------------------------------------------------------------
 
 local function subscribeQueryToArchetypeCreated(world: World, query: QueryImpl)
-    world:observe(0, builtins.ArchetypeCreated, function(event: builtins.ArchetypeCreated)
-        query:onNewArchetype(event.archetype)
-    end)
+    world:observe(
+        0,
+        builtins.ArchetypeCreated,
+        function(event: builtins.ArchetypeCreated) query:onNewArchetype(event.archetype) end
+    )
 end
 
 local function newQuery(
-    descriptor: QueryDescriptor,
-    matchingArchetypes: {Archetype},
-    masks: CompiledQueryMasks,
-    world: World
+    descriptor: QueryDescriptor, matchingArchetypes: {Archetype}, masks: CompiledQueryMasks, world: World
 ): Query
     local groupBy = descriptor.groupBy
     local archetypeIndices: {Archetype: integer} = {}
@@ -725,28 +751,31 @@ local function newQuery(
     local isTemp = descriptor.temp or false
     local onEntitiesAdded = descriptor.onEntitiesAdded
 
-    local self: QueryImpl = setmetatable({
-        descriptor = descriptor,
-        _world = world as WorldImpl,
-        _archetypes = matchingArchetypes,
-        _archetypeIndices = archetypeIndices,
-        _archetypeGroups = archetypeGroups,
-        _includeBits = masks.includeBits,
-        _includeWordBits = masks.includeWordBits,
-        _includeAnyBits = masks.includeAnyBits,
-        _includeAnyWordBits = masks.includeAnyWordBits,
-        _excludeBits = masks.excludeBits,
-        _excludeWordBits = masks.excludeWordBits,
-        _activeItems = activeItems,
-        _activeIndices = activeIndices,
-        _activeGroupItems = activeGroupItems,
-        _activeGroupIndices = activeGroupIndices,
-        _activeGroupList = activeGroupList,
-        _activeGroupListIndices = activeGroupListIndices,
-        _groupBy = groupBy,
-        onEntitiesAdded = wantAdd and queryOnEntitiesAdded or nil,
-        onEntitiesRemoved = wantRemove and queryOnEntitiesRemoved or nil,
-    }, QUERY_MT)
+    local self: QueryImpl = setmetatable(
+        {
+            descriptor = descriptor,
+            _world = world as WorldImpl,
+            _archetypes = matchingArchetypes,
+            _archetypeIndices = archetypeIndices,
+            _archetypeGroups = archetypeGroups,
+            _includeBits = masks.includeBits,
+            _includeWordBits = masks.includeWordBits,
+            _includeAnyBits = masks.includeAnyBits,
+            _includeAnyWordBits = masks.includeAnyWordBits,
+            _excludeBits = masks.excludeBits,
+            _excludeWordBits = masks.excludeWordBits,
+            _activeItems = activeItems,
+            _activeIndices = activeIndices,
+            _activeGroupItems = activeGroupItems,
+            _activeGroupIndices = activeGroupIndices,
+            _activeGroupList = activeGroupList,
+            _activeGroupListIndices = activeGroupListIndices,
+            _groupBy = groupBy,
+            onEntitiesAdded = wantAdd and queryOnEntitiesAdded or nil,
+            onEntitiesRemoved = wantRemove and queryOnEntitiesRemoved or nil,
+        },
+        QUERY_MT
+    )
 
     if isTemp then
         if onEntitiesAdded or descriptor.onEntitiesRemoved then

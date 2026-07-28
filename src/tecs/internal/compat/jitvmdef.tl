@@ -53,19 +53,18 @@ if not loaded["jit.vmdef"] and not preload["jit.vmdef"] then
 
         -- LuaJIT packs bytecode opcode names into a single fixed-width string,
         -- 6 chars per entry; consumers look up op N at byte N*6+1.
-        local bcnames =
-            "ISLT  ISGE  ISLE  ISGT  ISEQV ISNEV ISEQS ISNES ISEQN ISNEN ISEQP ISNEP " ..
-            "ISTC  ISFC  IST   ISF   ISTYPEISNUM MOV   NOT   UNM   LEN   " ..
-            "ADDVN SUBVN MULVN DIVVN MODVN ADDNV SUBNV MULNV DIVNV MODNV " ..
-            "ADDVV SUBVV MULVV DIVVV MODVV POW   CAT   " ..
-            "KSTR  KCDATAKSHORTKNUM  KPRI  KNIL  " ..
-            "UGET  USETV USETS USETN USETP UCLO  FNEW  TNEW  TDUP  GGET  GSET  " ..
-            "TGETV TGETS TGETB TGETR TSETV TSETS TSETB TSETM TSETR " ..
-            "CALLM CALL  CALLMTCALLT ITERC ITERN VARG  ISNEXT" ..
-            "RETM  RET   RET0  RET1  " ..
-            "FORI  JFORI FORL  IFORL JFORL ITERL IITERLJITERL" ..
-            "LOOP  ILOOP JLOOP JMP   " ..
-            "FUNCF IFUNCFJFUNCFFUNCV IFUNCVJFUNCVFUNCC FUNCCW"
+        local bcnames = "ISLT  ISGE  ISLE  ISGT  ISEQV ISNEV ISEQS ISNES ISEQN ISNEN ISEQP ISNEP "
+            .. "ISTC  ISFC  IST   ISF   ISTYPEISNUM MOV   NOT   UNM   LEN   "
+            .. "ADDVN SUBVN MULVN DIVVN MODVN ADDNV SUBNV MULNV DIVNV MODNV "
+            .. "ADDVV SUBVV MULVV DIVVV MODVV POW   CAT   "
+            .. "KSTR  KCDATAKSHORTKNUM  KPRI  KNIL  "
+            .. "UGET  USETV USETS USETN USETP UCLO  FNEW  TNEW  TDUP  GGET  GSET  "
+            .. "TGETV TGETS TGETB TGETR TSETV TSETS TSETB TSETM TSETR "
+            .. "CALLM CALL  CALLMTCALLT ITERC ITERN VARG  ISNEXT"
+            .. "RETM  RET   RET0  RET1  "
+            .. "FORI  JFORI FORL  IFORL JFORL ITERL IITERLJITERL"
+            .. "LOOP  ILOOP JLOOP JMP   "
+            .. "FUNCF IFUNCFJFUNCFFUNCV IFUNCVJFUNCVFUNCC FUNCCW"
 
         return {
             traceerr = traceerr,

@@ -78,7 +78,9 @@ local cache <const>: {string: shaders.Entry} = {}
 local roots: {string} = nil
 
 local function searchRoots(): {string}
-    if roots == nil then roots = { paths.asset("shaders/") } end
+    if roots == nil then
+        roots = {paths.asset("shaders/")}
+    end
     return roots
 end
 
@@ -90,7 +92,9 @@ end
 --- dropping them would put a spec or a material dispatch back on disk content
 --- it deliberately replaced.
 function shaders.invalidate()
-    for key in pairs(cache) do cache[key] = nil end
+    for key in pairs(cache) do
+        cache[key] = nil
+    end
 end
 
 --- Adds a directory to search before the ones already known.
@@ -107,10 +111,14 @@ end
 --- Locates `relative` in the first root that has it.
 local function find(relative: string): string
     local generated = provided[relative]
-    if generated ~= nil then return generated end
+    if generated ~= nil then
+        return generated
+    end
     for _, root in ipairs(searchRoots()) do
         local text = filesystem.read(root .. relative)
-        if text ~= nil then return text end
+        if text ~= nil then
+            return text
+        end
     end
     return nil
 end
@@ -142,21 +150,24 @@ local function expand(text: string, depth: integer, seen: {string: boolean}): st
         error("tecs: shader includes nest too deeply; check for a cycle", 0)
     end
 
-    local result = text:gsub('#include%s+"([^"]+)"', function(name: string): string
-        if seen[name] then
-            error(("tecs: shader include cycle through '%s'"):format(name), 0)
+    local result = text:gsub(
+        '#include%s+"([^"]+)"',
+        function(name: string): string
+            if seen[name] then
+                error(("tecs: shader include cycle through '%s'"):format(name), 0)
+            end
+            -- Under `include/` first, then as given, so an include may carry its
+            -- own extension or sit in a subdirectory.
+            local included = find("include/" .. name) or find(name)
+            if included == nil then
+                error(("tecs: no shader include named '%s'"):format(name), 0)
+            end
+            seen[name] = true
+            local expanded = expand(included, depth + 1, seen)
+            seen[name] = nil
+            return expanded
         end
-        -- Under `include/` first, then as given, so an include may carry its
-        -- own extension or sit in a subdirectory.
-        local included = find("include/" .. name) or find(name)
-        if included == nil then
-            error(("tecs: no shader include named '%s'"):format(name), 0)
-        end
-        seen[name] = true
-        local expanded = expand(included, depth + 1, seen)
-        seen[name] = nil
-        return expanded
-    end)
+    )
     return result
 end
 
@@ -174,7 +185,9 @@ local function readVariants(text: string): {{string: string}}
             defines[macro] = value
             any = true
         end
-        if any then list[#list + 1] = defines end
+        if any then
+            list[#list + 1] = defines
+        end
     end
     return list
 end
@@ -193,7 +206,9 @@ end
 --- what it would compile to.
 function shaders.provide(name: string, source: string)
     provided[name] = source
-    for key in pairs(cache) do cache[key] = nil end
+    for key in pairs(cache) do
+        cache[key] = nil
+    end
 end
 
 --- The key a name and define set are stored under.
@@ -201,12 +216,16 @@ end
 --- Defines are sorted so the key does not depend on table order, which in Lua
 --- is not the order they were written in.
 function shaders.key(name: string, defines?: {string: string}): string
-    if defines == nil then return name end
+    if defines == nil then
+        return name
+    end
     local parts: {string} = {}
     for macro, value in pairs(defines) do
         parts[#parts + 1] = macro .. "=" .. value
     end
-    if #parts == 0 then return name end
+    if #parts == 0 then
+        return name
+    end
     table.sort(parts)
     return name .. "|" .. table.concat(parts, ",")
 end
@@ -226,20 +245,20 @@ end
 ---     that names it: a name with no `.vert`, `.frag` or `.comp` raises.
 function shaders.get(name: string): shaders.Entry
     local cached = cache[name]
-    if cached ~= nil then return cached end
+    if cached ~= nil then
+        return cached
+    end
 
     local stage = stageOf(name)
     if stage == nil then
-        error(("tecs: '%s' does not name a stage; expected a .vert, .frag or "
-            .. ".comp suffix"):format(name), 2)
+        error(("tecs: '%s' does not name a stage; expected a .vert, .frag or " .. ".comp suffix"):format(name), 2)
     end
 
     local text = overrides[name]
     if text == nil then
         text = find(name .. ".glsl")
         if text == nil then
-            error(("tecs: no shader file for '%s' under %s")
-                :format(name, table.concat(searchRoots(), ", ")), 2)
+            error(("tecs: no shader file for '%s' under %s"):format(name, table.concat(searchRoots(), ", ")), 2)
         end
     end
 
@@ -265,7 +284,9 @@ end
 --- stage suffix is skipped for the same reason.
 function shaders.list(): {shaders.Entry}
     local names: {string: boolean} = {}
-    for name in pairs(overrides) do names[name] = true end
+    for name in pairs(overrides) do
+        names[name] = true
+    end
 
     for _, root in ipairs(searchRoots()) do
         local count = loader.newArray("int[1]")
@@ -282,12 +303,16 @@ function shaders.list(): {shaders.Entry}
 
     local sorted: {string} = {}
     for name in pairs(names) do
-        if stageOf(name) ~= nil then sorted[#sorted + 1] = name end
+        if stageOf(name) ~= nil then
+            sorted[#sorted + 1] = name
+        end
     end
     table.sort(sorted)
 
     local list: {shaders.Entry} = {}
-    for index, name in ipairs(sorted) do list[index] = shaders.get(name) end
+    for index, name in ipairs(sorted) do
+        list[index] = shaders.get(name)
+    end
     return list
 end
 
@@ -298,7 +323,7 @@ end
 function shaders.buildList(): {shaders.Variant}
     local list: {shaders.Variant} = {}
     for _, entry in ipairs(shaders.list()) do
-        local sets: {{string: string}} = { {} }
+        local sets: {{string: string}} = {{}}
         for _, defines in ipairs(entry.variants) do
             sets[#sets + 1] = defines
         end

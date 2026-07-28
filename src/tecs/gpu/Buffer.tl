@@ -108,7 +108,7 @@ end
 
 Buffer.slotCount = SLOT_COUNT
 
-local BufferMT <const>: metatable<Buffer> = { __index = Buffer }
+local BufferMT <const>: metatable<Buffer> = {__index = Buffer}
 
 -- Reused across flushes; every buffer flushes a slot every frame and an array
 -- allocated for each would be two cdata objects per flush on the frame path.
@@ -131,15 +131,16 @@ local USAGE_FLAGS <const>: {string: integer} = {
     computeWrite = K.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
 }
 
-local function createDeviceBuffer(device: loader.CPtr, usage: integer,
-                                  size: integer): loader.CPtr
+local function createDeviceBuffer(device: loader.CPtr, usage: integer, size: integer): loader.CPtr
     local info = loader.newArray("SDL_GPUBufferCreateInfo[1]")
     local settings = info[0] as loader.CStruct
     settings.usage = usage
     settings.size = size
     settings.props = 0
     local handle = C.SDL_CreateGPUBuffer(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUBuffer") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUBuffer")
+    end
     return handle as loader.CPtr
 end
 
@@ -150,7 +151,9 @@ local function createTransfer(device: loader.CPtr, size: integer): loader.CPtr
     settings.size = size
     settings.props = 0
     local transfer = C.SDL_CreateGPUTransferBuffer(device, info)
-    if transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+    if transfer == nil then
+        sdl.fail("SDL_CreateGPUTransferBuffer")
+    end
     return transfer as loader.CPtr
 end
 
@@ -160,7 +163,7 @@ end
 --- costs one device allocation and nothing else.
 function Buffer.create(device: loader.CPtr, options: BufferOptions): Buffer
     local flags = 0
-    for _, name in ipairs(options.usage or { "storage" }) do
+    for _, name in ipairs(options.usage or {"storage"}) do
         local flag = USAGE_FLAGS[name]
         if flag == nil then
             error(("tecs: unknown buffer usage '%s'"):format(tostring(name)), 2)
@@ -184,7 +187,7 @@ function Buffer.create(device: loader.CPtr, options: BufferOptions): Buffer
     self._destroyed = false
     self._slots = {}
     for index = 1, SLOT_COUNT do
-        self._slots[index] = { ranges = dirtyranges.create() }
+        self._slots[index] = {ranges = dirtyranges.create()}
     end
     return self
 end
@@ -192,14 +195,15 @@ end
 local function slotAt(self: Buffer, index: integer): Slot
     local slot = self._slots[index + 1]
     if slot == nil then
-        error(("tecs: buffer slot %s is outside 0..%d")
-            :format(tostring(index), SLOT_COUNT - 1), 3)
+        error(("tecs: buffer slot %s is outside 0..%d"):format(tostring(index), SLOT_COUNT - 1), 3)
     end
     return slot
 end
 
 local function ensureTransfer(self: Buffer, slot: Slot)
-    if slot.transfer ~= nil then return end
+    if slot.transfer ~= nil then
+        return
+    end
     -- Every slot carries a full staging set, so the second one doubles
     -- worst-case transfer residency: at four million instances the two staging
     -- sets are roughly 640 MB, before the driver's own cycling doubles what it
@@ -208,20 +212,24 @@ local function ensureTransfer(self: Buffer, slot: Slot)
     slot.transfer = createTransfer(self._device, self._transferSize)
 end
 
-local function mapSlotRecord(self: Buffer, slot: Slot,
-                             cycle?: boolean): loader.CValue
+local function mapSlotRecord(self: Buffer, slot: Slot, cycle?: boolean): loader.CValue
     ensureTransfer(self, slot)
-    if slot.mapped ~= nil then return slot.mapped end
+    if slot.mapped ~= nil then
+        return slot.mapped
+    end
     local shouldCycle = cycle ~= false
-    local mapped = C.SDL_MapGPUTransferBuffer(self._device, slot.transfer,
-        shouldCycle)
-    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    local mapped = C.SDL_MapGPUTransferBuffer(self._device, slot.transfer, shouldCycle)
+    if mapped == nil then
+        sdl.fail("SDL_MapGPUTransferBuffer")
+    end
     slot.mapped = mapped as loader.CValue
     return slot.mapped
 end
 
 local function unmapSlotRecord(self: Buffer, slot: Slot)
-    if slot.mapped == nil then return end
+    if slot.mapped == nil then
+        return
+    end
     C.SDL_UnmapGPUTransferBuffer(self._device, slot.transfer)
     slot.mapped = nil
 end
@@ -245,8 +253,7 @@ end
 --- @return The address to write into, and the bytes the slot holds.
 function Buffer:mapSlot(index: integer, cycle?: boolean): loader.BytePointer, integer
     local slot = slotAt(self, index)
-    return loader.bytePointer(mapSlotRecord(self, slot, cycle)),
-        self._transferSize
+    return loader.bytePointer(mapSlotRecord(self, slot, cycle)), self._transferSize
 end
 
 --- Maps a slot's staging memory as an array of `declaration`.
@@ -258,12 +265,10 @@ end
 --- again to the same allocation hands back the same object instead of
 --- allocating another. A cycled slot, or one asked for under a different
 --- declaration, is cast afresh.
-function Buffer:mapSlotAs(index: integer, declaration: string,
-                          cycle?: boolean): loader.CArray
+function Buffer:mapSlotAs(index: integer, declaration: string, cycle?: boolean): loader.CArray
     local slot = slotAt(self, index)
     local mapped = mapSlotRecord(self, slot, cycle)
-    if slot.view ~= nil and slot.viewDeclaration == declaration
-        and slot.viewOf == mapped then
+    if slot.view ~= nil and slot.viewDeclaration == declaration and slot.viewOf == mapped then
         return slot.view
     end
     local view = loader.castPointer(declaration, mapped)
@@ -280,10 +285,14 @@ end
 --- @param offset Bytes from the start of the buffer, matching the address
 ---     `mapSlot` returned. A size of zero or less records nothing.
 function Buffer:markSlotDirty(index: integer, offset: integer, size: integer)
-    if size <= 0 then return end
+    if size <= 0 then
+        return
+    end
     local slot = slotAt(self, index)
     slot.ranges:mark(offset, size)
-    if index == 0 then self.dirtyBytes = slot.ranges.bytes end
+    if index == 0 then
+        self.dirtyBytes = slot.ranges.bytes
+    end
 end
 
 --- Records every range in `ranges` against a slot.
@@ -302,8 +311,7 @@ end
 ---
 --- A convenience for producers that already hold a contiguous block. A
 --- producer that can write in place should map the slot and skip this copy.
-function Buffer:writeSlot(index: integer, offset: integer,
-                          source: loader.CValue, size: integer)
+function Buffer:writeSlot(index: integer, offset: integer, source: loader.CValue, size: integer)
     local base = self:mapSlot(index)
     loader.copyTo(base + offset, source, size)
     self:markSlotDirty(index, offset, size)
@@ -348,7 +356,9 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
 
     local ranges = slot.ranges
     local count = ranges.count
-    if count == 0 then return false end
+    if count == 0 then
+        return false
+    end
 
     local source = transferSource[0] as loader.CStruct
     local destination = bufferDestination[0] as loader.CStruct
@@ -361,13 +371,14 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
         source.offset = offset
         destination.offset = offset
         destination.size = size
-        C.SDL_UploadToGPUBuffer(copyPass, transferSource, bufferDestination,
-            false)
+        C.SDL_UploadToGPUBuffer(copyPass, transferSource, bufferDestination, false)
     end
     C.SDL_EndGPUCopyPass(copyPass)
 
     ranges:clear()
-    if index == 0 then self.dirtyBytes = 0 end
+    if index == 0 then
+        self.dirtyBytes = 0
+    end
     return true
 end
 
@@ -383,11 +394,8 @@ end
 function Buffer:cycleSlot(index: integer): loader.BytePointer, integer
     local slot = slotAt(self, index)
     unmapSlotRecord(self, slot)
-    return loader.bytePointer(mapSlotRecord(self, slot, true)),
-        self._transferSize
+    return loader.bytePointer(mapSlotRecord(self, slot, true)), self._transferSize
 end
-
-
 
 -- The methods below name no slot and mean slot zero, and they delegate rather
 -- than duplicate. Delegating is the choice because it leaves exactly one
@@ -438,15 +446,18 @@ end
 function Buffer:upload(source: loader.CArray, byteCount: integer, offset?: integer)
     self:write(offset or 0, source as loader.CValue, byteCount)
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
-    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
     self:flush(commandBuffer as loader.CValue)
-    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
-        "SDL_SubmitGPUCommandBuffer")
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean, "SDL_SubmitGPUCommandBuffer")
 end
 
 --- Releases the buffer and every slot's staging. Safe to call more than once.
 function Buffer:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     for index = 1, SLOT_COUNT do
         local slot = self._slots[index]

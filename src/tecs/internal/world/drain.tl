@@ -29,7 +29,9 @@ local pairs <const> = pairs
 function WorldImpl:_truncateArchetype(arch: Archetype)
     local entities = arch.entities as {integer}
     local archCount = entities[0]
-    if archCount == 0 then return end
+    if archCount == 0 then
+        return
+    end
 
     local arena = self.allocator
     local observer = self._transitionObserver
@@ -53,9 +55,9 @@ end
 
 function WorldImpl:_drainPendingSpawns(arch: Archetype)
     local slots = self.allocator.slots as {integer: EntitySlot}
-    local pendingArchArr = self._pendingArchArr as {integer:integer}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local pendingArchArr = self._pendingArchArr as {integer: integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archId = arch.id
 
@@ -75,9 +77,7 @@ function WorldImpl:_drainPendingSpawns(arch: Archetype)
             -- `pendingSpawnIds` stores packed ids; decode slot once per entity.
             local packedId = ids[k]
             local slot = IdAllocator.slotOf(packedId)
-            if slotStamp[slot] ~= epoch
-                    or pendingArchArr[slot] ~= archId
-                    or stateArr[slot] == STATE_DESPAWN then
+            if slotStamp[slot] ~= epoch or pendingArchArr[slot] ~= archId or stateArr[slot] == STATE_DESPAWN then
                 goto nextSpawn
             end
 
@@ -105,7 +105,9 @@ function WorldImpl:_drainPendingSpawns(arch: Archetype)
 
             placed = placed + 1
             local observer = self._transitionObserver
-            if observer then observer.entity(packedId, nil, arch) end
+            if observer then
+                observer.entity(packedId, nil, arch)
+            end
             ::nextSpawn::
         end
 
@@ -121,12 +123,14 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
     srcArch.hasPendingMoveOut = false
     local srcEntities = srcArch.entities as {integer}
     local srcCount = srcEntities[0]
-    if srcCount == 0 then return end
+    if srcCount == 0 then
+        return
+    end
 
     local slots = self.allocator.slots as {integer: EntitySlot}
-    local pendingArchArr = self._pendingArchArr as {integer:integer}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local pendingArchArr = self._pendingArchArr as {integer: integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local archIndex = self.archetypeIndex
     local toRemove = self._swapRemoveQueue
@@ -151,7 +155,9 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
         -- drain owns their row, so the move must not relocate it.
         if slotStamp[entSlot] == epoch and stateArr[entSlot] ~= STATE_DESPAWN then
             local archId = pendingArchArr[entSlot]
-            if archId ~= 0 then dstArch = archIndex[archId] end
+            if archId ~= 0 then
+                dstArch = archIndex[archId]
+            end
         end
 
         if dstArch == srcArch then
@@ -169,15 +175,14 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
             if vals then
                 applyPendingVals(vals, srcArch.columns, r)
                 for v = 1, #vals do
-                    local ct = (vals[v] as {string:any}).componentType as Component
+                    local ct = (vals[v] as {string: any}).componentType as Component
                     srcArch:markComponentDirty(ct)
                 end
             end
             if srcHasScalarPending then
                 local scalarTypes = srcPendingScalarTypes[entSlot]
                 if scalarTypes then
-                    applyPendingScalars(scalarTypes, srcPendingScalarValues[entSlot],
-                        srcArch.columns, r)
+                    applyPendingScalars(scalarTypes, srcPendingScalarValues[entSlot], srcArch.columns, r)
                     for v = 1, #scalarTypes do
                         srcArch:markComponentDirty(scalarTypes[v])
                     end
@@ -237,14 +242,18 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
             -- notification on observer presence internally.
             dstArch:onRowsAdded(newRow, 1, srcArch)
             local observer = self._transitionObserver
-            if observer then observer.entity(entId, srcArch, dstArch) end
+            if observer then
+                observer.entity(entId, srcArch, dstArch)
+            end
 
             removeCount = removeCount + 1
             toRemove[removeCount] = r
         end
     end
 
-    if removeCount == 0 then return end
+    if removeCount == 0 then
+        return
+    end
 
     if removeCount >= srcCount then
         if srcArch.observerCount > 0 then
@@ -253,7 +262,9 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
                 local dst: Archetype = nil
                 if slotStamp[entSlot] == epoch then
                     local archId = pendingArchArr[entSlot]
-                    if archId ~= 0 then dst = archIndex[archId] end
+                    if archId ~= 0 then
+                        dst = archIndex[archId]
+                    end
                 end
                 srcArch:notifyRemoved(r - 1, 1, dst)
             end
@@ -267,7 +278,9 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
             local entDst: Archetype = nil
             if slotStamp[srcEntSlot] == epoch then
                 local archId = pendingArchArr[srcEntSlot]
-                if archId ~= 0 then entDst = archIndex[archId] end
+                if archId ~= 0 then
+                    entDst = archIndex[archId]
+                end
             end
             local movedEntId = srcArch:removeEntity(row - 1, entDst)
             if movedEntId ~= 0 then
@@ -306,7 +319,9 @@ function WorldImpl:_drainPendingDespawns(arch: Archetype)
                     local slotOfRow = list[i]
                     local row = slots[slotOfRow].row + 1
                     local observer = self._transitionObserver
-                    if observer then observer.entity(entities[row], arch, nil) end
+                    if observer then
+                        observer.entity(entities[row], arch, nil)
+                    end
                     local movedEntId = arch:removeEntity(row - 1, nil)
                     IdAllocator.freeSlot(arena, slotOfRow)
                     if movedEntId ~= 0 then
@@ -330,9 +345,7 @@ function WorldImpl:_drainPendingDespawns(arch: Archetype)
 end
 
 function WorldImpl:_codegenBundleSpawn(
-    typeArray: {Component},
-    factoryArray: {function(): Component},
-    requiredCount: integer
+    typeArray: {Component}, factoryArray: {function(): Component}, requiredCount: integer
 ): function(any, ...: Component): integer
     return bundlecodegen.codegenBundleSpawn(self, typeArray, factoryArray, requiredCount)
 end
@@ -363,7 +376,7 @@ local function resetTransaction(self: WorldImpl)
         for i = 1, self.batchMutationCount do
             local mut = q[i]
             snapshotPool:release(mut.archetypes as {any})
-            mut.archetypes = nil  -- drop ref to released array
+            mut.archetypes = nil -- drop ref to released array
         end
         self.batchMutationCount = 0
     end
@@ -389,7 +402,9 @@ local function resetTransaction(self: WorldImpl)
         local archetypeIndex = self.archetypeIndex
         for i = 1, archetypeIndex.maxId do
             local a = archetypeIndex[i]
-            if a then a.dirtyQueuedEpoch = 0 end
+            if a then
+                a.dirtyQueuedEpoch = 0
+            end
         end
         e = 1
     end
@@ -400,8 +415,8 @@ end
 
 local function commitSparseChanges(self: WorldImpl)
     local stores = self.relationshipStores
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
+    local stateArr = self._stateArr as {integer: integer}
+    local slotStamp = self._slotStamp as {integer: integer}
     local epoch = self._transactionEpoch
     local slots = self.allocator.slots as {integer: EntitySlot}
     local sparsePool = self._sparseArraysPool
@@ -410,7 +425,8 @@ local function commitSparseChanges(self: WorldImpl)
         -- Entries staged by an entity that died during the transaction
         -- must not commit: a freed or recycled slot fails the generation
         -- compare, and a not-yet-drained despawn holds STATE_DESPAWN.
-        if not IdAllocator.isStale(slots, stagedId, slot)
+        if
+            not IdAllocator.isStale(slots, stagedId, slot)
             and not (slotStamp[slot] == epoch and stateArr[slot] == STATE_DESPAWN)
         then
             local arch = self.archetypeIndex[slots[slot].archetypeId]
@@ -535,6 +551,5 @@ function WorldImpl:_resetTxn()
         resetTransaction(self)
     end
 end
-
 
 return {}

@@ -149,16 +149,24 @@ local PATHTYPE_FILE <const> = tonumber(C.SDL_PATHTYPE_FILE)
 --- renaming it over the target, so a poll landing in the gap sees nothing and
 --- has to treat that as "not settled" rather than as a change.
 local function look(path: string): integer, number
-    if not C.SDL_GetPathInfo(path, INFO) then return -1, -1 end
-    if tonumber(FIELDS.type) ~= PATHTYPE_FILE then return -1, -1 end
+    if not C.SDL_GetPathInfo(path, INFO) then
+        return -1, -1
+    end
+    if tonumber(FIELDS.type) ~= PATHTYPE_FILE then
+        return -1, -1
+    end
     return tonumber(FIELDS.size) as integer, tonumber(FIELDS.modify_time)
 end
 
 --- What a path is reloaded as, from the kind it was loaded under.
 local function kindOf(path: string, loadedAs: string): string
-    if loadedAs ~= "document" then return loadedAs end
+    if loadedAs ~= "document" then
+        return loadedAs
+    end
     local suffix = path:match("%.([%a%d]+)$")
-    if suffix == nil then return "document" end
+    if suffix == nil then
+        return "document"
+    end
     return DOCUMENT_KINDS[suffix:lower()] or "document"
 end
 
@@ -176,8 +184,10 @@ end
 --- for a file that has not changed since the process opened it.
 function watch.install(config?: watch.Config)
     if not watch.available() then
-        error("this build links no shader compiler, so it is a release and "
-            .. "has no business polling the filesystem", 0)
+        error(
+            "this build links no shader compiler, so it is a release and " .. "has no business polling the filesystem",
+            0
+        )
     end
 
     local given = config or {} as watch.Config
@@ -226,7 +236,9 @@ end
 function watch.kinds(): {string}
     local names: {string} = {}
     for kind, handler in pairs(handlers) do
-        if handler ~= nil then names[#names + 1] = kind end
+        if handler ~= nil then
+            names[#names + 1] = kind
+        end
     end
     table.sort(names)
     return names
@@ -235,7 +247,9 @@ end
 --- Every path being watched, sorted.
 function watch.watching(): {string}
     local list: {string} = {}
-    for path in pairs(entries) do list[#list + 1] = path end
+    for path in pairs(entries) do
+        list[#list + 1] = path
+    end
     table.sort(list)
     return list
 end
@@ -247,7 +261,9 @@ end
 function watch.unsettled(): {string}
     local list: {string} = {}
     for path, entry in pairs(entries) do
-        if entry.pendingSize >= 0 then list[#list + 1] = path end
+        if entry.pendingSize >= 0 then
+            list[#list + 1] = path
+        end
     end
     table.sort(list)
     return list
@@ -269,8 +285,11 @@ local function adopt()
             local size, stamp = look(path)
             entries[path] = {
                 kind = kindOf(path, loadedAs),
-                size = size, stamp = stamp,
-                pendingSize = -1, pendingStamp = -1, steady = 0,
+                size = size,
+                stamp = stamp,
+                pendingSize = -1,
+                pendingStamp = -1,
+                steady = 0,
             }
         end
     end
@@ -283,9 +302,10 @@ end
 --- file is not usable, which is the same answer as waiting for the next save.
 local function dispatch(path: string, entry: Entry): boolean
     local handler = handlers[entry.kind]
-    if handler == nil then return false end
-    local ok, failure = pcall(handler,
-        { path = path, kind = entry.kind }) as (boolean, any)
+    if handler == nil then
+        return false
+    end
+    local ok, failure = pcall(handler, {path = path, kind = entry.kind}) as (boolean, any)
     if not ok then
         LOGGER:error("reloading '%s' failed: %s", path, tostring(failure))
         return false
@@ -301,7 +321,9 @@ end
 --- half-written file is asserted on without sleeping.
 --- @return How many changes were dispatched.
 function watch.scan(): integer
-    if not running then return 0 end
+    if not running then
+        return 0
+    end
     adopt()
 
     local fired = 0
@@ -331,7 +353,9 @@ function watch.scan(): integer
                 entry.pendingSize = -1
                 entry.pendingStamp = -1
                 entry.steady = 0
-                if dispatch(path, entry) then fired = fired + 1 end
+                if dispatch(path, entry) then
+                    fired = fired + 1
+                end
             end
         elseif entry.pendingSize >= 0 then
             -- Changed and then changed back inside the settle window, which
@@ -352,9 +376,13 @@ end
 --- this can sit in the loop unconditionally.
 --- @return How many changes were dispatched.
 function watch.poll(): integer
-    if not running then return 0 end
+    if not running then
+        return 0
+    end
     local now = tonumber(C.SDL_GetTicks()) as number
-    if now - lastPoll < intervalMs then return 0 end
+    if now - lastPoll < intervalMs then
+        return 0
+    end
     lastPoll = now
     return watch.scan()
 end

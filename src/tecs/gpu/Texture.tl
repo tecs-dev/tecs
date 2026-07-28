@@ -63,7 +63,7 @@ local record Texture
     _destroyed: boolean
 end
 
-local TextureMT <const>: metatable<Texture> = { __index = Texture }
+local TextureMT <const>: metatable<Texture> = {__index = Texture}
 
 local USAGE_FLAGS <const>: {string: integer} = {
     sampled = K.SDL_GPU_TEXTUREUSAGE_SAMPLER,
@@ -74,7 +74,7 @@ local USAGE_FLAGS <const>: {string: integer} = {
     graphicsRead = K.SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,
 }
 
-local DEFAULT_USAGE <const>: {string} = { "colorTarget", "sampled" }
+local DEFAULT_USAGE <const>: {string} = {"colorTarget", "sampled"}
 
 --- SDL_GPU_TEXTURETYPE_2D
 local TEXTURE_TYPE_2D <const> = 0
@@ -108,7 +108,7 @@ local DEPTH_FORMATS <const>: {DepthFormat} = {
     {
         format = tonumber(C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT) as integer,
         name = "D32_FLOAT",
-        resolution = 2 ^ -24,
+        resolution = 2 ^ (-24),
     },
     {
         format = tonumber(C.SDL_GPU_TEXTUREFORMAT_D24_UNORM) as integer,
@@ -151,10 +151,14 @@ function Texture.checkDepthSorting(format: integer): number
             break
         end
     end
-    if known == nil then return 0.0 end
+    if known == nil then
+        return 0.0
+    end
 
     local needed <const> = layers.depthResolution()
-    if known.resolution <= needed then return 0.0 end
+    if known.resolution <= needed then
+        return 0.0
+    end
 
     -- Required here rather than at the top. Logging reaches SDL through a
     -- native sink, and a texture is created by tools and tests that have no
@@ -163,11 +167,16 @@ function Texture.checkDepthSorting(format: integer): number
     local collapsed <const> = known.resolution / needed
     log.get("tecs.gpu"):error(
         "the depth target is %s, which steps by %.3g, and the layer sort "
-        .. "resolves to %.3g: entities within %.4g world units of each other "
-        .. "share a depth value and draw in the order they were written "
-        .. "rather than the order they were sorted into. Dividing "
-        .. "layers.maxY and layers.maxZ by %.4g resolves the sort again",
-        known.name, known.resolution, needed, collapsed, collapsed)
+            .. "resolves to %.3g: entities within %.4g world units of each other "
+            .. "share a depth value and draw in the order they were written "
+            .. "rather than the order they were sorted into. Dividing "
+            .. "layers.maxY and layers.maxZ by %.4g resolves the sort again",
+        known.name,
+        known.resolution,
+        needed,
+        collapsed,
+        collapsed
+    )
     return collapsed
 end
 
@@ -190,8 +199,7 @@ end
 function Texture.depthFormat(device: loader.CPtr): integer
     local usage = USAGE_FLAGS.depthTarget
     for _, entry in ipairs(DEPTH_FORMATS) do
-        if C.SDL_GPUTextureSupportsFormat(device, entry.format,
-            TEXTURE_TYPE_2D, usage) then
+        if C.SDL_GPUTextureSupportsFormat(device, entry.format, TEXTURE_TYPE_2D, usage) then
             Texture.checkDepthSorting(entry.format)
             return entry.format
         end
@@ -227,7 +235,9 @@ function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     settings.props = 0
 
     local handle = C.SDL_CreateGPUTexture(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUTexture") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUTexture")
+    end
 
     -- A device created without debug mode keeps no names, so this is free in a
     -- release and the difference is only visible in a graphics debugger.
@@ -265,15 +275,21 @@ function Texture:upload(pixels: loader.CValue, byteCount: integer)
     settings.props = 0
 
     local transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
-    if transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+    if transfer == nil then
+        sdl.fail("SDL_CreateGPUTransferBuffer")
+    end
 
     local mapped = C.SDL_MapGPUTransferBuffer(self._device, transfer, true)
-    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    if mapped == nil then
+        sdl.fail("SDL_MapGPUTransferBuffer")
+    end
     loader.copyBytes(mapped as loader.CArray, pixels, byteCount)
     C.SDL_UnmapGPUTransferBuffer(self._device, transfer)
 
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
-    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
     local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
 
     local source = loader.newArray("SDL_GPUTextureTransferInfo[1]")
@@ -293,8 +309,7 @@ function Texture:upload(pixels: loader.CValue, byteCount: integer)
 
     C.SDL_UploadToGPUTexture(copyPass, source, region, false)
     C.SDL_EndGPUCopyPass(copyPass)
-    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
-        "SDL_SubmitGPUCommandBuffer")
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean, "SDL_SubmitGPUCommandBuffer")
 
     C.SDL_ReleaseGPUTransferBuffer(self._device, transfer)
 end
@@ -318,12 +333,16 @@ function Texture:readback(): loader.CArray
         settings.size = byteCount
         settings.props = 0
         self._transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
-        if self._transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+        if self._transfer == nil then
+            sdl.fail("SDL_CreateGPUTransferBuffer")
+        end
         self._transferSize = byteCount
     end
 
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
-    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
     local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
 
     local region = loader.newArray("SDL_GPUTextureRegion[1]")
@@ -349,14 +368,18 @@ function Texture:readback(): loader.CArray
     C.SDL_EndGPUCopyPass(copyPass)
 
     local fence = C.SDL_SubmitGPUCommandBufferAndAcquireFence(commandBuffer)
-    if fence == nil then sdl.fail("SDL_SubmitGPUCommandBufferAndAcquireFence") end
+    if fence == nil then
+        sdl.fail("SDL_SubmitGPUCommandBufferAndAcquireFence")
+    end
     local fences = loader.newArray("SDL_GPUFence*[1]")
     fences[0] = fence
     C.SDL_WaitForGPUFences(self._device, true, fences, 1)
     C.SDL_ReleaseGPUFence(self._device, fence)
 
     local mapped = C.SDL_MapGPUTransferBuffer(self._device, self._transfer, false)
-    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    if mapped == nil then
+        sdl.fail("SDL_MapGPUTransferBuffer")
+    end
     local pixels = loader.newArray("uint8_t[?]", byteCount)
     loader.copyBytes(pixels, mapped as loader.CValue, byteCount)
     C.SDL_UnmapGPUTransferBuffer(self._device, self._transfer)
@@ -382,7 +405,9 @@ end
 
 --- Releases the texture and any transfer buffer. Safe to call more than once.
 function Texture:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     if self._transfer ~= nil then
         C.SDL_ReleaseGPUTransferBuffer(self._device, self._transfer)

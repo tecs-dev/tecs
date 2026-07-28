@@ -60,25 +60,25 @@ local record tweenrun
 
     --- The playback options a timeline reads out of `params`, validated.
     --- Raises on a combination a timeline cannot run.
-    resolveOptions: function(
-        params: {string: any}, totalDuration: number
-    ): PlaybackMode, integer, number, number
+    resolveOptions: function(params: {string: any}, totalDuration: number): PlaybackMode, integer, number, number
 end
 
 -------------------------------------------------------------------------------
 -- Construction
 -------------------------------------------------------------------------------
 
-function tweenrun.resolveOptions(
-    params: {string: any}, totalDuration: number
-): PlaybackMode, integer, number, number
+function tweenrun.resolveOptions(params: {string: any}, totalDuration: number): PlaybackMode, integer, number, number
     local mode, passCount = tweeneval.playbackMode(
-        params and params.mode as PlaybackMode,
-        params and params.count as integer)
+        params and params.mode as PlaybackMode, params and params.count as integer
+    )
     local speed <const> = (params and params.speed as number) or 1
     local delay <const> = (params and params.delay as number) or 0
-    if speed <= 0 then error("Tween speed must be greater than 0") end
-    if delay < 0 then error("Tween delay must be at least 0") end
+    if speed <= 0 then
+        error("Tween speed must be greater than 0")
+    end
+    if delay < 0 then
+        error("Tween delay must be at least 0")
+    end
     if passCount ~= 1 and totalDuration <= 0 then
         error("Repeating tween timelines must have a duration")
     end
@@ -86,11 +86,7 @@ function tweenrun.resolveOptions(
 end
 
 local function newPlayback(
-    tl: TimelineImpl,
-    mode: PlaybackMode,
-    passCount: integer,
-    rate: number,
-    delay: number
+    tl: TimelineImpl, mode: PlaybackMode, passCount: integer, rate: number, delay: number
 ): Playback
     local children: {Playback} = nil
     if tl.runs then
@@ -124,15 +120,16 @@ end
 -- emits -- which is nearly all of them -- pays nothing for the possibility.
 local function fireEmits(p: Playback, world: World, target: integer, cursor: Cursor)
     local emits <const> = p.timeline.emits
-    if not emits then return end
+    if not emits then
+        return
+    end
     while p.nextEmit <= #emits do
         local evDef <const> = emits[p.nextEmit]
         if p.elapsed >= evDef.time then
             p.nextEmit = p.nextEmit + 1
             -- An authored emit is an ordinary sequence event: the name it was
             -- given, and the entity it played on.
-            world:emit(0, seqtypes.Event, evDef.name, {target},
-                seqcursors.packHandle(cursor.slot, cursor.generation))
+            world:emit(0, seqtypes.Event, evDef.name, {target}, seqcursors.packHandle(cursor.slot, cursor.generation))
         else
             break
         end
@@ -158,11 +155,12 @@ local function beginRunCycle(p: Playback, runSlot: RunSlot, cycleIndex: integer)
 end
 
 local function evaluateRun(
-    p: Playback, runSlot: RunSlot, localElapsed: number,
-    world: World, target: integer, cursor: Cursor
+    p: Playback, runSlot: RunSlot, localElapsed: number, world: World, target: integer, cursor: Cursor
 )
     local cycleDuration <const> = p.timeline.totalDuration
-    if cycleDuration <= 0 then return end
+    if cycleDuration <= 0 then
+        return
+    end
 
     local atEnd <const> = localElapsed >= runSlot.effectiveDuration
     local cycleIndex = atEnd and (runSlot.passCount - 1) or floor(localElapsed / cycleDuration)
@@ -223,12 +221,12 @@ resetCycle = function(p: Playback)
 end
 
 --- Advance one playback by `dt`, returning true once it is finished.
-local function advance(
-    p: Playback, dt: number, world: World, target: integer, cursor: Cursor
-): boolean
+local function advance(p: Playback, dt: number, world: World, target: integer, cursor: Cursor): boolean
     if p.delay > 0 then
         p.delay = p.delay - dt
-        if p.delay > 0 then return false end
+        if p.delay > 0 then
+            return false
+        end
         dt = -p.delay
         p.delay = 0
     end
@@ -258,10 +256,14 @@ local function advance(
         remainingTime = remainingTime - distance
 
         if p.remainingPasses == -1 or p.remainingPasses > 1 then
-            if p.remainingPasses > 1 then p.remainingPasses = p.remainingPasses - 1 end
+            if p.remainingPasses > 1 then
+                p.remainingPasses = p.remainingPasses - 1
+            end
             if p.mode == "pingPong" then
                 p.direction = -p.direction
-                if p.direction == 1 then resetCycle(p) end
+                if p.direction == 1 then
+                    resetCycle(p)
+                end
             else
                 resetCycle(p)
             end
@@ -277,15 +279,13 @@ end
 -- Snapshot
 -------------------------------------------------------------------------------
 
-local SLOT_FIELDS <const>: {string} =
-    {"init", "applied", "lastT", "s1", "s2", "s3", "s4", "d1", "d2", "d3", "d4"}
+local SLOT_FIELDS <const>: {string} = {"init", "applied", "lastT", "s1", "s2", "s3", "s4", "d1", "d2", "d3", "d4"}
 
 local function saveSlotState(state: {TweenSlotState}, count: integer): {{number}}
     local out: {{number}} = {}
     for i = 0, count - 1 do
         local s <const> = state[i]
-        out[i + 1] = {s.init, s.applied, s.lastT, s.s1, s.s2, s.s3, s.s4,
-            s.d1, s.d2, s.d3, s.d4}
+        out[i + 1] = {s.init, s.applied, s.lastT, s.s1, s.s2, s.s3, s.s4, s.d1, s.d2, s.d3, s.d4}
     end
     return out
 end
@@ -293,7 +293,9 @@ end
 local function loadSlotState(state: {TweenSlotState}, count: integer, rows: {{number}})
     for i = 0, count - 1 do
         local row <const> = rows and rows[i + 1]
-        if not row then return end
+        if not row then
+            return
+        end
         local s <const> = state[i]
         local slot <const> = s as {string: number}
         for f = 1, #SLOT_FIELDS do
@@ -307,7 +309,9 @@ savePlayback = function(p: Playback): {string: any}
     local children: {{string: any}} = nil
     if p.children then
         children = {}
-        for i = 1, #p.children do children[i] = savePlayback(p.children[i]) end
+        for i = 1, #p.children do
+            children[i] = savePlayback(p.children[i])
+        end
     end
     return {
         elapsed = p.elapsed,
@@ -329,9 +333,13 @@ end
 -- save carried.
 local loadPlayback: function(tl: TimelineImpl, data: {string: any}): Playback
 loadPlayback = function(tl: TimelineImpl, data: {string: any}): Playback
-    local p <const> = newPlayback(tl, (data.mode as PlaybackMode) or "once",
+    local p <const> = newPlayback(
+        tl,
+        (data.mode as PlaybackMode) or "once",
         (data.remainingPasses as integer) or 1,
-        (data.rate as number) or 1, (data.delay as number) or 0)
+        (data.rate as number) or 1,
+        (data.delay as number) or 0
+    )
     p.elapsed = (data.elapsed as number) or 0
     p.direction = (data.direction as integer) or 1
     p.nextEmit = (data.nextEmit as integer) or 1
@@ -356,44 +364,48 @@ end
 local installed = false
 
 function tweenrun.install()
-    if installed then return end
+    if installed then
+        return
+    end
     installed = true
 
     local seqevaluators <const> = require("tecs.sequence.internal.evaluators")
-    seqevaluators.register(EVALUATOR, {
-        -- One resolve per program constant, shared by every playback of it:
-        -- easing names become functions and target ids become targets once,
-        -- not once per entity.
-        resolve = function(data: any): any
-            return tweeneval.deserializeTimeline(data as {string: any})
-        end,
+    seqevaluators.register(
+        EVALUATOR,
+        {
+            -- One resolve per program constant, shared by every playback of it:
+            -- easing names become functions and target ids become targets once,
+            -- not once per entity.
+            resolve = function(data: any): any return tweeneval.deserializeTimeline(data as {string: any}) end,
 
-        newState = function(_prog: seqtypes.ProgramImpl, data: any, cursor: Cursor): any
-            local tl <const> = data as TimelineImpl
-            local mode, passCount, speed, delay =
-                tweenrun.resolveOptions(cursor.params, tl.totalDuration)
-            return newPlayback(tl, mode, passCount, speed, delay)
-        end,
+            newState = function(_prog: seqtypes.ProgramImpl, data: any, cursor: Cursor): any
+                local tl <const> = data as TimelineImpl
+                local mode, passCount, speed, delay = tweenrun.resolveOptions(cursor.params, tl.totalDuration)
+                return newPlayback(tl, mode, passCount, speed, delay)
+            end,
 
-        step = function(world: World, cursor: Cursor, dt: number): boolean
-            local target <const> = cursor.owner
-            -- A timeline animates the playback's owner. Without one there is
-            -- nothing to write to, so it is done rather than faulted: the
-            -- same answer a despawned target gives.
-            if target == 0 then return true end
-            return advance(cursor.evalState as Playback, dt, world, target, cursor)
-        end,
+            step = function(world: World, cursor: Cursor, dt: number): boolean
+                local target <const> = cursor.owner
+                -- A timeline animates the playback's owner. Without one there is
+                -- nothing to write to, so it is done rather than faulted: the
+                -- same answer a despawned target gives.
+                if target == 0 then
+                    return true
+                end
+                return advance(cursor.evalState as Playback, dt, world, target, cursor)
+            end,
 
-        save = function(state: any): any
-            return savePlayback(state as Playback)
-        end,
+            save = function(state: any): any return savePlayback(state as Playback) end,
 
-        load = function(_prog: seqtypes.ProgramImpl, data: any, saved: any): any
-            local tl <const> = data as TimelineImpl
-            if not saved then return newPlayback(tl, "once", 1, 1, 0) end
-            return loadPlayback(tl, saved as {string: any})
-        end,
-    })
+            load = function(_prog: seqtypes.ProgramImpl, data: any, saved: any): any
+                local tl <const> = data as TimelineImpl
+                if not saved then
+                    return newPlayback(tl, "once", 1, 1, 0)
+                end
+                return loadPlayback(tl, saved as {string: any})
+            end,
+        }
+    )
 end
 
 tweenrun.EVALUATOR = EVALUATOR

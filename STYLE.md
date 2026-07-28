@@ -65,6 +65,7 @@ them reflows a comment body.
  ────────  ────────────  ─────────────
  C         clang-format  .clang-format
  Lua       stylua        .stylua.toml
+ Teal      Cerulean      tlconfig.lua
  Python    ruff format   ruff.toml
  CMake     gersemi       .gersemirc
  Web       prettier      .prettierrc
@@ -74,15 +75,16 @@ Prettier covers JSON, Markdown, YAML, CSS and the JS/TS family. Markdown is
 formatted with `proseWrap: preserve`, so hand-wrapped prose keeps its line
 breaks and only structure is normalized.
 
-Two languages here are deliberately unformatted, because the available tool
-damages them rather than tidying them:
+Teal uses the exact Cerulean revision installed by `make deps`. That revision
+supports this tree's local macro declarations, macro invocations, and quoted
+macro bodies. Require sorting is disabled because import order can be
+meaningful, while indentation and line width come from `tlconfig.lua`. The
+installer retains the Teal and Cerulean MIT notices under `vendor/licenses/`.
 
-- **Teal.** Cerulean 1.8.0 loses source. A `local macro name!()` declaration is
-  a parse error and the file comes back empty (`Bitset.tl`, and the three
-  `internal/world/` modules); a `= macroexp(...) ... end` body on a record field
-  is dropped with no diagnostic (`types.tl`, `IdAllocator.tl`). Six files under
-  `src/` hit one or the other. Revisit when both are fixed upstream.
-- **GLSL.** clang-format has no GLSL mode and reads an interface block as a
+GLSL is deliberately unformatted because the available tools damage it rather
+than tidying it:
+
+- clang-format has no GLSL mode and reads an interface block as a
   class definition, so `layout(...) uniform View { ... } view;` comes back with
   `view;` stranded on a line of its own. glslx 0.3.1 was measured as the
   alternative and rejected. It is a WebGL-dialect tool, so `flat`, `switch` and
@@ -96,7 +98,7 @@ damages them rather than tidying them:
   reads `layout` as an ordinary identifier, so all 22 files fail to parse and
   neither its validation nor its dead-code analysis reaches anything.
 
-Until those change, both are formatted by hand to the rules above.
+Until that changes, GLSL is formatted by hand to the rules above.
 
 ## Naming
 

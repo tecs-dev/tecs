@@ -59,7 +59,7 @@ local record World
     _moveOfCapacity: integer
 end
 
-local WorldMT <const>: metatable<World> = { __index = World }
+local WorldMT <const>: metatable<World> = {__index = World}
 
 local BODY_TYPES <const>: {string: integer} = {
     static = 0,
@@ -126,13 +126,19 @@ function World:beginMoves()
     for index = 0, count - 1 do
         local id = (self._moves as {integer: loader.CStruct})[index].bodyId as loader.CStruct
         local slot = id.index1 as integer
-        if slot > highest then highest = slot end
+        if slot > highest then
+            highest = slot
+        end
     end
 
     if highest >= self._moveOfCapacity then
         local capacity = self._moveOfCapacity
-        if capacity < 64 then capacity = 64 end
-        while capacity <= highest do capacity = capacity * 2 end
+        if capacity < 64 then
+            capacity = 64
+        end
+        while capacity <= highest do
+            capacity = capacity * 2
+        end
         self._moveOf = ffi.new("int32_t[?]", capacity) as loader.CArray
         self._moveOfCapacity = capacity
     end
@@ -167,14 +173,17 @@ end
 --- that slot, and a `RigidBody` restored from a snapshot lands here rather
 --- than on a body it does not own.
 function World:moveOf(index1: integer): number, number, number, number
-    if index1 >= self._moveOfCapacity then return nil end
+    if index1 >= self._moveOfCapacity then
+        return nil
+    end
     local slot = (self._moveOf as {integer: integer})[index1]
-    if slot == 0 then return nil end
+    if slot == 0 then
+        return nil
+    end
     local transform = (self._moves as {integer: loader.CStruct})[slot - 1].transform as loader.CStruct
     local position = transform.p as loader.CStruct
     local rotation = transform.q as loader.CStruct
-    return position.x as number, position.y as number,
-        rotation.c as number, rotation.s as number
+    return position.x as number, position.y as number, rotation.c as number, rotation.s as number
 end
 
 --- Creates a body and returns its handle.
@@ -216,7 +225,9 @@ local function shapeDef(options: ShapeOptions): loader.CArray
     def[0] = C.b2DefaultShapeDef()
 
     local settings = def[0] as loader.CStruct
-    if options.density ~= nil then settings.density = options.density end
+    if options.density ~= nil then
+        settings.density = options.density
+    end
     if options.friction ~= nil then
         local material = settings.material as loader.CStruct
         material.friction = options.friction
@@ -230,16 +241,14 @@ end
 
 --- Attaches an axis-aligned box to `body`. Extents are half-widths, matching
 --- Box2D's convention.
-function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number,
-                      options: ShapeOptions): loader.CValue
+function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number, options: ShapeOptions): loader.CValue
     local polygon = ffi.new("b2Polygon[1]") as loader.CArray
     polygon[0] = C.b2MakeBox(halfWidth, halfHeight)
     return C.b2CreatePolygonShape(body, shapeDef(options), polygon) as loader.CValue
 end
 
 --- Attaches a circle centred on the body's origin.
-function World.addCircle(body: loader.CValue, radius: number,
-                         options: ShapeOptions): loader.CValue
+function World.addCircle(body: loader.CValue, radius: number, options: ShapeOptions): loader.CValue
     local circle = ffi.new("b2Circle[1]") as loader.CArray
     local shape = circle[0] as loader.CStruct
     local centre = shape.center as loader.CStruct
@@ -285,7 +294,9 @@ end
 --- joining them second is what guarantees none is inside a step when the pool
 --- is released.
 function World:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.b2DestroyWorld(self.handle)
     self.handle = nil

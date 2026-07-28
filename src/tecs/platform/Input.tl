@@ -217,7 +217,7 @@ local record Input
     setTextInputArea: function(self: Input, area: TextArea): boolean
 end
 
-local InputMT <const>: metatable<Input> = { __index = Input }
+local InputMT <const>: metatable<Input> = {__index = Input}
 
 --- Creates an input state with a single base layer.
 ---
@@ -299,7 +299,9 @@ end
 --- overlay that consumes nothing moves no capture and drops nothing.
 function Input:pushLayer(name: string, blocking?: boolean): Layer
     local layer, captureMoved = self._gate:push(name, blocking)
-    if captureMoved then clearEdges(self) end
+    if captureMoved then
+        clearEdges(self)
+    end
     return layer
 end
 
@@ -314,7 +316,9 @@ function Input:popLayer(): Layer
     if layer ~= nil and layer == self._textLayer then
         self:stopTextInput()
     end
-    if captureMoved then clearEdges(self) end
+    if captureMoved then
+        clearEdges(self)
+    end
     return layer
 end
 
@@ -378,16 +382,22 @@ end
 
 --- Opens a device the platform has just reported, or reports it again.
 local function connect(self: Input, id: number)
-    if self._pads[id] ~= nil then return end
+    if self._pads[id] ~= nil then
+        return
+    end
     local pad = Gamepad.open(self._backend, self._gate, id)
-    if pad == nil then return end
+    if pad == nil then
+        return
+    end
     self._pads[id] = pad
     self._padList[#self._padList + 1] = pad
 end
 
 local function disconnect(self: Input, id: number)
     local pad = self._pads[id]
-    if pad == nil then return end
+    if pad == nil then
+        return
+    end
     self._pads[id] = nil
     for index = 1, #self._padList do
         if self._padList[index] == pad then
@@ -417,7 +427,9 @@ function Input:refreshDevices()
         known[index] = self._padList[index].id
     end
     for index = 1, #known do
-        if not present[known[index]] then disconnect(self, known[index]) end
+        if not present[known[index]] then
+            disconnect(self, known[index])
+        end
     end
 end
 
@@ -455,8 +467,12 @@ function Input:destroy()
     local pads = self._padList
     self._padList = {}
     self._pads = {}
-    for index = 1, #pads do pads[index]:_disconnect() end
-    if self._textStarted then self:stopTextInput() end
+    for index = 1, #pads do
+        pads[index]:_disconnect()
+    end
+    if self._textStarted then
+        self:stopTextInput()
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -475,7 +491,9 @@ local function releaseHeld(self: Input)
     for index = 1, #self._padList do
         self._padList[index]:_releaseHeld()
     end
-    for key in pairs(self._touches) do self._touches[key] = nil end
+    for key in pairs(self._touches) do
+        self._touches[key] = nil
+    end
     self.penTouching = false
     self.penPressure = 0.0
 end
@@ -535,7 +553,7 @@ function Input:handleEvent(event: eventStream.Event)
         local key = touchKey(event)
         local touch = self._touches[key]
         if touch == nil then
-            touch = { device = event.touchDevice, finger = event.finger } as Touch
+            touch = {device = event.touchDevice, finger = event.finger} as Touch
             self._touches[key] = touch
         end
         touch.x, touch.y = event.x, event.y
@@ -588,28 +606,35 @@ function Input:handleEvent(event: eventStream.Event)
         disconnect(self, event.which)
     elseif kind == "gamepadRemapped" then
         local pad = self._pads[event.which]
-        if pad ~= nil then pad:_readInfo() end
+        if pad ~= nil then
+            pad:_readInfo()
+        end
     elseif kind == "gamepadButtonDown" then
         local pad = self._pads[event.which]
-        if pad ~= nil then pad:_press(event.button) end
+        if pad ~= nil then
+            pad:_press(event.button)
+        end
     elseif kind == "gamepadButtonUp" then
         local pad = self._pads[event.which]
-        if pad ~= nil then pad:_release(event.button) end
+        if pad ~= nil then
+            pad:_release(event.button)
+        end
     elseif kind == "gamepadAxis" then
         local pad = self._pads[event.which]
-        if pad ~= nil then pad:_setAxis(event.axis, event.value) end
+        if pad ~= nil then
+            pad:_setAxis(event.axis, event.value)
+        end
     elseif kind == "gamepadSensor" then
         local pad = self._pads[event.which]
         if pad ~= nil then
-            pad:_setSensor(event.sensor, event.sensorX, event.sensorY,
-                event.sensorZ)
+            pad:_setSensor(event.sensor, event.sensorX, event.sensorY, event.sensorZ)
         end
-    elseif kind == "gamepadTouchpadDown" or kind == "gamepadTouchpadUp"
-        or kind == "gamepadTouchpadMotion" then
+    elseif kind == "gamepadTouchpadDown" or kind == "gamepadTouchpadUp" or kind == "gamepadTouchpadMotion" then
         local pad = self._pads[event.which]
         if pad ~= nil then
-            pad:_setFinger(event.touchpad, event.fingerIndex, event.normalX,
-                event.normalY, event.pressure, event.down == true)
+            pad:_setFinger(
+                event.touchpad, event.fingerIndex, event.normalX, event.normalY, event.pressure, event.down == true
+            )
         end
     elseif kind == "windowFocusLost" then
         releaseHeld(self)
@@ -626,13 +651,15 @@ end
 --- so "space" and "left shift" work too.
 function Input:scancode(name: string): integer
     local cached = self._scancodes[name]
-    if cached ~= nil then return cached end
+    if cached ~= nil then
+        return cached
+    end
 
     local code = self._backend.scancodeFromName(name)
     if code == 0 then
-        local titled = name:gsub("(%a)([%w']*)", function(head: string, tail: string): string
-            return head:upper() .. tail:lower()
-        end)
+        local titled = name:gsub(
+            "(%a)([%w']*)", function(head: string, tail: string): string return head:upper() .. tail:lower() end
+        )
         code = self._backend.scancodeFromName(titled)
     end
     if code == 0 then
@@ -652,26 +679,34 @@ function Input:keyName(scancode: integer): string
 end
 
 local function resolveKey(self: Input, key: string | integer): integer
-    if key is string then return self:scancode(key) end
+    if key is string then
+        return self:scancode(key)
+    end
     return key
 end
 
 --- Whether a key is held. Keys are identified by physical position, so a
 --- movement binding stays where it is on every layout.
 function Input:keyDown(key: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._keys.down[resolveKey(self, key)] == true
 end
 
 --- Whether a key went down. Reads the latched set inside a fixed step.
 function Input:keyPressed(key: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._keys:edges(self._gate.fixed, false)[resolveKey(self, key)] == true
 end
 
 --- Whether a key came up, on the same tiers as `keyPressed`.
 function Input:keyReleased(key: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._keys:edges(self._gate.fixed, true)[resolveKey(self, key)] == true
 end
 
@@ -689,7 +724,9 @@ end
 ---
 --- Either side counts for the unsided names, and "leftShift" asks for one.
 function Input:modifierDown(name: string, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     local mask = self._backend.modifierFromName(name)
     if mask == nil then
         error(("tecs: no modifier named '%s'"):format(name), 2)
@@ -715,20 +752,26 @@ end
 --- Whether a mouse button is held. Names are "left", "middle", "right", "x1",
 --- "x2".
 function Input:mouseDown(button: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._mouse.down[resolveMouse(self, button)] == true
 end
 
 --- Whether a mouse button went down. Reads the latched set inside a fixed
 --- step, on the same tiers as `keyPressed`.
 function Input:mousePressed(button: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._mouse:edges(self._gate.fixed, false)[resolveMouse(self, button)] == true
 end
 
 --- Whether a mouse button came up, on the same tiers as `mousePressed`.
 function Input:mouseReleased(button: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._mouse:edges(self._gate.fixed, true)[resolveMouse(self, button)] == true
 end
 
@@ -792,9 +835,15 @@ end
 --- retaining one has to copy it.
 function Input:touches(layer?: Layer): {Touch}
     local out = self._touchList
-    for index = #out, 1, -1 do out[index] = nil end
-    if not self._gate:canRead(layer) then return out end
-    for _, touch in pairs(self._touches) do out[#out + 1] = touch end
+    for index = #out, 1, -1 do
+        out[index] = nil
+    end
+    if not self._gate:canRead(layer) then
+        return out
+    end
+    for _, touch in pairs(self._touches) do
+        out[#out + 1] = touch
+    end
     return out
 end
 
@@ -814,7 +863,9 @@ end
 --- window and its own keyboard clear of the rectangle, and without one they
 --- land over what the player is typing.
 function Input:startTextInput(layer?: Layer, options?: TextOptions): boolean
-    if not self._backend.startTextInput(self._window) then return false end
+    if not self._backend.startTextInput(self._window) then
+        return false
+    end
     self._textStarted = true
     self._textLayer = layer
     local area = options ~= nil and options.area or nil
@@ -830,7 +881,9 @@ function Input:stopTextInput(): boolean
     self.composition = ""
     self.compositionStart = 0
     self.compositionLength = 0
-    if not self._textStarted then return false end
+    if not self._textStarted then
+        return false
+    end
     self._textStarted = false
     return self._backend.stopTextInput(self._window)
 end
@@ -856,8 +909,7 @@ end
 --- Worth calling as the caret moves, not only at the start: the platform
 --- places its candidate window against the most recent rectangle it was given.
 function Input:setTextInputArea(area: TextArea): boolean
-    return self._backend.setTextInputArea(self._window, area.x, area.y,
-        area.width, area.height, area.cursor or 0)
+    return self._backend.setTextInputArea(self._window, area.x, area.y, area.width, area.height, area.cursor or 0)
 end
 
 --- Whether the platform puts a keyboard on the screen for text input.

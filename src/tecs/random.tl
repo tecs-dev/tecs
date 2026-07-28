@@ -68,12 +68,24 @@ local NORM3 <const> = 1.1547005383792515
 --- The eight compass directions, as unit vectors. Held as two flat arrays
 --- rather than one array of pairs, so a lookup is two loads and no indirection.
 local GRAD2X <const>: {number} = {
-    1.0, 0.7071067811865476, 0.0, -0.7071067811865476,
-    -1.0, -0.7071067811865476, 0.0, 0.7071067811865476,
+    1.0,
+    0.7071067811865476,
+    0.0,
+    -0.7071067811865476,
+    -1.0,
+    -0.7071067811865476,
+    0.0,
+    0.7071067811865476,
 }
 local GRAD2Y <const>: {number} = {
-    0.0, 0.7071067811865476, 1.0, 0.7071067811865476,
-    0.0, -0.7071067811865476, -1.0, -0.7071067811865476,
+    0.0,
+    0.7071067811865476,
+    1.0,
+    0.7071067811865476,
+    0.0,
+    -0.7071067811865476,
+    -1.0,
+    -0.7071067811865476,
 }
 
 --- The twelve edge midpoints of a cube, normalised. Sixteen entries, because
@@ -82,16 +94,58 @@ local GRAD2Y <const>: {number} = {
 --- direction the set does not already have.
 local R2 <const> = 0.7071067811865476
 local GRAD3X <const>: {number} = {
-    R2, -R2, R2, -R2, R2, -R2, R2, -R2,
-    0.0, 0.0, 0.0, 0.0, R2, 0.0, -R2, 0.0,
+    R2,
+    -R2,
+    R2,
+    -R2,
+    R2,
+    -R2,
+    R2,
+    -R2,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    R2,
+    0.0,
+    -R2,
+    0.0,
 }
 local GRAD3Y <const>: {number} = {
-    R2, R2, -R2, -R2, 0.0, 0.0, 0.0, 0.0,
-    R2, -R2, R2, -R2, R2, R2, R2, -R2,
+    R2,
+    R2,
+    -R2,
+    -R2,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    R2,
+    -R2,
+    R2,
+    -R2,
+    R2,
+    R2,
+    R2,
+    -R2,
 }
 local GRAD3Z <const>: {number} = {
-    0.0, 0.0, 0.0, 0.0, R2, R2, -R2, -R2,
-    R2, R2, -R2, -R2, 0.0, -R2, 0.0, -R2,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    R2,
+    R2,
+    -R2,
+    -R2,
+    R2,
+    R2,
+    -R2,
+    -R2,
+    0.0,
+    -R2,
+    0.0,
+    -R2,
 }
 
 local record random
@@ -186,8 +240,8 @@ local record random
     seed: function(world: ecs.World, seed: integer)
 end
 
-local RandomMT <const>: metatable<random.Random> = { __index = random.Random }
-local NoiseMT <const>: metatable<random.Noise> = { __index = random.Noise }
+local RandomMT <const>: metatable<random.Random> = {__index = random.Random}
+local NoiseMT <const>: metatable<random.Noise> = {__index = random.Noise}
 
 local type Random = random.Random
 local type Noise = random.Noise
@@ -283,8 +337,7 @@ function random.Random:integer(m: integer, n?: integer): integer
         hi = n
     end
     if hi < lo then
-        error("random: integer(" .. tostring(lo) .. ", " .. tostring(hi) ..
-            ") has an empty range", 2)
+        error("random: integer(" .. tostring(lo) .. ", " .. tostring(hi) .. ") has an empty range", 2)
     end
     return lo + floor(self:next() * (hi - lo + 1))
 end
@@ -306,7 +359,7 @@ function random.Random:reseed(seed: integer)
 end
 
 function random.Random:state(): {integer}
-    return { self._s0, self._s1, self._s2, self._s3 }
+    return {self._s0, self._s1, self._s2, self._s3}
 end
 
 function random.Random:setState(words: {integer})
@@ -436,8 +489,7 @@ function random.Noise:fbm3(x: number, y: number, z: number, octaves: integer): n
     checkOctaves(octaves)
     local total, amplitude, frequency, norm = 0.0, 1.0, 1.0, 0.0
     for _ = 1, octaves do
-        total = total + self:noise3(
-            x * frequency, y * frequency, z * frequency) * amplitude
+        total = total + self:noise3(x * frequency, y * frequency, z * frequency) * amplitude
         norm = norm + amplitude
         frequency = frequency * LACUNARITY
         amplitude = amplitude * GAIN
@@ -449,11 +501,15 @@ function random.noise(seed?: integer): Noise
     local self <const> = setmetatable({} as Noise, NoiseMT)
     local generator <const> = random.new(seed)
     local perm: {integer} = {}
-    for i = 0, 255 do perm[i + 1] = i end
+    for i = 0, 255 do
+        perm[i + 1] = i
+    end
     generator:shuffle(perm)
     -- Doubled, so a lattice lookup that walks one past 255 reads the wrap
     -- instead of masking for it.
-    for i = 1, 256 do perm[256 + i] = perm[i] end
+    for i = 1, 256 do
+        perm[256 + i] = perm[i]
+    end
     self._perm = perm
     return self
 end
@@ -469,8 +525,7 @@ end
 
 --- The streams each world has. Weak, so a world that has gone takes its
 --- streams with it.
-local registries <const>: {ecs.World: Registry} =
-    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Registry}>)
+local registries <const>: {ecs.World: Registry} = setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Registry}>)
 
 --- Derives a stream's seed from the world's seed and the stream's name.
 ---
@@ -497,8 +552,7 @@ local function restore(registry: Registry, value: {string: any})
     local savedSeed <const> = value ~= nil and value.seed as integer or nil
     registry.seed = savedSeed ~= nil and tobit(savedSeed) or DEFAULT_SEED
 
-    local saved <const> = (value ~= nil and value.streams or nil)
-        as {string: {integer}}
+    local saved <const> = (value ~= nil and value.streams or nil) as {string: {integer}}
     for name, generator in pairs(registry.streams) do
         local words <const> = saved ~= nil and saved[name] or nil
         if words ~= nil then
@@ -531,9 +585,11 @@ end
 --- setup anyway.
 local function ensure(world: ecs.World): Registry
     local existing <const> = registries[world]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
-    local registry <const>: Registry = { seed = DEFAULT_SEED, streams = {} }
+    local registry <const>: Registry = {seed = DEFAULT_SEED, streams = {}}
     registries[world] = registry
 
     world:addSnapshotHandler({
@@ -543,11 +599,9 @@ local function ensure(world: ecs.World): Registry
             for name, generator in pairs(registry.streams) do
                 streams[name] = generator:state()
             end
-            return { seed = registry.seed, streams = streams }
+            return {seed = registry.seed, streams = streams}
         end,
-        load = function(_world: ecs.World, value: any)
-            restore(registry, value as {string: any})
-        end,
+        load = function(_world: ecs.World, value: any) restore(registry, value as {string: any}) end,
     })
     return registry
 end
@@ -558,7 +612,9 @@ function random.stream(world: ecs.World, name: string): Random
     end
     local registry <const> = ensure(world)
     local existing <const> = registry.streams[name]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
     local generator <const> = random.new(streamSeed(registry.seed, name))
     registry.streams[name] = generator

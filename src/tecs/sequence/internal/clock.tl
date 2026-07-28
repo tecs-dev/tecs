@@ -58,7 +58,6 @@ local record clock
 
     --- Remove the earliest entry, returning its seq and handle.
     take: function(c: Clock): integer, integer
-
 end
 
 function clock.new(): clock.Clock
@@ -70,7 +69,9 @@ function clock.clear(c: clock.Clock)
     c.seq = 0
     wakeheap.clear(c.waiting)
     local active <const> = c.active
-    for i = #active, 1, -1 do active[i] = nil end
+    for i = #active, 1, -1 do
+        active[i] = nil
+    end
 end
 
 function clock.schedule(c: clock.Clock, wakeAt: integer, handle: integer): integer

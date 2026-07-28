@@ -43,7 +43,7 @@ local record storage
 
     --- High-performance FFI storage with automatic fallback to table storage.
     --- @param def Configuration including fields, recycling options
-    newFFIStorage: function(def: {string:any}): Storage
+    newFFIStorage: function(def: {string: any}): Storage
 
     --- Install container metadata on FFI storage so cdata instances expose
     --- the same relationship and hook fields as table-backed instances.
@@ -55,12 +55,12 @@ local type Storage = storage.Storage
 
 -- Initialize component with optional table argument copying
 local function initializeComponentFromArgs<C is Component>(component: C, ...: any): C
-    local nargs = select('#', ...)
+    local nargs = select("#", ...)
     if nargs == 1 and type((...)) == "table" then
         -- Copy from table argument
-        local value = (...) as {string:any}
+        local value = (...) as {string: any}
         for k, v in pairs(value) do
-            (component as {string:any})[k] = v
+            (component as {string: any})[k] = v
         end
     end
     return component
@@ -69,26 +69,21 @@ end
 -- Generic table-based component constructor
 -- This is used when a table-based component is created but doesn't provide a custom constructor.
 local function createTableComponentConstructor(): function(...: any): Component
-    return function(...: any): Component
-        return initializeComponentFromArgs({}, ...)
-    end
+    return function(...: any): Component return initializeComponentFromArgs({}, ...) end
 end
 
 -- Table storage implementation
 local TABLE_STORAGE <const>: Storage = {
     storageType = "table",
-    createColumn = function(_self: Storage, size: integer): {Component}
-        return table_new(size, 0) as {Component}
-    end,
-    clear = function(_self: Storage, column: {Component})
-        table_clear(column)
-    end,
+    createColumn = function(_self: Storage, size: integer): {Component} return table_new(size, 0) as {Component} end,
+    clear = function(_self: Storage, column: {Component}) table_clear(column) end,
     ensureCapacity = function(_self: Storage, column: {Component}, _needed: integer): {Component}
         -- Lua tables grow automatically, so just return the same column
         return column
     end,
-    createComponent = createTableComponentConstructor
-        as function(_self: Storage, _container: Component): ComponentAllocator<Component>
+    createComponent = createTableComponentConstructor as function(
+        _self: Storage, _container: Component
+    ): ComponentAllocator<Component>;
 }
 
 function storage.newTableStorage(): Storage
@@ -107,9 +102,7 @@ function storage.newScalarStorage(kind: string, defaultValue: any): Storage
         createColumn = function(_self: Storage, size: integer): {Component}
             return table_new(size, 0) as {Component}
         end,
-        clear = function(_self: Storage, column: {Component})
-            table_clear(column)
-        end,
+        clear = function(_self: Storage, column: {Component}) table_clear(column) end,
         ensureCapacity = function(_self: Storage, column: {Component}, _needed: integer): {Component}
             return column
         end,
@@ -136,7 +129,8 @@ end
 local function tagIndex(t: {Component}, _index: integer): Component
     return (t as table).__container as Component
 end
-local function tagNewIndex() end
+local function tagNewIndex()
+end
 local TAG_MT <const>: metatable<{Component}> = {
     __index = tagIndex,
     __newindex = tagNewIndex,
@@ -158,20 +152,18 @@ function storage.newBitsetStorage(container: Component): Storage
         end,
 
         createComponent = function(_self: Storage, _container: Component): ComponentAllocator<Component>
-            return function(): Component
-                return container
-            end
+            return function(): Component return container end
         end,
     }
 end
 
-function storage.newFFIStorage(def: {string:any}): Storage
-    local ffi = require("tecs.internal.ffi" as string) as {string:any}
-    return (ffi.newFFIStorage as function({string:any}): Storage)(def)
+function storage.newFFIStorage(def: {string: any}): Storage
+    local ffi = require("tecs.internal.ffi" as string) as {string: any}
+    return (ffi.newFFIStorage as function({string: any}): Storage)(def)
 end
 
 function storage.syncMetadataToFFI(s: Storage, container: Component)
-    local storageAny = s as {string:any}
+    local storageAny = s as {string: any}
     if not storageAny.setMetadata then
         return
     end
@@ -182,10 +174,10 @@ function storage.syncMetadataToFFI(s: Storage, container: Component)
     setMetadata(s, "wildcardContainer", container)
     -- Sparse relationship values live outside archetype columns; this flag is
     -- the fast discriminator used by `WorldImpl:has` / `:get`.
-    if (container as {string:any}).isSparse then
+    if (container as {string: any}).isSparse then
         setMetadata(s, "isSparseInstance", true)
     end
-    local containerAny = container as {string:any}
+    local containerAny = container as {string: any}
     if containerAny.exclusiveRelationship ~= nil then
         setMetadata(s, "exclusiveRelationship", containerAny.exclusiveRelationship)
     end
@@ -198,7 +190,8 @@ function storage.syncMetadataToFFI(s: Storage, container: Component)
     -- Closed framework behavior metadata is attached to relationship
     -- containers after construction. Mirror only the typed metadata fields.
     for _, key in ipairs({
-        "frameworkBehavior", "frameworkBehaviorBits",
+        "frameworkBehavior",
+        "frameworkBehaviorBits",
     }) do
         if containerAny[key] ~= nil then
             setMetadata(s, key, containerAny[key])

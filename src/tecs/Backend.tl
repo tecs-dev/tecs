@@ -113,8 +113,7 @@ local record ComputeStage
     --- The instance and bounds buffers are handed over rather than reached
     --- for, because writing them is the whole point of being here and a stage
     --- that had to find them would be a stage that could find something else.
-    record: function(self: ComputeStage, frame: Frame, instances: Buffer,
-                     bounds: Buffer)
+    record: function(self: ComputeStage, frame: Frame, instances: Buffer, bounds: Buffer)
 
     --- Releases what the stage owns, called when the backend is destroyed.
     ---
@@ -218,7 +217,7 @@ local record Backend
     _destroyed: boolean
 end
 
-local BackendMT <const>: metatable<Backend> = { __index = Backend }
+local BackendMT <const>: metatable<Backend> = {__index = Backend}
 
 --- Fills the uniform the vertex shader reads a layer's behaviour from.
 ---
@@ -228,8 +227,7 @@ local BackendMT <const>: metatable<Backend> = { __index = Backend }
 --- way, the camera's position, its reciprocal zoom and two clip scales compose
 --- all four cases in a handful of shader instructions, and the sixteen entries
 --- stay what they were.
-local function layerUniform(self: Backend, width: number,
-                            height: number): loader.CArray
+local function layerUniform(self: Backend, width: number, height: number): loader.CArray
     local data = self._layerUniform
     local view = self._view
     data[0] = view.x
@@ -255,8 +253,7 @@ local function layerUniform(self: Backend, width: number,
         self._layerRevision = revision
         for layer = 1, layers.MAX do
             local base = 8 + (layer - 1) * 4
-            data[base], data[base + 1], data[base + 2], data[base + 3] =
-                layers.entryOf(layer)
+            data[base], data[base + 1], data[base + 2], data[base + 3] = layers.entryOf(layer)
         end
     end
 
@@ -272,21 +269,23 @@ local function buildGeometry(self: Backend): GraphicsPipeline
     local albedoFormat, normalFormat = self.deferred:geometryFormats()
     local vertex = Shader.load(device, "instance.vert", {})
     local fragment = Shader.load(device, "instance.frag", {})
-    local pipeline = GraphicsPipeline.create(device, {
-        vertexShader = vertex,
-        fragmentShader = fragment,
-        colorFormats = { albedoFormat, normalFormat },
-        depth = self.deferred:geometryDepth(),
-        name = "ecs.instances",
-    })
+    local pipeline = GraphicsPipeline.create(
+        device,
+        {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormats = {albedoFormat, normalFormat},
+            depth = self.deferred:geometryDepth(),
+            name = "ecs.instances",
+        }
+    )
     vertex:destroy()
     fragment:destroy()
     return pipeline
 end
 
 --- Builds a backend for `device`.
-function Backend.create(device: loader.CPtr, swapchainFormat: integer,
-                        options: BackendOptions): Backend
+function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: BackendOptions): Backend
     local self = setmetatable({} as Backend, BackendMT)
     self._device = device
     self.capacity = options.capacity
@@ -298,17 +297,19 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
     -- different region. Refused here rather than discovered as a wrong image.
     local layerCount <const> = options.layers or MAX_LAYERS
     if layerCount > instancelayout.LAYER_SLOTS then
-        error(("tecs: the image array holds at most %d layers")
-            :format(instancelayout.LAYER_SLOTS), 3)
+        error(("tecs: the image array holds at most %d layers"):format(instancelayout.LAYER_SLOTS), 3)
     end
 
-    self.sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
-    self.images = TextureArray.create(device, {
-        width = options.cell or DEFAULT_CELL,
-        height = options.cell or DEFAULT_CELL,
-        layers = layerCount,
-        pack = options.packImages,
-    })
+    self.sampler = Sampler.create(device, {filter = "nearest", address = "clamp"})
+    self.images = TextureArray.create(
+        device,
+        {
+            width = options.cell or DEFAULT_CELL,
+            height = options.cell or DEFAULT_CELL,
+            layers = layerCount,
+            pack = options.packImages,
+        }
+    )
 
     -- Layer zero is a single white pixel. Entities without a Sprite sample it,
     -- so textured and untextured geometry share one shader and one pipeline
@@ -326,36 +327,57 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
     -- pass rather than through staging. Nothing dispatches over them until
     -- something adds a stage, so a world that never does pays only for the
     -- usage bit.
-    self.instances = Buffer.create(device, {
-        usage = { "storage", "computeRead", "computeWrite" },
-        size = self.capacity * INSTANCE_BYTES,
-    })
-    self._bounds = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = self.capacity * BOUND_BYTES,
-    })
-    self._slots = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = self.capacity * 4,
-    })
-    self._blocks = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = math.ceil(self.capacity / CULL_GROUP) * 4,
-    })
-    self._visible = Buffer.create(device, {
-        usage = { "storage", "computeWrite" },
-        size = self.capacity * 4,
-    })
-    self._drawArgs = Buffer.create(device, {
-        -- Five uints: SDL_GPUIndexedIndirectDrawCommand.
-        usage = { "indirect", "computeWrite" },
-        size = 32,
-    })
-    self._playbacks = Buffer.create(device, {
-        usage = { "storage" },
-        size = PLAYBACK_FLOATS * 4,
-        name = "tecs.playbacks",
-    })
+    self.instances = Buffer.create(
+        device,
+        {
+            usage = {"storage", "computeRead", "computeWrite"},
+            size = self.capacity * INSTANCE_BYTES,
+        }
+    )
+    self._bounds = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = self.capacity * BOUND_BYTES,
+        }
+    )
+    self._slots = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = self.capacity * 4,
+        }
+    )
+    self._blocks = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = math.ceil(self.capacity / CULL_GROUP) * 4,
+        }
+    )
+    self._visible = Buffer.create(
+        device,
+        {
+            usage = {"storage", "computeWrite"},
+            size = self.capacity * 4,
+        }
+    )
+    self._drawArgs = Buffer.create(
+        device,
+        {
+            -- Five uints: SDL_GPUIndexedIndirectDrawCommand.
+            usage = {"indirect", "computeWrite"},
+            size = 32,
+        }
+    )
+    self._playbacks = Buffer.create(
+        device,
+        {
+            usage = {"storage"},
+            size = PLAYBACK_FLOATS * 4,
+            name = "tecs.playbacks",
+        }
+    )
     -- Below every revision the table can report, so the first frame uploads it
     -- even when nothing has registered and the buffer would otherwise be read
     -- before anything wrote it.
@@ -367,14 +389,19 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
     -- that reruns every frame to write the same five numbers back.
     local args = loader.newArray("uint32_t[8]")
     args[0] = QUAD_INDICES
-    for slot = 1, 7 do args[slot] = 0 end
+    for slot = 1, 7 do
+        args[slot] = 0
+    end
     self._drawArgs:upload(args, 32)
 
     -- Two triangles over four corners, uploaded once and never touched again.
-    self._indices = Buffer.create(device, {
-        usage = { "index" },
-        size = QUAD_INDICES * 2,
-    })
+    self._indices = Buffer.create(
+        device,
+        {
+            usage = {"index"},
+            size = QUAD_INDICES * 2,
+        }
+    )
     local quad = loader.newArray("uint16_t[6]")
     quad[0], quad[1], quad[2] = 0, 1, 2
     quad[3], quad[4], quad[5] = 1, 3, 2
@@ -406,43 +433,46 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
 
     -- Seeded with what the buffers hold now, which gives each list its length,
     -- and rewritten wherever it is used.
-    self._geometryBuffers = { self.instances.handle, self._visible.handle,
-        self._playbacks.handle }
-    self._geometryTextures = { self.images.handle }
-    self._markWrites = { self._slots.handle, self._blocks.handle }
-    self._markReads = { self._bounds.handle }
-    self._scanWrites = { self._blocks.handle, self._drawArgs.handle }
-    self._compactWrites = { self._visible.handle }
-    self._compactReads = { self._slots.handle, self._blocks.handle }
+    self._geometryBuffers = {self.instances.handle, self._visible.handle, self._playbacks.handle}
+    self._geometryTextures = {self.images.handle}
+    self._markWrites = {self._slots.handle, self._blocks.handle}
+    self._markReads = {self._bounds.handle}
+    self._scanWrites = {self._blocks.handle, self._drawArgs.handle}
+    self._compactWrites = {self._visible.handle}
+    self._compactReads = {self._slots.handle, self._blocks.handle}
 
-    self.deferred = Deferred.create(device, swapchainFormat, {
-        ambient = options.ambient,
-        geometry = function(context: Deferred.PassContext)
-            if self.count == 0 then return end
-            context.pass:bindPipeline(self.pipeline.handle)
+    self.deferred = Deferred.create(
+        device,
+        swapchainFormat,
+        {
+            ambient = options.ambient,
+            geometry = function(context: Deferred.PassContext)
+                if self.count == 0 then
+                    return
+                end
+                context.pass:bindPipeline(self.pipeline.handle)
 
-            context.pass:pushVertexUniform(0,
-                self._view:matrix(context.width, context.height), 64)
-            context.pass:pushVertexUniform(1,
-                layerUniform(self, context.width, context.height), LAYER_BYTES)
-            -- Once for the whole scene, and only the fragments of an instance
-            -- that named a region ever read it.
-            context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
-            local buffers <const> = self._geometryBuffers
-            buffers[1] = self.instances.handle
-            buffers[2] = self._visible.handle
-            buffers[3] = self._playbacks.handle
-            context.pass:bindVertexStorageBuffers(0, buffers)
+                context.pass:pushVertexUniform(0, self._view:matrix(context.width, context.height), 64)
+                context.pass:pushVertexUniform(1, layerUniform(self, context.width, context.height), LAYER_BYTES)
+                -- Once for the whole scene, and only the fragments of an instance
+                -- that named a region ever read it.
+                context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
+                local buffers <const> = self._geometryBuffers
+                buffers[1] = self.instances.handle
+                buffers[2] = self._visible.handle
+                buffers[3] = self._playbacks.handle
+                context.pass:bindVertexStorageBuffers(0, buffers)
 
-            local textures <const> = self._geometryTextures
-            textures[1] = self.images.handle
-            context.pass:bindTextures(0, textures, self.sampler.handle)
-            context.pass:bindIndexBuffer(self._indices.handle)
-            -- One draw for the scene, with its instance count decided by the
-            -- cull rather than by anything here.
-            context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
-        end,
-    })
+                local textures <const> = self._geometryTextures
+                textures[1] = self.images.handle
+                context.pass:bindTextures(0, textures, self.sampler.handle)
+                context.pass:bindIndexBuffer(self._indices.handle)
+                -- One draw for the scene, with its instance count decided by the
+                -- cull rather than by anything here.
+                context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
+            end,
+        }
+    )
 
     self.pipeline = buildGeometry(self)
 
@@ -458,8 +488,7 @@ end
 --- reallocated, and the driver cannot reclaim it fast enough.
 --- @return The instance staging as floats, then the bounds staging as floats.
 function Backend:mapSlot(slot: integer): loader.CArray, loader.CArray
-    return self.instances:mapSlotAs(slot, "float *", false),
-        self._bounds:mapSlotAs(slot, "float *", false)
+    return self.instances:mapSlotAs(slot, "float *", false), self._bounds:mapSlotAs(slot, "float *", false)
 end
 
 --- Adds a stage recorded between the staging flush and the cull.
@@ -480,9 +509,7 @@ function Backend:device(): loader.CPtr
 end
 
 --- Uploads a decoded image into the array and returns the region it occupies.
-function Backend:addImage(pixels: loader.CValue, width: integer,
-                          height: integer,
-                          pitch: integer): TextureArray.Region
+function Backend:addImage(pixels: loader.CValue, width: integer, height: integer, pitch: integer): TextureArray.Region
     return self.images:add(pixels, width, height, pitch)
 end
 
@@ -491,9 +518,9 @@ end
 --- The region is unchanged by this and stays the answer for that image, which
 --- is why nothing outside has to hear about it. Raises on a size that would
 --- need a different rect.
-function Backend:replaceImage(region: TextureArray.Region,
-                              pixels: loader.CValue, width: integer,
-                              height: integer, pitch: integer)
+function Backend:replaceImage(
+    region: TextureArray.Region, pixels: loader.CValue, width: integer, height: integer, pitch: integer
+)
     self.images:replace(region, pixels, width, height, pitch)
 end
 
@@ -519,17 +546,27 @@ function Backend:rebuildPipelines()
     local mark: ComputePipeline = nil
     local scan: ComputePipeline = nil
     local compact: ComputePipeline = nil
-    local built, reason = pcall(function(): string
-        pipeline = buildGeometry(self)
-        mark = ComputePipeline.load(device, "instance.mark.comp", {})
-        scan = ComputePipeline.load(device, "instance.scan.comp", {})
-        compact = ComputePipeline.load(device, "instance.compact.comp", {})
-    end)
+    local built, reason = pcall(
+        function(): string
+            pipeline = buildGeometry(self)
+            mark = ComputePipeline.load(device, "instance.mark.comp", {})
+            scan = ComputePipeline.load(device, "instance.scan.comp", {})
+            compact = ComputePipeline.load(device, "instance.compact.comp", {})
+        end
+    )
     if not built then
-        if pipeline ~= nil then pipeline:destroy() end
-        if mark ~= nil then mark:destroy() end
-        if scan ~= nil then scan:destroy() end
-        if compact ~= nil then compact:destroy() end
+        if pipeline ~= nil then
+            pipeline:destroy()
+        end
+        if mark ~= nil then
+            mark:destroy()
+        end
+        if scan ~= nil then
+            scan:destroy()
+        end
+        if compact ~= nil then
+            compact:destroy()
+        end
         error(reason, 0)
     end
 
@@ -554,10 +591,11 @@ end
 
 --- Fails on a region index outside the table.
 local function checkClipIndex(index: integer, level: integer)
-    if index == nil or index ~= math.floor(index)
-        or index < 1 or index >= instancelayout.CLIPS then
-        error(("tecs: a clip region is numbered 1 to %d, not %s")
-            :format(instancelayout.CLIPS - 1, tostring(index)), level + 1)
+    if index == nil or index ~= math.floor(index) or index < 1 or index >= instancelayout.CLIPS then
+        error(
+            ("tecs: a clip region is numbered 1 to %d, not %s"):format(instancelayout.CLIPS - 1, tostring(index)),
+            level + 1
+        )
     end
 end
 
@@ -574,8 +612,7 @@ end
 function Backend:setClipRegion(index: integer, region: ClipRegion)
     checkClipIndex(index, 3)
     if region == nil then
-        error("tecs: setClipRegion needs a rectangle; clearClipRegion "
-            .. "is how a region stops clipping", 3)
+        error("tecs: setClipRegion needs a rectangle; clearClipRegion " .. "is how a region stops clipping", 3)
     end
 
     -- Stored as bounds rather than as position and size, because that is what
@@ -630,8 +667,12 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         self._playbackRevision = revision
         local data, count = frametable.floats()
         if count > PLAYBACK_FLOATS then
-            error(("tecs: the animation frame table needs %d floats and the "
-                .. "buffer holds %d"):format(count, PLAYBACK_FLOATS), 2)
+            error(
+                ("tecs: the animation frame table needs %d floats and the " .. "buffer holds %d"):format(
+                    count, PLAYBACK_FLOATS
+                ),
+                2
+            )
         end
         self._playbacks:write(0, data as loader.CValue, count * 4)
         self._playbacks:flush(frame.commandBuffer)
@@ -684,13 +725,11 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         local markReads <const> = self._markReads
         markReads[1] = self._bounds.handle
 
-        local mark = ComputePass.begin(frame.commandBuffer, markWrites,
-            self._markPass)
+        local mark = ComputePass.begin(frame.commandBuffer, markWrites, self._markPass)
         self._markPass = mark
         mark:bindPipeline(self._mark.handle)
         mark:bindStorageBuffers(0, markReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, self._cullUniform, 32)
         mark:dispatch(groups)
         mark:finish()
 
@@ -698,12 +737,10 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         scanWrites[1] = self._blocks.handle
         scanWrites[2] = self._drawArgs.handle
 
-        local scan = ComputePass.begin(frame.commandBuffer, scanWrites,
-            self._scanPass)
+        local scan = ComputePass.begin(frame.commandBuffer, scanWrites, self._scanPass)
         self._scanPass = scan
         scan:bindPipeline(self._scan.handle)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, self._cullUniform, 32)
         scan:dispatch(1)
         scan:finish()
 
@@ -713,13 +750,11 @@ function Backend:consume(packet: FramePacket, frame: Frame)
         compactReads[1] = self._slots.handle
         compactReads[2] = self._blocks.handle
 
-        local compact = ComputePass.begin(frame.commandBuffer, compactWrites,
-            self._compactPass)
+        local compact = ComputePass.begin(frame.commandBuffer, compactWrites, self._compactPass)
         self._compactPass = compact
         compact:bindPipeline(self._compact.handle)
         compact:bindStorageBuffers(0, compactReads)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 32)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, self._cullUniform, 32)
         compact:dispatch(groups)
         compact:finish()
     end
@@ -741,12 +776,16 @@ end
 
 --- Releases everything the backend owns. Safe to call more than once.
 function Backend:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     -- First, because a stage's buffers were built on this device and releasing
     -- the device out from under them is the one order that cannot work.
     local stages <const> = self._stages
-    for index = 1, #stages do stages[index]:destroy() end
+    for index = 1, #stages do
+        stages[index]:destroy()
+    end
     self.pipeline:destroy()
     self.deferred:destroy()
     self.instances:destroy()

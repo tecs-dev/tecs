@@ -59,7 +59,9 @@ end
 
 function registry.names(): {string}
     local out: {string} = {}
-    for name in pairs(byName) do out[#out + 1] = name end
+    for name in pairs(byName) do
+        out[#out + 1] = name
+    end
     table.sort(out)
     return out
 end
@@ -116,18 +118,26 @@ function registry.retain(prog: ProgramImpl)
 end
 
 function registry.release(prog: ProgramImpl)
-    if not prog then return end
+    if not prog then
+        return
+    end
     local remaining = (refs[prog] or 1) - 1
     if remaining > 0 then
         refs[prog] = remaining
         return
     end
     refs[prog] = nil
-    if byName[prog.name] == prog then return end
+    if byName[prog.name] == prog then
+        return
+    end
     local known = versions[prog.name]
-    if not known then return end
+    if not known then
+        return
+    end
     known[prog.version] = nil
-    if next(known) == nil then versions[prog.name] = nil end
+    if next(known) == nil then
+        versions[prog.name] = nil
+    end
 end
 
 return registry

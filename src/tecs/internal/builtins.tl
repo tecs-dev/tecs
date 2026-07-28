@@ -287,13 +287,9 @@ builtins.ChildOf = components.newRelationship({
 --- Setup events
 -------------------------------------------------------------------------------
 
-events.newFFIEvent(builtins.OnSpawn, {
-    {"entity", "double"}
-}, "Tecs_OnSpawn")
+events.newFFIEvent(builtins.OnSpawn, {{"entity", "double"}}, "Tecs_OnSpawn")
 
-events.newFFIEvent(builtins.OnDespawn, {
-    {"entity", "double"}
-}, "Tecs_OnDespawn")
+events.newFFIEvent(builtins.OnDespawn, {{"entity", "double"}}, "Tecs_OnDespawn")
 
 builtins.ArchetypeCreated.init = function(e: builtins.ArchetypeCreated, archetype: types.Archetype)
     e.archetype = archetype
@@ -304,14 +300,10 @@ events.newEvent(builtins.ArchetypeCreated)
 --- Setup state stack events
 -------------------------------------------------------------------------------
 
-builtins.StateEnter.init = function(e: builtins.StateEnter, state: string)
-    e.state = state
-end
+builtins.StateEnter.init = function(e: builtins.StateEnter, state: string) e.state = state end
 events.newEvent(builtins.StateEnter)
 
-builtins.StateExit.init = function(e: builtins.StateExit, state: string)
-    e.state = state
-end
+builtins.StateExit.init = function(e: builtins.StateExit, state: string) e.state = state end
 events.newEvent(builtins.StateExit)
 
 builtins.StateBlur.init = function(e: builtins.StateBlur, state: string, pushed: string)
@@ -353,7 +345,7 @@ builtins.Key = components.newScalarComponent({
 
 do
     local Key <const> = builtins.Key as Component
-    local keyI = Key as {string:any}
+    local keyI = Key as {string: any}
     keyI.frameworkBehavior = behavior.Key
     keyI.frameworkBehaviorBits = behavior.keyBits()
 end
@@ -368,14 +360,14 @@ components.newFFIComponent({
         {"layer", "int32_t"},
         {"rotation", "float"},
         {"scaleX", "float"},
-        {"scaleY", "float"}
+        {"scaleY", "float"},
     },
     defaults = {0, 0, 0, 1, 0, 1, 1},
     init = function(instance: builtins.Transform)
         if instance.layer < 1 then
             error("Transform layer must be greater than 0, got: " .. tostring(instance.layer))
         end
-    end
+    end,
 })
 
 local function percentComplete(self: builtins.TTL): number
@@ -398,34 +390,32 @@ components.newComponent({
     end,
 })
 
-builtins.Disabled = components.newTagComponent({
-    name = "Disabled"
-})
+builtins.Disabled = components.newTagComponent({name = "Disabled"})
 
-builtins.Paused = components.newTagComponent({
-    name = "Paused"
-})
+builtins.Paused = components.newTagComponent({name = "Paused"})
 
-components.newFFIComponent({
-    name = "RelativeTransform",
-    container = builtins.RelativeTransform,
-    fields = {
-        {"x", "float"},
-        {"y", "float"},
-        {"z", "float"},
-        {"rotation", "float"},
-        {"scaleX", "float"},
-        {"scaleY", "float"},
-        {"originX", "float"},
-        {"originY", "float"}
-    },
-    defaults = {0, 0, 0, 0, 1, 1, 0, 0},
-    -- RelativeTransform auto-adds Transform via the declarative
-    -- `requires` trait. ChildOf is required by convention (the
-    -- composition system errors downstream if absent); users should
-    -- add it explicitly alongside RelativeTransform.
-    requires = { builtins.Transform },
-})
+components.newFFIComponent(
+    {
+        name = "RelativeTransform",
+        container = builtins.RelativeTransform,
+        fields = {
+            {"x", "float"},
+            {"y", "float"},
+            {"z", "float"},
+            {"rotation", "float"},
+            {"scaleX", "float"},
+            {"scaleY", "float"},
+            {"originX", "float"},
+            {"originY", "float"},
+        },
+        defaults = {0, 0, 0, 0, 1, 1, 0, 0},
+        -- RelativeTransform auto-adds Transform via the declarative
+        -- `requires` trait. ChildOf is required by convention (the
+        -- composition system errors downstream if absent); users should
+        -- add it explicitly alongside RelativeTransform.
+        requires = {builtins.Transform},
+    }
+)
 
 -------------------------------------------------------------------------------
 --- Plugin implementation
@@ -481,7 +471,7 @@ function builtins.plugin(w: types.World)
                         end
                     end
                 end
-            end
+            end,
         })
     end
 
@@ -497,56 +487,62 @@ function builtins.plugin(w: types.World)
         -- On first access, recursively resolves the parent chain and caches the result.
         -- Subsequent accesses for the same entity are plain table lookups.
         local worldTransformCache: {integer: builtins.Transform} = {}
-        setmetatable(worldTransformCache as {any:any}, {
-            __index = function(self: {integer: builtins.Transform}, entityId: integer): builtins.Transform
-                local transform = w:get(entityId, Transform)
-                if not transform then
-                    return nil
-                end
+        setmetatable(
+            worldTransformCache as {any: any},
+            {
+                __index = function(self: {integer: builtins.Transform}, entityId: integer): builtins.Transform
+                    local transform = w:get(entityId, Transform)
+                    if not transform then
+                        return nil
+                    end
 
-                local relTransform = w:get(entityId, RelativeTransform)
-                if not relTransform then
-                    -- Root entity: world transform is its own transform
-                    self[entityId] = transform
-                    return transform
-                end
+                    local relTransform = w:get(entityId, RelativeTransform)
+                    if not relTransform then
+                        -- Root entity: world transform is its own transform
+                        self[entityId] = transform
+                        return transform
+                    end
 
-                local childOf = w:getFirstRelationship(entityId, ChildOf)
-                if not childOf then
-                    self[entityId] = transform
-                    return transform
-                end
+                    local childOf = w:getFirstRelationship(entityId, ChildOf)
+                    if not childOf then
+                        self[entityId] = transform
+                        return transform
+                    end
 
-                -- Recurse to resolve parent's world transform (triggers __index if not cached)
-                local parentWorldTransform = self[childOf.target]
-                if parentWorldTransform then
-                    local scratch = scratchTransform
-                    composeTransforms(parentWorldTransform, relTransform, scratch)
-                    if transform.x ~= scratch.x or transform.y ~= scratch.y
+                    -- Recurse to resolve parent's world transform (triggers __index if not cached)
+                    local parentWorldTransform = self[childOf.target]
+                    if parentWorldTransform then
+                        local scratch = scratchTransform
+                        composeTransforms(parentWorldTransform, relTransform, scratch)
+                        if
+                            transform.x ~= scratch.x
+                            or transform.y ~= scratch.y
                             or transform.z ~= scratch.z
                             or transform.layer ~= scratch.layer
                             or transform.rotation ~= scratch.rotation
                             or transform.scaleX ~= scratch.scaleX
-                            or transform.scaleY ~= scratch.scaleY then
-                        transform.x = scratch.x
-                        transform.y = scratch.y
-                        transform.z = scratch.z
-                        transform.layer = scratch.layer
-                        transform.rotation = scratch.rotation
-                        transform.scaleX = scratch.scaleX
-                        transform.scaleY = scratch.scaleY
-                        -- Downstream dirty-gated consumers (GPU shadow
-                        -- uploads) must see the write; marking here also
-                        -- covers ancestors resolved recursively from
-                        -- another row's chain.
-                        w:markComponentDirty(entityId, Transform)
+                            or transform.scaleY ~= scratch.scaleY
+                        then
+                            transform.x = scratch.x
+                            transform.y = scratch.y
+                            transform.z = scratch.z
+                            transform.layer = scratch.layer
+                            transform.rotation = scratch.rotation
+                            transform.scaleX = scratch.scaleX
+                            transform.scaleY = scratch.scaleY
+                            -- Downstream dirty-gated consumers (GPU shadow
+                            -- uploads) must see the write; marking here also
+                            -- covers ancestors resolved recursively from
+                            -- another row's chain.
+                            w:markComponentDirty(entityId, Transform)
+                        end
                     end
-                end
 
-                self[entityId] = transform
-                return transform
-            end
-        })
+                    self[entityId] = transform
+                    return transform
+                end,
+            }
+        )
 
         local hierarchyQuery = w:query({
             name = "RelativeTransform",
@@ -577,9 +573,7 @@ function builtins.plugin(w: types.World)
         w:addSystem({
             name = "RelativeTransformDirtySampler",
             phase = phases.RenderLast,
-            run = function()
-                pendingHierarchyDirty = hierarchyStateDirty()
-            end
+            run = function() pendingHierarchyDirty = hierarchyStateDirty() end,
         })
 
         w:addSystem({
@@ -604,7 +598,7 @@ function builtins.plugin(w: types.World)
                         local _ = worldTransformCache[entities[row]]
                     end
                 end
-            end
+            end,
         })
     end
 end

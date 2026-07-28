@@ -15,12 +15,11 @@
 --- while worsening the tail has made the game feel worse, and physics is where
 --- that trade shows up.
 
-local root = os.getenv("TECS_LUA")
-    or (_G as {string: any})["__tecsContent"] as string
-    or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then root = root:sub(1, -2) end
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local physics <const> = require("tecs.physics")
@@ -59,8 +58,7 @@ local BLOWER_RADIUS <const> = tonumber(os.getenv("BENCH_BLOWER_RADIUS")) or 220.
 
 --- Long enough for every wave to land and the pile to start churning, so
 --- measurement starts with the full body count present and moving.
-local WARMUP <const> = math.floor(tonumber(os.getenv("BENCH_WARMUP"))
-    or (WAVES * WAVE_FRAMES + 240))
+local WARMUP <const> = math.floor(tonumber(os.getenv("BENCH_WARMUP")) or (WAVES * WAVE_FRAMES + 240))
 local FRAMES <const> = math.floor(tonumber(os.getenv("BENCH_FRAMES")) or 900)
 
 local WIDTH <const> = 1280
@@ -94,23 +92,25 @@ local MIN_Y <const> = WALL * 2
 local function buildContainer(world: tecs.World)
     local function wall(x: number, y: number, halfWidth: number, halfHeight: number)
         local entity = world:spawn(
-            Transform(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2),
-            Tint(0.18, 0.18, 0.22, 1.0),
-            Renderable()
+            Transform(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2), Tint(0.18, 0.18, 0.22, 1.0), Renderable()
         )
-        physics.attach(world, entity, {
-            type = "static",
-            halfWidth = halfWidth,
-            halfHeight = halfHeight,
-        })
+        physics.attach(
+            world,
+            entity,
+            {
+                type = "static",
+                halfWidth = halfWidth,
+                halfHeight = halfHeight,
+            }
+        )
     end
 
     local halfWidth <const> = WIDTH * 0.5 - WALL
     local halfHeight <const> = HEIGHT * 0.5 - WALL
-    wall(WIDTH * 0.5, HEIGHT - WALL, halfWidth, WALL)   -- floor
-    wall(WIDTH * 0.5, WALL, halfWidth, WALL)            -- ceiling
-    wall(WALL, HEIGHT * 0.5, WALL, halfHeight)          -- left
-    wall(WIDTH - WALL, HEIGHT * 0.5, WALL, halfHeight)  -- right
+    wall(WIDTH * 0.5, HEIGHT - WALL, halfWidth, WALL) -- floor
+    wall(WIDTH * 0.5, WALL, halfWidth, WALL) -- ceiling
+    wall(WALL, HEIGHT * 0.5, WALL, halfHeight) -- left
+    wall(WIDTH - WALL, HEIGHT * 0.5, WALL, halfHeight) -- right
 end
 
 --- Drops one wave of bodies above the pile.
@@ -135,23 +135,27 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
             round and Material(circleId, 0) or Material(0, 0),
             Renderable()
         )
-        physics.attach(world, entity, {
-            type = "dynamic",
-            radius = round and SIZE or nil,
-            halfWidth = SIZE,
-            halfHeight = SIZE,
-            density = 1.0,
-            friction = 0.3,
-            restitution = 0.1,
-        })
+        physics.attach(
+            world,
+            entity,
+            {
+                type = "dynamic",
+                radius = round and SIZE or nil,
+                halfWidth = SIZE,
+                halfHeight = SIZE,
+                density = 1.0,
+                friction = 0.3,
+                restitution = 0.1,
+            }
+        )
         spawned = spawned + 1
     end
 end
 
 return tecs.application({
-    window = { title = "physics", width = WIDTH, height = HEIGHT },
+    window = {title = "physics", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
-    ambientLight = { 1.0, 1.0, 1.0 },
+    ambientLight = {1.0, 1.0, 1.0},
     capacity = BODIES + 64,
     debugMaxFrames = WARMUP + FRAMES,
 
@@ -181,18 +185,16 @@ return tecs.application({
         -- The real dt is recorded here rather than in a system, which sees the
         -- pinned value: a stage fed the fiction would report the fiction. This
         -- is the one place that sees both.
-        clock.provider = function(realDt: number): number
-            timing.mark(DELTA, realDt)
-            return clock.nominal
-        end
+        clock.provider = function(realDt: number): number timing.mark(DELTA, realDt); return clock.nominal end
 
         -- The A/B knob for the solver's thread pool. One worker starts no
         -- threads and runs every task inline, which is the no-executor path.
-        world:addPlugin(physics.plugin({
-            gravity = { 0.0, 900.0 },
-            workerCount = math.floor(
-                tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
-        }))
+        world:addPlugin(
+            physics.plugin({
+                gravity = {0.0, 900.0},
+                workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
+            })
+        )
         buildContainer(world)
 
         -- Seeded, so every run drops the same bodies in the same order and two
@@ -207,8 +209,12 @@ return tecs.application({
             name = "bench.Drop",
             phase = tecs.phases.Update,
             run = function()
-                if dropped >= WAVES then return end
-                if frame < dropped * WAVE_FRAMES then return end
+                if dropped >= WAVES then
+                    return
+                end
+                if frame < dropped * WAVE_FRAMES then
+                    return
+                end
                 dropped = dropped + 1
                 dropWave(world, perWave, rand)
             end,
@@ -218,61 +224,62 @@ return tecs.application({
         -- component pushes downward.
         local function jet(x: number, y: number, dx: number, dy: number): {number}
             local length = math.sqrt(dx * dx + dy * dy)
-            return { x, y, dx / length, dy / length }
+            return {x, y, dx / length, dy / length}
         end
 
         -- Each aimed along the wall beside it, so the four together circulate
         -- clockwise instead of fighting each other in the middle.
         local blowers <const>: {{number}} = {
-            jet(WIDTH * 0.18, HEIGHT * 0.20,  1.0,  0.30),   -- top left, right
-            jet(WIDTH * 0.82, HEIGHT * 0.20, -0.30,  1.0),   -- top right, down
-            jet(WIDTH * 0.82, HEIGHT * 0.78, -1.0, -0.30),   -- low right, left
-            jet(WIDTH * 0.18, HEIGHT * 0.78,  0.30, -1.0),   -- low left, up
+            jet(WIDTH * 0.18, HEIGHT * 0.20, 1.0, 0.30), -- top left, right
+            jet(WIDTH * 0.82, HEIGHT * 0.20, -0.30, 1.0), -- top right, down
+            jet(WIDTH * 0.82, HEIGHT * 0.78, -1.0, -0.30), -- low right, left
+            jet(WIDTH * 0.18, HEIGHT * 0.78, 0.30, -1.0), -- low left, up
         }
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
         local blown = world:query({
-            include = { Transform, physics.RigidBody },
+            include = {Transform, physics.RigidBody},
         })
 
-        world:addSystem({
-            name = "bench.Blowers",
-            -- Beside the step rather than beside the frame, so a body takes
-            -- the same impulse per step of simulated time however the frames
-            -- fall.
-            phase = tecs.phases.FixedUpdate,
-            run = function()
-                -- The physics step is fixed, so the push is too.
-                local push = BLOWER_FORCE / 60.0
-                for archetype, length in blown:iter() do
-                    -- Read rather than getMut: the blowers change velocity
-                    -- through Box2D, and the transform is written back by the
-                    -- physics sync. Taking it mutable here would mark the
-                    -- column dirty every frame and defeat the gate.
-                    local transforms = archetype:get(Transform)
-                    local bodies = archetype:get(physics.RigidBody)
-                    for row = 1, length do
-                        local transform = transforms[row]
-                        for index = 1, #blowers do
-                            local blower = blowers[index]
-                            local dx = transform.x - blower[1]
-                            local dy = transform.y - blower[2]
-                            local distanceSq = dx * dx + dy * dy
-                            if distanceSq < radiusSq then
-                                -- Falls off with distance, so a body at the
-                                -- edge of the stream drifts rather than being
-                                -- snapped into it.
-                                local falloff = 1.0 - distanceSq / radiusSq
-                                local strength = push * falloff
-                                physics.applyImpulseTo(bodies[row],
-                                    blower[3] * strength, blower[4] * strength)
-                                break
+        world:addSystem(
+            {
+                name = "bench.Blowers",
+                -- Beside the step rather than beside the frame, so a body takes
+                -- the same impulse per step of simulated time however the frames
+                -- fall.
+                phase = tecs.phases.FixedUpdate,
+                run = function()
+                    -- The physics step is fixed, so the push is too.
+                    local push = BLOWER_FORCE / 60.0
+                    for archetype, length in blown:iter() do
+                        -- Read rather than getMut: the blowers change velocity
+                        -- through Box2D, and the transform is written back by the
+                        -- physics sync. Taking it mutable here would mark the
+                        -- column dirty every frame and defeat the gate.
+                        local transforms = archetype:get(Transform)
+                        local bodies = archetype:get(physics.RigidBody)
+                        for row = 1, length do
+                            local transform = transforms[row]
+                            for index = 1, #blowers do
+                                local blower = blowers[index]
+                                local dx = transform.x - blower[1]
+                                local dy = transform.y - blower[2]
+                                local distanceSq = dx * dx + dy * dy
+                                if distanceSq < radiusSq then
+                                    -- Falls off with distance, so a body at the
+                                    -- edge of the stream drifts rather than being
+                                    -- snapped into it.
+                                    local falloff = 1.0 - distanceSq / radiusSq
+                                    local strength = push * falloff
+                                    physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
+                                    break
+                                end
                             end
                         end
                     end
-                end
-            end,
-        })
+                end,
+            }
+        )
 
         world:addSystem({
             name = "bench.Sample",
@@ -283,7 +290,9 @@ return tecs.application({
                 -- those frames from every stage at once is what makes the
                 -- report a distribution of the steady state rather than of the
                 -- run.
-                if frame == WARMUP then timing.reset() end
+                if frame == WARMUP then
+                    timing.reset()
+                end
             end,
         })
 
@@ -291,16 +300,22 @@ return tecs.application({
             name = "bench.Report",
             phase = tecs.phases.Shutdown,
             run = function()
-                print(("frames after %d warmup, %d bodies spawned, "
-                    .. "%d instances synced")
-                    :format(WARMUP, spawned, renderer.count))
+                print(
+                    ("frames after %d warmup, %d bodies spawned, " .. "%d instances synced"):format(
+                        WARMUP, spawned, renderer.count
+                    )
+                )
                 local report = timing.format()
-                if report ~= "" then print(report) end
+                if report ~= "" then
+                    print(report)
+                end
             end,
         })
 
-        print(("physics: %d bodies in %d waves, %d frames apart, "
-            .. "measuring %d after %d warmup")
-            :format(BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP))
+        print(
+            ("physics: %d bodies in %d waves, %d frames apart, " .. "measuring %d after %d warmup"):format(
+                BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP
+            )
+        )
     end,
 })

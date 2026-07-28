@@ -39,12 +39,11 @@
 --- acquire. The default is `immediate`, which measures the part the engine is
 --- answerable for.
 
-local root = os.getenv("TECS_LUA")
-    or (_G as {string: any})["__tecsContent"] as string
-    or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then root = root:sub(1, -2) end
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local events <const> = require("tecs.platform.events")
@@ -74,7 +73,9 @@ local function spawnField(world: tecs.World)
     local golden <const> = 2.39996
     local extent <const> = math.min(WIDTH, HEIGHT) * 0.46
 
-    world:batchSpawn(COUNT, { Transform, Tint, Renderable },
+    world:batchSpawn(
+        COUNT,
+        {Transform, Tint, Renderable},
         function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform)
@@ -100,7 +101,8 @@ local function spawnField(world: tecs.World)
                 tint.b = 0.7
                 tint.a = 1.0
             end
-        end)
+        end
+    )
 end
 
 -- Measuring is the whole point of this file, so it does not wait to be asked.
@@ -114,9 +116,9 @@ local injected = 0
 local reactions = 0
 
 return tecs.application({
-    window = { title = "latency", width = WIDTH, height = HEIGHT },
+    window = {title = "latency", width = WIDTH, height = HEIGHT},
     presentMode = os.getenv("BENCH_PRESENT") or "immediate",
-    ambientLight = { 1.0, 1.0, 1.0 },
+    ambientLight = {1.0, 1.0, 1.0},
     capacity = COUNT + 64,
     debugMaxFrames = TOTAL,
 
@@ -127,9 +129,7 @@ return tecs.application({
         -- The entity the press moves. One entity, so the reaction costs
         -- nothing worth measuring and the latency reported is the loop's.
         local marker = world:spawn(
-            Transform(WIDTH * 0.5, HEIGHT * 0.5, 0, 1, 0, 24, 24),
-            Tint(1.0, 0.3, 0.2, 1.0),
-            Renderable()
+            Transform(WIDTH * 0.5, HEIGHT * 0.5, 0, 1, 0, 24, 24), Tint(1.0, 0.3, 0.2, 1.0), Renderable()
         )
 
         -- Iterations completed. Incremented in `Last`, so the injector in
@@ -152,7 +152,9 @@ return tecs.application({
                 if not input:keyPressed(KEY) and not input:keyReleased(KEY) then
                     return
                 end
-                if frame >= WARMUP then reactions = reactions + 1 end
+                if frame >= WARMUP then
+                    reactions = reactions + 1
+                end
                 local transform = world:getMut(marker, Transform)
                 transform.y = HEIGHT * (input:keyDown(KEY) and 0.6 or 0.4)
             end,
@@ -177,19 +179,24 @@ return tecs.application({
                 -- Warmup frames built and first uploaded the scene, and are
                 -- also what gets the reaction compiled. Dropping them here
                 -- leaves a distribution of the steady state.
-                if frame == WARMUP then timing.reset() end
+                if frame == WARMUP then
+                    timing.reset()
+                end
 
                 -- An event pushed here is delivered to the host before the
                 -- next iteration, so the step that reacts is the next one.
                 -- Injecting stops early enough that every press still gets a
                 -- frame to be presented in, which is what makes the two counts
                 -- comparable.
-                if frame % INTERVAL ~= 0 or frame + 1 >= TOTAL then return end
+                if frame % INTERVAL ~= 0 or frame + 1 >= TOTAL then
+                    return
+                end
 
                 local down = (frame / INTERVAL) % 2 < 1
-                events.push(down and "keyDown" or "keyUp",
-                    { scancode = input:scancode(KEY) } as events.Event)
-                if frame >= WARMUP then injected = injected + 1 end
+                events.push(down and "keyDown" or "keyUp", {scancode = input:scancode(KEY)} as events.Event)
+                if frame >= WARMUP then
+                    injected = injected + 1
+                end
             end,
         })
 
@@ -197,15 +204,18 @@ return tecs.application({
             name = "bench.Report",
             phase = tecs.phases.Shutdown,
             run = function()
-                print(("%d presses injected, %d reacted to")
-                    :format(injected, reactions))
+                print(("%d presses injected, %d reacted to"):format(injected, reactions))
                 local report = timing.format()
-                if report ~= "" then print(report) end
+                if report ~= "" then
+                    print(report)
+                end
             end,
         })
 
-        print(("latency: %d shapes, one %s press every %d frames, %s present")
-            :format(COUNT, KEY, INTERVAL,
-                    os.getenv("BENCH_PRESENT") or "immediate"))
+        print(
+            ("latency: %d shapes, one %s press every %d frames, %s present"):format(
+                COUNT, KEY, INTERVAL, os.getenv("BENCH_PRESENT") or "immediate"
+            )
+        )
     end,
 })

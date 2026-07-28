@@ -51,7 +51,7 @@ local record mcp
     end
 end
 
-local ServerMT <const>: metatable<mcp.Server> = { __index = mcp.Server }
+local ServerMT <const>: metatable<mcp.Server> = {__index = mcp.Server}
 
 local tools <const>: {string: mcp.Tool} = {}
 local order <const>: {string} = {}
@@ -88,7 +88,9 @@ end
 --- Every registered tool, in registration order.
 function mcp.tools(): {mcp.Tool}
     local list: {mcp.Tool} = {}
-    for index = 1, #order do list[index] = tools[order[index]] end
+    for index = 1, #order do
+        list[index] = tools[order[index]]
+    end
     return list
 end
 
@@ -99,8 +101,7 @@ local function describe(): {any}
         list[#list + 1] = {
             name = tool.name,
             description = tool.description or "",
-            inputSchema = tool.inputSchema
-                or { type = "object", properties = cjson.empty_array },
+            inputSchema = tool.inputSchema or {type = "object", properties = cjson.empty_array},
             annotations = {
                 readOnlyHint = tool.readOnly == true,
                 destructiveHint = tool.destructive == true,
@@ -112,19 +113,21 @@ local function describe(): {any}
     end
     -- An empty list has to say so, or it encodes as an object and a client
     -- parsing it strictly rejects the response.
-    if #list == 0 then return cjson.empty_array as {any} end
+    if #list == 0 then
+        return cjson.empty_array as {any}
+    end
     return list
 end
 
 local function reply(id: any, result: {string: any}): string
-    return cjson.encode({ jsonrpc = "2.0", id = id, result = result })
+    return cjson.encode({jsonrpc = "2.0", id = id, result = result})
 end
 
 local function fail(id: any, code: integer, message: string): string
     return cjson.encode({
         jsonrpc = "2.0",
         id = id,
-        error = { code = code, message = message },
+        error = {code = code, message = message},
     })
 end
 
@@ -146,28 +149,33 @@ function mcp.dispatch(text: string): string
     end
 
     if method == "initialize" then
-        return reply(id, {
-            protocolVersion = "2025-06-18",
-            capabilities = { tools = {} },
-            serverInfo = { name = "tecs", version = "0.1.0" },
-        })
+        return reply(
+            id,
+            {
+                protocolVersion = "2025-06-18",
+                capabilities = {tools = {}},
+                serverInfo = {name = "tecs", version = "0.1.0"},
+            }
+        )
     elseif method == "tools/list" then
-        return reply(id, { tools = describe() })
+        return reply(id, {tools = describe()})
     elseif method == "tools/call" then
         local params = (request.params or {}) as {string: any}
         local name = params.name as string
         local tool = name ~= nil and tools[name] or nil
         if tool == nil then
-            return fail(id, METHOD_NOT_FOUND,
-                ("no tool named '%s'"):format(tostring(name)))
+            return fail(id, METHOD_NOT_FOUND, ("no tool named '%s'"):format(tostring(name)))
         end
 
         if crashed ~= nil and not tool.whenCrashed then
-            return reply(id, {
-                isError = true,
-                crashed = true,
-                content = { { type = "text", text = crashed } },
-            })
+            return reply(
+                id,
+                {
+                    isError = true,
+                    crashed = true,
+                    content = {{type = "text", text = crashed}},
+                }
+            )
         end
 
         local arguments = (params.arguments or {}) as {string: any}
@@ -176,17 +184,23 @@ function mcp.dispatch(text: string): string
         local called, payload = pcall(tool.handler, arguments)
         if not called then
             LOGGER:warn("tool %s failed: %s", name, tostring(payload))
-            return reply(id, {
-                isError = true,
-                content = { { type = "text", text = tostring(payload) } },
-            })
+            return reply(
+                id,
+                {
+                    isError = true,
+                    content = {{type = "text", text = tostring(payload)}},
+                }
+            )
         end
 
         local structured = (payload or {}) as {string: any}
-        return reply(id, {
-            structuredContent = structured,
-            content = { { type = "text", text = cjson.encode(structured) } },
-        })
+        return reply(
+            id,
+            {
+                structuredContent = structured,
+                content = {{type = "text", text = cjson.encode(structured)}},
+            }
+        )
     end
 
     return fail(id, METHOD_NOT_FOUND, ("no method '%s'"):format(method))
@@ -203,27 +217,34 @@ end
 
 --- Answers at most one request. Call once per frame.
 function mcp.Server:poll(): boolean
-    if self._destroyed then return false end
-    return self._transport:poll(clock.now(), function(request: transport.Request)
-        if request.method ~= "POST" then
-            self._transport:respond(405, "Method Not Allowed",
-                '{"error":"POST only"}')
-            return
+    if self._destroyed then
+        return false
+    end
+    return self._transport:poll(
+        clock.now(),
+        function(request: transport.Request)
+            if request.method ~= "POST" then
+                self._transport:respond(405, "Method Not Allowed", '{"error":"POST only"}')
+                return
+            end
+            local ok, response = pcall(mcp.dispatch, request.body)
+            if not ok then
+                LOGGER:error("dispatch failed: %s", tostring(response))
+                self._transport:respond(
+                    500, "Internal Server Error", fail(cjson.null, INTERNAL_ERROR, tostring(response))
+                )
+                return
+            end
+            self._transport:respond(200, "OK", response as string)
         end
-        local ok, response = pcall(mcp.dispatch, request.body)
-        if not ok then
-            LOGGER:error("dispatch failed: %s", tostring(response))
-            self._transport:respond(500, "Internal Server Error",
-                fail(cjson.null, INTERNAL_ERROR, tostring(response)))
-            return
-        end
-        self._transport:respond(200, "OK", response as string)
-    end)
+    )
 end
 
 --- Releases the server. Safe to call more than once.
 function mcp.Server:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     self._transport:destroy()
 end

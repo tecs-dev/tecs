@@ -24,9 +24,7 @@ local record ChunkedArray
     get: function(self, id: integer): any
 end
 
-local ChunkedArrayMT: metatable<ChunkedArray> = {
-    __index = ChunkedArray
-}
+local ChunkedArrayMT: metatable<ChunkedArray> = {__index = ChunkedArray}
 
 local record module
     --- ChunkedArray type for annotations.

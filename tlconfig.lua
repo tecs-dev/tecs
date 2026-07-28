@@ -7,4 +7,10 @@ return {
     dont_prune = {
         "tecs/ffi/*cdef.lua",
     },
+    cerulean = {
+        indent_width = 4,
+        max_line_width = 120,
+        sort_requires = false,
+        hug_table_arguments = true,
+    },
 }

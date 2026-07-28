@@ -81,7 +81,9 @@ end
 --- read with an allocated empty string, and is handled because a null
 --- dereference is a worse way to learn otherwise.
 local function take(pointer: loader.CValue): string
-    if pointer == nil then return "" end
+    if pointer == nil then
+        return ""
+    end
     local text = loader.toString(pointer)
     C.SDL_free(pointer)
     return text
@@ -113,7 +115,9 @@ end
 --- text, and when there is no video. Ask `hasText` to tell those from text
 --- that is genuinely empty.
 function clipboard.text(): string
-    if not clipboard.available() then return "" end
+    if not clipboard.available() then
+        return ""
+    end
     return take(C.SDL_GetClipboardText())
 end
 
@@ -123,7 +127,9 @@ end
 --- platform refused, which includes having no video.
 function clipboard.setText(text: string): boolean
     required(text, "setText")
-    if not clipboard.available() then return false end
+    if not clipboard.available() then
+        return false
+    end
     return C.SDL_SetClipboardText(text) as boolean
 end
 
@@ -133,7 +139,9 @@ end
 --- platform where a read negotiates with the owning application, no
 --- negotiation happens.
 function clipboard.hasText(): boolean
-    if not clipboard.available() then return false end
+    if not clipboard.available() then
+        return false
+    end
     return C.SDL_HasClipboardText() as boolean
 end
 
@@ -142,7 +150,9 @@ end
 --- The clipboard is left empty rather than restored to what preceded the
 --- write, because nothing anywhere remembers what that was.
 function clipboard.clear(): boolean
-    if not clipboard.available() then return false end
+    if not clipboard.available() then
+        return false
+    end
     return C.SDL_ClearClipboardData() as boolean
 end
 
@@ -152,10 +162,14 @@ end
 --- rather than wait to be told. Empty when the clipboard is empty.
 function clipboard.mimeTypes(): {string}
     local found: {string} = {}
-    if not clipboard.available() then return found end
+    if not clipboard.available() then
+        return found
+    end
 
     local list = C.SDL_GetClipboardMimeTypes(countOut)
-    if list == nil then return found end
+    if list == nil then
+        return found
+    end
     local items = loader.castPointer("char **", list)
     local count = tonumber(countOut[0]) as integer
     for index = 0, count - 1 do
@@ -170,7 +184,9 @@ end
 --- Whether the clipboard offers `mimeType`.
 function clipboard.hasData(mimeType: string): boolean
     required(mimeType, "hasData")
-    if not clipboard.available() then return false end
+    if not clipboard.available() then
+        return false
+    end
     return C.SDL_HasClipboardData(mimeType) as boolean
 end
 
@@ -180,10 +196,14 @@ end
 --- bytes behind it and that is not the same as not being offered.
 function clipboard.data(mimeType: string): string
     required(mimeType, "data")
-    if not clipboard.available() then return nil end
+    if not clipboard.available() then
+        return nil
+    end
 
     local bytes = C.SDL_GetClipboardData(mimeType, countOut)
-    if bytes == nil then return nil end
+    if bytes == nil then
+        return nil
+    end
     local blob = loader.toBytes(bytes, tonumber(countOut[0]) as integer)
     C.SDL_free(bytes)
     return blob
@@ -191,7 +211,9 @@ end
 
 --- The primary selection's text, or an empty string when it holds none.
 function clipboard.primary(): string
-    if not clipboard.available() then return "" end
+    if not clipboard.available() then
+        return ""
+    end
     return take(C.SDL_GetPrimarySelectionText())
 end
 
@@ -201,13 +223,17 @@ end
 --- value for this process and nothing else can read it.
 function clipboard.setPrimary(text: string): boolean
     required(text, "setPrimary")
-    if not clipboard.available() then return false end
+    if not clipboard.available() then
+        return false
+    end
     return C.SDL_SetPrimarySelectionText(text) as boolean
 end
 
 --- Whether the primary selection holds text.
 function clipboard.hasPrimary(): boolean
-    if not clipboard.available() then return false end
+    if not clipboard.available() then
+        return false
+    end
     return C.SDL_HasPrimarySelectionText() as boolean
 end
 

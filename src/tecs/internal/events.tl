@@ -15,14 +15,9 @@ local NEXT_ID: integer = 1
 local NOOP_INIT <const> = function(_instance: any) end
 
 local record events
-
     newEvent: function<E is Event>(event: E)
 
-    newFFIEvent: function<E is Event>(
-        event: E,
-        fields: {{string, string}},
-        structName?: string
-    )
+    newFFIEvent: function<E is Event>(event: E, fields: {{string, string}}, structName?: string)
 
     -- Concrete bus state. Public method Tealdoc lives on
     -- `types.events.MessageBus`.
@@ -60,24 +55,13 @@ local record events
         new: function(): MessageBus
 
         observe: function<E is Event>(
-            self: MessageBus,
-            address: integer,
-            eventType: E,
-            observer: function(E), id?: string
+            self: MessageBus, address: integer, eventType: E, observer: function(E), id?: string
         )
 
-        observeOnce: function<E is Event>(
-            self: MessageBus,
-            address: integer,
-            eventType: E,
-            observer: function(E)
-        )
+        observeOnce: function<E is Event>(self: MessageBus, address: integer, eventType: E, observer: function(E))
 
         stopObserving: function<E is Event>(
-            self: MessageBus,
-            address: integer,
-            eventType: E,
-            observerOrId: function(E)|string
+            self: MessageBus, address: integer, eventType: E, observerOrId: function(E) | string
         )
 
         emit: function<E is Event>(self: MessageBus, address: integer, event: E)
@@ -100,26 +84,25 @@ function events.newEvent<E is Event>(event: E)
     local id <const> = NEXT_ID
     NEXT_ID = NEXT_ID + 1
     event.eventId = id
-    local MT <const> = { __index = event }
+    local MT <const> = {__index = event}
     local eventAny = event as {string: any}
     local init = eventAny.init as EventInit<E> or NOOP_INIT as EventInit<E>
     eventAny.init = init
 
     eventAny.__tecs_mt = MT
-    setmetatable(event, {
-        __call = function(_self: E, ...: any): E
-            local instance = setmetatable({eventId = id}, MT) as E
-            init(instance, ...)
-            return instance
-        end
-    })
+    setmetatable(
+        event,
+        {
+            __call = function(_self: E, ...: any): E
+                local instance = setmetatable({eventId = id}, MT) as E
+                init(instance, ...)
+                return instance
+            end,
+        }
+    )
 end
 
-function events.newFFIEvent<E is Event>(
-    event: E,
-    fields: {{string, string}},
-    structName?: string
-)
+function events.newFFIEvent<E is Event>(event: E, fields: {{string, string}}, structName?: string)
     if event.eventId then
         error("Event has already been configured: " .. tostring(event) .. " : " .. event.eventId)
     end
@@ -169,8 +152,7 @@ function events.newFFIEvent<E is Event>(
         end
         parts[#parts + 1] = ")\n"
         for i = 1, n do
-            parts[#parts + 1] = string.format(
-                "    if a%d ~= nil then instance.%s = a%d end\n", i, fieldNames[i], i)
+            parts[#parts + 1] = string.format("    if a%d ~= nil then instance.%s = a%d end\n", i, fieldNames[i], i)
         end
         parts[#parts + 1] = "end"
         local chunk = assert(load(table.concat(parts), "=ffi_event_init", "t"))
@@ -181,15 +163,18 @@ function events.newFFIEvent<E is Event>(
     -- Resolve the ctype once; per-construction C.new(name) re-parses the
     -- struct name on every call.
     local eventCtype = C.typeof(resolvedStructName as string) as function(): any
-    setmetatable(event, {
-        __call = function(_self: E, ...: any): E
-            local instance = eventCtype() as {string:any}
-            instance.eventId = id
-            instance.typeId = ffiTypeId
-            init(instance as E, ...)
-            return instance as E
-        end
-    })
+    setmetatable(
+        event,
+        {
+            __call = function(_self: E, ...: any): E
+                local instance = eventCtype() as {string: any}
+                instance.eventId = id
+                instance.typeId = ffiTypeId
+                init(instance as E, ...)
+                return instance as E
+            end,
+        }
+    )
 end
 
 -------------------------------------------------------------------------------
@@ -198,9 +183,7 @@ end
 
 local MessageBus <const> = events.MessageBus
 
-local MESSAGE_BUS_MT <const>: metatable<events.MessageBus> = {
-    __index = MessageBus
-}
+local MESSAGE_BUS_MT <const>: metatable<events.MessageBus> = {__index = MessageBus}
 
 function MessageBus.new(): events.MessageBus
     local bus: events.MessageBus = {
@@ -208,8 +191,8 @@ function MessageBus.new(): events.MessageBus
         _totalObservers = 0,
         _entityObserverCount = 0,
         _emitDepth = 0,
-        _callbacksPool = pool.newTablePool({ clearOn = "release" }),
-        _byAddressPool = pool.newTablePool({ clearOn = "acquire" }),
+        _callbacksPool = pool.newTablePool({clearOn = "release"}),
+        _byAddressPool = pool.newTablePool({clearOn = "acquire"}),
     }
     return setmetatable(bus, MESSAGE_BUS_MT)
 end
@@ -242,10 +225,7 @@ end
 
 function MessageBus:observeOnce<E is Event>(address: integer, eventType: E, observer: function(E))
     local wrappedFunction: function(E)
-    wrappedFunction = function(e: E)
-        self:stopObserving(address, eventType, wrappedFunction)
-        observer(e)
-    end
+    wrappedFunction = function(e: E) self:stopObserving(address, eventType, wrappedFunction); observer(e) end
     self:observe(address, eventType, wrappedFunction)
 end
 
@@ -261,7 +241,7 @@ local function removeAtIndex(callbacks: {any}, idx: integer, size: integer)
     callbacks[size] = nil
 end
 
-function MessageBus:stopObserving<E is Event>(address: integer, eventType: E, observerOrId: function(E)|string)
+function MessageBus:stopObserving<E is Event>(address: integer, eventType: E, observerOrId: function(E) | string)
     local eventId = assert(eventType.eventId, "Event type must be registered with newEvent or newFFIEvent")
 
     -- If we're emitting, defer the removal
@@ -435,7 +415,9 @@ end
 function MessageBus:hasObservers<E is Event>(address: integer, eventType: E): boolean
     -- Fast path: when the bus has no observers at all, skip the
     -- two hashmap lookups. Read one integer field + branch.
-    if self._totalObservers == 0 then return false end
+    if self._totalObservers == 0 then
+        return false
+    end
     local byAddress = self._observers[address]
     if not byAddress then
         return false
@@ -476,7 +458,9 @@ end
 -- global user observers survive the clear; a full reset() would unsubscribe
 -- them, leaving queries unable to match archetypes created after the clear.
 function MessageBus:clearEntityObservers()
-    if self._totalObservers == 0 then return end
+    if self._totalObservers == 0 then
+        return
+    end
     local addresses: {integer} = {}
     local n = 0
     for address in pairs(self._observers) do

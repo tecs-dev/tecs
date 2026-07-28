@@ -217,11 +217,7 @@ local record tecs
     --- @param event The event type to configure.
     --- @param fields Field definitions in format {{"name", "type"}, ...}
     --- @param structName Optional struct name (auto-generated if not provided)
-    newFFIEvent: function<E is Event>(
-        event: E,
-        fields: {{string, string}},
-        structName?: string
-    )
+    newFFIEvent: function<E is Event>(event: E, fields: {{string, string}}, structName?: string)
 
     --- Create a new address-based event message bus.
     newMessageBus: function(): MessageBus
@@ -235,18 +231,24 @@ end
 
 -- Teal does not accept bare assignment of these polymorphic function values between record fields, even when the
 -- signatures are structurally identical.
-tecs.newComponent = internalComponents.newComponent
-    as function<C is types.components.Component>(options: types.components.ComponentOptions<C>): C
-tecs.newScalarComponent = internalComponents.newScalarComponent
-    as function<T>(options: types.components.ScalarComponentOptions<T>): types.components.ScalarComponent<T>
-tecs.newTagComponent = internalComponents.newTagComponent
-    as function(options: types.components.TagComponentOptions): types.components.Component
-tecs.newFFIComponent = internalComponents.newFFIComponent
-    as function<C is types.components.Component>(options: types.components.FFIComponentOptions<C>): C
-tecs.newRelationship = internalComponents.newRelationship
-    as function<R is types.components.Relationship>(config: types.components.RelationshipOptions<R>): R
-tecs.newFFIRelationship = internalComponents.newFFIRelationship
-    as function<R is types.components.Relationship>(config: types.components.FFIRelationshipOptions<R>): R
+tecs.newComponent = internalComponents.newComponent as function<C is types.components.Component>(
+    options: types.components.ComponentOptions<C>
+): C
+tecs.newScalarComponent = internalComponents.newScalarComponent as function<T>(
+    options: types.components.ScalarComponentOptions<T>
+): types.components.ScalarComponent<T>
+tecs.newTagComponent = internalComponents.newTagComponent as function(
+    options: types.components.TagComponentOptions
+): types.components.Component
+tecs.newFFIComponent = internalComponents.newFFIComponent as function<C is types.components.Component>(
+    options: types.components.FFIComponentOptions<C>
+): C
+tecs.newRelationship = internalComponents.newRelationship as function<R is types.components.Relationship>(
+    config: types.components.RelationshipOptions<R>
+): R
+tecs.newFFIRelationship = internalComponents.newFFIRelationship as function<R is types.components.Relationship>(
+    config: types.components.FFIRelationshipOptions<R>
+): R
 
 function tecs.getComponentById(id: integer): types.components.Component
     return internalComponents.componentsById[id]
@@ -326,15 +328,20 @@ local ENGINE <const>: {string: string} = {
     compress = "tecs.compress",
 }
 
-setmetatable(tecs as {string: any}, {
-    __index = function(self: {string: any}, name: string): any
-        local module = ENGINE[name]
-        if module == nil then return nil end
-        local resolved = require(module)
-        rawset(self, name, resolved)
-        return resolved
-    end,
-})
+setmetatable(
+    tecs as {string: any},
+    {
+        __index = function(self: {string: any}, name: string): any
+            local module = ENGINE[name]
+            if module == nil then
+                return nil
+            end
+            local resolved = require(module)
+            rawset(self, name, resolved)
+            return resolved
+        end,
+    }
+)
 
 tecs.version = "0.1.0"
 

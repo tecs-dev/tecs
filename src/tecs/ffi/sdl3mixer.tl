@@ -18,8 +18,9 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("sdl3mixer")
 
-local namespace <const>, libraryPath <const> =
-    loader.library("SDL3_mixer", "sdl3_mixer", "TECS_SDL3MIXER_PATH", "sdl3mixer")
+local namespace <const>, libraryPath <const> = loader.library(
+    "SDL3_mixer", "sdl3_mixer", "TECS_SDL3MIXER_PATH", "sdl3mixer"
+)
 
 local record sdl3mixer
     C: loader.CNamespace
@@ -38,8 +39,12 @@ local started = false
 --- Call from the main thread. Everything else in this library may be called
 --- from any thread once this has returned.
 function sdl3mixer.init(): boolean
-    if started then return true end
-    if not namespace.MIX_Init() then return false end
+    if started then
+        return true
+    end
+    if not namespace.MIX_Init() then
+        return false
+    end
     started = true
     return true
 end
@@ -54,7 +59,9 @@ end
 --- Nothing loaded through this library may be touched afterwards, including
 --- anything a worker loaded, so callers destroy their own objects first.
 function sdl3mixer.quit()
-    if not started then return end
+    if not started then
+        return
+    end
     namespace.MIX_Quit()
     started = false
 end

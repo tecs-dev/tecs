@@ -51,7 +51,6 @@ local record TestHelpers
     -- Create component providers for a test suite
     createComponentProvider: function(prefix: string, testId: integer): ComponentProvider
 
-
     -- Count items in a table (useful for testing)
     countTable: function<T>(t: {any: T}): integer
 
@@ -134,10 +133,7 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     })
 
     function provider:createRelationship(name: string, exclusive: boolean): tecs.Relationship
-        return tecs.newRelationship({
-            name = prefix .. name .. testId,
-            exclusive = exclusive
-        })
+        return tecs.newRelationship({name = prefix .. name .. testId, exclusive = exclusive})
     end
 
     return provider
@@ -188,17 +184,19 @@ function TestHelpers.createMockFile(): TestHelpers.MockFile
         close = spy.new(function() end),
         setvbuf = spy.new(function() end),
         read = spy.new(function(): string return "" end),
-        seek = spy.new(function(): integer return 0 end)
+        seek = spy.new(function(): integer return 0 end),
     } as any as TestHelpers.MockFile
 end
 
 -- Record for accessing archetype implementation fields
 local record ArchetypeImpl
-    entities: DoubleArray  -- FFI array
+    entities: DoubleArray -- FFI array
     columns: {tecs.Component: any}
 end
 
-function TestHelpers.addEntitiesToArchetype(archetype: Archetype, entityIds: {integer}, componentData: {{tecs.Component: any}})
+function TestHelpers.addEntitiesToArchetype(
+    archetype: Archetype, entityIds: {integer}, componentData: {{tecs.Component: any}}
+)
     local ffi = require("tecs.internal.ffi")
     local archImpl = archetype as ArchetypeImpl
 

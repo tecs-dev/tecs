@@ -39,7 +39,7 @@ local record Shader
     _destroyed: boolean
 end
 
-local ShaderMT <const>: metatable<Shader> = { __index = Shader }
+local ShaderMT <const>: metatable<Shader> = {__index = Shader}
 
 local STAGES <const>: {string: integer} = {
     vertex = 0,
@@ -47,8 +47,7 @@ local STAGES <const>: {string: integer} = {
 }
 
 --- Creates a shader on `device` from an already compiled stage.
-local function create(device: loader.CPtr, stage: string,
-                      compiled: shadercompiler.CompiledShader): Shader
+local function create(device: loader.CPtr, stage: string, compiled: shadercompiler.CompiledShader): Shader
     local stageEnum = STAGES[stage]
     if stageEnum == nil then
         error(("tecs: '%s' is not a graphics shader stage"):format(tostring(stage)), 3)
@@ -68,7 +67,9 @@ local function create(device: loader.CPtr, stage: string,
     settings.props = 0
 
     local handle = C.SDL_CreateGPUShader(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUShader") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUShader")
+    end
 
     local self = setmetatable({} as Shader, ShaderMT)
     self.handle = handle
@@ -91,12 +92,10 @@ end
 --- `.frag` asked for as a vertex shader is not a thing that can be said.
 --- @param name A registered shader, without the `.glsl` extension, such as
 ---     "deferred.lighting.frag".
-function Shader.load(device: loader.CPtr, name: string,
-                     options: ShaderOptions): Shader
+function Shader.load(device: loader.CPtr, name: string, options: ShaderOptions): Shader
     options = options or {}
     local entry = shaders.get(name)
-    return create(device, entry.stage,
-        shadercompiler.load(name, options.defines))
+    return create(device, entry.stage, shadercompiler.load(name, options.defines))
 end
 
 --- Compiles GLSL directly and creates a shader on `device`.
@@ -109,13 +108,20 @@ end
 --- and source handed in directly has already been assembled by whoever holds
 --- it.
 --- @param stage "vertex" or "fragment". Compute uses `ComputePipeline`.
-function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string,
-                         options: ShaderOptions): Shader
+function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string, options: ShaderOptions): Shader
     options = options or {}
-    return create(device, stage, shadercompiler.compile(source, stage, {
-        name = options.name,
-        defines = options.defines,
-    }))
+    return create(
+        device,
+        stage,
+        shadercompiler.compile(
+            source,
+            stage,
+            {
+                name = options.name,
+                defines = options.defines,
+            }
+        )
+    )
 end
 
 --- Releases the shader. Safe to call more than once.
@@ -123,7 +129,9 @@ end
 --- A shader may be released once every pipeline using it has been created;
 --- SDL retains what it needs.
 function Shader:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.SDL_ReleaseGPUShader(self._device, self.handle)
     self.handle = nil

@@ -132,7 +132,7 @@ local function denseUnlink(world: WorldImpl, owner: Component, id: integer, valu
     if value ~= nil then
         local store = denseStore(world, owner)
         if store then
-            store:unlink(id, (value as {string:integer}).target)
+            store:unlink(id, (value as {string: integer}).target)
         end
     end
 end
@@ -161,7 +161,7 @@ function frameworkBehavior.set(world: WorldImpl, id: integer, componentType: Com
     end
 
     if behavior == SparseRelationship then
-        if (value as {string:any}).target ~= nil then
+        if (value as {string: any}).target ~= nil then
             world:setSparseRaw(id, value)
         end
         return world:deferSetRaw(id, owner, owner)
@@ -191,7 +191,7 @@ function frameworkBehavior.set(world: WorldImpl, id: integer, componentType: Com
     if owner.reverseIndex then
         local store = denseStore(world, owner)
         if store then
-            store:link(id, (value as {string:integer}).target)
+            store:link(id, (value as {string: integer}).target)
         end
     end
 end

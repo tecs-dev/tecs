@@ -163,8 +163,7 @@ local record frametable
     --- @param start The fixed step playback began on, or the tick to hold.
     --- @param rate Clip ticks per fixed step, or zero to hold.
     --- @param loop Whether the cycle repeats rather than parking at its end.
-    encode: function(target: Sprite, id: integer, start: number, rate: number,
-                     loop: boolean)
+    encode: function(target: Sprite, id: integer, start: number, rate: number, loop: boolean)
 
     --- Ticks one pass through a playback's cycle takes.
     --- @param id An index from `register`. Anything else answers zero.
@@ -231,7 +230,9 @@ end
 --- it shows. Run once per tick when a playback is registered and never again.
 local function stepAt(timing: {number}, steps: integer, time: number): integer
     for step = 1, steps do
-        if time <= timing[step] then return step end
+        if time <= timing[step] then
+            return step
+        end
     end
     return steps
 end
@@ -268,10 +269,18 @@ local function resolvePivots(playback: Playback)
     for step = 1, steps do
         local x <const>, y <const> = source:pivotOf(slice, order[step])
         pivotX[step], pivotY[step] = x, y
-        if x < minX then minX = x end
-        if x > maxX then maxX = x end
-        if y < minY then minY = y end
-        if y > maxY then maxY = y end
+        if x < minX then
+            minX = x
+        end
+        if x > maxX then
+            maxX = x
+        end
+        if y < minY then
+            minY = y
+        end
+        if y > maxY then
+            maxY = y
+        end
     end
 
     local midX <const> = (minX + maxX) * 0.5
@@ -287,7 +296,9 @@ end
 
 function frametable.pivotOf(id: integer): number, number, number, number
     local playback <const> = playbacks[id]
-    if playback == nil then return CENTRE, CENTRE, 0.0, 0.0 end
+    if playback == nil then
+        return CENTRE, CENTRE, 0.0, 0.0
+    end
     -- Assembled on demand, because a rebind or a re-export can move the slice
     -- since this was registered and a caller asking where the pivot is wants
     -- the answer the shader is about to draw with.
@@ -312,7 +323,9 @@ local function planTicks(playback: Playback)
     -- land rather than dividing into an empty table.
     local cycle <const> = source._cycle[tag] or 0.0
     local count = floor(cycle * TICK_HZ + 0.5)
-    if count < 1 then count = 1 end
+    if count < 1 then
+        count = 1
+    end
 
     local ticks: {integer} = {}
     for tick = 0, count - 1 do
@@ -323,8 +336,7 @@ local function planTicks(playback: Playback)
     playback.ticks = ticks
 end
 
-function frametable.register(source: Sheet, tag: integer,
-                             slice?: integer): integer
+function frametable.register(source: Sheet, tag: integer, slice?: integer): integer
     if source == nil then
         error("tecs: a playback needs a sheet", 2)
     end
@@ -333,7 +345,9 @@ function frametable.register(source: Sheet, tag: integer,
 
     local key <const> = source.id .. ":" .. tag .. ":" .. slice
     local existing <const> = ids[key]
-    if existing ~= nil then return existing end
+    if existing ~= nil then
+        return existing
+    end
 
     if source._order[tag] == nil then
         error(("tecs: sheet '%s' has no tag %d"):format(source.name, tag), 2)
@@ -365,13 +379,17 @@ end
 
 function frametable.tickCount(id: integer): integer
     local playback <const> = playbacks[id]
-    if playback == nil then return 0 end
+    if playback == nil then
+        return 0
+    end
     return #playback.ticks
 end
 
 function frametable.frameAt(id: integer, tick: number, loop: boolean): integer
     local playback <const> = playbacks[id]
-    if playback == nil then return 1 end
+    if playback == nil then
+        return 1
+    end
     local ticks <const> = playback.ticks
     local count <const> = #ticks
 
@@ -380,13 +398,21 @@ function frametable.frameAt(id: integer, tick: number, loop: boolean): integer
         at = tick % count
     else
         at = tick
-        if at < 0.0 then at = 0.0 end
-        if at > count - 1 then at = count - 1 end
+        if at < 0.0 then
+            at = 0.0
+        end
+        if at > count - 1 then
+            at = count - 1
+        end
     end
 
     local index = floor(at) + 1
-    if index < 1 then index = 1 end
-    if index > count then index = count end
+    if index < 1 then
+        index = 1
+    end
+    if index > count then
+        index = count
+    end
     return playback.order[ticks[index]]
 end
 
@@ -399,12 +425,13 @@ function frametable.isPlayback(target: Sprite): boolean
 end
 
 function frametable.playbackOf(target: Sprite): integer
-    if target.u0 >= 0.0 then return 0 end
+    if target.u0 >= 0.0 then
+        return 0
+    end
     return floor(-target.u0 + 0.5)
 end
 
-function frametable.encode(target: Sprite, id: integer, start: number,
-                           rate: number, loop: boolean)
+function frametable.encode(target: Sprite, id: integer, start: number, rate: number, loop: boolean)
     target.u0 = -id
     target.v0 = start
     target.u1 = rate
@@ -416,8 +443,7 @@ end
 -------------------------------------------------------------------------------
 
 --- Writes one playback's frame entries and hands back where they went.
-local function writeEntries(data: loader.CArray, at: integer,
-                            playback: Playback): integer
+local function writeEntries(data: loader.CArray, at: integer, playback: Playback): integer
     local source <const> = playback.source
     local uvs <const> = source._uvs
     local layer <const> = source._slot
@@ -471,7 +497,9 @@ local function assemble()
         local playback <const> = playbacks[id]
         total = total + #playback.ticks + #playback.order * ENTRY_FLOATS
     end
-    if total < 1 then total = 1 end
+    if total < 1 then
+        total = 1
+    end
 
     if total > capacity then
         -- Grown in one go rather than per registration, and never while a frame
@@ -517,8 +545,7 @@ local function assemble()
         local entryBase <const> = playback.entryBase
         local tickBase <const> = playback.tickBase
         for tick = 1, #ticks do
-            data[tickBase + tick - 1] =
-                entryBase + (ticks[tick] - 1) * ENTRY_FLOATS
+            data[tickBase + tick - 1] = entryBase + (ticks[tick] - 1) * ENTRY_FLOATS
         end
     end
 

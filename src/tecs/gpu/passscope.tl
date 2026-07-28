@@ -38,7 +38,9 @@ local count = 0
 --- Finds the entry for `commandBuffer`, or zero.
 local function indexOf(commandBuffer: loader.CValue): integer
     for index = 1, count do
-        if buffers[index] == commandBuffer then return index end
+        if buffers[index] == commandBuffer then
+            return index
+        end
     end
     return 0
 end
@@ -62,7 +64,9 @@ end
 --- Forgets the pass open on `commandBuffer`. Called by `finish`.
 function passscope.closed(commandBuffer: loader.CValue)
     local index = indexOf(commandBuffer)
-    if index == 0 then return end
+    if index == 0 then
+        return
+    end
     buffers[index] = buffers[count]
     passes[index] = passes[count]
     buffers[count] = nil
@@ -77,7 +81,9 @@ end
 --- @return Whether there was one to end.
 function passscope.endOpen(commandBuffer: loader.CValue): boolean
     local index = indexOf(commandBuffer)
-    if index == 0 then return false end
+    if index == 0 then
+        return false
+    end
     passes[index]:finish()
     return true
 end

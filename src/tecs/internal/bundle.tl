@@ -60,8 +60,7 @@ function bundle.create(world: World, name: string, def?: BundleDef): types.Bundl
         elseif value == true then
             factory = function(): Component return t() end
         else
-            error("Bundle 'with' value for " .. t.componentName ..
-                " must be a factory function or `true`")
+            error("Bundle 'with' value for " .. t.componentName .. " must be a factory function or `true`")
         end
         factoryArray[requiredCount + withIndex] = factory
         defaultedNames[withIndex] = t.componentName
@@ -71,9 +70,10 @@ function bundle.create(world: World, name: string, def?: BundleDef): types.Bundl
     -- bundle's ordered component list. The generated function writes
     -- directly to the target archetype, bypassing the deferred staging
     -- path. Bundle spawn bookkeeping lives on the world.
-    local worldAny = world as {string:any}
-    local codegen = worldAny._codegenBundleSpawn
-        as function(any, {Component}, {function(): Component}, integer): function(any, ...: Component): integer
+    local worldAny = world as {string: any}
+    local codegen = worldAny._codegenBundleSpawn as function(
+        any, {Component}, {function(): Component}, integer
+    ): function(any, ...: Component): integer
     local spawnFn = codegen(world, typeArray, factoryArray, requiredCount)
 
     -- Assemble the bundle object. `spawn` is assigned as a per-instance
@@ -85,7 +85,7 @@ function bundle.create(world: World, name: string, def?: BundleDef): types.Bundl
         defaulted = defaultedNames,
         _world = world,
     }
-    (bundleObj as {string:any}).spawn = spawnFn
+    (bundleObj as {string: any}).spawn = spawnFn
     setmetatable(bundleObj as table, {__index = Bundle})
 
     -- Register with world

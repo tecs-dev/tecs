@@ -17,9 +17,11 @@ local ffi <const> = require("ffi")
 -- Enough of dlfcn to pin a library in memory. Declared here rather than
 -- generated, because it is the C library's own interface and exists on every
 -- target that can load one at all.
-ffi.cdef[[
+ffi.cdef(
+    [[
 void *dlopen(const char *path, int mode);
 ]]
+)
 
 --- Load now, and never unmap.
 ---
@@ -85,9 +87,13 @@ end
 --- that has to be set is a program that does not run.
 local function ownDirectory(): string
     local source = debug.getinfo(1, "S").source
-    if source == nil or source:sub(1, 1) ~= "@" then return nil end
+    if source == nil or source:sub(1, 1) ~= "@" then
+        return nil
+    end
     local directory = source:sub(2):match("^(.*)[/\\][^/\\]*$")
-    if directory == nil or directory == "" then return nil end
+    if directory == nil or directory == "" then
+        return nil
+    end
     return directory
 end
 
@@ -101,14 +107,18 @@ end
 local function siblingLibraryPaths(): {string}
     local paths: {string} = {}
     local directory = ownDirectory()
-    if directory == nil then return paths end
+    if directory == nil then
+        return paths
+    end
 
     -- Six is past the deepest layout either tree uses, so this stops rather
     -- than walking to the filesystem root on a path it does not recognise.
     for _ = 1, 6 do
         paths[#paths + 1] = directory .. "/lib/"
         local parent = directory:match("^(.*)[/\\][^/\\]+$")
-        if parent == nil or parent == "" or parent == directory then break end
+        if parent == nil or parent == "" or parent == directory then
+            break
+        end
         directory = parent
     end
     return paths
@@ -139,9 +149,7 @@ for _, path in ipairs({
     loader.searchPaths[#loader.searchPaths + 1] = path
 end
 
-local suffix <const> = ffi.os == "Windows" and ".dll"
-    or ffi.os == "OSX" and ".dylib"
-    or ".so"
+local suffix <const> = ffi.os == "Windows" and ".dll" or ffi.os == "OSX" and ".dylib" or ".so"
 
 local loaded <const>: {string: loader.CNamespace} = {}
 
@@ -163,7 +171,9 @@ local structs: {string: string} = nil
 --- The function-pointer table the host installed for `name`, if any.
 local function registryTable(name: string): loader.CValue
     local registry = (_G as {string: any})["__tecsRegistry"]
-    if registry == nil then return nil end
+    if registry == nil then
+        return nil
+    end
     return (registry as {string: any})[name] as loader.CValue
 end
 
@@ -179,21 +189,22 @@ end
 --- engine makes.
 local function registryNamespace(functions: loader.CValue): loader.CNamespace
     local proxy = {}
-    return setmetatable(proxy, {
-        __index = function(_self: any, name: string): any
-            -- Indexing a struct with a name it does not have raises rather
-            -- than answering nil, so the miss has to be caught to fall
-            -- through to the constants.
-            local ok, found = pcall(function(): any
-                return (functions as loader.CValue)[name]
-            end)
-            if not ok or found == nil then
-                found = (ffi.C as loader.CValue)[name]
-            end
-            rawset(proxy, name, found)
-            return found
-        end,
-    }) as loader.CNamespace
+    return setmetatable(
+        proxy,
+        {
+            __index = function(_self: any, name: string): any
+                -- Indexing a struct with a name it does not have raises rather
+                -- than answering nil, so the miss has to be caught to fall
+                -- through to the constants.
+                local ok, found = pcall(function(): any return (functions as loader.CValue)[name] end)
+                if not ok or found == nil then
+                    found = (ffi.C as loader.CValue)[name]
+                end
+                rawset(proxy, name, found)
+                return found
+            end,
+        }
+    ) as loader.CNamespace
 end
 
 --- Whether a library is reachable without dynamic loading.
@@ -211,8 +222,9 @@ end
 --- @param formula Package name used to expand per-package prefixes.
 --- @param envVar Environment variable holding an absolute override path.
 --- @param registryName Key the host registered this library under.
-function loader.library(soname: string, formula: string, envVar: string,
-                        registryName?: string): loader.CNamespace, string
+function loader.library(
+    soname: string, formula: string, envVar: string, registryName?: string
+): loader.CNamespace, string
     -- Keyed by the registry name rather than the library, because several
     -- registered APIs can share one library: the worker, the log sink and the
     -- solver pool are all in libtecsworker, and each has its own table of
@@ -220,7 +232,9 @@ function loader.library(soname: string, formula: string, envVar: string,
     -- answer for the rest, and a name only the others declare would miss.
     local key = registryName or soname
     local cached = loaded[key]
-    if cached ~= nil then return cached, "(cached)" end
+    if cached ~= nil then
+        return cached, "(cached)"
+    end
 
     -- Taken at build time, so this path needs no dlopen and works where one is
     -- not permitted.
@@ -234,8 +248,7 @@ function loader.library(soname: string, formula: string, envVar: string,
         if struct == nil then
             error(("tecs: %s is in the registry with no declared table"):format(key), 2)
         end
-        local namespace = registryNamespace(
-            ffi.cast(struct .. " *", table_ as string) as loader.CValue)
+        local namespace = registryNamespace(ffi.cast(struct .. " *", table_ as string) as loader.CValue)
         loaded[key] = namespace
         return namespace, "(registry)"
     end
@@ -261,19 +274,24 @@ function loader.library(soname: string, formula: string, envVar: string,
             -- Pinned before anything can start a thread inside it. A failure
             -- here is not fatal: the library is already loaded and usable, and
             -- only an orderly shutdown that beats its own threads is at risk.
-            pcall(function()
-                local dlopen = (ffi.C as {string: any}).dlopen
-                    as function(string, integer): any
-                dlopen(path, RTLD_NOW + RTLD_NODELETE)
-            end)
+            pcall(
+                function()
+                    local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
+                    dlopen(path, RTLD_NOW + RTLD_NODELETE)
+                end
+            )
             loaded[key] = namespace
             return namespace, path
         end
         failures[#failures + 1] = path
     end
 
-    error(("tecs: cannot load %s. Tried:\n  %s\nSet %s to an absolute path.")
-        :format(soname, table.concat(failures, "\n  "), envVar), 2)
+    error(
+        ("tecs: cannot load %s. Tried:\n  %s\nSet %s to an absolute path."):format(
+            soname, table.concat(failures, "\n  "), envVar
+        ),
+        2
+    )
 end
 
 local declared <const>: {string: boolean} = {}
@@ -284,7 +302,9 @@ local declared <const>: {string: boolean} = {}
 --- registered one, since that is what `library` casts through.
 --- @param name Module basename, e.g. "sdl3" for `tecs.ffi.sdl3cdef`.
 function loader.declare(name: string)
-    if declared[name] then return end
+    if declared[name] then
+        return
+    end
     local ok, source = requireGenerated(name .. "cdef")
     if not ok then
         error(("tecs: missing generated cdef for %s. Run the build."):format(name), 2)
@@ -294,8 +314,7 @@ function loader.declare(name: string)
     if registryTable(name) ~= nil then
         local hasApi, api = requireGenerated(name .. "apicdef")
         if not hasApi then
-            error(("tecs: %s is registered but its table declaration is missing")
-                :format(name), 2)
+            error(("tecs: %s is registered but its table declaration is missing"):format(name), 2)
         end
         ffi.cdef(api as string)
     end
@@ -309,7 +328,9 @@ end
 --- CData union that cannot name an open FFI value, so it lives here once
 --- instead of at every call site.
 function loader.toString(value: loader.CValue): string
-    if value == nil then return "" end
+    if value == nil then
+        return ""
+    end
     return ffi.string(value as string) as string
 end
 
@@ -318,7 +339,9 @@ end
 --- Unlike `toString` this does not stop at a NUL, so it is what reads a binary
 --- blob such as SPIR-V or a packed shader artifact.
 function loader.toBytes(value: loader.CValue, length: integer): string
-    if value == nil then return "" end
+    if value == nil then
+        return ""
+    end
     return ffi.string(value as string, length) as string
 end
 
@@ -353,15 +376,13 @@ function loader.castPointer(declaration: string, base: loader.CValue): loader.CA
 end
 
 --- Copies `size` bytes between FFI buffers.
-function loader.copyBytes(destination: loader.CArray, source: loader.CValue,
-                          size: integer)
+function loader.copyBytes(destination: loader.CArray, source: loader.CValue, size: integer)
     ffi.copy(destination as string, source as string, size)
 end
 
 --- Copies `size` bytes to a byte pointer, which may be an offset into a
 --- mapped region.
-function loader.copyTo(destination: loader.BytePointer, source: loader.CValue,
-                       size: integer)
+function loader.copyTo(destination: loader.BytePointer, source: loader.CValue, size: integer)
     ffi.copy(destination as string, source as string, size)
 end
 

@@ -23,9 +23,7 @@ local record evaluators
     ---
     --- Cached on the program, so the work of binding functions and looking
     --- up names happens once per constant rather than once per playback.
-    resolve: function(
-        prog: seqtypes.ProgramImpl, evaluator: seqtypes.Evaluator, index: integer
-    ): any
+    resolve: function(prog: seqtypes.ProgramImpl, evaluator: seqtypes.Evaluator, index: integer): any
 end
 
 local byName: {string: seqtypes.Evaluator} = {}
@@ -44,13 +42,11 @@ function evaluators.get(name: string): seqtypes.Evaluator
     return byName[name]
 end
 
-function evaluators.resolve(
-    prog: seqtypes.ProgramImpl,
-    evaluator: seqtypes.Evaluator,
-    index: integer
-): any
+function evaluators.resolve(prog: seqtypes.ProgramImpl, evaluator: seqtypes.Evaluator, index: integer): any
     local raw <const> = prog.consts[index]
-    if not evaluator.resolve then return raw end
+    if not evaluator.resolve then
+        return raw
+    end
     local cache = prog.evalResolved
     if not cache then
         cache = {}

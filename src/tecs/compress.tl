@@ -49,13 +49,11 @@ local K <const> = zlib.K
 
 --- The three entry points, typed. The bindings are open namespaces, so the
 --- signature is declared here rather than inferred, the way `tecs.hash` does it.
-local inflateInit2 <const> = C.inflateInit2_
-    as function(stream: loader.CValue, windowBits: integer, version: string,
-                size: integer): integer
-local inflate <const> = C.inflate
-    as function(stream: loader.CValue, flush: integer): integer
-local inflateEnd <const> = C.inflateEnd
-    as function(stream: loader.CValue): integer
+local inflateInit2 <const> = C.inflateInit2_ as function(
+    stream: loader.CValue, windowBits: integer, version: string, size: integer
+): integer
+local inflate <const> = C.inflate as function(stream: loader.CValue, flush: integer): integer
+local inflateEnd <const> = C.inflateEnd as function(stream: loader.CValue): integer
 
 --- What `inflateInit2_` checks itself against, and what it is checked against.
 ---
@@ -85,8 +83,7 @@ local CODE_NAMES <const>: {integer: string} = {
     [K.Z_STREAM_ERROR] = "its state is inconsistent",
     [K.Z_DATA_ERROR] = "it is corrupt",
     [K.Z_MEM_ERROR] = "zlib could not allocate",
-    [K.Z_VERSION_ERROR] = "the zlib in this process is not the one these "
-        .. "bindings were generated against",
+    [K.Z_VERSION_ERROR] = "the zlib in this process is not the one these " .. "bindings were generated against",
 }
 
 local record compress
@@ -106,8 +103,7 @@ local function describe(fields: loader.CStruct, status: integer): string
 
     local message = fields.msg
     if message ~= nil then
-        return ("tecs: the compressed stream is not valid: %s")
-            :format(loader.toString(message as loader.CValue))
+        return ("tecs: the compressed stream is not valid: %s"):format(loader.toString(message as loader.CValue))
     end
     local named = CODE_NAMES[status] or ("zlib returned %d"):format(status)
     return ("tecs: the compressed stream is not valid: %s"):format(named)
@@ -115,10 +111,11 @@ end
 
 --- Inflates all of `bytes` under `windowBits`, which is what selects the
 --- wrapper. Returns the bytes, or nil and what went wrong.
-local function run(bytes: string, windowBits: integer,
-                   sizeHint?: integer): string, string
+local function run(bytes: string, windowBits: integer, sizeHint?: integer): string, string
     local capacity = sizeHint
-    if capacity == nil or capacity < 1 then capacity = INITIAL_CAPACITY end
+    if capacity == nil or capacity < 1 then
+        capacity = INITIAL_CAPACITY
+    end
 
     local stream <const> = loader.newStruct("z_stream")
     local fields <const> = stream as loader.CStruct
@@ -146,7 +143,9 @@ local function run(bytes: string, windowBits: integer,
         end
 
         local room = capacity - produced
-        if room > MAX_CHUNK then room = MAX_CHUNK end
+        if room > MAX_CHUNK then
+            room = MAX_CHUNK
+        end
         fields.next_out = loader.bytePointer(out as loader.CValue) + produced
         fields.avail_out = room
 
@@ -183,7 +182,9 @@ function compress.inflateRaw(bytes: string, sizeHint?: integer): string
         error("tecs: an empty string is not a DEFLATE stream", 2)
     end
     local result, reason = run(bytes, -WINDOW_BITS, sizeHint)
-    if result == nil then error(reason, 2) end
+    if result == nil then
+        error(reason, 2)
+    end
     return result
 end
 
@@ -208,7 +209,9 @@ function compress.inflate(bytes: string, sizeHint?: integer): string
         error("tecs: an empty string is not a zlib stream", 2)
     end
     local result, reason = run(bytes, WINDOW_BITS, sizeHint)
-    if result == nil then error(reason, 2) end
+    if result == nil then
+        error(reason, 2)
+    end
     return result
 end
 

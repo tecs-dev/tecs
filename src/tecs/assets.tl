@@ -243,8 +243,8 @@ end
 
 local type Batch = assets.Batch
 
-local HandleMT <const>: metatable<Handle> = { __index = Handle }
-local BatchMT <const>: metatable<Batch<any>> = { __index = Batch }
+local HandleMT <const>: metatable<Handle> = {__index = Handle}
+local BatchMT <const>: metatable<Batch<any>> = {__index = Batch}
 
 local pending: {integer: Handle} = {}
 --- Image decodes that have been queued and not yet answered, by path. A second
@@ -268,7 +268,9 @@ local worker: workers.Worker = nil
 --- and every decode already queued would answer into a channel that has been
 --- dropped, so a load in flight across the second call would never resolve.
 function assets.install(luaPath?: string)
-    if worker ~= nil then return end
+    if worker ~= nil then
+        return
+    end
     worker = workers.spawn({
         source = DECODER,
         luaPath = luaPath or package.path,
@@ -312,11 +314,10 @@ function assets.loadImage(path: string): Handle
         return shared
     end
 
-    local handle = setmetatable(
-        { kind = "image", status = "loading", path = path } as Handle, HandleMT)
+    local handle = setmetatable({kind = "image", status = "loading", path = path} as Handle, HandleMT)
     local id = queue(handle)
     inFlight[path] = handle
-    worker:send({ id = id, kind = "image", path = path })
+    worker:send({id = id, kind = "image", path = path})
     return handle
 end
 
@@ -331,22 +332,29 @@ end
 --- The library is initialised here rather than on the worker: `MIX_Init` is
 --- documented as not thread safe, and doing it before the task is sent puts it
 --- in order ahead of every decode without a lock.
-function assets.loadSound(path: string, mode: string,
-                          streamMs: integer): Handle
+function assets.loadSound(path: string, mode: string, streamMs: integer): Handle
     filesystem.note(path, "sound")
     if not sdl3mixer.init() then
-        local failed = setmetatable({
-            kind = "sound", status = "failed", path = path, _shares = 1,
-            error = "cannot load " .. path,
-        } as Handle, HandleMT)
+        local failed = setmetatable(
+            {
+                kind = "sound",
+                status = "failed",
+                path = path,
+                _shares = 1,
+                error = "cannot load " .. path,
+            } as Handle,
+            HandleMT
+        )
         return failed
     end
-    local handle = setmetatable(
-        { kind = "sound", status = "loading", path = path } as Handle, HandleMT)
+    local handle = setmetatable({kind = "sound", status = "loading", path = path} as Handle, HandleMT)
     local id = queue(handle)
     worker:send({
-        id = id, kind = "sound", path = path,
-        mode = mode, streamMs = streamMs,
+        id = id,
+        kind = "sound",
+        path = path,
+        mode = mode,
+        streamMs = streamMs,
     })
     return handle
 end
@@ -356,20 +364,22 @@ local function complete(result: {string: any}): boolean
     local id = result.id as integer
     local handle = pending[id]
     pending[id] = nil
-    if handle == nil then return false end
-    if inFlight[handle.path] == handle then inFlight[handle.path] = nil end
+    if handle == nil then
+        return false
+    end
+    if inFlight[handle.path] == handle then
+        inFlight[handle.path] = nil
+    end
 
     -- Released while the worker was still decoding. Ownership still arrives
     -- with the address, so what arrived is destroyed here rather than left for
     -- a handle nobody is holding any more.
     if handle.status == "released" then
         if result.surface ~= nil then
-            C.SDL_DestroySurface(ffi.cast("SDL_Surface *",
-                ffi.cast("uintptr_t", result.surface)) as loader.CValue)
+            C.SDL_DestroySurface(ffi.cast("SDL_Surface *", ffi.cast("uintptr_t", result.surface)) as loader.CValue)
         end
         if result.audio ~= nil then
-            MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *",
-                ffi.cast("uintptr_t", result.audio)) as loader.CValue)
+            MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue)
         end
         return true
     end
@@ -386,8 +396,7 @@ local function complete(result: {string: any}): boolean
         if handle.resident then
             -- Ownership arrived with the address, exactly as it does for a
             -- surface. The mixer allocated this, so the mixer frees it.
-            handle.audio = ffi.cast("MIX_Audio *",
-                ffi.cast("uintptr_t", result.audio)) as loader.CValue
+            handle.audio = ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue
         end
         handle.status = "ready"
         return true
@@ -395,8 +404,7 @@ local function complete(result: {string: any}): boolean
 
     -- Ownership arrived with the address. The surface stays alive until the
     -- handle is released, because the pixels are what the caller came for.
-    local surface = ffi.cast("SDL_Surface *",
-        ffi.cast("uintptr_t", result.surface)) as loader.CValue
+    local surface = ffi.cast("SDL_Surface *", ffi.cast("uintptr_t", result.surface)) as loader.CValue
     handle._surface = surface
     handle.pixels = surface.pixels as loader.CValue
     handle.width = result.width as integer
@@ -422,11 +430,17 @@ end
 --- Where several loads shared one decode, this releases one of them, and the
 --- last one frees.
 function Handle:release()
-    if self.status == "released" then return end
+    if self.status == "released" then
+        return
+    end
     self._shares = self._shares - 1
-    if self._shares > 0 then return end
+    if self._shares > 0 then
+        return
+    end
 
-    if inFlight[self.path] == self then inFlight[self.path] = nil end
+    if inFlight[self.path] == self then
+        inFlight[self.path] = nil
+    end
     self.status = "released"
 
     if self.audio ~= nil then
@@ -434,7 +448,9 @@ function Handle:release()
         self.audio = nil
         self.resident = false
     end
-    if self._surface == nil then return end
+    if self._surface == nil then
+        return
+    end
     C.SDL_DestroySurface(self._surface)
     self._surface = nil
     self.pixels = nil
@@ -442,12 +458,18 @@ end
 
 --- Takes finished decodes and uploads them. Call once per frame.
 function assets.update(): integer
-    if worker == nil then return 0 end
+    if worker == nil then
+        return 0
+    end
     local completed = 0
     while true do
         local result = worker:receive(0)
-        if result == nil then break end
-        if complete(result as {string: any}) then completed = completed + 1 end
+        if result == nil then
+            break
+        end
+        if complete(result as {string: any}) then
+            completed = completed + 1
+        end
     end
     return completed
 end
@@ -455,16 +477,22 @@ end
 --- Handles still waiting on the worker.
 function assets.pending(): integer
     local count = 0
-    for _ in pairs(pending) do count = count + 1 end
+    for _ in pairs(pending) do
+        count = count + 1
+    end
     return count
 end
 
 --- Waits up to `ms` for one decode and takes it. Shared by everything here
 --- that blocks, so there is one description of how a wait is spent.
 local function pump(ms: number)
-    if worker == nil then return end
+    if worker == nil then
+        return
+    end
     local result = worker:receive(ms)
-    if result ~= nil then complete(result as {string: any}) end
+    if result ~= nil then
+        complete(result as {string: any})
+    end
 end
 
 --- Milliseconds one blocking pump spends when nothing has arrived yet.
@@ -483,7 +511,9 @@ local function spend(ms: number, waiting: function(): boolean)
     local deadline = clock.now() * 1000.0 + ms
     while waiting() do
         local remaining = deadline - clock.now() * 1000.0
-        if remaining <= 0 then break end
+        if remaining <= 0 then
+            break
+        end
         pump(remaining < PUMP_MS and remaining or PUMP_MS)
     end
 end
@@ -492,9 +522,7 @@ end
 ---
 --- For startup and tests. A frame should poll `update` instead.
 function assets.waitAll(timeoutMs?: number)
-    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean
-        return assets.pending() > 0
-    end)
+    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean return assets.pending() > 0 end)
 end
 
 -------------------------------------------------------------------------------
@@ -506,15 +534,18 @@ end
 --- The callback is given once rather than at every drain, because what a batch
 --- does with a load is a property of who made it and not of the moment it is
 --- looked at.
-function assets.batch<T>(
-    finished: function(key: T, handle: Handle)
-): Batch<T>
+function assets.batch<T>(finished: function(key: T, handle: Handle)): Batch<T>
     if finished == nil then
         error("tecs: a batch needs something to hand finished loads to", 2)
     end
-    return setmetatable({
-        _finished = finished, _handles = {}, _keys = {},
-    } as Batch<T>, BatchMT as metatable<Batch<T>>)
+    return setmetatable(
+        {
+            _finished = finished,
+            _handles = {},
+            _keys = {},
+        } as Batch<T>,
+        BatchMT as metatable<Batch<T>>
+    )
 end
 
 function Batch:add(handle: Handle, key: T)
@@ -527,14 +558,18 @@ function Batch:pending(): integer
     local waiting = 0
     local handles = self._handles
     for index = 1, #handles do
-        if handles[index].status == "loading" then waiting = waiting + 1 end
+        if handles[index].status == "loading" then
+            waiting = waiting + 1
+        end
     end
     return waiting
 end
 
 function Batch:resolve(): integer
     local waiting = #self._handles
-    if waiting == 0 then return 0 end
+    if waiting == 0 then
+        return 0
+    end
     assets.update()
 
     -- Compacted in place: what is still in flight slides down over what has
@@ -563,15 +598,15 @@ function Batch:resolve(): integer
 end
 
 function Batch:wait(timeoutMs?: number): integer
-    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean
-        return self:pending() > 0
-    end)
+    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean return self:pending() > 0 end)
     return self:resolve()
 end
 
 --- Stops the loading worker.
 function assets.shutdown()
-    if worker == nil then return end
+    if worker == nil then
+        return
+    end
     worker:stop()
     worker = nil
     pending = {}

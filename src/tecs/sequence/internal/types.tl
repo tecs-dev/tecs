@@ -130,7 +130,8 @@ end
 
 --- One authored step. Produced by the node constructors below; treat the
 --- returned value as opaque and do not reuse a node across programs.
-local interface Node end
+local interface Node
+end
 
 --- A reference to an entity supplied at `play` time. Resolved when the
 --- instruction that uses it runs, not when the program is defined.
@@ -283,19 +284,13 @@ local record Status
     faultMessage: string
 end
 
-function Event.init(
-    e: Event,
-    name: string,
-    args: {any},
-    handle: Handle
-)
+function Event.init(e: Event, name: string, args: {any}, handle: Handle)
     e.name = name
     e.args = args
     e.handle = handle
 end
 
 ecs.newEvent(Event)
-
 
 -------------------------------------------------------------------------------
 -- Runtime representations

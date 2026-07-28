@@ -44,10 +44,7 @@ local record ComponentCodegen
     --- `leadingFields` are prepended before `fields` (for example
     --- `{"target"}` for relationships).
     createNewFn: function(
-        container: any,
-        fields: {string},
-        leadingFields?: {string},
-        requiredFieldErrors?: {string:string}
+        container: any, fields: {string}, leadingFields?: {string}, requiredFieldErrors?: {string: string}
     ): function(data: {string: any}): any
 end
 
@@ -104,12 +101,16 @@ local function createCallFn(spec: ComponentCodegen.CallSpec): function(any, ...:
         needComma = true
     end
     for i = 1, leadingArgCount do
-        if needComma then CODEGEN_BUF:put(", ") end
+        if needComma then
+            CODEGEN_BUF:put(", ")
+        end
         CODEGEN_BUF:putf("l%d", i)
         needComma = true
     end
     for i = 1, #fields do
-        if needComma then CODEGEN_BUF:put(", ") end
+        if needComma then
+            CODEGEN_BUF:put(", ")
+        end
         CODEGEN_BUF:putf("a%d", i)
         needComma = true
     end
@@ -135,7 +136,9 @@ local function createCallFn(spec: ComponentCodegen.CallSpec): function(any, ...:
 
     local src = CODEGEN_BUF:get()
     local chunk, err = load(src, "=component_ctor", "t")
-    if not chunk then error("codegen failed: " .. tostring(err)) end
+    if not chunk then
+        error("codegen failed: " .. tostring(err))
+    end
     local callFn = (chunk as function(...: any): function(any, ...: any): any)(table_unpack(upArgs))
 
     ARRAY_POOL:release(tableAssigns)
@@ -147,10 +150,7 @@ local function createCallFn(spec: ComponentCodegen.CallSpec): function(any, ...:
 end
 
 local function createNewFn(
-    container: any,
-    fields: {string},
-    leadingFields?: {string},
-    requiredFieldErrors?: {string:string}
+    container: any, fields: {string}, leadingFields?: {string}, requiredFieldErrors?: {string: string}
 ): function(data: {string: any}): any
     local leading: {string}
     local leadingCount: integer

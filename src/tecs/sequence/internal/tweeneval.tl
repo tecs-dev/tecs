@@ -105,7 +105,8 @@ end
 -- Per-slot working state. One flat struct so a whole playback's state is a
 -- single contiguous allocation the evaluation loop indexes rather than a
 -- table per slot.
-ffi.cdef[[
+ffi.cdef(
+    [[
     typedef struct {
         double init;
         double applied;
@@ -120,6 +121,7 @@ ffi.cdef[[
         double d4;
     } TweenSlotState;
 ]]
+)
 
 local record TweenSlotState
     init: number
@@ -139,7 +141,8 @@ end
 local type EasingFunction = function(t: number): number
 
 --- A component-field animation target.
-local interface Target end
+local interface Target
+end
 
 --- Runtime target descriptor used by the tween compiler and evaluator.
 local record TargetImpl is Target
@@ -155,19 +158,27 @@ local record TargetImpl is Target
     mode: TargetMode
 
     init: function(
-        world: World, entity: integer, relative: boolean,
-        t1: number, t2: number, t3: number, t4: number
+        world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
     ): number, number, number, number, number, number, number, number
 
     apply: function(
-        world: World, entity: integer, t: number,
-        s1: number, s2: number, s3: number, s4: number,
-        d1: number, d2: number, d3: number, d4: number
+        world: World,
+        entity: integer,
+        t: number,
+        s1: number,
+        s2: number,
+        s3: number,
+        s4: number,
+        d1: number,
+        d2: number,
+        d3: number,
+        d4: number
     )
 end
 
 --- A live component-field tracking source.
-local interface TrackSource end
+local interface TrackSource
+end
 
 --- Runtime tracking descriptor used by the tween evaluator.
 local record TrackSourceImpl is TrackSource
@@ -247,7 +258,8 @@ end
 
 --- An immutable compiled tween timeline. Playing one is `sequence.play` on
 --- the program it compiles to, so there is nothing to call on it directly.
-local interface Timeline end
+local interface Timeline
+end
 
 --- Runtime representation of a compiled tween timeline.
 local record TimelineImpl is Timeline
@@ -393,9 +405,7 @@ local record Sources
     --- Track fields selected by the entity's TrackingTarget component.
     tracking: function(component: Component, field: string | {string}): TrackSource
     --- Track fields on the target of a relationship component.
-    related: function(
-        relationship: Component, component: Component, field: string | {string}
-    ): TrackSource
+    related: function(relationship: Component, component: Component, field: string | {string}): TrackSource
 end
 
 local record tweeneval
@@ -426,18 +436,25 @@ local record tweeneval
     --- Authoring nodes. `to` and `adjust` interpolate to an absolute or a
     --- relative destination; `track` chases one that keeps moving.
     to: function(
-        duration: number, easing: EasingName | EasingFunction,
+        duration: number,
+        easing: EasingName | EasingFunction,
         target: TargetName | Target,
-        t1: number, t2?: number, t3?: number, t4?: number
+        t1: number,
+        t2?: number,
+        t3?: number,
+        t4?: number
     ): TimelineNode
     adjust: function(
-        duration: number, easing: EasingName | EasingFunction,
+        duration: number,
+        easing: EasingName | EasingFunction,
         target: TargetName | Target,
-        t1: number, t2?: number, t3?: number, t4?: number
+        t1: number,
+        t2?: number,
+        t3?: number,
+        t4?: number
     ): TimelineNode
     track: function(
-        duration: number, easing: EasingName | EasingFunction,
-        target: TargetName | Target, source: TrackSource
+        duration: number, easing: EasingName | EasingFunction, target: TargetName | Target, source: TrackSource
     ): TimelineNode
 
     --- Advance the cursor without changing anything.
@@ -459,14 +476,12 @@ local record tweeneval
 
     --- Validate a mode and pass count, resolving the defaults. `finite`
     --- rejects an endless repeat, which a nested run cannot express.
-    playbackMode: function(
-        mode?: PlaybackMode, count?: integer, finite?: boolean
-    ): PlaybackMode, integer
+    playbackMode: function(mode?: PlaybackMode, count?: integer, finite?: boolean): PlaybackMode, integer
 
     --- Turn a compiled timeline into plain data, and back. The const pool of
     --- a program carries the first form; the evaluator reads the second.
-    serializeTimeline: function(tl: Timeline): {string:any}
-    deserializeTimeline: function(data: {string:any}): TimelineImpl
+    serializeTimeline: function(tl: Timeline): {string: any}
+    deserializeTimeline: function(data: {string: any}): TimelineImpl
 
     --- Attach the timeline metatable to a freshly compiled timeline.
     asTimeline: function(tl: TimelineImpl): Timeline
@@ -496,24 +511,19 @@ local record tweeneval
 
     --- Turn a target or source into plain data, and back. This is the codec a
     --- compiled program's const pool carries.
-    serializeTarget: function(t: Target): {string:any}
-    deserializeTarget: function(data: {string:any}): TargetImpl
-    serializeSource: function(s: TrackSource): {string:any}
-    deserializeSource: function(data: {string:any}): TrackSourceImpl
+    serializeTarget: function(t: Target): {string: any}
+    deserializeTarget: function(data: {string: any}): TargetImpl
+    serializeSource: function(s: TrackSource): {string: any}
+    deserializeSource: function(data: {string: any}): TrackSourceImpl
 
     --- Read the four numbers a `track` slot is currently chasing.
-    valuesFromSource: function(
-        world: World, entity: integer, src: TrackSourceImpl
-    ): number, number, number, number
+    valuesFromSource: function(world: World, entity: integer, src: TrackSourceImpl): number, number, number, number
 
     --- Advance every slot to `elapsed`, writing the components they target.
     ---
     --- The whole loop is one instruction body rather than one per slot, so
     --- dispatch amortizes across the slots a timeline holds.
-    evaluateSlots: function(
-        slots: {Slot}, state: {TweenSlotState},
-        world: World, target: integer, elapsed: number
-    )
+    evaluateSlots: function(slots: {Slot}, state: {TweenSlotState}, world: World, target: integer, elapsed: number)
 
     --- A zeroed state buffer for `count` slots.
     newState: function(count: integer): {TweenSlotState}
@@ -528,7 +538,9 @@ end
 
 local easing: Easings = {}
 
-function easing.linear(t: number): number return t end
+function easing.linear(t: number): number
+    return t
+end
 
 local EASING_NAMES: {EasingFunction: EasingName} = {}
 local EASINGS: {EasingName: EasingFunction} = {}
@@ -543,11 +555,15 @@ local function makeVariants(name: string, inFn: EasingFunction)
     e[name .. "In"] = inFn
     e[name .. "Out"] = function(t: number): number return 1 - inFn(1 - t) end
     e[name .. "InOut"] = function(t: number): number
-        if t < 0.5 then return 0.5 * inFn(2 * t) end
+        if t < 0.5 then
+            return 0.5 * inFn(2 * t)
+        end
         return 1 - 0.5 * inFn(2 - 2 * t)
     end
     e[name .. "OutIn"] = function(t: number): number
-        if t < 0.5 then return 0.5 - 0.5 * inFn(1 - 2 * t) end
+        if t < 0.5 then
+            return 0.5 - 0.5 * inFn(1 - 2 * t)
+        end
         return 0.5 + 0.5 * inFn(2 * t - 1)
     end
 end
@@ -557,37 +573,59 @@ makeVariants("cubic", function(t: number): number return t * t * t end)
 makeVariants("quart", function(t: number): number return t * t * t * t end)
 makeVariants("quint", function(t: number): number return t * t * t * t * t end)
 makeVariants("sine", function(t: number): number return 1 - mathCos(t * mathPi * 0.5) end)
-makeVariants("expo", function(t: number): number
-    if t == 0 then return 0 end
-    return mathPow(2, 10 * (t - 1))
-end)
-makeVariants("back", function(t: number): number
-    local s <const> = 1.70158
-    return t * t * ((s + 1) * t - s)
-end)
-makeVariants("elastic", function(t: number): number
-    if t == 0 then return 0 end
-    if t == 1 then return 1 end
-    local p <const> = 0.3
-    return -mathPow(2, 10 * (t - 1)) * mathSin((t - 1 - p / 4) * (2 * mathPi) / p)
-end)
+makeVariants(
+    "expo",
+    function(t: number): number
+        if t == 0 then
+            return 0
+        end
+        return mathPow(2, 10 * (t - 1))
+    end
+)
+makeVariants("back", function(t: number): number local s <const> = 1.70158; return t * t * ((s + 1) * t - s) end)
+makeVariants(
+    "elastic",
+    function(t: number): number
+        if t == 0 then
+            return 0
+        end
+        if t == 1 then
+            return 1
+        end
+        local p <const> = 0.3
+        return -mathPow(2, 10 * (t - 1)) * mathSin((t - 1 - p / 4) * (2 * mathPi) / p)
+    end
+)
 
 do
     local function bounceOut(t: number): number
-        if t < 1 / 2.75 then return 7.5625 * t * t
-        elseif t < 2 / 2.75 then local u <const> = t - 1.5 / 2.75; return 7.5625 * u * u + 0.75
-        elseif t < 2.5 / 2.75 then local u <const> = t - 2.25 / 2.75; return 7.5625 * u * u + 0.9375 end
-        local u <const> = t - 2.625 / 2.75; return 7.5625 * u * u + 0.984375
+        if t < 1 / 2.75 then
+            return 7.5625 * t * t
+        elseif t < 2 / 2.75 then
+            local u <const> = t - 1.5 / 2.75
+            return 7.5625 * u * u + 0.75
+        elseif t < 2.5 / 2.75 then
+            local u <const> = t - 2.25 / 2.75
+            return 7.5625 * u * u + 0.9375
+        end
+        local u <const> = t - 2.625 / 2.75
+        return 7.5625 * u * u + 0.984375
     end
-    local function bounceIn(t: number): number return 1 - bounceOut(1 - t) end
+    local function bounceIn(t: number): number
+        return 1 - bounceOut(1 - t)
+    end
     easing.bounceIn = bounceIn
     easing.bounceOut = bounceOut
     easing.bounceInOut = function(t: number): number
-        if t < 0.5 then return 0.5 * bounceIn(2 * t) end
+        if t < 0.5 then
+            return 0.5 * bounceIn(2 * t)
+        end
         return 0.5 * bounceOut(2 * t - 1) + 0.5
     end
     easing.bounceOutIn = function(t: number): number
-        if t < 0.5 then return 0.5 * bounceOut(2 * t) end
+        if t < 0.5 then
+            return 0.5 * bounceOut(2 * t)
+        end
         return 0.5 * bounceIn(2 * t - 1) + 0.5
     end
 end
@@ -595,15 +633,42 @@ end
 do
     local names <const>: {EasingName} = {
         "linear",
-        "quadIn", "quadOut", "quadInOut", "quadOutIn",
-        "cubicIn", "cubicOut", "cubicInOut", "cubicOutIn",
-        "quartIn", "quartOut", "quartInOut", "quartOutIn",
-        "quintIn", "quintOut", "quintInOut", "quintOutIn",
-        "sineIn", "sineOut", "sineInOut", "sineOutIn",
-        "expoIn", "expoOut", "expoInOut", "expoOutIn",
-        "backIn", "backOut", "backInOut", "backOutIn",
-        "elasticIn", "elasticOut", "elasticInOut", "elasticOutIn",
-        "bounceIn", "bounceOut", "bounceInOut", "bounceOutIn",
+        "quadIn",
+        "quadOut",
+        "quadInOut",
+        "quadOutIn",
+        "cubicIn",
+        "cubicOut",
+        "cubicInOut",
+        "cubicOutIn",
+        "quartIn",
+        "quartOut",
+        "quartInOut",
+        "quartOutIn",
+        "quintIn",
+        "quintOut",
+        "quintInOut",
+        "quintOutIn",
+        "sineIn",
+        "sineOut",
+        "sineInOut",
+        "sineOutIn",
+        "expoIn",
+        "expoOut",
+        "expoInOut",
+        "expoOutIn",
+        "backIn",
+        "backOut",
+        "backInOut",
+        "backOutIn",
+        "elasticIn",
+        "elasticOut",
+        "elasticInOut",
+        "elasticOutIn",
+        "bounceIn",
+        "bounceOut",
+        "bounceInOut",
+        "bounceOutIn",
     }
     local e = easing as {string: EasingFunction}
     for i = 1, #names do
@@ -615,7 +680,7 @@ end
 -- Targets and tracking sources
 -------------------------------------------------------------------------------
 
-local TARGET_MT <const>: metatable<TargetImpl> = { __index = TargetImpl }
+local TARGET_MT <const>: metatable<TargetImpl> = {__index = TargetImpl}
 local targetInit: function(
     TargetImpl, World, integer, boolean, number, number, number, number
 ): (number, number, number, number, number, number, number, number)
@@ -625,14 +690,16 @@ local targetApply: function(
 
 local function fieldsFrom(field: string | {string}): {string}
     if field is string then
-        return { field }
+        return {field}
     end
     return field as {string}
 end
 
 local function componentByName(name: string): Component
     local component = internalComponents.registeredComponents[name]
-    if not component then error("Unknown tween component " .. name) end
+    if not component then
+        error("Unknown tween component " .. name)
+    end
     return component
 end
 
@@ -648,48 +715,61 @@ local function newTarget(component: Component, fields: {string}, mode?: TargetMo
     for i = 1, #fields do
         parts = parts .. "." .. fields[i]
     end
-    local t: TargetImpl = setmetatable({
-        id = id or parts,
-        component = component,
-        componentName = component.componentName,
-        fields = fields,
-        mode = mode or (#fields == 2 and "field2" or "field"),
-    }, TARGET_MT)
+    local t: TargetImpl = setmetatable(
+        {
+            id = id or parts,
+            component = component,
+            componentName = component.componentName,
+            fields = fields,
+            mode = mode or (#fields == 2 and "field2" or "field"),
+        },
+        TARGET_MT
+    )
     t.init = function(
-        world: World, entity: integer, relative: boolean,
-        t1: number, t2: number, t3: number, t4: number
+        world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
     ): (number, number, number, number, number, number, number, number)
         return targetInit(t, world, entity, relative, t1, t2, t3, t4)
     end
     t.apply = function(
-        world: World, entity: integer, tv: number,
-        s1: number, s2: number, s3: number, s4: number,
-        d1: number, d2: number, d3: number, d4: number
+        world: World,
+        entity: integer,
+        tv: number,
+        s1: number,
+        s2: number,
+        s3: number,
+        s4: number,
+        d1: number,
+        d2: number,
+        d3: number,
+        d4: number
     )
         targetApply(t, world, entity, tv, s1, s2, s3, s4, d1, d2, d3, d4)
     end
     return t
 end
 
-targetInit = function(self: TargetImpl,
-    world: World, entity: integer, relative: boolean,
-    t1: number, t2: number, t3: number, t4: number
+targetInit = function(
+    self: TargetImpl, world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
 ): number, number, number, number, number, number, number, number
     resolveTarget(self)
     local c = world:get(entity, self.component)
     if not c then
         return 0, 0, 0, 0, 0, 0, 0, 0
     end
-    local cany = c as {string:number}
+    local cany = c as {string: number}
     local f <const> = self.fields
     local mode <const> = self.mode
     if mode == "color" then
         local r, g, b, a <const> = cany[f[1]], cany[f[2]], cany[f[3]], cany[f[4]]
-        if relative then return r, g, b, a, t1, t2, t3, t4 end
+        if relative then
+            return r, g, b, a, t1, t2, t3, t4
+        end
         return r, g, b, a, t1 - r, t2 - g, t3 - b, t4 - a
     elseif mode == "field2" then
         local a, b <const> = cany[f[1]], cany[f[2]]
-        if relative then return a, b, 0, 0, t1, t2, 0, 0 end
+        if relative then
+            return a, b, 0, 0, t1, t2, 0, 0
+        end
         return a, b, 0, 0, t1 - a, t2 - b, 0, 0
     elseif mode == "angle" then
         local startVal <const> = cany[f[1]]
@@ -708,15 +788,26 @@ targetInit = function(self: TargetImpl,
     return startVal, 0, 0, 0, delta, 0, 0, 0
 end
 
-targetApply = function(self: TargetImpl,
-    world: World, entity: integer, t: number,
-    s1: number, s2: number, s3: number, s4: number,
-    d1: number, d2: number, d3: number, d4: number
+targetApply = function(
+    self: TargetImpl,
+    world: World,
+    entity: integer,
+    t: number,
+    s1: number,
+    s2: number,
+    s3: number,
+    s4: number,
+    d1: number,
+    d2: number,
+    d3: number,
+    d4: number
 )
     resolveTarget(self)
     local c = world:getMut(entity, self.component)
-    if not c then return end
-    local cany = c as {string:number}
+    if not c then
+        return
+    end
+    local cany = c as {string: number}
     local f <const> = self.fields
     local mode <const> = self.mode
     cany[f[1]] = s1 + d1 * t
@@ -750,8 +841,7 @@ function targets.of(component: Component, field: string | {string}): Target
 end
 
 local function newSource(
-    kind: TrackSourceKind, component: Component, field: string | {string},
-    key?: string, relationship?: Component
+    kind: TrackSourceKind, component: Component, field: string | {string}, key?: string, relationship?: Component
 ): TrackSource
     return {
         kind = kind,
@@ -778,9 +868,7 @@ function source.tracking(component: Component, field: string | {string}): TrackS
     return newSource("trackingTarget", component, field)
 end
 
-function source.related(
-    relationship: Component, component: Component, field: string | {string}
-): TrackSource
+function source.related(relationship: Component, component: Component, field: string | {string}): TrackSource
     return newSource("relationship", component, field, nil, relationship)
 end
 
@@ -828,8 +916,7 @@ function tweeneval.resolveEasing(value: any): EasingName, EasingFunction
         return name, assert(EASINGS[name], "Unknown tween easing " .. value)
     end
     local easingFn <const> = value as EasingFunction
-    return assert(EASING_NAMES[easingFn],
-        "Tween easing must be a built-in easing name or value"), easingFn
+    return assert(EASING_NAMES[easingFn], "Tween easing must be a built-in easing name or value"), easingFn
 end
 
 function tweeneval.resolveTargetValue(value: any): TargetImpl
@@ -839,7 +926,7 @@ function tweeneval.resolveTargetValue(value: any): TargetImpl
     return value as TargetImpl
 end
 
-function tweeneval.serializeTarget(t: Target): {string:any}
+function tweeneval.serializeTarget(t: Target): {string: any}
     local impl <const> = t as TargetImpl
     return {
         id = impl.id,
@@ -849,20 +936,21 @@ function tweeneval.serializeTarget(t: Target): {string:any}
     }
 end
 
-function tweeneval.deserializeTarget(data: {string:any}): TargetImpl
+function tweeneval.deserializeTarget(data: {string: any}): TargetImpl
     local id = data.id as string
     local builtin = id and BUILTIN_TARGETS[id as TargetName]
-    if builtin then return builtin end
+    if builtin then
+        return builtin
+    end
     return newTarget(
-        componentByName(data.component as string),
-        data.fields as {string},
-        (data.mode as TargetMode) or "field",
-        id
+        componentByName(data.component as string), data.fields as {string}, (data.mode as TargetMode) or "field", id
     )
 end
 
-function tweeneval.serializeSource(s: TrackSource): {string:any}
-    if not s then return nil end
+function tweeneval.serializeSource(s: TrackSource): {string: any}
+    if not s then
+        return nil
+    end
     local impl <const> = s as TrackSourceImpl
     return {
         kind = impl.kind,
@@ -873,8 +961,10 @@ function tweeneval.serializeSource(s: TrackSource): {string:any}
     }
 end
 
-function tweeneval.deserializeSource(data: {string:any}): TrackSourceImpl
-    if not data then return nil end
+function tweeneval.deserializeSource(data: {string: any}): TrackSourceImpl
+    if not data then
+        return nil
+    end
     local relName = data.relationship as string
     return {
         kind = data.kind as TrackSourceKind,
@@ -897,9 +987,9 @@ function tweeneval.asTimeline(tl: TimelineImpl): Timeline
     return setmetatable(tl, TIMELINE_MT) as Timeline
 end
 
-function tweeneval.serializeTimeline(tl: Timeline): {string:any}
+function tweeneval.serializeTimeline(tl: Timeline): {string: any}
     local impl <const> = tl as TimelineImpl
-    local slots: {{string:any}} = {}
+    local slots: {{string: any}} = {}
     for i = 1, #(impl.slots or {}) do
         local s <const> = impl.slots[i]
         slots[i] = {
@@ -907,7 +997,10 @@ function tweeneval.serializeTimeline(tl: Timeline): {string:any}
             target = tweeneval.serializeTarget(s.target),
             source = tweeneval.serializeSource(s.source),
             easing = s.easingName,
-            t1 = s.t1, t2 = s.t2, t3 = s.t3, t4 = s.t4,
+            t1 = s.t1,
+            t2 = s.t2,
+            t3 = s.t3,
+            t4 = s.t4,
             relative = s.relative,
             startTime = s.startTime,
             endTime = s.endTime,
@@ -915,7 +1008,7 @@ function tweeneval.serializeTimeline(tl: Timeline): {string:any}
             stateIndex = s.stateIndex,
         }
     end
-    local runs: {{string:any}} = nil
+    local runs: {{string: any}} = nil
     if impl.runs then
         runs = {}
         for i = 1, #impl.runs do
@@ -942,16 +1035,16 @@ function tweeneval.serializeTimeline(tl: Timeline): {string:any}
     }
 end
 
-function tweeneval.deserializeTimeline(data: {string:any}): TimelineImpl
+function tweeneval.deserializeTimeline(data: {string: any}): TimelineImpl
     local slots: {Slot} = {}
-    local savedSlots = data.slots as {{string:any}}
+    local savedSlots = data.slots as {{string: any}}
     for i = 1, #(savedSlots or {}) do
         local s <const> = savedSlots[i]
         local easingName <const> = s.easing as EasingName
         slots[i] = {
             kind = (s.kind as OperationKind) or "to",
-            target = tweeneval.deserializeTarget(s.target as {string:any}),
-            source = tweeneval.deserializeSource(s.source as {string:any}),
+            target = tweeneval.deserializeTarget(s.target as {string: any}),
+            source = tweeneval.deserializeSource(s.source as {string: any}),
             easingName = easingName,
             easing = assert(EASINGS[easingName], "Unknown tween easing " .. tostring(easingName)),
             t1 = (s.t1 as number) or 0,
@@ -966,13 +1059,13 @@ function tweeneval.deserializeTimeline(data: {string:any}): TimelineImpl
         }
     end
     local runs: {RunSlot} = nil
-    local savedRuns = data.runs as {{string:any}}
+    local savedRuns = data.runs as {{string: any}}
     if savedRuns then
         runs = {}
         for i = 1, #savedRuns do
             local r <const> = savedRuns[i]
             runs[i] = {
-                timeline = r.timeline and tweeneval.deserializeTimeline(r.timeline as {string:any}) or nil,
+                timeline = r.timeline and tweeneval.deserializeTimeline(r.timeline as {string: any}) or nil,
                 timelineId = (r.timelineId as integer) or 0,
                 startTime = (r.startTime as number) or 0,
                 effectiveDuration = (r.effectiveDuration as number) or 0,
@@ -981,16 +1074,19 @@ function tweeneval.deserializeTimeline(data: {string:any}): TimelineImpl
             }
         end
     end
-    return setmetatable({
-        slots = slots,
-        runs = runs,
-        emits = data.emits as {EmitSlot},
-        totalDuration = (data.totalDuration as number) or 0,
-        stateSize = (data.stateSize as integer) or #slots,
-        channel = data.channel as string,
-        presetName = data.presetName as string,
-        pinned = data.pinned == true,
-    } as TimelineImpl, TIMELINE_MT)
+    return setmetatable(
+        {
+            slots = slots,
+            runs = runs,
+            emits = data.emits as {EmitSlot},
+            totalDuration = (data.totalDuration as number) or 0,
+            stateSize = (data.stateSize as integer) or #slots,
+            channel = data.channel as string,
+            presetName = data.presetName as string,
+            pinned = data.pinned == true,
+        } as TimelineImpl,
+        TIMELINE_MT
+    )
 end
 
 -------------------------------------------------------------------------------
@@ -1000,12 +1096,11 @@ end
 -- authored timeline becomes a compiled one in place rather than in a copy.
 -------------------------------------------------------------------------------
 
-function tweeneval.playbackMode(
-    mode?: PlaybackMode, count?: integer, finite?: boolean
-): PlaybackMode, integer
+function tweeneval.playbackMode(mode?: PlaybackMode, count?: integer, finite?: boolean): PlaybackMode, integer
     local resolved <const> = mode or "once"
-    assert(resolved == "once" or resolved == "loop" or resolved == "pingPong",
-        "Tween mode must be once, loop, or pingPong")
+    assert(
+        resolved == "once" or resolved == "loop" or resolved == "pingPong", "Tween mode must be once, loop, or pingPong"
+    )
     if resolved == "once" then
         assert(count == nil, "Tween count is only valid with loop or pingPong mode")
         return resolved, 1
@@ -1019,28 +1114,39 @@ function tweeneval.playbackMode(
 end
 
 local function numericValue(value: any, position: integer): number
-    if value == nil then return 0 end
+    if value == nil then
+        return 0
+    end
     assert(value is number, "Tween value at position " .. tostring(position) .. " must be a number")
     return value as number
 end
 
 function tweeneval.to(
-    duration: number, curve: EasingName | EasingFunction, target: TargetName | Target,
-    t1: number, t2?: number, t3?: number, t4?: number
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    t1: number,
+    t2?: number,
+    t3?: number,
+    t4?: number
 ): TimelineNode
     return {"to", duration, curve, target, t1, t2, t3, t4}
 end
 
 function tweeneval.adjust(
-    duration: number, curve: EasingName | EasingFunction, target: TargetName | Target,
-    t1: number, t2?: number, t3?: number, t4?: number
+    duration: number,
+    curve: EasingName | EasingFunction,
+    target: TargetName | Target,
+    t1: number,
+    t2?: number,
+    t3?: number,
+    t4?: number
 ): TimelineNode
     return {"adjust", duration, curve, target, t1, t2, t3, t4}
 end
 
 function tweeneval.track(
-    duration: number, curve: EasingName | EasingFunction,
-    target: TargetName | Target, from: TrackSource
+    duration: number, curve: EasingName | EasingFunction, target: TargetName | Target, from: TrackSource
 ): TimelineNode
     return {"track", duration, curve, target, from}
 end
@@ -1076,7 +1182,7 @@ local function compileBlock(block: {TimelineNode}, startTime: number, tl: Timeli
 end
 
 local function compileSlot(node: TimelineNode, startTime: number, tl: TimelineImpl): number
-    local compiled <const> = (node as any) as {any:any}
+    local compiled <const> = (node as any) as {any: any}
     local authoredKind <const> = compiled[1] as OperationKind
     local duration <const> = compiled[2] as number
     assert(duration and duration > 0, "Tween duration must be greater than 0")
@@ -1104,7 +1210,7 @@ local function compileSlot(node: TimelineNode, startTime: number, tl: TimelineIm
 end
 
 compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl): number
-    local data <const> = (node as any) as {any:any}
+    local data <const> = (node as any) as {any: any}
     assert(data, "Tween timeline entry is required")
     local kind <const> = data[1]
     if kind is table then
@@ -1130,15 +1236,14 @@ compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl):
         -- A nested timeline is given either already compiled or as its own
         -- spec. The second form is what authoring reaches for, since a
         -- nested timeline needs no name of its own.
-        local nested <const> = data[2] as {any:any}
+        local nested <const> = data[2] as {any: any}
         assert(nested, "Tween run requires a timeline")
         local child = nested as TimelineImpl
         if child.totalDuration == nil then
             child = tweeneval.compile(nested as TimelineSpec) as TimelineImpl
         end
         local options <const> = data[3] as RunOptions
-        local mode, passCount =
-            tweeneval.playbackMode(options and options.mode, options and options.count, true)
+        local mode, passCount = tweeneval.playbackMode(options and options.mode, options and options.count, true)
         local duration <const> = child.totalDuration * passCount
         data.timeline = child
         data.startTime = startTime
@@ -1152,7 +1257,9 @@ compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl):
         local children <const> = data as {any}
         for i = 2, #children do
             local childEnd <const> = compileNode(children[i] as TimelineNode, startTime, tl)
-            if childEnd > endTime then endTime = childEnd end
+            if childEnd > endTime then
+                endTime = childEnd
+            end
         end
         return endTime
     end
@@ -1160,7 +1267,7 @@ compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl):
 end
 
 function tweeneval.compile(spec: TimelineSpec): Timeline
-    local authored <const> = spec as {any:any}
+    local authored <const> = spec as {any: any}
     assert(authored.sequence == nil, "Tween timelines use an implicit sequence")
     local tl <const> = spec as TimelineImpl
     tl.slots = {}
@@ -1168,13 +1275,18 @@ function tweeneval.compile(spec: TimelineSpec): Timeline
     tl.emits = {}
     tl.totalDuration = compileBlock(spec, 0, tl)
     tl.stateSize = #tl.slots
-    if #tl.runs == 0 then tl.runs = nil end
+    if #tl.runs == 0 then
+        tl.runs = nil
+    end
     if #tl.emits == 0 then
         tl.emits = nil
     else
-        table.sort(tl.emits, function(a: EmitSlot, b: EmitSlot): boolean
-            return a.time < b.time or (a.time == b.time and a.order < b.order)
-        end)
+        table.sort(
+            tl.emits,
+            function(a: EmitSlot, b: EmitSlot): boolean
+                return a.time < b.time or (a.time == b.time and a.order < b.order)
+            end
+        )
     end
     return tweeneval.asTimeline(tl)
 end
@@ -1185,10 +1297,10 @@ end
 
 local TrackingTargetComponent <const> = tweeneval.TrackingTarget
 
-function tweeneval.valuesFromSource(
-    world: World, entity: integer, src: TrackSourceImpl
-): number, number, number, number
-    if not src then return 0, 0, 0, 0 end
+function tweeneval.valuesFromSource(world: World, entity: integer, src: TrackSourceImpl): number, number, number, number
+    if not src then
+        return 0, 0, 0, 0
+    end
     if not src.component and src.componentName then
         src.component = componentByName(src.componentName)
     end
@@ -1197,7 +1309,9 @@ function tweeneval.valuesFromSource(
         sourceEntity = world:requireKey(src.key)
     elseif src.kind == "trackingTarget" then
         local tt = world:get(entity, TrackingTargetComponent)
-        if not tt then return 0, 0, 0, 0 end
+        if not tt then
+            return 0, 0, 0, 0
+        end
         if tt.entity and tt.entity ~= 0 then
             sourceEntity = tt.entity
         elseif tt.key and tt.key ~= "" then
@@ -1210,22 +1324,23 @@ function tweeneval.valuesFromSource(
             src.relationship = componentByName(src.relationshipName)
         end
         local rel = world:get(entity, src.relationship)
-        if not rel then return 0, 0, 0, 0 end
+        if not rel then
+            return 0, 0, 0, 0
+        end
         sourceEntity = (rel as RelationshipValue).target
     end
     local c = world:get(sourceEntity, src.component)
-    if not c then return 0, 0, 0, 0 end
-    local cany = c as {string:number}
+    if not c then
+        return 0, 0, 0, 0
+    end
+    local cany = c as {string: number}
     local f <const> = src.fields
     return cany[f[1]] or 0, cany[f[2]] or 0, cany[f[3]] or 0, cany[f[4]] or 0
 end
 
 local valuesFromSource <const> = tweeneval.valuesFromSource
 
-function tweeneval.evaluateSlots(
-    slots: {Slot}, state: {TweenSlotState},
-    world: World, target: integer, elapsed: number
-)
+function tweeneval.evaluateSlots(slots: {Slot}, state: {TweenSlotState}, world: World, target: integer, elapsed: number)
     for i = 1, #(slots or {}) do
         local slot <const> = slots[i]
         local ss <const> = state[slot.stateIndex]
@@ -1250,12 +1365,17 @@ function tweeneval.evaluateSlots(
                 if slot.kind == "track" then
                     t1, t2, t3, t4 = valuesFromSource(world, target, slot.source)
                 end
-                ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4 =
-                    slot.target.init(world, target, slot.relative, t1, t2, t3, t4)
+                ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4 = slot.target.init(
+                    world, target, slot.relative, t1, t2, t3, t4
+                )
                 ss.init = 1
             end
-            if localT < 0 then localT = 0 end
-            if localT > 1 then localT = 1 end
+            if localT < 0 then
+                localT = 0
+            end
+            if localT > 1 then
+                localT = 1
+            end
             if slot.kind == "track" and active then
                 local t1, t2, t3, t4 = valuesFromSource(world, target, slot.source)
                 ss.d1 = t1 - ss.s1
@@ -1265,9 +1385,7 @@ function tweeneval.evaluateSlots(
             end
             if ss.applied == 0 or ss.lastT ~= localT or (slot.kind == "track" and active) then
                 slot.target.apply(
-                    world, target, slot.easing(localT),
-                    ss.s1, ss.s2, ss.s3, ss.s4,
-                    ss.d1, ss.d2, ss.d3, ss.d4
+                    world, target, slot.easing(localT), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4
                 )
                 ss.applied = 1
                 ss.lastT = localT

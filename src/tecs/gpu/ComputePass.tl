@@ -117,16 +117,14 @@ local record ComputePass
     finish: function(self)
 end
 
-local ComputePassMT <const>: metatable<ComputePass> = { __index = ComputePass }
+local ComputePassMT <const>: metatable<ComputePass> = {__index = ComputePass}
 
 -- Reused across passes, for the reason in the header.
-local readWrite <const> = loader.newArray(
-    "SDL_GPUStorageBufferReadWriteBinding[?]", MAX_BUFFER_BINDINGS)
+local readWrite <const> = loader.newArray("SDL_GPUStorageBufferReadWriteBinding[?]", MAX_BUFFER_BINDINGS)
 local handles <const> = loader.newArray("SDL_GPUBuffer*[?]", MAX_BUFFER_BINDINGS)
 
 --- Fills `pass` in and records it as open. Shared by `wrap` and `begin`.
-local function open(pass: ComputePass, handle: loader.CPtr,
-                    commandBuffer: loader.CValue): ComputePass
+local function open(pass: ComputePass, handle: loader.CPtr, commandBuffer: loader.CValue): ComputePass
     pass.handle = handle
     pass.commandBuffer = commandBuffer
     pass._finished = false
@@ -136,19 +134,18 @@ local function open(pass: ComputePass, handle: loader.CPtr,
     return pass
 end
 
-function ComputePass.wrap(handle: loader.CPtr,
-                          commandBuffer?: loader.CValue): ComputePass
-    return open(setmetatable({} as ComputePass, ComputePassMT), handle,
-        commandBuffer)
+function ComputePass.wrap(handle: loader.CPtr, commandBuffer?: loader.CValue): ComputePass
+    return open(setmetatable({} as ComputePass, ComputePassMT), handle, commandBuffer)
 end
 
-function ComputePass.begin(commandBuffer: loader.CValue, readWriteBuffers: {loader.CValue}, reuse?: ComputePass): ComputePass
+function ComputePass.begin(
+    commandBuffer: loader.CValue, readWriteBuffers: {loader.CValue}, reuse?: ComputePass
+): ComputePass
     local count = 0
     if readWriteBuffers ~= nil then
         count = #readWriteBuffers
         if count > MAX_BUFFER_BINDINGS then
-            error(("tecs: %d read-write buffers exceeds the limit of %d")
-                :format(count, MAX_BUFFER_BINDINGS), 2)
+            error(("tecs: %d read-write buffers exceeds the limit of %d"):format(count, MAX_BUFFER_BINDINGS), 2)
         end
         for index = 1, count do
             local binding = readWrite[index - 1] as loader.CStruct
@@ -159,11 +156,11 @@ function ComputePass.begin(commandBuffer: loader.CValue, readWriteBuffers: {load
         end
     end
 
-    local handle = C.SDL_BeginGPUComputePass(commandBuffer,
-        nil, 0, readWrite, count)
-    if handle == nil then sdl.fail("SDL_BeginGPUComputePass") end
-    return open(reuse or setmetatable({} as ComputePass, ComputePassMT),
-        handle, commandBuffer)
+    local handle = C.SDL_BeginGPUComputePass(commandBuffer, nil, 0, readWrite, count)
+    if handle == nil then
+        sdl.fail("SDL_BeginGPUComputePass")
+    end
+    return open(reuse or setmetatable({} as ComputePass, ComputePassMT), handle, commandBuffer)
 end
 
 function ComputePass:bindPipeline(pipeline: loader.CValue)
@@ -173,8 +170,7 @@ end
 function ComputePass:bindStorageBuffers(firstSlot: integer, buffers: {loader.CValue})
     local count <const> = #buffers
     if count > MAX_BUFFER_BINDINGS then
-        error(("tecs: %d storage buffers exceeds the limit of %d")
-            :format(count, MAX_BUFFER_BINDINGS), 2)
+        error(("tecs: %d storage buffers exceeds the limit of %d"):format(count, MAX_BUFFER_BINDINGS), 2)
     end
     for index = 1, count do
         handles[index - 1] = buffers[index]
@@ -187,9 +183,13 @@ function ComputePass:dispatch(x: integer, y?: integer, z?: integer)
 end
 
 function ComputePass:finish()
-    if self._finished then return end
+    if self._finished then
+        return
+    end
     self._finished = true
-    if self.commandBuffer ~= nil then passscope.closed(self.commandBuffer) end
+    if self.commandBuffer ~= nil then
+        passscope.closed(self.commandBuffer)
+    end
     C.SDL_EndGPUComputePass(self.handle)
     self.handle = nil
 end

@@ -131,14 +131,13 @@ local record TextureArray
     usage: function(self): integer, integer
 end
 
-local TextureArrayMT <const>: metatable<TextureArray> = { __index = TextureArray }
+local TextureArrayMT <const>: metatable<TextureArray> = {__index = TextureArray}
 
 --- Creates an array with `layers` cells of the given size.
 ---
 --- RGBA8 and sampler usage, neither of which is an option: the point is one
 --- binding for every image, and a second format would be a second binding.
-function TextureArray.create(device: loader.CPtr,
-                             options: TextureArrayOptions): TextureArray
+function TextureArray.create(device: loader.CPtr, options: TextureArrayOptions): TextureArray
     local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
     local settings = info[0] as loader.CStruct
     settings.type = TYPE_2D_ARRAY
@@ -152,7 +151,9 @@ function TextureArray.create(device: loader.CPtr,
     settings.props = 0
 
     local handle = C.SDL_CreateGPUTexture(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUTexture") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUTexture")
+    end
 
     local self = setmetatable({} as TextureArray, TextureArrayMT)
     self.handle = handle
@@ -171,7 +172,9 @@ function TextureArray.create(device: loader.CPtr,
 end
 
 local function ensureTransfer(self: TextureArray, byteCount: integer)
-    if self._transfer ~= nil and self._transferSize >= byteCount then return end
+    if self._transfer ~= nil and self._transferSize >= byteCount then
+        return
+    end
     if self._transfer ~= nil then
         C.SDL_ReleaseGPUTransferBuffer(self._device, self._transfer)
     end
@@ -181,7 +184,9 @@ local function ensureTransfer(self: TextureArray, byteCount: integer)
     settings.size = byteCount
     settings.props = 0
     self._transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
-    if self._transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+    if self._transfer == nil then
+        sdl.fail("SDL_CreateGPUTransferBuffer")
+    end
     self._transferSize = byteCount
 end
 
@@ -189,15 +194,14 @@ end
 ---
 --- One image a layer, at its origin, which is what the array did before there
 --- was a packer and what it still does unless asked otherwise.
-local function placeUnpacked(self: TextureArray, width: integer,
-                             height: integer, level: integer): integer, integer, integer
+local function placeUnpacked(
+    self: TextureArray, width: integer, height: integer, level: integer
+): integer, integer, integer
     if self.used >= self.layers then
-        error(("tecs: texture array is full at %d layers")
-            :format(self.layers), level)
+        error(("tecs: texture array is full at %d layers"):format(self.layers), level)
     end
     if width > self.width or height > self.height then
-        error(("tecs: image %dx%d exceeds the %dx%d cell")
-            :format(width, height, self.width, self.height), level)
+        error(("tecs: image %dx%d exceeds the %dx%d cell"):format(width, height, self.width, self.height), level)
     end
     local layer <const> = self.used
     self.used = layer + 1
@@ -212,20 +216,22 @@ end
 --- a shelf opens below the last one on the newest layer, and failing that a new
 --- layer starts. Nothing is ever reclaimed, which is the same bargain the
 --- unpacked path makes.
-local function placePacked(self: TextureArray, width: integer, height: integer,
-                           level: integer): integer, integer, integer
+local function placePacked(
+    self: TextureArray, width: integer, height: integer, level: integer
+): integer, integer, integer
     if width > self.width or height > self.height then
-        error(("tecs: image %dx%d exceeds the %dx%d cell")
-            :format(width, height, self.width, self.height), level)
+        error(("tecs: image %dx%d exceeds the %dx%d cell"):format(width, height, self.width, self.height), level)
     end
 
     local shelves <const> = self._shelves
     local best: Shelf = nil
     for index = 1, #shelves do
         local shelf = shelves[index]
-        if shelf.height >= height
+        if
+            shelf.height >= height
             and self.width - shelf.cursor >= width
-            and (best == nil or shelf.height < best.height) then
+            and (best == nil or shelf.height < best.height)
+        then
             best = shelf
         end
     end
@@ -241,8 +247,7 @@ local function placePacked(self: TextureArray, width: integer, height: integer,
     -- being packed into, starts a layer of its own.
     if self.used == 0 or self._shelfTop + height > self.height then
         if self.used >= self.layers then
-            error(("tecs: texture array is full at %d layers")
-                :format(self.layers), level)
+            error(("tecs: texture array is full at %d layers"):format(self.layers), level)
         end
         self.used = self.used + 1
         self._shelfTop = 0
@@ -251,7 +256,10 @@ local function placePacked(self: TextureArray, width: integer, height: integer,
     local layer <const> = self.used - 1
     local y <const> = self._shelfTop
     shelves[#shelves + 1] = {
-        layer = layer, y = y, height = height, cursor = width,
+        layer = layer,
+        y = y,
+        height = height,
+        cursor = width,
     }
     self._shelfTop = y + height
     self._occupied = self._occupied + width * height
@@ -265,14 +273,17 @@ end
 --- image's own colour rather than the neighbour packed beside it. Repeating the
 --- edge is what makes what it finds harmless; leaving the gutter undefined
 --- would only move the seam.
-local function stage(self: TextureArray, pixels: loader.CValue, width: integer,
-                     height: integer, pitch: integer, pad: integer): integer
+local function stage(
+    self: TextureArray, pixels: loader.CValue, width: integer, height: integer, pitch: integer, pad: integer
+): integer
     local rowTexels <const> = width + pad * 2
     local rowBytes <const> = rowTexels * 4
     ensureTransfer(self, rowBytes * (height + pad * 2))
 
     local mapped = C.SDL_MapGPUTransferBuffer(self._device, self._transfer, true)
-    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    if mapped == nil then
+        sdl.fail("SDL_MapGPUTransferBuffer")
+    end
 
     -- Repacked row by row so the upload sees tightly packed data regardless
     -- of what stride the source used.
@@ -284,18 +295,18 @@ local function stage(self: TextureArray, pixels: loader.CValue, width: integer,
         loader.copyTo(target, (source + row * pitch) as loader.CValue, width * 4)
         for column = 1, pad do
             loader.copyTo(start + (pad - column) * 4, target as loader.CValue, 4)
-            loader.copyTo(target + (width + column - 1) * 4,
-                (target + (width - 1) * 4) as loader.CValue, 4)
+            loader.copyTo(target + (width + column - 1) * 4, (target + (width - 1) * 4) as loader.CValue, 4)
         end
     end
     -- Top and bottom gutters are whole rows of what they abut, so they pick up
     -- the side gutters written above with no further work.
     for row = 1, pad do
-        loader.copyTo(destination + (pad - row) * rowBytes,
-            (destination + pad * rowBytes) as loader.CValue, rowBytes)
-        loader.copyTo(destination + (pad + height + row - 1) * rowBytes,
+        loader.copyTo(destination + (pad - row) * rowBytes, (destination + pad * rowBytes) as loader.CValue, rowBytes)
+        loader.copyTo(
+            destination + (pad + height + row - 1) * rowBytes,
             (destination + (pad + height - 1) * rowBytes) as loader.CValue,
-            rowBytes)
+            rowBytes
+        )
     end
 
     C.SDL_UnmapGPUTransferBuffer(self._device, self._transfer)
@@ -309,11 +320,13 @@ end
 --- everything after it without a frame having to carry it.
 --- @param x The rectangle's left edge in the layer, gutter included, so this is
 ---     where the placement starts rather than where the image does.
-local function upload(self: TextureArray, layer: integer, x: integer,
-                      y: integer, rowTexels: integer, width: integer,
-                      height: integer)
+local function upload(
+    self: TextureArray, layer: integer, x: integer, y: integer, rowTexels: integer, width: integer, height: integer
+)
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
-    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    if commandBuffer == nil then
+        sdl.fail("SDL_AcquireGPUCommandBuffer")
+    end
     local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
 
     local from = loader.newArray("SDL_GPUTextureTransferInfo[1]")
@@ -333,8 +346,7 @@ local function upload(self: TextureArray, layer: integer, x: integer,
 
     C.SDL_UploadToGPUTexture(copyPass, from, to, false)
     C.SDL_EndGPUCopyPass(copyPass)
-    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
-        "SDL_SubmitGPUCommandBuffer")
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean, "SDL_SubmitGPUCommandBuffer")
 end
 
 --- Uploads RGBA pixels into the array.
@@ -347,8 +359,7 @@ end
 ---     never does shears the image.
 --- @return Where the image landed, which the caller keeps: nothing here maps
 ---     an image back to its region.
-function TextureArray:add(pixels: loader.CValue, width: integer,
-                          height: integer, pitch: integer): TextureArray.Region
+function TextureArray:add(pixels: loader.CValue, width: integer, height: integer, pitch: integer): TextureArray.Region
     local pad <const> = self.packed and PADDING or 0
     local layer, x, y = 0, 0, 0
     if self.packed then
@@ -395,18 +406,21 @@ end
 --- the old one have no way to be told.
 --- @param region What `add` returned for this image, unchanged.
 --- @param pitch The source's row stride in bytes, as `add` takes it.
-function TextureArray:replace(region: TextureArray.Region,
-                              pixels: loader.CValue, width: integer,
-                              height: integer, pitch: integer)
+function TextureArray:replace(
+    region: TextureArray.Region, pixels: loader.CValue, width: integer, height: integer, pitch: integer
+)
     if width ~= region.width or height ~= region.height then
-        error(("tecs: an image occupying %dx%d texels cannot be replaced by a "
-            .. "%dx%d one"):format(region.width, region.height, width, height), 2)
+        error(
+            ("tecs: an image occupying %dx%d texels cannot be replaced by a " .. "%dx%d one"):format(
+                region.width, region.height, width, height
+            ),
+            2
+        )
     end
 
     local pad <const> = self.packed and PADDING or 0
     local rowTexels <const> = stage(self, pixels, width, height, pitch, pad)
-    upload(self, region.layer, region.x - pad, region.y - pad, rowTexels,
-        width + pad * 2, height + pad * 2)
+    upload(self, region.layer, region.x - pad, region.y - pad, rowTexels, width + pad * 2, height + pad * 2)
 end
 
 function TextureArray:usage(): integer, integer
@@ -415,7 +429,9 @@ end
 
 --- Releases the array. Safe to call more than once.
 function TextureArray:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     if self._transfer ~= nil then
         C.SDL_ReleaseGPUTransferBuffer(self._device, self._transfer)

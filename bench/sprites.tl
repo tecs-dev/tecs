@@ -39,12 +39,11 @@
 --- is not part of what is being measured and a bench that needed its own
 --- artwork would be carrying it for nothing.
 
-local root = os.getenv("TECS_LUA")
-    or (_G as {string: any})["__tecsContent"] as string
-    or "out/macos-arm64-dev/lua"
-if root:sub(-1) == "/" then root = root:sub(1, -2) end
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+local root = os.getenv("TECS_LUA") or (_G as {string: any})["__tecsContent"] as string or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then
+    root = root:sub(1, -2)
+end
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local assets <const> = require("tecs.assets")
@@ -112,9 +111,7 @@ local TOTAL <const> = COUNT + POOL
 
 --- Sprites whose animation is playing, which is the number of sprites that
 --- change anything on a fixed step.
-local PLAYING <const> = MODE == "dense" and COUNT
-    or MODE == "sparse" and math.floor(COUNT * CHURN)
-    or 0
+local PLAYING <const> = MODE == "dense" and COUNT or MODE == "sparse" and math.floor(COUNT * CHURN) or 0
 
 timing.enable()
 
@@ -145,11 +142,12 @@ local instances = 0
 --- archetype of their own and the dirty gate would then be exact, which is a
 --- different scene from the one a game has.
 local function scatter(world: tecs.World, count: integer, animated: boolean)
-    if count < 1 then return end
+    if count < 1 then
+        return
+    end
 
-    local types: {tecs.Component} = animated
-        and { Transform, Tint, Sprite, Renderable, Animation }
-        or { Transform, Tint, Sprite, Renderable }
+    local types: {tecs.Component} = animated and {Transform, Tint, Sprite, Renderable, Animation}
+        or {Transform, Tint, Sprite, Renderable}
 
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5
@@ -157,53 +155,56 @@ local function scatter(world: tecs.World, count: integer, animated: boolean)
     local cycle <const> = playbook:cycle(0)
     local rand <const> = math.random
 
-    world:batchSpawn(count, types,
-    function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
-        -- batchSpawn skips FFI defaults, so every field is written here.
-        local transforms = archetype:getMut(Transform)
-        local tints = archetype:getMut(Tint)
-        local sprites = archetype:getMut(Sprite)
-        local animations = animated and archetype:getMut(Animation) or nil
+    world:batchSpawn(
+        count,
+        types,
+        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+            -- batchSpawn skips FFI defaults, so every field is written here.
+            local transforms = archetype:getMut(Transform)
+            local tints = archetype:getMut(Tint)
+            local sprites = archetype:getMut(Sprite)
+            local animations = animated and archetype:getMut(Animation) or nil
 
-        for row = firstRow, lastRow do
-            local transform = transforms[row]
-            transform.x = originX + rand() * AREA_W
-            transform.y = originY + rand() * AREA_H
-            transform.z = 0.0
-            transform.layer = 1
-            transform.rotation = 0.0
-            transform.scaleX = 12.0 + rand() * 16.0
-            transform.scaleY = 12.0 + rand() * 16.0
+            for row = firstRow, lastRow do
+                local transform = transforms[row]
+                transform.x = originX + rand() * AREA_W
+                transform.y = originY + rand() * AREA_H
+                transform.z = 0.0
+                transform.layer = 1
+                transform.rotation = 0.0
+                transform.scaleX = 12.0 + rand() * 16.0
+                transform.scaleY = 12.0 + rand() * 16.0
 
-            local tint = tints[row]
-            tint.r = rand()
-            tint.g = rand()
-            tint.b = rand()
-            tint.a = 1.0
+                local tint = tints[row]
+                tint.r = rand()
+                tint.g = rand()
+                tint.b = rand()
+                tint.a = 1.0
 
-            local target = sprites[row]
-            target.image = resident.image
-            target.slot = resident.slot
-            target.u0 = resident.u0
-            target.v0 = resident.v0
-            target.u1 = resident.u1
-            target.v1 = resident.v1
+                local target = sprites[row]
+                target.image = resident.image
+                target.slot = resident.slot
+                target.u0 = resident.u0
+                target.v0 = resident.v0
+                target.u1 = resident.u1
+                target.v1 = resident.v1
 
-            if animations ~= nil then
-                local instance = animations[row]
-                instance.sheet = playbook.id
-                instance.tag = 0
-                instance.speed = 1.0
-                -- Spread through the cycle rather than started together, so
-                -- the field is not one animation drawn many times and the
-                -- frames a step has to write are not all the same frame.
-                instance.time = rand() * cycle
-                instance.frame = 0
-                instance.loop = true
-                instance.playing = row <= playing
+                if animations ~= nil then
+                    local instance = animations[row]
+                    instance.sheet = playbook.id
+                    instance.tag = 0
+                    instance.speed = 1.0
+                    -- Spread through the cycle rather than started together, so
+                    -- the field is not one animation drawn many times and the
+                    -- frames a step has to write are not all the same frame.
+                    instance.time = rand() * cycle
+                    instance.frame = 0
+                    instance.loop = true
+                    instance.playing = row <= playing
+                end
             end
         end
-    end)
+    )
 end
 
 --- One sprite, for the churn pool.
@@ -211,132 +212,151 @@ local function spawnOne(world: tecs.World, at: integer): integer
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5
     return world:spawn(
-        Transform(originX + (at % 613) / 613.0 * AREA_W,
-            originY + (at % 419) / 419.0 * AREA_H, 0.0, 1, 0.0, 18.0, 18.0),
+        Transform(
+            originX + (at % 613) / 613.0 * AREA_W, originY + (at % 419) / 419.0 * AREA_H, 0.0, 1, 0.0, 18.0, 18.0
+        ),
         Tint(1.0, 0.9, 0.4, 1.0),
-        Sprite(resident.image, resident.u0, resident.v0, resident.u1,
-            resident.v1, resident.slot),
+        Sprite(resident.image, resident.u0, resident.v0, resident.u1, resident.v1, resident.slot),
         Renderable()
     )
 end
 
-return tecs.application({
-    window = { title = "sprites", width = WIDTH, height = HEIGHT },
-    presentMode = "immediate",
-    ambientLight = { 1.0, 1.0, 1.0 },
-    capacity = TOTAL + 64,
-    -- The default ceiling is a million slots, so a scale run has to raise it
-    -- rather than discovering the limit as a spawn failure.
-    maxEntities = TOTAL + 1024,
-    debugMaxFrames = WARMUP + FRAMES,
+return tecs.application(
+    {
+        window = {title = "sprites", width = WIDTH, height = HEIGHT},
+        presentMode = "immediate",
+        ambientLight = {1.0, 1.0, 1.0},
+        capacity = TOTAL + 64,
+        -- The default ceiling is a million slots, so a scale run has to raise it
+        -- rather than discovering the limit as a spawn failure.
+        maxEntities = TOTAL + 1024,
+        debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
-        local renderer = app.renderer
-        if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse"
-            and MODE ~= "churn" then
-            error(("tecs: no sprite bench regime '%s'"):format(MODE))
-        end
+        plugin = function(world: tecs.World, app: tecs.Application)
+            local renderer = app.renderer
+            if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" then
+                error(("tecs: no sprite bench regime '%s'"):format(MODE))
+            end
 
-        -- Blocking, because the field cannot be built before the sheet knows
-        -- which layer its frames live on and there is no frame to poll from
-        -- yet. A game polls `assets.update` instead.
-        if not assets.installed() then assets.install() end
-        local handle <const> = assets.loadImage(paths.asset(ATLAS))
-        assets.waitAll()
-        if handle.status ~= "ready" then
-            error(("tecs: cannot load '%s': %s")
-                :format(ATLAS, handle.error or handle.status))
-        end
-        local imageWidth <const> = handle.width
-        local imageHeight <const> = handle.height
-        resident = renderer:registerImage(handle)
+            -- Blocking, because the field cannot be built before the sheet knows
+            -- which layer its frames live on and there is no frame to poll from
+            -- yet. A game polls `assets.update` instead.
+            if not assets.installed() then
+                assets.install()
+            end
+            local handle <const> = assets.loadImage(paths.asset(ATLAS))
+            assets.waitAll()
+            if handle.status ~= "ready" then
+                error(("tecs: cannot load '%s': %s"):format(ATLAS, handle.error or handle.status))
+            end
+            local imageWidth <const> = handle.width
+            local imageHeight <const> = handle.height
+            resident = renderer:registerImage(handle)
 
-        playbook = sheet.grid({
-            name = "bench.sprites",
-            imageWidth = imageWidth,
-            imageHeight = imageHeight,
-            frameWidth = imageWidth / COLUMNS,
-            frameHeight = imageHeight / ROWS,
-            duration = FRAME_MS,
-        }):bind(resident)
+            playbook = sheet.grid({
+                name = "bench.sprites",
+                imageWidth = imageWidth,
+                imageHeight = imageHeight,
+                frameWidth = imageWidth / COLUMNS,
+                frameHeight = imageHeight / ROWS,
+                duration = FRAME_MS,
+            }):bind(resident)
 
-        animation.useGPU(GPU)
-        if MODE ~= "static" then animation.plugin(world) end
+            animation.useGPU(GPU)
+            if MODE ~= "static" then
+                animation.plugin(world)
+            end
 
-        math.randomseed(42)
-        scatter(world, COUNT, MODE == "dense" or MODE == "sparse")
+            math.randomseed(42)
+            scatter(world, COUNT, MODE == "dense" or MODE == "sparse")
 
-        if MODE == "churn" then
-            print(("sprites: %d resident + %d churning, %d spawned and %d "
-                .. "despawned per frame")
-                :format(COUNT, POOL, SPAWN_RATE, SPAWN_RATE))
-        else
-            print(("sprites: %d sprites over %.0fx%.0f, %d animating")
-                :format(COUNT, AREA_W, AREA_H, PLAYING))
-        end
-        -- The churn and the sampling both sit in `First`, which is where the
-        -- loop used to call this from: ahead of every system in the frame, so a
-        -- sprite spawned here is extracted by the frame that spawned it. The
-        -- one thing that is not the same is that a spawn from inside the step
-        -- is applied at the next phase boundary rather than at once, which is
-        -- what every other spawn in a world already does.
-        local frame = 0
-        world:addSystem({
-            name = "bench.Churn",
-            phase = tecs.phases.First,
-            run = function(dt: number)
-                -- Warmup frames are the ones that built and first uploaded the
-                -- scene. Dropping them from every stage at once is what makes
-                -- the report a distribution of the steady state rather than of
-                -- the run.
-                if frame == WARMUP then timing.reset() end
-
-                if MODE == "churn" then
-                    local size <const> = POOL
-                    for _ = 1, SPAWN_RATE do
-                        local slot <const> = ringAt % size + 1
-                        local previous <const> = ring[slot]
-                        if previous ~= nil then world:despawn(previous) end
-                        ring[slot] = spawnOne(world, ringAt)
-                        ringAt = ringAt + 1
+            if MODE == "churn" then
+                print(
+                    ("sprites: %d resident + %d churning, %d spawned and %d " .. "despawned per frame"):format(
+                        COUNT, POOL, SPAWN_RATE, SPAWN_RATE
+                    )
+                )
+            else
+                print(("sprites: %d sprites over %.0fx%.0f, %d animating"):format(COUNT, AREA_W, AREA_H, PLAYING))
+            end
+            -- The churn and the sampling both sit in `First`, which is where the
+            -- loop used to call this from: ahead of every system in the frame, so a
+            -- sprite spawned here is extracted by the frame that spawned it. The
+            -- one thing that is not the same is that a spawn from inside the step
+            -- is applied at the next phase boundary rather than at once, which is
+            -- what every other spawn in a world already does.
+            local frame = 0
+            world:addSystem({
+                name = "bench.Churn",
+                phase = tecs.phases.First,
+                run = function(dt: number)
+                    -- Warmup frames are the ones that built and first uploaded the
+                    -- scene. Dropping them from every stage at once is what makes
+                    -- the report a distribution of the steady state rather than of
+                    -- the run.
+                    if frame == WARMUP then
+                        timing.reset()
                     end
-                end
 
-                if frame >= WARMUP then
-                    timing.mark(DELTA, dt)
-                    -- One frame behind, since the counter is published by the
-                    -- sync and this runs ahead of it. Over a run of hundreds
-                    -- that shifts the window by one frame and nothing else.
-                    local written <const> = renderer.rewritten
-                    rewrittenTotal = rewrittenTotal + written
-                    if written > rewrittenPeak then rewrittenPeak = written end
-                    if written == 0 then quietFrames = quietFrames + 1 end
-                    instances = renderer.count
-                end
-                frame = frame + 1
-            end,
-        })
+                    if MODE == "churn" then
+                        local size <const> = POOL
+                        for _ = 1, SPAWN_RATE do
+                            local slot <const> = ringAt % size + 1
+                            local previous <const> = ring[slot]
+                            if previous ~= nil then
+                                world:despawn(previous)
+                            end
+                            ring[slot] = spawnOne(world, ringAt)
+                            ringAt = ringAt + 1
+                        end
+                    end
 
-        world:addSystem({
-            name = "bench.Report",
-            phase = tecs.phases.Shutdown,
-            run = function()
-                local frames <const> = math.max(1, frame - WARMUP)
-                print(("%d of %d instances synced, %d changing per fixed step")
-                    :format(instances, TOTAL,
-                        MODE == "churn" and SPAWN_RATE * 2 or PLAYING))
-                print(("rewritten %.0f mean and %d peak per frame, %d of %d "
-                    .. "frames rewrote nothing")
-                    :format(rewrittenTotal / frames, rewrittenPeak,
-                        quietFrames, frames))
-                local report = timing.format()
-                if report ~= "" then print(report) end
-            end,
-        })
+                    if frame >= WARMUP then
+                        timing.mark(DELTA, dt)
+                        -- One frame behind, since the counter is published by the
+                        -- sync and this runs ahead of it. Over a run of hundreds
+                        -- that shifts the window by one frame and nothing else.
+                        local written <const> = renderer.rewritten
+                        rewrittenTotal = rewrittenTotal + written
+                        if written > rewrittenPeak then
+                            rewrittenPeak = written
+                        end
+                        if written == 0 then
+                            quietFrames = quietFrames + 1
+                        end
+                        instances = renderer.count
+                    end
+                    frame = frame + 1
+                end,
+            })
 
-        print(("sprites: mode %s, playback on the %s, viewport %dx%d, "
-            .. "measuring %d frames after %d warmup")
-            :format(MODE, GPU and "GPU" or "host", WIDTH, HEIGHT, FRAMES,
-                WARMUP))
-    end,
-})
+            world:addSystem({
+                name = "bench.Report",
+                phase = tecs.phases.Shutdown,
+                run = function()
+                    local frames <const> = math.max(1, frame - WARMUP)
+                    print(
+                        ("%d of %d instances synced, %d changing per fixed step"):format(
+                            instances, TOTAL, MODE == "churn" and SPAWN_RATE * 2 or PLAYING
+                        )
+                    )
+                    print(
+                        ("rewritten %.0f mean and %d peak per frame, %d of %d " .. "frames rewrote nothing"):format(
+                            rewrittenTotal / frames, rewrittenPeak, quietFrames, frames
+                        )
+                    )
+                    local report = timing.format()
+                    if report ~= "" then
+                        print(report)
+                    end
+                end,
+            })
+
+            print(
+                (
+                    "sprites: mode %s, playback on the %s, viewport %dx%d, " .. "measuring %d frames after %d warmup"
+                ):format(MODE, GPU and "GPU" or "host", WIDTH, HEIGHT, FRAMES, WARMUP)
+            )
+        end,
+    }
+)

@@ -5,7 +5,8 @@ local record types
     --- Context is a type-safe bag of data.
     record Context
         --- Type-safe Key interface.
-        interface Key<T> end
+        interface Key<T>
+        end
 
         --- Get a context value using a type-safe key.
         metamethod __index: function<T>(Context, key: Key<T>): T
@@ -182,7 +183,7 @@ local record types
             defaults: {any}
 
             --- Optional metatable to apply to FFI instances (for instance methods).
-            metatable: {any:any}
+            metatable: {any: any}
 
             --- Optional post-allocation positional initializer. Same semantics as
             --- `ComponentOptions.init`, but the base instance is an FFI struct.
@@ -238,10 +239,12 @@ local record types
         end
 
         --- Relationship component configuration.
-        interface RelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, ComponentOptions<R> end
+        interface RelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, ComponentOptions<R>
+        end
 
         --- FFI relationship component configuration.
-        interface FFIRelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, FFIComponentOptions<R> end
+        interface FFIRelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, FFIComponentOptions<R>
+        end
     end
 
     -- User component lifecycle hooks are not part of the public component
@@ -299,7 +302,8 @@ local record types
         --- @param row 1-based row position.
         --- @param callback Called once per matching relationship instance.
         forEachRelationship: function<T is components.Relationship>(
-            self, relationshipContainer: T, row: integer, callback: function(T))
+            self, relationshipContainer: T, row: integer, callback: function(T)
+        )
 
         --- Get the first relationship instance of the given container
         --- for the entity at `row`, or nil if none exists.
@@ -346,12 +350,7 @@ local record types
         --- @param count Number of entities in the range (lastRow - firstRow + 1).
         --- @param sourceArchetype The archetype the range originated from (nil for spawns).
         onEntitiesAdded: function(
-            self,
-            archetype: Archetype,
-            firstRow: integer,
-            lastRow: integer,
-            count: integer,
-            sourceArchetype?: Archetype
+            self, archetype: Archetype, firstRow: integer, lastRow: integer, count: integer, sourceArchetype?: Archetype
         )
 
         --- Called once per contiguous range of entities removed from the archetype.
@@ -362,12 +361,7 @@ local record types
         --- @param count Number of entities in the range (lastRow - firstRow + 1).
         --- @param destArchetype The archetype the range is moving to (nil for despawns).
         onEntitiesRemoved: function(
-            self,
-            archetype: Archetype,
-            firstRow: integer,
-            lastRow: integer,
-            count: integer,
-            destArchetype?: Archetype
+            self, archetype: Archetype, firstRow: integer, lastRow: integer, count: integer, destArchetype?: Archetype
         )
 
         --- Called when an entity is swap-popped into a different row.
@@ -896,8 +890,12 @@ local record types
         ---   Iterate rows with `for i = firstRow, lastRow do ... end`.
         --- @return firstId First entity ID when the allocation is contiguous, otherwise nil.
         --- @return ids Explicit entity ID list when fallback uses non-contiguous IDs, otherwise nil.
-        batchSpawn: function(self, count: integer, componentTypes: {components.Component},
-            callback: function(Archetype, integer, integer, integer)): integer | nil, {integer} | nil
+        batchSpawn: function(
+            self,
+            count: integer,
+            componentTypes: {components.Component},
+            callback: function(Archetype, integer, integer, integer)
+        ): integer | nil, {integer} | nil
 
         --- Like `batchSpawn`, but uses the supplied entity IDs instead of
         --- allocating a new contiguous range. Intended for snapshot loads
@@ -908,8 +906,12 @@ local record types
         --- @param ids Explicit entity IDs to spawn, in order.
         --- @param componentTypes Array of component types defining the archetype.
         --- @param callback Called at commit with `(archetype, firstRow, lastRow, count)`.
-        batchSpawnAt: function(self, ids: {integer}, componentTypes: {components.Component},
-            callback: function(Archetype, integer, integer, integer))
+        batchSpawnAt: function(
+            self,
+            ids: {integer},
+            componentTypes: {components.Component},
+            callback: function(Archetype, integer, integer, integer)
+        )
 
         --- Despawn an entity.
         ---
@@ -1172,11 +1174,7 @@ local record types
         --- @param callback Receives (sourceId, context) for each source.
         --- @param context Optional context value forwarded to the callback.
         targets: function<T>(
-            self,
-            entity: integer,
-            relationship: components.Relationship,
-            callback: function(integer, T),
-            context: T
+            self, entity: integer, relationship: components.Relationship, callback: function(integer, T), context: T
         )
 
         --- Depth-first traversal over a sparse relationship's inverse index.
@@ -1253,7 +1251,9 @@ local record types
         --- @param event The event type to observe.
         --- @param callback The callback to call when the event is emitted.
         --- @param id Optional ID for the observer.
-        observe: function<T is events.Event>(self, address: integer, event: T, callback: function(event: T), id?: string)
+        observe: function<T is events.Event>(
+            self, address: integer, event: T, callback: function(event: T), id?: string
+        )
 
         --- Stop observing an event at an address.
         ---
@@ -1424,26 +1424,15 @@ local record types
             --- Observe an event type at a specific address.
             --- Address 0 is for world-level events, entity IDs for entity events.
             observe: function<E is Event>(
-                self: MessageBus,
-                address: integer,
-                eventType: E,
-                observer: function(E), id?: string
+                self: MessageBus, address: integer, eventType: E, observer: function(E), id?: string
             )
 
             --- Observe an event type at a specific address, at most once.
-            observeOnce: function<E is Event>(
-                self: MessageBus,
-                address: integer,
-                eventType: E,
-                observer: function(E)
-            )
+            observeOnce: function<E is Event>(self: MessageBus, address: integer, eventType: E, observer: function(E))
 
             --- Stop observing an event type at a specific address.
             stopObserving: function<E is Event>(
-                self: MessageBus,
-                address: integer,
-                eventType: E,
-                observerOrId: function(E)|string
+                self: MessageBus, address: integer, eventType: E, observerOrId: function(E) | string
             )
 
             --- Emit an event to all observers at the specified address.
@@ -1486,7 +1475,6 @@ local record types
         --- Fires when this state is popped (default: "despawn").
         onExit: string | Action | function(World)
     end
-
 end
 
 return types

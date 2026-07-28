@@ -38,7 +38,7 @@ local record FFIStorage
         --- Field tuples {name, type} where type can include array syntax like "float[16]"
         fields: {{string, string}}
         --- Optional metatable to apply to instances (for instance methods)
-        metatable: {any:any}
+        metatable: {any: any}
         --- If true, each instance is its own component type (for dense relationships)
         perEntityComponent: boolean
         --- Stable ECS component name used to recognize an insulated module reload.
@@ -72,7 +72,7 @@ end
 
 local record StructRegistryEntry
     cdef: string
-    metadataFields: {string:any}
+    metadataFields: {string: any}
     instanceIds: {any: integer}
     metatypeInstalled: boolean
 end
@@ -112,7 +112,6 @@ end
 -- Per-column metadata keyed by cdata pointer. Weak keys let resized or dropped
 -- columns disappear without explicit cleanup on every path.
 local storageMetadata: {any: StorageMeta} = setmetatable({}, {__mode = "k"})
-
 
 local function generateStructDef(name: string, fieldTuples: {{string, string}}): string, {string}
     local parts: {string} = {"typedef struct { "}
@@ -154,7 +153,7 @@ local function buildFieldInfo(fieldTuples: {{string, string}}): {FieldInfo}
 end
 
 local function copyArrayField(dst: any, fieldInfo: FieldInfo, value: any)
-    local field = (dst as {string:any})[fieldInfo.name] as {integer: any}
+    local field = (dst as {string: any})[fieldInfo.name] as {integer: any}
     local src = value as {integer: any}
     -- Sources are 0-based (FFI arrays) or 1-based (Lua tables, including
     -- serializeArrayField output). Pick the base once; probing per index
@@ -171,7 +170,7 @@ end
 
 local function serializeArrayField(src: any, fieldInfo: FieldInfo): {any}
     local out: {any} = {}
-    local field = (src as {string:any})[fieldInfo.name] as {integer: any}
+    local field = (src as {string: any})[fieldInfo.name] as {integer: any}
     for i = 0, fieldInfo.arraySize - 1 do
         out[i + 1] = field[i]
     end
@@ -270,36 +269,29 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 elseif key == "componentId" then
                     return instanceIds[self]
                 end
-                return (metadataFields as {any:any})[key]
+                return (metadataFields as {any: any})[key]
             end
 
             tostringFn = function(self: any): string
-                local target = (self as {string:integer})[targetField]
+                local target = (self as {string: integer})[targetField]
                 return structName .. "(" .. target .. ")"
             end
         else
-            indexFn = function(_self: any, key: any): any
-                return (metadataFields as {any:any})[key]
-            end
+            indexFn = function(_self: any, key: any): any return (metadataFields as {any: any})[key] end
 
-            tostringFn = function(_self: any): string
-                return structName
-            end
+            tostringFn = function(_self: any): string return structName end
         end
 
-        local mt: {any:any} = {
-            __tostring = tostringFn,
-            __index = indexFn
-        }
+        local mt: {any: any} = {__tostring = tostringFn, __index = indexFn}
 
         -- Merge user-provided metatable if present
         if def.metatable then
-            for k, v in pairs(def.metatable as {any:any}) do
+            for k, v in pairs(def.metatable as {any: any}) do
                 if k == "__index" then
                     -- Merge __index tables
                     if type(v) == "table" then
-                        for method, impl in pairs(v as {any:any}) do
-                            (metadataFields as {any:any})[method] = impl
+                        for method, impl in pairs(v as {any: any}) do
+                            (metadataFields as {any: any})[method] = impl
                         end
                     end
                 else
@@ -328,22 +320,22 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     local function createInstance(...: any): types.components.Component
         local instance: any = C.new(structType)
 
-        local nargs = select('#', ...)
+        local nargs = select("#", ...)
 
         if nargs == 0 then
             -- FFI zero-initialization is sufficient.
         elseif nargs == 1 and type(select(1, ...)) == "table" then
             -- Table form: copy only declared struct fields.
-            local value = select(1, ...) as {string:any}
+            local value = select(1, ...) as {string: any}
             for i = 1, nFields do
                 local info = fieldInfo[i]
                 local k = info.name
                 local v = value[k]
                 if v ~= nil then
                     if info.isArray then
-                        copyArrayField(instance as {string:any}, info, v)
+                        copyArrayField(instance as {string: any}, info, v)
                     else
-                        (instance as {string:any})[k] = v
+                        (instance as {string: any})[k] = v
                     end
                 end
             end
@@ -352,54 +344,94 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             --
             -- Hardcode 1..4 field unrolls instead of a `for i=1,count do select(i, ...) end` loop.
             -- `select(i, ...)` with a variable index is NYI on LuaJIT traces.
-            local inst = instance as {string:any}
+            local inst = instance as {string: any}
             if nFields == 1 then
                 local a = ...
                 if nargs >= 1 and a ~= nil then
                     local info = fieldInfo[1]
-                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                    if info.isArray then
+                        copyArrayField(inst, info, a)
+                    else
+                        inst[info.name] = a
+                    end
                 end
             elseif nFields == 2 then
                 local a, b = ...
                 if nargs >= 1 and a ~= nil then
                     local info = fieldInfo[1]
-                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                    if info.isArray then
+                        copyArrayField(inst, info, a)
+                    else
+                        inst[info.name] = a
+                    end
                 end
                 if nargs >= 2 and b ~= nil then
                     local info = fieldInfo[2]
-                    if info.isArray then copyArrayField(inst, info, b) else inst[info.name] = b end
+                    if info.isArray then
+                        copyArrayField(inst, info, b)
+                    else
+                        inst[info.name] = b
+                    end
                 end
             elseif nFields == 3 then
                 local a, b, c = ...
                 if nargs >= 1 and a ~= nil then
                     local info = fieldInfo[1]
-                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                    if info.isArray then
+                        copyArrayField(inst, info, a)
+                    else
+                        inst[info.name] = a
+                    end
                 end
                 if nargs >= 2 and b ~= nil then
                     local info = fieldInfo[2]
-                    if info.isArray then copyArrayField(inst, info, b) else inst[info.name] = b end
+                    if info.isArray then
+                        copyArrayField(inst, info, b)
+                    else
+                        inst[info.name] = b
+                    end
                 end
                 if nargs >= 3 and c ~= nil then
                     local info = fieldInfo[3]
-                    if info.isArray then copyArrayField(inst, info, c) else inst[info.name] = c end
+                    if info.isArray then
+                        copyArrayField(inst, info, c)
+                    else
+                        inst[info.name] = c
+                    end
                 end
             elseif nFields == 4 then
                 local a, b, c, d = ...
                 if nargs >= 1 and a ~= nil then
                     local info = fieldInfo[1]
-                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                    if info.isArray then
+                        copyArrayField(inst, info, a)
+                    else
+                        inst[info.name] = a
+                    end
                 end
                 if nargs >= 2 and b ~= nil then
                     local info = fieldInfo[2]
-                    if info.isArray then copyArrayField(inst, info, b) else inst[info.name] = b end
+                    if info.isArray then
+                        copyArrayField(inst, info, b)
+                    else
+                        inst[info.name] = b
+                    end
                 end
                 if nargs >= 3 and c ~= nil then
                     local info = fieldInfo[3]
-                    if info.isArray then copyArrayField(inst, info, c) else inst[info.name] = c end
+                    if info.isArray then
+                        copyArrayField(inst, info, c)
+                    else
+                        inst[info.name] = c
+                    end
                 end
                 if nargs >= 4 and d ~= nil then
                     local info = fieldInfo[4]
-                    if info.isArray then copyArrayField(inst, info, d) else inst[info.name] = d end
+                    if info.isArray then
+                        copyArrayField(inst, info, d)
+                    else
+                        inst[info.name] = d
+                    end
                 end
             else
                 -- Fallback for 5+ fields: collect varargs into a table (one alloc) and index by loop index.
@@ -446,10 +478,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         end
 
         storageMetadata[newArray] = {
-            capacity = newCapacity,
-            structSize = structSize,
-            arrayType = arrayType,
-            structType = structType
+            capacity = newCapacity, structSize = structSize, arrayType = arrayType, structType = structType
         }
 
         if oldArray then
@@ -470,14 +499,11 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 byteDataByColumn[ptr] = holder
                 data = ptr as C.CData
             else
-                data = C.new(arrayType as C.CType, capacity + 1)  -- +1 for padding at index 0
+                data = C.new(arrayType as C.CType, capacity + 1) -- +1 for padding at index 0
             end
 
             storageMetadata[data] = {
-                capacity = capacity,
-                structSize = structSize,
-                arrayType = arrayType,
-                structType = structType
+                capacity = capacity, structSize = structSize, arrayType = arrayType, structType = structType
             }
 
             return data as {types.components.Component}
@@ -497,9 +523,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         -- us with the already-batched target size. Duplicating the grow
         -- factor here would waste memory.
         ensureCapacity = function(
-            _self: Storage,
-            column: {types.components.Component},
-            needed: integer
+            _self: Storage, column: {types.components.Component}, needed: integer
         ): {types.components.Component}
             local meta = storageMetadata[column]
             if meta and needed > meta.capacity then
@@ -514,9 +538,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         -- of capacity. This avoids thrashing for workloads that grow and drop
         -- a handful of entities. Thresholds mirror `ffi.adjustCapacityDouble`.
         adjustCapacity = function(
-            _self: Storage,
-            column: {types.components.Component},
-            usedCount: integer
+            _self: Storage, column: {types.components.Component}, usedCount: integer
         ): {types.components.Component}
             local meta = storageMetadata[column]
             if meta and meta.capacity >= 2048 and usedCount <= meta.capacity / 8 then
@@ -535,10 +557,9 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             columnAllocator = fn
         end,
 
-        createComponent = function(
-            _self: Storage,
-            container: types.components.Component
-        ): function(...: any): types.components.Component
+        createComponent = function(_self: Storage, container: types.components.Component): function(
+            ...: any
+        ): types.components.Component
             -- Shared fields exposed by every instance through the metatype.
             if container then
                 -- The metatype is shared per struct name; a second
@@ -553,15 +574,21 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                     -- real struct-name collision and must not steal it.
                     local nextName = def.bindingName or container.componentName
                     if bound.componentName ~= nextName then
-                        error("FFI struct '" .. structName .. "' is already bound to component '" ..
-                            tostring(bound.componentName) .. "'; use a distinct struct name", 0)
+                        error(
+                            "FFI struct '"
+                                .. structName
+                                .. "' is already bound to component '"
+                                .. tostring(bound.componentName)
+                                .. "'; use a distinct struct name",
+                            0
+                        )
                     end
                 end
                 metadataFields.componentType = container
                 metadataFields.componentName = structName
-                metadataFields.componentId = (container as {string:any}).componentId
-                metadataFields.storage = (container as {string:any}).storage
-                metadataFields.storageType = (container as {string:any}).storageType
+                metadataFields.componentId = (container as {string: any}).componentId
+                metadataFields.storage = (container as {string: any}).storage
+                metadataFields.storageType = (container as {string: any}).storageType
                 -- Cdata relationship instances serve as archetype column
                 -- keys; move plans and snapshot bulk paths classify FFI
                 -- columns by `structSize`, so instances must expose it
@@ -585,9 +612,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         _structSize = structSize,
 
         -- Set shared metadata read by FFI instances through their metatype.
-        setMetadata = function(_self: Storage, key: string, value: any)
-            metadataFields[key] = value
-        end,
+        setMetadata = function(_self: Storage, key: string, value: any) metadataFields[key] = value end,
 
         -- Convert an FFI instance to a plain table for JSON-compatible snapshots.
         serialize = function(_self: Storage, instance: types.components.Component): {string: any}
@@ -630,7 +655,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 instanceIds[instance] = componentId
             end
             return instance as types.components.Component
-        end
+        end,
     } as Storage
 end
 

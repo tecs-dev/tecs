@@ -28,7 +28,7 @@ local record Sampler
     _destroyed: boolean
 end
 
-local SamplerMT <const>: metatable<Sampler> = { __index = Sampler }
+local SamplerMT <const>: metatable<Sampler> = {__index = Sampler}
 
 local FILTERS <const>: {string: integer} = {
     nearest = 0,
@@ -71,7 +71,9 @@ function Sampler.create(device: loader.CPtr, options: SamplerOptions): Sampler
     settings.props = 0
 
     local handle = C.SDL_CreateGPUSampler(device, info)
-    if handle == nil then sdl.fail("SDL_CreateGPUSampler") end
+    if handle == nil then
+        sdl.fail("SDL_CreateGPUSampler")
+    end
 
     local self = setmetatable({} as Sampler, SamplerMT)
     self.handle = handle
@@ -82,7 +84,9 @@ end
 
 --- Releases the sampler. Safe to call more than once.
 function Sampler:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     C.SDL_ReleaseGPUSampler(self._device, self.handle)
     self.handle = nil

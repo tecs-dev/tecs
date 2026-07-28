@@ -93,7 +93,12 @@ end
 shaderpack.VERSION = 2
 
 local FORMAT_NAMES <const>: {string} = {
-    "private", "spirv", "dxbc", "dxil", "msl", "metallib",
+    "private",
+    "spirv",
+    "dxbc",
+    "dxil",
+    "msl",
+    "metallib",
 }
 
 --- Name of an SDL shader format, for diagnostics and for the manifest.
@@ -128,8 +133,7 @@ end
 --- architectures: the body is LuaJIT's own serialization, which is what makes
 --- it cheap to read, and a pack is built for one target anyway.
 function shaderpack.encode(pack: shaderpack.Pack): string
-    return MAGIC .. string.char(shaderpack.VERSION)
-        .. buffer.encode(pack as string) as string
+    return MAGIC .. string.char(shaderpack.VERSION) .. buffer.encode(pack as string) as string
 end
 
 --- Deserializes a pack, raising if it is not one or is a layout this build
@@ -143,15 +147,13 @@ function shaderpack.decode(bytes: string, origin?: string): shaderpack.Pack
     end
     local version = bytes:byte(#MAGIC + 1)
     if version ~= shaderpack.VERSION then
-        error(("tecs: %s is a version %d shader pack, this build reads %d")
-            :format(origin, version, shaderpack.VERSION), 2)
+        error(
+            ("tecs: %s is a version %d shader pack, this build reads %d"):format(origin, version, shaderpack.VERSION), 2
+        )
     end
-    local ok, decoded = pcall(function(): any
-        return buffer.decode(bytes:sub(#MAGIC + 2)) as any
-    end)
+    local ok, decoded = pcall(function(): any return buffer.decode(bytes:sub(#MAGIC + 2)) as any end)
     if not ok then
-        error(("tecs: %s is a corrupt shader pack: %s")
-            :format(origin, tostring(decoded)), 2)
+        error(("tecs: %s is a corrupt shader pack: %s"):format(origin, tostring(decoded)), 2)
     end
     return decoded as shaderpack.Pack
 end
@@ -172,7 +174,9 @@ end
 --- Reads a pack from `path`, or nil if there is no file there.
 function shaderpack.read(path: string): shaderpack.Pack
     local bytes = filesystem.read(path)
-    if bytes == nil then return nil end
+    if bytes == nil then
+        return nil
+    end
     return shaderpack.decode(bytes, path)
 end
 

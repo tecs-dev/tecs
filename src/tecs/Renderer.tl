@@ -48,7 +48,7 @@ local DEFAULT_CAPACITY <const> = 65536
 --- fraction of them. A dim default makes the first thing anyone builds look
 --- broken and makes lighting the price of seeing anything at all; at white,
 --- lights add on top of a scene that is already legible.
-local DEFAULT_AMBIENT <const>: {number} = { 1.0, 1.0, 1.0 }
+local DEFAULT_AMBIENT <const>: {number} = {1.0, 1.0, 1.0}
 
 local record RendererOptions
     --- Light every surface receives before any light entity contributes, as
@@ -113,11 +113,10 @@ local record Renderer
     _centred: boolean
 end
 
-local RendererMT <const>: metatable<Renderer> = { __index = Renderer }
+local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
 
 --- Builds a renderer for `device`.
-function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
-                         options: RendererOptions): Renderer
+function Renderer.create(device: loader.CPtr, swapchainFormat: integer, options: RendererOptions): Renderer
     options = options or {}
 
     local self = setmetatable({} as Renderer, RendererMT)
@@ -132,16 +131,19 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     -- A copy rather than the constant itself, so a caller reaching for
     -- `renderer.deferred.ambient` and writing into it moves this renderer's
     -- light and not every renderer's.
-    local ambient <const> = options.ambient
-        or { DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3] }
+    local ambient <const> = options.ambient or {DEFAULT_AMBIENT[1], DEFAULT_AMBIENT[2], DEFAULT_AMBIENT[3]}
 
-    local backend = Backend.create(device, swapchainFormat, {
-        ambient = ambient,
-        capacity = self.capacity,
-        cell = options.cell,
-        layers = options.layers,
-        packImages = options.packImages,
-    })
+    local backend = Backend.create(
+        device,
+        swapchainFormat,
+        {
+            ambient = ambient,
+            capacity = self.capacity,
+            cell = options.cell,
+            layers = options.layers,
+            packImages = options.packImages,
+        }
+    )
     self._backend = backend
     self.images = backend.images
     self.instances = backend.instances
@@ -167,12 +169,16 @@ end
 
 --- Registers the sync system and queries on `world`.
 function Renderer:install(world: ecs.World)
-    self._extractor:install(world, self._packet, function()
-        local packet = self._packet
-        self.count = packet.count
-        self.dropped = packet.dropped
-        self.rewritten = packet.rewritten
-    end)
+    self._extractor:install(
+        world,
+        self._packet,
+        function()
+            local packet = self._packet
+            self.count = packet.count
+            self.dropped = packet.dropped
+            self.rewritten = packet.rewritten
+        end
+    )
 end
 
 --- Uploads a decoded image into the array and returns a Sprite for it.
@@ -199,14 +205,12 @@ function Renderer:registerImage(handle: assets.Handle): components.Sprite, Textu
     local image = components.imageId(handle.path)
     local region = self._extractor:regionOf(image)
     if region == nil then
-        region = self._backend:addImage(handle.pixels, handle.width,
-            handle.height, handle.pitch)
+        region = self._backend:addImage(handle.pixels, handle.width, handle.height, handle.pitch)
         self._extractor:registerImage(image, region)
     end
     handle:release()
 
-    return components.Sprite(image, region.u0, region.v0, region.u1,
-        region.v1, region.layer), region
+    return components.Sprite(image, region.u0, region.v0, region.u1, region.v1, region.layer), region
 end
 
 --- Uploads a decoded image over the one already registered under its path.
@@ -232,22 +236,23 @@ function Renderer:replaceImage(handle: assets.Handle): components.Sprite, Textur
     local image = components.imageId(handle.path)
     local region = self._extractor:regionOf(image)
     if region == nil then
-        error(("tecs: no image is registered as '%s', so there is nothing to "
-            .. "replace"):format(handle.path), 2)
+        error(("tecs: no image is registered as '%s', so there is nothing to " .. "replace"):format(handle.path), 2)
     end
     if handle.width ~= region.width or handle.height ~= region.height then
-        error(("tecs: '%s' was registered at %dx%d and is now %dx%d; a "
-            .. "replacement keeps the size, because the sprites drawing it "
-            .. "already hold the old rect"):format(handle.path, region.width,
-            region.height, handle.width, handle.height), 2)
+        error(
+            (
+                "tecs: '%s' was registered at %dx%d and is now %dx%d; a "
+                .. "replacement keeps the size, because the sprites drawing it "
+                .. "already hold the old rect"
+            ):format(handle.path, region.width, region.height, handle.width, handle.height),
+            2
+        )
     end
 
-    self._backend:replaceImage(region, handle.pixels, handle.width,
-        handle.height, handle.pitch)
+    self._backend:replaceImage(region, handle.pixels, handle.width, handle.height, handle.pitch)
     handle:release()
 
-    return components.Sprite(image, region.u0, region.v0, region.u1,
-        region.v1, region.layer), region
+    return components.Sprite(image, region.u0, region.v0, region.u1, region.v1, region.layer), region
 end
 
 --- Rebuilds every pipeline from the shader sources as they read now.
@@ -282,8 +287,7 @@ function Renderer:reservesRuns(): boolean
     return self._extractor:reservesRuns()
 end
 
-function Renderer:sprite(name: string, u0?: number, v0?: number,
-                         u1?: number, v1?: number): components.Sprite
+function Renderer:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
     return self._extractor:sprite(name, u0, v0, u1, v1)
 end
 

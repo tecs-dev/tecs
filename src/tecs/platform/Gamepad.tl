@@ -98,7 +98,7 @@ local record Gamepad
     _readInfo: function(self: Gamepad)
 end
 
-local GamepadMT <const>: metatable<Gamepad> = { __index = Gamepad }
+local GamepadMT <const>: metatable<Gamepad> = {__index = Gamepad}
 
 --- Stick drift is a property of the hardware rather than of any one game, so
 --- a default lives here.
@@ -123,7 +123,9 @@ end
 ---     `gamepadAdded` event.
 function Gamepad.open(backend: Backend, gate: Gate, id: number): Gamepad
     local handle = backend.openGamepad(id)
-    if handle == nil then return nil end
+    if handle == nil then
+        return nil
+    end
 
     local self = setmetatable({} as Gamepad, GamepadMT)
     self._backend = backend
@@ -144,7 +146,9 @@ end
 --- reports a remap, which is the only other moment the answers change.
 function Gamepad:_readInfo()
     local handle = live(self)
-    if handle == nil then return end
+    if handle == nil then
+        return
+    end
     local info = self._backend.gamepadInfo(handle, self.id)
     self.name = info.name
     self.kind = info.kind
@@ -170,7 +174,9 @@ function Gamepad:_disconnect()
     self._axes = {}
     self._sensors = {}
     self._fingers = {}
-    if handle ~= nil then self._backend.closeGamepad(handle) end
+    if handle ~= nil then
+        self._backend.closeGamepad(handle)
+    end
 end
 
 --- Clears every tier. For focus loss, where the device is still there but the
@@ -202,14 +208,13 @@ end
 function Gamepad:_setSensor(sensor: integer, x: number, y: number, z: number)
     local reading = self._sensors[sensor]
     if reading == nil then
-        reading = { 0.0, 0.0, 0.0 }
+        reading = {0.0, 0.0, 0.0}
         self._sensors[sensor] = reading
     end
     reading[1], reading[2], reading[3] = x, y, z
 end
 
-function Gamepad:_setFinger(touchpad: integer, finger: integer, x: number,
-                            y: number, pressure: number, down: boolean)
+function Gamepad:_setFinger(touchpad: integer, finger: integer, x: number, y: number, pressure: number, down: boolean)
     local pad = self._fingers[touchpad]
     if pad == nil then
         pad = {}
@@ -217,7 +222,7 @@ function Gamepad:_setFinger(touchpad: integer, finger: integer, x: number,
     end
     local held = pad[finger]
     if held == nil then
-        held = { touchpad = touchpad, finger = finger } as TouchpadFinger
+        held = {touchpad = touchpad, finger = finger} as TouchpadFinger
         pad[finger] = held
     end
     held.x, held.y, held.pressure, held.down = x, y, pressure, down
@@ -278,21 +283,27 @@ end
 --- Whether a button is held. Names are positional: "south", "leftShoulder",
 --- "dpadUp".
 function Gamepad:buttonDown(button: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     return self._buttons.down[resolveButton(self, button)] == true
 end
 
 --- Whether a button went down. Reads the latched set inside a fixed step, so
 --- a press that began and ended between two steps is not lost.
 function Gamepad:buttonPressed(button: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     local edges = self._buttons:edges(self._gate.fixed, false)
     return edges[resolveButton(self, button)] == true
 end
 
 --- Whether a button came up, on the same tiers as `buttonPressed`.
 function Gamepad:buttonReleased(button: string | integer, layer?: Layer): boolean
-    if not self._gate:canRead(layer) then return false end
+    if not self._gate:canRead(layer) then
+        return false
+    end
     local edges = self._buttons:edges(self._gate.fixed, true)
     return edges[resolveButton(self, button)] == true
 end
@@ -308,12 +319,15 @@ end
 --- @param deadzone Magnitude below which the axis reads as zero. Defaults to a
 ---     value that suits the hardware, since stick drift is a property of the
 ---     device rather than of any one game.
-function Gamepad:axis(axis: string | integer, deadzone?: number,
-                      layer?: Layer): number
-    if not self._gate:canRead(layer) then return 0.0 end
+function Gamepad:axis(axis: string | integer, deadzone?: number, layer?: Layer): number
+    if not self._gate:canRead(layer) then
+        return 0.0
+    end
     local value = self._axes[resolveAxis(self, axis)] or 0.0
     local limit = deadzone or DEFAULT_DEADZONE
-    if value < limit and value > -limit then return 0.0 end
+    if value < limit and value > -limit then
+        return 0.0
+    end
     return value
 end
 
@@ -325,7 +339,9 @@ end
 --- same answer a prompt wants.
 function Gamepad:hasButton(button: string | integer): boolean
     local handle = live(self)
-    if handle == nil then return false end
+    if handle == nil then
+        return false
+    end
     return self._backend.gamepadHasButton(handle, resolveButton(self, button))
 end
 
@@ -335,7 +351,9 @@ end
 --- forever, which is indistinguishable from one the player is not moving.
 function Gamepad:hasAxis(axis: string | integer): boolean
     local handle = live(self)
-    if handle == nil then return false end
+    if handle == nil then
+        return false
+    end
     return self._backend.gamepadHasAxis(handle, resolveAxis(self, axis))
 end
 
@@ -345,10 +363,14 @@ end
 --- only changes when the device is remapped, which drops the cache.
 function Gamepad:label(button: string | integer): string
     local handle = live(self)
-    if handle == nil then return "unknown" end
+    if handle == nil then
+        return "unknown"
+    end
     local code = resolveButton(self, button)
     local cached = self._labels[code]
-    if cached ~= nil then return cached end
+    if cached ~= nil then
+        return cached
+    end
     local found = self._backend.gamepadButtonLabel(handle, code)
     self._labels[code] = found
     return found
@@ -362,7 +384,9 @@ end
 --- @return The state name, then the charge in 0..100 or -1.
 function Gamepad:power(): string, integer
     local handle = live(self)
-    if handle == nil then return "unknown", -1 end
+    if handle == nil then
+        return "unknown", -1
+    end
     return self._backend.gamepadPower(handle)
 end
 
@@ -373,7 +397,9 @@ end
 --- Whether the device carries a sensor: "gyro" or "accelerometer".
 function Gamepad:hasSensor(sensor: string | integer): boolean
     local handle = live(self)
-    if handle == nil then return false end
+    if handle == nil then
+        return false
+    end
     return self._backend.gamepadHasSensor(handle, resolveSensor(self, sensor))
 end
 
@@ -384,9 +410,10 @@ end
 --- for the stream.
 function Gamepad:enableSensor(sensor: string | integer, enabled?: boolean): boolean
     local handle = live(self)
-    if handle == nil then return false end
-    return self._backend.setGamepadSensor(handle, resolveSensor(self, sensor),
-        enabled ~= false)
+    if handle == nil then
+        return false
+    end
+    return self._backend.setGamepadSensor(handle, resolveSensor(self, sensor), enabled ~= false)
 end
 
 --- Whether a sensor is currently delivering readings.
@@ -396,7 +423,9 @@ end
 --- up here as false.
 function Gamepad:sensorEnabled(sensor: string | integer): boolean
     local handle = live(self)
-    if handle == nil then return false end
+    if handle == nil then
+        return false
+    end
     return self._backend.gamepadSensorEnabled(handle, resolveSensor(self, sensor))
 end
 
@@ -405,9 +434,13 @@ end
 --- Folded from the event stream rather than polled, so a replay reproduces it
 --- and a blocked layer cannot read it.
 function Gamepad:sensor(sensor: string | integer, layer?: Layer): number, number, number
-    if not self._gate:canRead(layer) then return 0.0, 0.0, 0.0 end
+    if not self._gate:canRead(layer) then
+        return 0.0, 0.0, 0.0
+    end
     local reading = self._sensors[resolveSensor(self, sensor)]
-    if reading == nil then return 0.0, 0.0, 0.0 end
+    if reading == nil then
+        return 0.0, 0.0, 0.0
+    end
     return reading[1], reading[2], reading[3]
 end
 
@@ -424,11 +457,17 @@ end
 ---     the only one on every device that has any.
 function Gamepad:touchpadFingers(touchpad?: integer, layer?: Layer): {TouchpadFinger}
     local out: {TouchpadFinger} = {}
-    if not self._gate:canRead(layer) then return out end
+    if not self._gate:canRead(layer) then
+        return out
+    end
     local pad = self._fingers[touchpad or 0]
-    if pad == nil then return out end
+    if pad == nil then
+        return out
+    end
     for _, finger in pairs(pad) do
-        if finger.down then out[#out + 1] = finger end
+        if finger.down then
+            out[#out + 1] = finger
+        end
     end
     return out
 end
@@ -449,9 +488,10 @@ end
 --- @param high The lighter, higher-frequency one.
 function Gamepad:rumble(low: number, high: number, seconds: number): boolean
     local handle = live(self)
-    if handle == nil then return false end
-    return self._backend.rumble(handle, low, high,
-        math.floor((seconds or 0.0) * 1000.0 + 0.5))
+    if handle == nil then
+        return false
+    end
+    return self._backend.rumble(handle, low, high, math.floor((seconds or 0.0) * 1000.0 + 0.5))
 end
 
 --- Rumbles the triggers, on the devices that have motors in them.
@@ -461,9 +501,10 @@ end
 --- nothing to the other. False on everything else.
 function Gamepad:rumbleTriggers(left: number, right: number, seconds: number): boolean
     local handle = live(self)
-    if handle == nil then return false end
-    return self._backend.rumbleTriggers(handle, left, right,
-        math.floor((seconds or 0.0) * 1000.0 + 0.5))
+    if handle == nil then
+        return false
+    end
+    return self._backend.rumbleTriggers(handle, left, right, math.floor((seconds or 0.0) * 1000.0 + 0.5))
 end
 
 --- Sets the device's light, in 0..1 per channel.
@@ -472,7 +513,9 @@ end
 --- `setPlayerIndex` drives. False on a device with neither.
 function Gamepad:setLED(red: number, green: number, blue: number): boolean
     local handle = live(self)
-    if handle == nil then return false end
+    if handle == nil then
+        return false
+    end
     return self._backend.setLED(handle, red, green, blue)
 end
 
@@ -484,8 +527,12 @@ end
 --- @param index The slot, zero-based, or -1 for none.
 function Gamepad:setPlayerIndex(index: integer): boolean
     local handle = live(self)
-    if handle == nil then return false end
-    if not self._backend.setPlayerIndex(handle, index) then return false end
+    if handle == nil then
+        return false
+    end
+    if not self._backend.setPlayerIndex(handle, index) then
+        return false
+    end
     self.playerIndex = index
     return true
 end

@@ -9,6 +9,13 @@ PRESET ?= macos-arm64-dev
 OUT    := out/$(PRESET)
 LUA    := $(OUT)/lua
 BIN    := $(OUT)/bin/tecs
+TL     := $(CURDIR)/vendor/bin/tl
+
+# Development tools are installed into the ignored vendor rock tree at exact
+# commits. Teal and Cerulean both move ahead of releases that understand the
+# syntax used here, so floating development rocks are not reproducible.
+TL_REF        ?= 1326d829790b92e23defe69fcf40460103b60d1d
+CERULEAN_REF  ?= 94dcc5f178163d759674836fffc9558eccf692cd
 
 # The build system owns these locations, so it passes them rather than having
 # the engine guess where its own output went.
@@ -60,7 +67,8 @@ BENCH_TL  := $(shell find bench -name '*.tl' 2>/dev/null)
 TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test test-package abi-check run clean \
-        rebuild deps package check-package presets shaders bench bench-physics \
+        rebuild deps dev-tools package check-package presets shaders \
+        bench bench-physics \
         bench-sprites bench-text bench-particles bench-latency bench-alloc \
         bench-ecs \
         bench-json \
@@ -78,7 +86,12 @@ presets: ## List available CMake presets
 deps: ## Install development dependencies (macOS/Homebrew)
 	brew install cmake pkg-config sdl3 sdl3_image sdl3_mixer sdl3_net box2d \
 	  shaderc spirv-cross luajit \
-	  clang-format stylua ruff gersemi prettier
+	  clang-format stylua ruff gersemi prettier luarocks
+	@$(MAKE) dev-tools
+
+dev-tools: ## Install pinned Teal and Cerulean into vendor
+	@TL_REF="$(TL_REF)" CERULEAN_REF="$(CERULEAN_REF)" \
+	  scripts/install-dev-tools.sh
 
 configure: ## Configure the selected preset
 	@cmake --preset $(PRESET)
@@ -90,7 +103,7 @@ build: ## Build the selected preset
 	@cmake --build --preset $(PRESET)
 
 check: ## Type-check Teal sources
-	@tl check $(TL_FLAGS) $(SOURCE_TL) $(BENCH_TL) main.tl
+	@$(TL) check $(TL_FLAGS) $(SOURCE_TL) $(BENCH_TL) main.tl
 
 # Formatting needs no build, so these call the script rather than going through
 # CMake. It is the same script the CMake targets of these names run, so there is
@@ -119,11 +132,11 @@ abi-check: build ## Verify generated cdefs against the C ABI
 	@python3 scripts/abicheck.py $(LUA)/tecs/ffi
 
 $(LUA)/main.lua: main.tl
-	@tl gen $(TL_FLAGS) main.tl -o $@
+	@$(TL) gen $(TL_FLAGS) main.tl -o $@
 
 $(OUT)/bench/%.lua: bench/%.tl
 	@mkdir -p $(OUT)/bench
-	@tl gen $(TL_FLAGS) $< -o $@
+	@$(TL) gen $(TL_FLAGS) $< -o $@
 
 bench: build $(OUT)/bench/shapes.lua ## Run the shapes benchmark
 	@$(BIN) --entry $(OUT)/bench/shapes.lua
