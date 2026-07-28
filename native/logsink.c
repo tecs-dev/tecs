@@ -106,6 +106,10 @@ static void SDLCALL sink(void *userdata, int category, SDL_LogPriority priority,
     if (previousFunction) {
         previousFunction(previousUserdata, category, priority, message);
     }
+    /* Read without the lock only to skip formatting a line nothing will take.
+     * The pointer is not dereferenced until it has been read again under the
+     * lock below, so a file being swapped or closed underneath this cannot
+     * turn into a write to a stream that has gone. */
     if (!sinkFile) return;
 
     char line[2048];
@@ -120,22 +124,46 @@ static void SDLCALL sink(void *userdata, int category, SDL_LogPriority priority,
     used += (size_t)SDL_snprintf(line + used, sizeof(line) - used, "\"}\n");
 
     SDL_LockMutex(sinkLock);
-    SDL_WriteIO(sinkFile, line, used);
-    SDL_FlushIO(sinkFile);
+    if (sinkFile) {
+        /* One write per line, under the lock, so a line is never split across
+         * two files when `tecsLogSinkOpen` swaps one for another. */
+        SDL_WriteIO(sinkFile, line, used);
+        SDL_FlushIO(sinkFile);
+    }
     SDL_UnlockMutex(sinkLock);
 }
 
-/* Starts writing to `path`, truncating it. Returns false on failure. */
+/* Starts writing to `path`, truncating it, and stops writing to whatever file
+ * was open before. Returns false on failure, in which case the previous file
+ * keeps receiving lines. */
 bool tecsLogSinkOpen(const char *path)
 {
-    if (sinkFile) return true;
     if (!sinkLock) {
         sinkLock = SDL_CreateMutex();
         if (!sinkLock) return false;
     }
-    sinkFile = SDL_IOFromFile(path, "w");
-    if (!sinkFile) return false;
 
+    /* The new file is opened before the old one is given up, so a path that
+     * cannot be created leaves the sink exactly as it was. */
+    SDL_IOStream *opened = SDL_IOFromFile(path, "w");
+    if (!opened) return false;
+
+    SDL_LockMutex(sinkLock);
+    SDL_IOStream *replaced = sinkFile;
+    sinkFile = opened;
+    SDL_UnlockMutex(sinkLock);
+
+    if (replaced) {
+        /* Past the unlock nothing can reach `replaced`: a thread already
+         * inside `sink` finished its line before the swap took the lock, and
+         * one arriving after reads the new file under it. */
+        SDL_CloseIO(replaced);
+        return true;
+    }
+
+    /* Only on the way in from nothing. Asking SDL for its output function
+     * while this one is already installed would answer with `sink` itself,
+     * and the restore in `tecsLogSinkClose` would then recurse forever. */
     SDL_GetLogOutputFunction(&previousFunction, &previousUserdata);
     SDL_SetLogOutputFunction(sink, NULL);
     return true;

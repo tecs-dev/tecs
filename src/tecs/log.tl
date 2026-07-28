@@ -181,10 +181,15 @@ local filePath: string = nil
 --- Lines are written from whichever thread logged, including threads the VM never created,
 --- so ordering follows the calls and not any Lua-side sequence.
 ---
---- @param path Truncated if it exists, created if it does not. Directories are not made.
---- @return False when the file could not be opened, in which case nothing else changed.
----     True when a file is already open, where the call is a no-op and the earlier file
----     keeps receiving lines; `closeFile` first to move to another path.
+--- Called while another file is open, this moves to `path`: the previous file is closed and
+--- every later line goes to the new one, so the path this accepts is the path being written
+--- to and `filePath` never names a file the sink has left behind. The move happens between
+--- lines rather than inside one.
+---
+--- @param path Truncated if it exists, created if it does not, including when it is the
+---     file already open, so this is not a way to check one is. Directories are not made.
+--- @return False when the file could not be opened, in which case nothing else changed and
+---     a file already open keeps receiving lines.
 function log.openFile(path: string): boolean
     local ok = sink.tecsLogSinkOpen(path) as boolean
     if ok then

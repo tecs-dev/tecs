@@ -14,6 +14,8 @@ local log = require("tecs.log")
 
 local C = sdl.C
 local PATH = "/tmp/tecs-log-spec.jsonl"
+local FIRST = "/tmp/tecs-log-spec-first.jsonl"
+local SECOND = "/tmp/tecs-log-spec-second.jsonl"
 
 local function readLines(path)
     local file = io.open(path, "r")
@@ -35,8 +37,19 @@ describe("log", function()
     teardown(function()
         log.closeFile()
         os.remove(PATH)
+        os.remove(FIRST)
+        os.remove(SECOND)
         C.SDL_Quit()
     end)
+
+    local function contains(path, text)
+        for _, line in ipairs(readLines(path)) do
+            if line:find(text, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
 
     it("gives the same logger back for a name", function()
         local one = log.get("spec.same")
@@ -136,5 +149,39 @@ describe("log", function()
             end
         end
         assert.is_true(found, "SDL's own categories must be named too")
+    end)
+
+    it("moves to the second file rather than reporting one it did not open", function()
+        -- `get_logs` hands `filePath` to whoever is reading the log, so a call
+        -- that answers true and names a path the sink is not writing to sends
+        -- that reader to an empty file and tells them the game is silent.
+        assert.is_true(log.openFile(FIRST))
+        local logger = log.get("spec.switch")
+        logger:setLevel(log.INFO)
+        logger:info("before the switch")
+
+        assert.is_true(log.openFile(SECOND))
+        assert.are.equal(SECOND, log.filePath())
+        logger:info("after the switch")
+
+        assert.is_true(contains(SECOND, "after the switch"), "the line went to the file that was left behind")
+        assert.is_false(contains(SECOND, "before the switch"))
+
+        -- The first file is closed rather than abandoned mid-line, so what it
+        -- already had is on disk and nothing arrived in it afterwards.
+        assert.is_true(contains(FIRST, "before the switch"))
+        assert.is_false(contains(FIRST, "after the switch"))
+    end)
+
+    it("keeps writing to the file it has when a path cannot be opened", function()
+        assert.is_true(log.openFile(FIRST))
+        local logger = log.get("spec.refused")
+        logger:setLevel(log.INFO)
+
+        assert.is_false(log.openFile("/tmp/tecs-log-spec-missing-directory/log.jsonl"))
+        assert.are.equal(FIRST, log.filePath(), "a refused path must not be reported as open")
+
+        logger:info("still the first file")
+        assert.is_true(contains(FIRST, "still the first file"))
     end)
 end)
