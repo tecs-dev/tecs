@@ -473,5 +473,50 @@ describe(
                 )
             end
         )
+
+        describe(
+            "a negative index",
+            function()
+                -- The shifts that turn an index into a word are unsigned, so a
+                -- negative one names a word near 2^27 while the growth is
+                -- sized from a bit count of zero. The two calls that would act
+                -- on that write outside the array; the rest see it as past the
+                -- end and answer with nothing.
+                it(
+                    "raises on set rather than writing outside the array",
+                    function()
+                        local bs = Bitset.new(64)
+                        assert.has_error(function() bs:set(-1) end)
+                        assert.has_error(function() bs:set(-33) end)
+                        assert.are.equal(0, bs.count)
+                    end
+                )
+
+                it(
+                    "raises on setRange, where the head word is the one written",
+                    function()
+                        local bs = Bitset.new(64)
+                        assert.has_error(function() bs:setRange(-1, 5) end)
+                        assert.are.equal(0, bs.count)
+                    end
+                )
+
+                it(
+                    "raises through setOnly, which sets through set",
+                    function() local bs = Bitset.new(64); bs:set(3); assert.has_error(function() bs:setOnly(-1) end) end
+                )
+
+                it(
+                    "is answered as past the end by everything that reads",
+                    function()
+                        local bs = Bitset.new(64)
+                        bs:set(5)
+                        assert.is_false(bs:get(-1))
+                        bs:clear(-1)
+                        assert.are.equal(1, bs.count, "clear reached a word it does not own")
+                    end
+                )
+            end
+        )
     end
 )

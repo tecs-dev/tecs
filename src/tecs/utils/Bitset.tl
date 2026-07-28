@@ -13,11 +13,11 @@ local max <const> = math.max
 
 --- FFI-backed bitset with zero-based indexes.
 ---
---- Indexes are bit positions counting from 0 and are never negative; the shifts that turn
---- one into a word are unsigned, so a negative index is read as a word index near 2^27
---- rather than rejected. `get`, `clear` and `beginScan` see that as past the end and do
---- nothing, but `set` and `setRange` take it as real and either write outside the array or
---- allocate half a gigabyte reaching for it, so do not pass one.
+--- Indexes are bit positions counting from 0. Negative is not one, and the two calls that
+--- would act on it rather than ignore it say so: the shifts that turn an index into a word
+--- are unsigned, so a negative index reads as a word near 2^27, which `get`, `clear` and
+--- `beginScan` see as past the end and answer with nothing, while `set` and `setRange`
+--- would write there. Those two raise instead.
 ---
 --- Capacity grows on its own when a bit is set past the end, and the calls that can
 --- allocate are `set`, `setRange`, `setOnly`, `ensureCapacity`, `copyFrom` and `orWith`.
@@ -72,10 +72,12 @@ local record Bitset
     --- Grows the backing array when `index` is past the end. Setting a bit that is already
     --- set changes nothing, so `count` counts distinct bits and not calls.
     ---
-    --- @param index A bit position counting from 0, and never negative. Past the end it
-    ---     grows, which replaces `_data`. An active scan is left running, and reports the
-    ---     new bit only when its word is one the scan has yet to reach and is inside the
-    ---     bound the scan captured.
+    --- @param index A bit position counting from 0. Negative raises rather than being
+    ---     ignored, because the word number a negative index produces is far outside the
+    ---     array and the store would land there. Past the end it grows, which replaces
+    ---     `_data`. An active scan is left running, and reports the new bit only when its
+    ---     word is one the scan has yet to reach and is inside the bound the scan
+    ---     captured.
     set: function(self, index: integer)
 
     --- Set all bits in the inclusive range [lo, hi] (0-based).
@@ -87,7 +89,8 @@ local record Bitset
     --- write also pays for one popcount delta, so per-call overhead
     --- remains word-linear.
     ---
-    --- @param lo The first bit set, included, counting from 0 and never negative.
+    --- @param lo The first bit set, included, counting from 0. Negative raises, for the
+    ---     reason `set` gives: the head word this writes would be far outside the array.
     --- @param hi The last bit set, also included. Below `lo` is not an error and sets
     ---     nothing, so an empty range needs no guard at the call site.
     setRange: function(self, lo: integer, hi: integer)
@@ -310,6 +313,15 @@ function Bitset:ensureCapacity(n: integer)
 end
 
 function Bitset:set(index: integer)
+    -- `rshift` is logical, so a negative index becomes a word number near 2^27
+    -- while `ensureCapacity` is handed a bit count of zero or less and grows
+    -- nothing. The write below then lands far outside the array. One
+    -- predictable compare is what that costs to make impossible, and every
+    -- other entry point here is safe already: reading, clearing and testing
+    -- past the end are defined.
+    if index < 0 then
+        error("Bitset:set: index must not be negative", 2)
+    end
     local word = rshift(index, 5)
     if word >= self.wordCount then
         self:ensureCapacity(index + 1)
@@ -331,6 +343,12 @@ end
 function Bitset:setRange(lo: integer, hi: integer)
     if hi < lo then
         return
+    end
+    -- The same hazard `set` guards, and here it reaches the head word write
+    -- below rather than a single store: `rshift` is logical, so a negative
+    -- `lo` names a word near 2^27 while the growth is sized from `hi`.
+    if lo < 0 then
+        error("Bitset:setRange: lo must not be negative", 2)
     end
     -- Grow backing storage before we start issuing word writes.
     local neededWords = bitsToWords!(hi + 1)
