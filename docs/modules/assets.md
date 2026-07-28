@@ -314,7 +314,7 @@ from.
 
 ### tecs.assets.Batch.add
 
-<pre><code v-pre>function <a href="#tecs.assets.Batch.add">tecs.assets.Batch.add</a>(self: <a href="#tecs.assets.Batch">Batch</a>&lt;T&gt;, <a href="#tecs.assets.Handle">Handle</a>, T)
+<pre><code v-pre>function <a href="#tecs.assets.Batch.add">tecs.assets.Batch.add</a>(self: <a href="#tecs.assets.Batch">Batch</a>&lt;T&gt;, handle: <a href="#tecs.assets.Handle">Handle</a>, key: T)
 </code></pre>
 
 Adds a load to wait on, with the caller's value beside it.
@@ -324,11 +324,11 @@ already finished is allowed; the next `resolve` hands it over.
 
 #### Parameters
 
-| Type                                                               | Name                    | Description |
-| ------------------------------------------------------------------ | ----------------------- | ----------- |
-| <code v-pre><a href="#tecs.assets.Batch">Batch</a>&lt;T&gt;</code> | <code v-pre>self</code> |             |
-| <code v-pre><a href="#tecs.assets.Handle">Handle</a></code>        |                         |             |
-| <code v-pre>T</code>                                               |                         |             |
+| Type                                                               | Name                      | Description                                                                                                                                                                      |
+| ------------------------------------------------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.assets.Batch">Batch</a>&lt;T&gt;</code> | <code v-pre>self</code>   |                                                                                                                                                                                  |
+| <code v-pre><a href="#tecs.assets.Handle">Handle</a></code>        | <code v-pre>handle</code> | Held rather than copied, so the batch sees whatever the worker settles it to. Nothing is started here: the load was already in flight before it arrived.                         |
+| <code v-pre>T</code>                                               | <code v-pre>key</code>    | The caller's own value, handed back beside the handle at `resolve` so the callback knows which load it is looking at. Not read or compared by the batch, so duplicates are fine. |
 
 <a id="tecs.assets.Batch.pending"></a>
 
@@ -476,9 +476,9 @@ game has started the worker yet.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | Whether the worker exists, which is a fact about the process rather than about any world. False means a load raises rather than queueing, so this is the guard rather than an optimisation. |
 
 <a id="tecs.assets.loadImage"></a>
 

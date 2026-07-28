@@ -78,12 +78,15 @@ Every function and type this module carries, rendered from `src/tecs/platform/se
 
 Sensors attached now, in platform order.
 
+A snapshot, not a subscription: a sensor unplugged after this leaves an id
+that `open` refuses.
+
 #### Returns
 
-| Type                                                           | Description |
-| -------------------------------------------------------------- | ----------- |
-| <code v-pre>{<a href="#tecs.sensors.Device">Device</a>}</code> |             |
-| <code v-pre>string</code>                                      |             |
+| Type                                                           | Description                                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{<a href="#tecs.sensors.Device">Device</a>}</code> | The devices, listed afresh each call and the caller's to keep. Empty rather than nil when the sensor subsystem cannot start, so a caller that only iterates needs no nil check. Most desktop machines genuinely have none, which is an empty list and not a failure. |
+| <code v-pre>string</code>                                      | SDL's reason, when something went wrong.                                                                                                                                                                                                                             |
 
 <a id="tecs.sensors.open"></a>
 
@@ -96,13 +99,13 @@ Opens an attached sensor by instance id.
 
 #### Parameters
 
-| Type                      | Name                  | Description |
-| ------------------------- | --------------------- | ----------- |
-| <code v-pre>number</code> | <code v-pre>id</code> |             |
+| Type                      | Name                  | Description                                                                                                                                                      |
+| ------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>number</code> | <code v-pre>id</code> | An instance id from `devices`. Ids name a device while it stays attached rather than a slot, so one kept across an unplug does not come back to the same sensor. |
 
 #### Returns
 
-| Type                                                         | Description |
-| ------------------------------------------------------------ | ----------- |
-| <code v-pre><a href="#tecs.sensors.Sensor">Sensor</a></code> |             |
-| <code v-pre>string</code>                                    |             |
+| Type                                                         | Description                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sensors.Sensor">Sensor</a></code> | The open sensor, whose `name` and `kind` are read from the device itself rather than copied from the listing. Nil on failure, with the reason beside it, and nothing is left open in that case. Closing is the caller's, through `destroy`. |
+| <code v-pre>string</code>                                    | The reason, when the first return is nil.                                                                                                                                                                                                   |

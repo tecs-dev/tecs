@@ -179,6 +179,10 @@ local record sequence
     ---
     --- @param duration Seconds, and strictly positive: a zero is rejected at
     ---     compile time. Use `tweenWait` for a gap that moves nothing.
+    --- @param curve A name from `sequence.easing`, or one of those functions
+    ---     itself. A curve of your own is rejected when the timeline compiles:
+    ---     a compiled slot carries the curve's name so it can travel in a
+    ---     const pool, and a function it cannot name has none.
     --- @param target Which component fields move, and in which order `t1`
     ---     through `t4` line up with them.
     --- @param t1 Destination for the target's first field, in that field's own
@@ -209,6 +213,9 @@ local record sequence
     --- entity's value the first tick the operation is evaluated.
     ---
     --- @param duration Seconds, and strictly positive.
+    --- @param curve As `tweenTo`'s, and built in for the same reason.
+    --- @param target Which component fields move, and in which order `t1`
+    ---     through `t4` line up with them.
     --- @param t1 Change applied to the target's first field, in that field's
     ---     own units, and signed: negative moves the other way.
     --- @param t2 Change applied to the second field.
@@ -236,6 +243,12 @@ local record sequence
     --- the window ends the last destination is held rather than followed.
     ---
     --- @param duration Seconds, and strictly positive.
+    --- @param curve As `tweenTo`'s. It shapes how far toward the current
+    ---     destination the value sits, and that destination keeps moving
+    ---     underneath it.
+    --- @param target Which component fields move, and which fields of `from`
+    ---     line up with them: the source is read into the same one to four
+    ---     numbers the target writes.
     --- @param from Where the destination is read each tick. A source whose
     ---     entity or component is missing reads as zero rather than faulting,
     ---     so an entity chasing something that despawned drifts to the origin.
@@ -256,7 +269,11 @@ local record sequence
 
     --- Emit a named `sequence.Event` when the cursor reaches this point.
     ---
-    --- Occupies no time, so what follows it starts at the same instant.
+    --- Occupies no time, so what follows it starts at the same instant. The
+    --- event carries the entity the timeline is animating as its one argument,
+    --- and the timeline's own playback as its handle. It fires as the cursor
+    --- passes the point going forward, so a `pingPong`'s return leg does not
+    --- fire it a second time.
     ---
     --- @param name Carried on the event as its name; the sequencer attaches no
     ---     meaning to it.
@@ -272,6 +289,8 @@ local record sequence
     ---
     --- @param spec Compiled in place if it has not been already, so the table
     ---     given here belongs to this node afterwards.
+    --- @param options Omit to run the nested timeline once. `"loop"` and
+    ---     `"pingPong"` need a `count` here, and compiling raises without one.
     --- @return A node for a `TimelineSpec`.
     tweenRun: function(spec: TimelineSpec, options?: RunOptions): TimelineNode
 
@@ -282,6 +301,9 @@ local record sequence
     --- the same component field is not an error and the later one in argument
     --- order wins each tick.
     ---
+    --- @param ... One node per concurrent operation. A list of nodes counts as
+    ---     one argument and runs in sequence within it, which is how a branch
+    ---     longer than a single operation is written.
     --- @return A node for a `TimelineSpec`.
     tweenParallel: function(...: TimelineNode): TimelineNode
 
@@ -322,16 +344,25 @@ local record sequence
     ---         {op = "wait", seconds = 1.5},
     ---     })
     ---
+    --- @param name As `define`'s, and sharing its namespace and its versioning.
     --- @param rows One table per step, keyed by `op` and the fields that step
-    ---     takes. Names of the steps are `dataOps`.
+    ---     takes. Names of the steps are `dataOps`. An empty list is rejected
+    ---     here, unlike `define`'s, since a program of no steps is a mistake in
+    ---     the caller rather than something to run.
+    --- @param options As `define`'s.
     --- @return The compiled program, or nil when a row is bad.
-    --- @return nil on success; on failure the path to the first bad entry,
-    ---     which is why the two are never both set.
+    --- @return nil on success; on failure the path to the first bad entry, as
+    ---     `program[2].loop[1]`, and what it was missing. That is why the two
+    ---     are never both set. A row whose shape is right and whose value is
+    ---     not, a negative wait among them, raises instead: the path covers
+    ---     what this decoder checks, not what the node constructors do.
     defineData: function(name: string, rows: {any}, options?: DefineOptions): Program, string
 
     --- The step names `defineData` accepts, sorted.
     ---
-    --- @return A fresh table each call, which the caller owns.
+    --- @return A fresh table each call, which the caller owns. It is narrower
+    ---     than the node constructors: `await` and `eval` have no data form and
+    ---     are not among them.
     dataOps: function(): {string}
 
     --- Compile a program under a stable symbolic name.
@@ -349,6 +380,8 @@ local record sequence
     ---     calls see the new one.
     --- @param nodes An empty list is accepted and compiles to a program that
     ---     completes on its first tick.
+    --- @param options Omitted, the program counts fixed steps. A `clock` that
+    ---     is none of the three names raises here.
     --- @return The compiled program, immutable and shared by every playback
     ---     of it, so the same value plays on any number of worlds.
     define: function(name: string, nodes: {Node}, options?: DefineOptions): Program
@@ -388,7 +421,16 @@ local record sequence
     ---     playbacks of the old one running it.
     --- @param spec Compiled in place, so the table given here belongs to the
     ---     timeline afterwards and must not be compiled a second time.
+    --- @param options Omitted, the timeline runs on the presentation clock.
+    ---     `"fixed"` and `"presentation"` are the only two accepted; `"frame"`
+    ---     raises, though `define` takes it.
     --- @return The compiled program, also reachable by name through `program`.
+    ---     Play it on an entity: a playback with no `owner` has nothing to
+    ---     write to and completes on its first tick without animating
+    ---     anything. The `params` above are read when that playback builds its
+    ---     state, so a `speed` of zero or less, a negative `delay`, or a
+    ---     repeat of a zero-length timeline faults the playback with
+    ---     `actionError` rather than raising from `play`.
     timeline: function(name: string, spec: TimelineSpec, options?: TimelineOptions): Program
 
     --- Look up a defined program: the newest version, or a specific one.
@@ -412,9 +454,14 @@ local record sequence
     --- Resolved when the instruction using it runs, not at `play`, so a
     --- binding may name an entity that does not exist yet.
     ---
-    --- @param name Must be non-empty. It is matched against the keys of
+    --- @param name Must be non-empty, and an empty one raises here rather than
+    ---     at `define`. It is matched against the keys of
     ---     `PlayOptions.bindings`, and a name with no binding resolves to
     ---     nothing rather than faulting.
+    --- @return A reference to put in a `call` or `emit` argument list, or to
+    ---     hand to `playTween` or `await`. It is interned into the program's
+    ---     const pool, so it is shared by every playback and resolved against
+    ---     each one's own bindings.
     bind: function(name: string): EntityRef
 
     --- Run a registered action.
@@ -425,20 +472,23 @@ local record sequence
     --- @param ... Compiled into the program's const pool, so they are the same
     ---     values for every playback of it. Put anything that differs between
     ---     two playbacks in `PlayOptions.params` instead.
+    --- @return A node for `define`, and not to be put in a second program.
     call: function(action: string, ...: Argument): Node
 
     --- Wait for a duration in seconds.
     ---
-    --- Converted to whole fixed steps when the instruction runs, using the
-    --- world's fixed timestep, rounded to nearest, with any non-zero duration
-    --- waiting at least one step. Programs therefore stay independent of any
-    --- one world's timestep. Use `waitSteps` when the exact step count
-    --- matters more than the wall-clock duration.
+    --- Converted to whole ticks when the instruction runs, rounded to nearest,
+    --- with any non-zero duration waiting at least one tick. A program on the
+    --- frame clock divides the duration by the loop's nominal frame dt; every
+    --- other clock divides by the world's fixed timestep. Programs therefore
+    --- stay independent of any one world's timing. Use `waitSteps` when the
+    --- exact tick count matters more than the wall-clock duration.
     ---
     --- @param seconds Non-negative; a negative one is rejected here rather
     ---     than at compile time. Zero still costs a tick: the cursor resumes
     ---     on the program's next tick rather than carrying on within this one,
     ---     so no duration makes `wait` free.
+    --- @return A node for `define`, and not to be put in a second program.
     wait: function(seconds: number): Node
 
     --- Block until a named signal is raised.
@@ -446,7 +496,16 @@ local record sequence
     --- Signals are delivered on the fixed step after `signal` is called, so a
     --- signal raised by one sequence never runs another within the same step.
     --- That bounds a chain of signals to one link per step and keeps delivery
-    --- order independent of which cursor happened to run first.
+    --- order independent of which cursor happened to run first. Delivery runs
+    --- on the fixed clock whatever clock the program is on, so a frame or
+    --- presentation program wakes at its own clock's next tick after the fixed
+    --- step that delivered it.
+    ---
+    --- @param name Matched by value against `signal`'s, and registered
+    ---     nowhere: any string names a channel. A name nothing raises parks
+    ---     the playback until something cancels it, because a signal raised
+    ---     before the wait is not remembered.
+    --- @return A node for `define`, and not to be put in a second program.
     waitSignal: function(name: string): Node
 
     --- Block until a registered query matches, or stops matching.
@@ -459,16 +518,25 @@ local record sequence
     --- at the instruction itself, so it never reads a world that a spawn or
     --- despawn from the current step has not been committed to yet. A query
     --- wait therefore costs at least one step.
+    ---
+    --- @param name Resolved per world when the instruction runs, not at
+    ---     `define`, so a program may name a query registered later. A name
+    ---     still unregistered when the step runs faults the playback with
+    ---     `unregisteredQuery`.
+    --- @param condition Rejected here, not at compile time, when it is neither
+    ---     `"any"` nor `"empty"`.
+    --- @return A node for `define`, and not to be put in a second program.
     waitQuery: function(name: string, condition: QueryCondition): Node
 
-    --- Wait for a whole number of fixed steps.
+    --- Wait for a whole number of ticks of the program's clock.
     ---
-    --- `waitSteps(0)` yields: the cursor resumes on the next fixed step
+    --- `waitSteps(0)` yields: the cursor resumes on its program's next tick
     --- rather than continuing within the current one.
     ---
     --- @param steps Ticks of the program's own clock, so a program defined
     ---     against `"frame"` or `"presentation"` counts those and not fixed
     ---     steps. Non-negative and whole; a fraction is rejected here.
+    --- @return A node for `define`, and not to be put in a second program.
     waitSteps: function(steps: integer): Node
 
     --- Emit an ECS event at address 0.
@@ -482,27 +550,44 @@ local record sequence
     ---     `args` with any `bind` reference already resolved to an entity id.
     ---     That list is copied for each emit and leaves with the event, so an
     ---     observer may keep it, unlike the one an action receives.
+    --- @return A node for `define`, and not to be put in a second program.
     emit: function(event: string, ...: Argument): Node
 
     --- Repeat a block.
-    --- @param count Iterations, or nil to repeat until cancelled.
+    ---
+    --- @param count Iterations, or nil to repeat until cancelled. A positive
+    ---     whole number; zero and a fraction are rejected here.
+    --- @param nodes The block, run in order and started again from its first
+    ---     node. Must be non-empty. A block with no wait in it spends the
+    ---     playback's per-step instruction budget within one tick and faults
+    ---     it with `budgetExceeded`, which is what that budget is for.
+    --- @return A node for `define`, and not to be put in a second program.
     loop: function(count: integer, nodes: {Node}): Node
 
     --- Start a branch that runs alongside the rest of the program.
     ---
     --- The branch is a playback of its own running the same program at a
-    --- different instruction, and it inherits the owner, bindings, and
+    --- different instruction, and it inherits the owner, bindings, params and
     --- instruction budget of the playback that forked it. It starts once
-    --- that playback next waits, joins, or ends, within the same fixed step.
+    --- that playback next waits, joins, or ends, within the same tick.
     ---
     --- A branch never outlives the playback that forked it: finishing or
-    --- cancelling that playback cancels the branches it has not joined.
+    --- cancelling that playback cancels the branches it has not joined. A
+    --- branch that faults takes its parent with it, faulted `branchFaulted`,
+    --- rather than leaving a `join` one branch short forever.
+    ---
+    --- @param nodes The branch body, run in order. Must be non-empty. It reads
+    ---     and writes the forking playback's own bindings table rather than a
+    ---     copy, so a name an action binds in one is seen by the other.
+    --- @return A node for `define`, and not to be put in a second program.
     fork: function(nodes: {Node}): Node
 
     --- Wait for every branch forked and not yet joined.
     ---
     --- Falls straight through when there are none. When the last branch
-    --- finishes, the waiting playback resumes within that same step.
+    --- finishes, the waiting playback resumes within that same tick.
+    ---
+    --- @return A node for `define`, and not to be put in a second program.
     join: function(): Node
 
     --- Play a registered tween preset on a bound entity.
@@ -510,6 +595,23 @@ local record sequence
     --- Needs the sequencer, which `tecs.application.create` installs. A binding
     --- that is missing or dead is not a fault: nothing plays, and a following
     --- `waitTween` resumes at once reporting `targetLost`.
+    ---
+    --- The step itself costs no tick. What it starts is a playback of its own,
+    --- owned by the bound entity, running on the named program's clock, and
+    --- holding this playback's instruction budget.
+    ---
+    --- @param timeline Resolved when the instruction runs, and always to the
+    ---     newest version of the name; any program defined under it will do,
+    ---     though `timeline` is what normally publishes one. A name that is
+    ---     not defined faults the playback with `unregisteredTween`.
+    --- @param target A `bind` reference and nothing else: an entity id raises
+    ---     here, for the same reason `define` rejects one as a constant.
+    --- @param params The started playback's `params`, so `mode`, `count`,
+    ---     `speed` and `delay` shape it as they do for `play`. A `channel` in
+    ---     it names the slot the playback takes on that entity, cancelling
+    ---     whatever held the slot and reporting `replaced` to anything waiting
+    ---     on it.
+    --- @return A node for `define`, and not to be put in a second program.
     playTween: function(timeline: string, target: EntityRef, params?: {string: any}): Node
 
     --- Evaluate a registered evaluator every tick until it finishes.
@@ -522,6 +624,18 @@ local record sequence
     --- so it travels with a snapshot and has to be plain data for the same
     --- reason a `call` argument does. What the evaluator makes of it is its
     --- own business.
+    ---
+    --- @param evaluator Resolved globally when the instruction runs, so a
+    ---     program may name an evaluator registered later. A name still
+    ---     unregistered when the step runs faults the playback with
+    ---     `unregisteredEvaluator`, and an evaluator that raises while
+    ---     resolving the data or building its state faults it with
+    ---     `actionError`.
+    --- @param data Passed through the evaluator's `resolve` once per program
+    ---     constant and the answer shared by every playback of it, so an
+    ---     evaluator must not write per-playback state into what it gets back.
+    ---     Omit it for an evaluator that needs none.
+    --- @return A node for `define`, and not to be put in a second program.
     eval: function(evaluator: string, data?: any): Node
 
     --- Wait for something outside the sequencer to finish.
@@ -537,6 +651,19 @@ local record sequence
     ---
     ---     sequence.call("game.playTag", sequence.bind("hero"), "hurt"),
     ---     sequence.await("game.spriteAnimation", sequence.bind("hero")),
+    ---
+    --- @param provider Resolved globally when the instruction runs, and
+    ---     checked before the binding: a name no build registered faults the
+    ---     playback with `unregisteredAwaitable`. It is asked again at each
+    ---     fixed step boundary while the playback is parked, and an answer
+    ---     that raises faults the playback with `actionError`.
+    --- @param target A `bind` reference and nothing else, as `playTween`'s is.
+    ---     An entity that dies while the step is parked releases the playback
+    ---     rather than stranding it for the life of the world.
+    --- @param key Handed to the provider unread, for a provider that answers
+    ---     about more than one thing per entity. Nil when omitted, which is
+    ---     what a provider with one answer per entity sees.
+    --- @return A node for `define`, and not to be put in a second program.
     await: function(provider: string, target: EntityRef, key?: string): Node
 
     --- What a registered awaitable provider has to answer.
@@ -544,19 +671,36 @@ local record sequence
 
     --- Register something an `await` step can name. Global, like an
     --- evaluator, because a provider is code.
+    ---
+    --- @param name Registering a name twice replaces the provider, which is
+    ---     what a hot reload wants: a playback already parked on the name asks
+    ---     the new one at the next step. An empty name raises.
+    --- @param provider Must carry `isPending`, or this raises. `setPaused` is
+    ---     optional, and a provider without one leaves its work running when
+    ---     the playback waiting on it is paused.
     registerAwaitable: function(name: string, provider: Awaitable)
 
     --- Wait for the tween the most recent `playTween` started.
     ---
     --- Resumes when that specific playback completes, is cancelled, is
     --- replaced on its channel, or loses its entity, so it never waits
-    --- forever. `status` reports which of those happened.
+    --- forever. `status` reports which of those happened, as `tweenOutcome`.
+    ---
+    --- A `waitTween` that no `playTween` in this playback preceded falls
+    --- straight through without costing a tick.
+    ---
+    --- @return A node for `define`, and not to be put in a second program.
     waitTween: function(): Node
 
     --- Fork several blocks and wait for all of them.
     ---
     --- Sugar for a `fork` per block followed by one `join`. Blocks start in
     --- the order they are given.
+    ---
+    --- @param ... One block per branch, each a non-empty list of nodes. At
+    ---     least one block is required, and an empty one raises. Each shares
+    ---     the playback's bindings table, as a `fork` does.
+    --- @return A node for `define`, and not to be put in a second program.
     parallel: function(...: {Node}): Node
 
     ---------------------------------------------------------------------------
@@ -567,6 +711,12 @@ local record sequence
     ---
     --- Registration is global, like a program: an evaluator is code, and two
     --- worlds evaluating the same name run the same thing.
+    ---
+    --- @param name Registering a name twice replaces it. An empty name raises.
+    --- @param evaluator Must carry `step`, or this raises. The rest are
+    ---     optional, and without `save` and `load` a playback evaluating this
+    ---     name comes back from a snapshot at the start of its state rather
+    ---     than where it was.
     registerEvaluator: function(name: string, evaluator: Evaluator)
 
     --- What an `eval` step runs every tick.
@@ -577,9 +727,20 @@ local record sequence
     --- Actions must obey the deterministic-action contract to keep replay and
     --- rewind meaningful: no wall-clock reads, no file or network access, and
     --- randomness only from a generator whose state travels with the snapshot.
+    ---
+    --- @param name Per world, unlike an evaluator or an awaitable. Registering
+    ---     it twice replaces the action, and a playback resolves the name at
+    ---     each `call`, so one already running picks the new one up. An empty
+    ---     name raises.
+    --- @param action Must be a function, or this raises. Raising when it runs
+    ---     faults the playback with `actionError`, and whatever it already
+    ---     wrote to the world stays written: the sequencer rolls nothing back.
     registerAction: function(world: World, name: string, action: Action)
 
     --- Whether an action name is registered on this world.
+    ---
+    --- @return false for a name this world never registered, including one
+    ---     another world has: actions are per world.
     hasAction: function(world: World, name: string): boolean
 
     --- Register a query a `waitQuery` step can name.
@@ -588,9 +749,20 @@ local record sequence
     --- event driven rather than polling. Registration is startup work: a
     --- name registered twice keeps the newer query, and the replaced one
     --- holds its subscriptions for the life of the world.
+    ---
+    --- @param name Empty raises. Registering it again re-tests every playback
+    ---     already parked on the name, against the new query, at the next
+    ---     fixed step.
+    --- @param descriptor Copied rather than kept, and its
+    ---     `onEntitiesAdded` and `onEntitiesRemoved` are wrapped rather than
+    ---     replaced: the ones you supply are still called, after the name is
+    ---     marked. A non-table raises.
     registerQuery: function(world: World, name: string, descriptor: ecs.Query.Descriptor)
 
     --- Whether a query name is registered on this world.
+    ---
+    --- @return false for a name this world never registered, including one
+    ---     another world has: queries are per world.
     hasQuery: function(world: World, name: string): boolean
 
     --- Raise a signal every time an event is emitted at address 0.
@@ -598,6 +770,12 @@ local record sequence
     --- An ECS event is an edge, like a signal, so this wires one to the
     --- other rather than adding a separate kind of wait. Delivery follows
     --- the ordinary signal rule: waiters wake on the next fixed step.
+    ---
+    --- @param name The signal to raise, once per emission. An empty one
+    ---     raises.
+    --- @param event Observed at address 0, and only there. The observer lasts
+    ---     for the life of the world; wiring the same pair twice observes it
+    ---     twice, and there is nothing that unwires one.
     signalOnEvent: function<T is ecs.Event>(world: World, name: string, event: T)
 
     --- Raise a named signal, waking every playback blocked on it.
@@ -605,7 +783,12 @@ local record sequence
     --- Delivery happens on the next fixed step. Raising a signal nothing is
     --- waiting on is not an error and is not remembered: a playback that
     --- reaches `waitSignal` afterwards keeps waiting.
-    --- @return Playbacks that will wake.
+    ---
+    --- @param name Any string, registered nowhere. An empty one raises.
+    --- @return How many playbacks are parked on the name at this call. It is a
+    ---     reading rather than a promise: delivery wakes whatever is parked on
+    ---     the name when the next fixed step arrives, which is not necessarily
+    ---     the same set.
     signal: function(world: World, name: string): integer
 
     --- Playbacks currently blocked on a signal name.
@@ -619,11 +802,17 @@ local record sequence
     -- Playback
     ---------------------------------------------------------------------------
 
-    --- Start a program. The first instruction runs on the next fixed step.
+    --- Start a program. The first instruction runs on the next tick of the
+    --- program's own clock, never inside this call.
     ---
     --- @param program A value from `define` or `timeline`, not a name. The
     ---     version handed in is the version this playback runs for its whole
-    ---     life, even if the name is redefined under it.
+    ---     life, even if the name is redefined under it. Anything that is not
+    ---     a compiled program raises.
+    --- @param options Omitted, the playback has no owner, no bindings, no
+    ---     params, no channel, and the world's instruction budget. Taking a
+    ---     channel another playback on the same owner holds cancels that one
+    ---     first, reporting `replaced` to anything waiting on it.
     --- @return A handle to the new playback, valid until it ends. A handle
     ---     carries a generation, so one whose playback has ended never names a
     ---     later playback that took the same slot.
@@ -631,8 +820,16 @@ local record sequence
 
     --- Stop a playback and release its cursor. Safe on a finished handle.
     ---
+    --- It takes the branches it forked with it, and a playback parked in a
+    --- `waitTween` on the one cancelled is told `cancelled` and resumes. What
+    --- a `playTween` started is a playback in its own right and is not
+    --- cancelled with the one that started it, unlike a pause, which cascades
+    --- to it: stop it through its owner with `cancelOwnedBy`.
+    ---
+    --- @param handle Read against this world's cursor arena, so one issued by
+    ---     another world is meaningless here rather than reliably ignored.
     --- @return false when the handle names nothing running, whether it already
-    ---     finished, was already cancelled, or came from another world.
+    ---     finished or was already cancelled.
     cancel: function(world: World, handle: Handle): boolean
 
     --- Suspend a playback, its branches, and anything it started.
@@ -645,22 +842,36 @@ local record sequence
     --- Its wait, if any, resumes from where it paused. What it is waiting on
     --- stops with it when the awaitable provider knows how.
     ---
+    --- @param holder Any string, and a set rather than a count: two pauses
+    ---     under the same holder are one hold, and one `resume` under it
+    ---     releases both. Two callers that both leave it at the default
+    ---     therefore share a single hold.
     --- @return Whether the playback stopped. A second holder taking a hold on
-    --- one that is already paused registers the hold and returns false,
-    --- because nothing observable changed.
+    ---     one that is already paused registers the hold and returns false,
+    ---     because nothing observable changed. So does a handle that names
+    ---     nothing running.
     pause: function(world: World, handle: Handle, holder?: string): boolean
 
     --- Release one holder's claim.
+    ---
+    --- @param holder Must be the string that took the hold; releasing one that
+    ---     never held it changes nothing. Defaults to `"user"`, as `pause`'s
+    ---     does.
     --- @return Whether the playback started running again, which is only
-    --- true for the last holder to let go.
+    ---     true for the last holder to let go. A wake time that passed while
+    ---     it was held runs it on the next tick rather than immediately.
     resume: function(world: World, handle: Handle, holder?: string): boolean
 
     --- Inspect a playback. Returns nil for a handle this world never issued.
     ---
+    --- @param handle Read against this world's cursor arena, as `cancel`'s is.
     --- @return A fresh table each call, which the caller owns. A finished
     ---     playback still answers, with `state` saying how it ended, until its
     ---     slot is taken by a later `play`; after that the generation no
-    ---     longer matches and the answer is nil.
+    ---     longer matches and the answer is nil. The fields naming what it is
+    ---     waiting on are filled only while it is alive, so a finished
+    ---     playback reports its program, the `pc` it stopped at, how it ended
+    ---     and its last tween outcome, with the rest nil.
     status: function(world: World, handle: Handle): Status
 
     --- Cancel every playback owned by an entity.
@@ -672,21 +883,28 @@ local record sequence
     --- @param owner An entity id. A playback started without an owner is
     ---     owned by nothing rather than by entity 0, so no argument reaches
     ---     one and only `cancel` on its handle stops it.
+    --- @param reason What a playback parked in a `waitTween` on one of these
+    ---     is told, and what its `status` reports afterwards as
+    ---     `tweenOutcome`. Omitted, a waiter is told `cancelled`.
     --- @return How many were running and are now cancelled; 0 when the entity
-    ---     owns none.
+    ---     owns none. A branch carries the owner of the playback that forked
+    ---     it, so it is reached by the same call, and each cursor is counted
+    ---     once however it was reached.
     cancelOwnedBy: function(world: World, owner: integer, reason?: TweenOutcome): integer
 
     --- Number of live playbacks, for tests and diagnostics.
     ---
     --- @return Branches counted individually, since a branch is a playback of
-    ---     its own.
+    ---     its own, and so are the playbacks a `playTween` started.
     activeCount: function(world: World): integer
 
     --- Handles of every live playback, branches included, in a stable
     --- order. For diagnostics and the debugger, not for hot paths.
     ---
     --- @return A fresh table each call, ordered by cursor slot, which is
-    ---     stable within a run but is not creation order.
+    ---     stable within a run but is not creation order: a slot freed by a
+    ---     finished playback is handed to the next one started. The playbacks
+    ---     a `playTween` started are in it too.
     playbacks: function(world: World): {Handle}
 
     ---------------------------------------------------------------------------
@@ -706,9 +924,12 @@ local record sequence
     --- A clock's current tick, as counted by the sequencer. Defaults to the
     --- fixed clock.
     ---
-    --- @return Ticks since the sequencer was installed on this world, not
-    ---     since the process started, and rising by one per tick of that one
-    ---     clock. Comparable only against another reading of the same clock.
+    --- @param clock Which of the three counters to read. Omitted, `"fixed"`.
+    --- @return Ticks of that one clock, rising by one each time the sequencer
+    ---     advances it and by nothing else. It counts from when this world's
+    ---     sequencer state was created, not from the process starting, and a
+    ---     snapshot load puts back the count the snapshot carried. Comparable
+    ---     only against another reading of the same clock.
     currentStep: function(world: World, clock?: ClockId): integer
 
     --- What a playback will certainly do next, and when.
@@ -717,20 +938,31 @@ local record sequence
     --- waits, and stops at the first instruction whose successor cannot be
     --- known without running it. Ticks are counted in the playback's own
     --- clock, from now.
+    ---
     --- @param withinTicks Report only what is due within this many ticks.
     ---     Counted in the playback's own clock, from now. Omit for everything
     ---     the walk can reach.
-    --- @return A fresh table each call. Empty for a handle that names nothing
-    ---     running, and also for one parked on a signal, a query, a join or a
-    ---     tween, since none of those has a predictable start.
+    --- @return A fresh table each call, holding the calls and emits ahead in
+    ---     order. Empty for a handle that names nothing running, and also for
+    ---     one parked on a signal, a query, a join, a tween or an evaluator,
+    ---     since none of those has a predictable start. A wait written in
+    ---     seconds also ends the walk, because converting it needs a clock the
+    ---     program does not carry. Each step's `args` is the program's own
+    ---     constant list rather than a copy of it, so read it and do not write
+    ---     to it. A paused playback still answers, counted as though it were
+    ---     running.
     upcoming: function(world: World, handle: Handle, withinTicks?: integer): {Step}
 
     --- One step a playback will reach without branching.
     type Step = seqprogram.Step
 
     --- Render a program as readable instructions.
+    ---
+    --- @param program A value from `define` or `timeline`; anything else
+    ---     raises.
     --- @param pc Mark this instruction, as a playback's `status` reports it.
-    ---     Omit for an unmarked listing.
+    ---     Omit for an unmarked listing. One past the end, or any other
+    ---     address the program does not hold, marks nothing.
     --- @return A header naming the program and its version, then one line per
     ---     instruction, newline separated. For reading and not for parsing:
     ---     the format is free to change.

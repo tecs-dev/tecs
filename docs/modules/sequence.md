@@ -1147,15 +1147,15 @@ Number of live playbacks, for tests and diagnostics.
 
 #### Returns
 
-| Type                       | Description                                                             |
-| -------------------------- | ----------------------------------------------------------------------- |
-| <code v-pre>integer</code> | Branches counted individually, since a branch is a playback of its own. |
+| Type                       | Description                                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | Branches counted individually, since a branch is a playback of its own, and so are the playbacks a `playTween` started. |
 
 <a id="tecs.sequence.await"></a>
 
 ### tecs.sequence.await
 
-<pre><code v-pre>function <a href="#tecs.sequence.await">tecs.sequence.await</a>(string, <a href="#tecs.sequence.EntityRef">EntityRef</a>, string): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.await">tecs.sequence.await</a>(provider: string, target: <a href="#tecs.sequence.EntityRef">EntityRef</a>, key: string): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Wait for something outside the sequencer to finish.
@@ -1174,17 +1174,17 @@ sequence.await("game.spriteAnimation", sequence.bind("hero")),
 
 #### Parameters
 
-| Type                                                                | Name | Description |
-| ------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>string</code>                                           |      |             |
-| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> |      |             |
-| <code v-pre>string</code>                                           |      |             |
+| Type                                                                | Name                        | Description                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                           | <code v-pre>provider</code> | Resolved globally when the instruction runs, and checked before the binding: a name no build registered faults the playback with `unregisteredAwaitable`. It is asked again at each fixed step boundary while the playback is parked, and an answer that raises faults the playback with `actionError`. |
+| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> | <code v-pre>target</code>   | A `bind` reference and nothing else, as `playTween`'s is. An entity that dies while the step is parked releases the playback rather than stranding it for the life of the world.                                                                                                                        |
+| <code v-pre>string</code>                                           | <code v-pre>key</code>      | Handed to the provider unread, for a provider that answers about more than one thing per entity. Nil when omitted, which is what a provider with one answer per entity sees.                                                                                                                            |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.bind"></a>
 
@@ -1200,15 +1200,15 @@ binding may name an entity that does not exist yet.
 
 #### Parameters
 
-| Type                      | Name                    | Description                                                                                                                                       |
-| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>string</code> | <code v-pre>name</code> | Must be non-empty. It is matched against the keys of `PlayOptions.bindings`, and a name with no binding resolves to nothing rather than faulting. |
+| Type                      | Name                    | Description                                                                                                                                                                                             |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | Must be non-empty, and an empty one raises here rather than at `define`. It is matched against the keys of `PlayOptions.bindings`, and a name with no binding resolves to nothing rather than faulting. |
 
 #### Returns
 
-| Type                                                                | Description |
-| ------------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> |             |
+| Type                                                                | Description                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> | A reference to put in a `call` or `emit` argument list, or to hand to `playTween` or `await`. It is interned into the program's const pool, so it is shared by every playback and resolved against each one's own bindings. |
 
 <a id="tecs.sequence.call"></a>
 
@@ -1228,37 +1228,43 @@ Run a registered action.
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.cancel"></a>
 
 ### tecs.sequence.cancel
 
-<pre><code v-pre>function <a href="#tecs.sequence.cancel">tecs.sequence.cancel</a>(World, <a href="#tecs.sequence.Handle">Handle</a>): boolean
+<pre><code v-pre>function <a href="#tecs.sequence.cancel">tecs.sequence.cancel</a>(handle: World, <a href="#tecs.sequence.Handle">Handle</a>): boolean
 </code></pre>
 
 Stop a playback and release its cursor. Safe on a finished handle.
 
+It takes the branches it forked with it, and a playback parked in a
+`waitTween` on the one cancelled is told `cancelled` and resumes. What
+a `playTween` started is a playback in its own right and is not
+cancelled with the one that started it, unlike a pause, which cascades
+to it: stop it through its owner with `cancelOwnedBy`.
+
 #### Parameters
 
-| Type                                                          | Name | Description |
-| ------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                                      |      |             |
-| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |      |             |
+| Type                                                          | Name                      | Description                                                                                                              |
+| ------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>World</code>                                      | <code v-pre>handle</code> | Read against this world's cursor arena, so one issued by another world is meaningless here rather than reliably ignored. |
+| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |                           |                                                                                                                          |
 
 #### Returns
 
-| Type                       | Description                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | false when the handle names nothing running, whether it already finished, was already cancelled, or came from another world. |
+| Type                       | Description                                                                                        |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | false when the handle names nothing running, whether it already finished or was already cancelled. |
 
 <a id="tecs.sequence.cancelOwnedBy"></a>
 
 ### tecs.sequence.cancelOwnedBy
 
-<pre><code v-pre>function <a href="#tecs.sequence.cancelOwnedBy">tecs.sequence.cancelOwnedBy</a>(owner: World, integer, <a href="#tecs.sequence.TweenOutcome">TweenOutcome</a>): integer
+<pre><code v-pre>function <a href="#tecs.sequence.cancelOwnedBy">tecs.sequence.cancelOwnedBy</a>(owner: World, reason: integer, <a href="#tecs.sequence.TweenOutcome">TweenOutcome</a>): integer
 </code></pre>
 
 Cancel every playback owned by an entity.
@@ -1269,23 +1275,23 @@ despawning reports `targetLost`, which is what a waiter needs to tell
 
 #### Parameters
 
-| Type                                                                      | Name                     | Description                                                                                                                                                         |
-| ------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>World</code>                                                  | <code v-pre>owner</code> | An entity id. A playback started without an owner is owned by nothing rather than by entity 0, so no argument reaches one and only `cancel` on its handle stops it. |
-| <code v-pre>integer</code>                                                |                          |                                                                                                                                                                     |
-| <code v-pre><a href="#tecs.sequence.TweenOutcome">TweenOutcome</a></code> |                          |                                                                                                                                                                     |
+| Type                                                                      | Name                      | Description                                                                                                                                                         |
+| ------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code>                                                  | <code v-pre>owner</code>  | An entity id. A playback started without an owner is owned by nothing rather than by entity 0, so no argument reaches one and only `cancel` on its handle stops it. |
+| <code v-pre>integer</code>                                                | <code v-pre>reason</code> | What a playback parked in a `waitTween` on one of these is told, and what its `status` reports afterwards as `tweenOutcome`. Omitted, a waiter is told `cancelled`. |
+| <code v-pre><a href="#tecs.sequence.TweenOutcome">TweenOutcome</a></code> |                           |                                                                                                                                                                     |
 
 #### Returns
 
-| Type                       | Description                                                               |
-| -------------------------- | ------------------------------------------------------------------------- |
-| <code v-pre>integer</code> | How many were running and are now cancelled; 0 when the entity owns none. |
+| Type                       | Description                                                                                                                                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | How many were running and are now cancelled; 0 when the entity owns none. A branch carries the owner of the playback that forked it, so it is reached by the same call, and each cursor is counted once however it was reached. |
 
 <a id="tecs.sequence.currentStep"></a>
 
 ### tecs.sequence.currentStep
 
-<pre><code v-pre>function <a href="#tecs.sequence.currentStep">tecs.sequence.currentStep</a>(World, <a href="#tecs.sequence.ClockId">ClockId</a>): integer
+<pre><code v-pre>function <a href="#tecs.sequence.currentStep">tecs.sequence.currentStep</a>(clock: World, <a href="#tecs.sequence.ClockId">ClockId</a>): integer
 </code></pre>
 
 A clock's current tick, as counted by the sequencer. Defaults to the
@@ -1293,16 +1299,16 @@ fixed clock.
 
 #### Parameters
 
-| Type                                                            | Name | Description |
-| --------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                                        |      |             |
-| <code v-pre><a href="#tecs.sequence.ClockId">ClockId</a></code> |      |             |
+| Type                                                            | Name                     | Description                                              |
+| --------------------------------------------------------------- | ------------------------ | -------------------------------------------------------- |
+| <code v-pre>World</code>                                        | <code v-pre>clock</code> | Which of the three counters to read. Omitted, `"fixed"`. |
+| <code v-pre><a href="#tecs.sequence.ClockId">ClockId</a></code> |                          |                                                          |
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                                                    |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code> | Ticks since the sequencer was installed on this world, not since the process started, and rising by one per tick of that one clock. Comparable only against another reading of the same clock. |
+| Type                       | Description                                                                                                                                                                                                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | Ticks of that one clock, rising by one each time the sequencer advances it and by nothing else. It counts from when this world's sequencer state was created, not from the process starting, and a snapshot load puts back the count the snapshot carried. Comparable only against another reading of the same clock. |
 
 <a id="tecs.sequence.dataOps"></a>
 
@@ -1315,15 +1321,15 @@ The step names `defineData` accepts, sorted.
 
 #### Returns
 
-| Type                        | Description                                     |
-| --------------------------- | ----------------------------------------------- |
-| <code v-pre>{string}</code> | A fresh table each call, which the caller owns. |
+| Type                        | Description                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{string}</code> | A fresh table each call, which the caller owns. It is narrower than the node constructors: `await` and `eval` have no data form and are not among them. |
 
 <a id="tecs.sequence.define"></a>
 
 ### tecs.sequence.define
 
-<pre><code v-pre>function <a href="#tecs.sequence.define">tecs.sequence.define</a>(name: string, nodes: {<a href="#tecs.sequence.Node">Node</a>}, <a href="#tecs.sequence.DefineOptions">DefineOptions</a>): <a href="#tecs.sequence.Program">Program</a>
+<pre><code v-pre>function <a href="#tecs.sequence.define">tecs.sequence.define</a>(name: string, nodes: {<a href="#tecs.sequence.Node">Node</a>}, options: <a href="#tecs.sequence.DefineOptions">DefineOptions</a>): <a href="#tecs.sequence.Program">Program</a>
 </code></pre>
 
 Compile a program under a stable symbolic name.
@@ -1337,11 +1343,11 @@ carrying the frame's real elapsed time.
 
 #### Parameters
 
-| Type                                                                        | Name                     | Description                                                                                                                                                                                             |
-| --------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>string</code>                                                   | <code v-pre>name</code>  | Defining over a name already in use publishes a new version rather than replacing the old one: playbacks already running keep the version they started on, and only later `play` calls see the new one. |
-| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code>                 | <code v-pre>nodes</code> | An empty list is accepted and compiles to a program that completes on its first tick.                                                                                                                   |
-| <code v-pre><a href="#tecs.sequence.DefineOptions">DefineOptions</a></code> |                          |                                                                                                                                                                                                         |
+| Type                                                                        | Name                       | Description                                                                                                                                                                                             |
+| --------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                                   | <code v-pre>name</code>    | Defining over a name already in use publishes a new version rather than replacing the old one: playbacks already running keep the version they started on, and only later `play` calls see the new one. |
+| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code>                 | <code v-pre>nodes</code>   | An empty list is accepted and compiles to a program that completes on its first tick.                                                                                                                   |
+| <code v-pre><a href="#tecs.sequence.DefineOptions">DefineOptions</a></code> | <code v-pre>options</code> | Omitted, the program counts fixed steps. A `clock` that is none of the three names raises here.                                                                                                         |
 
 #### Returns
 
@@ -1353,7 +1359,7 @@ carrying the frame's real elapsed time.
 
 ### tecs.sequence.defineData
 
-<pre><code v-pre>function <a href="#tecs.sequence.defineData">tecs.sequence.defineData</a>(rows: string, {&lt;any type&gt;}, <a href="#tecs.sequence.DefineOptions">DefineOptions</a>): <a href="#tecs.sequence.Program">Program</a>, string
+<pre><code v-pre>function <a href="#tecs.sequence.defineData">tecs.sequence.defineData</a>(name: string, rows: {&lt;any type&gt;}, options: <a href="#tecs.sequence.DefineOptions">DefineOptions</a>): <a href="#tecs.sequence.Program">Program</a>, string
 </code></pre>
 
 Compile a program written as plain data rather than node calls.
@@ -1369,34 +1375,34 @@ sequence.defineData("game.intro", {
 
 #### Parameters
 
-| Type                                                                        | Name                    | Description                                                                                         |
-| --------------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------- |
-| <code v-pre>string</code>                                                   | <code v-pre>rows</code> | One table per step, keyed by `op` and the fields that step takes. Names of the steps are `dataOps`. |
-| <code v-pre>{&lt;any type&gt;}</code>                                       |                         |                                                                                                     |
-| <code v-pre><a href="#tecs.sequence.DefineOptions">DefineOptions</a></code> |                         |                                                                                                     |
+| Type                                                                        | Name                       | Description                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                                   | <code v-pre>name</code>    | As `define`'s, and sharing its namespace and its versioning.                                                                                                                                                                                |
+| <code v-pre>{&lt;any type&gt;}</code>                                       | <code v-pre>rows</code>    | One table per step, keyed by `op` and the fields that step takes. Names of the steps are `dataOps`. An empty list is rejected here, unlike `define`'s, since a program of no steps is a mistake in the caller rather than something to run. |
+| <code v-pre><a href="#tecs.sequence.DefineOptions">DefineOptions</a></code> | <code v-pre>options</code> | As `define`'s.                                                                                                                                                                                                                              |
 
 #### Returns
 
-| Type                                                            | Description                                                                                          |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.sequence.Program">Program</a></code> | The compiled program, or nil when a row is bad.                                                      |
-| <code v-pre>string</code>                                       | nil on success; on failure the path to the first bad entry, which is why the two are never both set. |
+| Type                                                            | Description                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Program">Program</a></code> | The compiled program, or nil when a row is bad.                                                                                                                                                                                                                                                                                   |
+| <code v-pre>string</code>                                       | nil on success; on failure the path to the first bad entry, as `program[2].loop[1]`, and what it was missing. That is why the two are never both set. A row whose shape is right and whose value is not, a negative wait among them, raises instead: the path covers what this decoder checks, not what the node constructors do. |
 
 <a id="tecs.sequence.disassemble"></a>
 
 ### tecs.sequence.disassemble
 
-<pre><code v-pre>function <a href="#tecs.sequence.disassemble">tecs.sequence.disassemble</a>(pc: <a href="#tecs.sequence.Program">Program</a>, integer): string
+<pre><code v-pre>function <a href="#tecs.sequence.disassemble">tecs.sequence.disassemble</a>(program: <a href="#tecs.sequence.Program">Program</a>, pc: integer): string
 </code></pre>
 
 Render a program as readable instructions.
 
 #### Parameters
 
-| Type                                                            | Name                  | Description                                                                               |
-| --------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.sequence.Program">Program</a></code> | <code v-pre>pc</code> | Mark this instruction, as a playback's `status` reports it. Omit for an unmarked listing. |
-| <code v-pre>integer</code>                                      |                       |                                                                                           |
+| Type                                                            | Name                       | Description                                                                                                                                                                |
+| --------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Program">Program</a></code> | <code v-pre>program</code> | A value from `define` or `timeline`; anything else raises.                                                                                                                 |
+| <code v-pre>integer</code>                                      | <code v-pre>pc</code>      | Mark this instruction, as a playback's `status` reports it. Omit for an unmarked listing. One past the end, or any other address the program does not hold, marks nothing. |
 
 #### Returns
 
@@ -1432,15 +1438,15 @@ Occupies no tick: the step after it runs in the same one.
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.eval"></a>
 
 ### tecs.sequence.eval
 
-<pre><code v-pre>function <a href="#tecs.sequence.eval">tecs.sequence.eval</a>(string, any): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.eval">tecs.sequence.eval</a>(evaluator: string, data: any): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Evaluate a registered evaluator every tick until it finishes.
@@ -1456,45 +1462,47 @@ own business.
 
 #### Parameters
 
-| Type                      | Name | Description |
-| ------------------------- | ---- | ----------- |
-| <code v-pre>string</code> |      |             |
-| <code v-pre>any</code>    |      |             |
+| Type                      | Name                         | Description                                                                                                                                                                                                                                                                                                |
+| ------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>evaluator</code> | Resolved globally when the instruction runs, so a program may name an evaluator registered later. A name still unregistered when the step runs faults the playback with `unregisteredEvaluator`, and an evaluator that raises while resolving the data or building its state faults it with `actionError`. |
+| <code v-pre>any</code>    | <code v-pre>data</code>      | Passed through the evaluator's `resolve` once per program constant and the answer shared by every playback of it, so an evaluator must not write per-playback state into what it gets back. Omit it for an evaluator that needs none.                                                                      |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.fork"></a>
 
 ### tecs.sequence.fork
 
-<pre><code v-pre>function <a href="#tecs.sequence.fork">tecs.sequence.fork</a>({<a href="#tecs.sequence.Node">Node</a>}): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.fork">tecs.sequence.fork</a>(nodes: {<a href="#tecs.sequence.Node">Node</a>}): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Start a branch that runs alongside the rest of the program.
 
 The branch is a playback of its own running the same program at a
-different instruction, and it inherits the owner, bindings, and
+different instruction, and it inherits the owner, bindings, params and
 instruction budget of the playback that forked it. It starts once
-that playback next waits, joins, or ends, within the same fixed step.
+that playback next waits, joins, or ends, within the same tick.
 
 A branch never outlives the playback that forked it: finishing or
-cancelling that playback cancels the branches it has not joined.
+cancelling that playback cancels the branches it has not joined. A
+branch that faults takes its parent with it, faulted `branchFaulted`,
+rather than leaving a `join` one branch short forever.
 
 #### Parameters
 
-| Type                                                        | Name | Description |
-| ----------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> |      |             |
+| Type                                                        | Name                     | Description                                                                                                                                                                                |
+| ----------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> | <code v-pre>nodes</code> | The branch body, run in order. Must be non-empty. It reads and writes the forking playback's own bindings table rather than a copy, so a name an action binds in one is seen by the other. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.hasAction"></a>
 
@@ -1514,9 +1522,9 @@ Whether an action name is registered on this world.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | false for a name this world never registered, including one another world has: actions are per world. |
 
 <a id="tecs.sequence.hasQuery"></a>
 
@@ -1536,9 +1544,9 @@ Whether a query name is registered on this world.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | false for a name this world never registered, including one another world has: queries are per world. |
 
 <a id="tecs.sequence.join"></a>
 
@@ -1550,41 +1558,41 @@ Whether a query name is registered on this world.
 Wait for every branch forked and not yet joined.
 
 Falls straight through when there are none. When the last branch
-finishes, the waiting playback resumes within that same step.
+finishes, the waiting playback resumes within that same tick.
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.loop"></a>
 
 ### tecs.sequence.loop
 
-<pre><code v-pre>function <a href="#tecs.sequence.loop">tecs.sequence.loop</a>(count: integer, {<a href="#tecs.sequence.Node">Node</a>}): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.loop">tecs.sequence.loop</a>(count: integer, nodes: {<a href="#tecs.sequence.Node">Node</a>}): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Repeat a block.
 
 #### Parameters
 
-| Type                                                        | Name                     | Description                                   |
-| ----------------------------------------------------------- | ------------------------ | --------------------------------------------- |
-| <code v-pre>integer</code>                                  | <code v-pre>count</code> | Iterations, or nil to repeat until cancelled. |
-| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> |                          |                                               |
+| Type                                                        | Name                     | Description                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code>                                  | <code v-pre>count</code> | Iterations, or nil to repeat until cancelled. A positive whole number; zero and a fraction are rejected here.                                                                                                                                         |
+| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> | <code v-pre>nodes</code> | The block, run in order and started again from its first node. Must be non-empty. A block with no wait in it spends the playback's per-step instruction budget within one tick and faults it with `budgetExceeded`, which is what that budget is for. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.parallel"></a>
 
 ### tecs.sequence.parallel
 
-<pre><code v-pre>function <a href="#tecs.sequence.parallel">tecs.sequence.parallel</a>({<a href="#tecs.sequence.Node">Node</a>}): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.parallel">tecs.sequence.parallel</a>(...: {<a href="#tecs.sequence.Node">Node</a>}): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Fork several blocks and wait for all of them.
@@ -1594,21 +1602,21 @@ the order they are given.
 
 #### Parameters
 
-| Type                                                        | Name | Description |
-| ----------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> |      |             |
+| Type                                                        | Name                   | Description                                                                                                                                                                 |
+| ----------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{<a href="#tecs.sequence.Node">Node</a>}</code> | <code v-pre>...</code> | One block per branch, each a non-empty list of nodes. At least one block is required, and an empty one raises. Each shares the playback's bindings table, as a `fork` does. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.pause"></a>
 
 ### tecs.sequence.pause
 
-<pre><code v-pre>function <a href="#tecs.sequence.pause">tecs.sequence.pause</a>(World, <a href="#tecs.sequence.Handle">Handle</a>, string): boolean
+<pre><code v-pre>function <a href="#tecs.sequence.pause">tecs.sequence.pause</a>(holder: World, <a href="#tecs.sequence.Handle">Handle</a>, string): boolean
 </code></pre>
 
 Suspend a playback, its branches, and anything it started.
@@ -1623,34 +1631,35 @@ stops with it when the awaitable provider knows how.
 
 #### Parameters
 
-| Type                                                          | Name | Description |
-| ------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                                      |      |             |
-| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |      |             |
-| <code v-pre>string</code>                                     |      |             |
+| Type                                                          | Name                      | Description                                                                                                                                                                                                     |
+| ------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code>                                      | <code v-pre>holder</code> | Any string, and a set rather than a count: two pauses under the same holder are one hold, and one `resume` under it releases both. Two callers that both leave it at the default therefore share a single hold. |
+| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |                           |                                                                                                                                                                                                                 |
+| <code v-pre>string</code>                                     |                           |                                                                                                                                                                                                                 |
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | Whether the playback stopped. A second holder taking a hold on one that is already paused registers the hold and returns false, because nothing observable changed. |
+| Type                       | Description                                                                                                                                                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | Whether the playback stopped. A second holder taking a hold on one that is already paused registers the hold and returns false, because nothing observable changed. So does a handle that names nothing running. |
 
 <a id="tecs.sequence.play"></a>
 
 ### tecs.sequence.play
 
-<pre><code v-pre>function <a href="#tecs.sequence.play">tecs.sequence.play</a>(program: World, <a href="#tecs.sequence.Program">Program</a>, <a href="#tecs.sequence.PlayOptions">PlayOptions</a>): <a href="#tecs.sequence.Handle">Handle</a>
+<pre><code v-pre>function <a href="#tecs.sequence.play">tecs.sequence.play</a>(program: World, options: <a href="#tecs.sequence.Program">Program</a>, <a href="#tecs.sequence.PlayOptions">PlayOptions</a>): <a href="#tecs.sequence.Handle">Handle</a>
 </code></pre>
 
-Start a program. The first instruction runs on the next fixed step.
+Start a program. The first instruction runs on the next tick of the
+program's own clock, never inside this call.
 
 #### Parameters
 
-| Type                                                                    | Name                       | Description                                                                                                                                                          |
-| ----------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>World</code>                                                | <code v-pre>program</code> | A value from `define` or `timeline`, not a name. The version handed in is the version this playback runs for its whole life, even if the name is redefined under it. |
-| <code v-pre><a href="#tecs.sequence.Program">Program</a></code>         |                            |                                                                                                                                                                      |
-| <code v-pre><a href="#tecs.sequence.PlayOptions">PlayOptions</a></code> |                            |                                                                                                                                                                      |
+| Type                                                                    | Name                       | Description                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code>                                                | <code v-pre>program</code> | A value from `define` or `timeline`, not a name. The version handed in is the version this playback runs for its whole life, even if the name is redefined under it. Anything that is not a compiled program raises.                          |
+| <code v-pre><a href="#tecs.sequence.Program">Program</a></code>         | <code v-pre>options</code> | Omitted, the playback has no owner, no bindings, no params, no channel, and the world's instruction budget. Taking a channel another playback on the same owner holds cancels that one first, reporting `replaced` to anything waiting on it. |
+| <code v-pre><a href="#tecs.sequence.PlayOptions">PlayOptions</a></code> |                            |                                                                                                                                                                                                                                               |
 
 #### Returns
 
@@ -1662,7 +1671,7 @@ Start a program. The first instruction runs on the next fixed step.
 
 ### tecs.sequence.playTween
 
-<pre><code v-pre>function <a href="#tecs.sequence.playTween">tecs.sequence.playTween</a>(string, <a href="#tecs.sequence.EntityRef">EntityRef</a>, {string : &lt;any type&gt;}): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.playTween">tecs.sequence.playTween</a>(timeline: string, target: <a href="#tecs.sequence.EntityRef">EntityRef</a>, params: {string : &lt;any type&gt;}): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Play a registered tween preset on a bound entity.
@@ -1671,19 +1680,23 @@ Needs the sequencer, which `tecs.application.create` installs. A binding
 that is missing or dead is not a fault: nothing plays, and a following
 `waitTween` resumes at once reporting `targetLost`.
 
+The step itself costs no tick. What it starts is a playback of its own,
+owned by the bound entity, running on the named program's clock, and
+holding this playback's instruction budget.
+
 #### Parameters
 
-| Type                                                                | Name | Description |
-| ------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>string</code>                                           |      |             |
-| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> |      |             |
-| <code v-pre>{string : &lt;any type&gt;}</code>                      |      |             |
+| Type                                                                | Name                        | Description                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>string</code>                                           | <code v-pre>timeline</code> | Resolved when the instruction runs, and always to the newest version of the name; any program defined under it will do, though `timeline` is what normally publishes one. A name that is not defined faults the playback with `unregisteredTween`.                 |
+| <code v-pre><a href="#tecs.sequence.EntityRef">EntityRef</a></code> | <code v-pre>target</code>   | A `bind` reference and nothing else: an entity id raises here, for the same reason `define` rejects one as a constant.                                                                                                                                             |
+| <code v-pre>{string : &lt;any type&gt;}</code>                      | <code v-pre>params</code>   | The started playback's `params`, so `mode`, `count`, `speed` and `delay` shape it as they do for `play`. A `channel` in it names the slot the playback takes on that entity, cancelling whatever held the slot and reporting `replaced` to anything waiting on it. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.playbacks"></a>
 
@@ -1703,9 +1716,9 @@ order. For diagnostics and the debugger, not for hot paths.
 
 #### Returns
 
-| Type                                                            | Description                                                                                              |
-| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| <code v-pre>{<a href="#tecs.sequence.Handle">Handle</a>}</code> | A fresh table each call, ordered by cursor slot, which is stable within a run but is not creation order. |
+| Type                                                            | Description                                                                                                                                                                                                                        |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{<a href="#tecs.sequence.Handle">Handle</a>}</code> | A fresh table each call, ordered by cursor slot, which is stable within a run but is not creation order: a slot freed by a finished playback is handed to the next one started. The playbacks a `playTween` started are in it too. |
 
 <a id="tecs.sequence.plugin"></a>
 
@@ -1765,7 +1778,7 @@ Names of every defined program, sorted.
 
 ### tecs.sequence.registerAction
 
-<pre><code v-pre>function <a href="#tecs.sequence.registerAction">tecs.sequence.registerAction</a>(World, string, <a href="#tecs.sequence.Action">Action</a>)
+<pre><code v-pre>function <a href="#tecs.sequence.registerAction">tecs.sequence.registerAction</a>(name: World, action: string, <a href="#tecs.sequence.Action">Action</a>)
 </code></pre>
 
 Register an effect a `call` node can name.
@@ -1776,17 +1789,17 @@ randomness only from a generator whose state travels with the snapshot.
 
 #### Parameters
 
-| Type                                                          | Name | Description |
-| ------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                                      |      |             |
-| <code v-pre>string</code>                                     |      |             |
-| <code v-pre><a href="#tecs.sequence.Action">Action</a></code> |      |             |
+| Type                                                          | Name                      | Description                                                                                                                                                                                                   |
+| ------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code>                                      | <code v-pre>name</code>   | Per world, unlike an evaluator or an awaitable. Registering it twice replaces the action, and a playback resolves the name at each `call`, so one already running picks the new one up. An empty name raises. |
+| <code v-pre>string</code>                                     | <code v-pre>action</code> | Must be a function, or this raises. Raising when it runs faults the playback with `actionError`, and whatever it already wrote to the world stays written: the sequencer rolls nothing back.                  |
+| <code v-pre><a href="#tecs.sequence.Action">Action</a></code> |                           |                                                                                                                                                                                                               |
 
 <a id="tecs.sequence.registerAwaitable"></a>
 
 ### tecs.sequence.registerAwaitable
 
-<pre><code v-pre>function <a href="#tecs.sequence.registerAwaitable">tecs.sequence.registerAwaitable</a>(string, <a href="#tecs.sequence.Awaitable">Awaitable</a>)
+<pre><code v-pre>function <a href="#tecs.sequence.registerAwaitable">tecs.sequence.registerAwaitable</a>(name: string, provider: <a href="#tecs.sequence.Awaitable">Awaitable</a>)
 </code></pre>
 
 Register something an `await` step can name. Global, like an
@@ -1794,16 +1807,16 @@ evaluator, because a provider is code.
 
 #### Parameters
 
-| Type                                                                | Name | Description |
-| ------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>string</code>                                           |      |             |
-| <code v-pre><a href="#tecs.sequence.Awaitable">Awaitable</a></code> |      |             |
+| Type                                                                | Name                        | Description                                                                                                                                                                      |
+| ------------------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                           | <code v-pre>name</code>     | Registering a name twice replaces the provider, which is what a hot reload wants: a playback already parked on the name asks the new one at the next step. An empty name raises. |
+| <code v-pre><a href="#tecs.sequence.Awaitable">Awaitable</a></code> | <code v-pre>provider</code> | Must carry `isPending`, or this raises. `setPaused` is optional, and a provider without one leaves its work running when the playback waiting on it is paused.                   |
 
 <a id="tecs.sequence.registerEvaluator"></a>
 
 ### tecs.sequence.registerEvaluator
 
-<pre><code v-pre>function <a href="#tecs.sequence.registerEvaluator">tecs.sequence.registerEvaluator</a>(string, <a href="#tecs.sequence.Evaluator">Evaluator</a>)
+<pre><code v-pre>function <a href="#tecs.sequence.registerEvaluator">tecs.sequence.registerEvaluator</a>(name: string, evaluator: <a href="#tecs.sequence.Evaluator">Evaluator</a>)
 </code></pre>
 
 Register something an `eval` step can name.
@@ -1813,16 +1826,16 @@ worlds evaluating the same name run the same thing.
 
 #### Parameters
 
-| Type                                                                | Name | Description |
-| ------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>string</code>                                           |      |             |
-| <code v-pre><a href="#tecs.sequence.Evaluator">Evaluator</a></code> |      |             |
+| Type                                                                | Name                         | Description                                                                                                                                                                                            |
+| ------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>string</code>                                           | <code v-pre>name</code>      | Registering a name twice replaces it. An empty name raises.                                                                                                                                            |
+| <code v-pre><a href="#tecs.sequence.Evaluator">Evaluator</a></code> | <code v-pre>evaluator</code> | Must carry `step`, or this raises. The rest are optional, and without `save` and `load` a playback evaluating this name comes back from a snapshot at the start of its state rather than where it was. |
 
 <a id="tecs.sequence.registerQuery"></a>
 
 ### tecs.sequence.registerQuery
 
-<pre><code v-pre>function <a href="#tecs.sequence.registerQuery">tecs.sequence.registerQuery</a>(World, string, ecs.Query.Descriptor)
+<pre><code v-pre>function <a href="#tecs.sequence.registerQuery">tecs.sequence.registerQuery</a>(name: World, descriptor: string, ecs.Query.Descriptor)
 </code></pre>
 
 Register a query a `waitQuery` step can name.
@@ -1834,34 +1847,34 @@ holds its subscriptions for the life of the world.
 
 #### Parameters
 
-| Type                                    | Name | Description |
-| --------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                |      |             |
-| <code v-pre>string</code>               |      |             |
-| <code v-pre>ecs.Query.Descriptor</code> |      |             |
+| Type                                    | Name                          | Description                                                                                                                                                                                      |
+| --------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>World</code>                | <code v-pre>name</code>       | Empty raises. Registering it again re-tests every playback already parked on the name, against the new query, at the next fixed step.                                                            |
+| <code v-pre>string</code>               | <code v-pre>descriptor</code> | Copied rather than kept, and its `onEntitiesAdded` and `onEntitiesRemoved` are wrapped rather than replaced: the ones you supply are still called, after the name is marked. A non-table raises. |
+| <code v-pre>ecs.Query.Descriptor</code> |                               |                                                                                                                                                                                                  |
 
 <a id="tecs.sequence.resume"></a>
 
 ### tecs.sequence.resume
 
-<pre><code v-pre>function <a href="#tecs.sequence.resume">tecs.sequence.resume</a>(World, <a href="#tecs.sequence.Handle">Handle</a>, string): boolean
+<pre><code v-pre>function <a href="#tecs.sequence.resume">tecs.sequence.resume</a>(holder: World, <a href="#tecs.sequence.Handle">Handle</a>, string): boolean
 </code></pre>
 
 Release one holder's claim.
 
 #### Parameters
 
-| Type                                                          | Name | Description |
-| ------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                                      |      |             |
-| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |      |             |
-| <code v-pre>string</code>                                     |      |             |
+| Type                                                          | Name                      | Description                                                                                                                       |
+| ------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code>                                      | <code v-pre>holder</code> | Must be the string that took the hold; releasing one that never held it changes nothing. Defaults to `"user"`, as `pause`'s does. |
+| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |                           |                                                                                                                                   |
+| <code v-pre>string</code>                                     |                           |                                                                                                                                   |
 
 #### Returns
 
-| Type                       | Description                                                                                   |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | Whether the playback started running again, which is only true for the last holder to let go. |
+| Type                       | Description                                                                                                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | Whether the playback started running again, which is only true for the last holder to let go. A wake time that passed while it was held runs it on the next tick rather than immediately. |
 
 <a id="tecs.sequence.setInstructionBudget"></a>
 
@@ -1883,7 +1896,7 @@ Per-step instruction budget for playbacks that do not set their own.
 
 ### tecs.sequence.signal
 
-<pre><code v-pre>function <a href="#tecs.sequence.signal">tecs.sequence.signal</a>(World, string): integer
+<pre><code v-pre>function <a href="#tecs.sequence.signal">tecs.sequence.signal</a>(name: World, string): integer
 </code></pre>
 
 Raise a named signal, waking every playback blocked on it.
@@ -1894,22 +1907,22 @@ reaches `waitSignal` afterwards keeps waiting.
 
 #### Parameters
 
-| Type                      | Name | Description |
-| ------------------------- | ---- | ----------- |
-| <code v-pre>World</code>  |      |             |
-| <code v-pre>string</code> |      |             |
+| Type                      | Name                    | Description                                          |
+| ------------------------- | ----------------------- | ---------------------------------------------------- |
+| <code v-pre>World</code>  | <code v-pre>name</code> | Any string, registered nowhere. An empty one raises. |
+| <code v-pre>string</code> |                         |                                                      |
 
 #### Returns
 
-| Type                       | Description               |
-| -------------------------- | ------------------------- |
-| <code v-pre>integer</code> | Playbacks that will wake. |
+| Type                       | Description                                                                                                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | How many playbacks are parked on the name at this call. It is a reading rather than a promise: delivery wakes whatever is parked on the name when the next fixed step arrives, which is not necessarily the same set. |
 
 <a id="tecs.sequence.signalOnEvent"></a>
 
 ### tecs.sequence.signalOnEvent
 
-<pre><code v-pre>function <a href="#tecs.sequence.signalOnEvent">tecs.sequence.signalOnEvent</a>&lt;T is ecs.Event&gt;(World, string, T)
+<pre><code v-pre>function <a href="#tecs.sequence.signalOnEvent">tecs.sequence.signalOnEvent</a>&lt;T is ecs.Event&gt;(name: World, event: string, T)
 </code></pre>
 
 Raise a signal every time an event is emitted at address 0.
@@ -1926,11 +1939,11 @@ the ordinary signal rule: waiters wake on the next fixed step.
 
 #### Parameters
 
-| Type                      | Name | Description |
-| ------------------------- | ---- | ----------- |
-| <code v-pre>World</code>  |      |             |
-| <code v-pre>string</code> |      |             |
-| <code v-pre>T</code>      |      |             |
+| Type                      | Name                     | Description                                                                                                                                                               |
+| ------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code>  | <code v-pre>name</code>  | The signal to raise, once per emission. An empty one raises.                                                                                                              |
+| <code v-pre>string</code> | <code v-pre>event</code> | Observed at address 0, and only there. The observer lasts for the life of the world; wiring the same pair twice observes it twice, and there is nothing that unwires one. |
+| <code v-pre>T</code>      |                          |                                                                                                                                                                           |
 
 <a id="tecs.sequence.source"></a>
 
@@ -1945,23 +1958,23 @@ Where a `tweenTrack` step reads the value it chases:
 
 ### tecs.sequence.status
 
-<pre><code v-pre>function <a href="#tecs.sequence.status">tecs.sequence.status</a>(World, <a href="#tecs.sequence.Handle">Handle</a>): <a href="#tecs.sequence.Status">Status</a>
+<pre><code v-pre>function <a href="#tecs.sequence.status">tecs.sequence.status</a>(handle: World, <a href="#tecs.sequence.Handle">Handle</a>): <a href="#tecs.sequence.Status">Status</a>
 </code></pre>
 
 Inspect a playback. Returns nil for a handle this world never issued.
 
 #### Parameters
 
-| Type                                                          | Name | Description |
-| ------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>World</code>                                      |      |             |
-| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |      |             |
+| Type                                                          | Name                      | Description                                               |
+| ------------------------------------------------------------- | ------------------------- | --------------------------------------------------------- |
+| <code v-pre>World</code>                                      | <code v-pre>handle</code> | Read against this world's cursor arena, as `cancel`'s is. |
+| <code v-pre><a href="#tecs.sequence.Handle">Handle</a></code> |                           |                                                           |
 
 #### Returns
 
-| Type                                                          | Description                                                                                                                                                                                                                        |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.sequence.Status">Status</a></code> | A fresh table each call, which the caller owns. A finished playback still answers, with `state` saying how it ended, until its slot is taken by a later `play`; after that the generation no longer matches and the answer is nil. |
+| Type                                                          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Status">Status</a></code> | A fresh table each call, which the caller owns. A finished playback still answers, with `state` saying how it ended, until its slot is taken by a later `play`; after that the generation no longer matches and the answer is nil. The fields naming what it is waiting on are filled only while it is alive, so a finished playback reports its program, the `pc` it stopped at, how it ended and its last tween outcome, with the rest nil. |
 
 <a id="tecs.sequence.target"></a>
 
@@ -1976,7 +1989,7 @@ The built-in targets and the constructors for new ones:
 
 ### tecs.sequence.timeline
 
-<pre><code v-pre>function <a href="#tecs.sequence.timeline">tecs.sequence.timeline</a>(name: string, spec: <a href="#tecs.sequence.TimelineSpec">TimelineSpec</a>, <a href="#tecs.sequence.TimelineOptions">TimelineOptions</a>): <a href="#tecs.sequence.Program">Program</a>
+<pre><code v-pre>function <a href="#tecs.sequence.timeline">tecs.sequence.timeline</a>(name: string, spec: <a href="#tecs.sequence.TimelineSpec">TimelineSpec</a>, options: <a href="#tecs.sequence.TimelineOptions">TimelineOptions</a>): <a href="#tecs.sequence.Program">Program</a>
 </code></pre>
 
 Compile a tween timeline into a program under a stable name.
@@ -1999,23 +2012,23 @@ sequence.play(world, fade, {owner = e, params = {delay = 0.2}})
 
 #### Parameters
 
-| Type                                                                            | Name                    | Description                                                                                                                                                      |
-| ------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>string</code>                                                       | <code v-pre>name</code> | Shared with `define`'s namespace, and versioned the same way: compiling over a live name publishes a new version and leaves playbacks of the old one running it. |
-| <code v-pre><a href="#tecs.sequence.TimelineSpec">TimelineSpec</a></code>       | <code v-pre>spec</code> | Compiled in place, so the table given here belongs to the timeline afterwards and must not be compiled a second time.                                            |
-| <code v-pre><a href="#tecs.sequence.TimelineOptions">TimelineOptions</a></code> |                         |                                                                                                                                                                  |
+| Type                                                                            | Name                       | Description                                                                                                                                                      |
+| ------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                                       | <code v-pre>name</code>    | Shared with `define`'s namespace, and versioned the same way: compiling over a live name publishes a new version and leaves playbacks of the old one running it. |
+| <code v-pre><a href="#tecs.sequence.TimelineSpec">TimelineSpec</a></code>       | <code v-pre>spec</code>    | Compiled in place, so the table given here belongs to the timeline afterwards and must not be compiled a second time.                                            |
+| <code v-pre><a href="#tecs.sequence.TimelineOptions">TimelineOptions</a></code> | <code v-pre>options</code> | Omitted, the timeline runs on the presentation clock. `"fixed"` and `"presentation"` are the only two accepted; `"frame"` raises, though `define` takes it.      |
 
 #### Returns
 
-| Type                                                            | Description                                                     |
-| --------------------------------------------------------------- | --------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.sequence.Program">Program</a></code> | The compiled program, also reachable by name through `program`. |
+| Type                                                            | Description                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Program">Program</a></code> | The compiled program, also reachable by name through `program`. Play it on an entity: a playback with no `owner` has nothing to write to and completes on its first tick without animating anything. The `params` above are read when that playback builds its state, so a `speed` of zero or less, a negative `delay`, or a repeat of a zero-length timeline faults the playback with `actionError` rather than raising from `play`. |
 
 <a id="tecs.sequence.tweenAdjust"></a>
 
 ### tecs.sequence.tweenAdjust
 
-<pre><code v-pre>function <a href="#tecs.sequence.tweenAdjust">tecs.sequence.tweenAdjust</a>(duration: number, t1: <a href="#tecs.sequence.EasingName">EasingName</a> | <a href="#tecs.sequence.EasingFunction">EasingFunction</a>, t2: <a href="#tecs.sequence.TargetName">TargetName</a> | <a href="#tecs.sequence.Target">Target</a>, t3: number, t4: number, number, number): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
+<pre><code v-pre>function <a href="#tecs.sequence.tweenAdjust">tecs.sequence.tweenAdjust</a>(duration: number, curve: <a href="#tecs.sequence.EasingName">EasingName</a> | <a href="#tecs.sequence.EasingFunction">EasingFunction</a>, target: <a href="#tecs.sequence.TargetName">TargetName</a> | <a href="#tecs.sequence.Target">Target</a>, t1: number, t2: number, t3: number, t4: number): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
 </code></pre>
 
 Interpolate by a relative delta, read from wherever the value starts.
@@ -2029,12 +2042,12 @@ entity's value the first tick the operation is evaluated.
 | Type                                                                                                                                | Name                        | Description                                                                                                                                                            |
 | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>duration</code> | Seconds, and strictly positive.                                                                                                                                        |
-| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>t1</code>       | Change applied to the target's first field, in that field's own units, and signed: negative moves the other way.                                                       |
-| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>t2</code>       | Change applied to the second field.                                                                                                                                    |
+| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>curve</code>    | As `tweenTo`'s, and built in for the same reason.                                                                                                                      |
+| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>target</code>   | Which component fields move, and in which order `t1` through `t4` line up with them.                                                                                   |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t1</code>       | Change applied to the target's first field, in that field's own units, and signed: negative moves the other way.                                                       |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t2</code>       | Change applied to the second field.                                                                                                                                    |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>t3</code>       | Change applied to the third field.                                                                                                                                     |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>t4</code>       | Change applied to the fourth field. An argument past the target's field count is ignored; an omitted one is a change of zero, which holds that field where it started. |
-| <code v-pre>number</code>                                                                                                           |                             |                                                                                                                                                                        |
-| <code v-pre>number</code>                                                                                                           |                             |                                                                                                                                                                        |
 
 #### Returns
 
@@ -2051,7 +2064,11 @@ entity's value the first tick the operation is evaluated.
 
 Emit a named `sequence.Event` when the cursor reaches this point.
 
-Occupies no time, so what follows it starts at the same instant.
+Occupies no time, so what follows it starts at the same instant. The
+event carries the entity the timeline is animating as its one argument,
+and the timeline's own playback as its handle. It fires as the cursor
+passes the point going forward, so a `pingPong`'s return leg does not
+fire it a second time.
 
 #### Parameters
 
@@ -2069,7 +2086,7 @@ Occupies no time, so what follows it starts at the same instant.
 
 ### tecs.sequence.tweenParallel
 
-<pre><code v-pre>function <a href="#tecs.sequence.tweenParallel">tecs.sequence.tweenParallel</a>(<a href="#tecs.sequence.TimelineNode">TimelineNode</a>): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
+<pre><code v-pre>function <a href="#tecs.sequence.tweenParallel">tecs.sequence.tweenParallel</a>(...: <a href="#tecs.sequence.TimelineNode">TimelineNode</a>): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
 </code></pre>
 
 Run timeline nodes concurrently, ending with the longest.
@@ -2081,9 +2098,9 @@ order wins each tick.
 
 #### Parameters
 
-| Type                                                                      | Name | Description |
-| ------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.sequence.TimelineNode">TimelineNode</a></code> |      |             |
+| Type                                                                      | Name                   | Description                                                                                                                                                                |
+| ------------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.TimelineNode">TimelineNode</a></code> | <code v-pre>...</code> | One node per concurrent operation. A list of nodes counts as one argument and runs in sequence within it, which is how a branch longer than a single operation is written. |
 
 #### Returns
 
@@ -2095,7 +2112,7 @@ order wins each tick.
 
 ### tecs.sequence.tweenRun
 
-<pre><code v-pre>function <a href="#tecs.sequence.tweenRun">tecs.sequence.tweenRun</a>(spec: <a href="#tecs.sequence.TimelineSpec">TimelineSpec</a>, <a href="#tecs.sequence.RunOptions">RunOptions</a>): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
+<pre><code v-pre>function <a href="#tecs.sequence.tweenRun">tecs.sequence.tweenRun</a>(spec: <a href="#tecs.sequence.TimelineSpec">TimelineSpec</a>, options: <a href="#tecs.sequence.RunOptions">RunOptions</a>): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
 </code></pre>
 
 Run a nested timeline, given as its own spec.
@@ -2107,10 +2124,10 @@ from the parent's.
 
 #### Parameters
 
-| Type                                                                      | Name                    | Description                                                                                            |
-| ------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------ |
-| <code v-pre><a href="#tecs.sequence.TimelineSpec">TimelineSpec</a></code> | <code v-pre>spec</code> | Compiled in place if it has not been already, so the table given here belongs to this node afterwards. |
-| <code v-pre><a href="#tecs.sequence.RunOptions">RunOptions</a></code>     |                         |                                                                                                        |
+| Type                                                                      | Name                       | Description                                                                                                            |
+| ------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.TimelineSpec">TimelineSpec</a></code> | <code v-pre>spec</code>    | Compiled in place if it has not been already, so the table given here belongs to this node afterwards.                 |
+| <code v-pre><a href="#tecs.sequence.RunOptions">RunOptions</a></code>     | <code v-pre>options</code> | Omit to run the nested timeline once. `"loop"` and `"pingPong"` need a `count` here, and compiling raises without one. |
 
 #### Returns
 
@@ -2122,7 +2139,7 @@ from the parent's.
 
 ### tecs.sequence.tweenTo
 
-<pre><code v-pre>function <a href="#tecs.sequence.tweenTo">tecs.sequence.tweenTo</a>(duration: number, target: <a href="#tecs.sequence.EasingName">EasingName</a> | <a href="#tecs.sequence.EasingFunction">EasingFunction</a>, t1: <a href="#tecs.sequence.TargetName">TargetName</a> | <a href="#tecs.sequence.Target">Target</a>, t2: number, t3: number, t4: number, number): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
+<pre><code v-pre>function <a href="#tecs.sequence.tweenTo">tecs.sequence.tweenTo</a>(duration: number, curve: <a href="#tecs.sequence.EasingName">EasingName</a> | <a href="#tecs.sequence.EasingFunction">EasingFunction</a>, target: <a href="#tecs.sequence.TargetName">TargetName</a> | <a href="#tecs.sequence.Target">Target</a>, t1: number, t2: number, t3: number, t4: number): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
 </code></pre>
 
 Interpolate to an absolute destination.
@@ -2136,12 +2153,12 @@ timeline played on two entities starts from wherever each of them is.
 | Type                                                                                                                                | Name                        | Description                                                                                                                                                                                                                                          |
 | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>duration</code> | Seconds, and strictly positive: a zero is rejected at compile time. Use `tweenWait` for a gap that moves nothing.                                                                                                                                    |
-| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>target</code>   | Which component fields move, and in which order `t1` through `t4` line up with them.                                                                                                                                                                 |
-| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>t1</code>       | Destination for the target's first field, in that field's own units: pixels for a translate, radians for a rotation, 0 to 1 for a colour channel. A shortest-path rotation target still takes an absolute angle and picks the short way round to it. |
+| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>curve</code>    | A name from `sequence.easing`, or one of those functions itself. A curve of your own is rejected when the timeline compiles: a compiled slot carries the curve's name so it can travel in a const pool, and a function it cannot name has none.      |
+| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>target</code>   | Which component fields move, and in which order `t1` through `t4` line up with them.                                                                                                                                                                 |
+| <code v-pre>number</code>                                                                                                           | <code v-pre>t1</code>       | Destination for the target's first field, in that field's own units: pixels for a translate, radians for a rotation, 0 to 1 for a colour channel. A shortest-path rotation target still takes an absolute angle and picks the short way round to it. |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>t2</code>       | Destination for the second field, for a target that has one.                                                                                                                                                                                         |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>t3</code>       | Destination for the third field, for a four-field target.                                                                                                                                                                                            |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>t4</code>       | Destination for the fourth field, for a four-field target. An argument past the target's field count is ignored; one the target has and you omit counts as a destination of zero.                                                                    |
-| <code v-pre>number</code>                                                                                                           |                             |                                                                                                                                                                                                                                                      |
 
 #### Returns
 
@@ -2153,7 +2170,7 @@ timeline played on two entities starts from wherever each of them is.
 
 ### tecs.sequence.tweenTrack
 
-<pre><code v-pre>function <a href="#tecs.sequence.tweenTrack">tecs.sequence.tweenTrack</a>(duration: number, from: <a href="#tecs.sequence.EasingName">EasingName</a> | <a href="#tecs.sequence.EasingFunction">EasingFunction</a>, <a href="#tecs.sequence.TargetName">TargetName</a> | <a href="#tecs.sequence.Target">Target</a>, <a href="#tecs.sequence.TrackSource">TrackSource</a>): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
+<pre><code v-pre>function <a href="#tecs.sequence.tweenTrack">tecs.sequence.tweenTrack</a>(duration: number, curve: <a href="#tecs.sequence.EasingName">EasingName</a> | <a href="#tecs.sequence.EasingFunction">EasingFunction</a>, target: <a href="#tecs.sequence.TargetName">TargetName</a> | <a href="#tecs.sequence.Target">Target</a>, from: <a href="#tecs.sequence.TrackSource">TrackSource</a>): <a href="#tecs.sequence.TimelineNode">TimelineNode</a>
 </code></pre>
 
 Interpolate toward a destination that keeps moving.
@@ -2168,9 +2185,9 @@ the window ends the last destination is held rather than followed.
 | Type                                                                                                                                | Name                        | Description                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <code v-pre>number</code>                                                                                                           | <code v-pre>duration</code> | Seconds, and strictly positive.                                                                                                                                                                                                                                             |
-| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>from</code>     | Where the destination is read each tick. A source whose entity or component is missing reads as zero rather than faulting, so an entity chasing something that despawned drifts to the origin. A source named by world key is the exception and requires the key to be set. |
-| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 |                             |                                                                                                                                                                                                                                                                             |
-| <code v-pre><a href="#tecs.sequence.TrackSource">TrackSource</a></code>                                                             |                             |                                                                                                                                                                                                                                                                             |
+| <code v-pre><a href="#tecs.sequence.EasingName">EasingName</a> \| <a href="#tecs.sequence.EasingFunction">EasingFunction</a></code> | <code v-pre>curve</code>    | As `tweenTo`'s. It shapes how far toward the current destination the value sits, and that destination keeps moving underneath it.                                                                                                                                           |
+| <code v-pre><a href="#tecs.sequence.TargetName">TargetName</a> \| <a href="#tecs.sequence.Target">Target</a></code>                 | <code v-pre>target</code>   | Which component fields move, and which fields of `from` line up with them: the source is read into the same one to four numbers the target writes.                                                                                                                          |
+| <code v-pre><a href="#tecs.sequence.TrackSource">TrackSource</a></code>                                                             | <code v-pre>from</code>     | Where the destination is read each tick. A source whose entity or component is missing reads as zero rather than faulting, so an entity chasing something that despawned drifts to the origin. A source named by world key is the exception and requires the key to be set. |
 
 #### Returns
 
@@ -2223,9 +2240,9 @@ clock, from now.
 
 #### Returns
 
-| Type                                                        | Description                                                                                                                                                                           |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>{<a href="#tecs.sequence.Step">Step</a>}</code> | A fresh table each call. Empty for a handle that names nothing running, and also for one parked on a signal, a query, a join or a tween, since none of those has a predictable start. |
+| Type                                                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{<a href="#tecs.sequence.Step">Step</a>}</code> | A fresh table each call, holding the calls and emits ahead in order. Empty for a handle that names nothing running, and also for one parked on a signal, a query, a join, a tween or an evaluator, since none of those has a predictable start. A wait written in seconds also ends the walk, because converting it needs a clock the program does not carry. Each step's `args` is the program's own constant list rather than a copy of it, so read it and do not write to it. A paused playback still answers, counted as though it were running. |
 
 <a id="tecs.sequence.wait"></a>
 
@@ -2236,11 +2253,12 @@ clock, from now.
 
 Wait for a duration in seconds.
 
-Converted to whole fixed steps when the instruction runs, using the
-world's fixed timestep, rounded to nearest, with any non-zero duration
-waiting at least one step. Programs therefore stay independent of any
-one world's timestep. Use `waitSteps` when the exact step count
-matters more than the wall-clock duration.
+Converted to whole ticks when the instruction runs, rounded to nearest,
+with any non-zero duration waiting at least one tick. A program on the
+frame clock divides the duration by the loop's nominal frame dt; every
+other clock divides by the world's fixed timestep. Programs therefore
+stay independent of any one world's timing. Use `waitSteps` when the
+exact tick count matters more than the wall-clock duration.
 
 #### Parameters
 
@@ -2250,15 +2268,15 @@ matters more than the wall-clock duration.
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.waitQuery"></a>
 
 ### tecs.sequence.waitQuery
 
-<pre><code v-pre>function <a href="#tecs.sequence.waitQuery">tecs.sequence.waitQuery</a>(string, <a href="#tecs.sequence.QueryCondition">QueryCondition</a>): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.waitQuery">tecs.sequence.waitQuery</a>(name: string, condition: <a href="#tecs.sequence.QueryCondition">QueryCondition</a>): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Block until a registered query matches, or stops matching.
@@ -2274,22 +2292,22 @@ wait therefore costs at least one step.
 
 #### Parameters
 
-| Type                                                                          | Name | Description |
-| ----------------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>string</code>                                                     |      |             |
-| <code v-pre><a href="#tecs.sequence.QueryCondition">QueryCondition</a></code> |      |             |
+| Type                                                                          | Name                         | Description                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code>                                                     | <code v-pre>name</code>      | Resolved per world when the instruction runs, not at `define`, so a program may name a query registered later. A name still unregistered when the step runs faults the playback with `unregisteredQuery`. |
+| <code v-pre><a href="#tecs.sequence.QueryCondition">QueryCondition</a></code> | <code v-pre>condition</code> | Rejected here, not at compile time, when it is neither `"any"` nor `"empty"`.                                                                                                                             |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.waitSignal"></a>
 
 ### tecs.sequence.waitSignal
 
-<pre><code v-pre>function <a href="#tecs.sequence.waitSignal">tecs.sequence.waitSignal</a>(string): <a href="#tecs.sequence.Node">Node</a>
+<pre><code v-pre>function <a href="#tecs.sequence.waitSignal">tecs.sequence.waitSignal</a>(name: string): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
 Block until a named signal is raised.
@@ -2297,19 +2315,22 @@ Block until a named signal is raised.
 Signals are delivered on the fixed step after `signal` is called, so a
 signal raised by one sequence never runs another within the same step.
 That bounds a chain of signals to one link per step and keeps delivery
-order independent of which cursor happened to run first.
+order independent of which cursor happened to run first. Delivery runs
+on the fixed clock whatever clock the program is on, so a frame or
+presentation program wakes at its own clock's next tick after the fixed
+step that delivered it.
 
 #### Parameters
 
-| Type                      | Name | Description |
-| ------------------------- | ---- | ----------- |
-| <code v-pre>string</code> |      |             |
+| Type                      | Name                    | Description                                                                                                                                                                                                              |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>string</code> | <code v-pre>name</code> | Matched by value against `signal`'s, and registered nowhere: any string names a channel. A name nothing raises parks the playback until something cancels it, because a signal raised before the wait is not remembered. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.waitSteps"></a>
 
@@ -2318,9 +2339,9 @@ order independent of which cursor happened to run first.
 <pre><code v-pre>function <a href="#tecs.sequence.waitSteps">tecs.sequence.waitSteps</a>(steps: integer): <a href="#tecs.sequence.Node">Node</a>
 </code></pre>
 
-Wait for a whole number of fixed steps.
+Wait for a whole number of ticks of the program's clock.
 
-`waitSteps(0)` yields: the cursor resumes on the next fixed step
+`waitSteps(0)` yields: the cursor resumes on its program's next tick
 rather than continuing within the current one.
 
 #### Parameters
@@ -2331,9 +2352,9 @@ rather than continuing within the current one.
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.waitTween"></a>
 
@@ -2346,13 +2367,16 @@ Wait for the tween the most recent `playTween` started.
 
 Resumes when that specific playback completes, is cancelled, is
 replaced on its channel, or loses its entity, so it never waits
-forever. `status` reports which of those happened.
+forever. `status` reports which of those happened, as `tweenOutcome`.
+
+A `waitTween` that no `playTween` in this playback preceded falls
+straight through without costing a tick.
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> |             |
+| Type                                                      | Description                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| <code v-pre><a href="#tecs.sequence.Node">Node</a></code> | A node for `define`, and not to be put in a second program. |
 
 <a id="tecs.sequence.waitingOn"></a>
 

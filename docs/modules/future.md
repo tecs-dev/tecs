@@ -649,9 +649,9 @@ A future already carrying a failure.
 
 #### Returns
 
-| Type                               | Description |
-| ---------------------------------- | ----------- |
-| <code v-pre>Future&lt;U&gt;</code> |             |
+| Type                               | Description                                                                                                                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;U&gt;</code> | A future at "failed" with no source, so `wait` on it returns at once and `cancel` does nothing. `map` on it propagates without running the transform, while `recover` on it is the one thing that still runs. |
 
 <a id="tecs.future.Future.flatMap"></a>
 
@@ -800,9 +800,9 @@ recovered, which is the whole reason the two are distinct states.
 
 #### Returns
 
-| Type                               | Description |
-| ---------------------------------- | ----------- |
-| <code v-pre>Future&lt;T&gt;</code> |             |
+| Type                               | Description                                                                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;T&gt;</code> | A new future watching this one, carrying the same type: a recovery produces a value where the upstream produced an error, so a ready upstream passes through untouched. |
 
 <a id="tecs.future.Future.settled"></a>
 

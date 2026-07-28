@@ -1593,6 +1593,6 @@ Whether playback resolves on the GPU.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                                                                                                                         |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | The setting as it stands now, which decides what the next world to install the plugin gets. Worlds already carrying the systems keep the ones they were built with, so this does not describe them. |

@@ -586,9 +586,9 @@ Compiles keyframes into a curve over normalised age.
 
 #### Returns
 
-| Type                                                         | Description |
-| ------------------------------------------------------------ | ----------- |
-| <code v-pre><a href="#tecs.particles.Curve">Curve</a></code> |             |
+| Type                                                         | Description                                                                                                                                                                 |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.particles.Curve">Curve</a></code> | A resampled curve at `CURVE_SAMPLES` points, so the keys are not kept and the shape between two distant ones is straight. Ages outside zero to one read as the nearest end. |
 
 <a id="tecs.particles.effect"></a>
 
@@ -630,9 +630,9 @@ The effect registered under `name`, or nil when nothing has that name.
 
 #### Returns
 
-| Type                                                           | Description |
-| -------------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.particles.Effect">Effect</a></code> |             |
+| Type                                                           | Description                                                                                                         |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.particles.Effect">Effect</a></code> | The registered effect itself, not a copy, so two callers finding one name share it. Nil when nothing has that name. |
 
 <a id="tecs.particles.gradient"></a>
 
@@ -651,9 +651,9 @@ Compiles keyframes into a colour gradient over normalised age.
 
 #### Returns
 
-| Type                                                               | Description |
-| ------------------------------------------------------------------ | ----------- |
-| <code v-pre><a href="#tecs.particles.Gradient">Gradient</a></code> |             |
+| Type                                                               | Description                                                                                                                                                                        |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.particles.Gradient">Gradient</a></code> | A gradient resampled like a curve, interpolating each channel separately, so two colours blend through whatever lies between them componentwise rather than around a colour wheel. |
 
 <a id="tecs.particles.names"></a>
 
@@ -696,16 +696,16 @@ without it.
 
 ### tecs.particles.poolOf
 
-<pre><code v-pre>function <a href="#tecs.particles.poolOf">tecs.particles.poolOf</a>(World): <a href="#tecs.particles.Pool">Pool</a>
+<pre><code v-pre>function <a href="#tecs.particles.poolOf">tecs.particles.poolOf</a>(world: World): <a href="#tecs.particles.Pool">Pool</a>
 </code></pre>
 
 The pool installed on a world, or nil. For tests and tooling.
 
 #### Parameters
 
-| Type                     | Name | Description |
-| ------------------------ | ---- | ----------- |
-| <code v-pre>World</code> |      |             |
+| Type                     | Name                     | Description                                                                                                    |
+| ------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>World</code> | <code v-pre>world</code> | Any world, with or without the plugin, so this doubles as the test for whether particles are installed on one. |
 
 #### Returns
 

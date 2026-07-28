@@ -396,15 +396,15 @@ when a child ran to completion, whatever it then reported.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | Whether the exit code was zero, which is the convention and not a guarantee: a program free to mean something else by it needs `exitCode` read directly. |
 
 <a id="tecs.proc.install"></a>
 
 ### tecs.proc.install
 
-<pre><code v-pre>function <a href="#tecs.proc.install">tecs.proc.install</a>(string)
+<pre><code v-pre>function <a href="#tecs.proc.install">tecs.proc.install</a>(luaPath: string)
 </code></pre>
 
 Starts the runner worker.
@@ -415,9 +415,9 @@ give the worker a module path other than this state's.
 
 #### Parameters
 
-| Type                      | Name | Description |
-| ------------------------- | ---- | ----------- |
-| <code v-pre>string</code> |      |             |
+| Type                      | Name                       | Description                                                                                                                                                                                                                      |
+| ------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>luaPath</code> | Where the worker finds its modules. Defaults to this state's own, which is right whenever the two run from the same tree. Only read on the call that actually starts the worker, so passing it to a second call changes nothing. |
 
 <a id="tecs.proc.installed"></a>
 
@@ -430,15 +430,15 @@ Whether the runner worker is running.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>boolean</code> |             |
+| Type                       | Description                                                                                                          |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | A fact about the process rather than about any world. False costs nothing to act on: `run` starts the worker itself. |
 
 <a id="tecs.proc.kill"></a>
 
 ### tecs.proc.kill
 
-<pre><code v-pre>function <a href="#tecs.proc.kill">tecs.proc.kill</a>(Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;, boolean)
+<pre><code v-pre>function <a href="#tecs.proc.kill">tecs.proc.kill</a>(run: Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;, force: boolean)
 </code></pre>
 
 Asks the worker to end a child.
@@ -454,10 +454,10 @@ one ends the child whoever else is watching.
 
 #### Parameters
 
-| Type                                                                    | Name | Description |
-| ----------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;</code> |      |             |
-| <code v-pre>boolean</code>                                              |      |             |
+| Type                                                                    | Name                     | Description                                                                                                         |
+| ----------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;</code> | <code v-pre>run</code>   | A future `proc.run` handed out. One that has already settled is ignored, so this is safe to call on a race it lost. |
+| <code v-pre>boolean</code>                                              | <code v-pre>force</code> | Sends the signal a child cannot handle. Defaults to false, which asks and may be refused.                           |
 
 <a id="tecs.proc.pending"></a>
 
@@ -470,15 +470,15 @@ Runs that have not answered yet.
 
 #### Returns
 
-| Type                       | Description |
-| -------------------------- | ----------- |
-| <code v-pre>integer</code> |             |
+| Type                       | Description                                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>integer</code> | Every run in flight in this process, not one caller's, and counting a child that has been asked to die but has not yet. |
 
 <a id="tecs.proc.result"></a>
 
 ### tecs.proc.result
 
-<pre><code v-pre>function <a href="#tecs.proc.result">tecs.proc.result</a>(Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;): <a href="#tecs.proc.Result">Result</a>
+<pre><code v-pre>function <a href="#tecs.proc.result">tecs.proc.result</a>(run: Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;): <a href="#tecs.proc.Result">Result</a>
 </code></pre>
 
 The record a run fills in, whatever became of it.
@@ -499,21 +499,21 @@ anything that is not a run from here.
 
 #### Parameters
 
-| Type                                                                    | Name | Description |
-| ----------------------------------------------------------------------- | ---- | ----------- |
-| <code v-pre>Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;</code> |      |             |
+| Type                                                                    | Name                   | Description                                                                       |
+| ----------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;</code> | <code v-pre>run</code> | A future `proc.run` handed out. Any other future answers nil rather than raising. |
 
 #### Returns
 
-| Type                                                      | Description |
-| --------------------------------------------------------- | ----------- |
-| <code v-pre><a href="#tecs.proc.Result">Result</a></code> |             |
+| Type                                                      | Description                                                                                                                          |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre><a href="#tecs.proc.Result">Result</a></code> | The runner's own record, not a copy, so it fills in as the child runs and the same table is what the future carries when it settles. |
 
 <a id="tecs.proc.run"></a>
 
 ### tecs.proc.run
 
-<pre><code v-pre>function <a href="#tecs.proc.run">tecs.proc.run</a>(<a href="#tecs.proc.Options">Options</a>): Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;
+<pre><code v-pre>function <a href="#tecs.proc.run">tecs.proc.run</a>(options: <a href="#tecs.proc.Options">Options</a>): Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;
 </code></pre>
 
 Runs a program and answers a future for it, immediately.
@@ -523,15 +523,15 @@ a `wait` on it, takes the worker's answer.
 
 #### Parameters
 
-| Type                                                        | Name | Description |
-| ----------------------------------------------------------- | ---- | ----------- |
-| <code v-pre><a href="#tecs.proc.Options">Options</a></code> |      |             |
+| Type                                                        | Name                       | Description                                                                                                                                                  |
+| ----------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre><a href="#tecs.proc.Options">Options</a></code> | <code v-pre>options</code> | Read here and sent to the worker, so a later edit to the same table does not reach the child. Starting the runner is part of this call when nothing has yet. |
 
 #### Returns
 
-| Type                                                                    | Description |
-| ----------------------------------------------------------------------- | ----------- |
-| <code v-pre>Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;</code> |             |
+| Type                                                                    | Description                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Future&lt;<a href="#tecs.proc.Result">Result</a>&gt;</code> | A future that settles "ready" with the result when the child ends, however it ended: a non-zero exit is still "ready", and `succeeded` is what distinguishes them. It settles "failed" only when the child could not be started, and "cancelled" when it was killed. |
 
 <a id="tecs.proc.shutdown"></a>
 
