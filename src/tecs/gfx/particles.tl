@@ -448,7 +448,9 @@ local revision = 0
 --- Every registered effect's name, in registration order.
 local function effectNames(): {string}
     local names <const>: {string} = {}
-    for index = 1, #registry do names[index] = registry[index].name end
+    for index = 1, #registry do
+        names[index] = registry[index].name
+    end
     return names
 end
 
@@ -459,7 +461,9 @@ end
 --- that caller: the name it holds is a fact about a file rather than about the
 --- call site, and the message it raises says so.
 local function findEffect(name: string): Effect
-    if name == nil then return nil end
+    if name == nil then
+        return nil
+    end
     return byName[name]
 end
 
@@ -473,9 +477,10 @@ local function checkNumber(value: number, field: string, level: integer): number
 end
 
 --- A constant or a range, as two bounds.
-local function boundsOf(value: Value, lo: number, hi: number,
-                        field: string, level: integer): number, number
-    if value == nil then return lo, hi end
+local function boundsOf(value: Value, lo: number, hi: number, field: string, level: integer): number, number
+    if value == nil then
+        return lo, hi
+    end
     if value is number then
         checkNumber(value, field, level + 1)
         return value, value
@@ -483,12 +488,13 @@ local function boundsOf(value: Value, lo: number, hi: number,
     local low = value.min
     local high = value.max
     if low == nil or high == nil then
-        error(("tecs: %s is a number or { min = , max = }"):format(field),
-            level + 1)
+        error(("tecs: %s is a number or { min = , max = }"):format(field), level + 1)
     end
     checkNumber(low, field .. ".min", level + 1)
     checkNumber(high, field .. ".max", level + 1)
-    if high < low then low, high = high, low end
+    if high < low then
+        low, high = high, low
+    end
     return low, high
 end
 
@@ -498,24 +504,22 @@ local function channelAt(body: string, at: integer): number
 end
 
 --- A colour as four channels in zero to one.
-local function colorOf(value: Color, field: string,
-                       level: integer): number, number, number, number
-    if value == nil then return 1.0, 1.0, 1.0, 1.0 end
+local function colorOf(value: Color, field: string, level: integer): number, number, number, number
+    if value == nil then
+        return 1.0, 1.0, 1.0, 1.0
+    end
     if value is string then
         local body = value:match("^#?(%x+)$")
         if body == nil or (#body ~= 6 and #body ~= 8) then
-            error(("tecs: %s is #rrggbb or #rrggbbaa, not '%s'")
-                :format(field, value), level + 1)
+            error(("tecs: %s is #rrggbb or #rrggbbaa, not '%s'"):format(field, value), level + 1)
         end
-        return channelAt(body, 1), channelAt(body, 3), channelAt(body, 5),
-            #body == 8 and channelAt(body, 7) or 1.0
+        return channelAt(body, 1), channelAt(body, 3), channelAt(body, 5), #body == 8 and channelAt(body, 7) or 1.0
     end
     if value is number then
         local packed = floor(value)
-        return floor(packed / 0x1000000) % 256 / 255.0,
-            floor(packed / 0x10000) % 256 / 255.0,
-            floor(packed / 0x100) % 256 / 255.0,
-            packed % 256 / 255.0
+        return floor(packed / 0x1000000) % 256 / 255.0, floor(packed / 0x10000) % 256 / 255.0, floor(
+            packed / 0x100
+        ) % 256 / 255.0, packed % 256 / 255.0
     end
     return value[1] or 1.0, value[2] or 1.0, value[3] or 1.0, value[4] or 1.0
 end
@@ -525,18 +529,18 @@ end
 --- Keys may sit anywhere in zero to one and need not be sorted; what comes out
 --- is the piecewise-linear curve through them, sampled at a fixed resolution
 --- the shader indexes without searching.
-local function sampleKeys(keys: {CurveKey}, width: integer,
-                          read: function(key: CurveKey, into: {number}),
-                          level: integer): {number}
+local function sampleKeys(
+    keys: {CurveKey}, width: integer, read: function(key: CurveKey, into: {number}), level: integer
+): {number}
     if keys == nil or #keys == 0 then
         error("tecs: a curve needs at least one key", level + 1)
     end
 
     local sorted: {CurveKey} = {}
-    for index = 1, #keys do sorted[index] = keys[index] end
-    table.sort(sorted, function(a: CurveKey, b: CurveKey): boolean
-        return (a[1] as number) < (b[1] as number)
-    end)
+    for index = 1, #keys do
+        sorted[index] = keys[index]
+    end
+    table.sort(sorted, function(a: CurveKey, b: CurveKey): boolean return (a[1] as number) < (b[1] as number) end)
 
     local values: {number} = {}
     local scratch: {number} = {}
@@ -544,7 +548,9 @@ local function sampleKeys(keys: {CurveKey}, width: integer,
     for index = 1, #sorted do
         read(sorted[index], scratch)
         local base = (index - 1) * width
-        for lane = 1, width do values[base + lane] = scratch[lane] end
+        for lane = 1, width do
+            values[base + lane] = scratch[lane]
+        end
     end
 
     local count <const> = #sorted
@@ -561,7 +567,11 @@ local function sampleKeys(keys: {CurveKey}, width: integer,
         local t0 <const> = sorted[lower][1] as number
         local t1 <const> = sorted[upper][1] as number
         local mix = t1 > t0 and (t - t0) / (t1 - t0) or 0.0
-        if mix < 0.0 then mix = 0.0 elseif mix > 1.0 then mix = 1.0 end
+        if mix < 0.0 then
+            mix = 0.0
+        elseif mix > 1.0 then
+            mix = 1.0
+        end
         for lane = 1, width do
             local a <const> = values[(lower - 1) * width + lane]
             local b <const> = values[(upper - 1) * width + lane]
@@ -577,10 +587,12 @@ end
 --- author wants them rather than spaced evenly.
 local function newCurve(keys: {CurveKey}): Curve
     return {
-        samples = sampleKeys(keys, 1,
-            function(key: CurveKey, into: {number})
-                into[1] = checkNumber(key[2] as number, "a curve value", 4)
-            end, 3),
+        samples = sampleKeys(
+            keys,
+            1,
+            function(key: CurveKey, into: {number}) into[1] = checkNumber(key[2] as number, "a curve value", 4) end,
+            3
+        ),
     }
 end
 
@@ -591,11 +603,14 @@ end
 --- only fade that works is the size curve going to zero.
 local function newGradient(keys: {CurveKey}): Gradient
     return {
-        samples = sampleKeys(keys, 4,
+        samples = sampleKeys(
+            keys,
+            4,
             function(key: CurveKey, into: {number})
-                into[1], into[2], into[3], into[4] =
-                    colorOf(key[2] as Color, "a gradient colour", 4)
-            end, 3),
+                into[1], into[2], into[3], into[4] = colorOf(key[2] as Color, "a gradient colour", 4)
+            end,
+            3
+        ),
     }
 end
 
@@ -625,14 +640,22 @@ local function newEffect(options: EffectOptions): Effect
     -- capacity warning has already been logged about it.
     local name <const> = options.name
     if name == nil or name == "" then
-        error("tecs: an effect needs a name; it is what a snapshot names it "
-            .. "by, and there is nothing else about an effect that survives "
-            .. "the process that registered it", 2)
+        error(
+            "tecs: an effect needs a name; it is what a snapshot names it "
+                .. "by, and there is nothing else about an effect that survives "
+                .. "the process that registered it",
+            2
+        )
     end
     if byName[name] ~= nil then
-        error(("tecs: an effect named '%s' is already registered; two under "
-            .. "one name cannot be told apart again by anything that saved "
-            .. "either"):format(name), 2)
+        error(
+            (
+                "tecs: an effect named '%s' is already registered; two under "
+                .. "one name cannot be told apart again by anything that saved "
+                .. "either"
+            ):format(name),
+            2
+        )
     end
 
     local schedule <const> = options.schedule or {}
@@ -642,7 +665,9 @@ local function newEffect(options: EffectOptions): Effect
     local render <const> = options.render or {}
 
     local fields: {number} = {}
-    for index = 0, EFFECT_FLOATS - 1 do fields[index] = 0.0 end
+    for index = 0, EFFECT_FLOATS - 1 do
+        fields[index] = 0.0
+    end
 
     -- Schedule.
     local rate <const> = schedule.rate or 0.0
@@ -654,8 +679,7 @@ local function newEffect(options: EffectOptions): Effect
     local bursts <const>: {number} = {}
     local list <const> = schedule.bursts or {}
     if #list > MAX_BURSTS then
-        error(("tecs: an effect schedules at most %d bursts, not %d")
-            :format(MAX_BURSTS, #list), 2)
+        error(("tecs: an effect schedules at most %d bursts, not %d"):format(MAX_BURSTS, #list), 2)
     end
     fields[EFFECT.BURST_COUNT] = #list
     for index = 1, #list do
@@ -677,50 +701,49 @@ local function newEffect(options: EffectOptions): Effect
     fields[EFFECT.SHAPE_HEIGHT] = spawn.height or 0.0
     fields[EFFECT.SHAPE_ARC] = spawn.arc or math.pi * 2.0
     fields[EFFECT.SHAPE_ROTATION] = spawn.rotation or 0.0
-    if spawn.distribution ~= nil and spawn.distribution ~= "uniform"
-        and spawn.distribution ~= "normal" then
-        error(("tecs: '%s' is not a distribution; use uniform or normal")
-            :format(tostring(spawn.distribution)), 2)
+    if spawn.distribution ~= nil and spawn.distribution ~= "uniform" and spawn.distribution ~= "normal" then
+        error(("tecs: '%s' is not a distribution; use uniform or normal"):format(tostring(spawn.distribution)), 2)
     end
     fields[EFFECT.DISTRIBUTION] = spawn.distribution == "normal" and 1.0 or 0.0
     fields[EFFECT.DIRECTION] = spawn.direction or 0.0
     fields[EFFECT.SPREAD] = spawn.spread or 0.0
     fields[EFFECT.OUTWARD] = spawn.outward and 1.0 or 0.0
-    if spawn.space ~= nil and spawn.space ~= "local"
-        and spawn.space ~= "world" then
-        error(("tecs: '%s' is not a simulation space; use local or world")
-            :format(tostring(spawn.space)), 2)
+    if spawn.space ~= nil and spawn.space ~= "local" and spawn.space ~= "world" then
+        error(("tecs: '%s' is not a simulation space; use local or world"):format(tostring(spawn.space)), 2)
     end
     fields[EFFECT.SPACE] = spawn.space == "local" and 0.0 or 1.0
     fields[EFFECT.INHERIT] = spawn.inheritVelocity or 0.0
 
     -- Initial state.
-    fields[EFFECT.LIFETIME_MIN], fields[EFFECT.LIFETIME_MAX] =
-        boundsOf(initial.lifetime, 1.0, 1.0, "initial.lifetime", 2)
-    fields[EFFECT.SPEED_MIN], fields[EFFECT.SPEED_MAX] =
-        boundsOf(initial.speed, 0.0, 0.0, "initial.speed", 2)
-    fields[EFFECT.SIZE_MIN], fields[EFFECT.SIZE_MAX] =
-        boundsOf(initial.size, 1.0, 1.0, "initial.size", 2)
-    fields[EFFECT.ROTATION_MIN], fields[EFFECT.ROTATION_MAX] =
-        boundsOf(initial.rotation, 0.0, 0.0, "initial.rotation", 2)
-    fields[EFFECT.ANGULAR_MIN], fields[EFFECT.ANGULAR_MAX] =
-        boundsOf(initial.angularVelocity, 0.0, 0.0,
-            "initial.angularVelocity", 2)
-    fields[EFFECT.ACCEL_X_MIN], fields[EFFECT.ACCEL_X_MAX] =
-        boundsOf(initial.accelerationX, 0.0, 0.0, "initial.accelerationX", 2)
-    fields[EFFECT.ACCEL_Y_MIN], fields[EFFECT.ACCEL_Y_MAX] =
-        boundsOf(initial.accelerationY, 0.0, 0.0, "initial.accelerationY", 2)
-    fields[EFFECT.COLOR_R], fields[EFFECT.COLOR_G], fields[EFFECT.COLOR_B],
-        fields[EFFECT.COLOR_A] = colorOf(initial.color, "initial.color", 2)
+    fields[EFFECT.LIFETIME_MIN], fields[EFFECT.LIFETIME_MAX] = boundsOf(
+        initial.lifetime, 1.0, 1.0, "initial.lifetime", 2
+    )
+    fields[EFFECT.SPEED_MIN], fields[EFFECT.SPEED_MAX] = boundsOf(initial.speed, 0.0, 0.0, "initial.speed", 2)
+    fields[EFFECT.SIZE_MIN], fields[EFFECT.SIZE_MAX] = boundsOf(initial.size, 1.0, 1.0, "initial.size", 2)
+    fields[EFFECT.ROTATION_MIN], fields[EFFECT.ROTATION_MAX] = boundsOf(
+        initial.rotation, 0.0, 0.0, "initial.rotation", 2
+    )
+    fields[EFFECT.ANGULAR_MIN], fields[EFFECT.ANGULAR_MAX] = boundsOf(
+        initial.angularVelocity, 0.0, 0.0, "initial.angularVelocity", 2
+    )
+    fields[EFFECT.ACCEL_X_MIN], fields[EFFECT.ACCEL_X_MAX] = boundsOf(
+        initial.accelerationX, 0.0, 0.0, "initial.accelerationX", 2
+    )
+    fields[EFFECT.ACCEL_Y_MIN], fields[EFFECT.ACCEL_Y_MAX] = boundsOf(
+        initial.accelerationY, 0.0, 0.0, "initial.accelerationY", 2
+    )
+    fields[EFFECT.COLOR_R], fields[EFFECT.COLOR_G], fields[EFFECT.COLOR_B], fields[EFFECT.COLOR_A] = colorOf(
+        initial.color, "initial.color", 2
+    )
 
     -- Evolution.
     fields[EFFECT.DRAG] = update.drag or 0.0
-    fields[EFFECT.RADIAL_MIN], fields[EFFECT.RADIAL_MAX] =
-        boundsOf(update.radialAcceleration, 0.0, 0.0,
-            "update.radialAcceleration", 2)
-    fields[EFFECT.TANGENTIAL_MIN], fields[EFFECT.TANGENTIAL_MAX] =
-        boundsOf(update.tangentialAcceleration, 0.0, 0.0,
-            "update.tangentialAcceleration", 2)
+    fields[EFFECT.RADIAL_MIN], fields[EFFECT.RADIAL_MAX] = boundsOf(
+        update.radialAcceleration, 0.0, 0.0, "update.radialAcceleration", 2
+    )
+    fields[EFFECT.TANGENTIAL_MIN], fields[EFFECT.TANGENTIAL_MAX] = boundsOf(
+        update.tangentialAcceleration, 0.0, 0.0, "update.tangentialAcceleration", 2
+    )
 
     -- A negative base is what the shader reads as "no table", answering one
     -- for a curve and white for a gradient, so the multiply is unconditional.
@@ -753,8 +776,7 @@ local function newEffect(options: EffectOptions): Effect
 
     local layer <const> = render.layer or 1
     if layer < 1 or layer > layers.MAX then
-        error(("tecs: render.layer is 1 to %d, not %d")
-            :format(layers.MAX, layer), 2)
+        error(("tecs: render.layer is 1 to %d, not %d"):format(layers.MAX, layer), 2)
     end
     -- One depth for the effect rather than one per particle. An effect names
     -- one layer, so its band and sort mode are constant, and what a per
@@ -789,25 +811,24 @@ local function newEffect(options: EffectOptions): Effect
 
     fields[EFFECT.PIVOT_X] = render.pivotX or 0.5
     fields[EFFECT.PIVOT_Y] = render.pivotY or 0.5
-    if render.alignment ~= nil and render.alignment ~= "fixed"
-        and render.alignment ~= "velocity" then
-        error(("tecs: '%s' is not an alignment; use fixed or velocity")
-            :format(tostring(render.alignment)), 2)
+    if render.alignment ~= nil and render.alignment ~= "fixed" and render.alignment ~= "velocity" then
+        error(("tecs: '%s' is not an alignment; use fixed or velocity"):format(tostring(render.alignment)), 2)
     end
     fields[EFFECT.ALIGNMENT] = render.alignment == "velocity" and 1.0 or 0.0
     fields[EFFECT.STRETCH] = render.stretch or 1.0
 
     if render.blend ~= nil and not blendNoted[render.blend] then
         blendNoted[render.blend] = true
-        logger:warn("particle blend '%s' is accepted and ignored: this "
-            .. "engine has no blend state, so particles draw opaque and a "
-            .. "colour's alpha reaches the target unblended", render.blend)
+        logger:warn(
+            "particle blend '%s' is accepted and ignored: this "
+                .. "engine has no blend state, so particles draw opaque and a "
+                .. "colour's alpha reaches the target unblended",
+            render.blend
+        )
     end
 
-    if options.overflow ~= nil and options.overflow ~= "drop"
-        and options.overflow ~= "replace" then
-        error(("tecs: '%s' is not an overflow policy; use drop or replace")
-            :format(tostring(options.overflow)), 2)
+    if options.overflow ~= nil and options.overflow ~= "drop" and options.overflow ~= "replace" then
+        error(("tecs: '%s' is not an overflow policy; use drop or replace"):format(tostring(options.overflow)), 2)
     end
     fields[EFFECT.OVERFLOW] = options.overflow == "drop" and 0.0 or 1.0
 
@@ -823,17 +844,21 @@ local function newEffect(options: EffectOptions): Effect
     -- common way one of them is quietly wrong.
     local needed <const> = rate * maxLifetime
     if capacity < needed then
-        logger:warn("a particle effect emitting %g a second for up to %g "
-            .. "seconds needs %d slots at steady state and was given %d, so "
-            .. "emissions are lost", rate, maxLifetime, math.ceil(needed),
-            capacity)
+        logger:warn(
+            "a particle effect emitting %g a second for up to %g "
+                .. "seconds needs %d slots at steady state and was given %d, so "
+                .. "emissions are lost",
+            rate,
+            maxLifetime,
+            math.ceil(needed),
+            capacity
+        )
     end
 
     local duration <const> = fields[EFFECT.DURATION]
     local emitFor = -1.0
     if not schedule.looping then
-        emitFor = fields[EFFECT.DELAY]
-            + (duration > 0.0 and duration or 0.0)
+        emitFor = fields[EFFECT.DELAY] + (duration > 0.0 and duration or 0.0)
     end
 
     local effect <const>: Effect = {
@@ -884,8 +909,12 @@ local assembledAt = -1
 local function assemble()
     local count <const> = #registry
     local total = count * EFFECT_FLOATS
-    for index = 1, count do total = total + #registry[index]._extra end
-    if total < 1 then total = 1 end
+    for index = 1, count do
+        total = total + #registry[index]._extra
+    end
+    if total < 1 then
+        total = 1
+    end
 
     if total > assembledCapacity then
         assembledCapacity = total * 2
@@ -900,13 +929,13 @@ local function assemble()
         for lane = 0, EFFECT_FLOATS - 1 do
             assembled[base + lane] = record[lane]
         end
-        assembled[base + EFFECT.SIZE_CURVE] = effect._sizeCurveAt >= 0
-            and at + effect._sizeCurveAt or -1.0
-        assembled[base + EFFECT.COLOR_GRADIENT] = effect._colorGradientAt >= 0
-            and at + effect._colorGradientAt or -1.0
+        assembled[base + EFFECT.SIZE_CURVE] = effect._sizeCurveAt >= 0 and at + effect._sizeCurveAt or -1.0
+        assembled[base + EFFECT.COLOR_GRADIENT] = effect._colorGradientAt >= 0 and at + effect._colorGradientAt or -1.0
 
         local extra <const> = effect._extra
-        for lane = 1, #extra do assembled[at + lane - 1] = extra[lane] end
+        for lane = 1, #extra do
+            assembled[at + lane - 1] = extra[lane]
+        end
         at = at + #extra
     end
 
@@ -978,7 +1007,9 @@ end
 --- From stopped this begins the cycle again; from paused it carries on from
 --- where it was, with the steps spent paused not counted against the schedule.
 function ParticleEmitter:play()
-    if self.state == "playing" then return end
+    if self.state == "playing" then
+        return
+    end
     if self.state == "stopped" then
         self._startStep = self._clock
         self._generation = self._generation + 1
@@ -992,7 +1023,9 @@ end
 --- sequence, which is what makes it reproducible. Killing the field instead is
 --- `clear`, and the two are deliberately separate.
 function ParticleEmitter:stop()
-    if self.state == "stopped" then return end
+    if self.state == "stopped" then
+        return
+    end
     self.state = "stopped"
     self._startStep = self._clock
     self._generation = self._generation + 1
@@ -1001,7 +1034,9 @@ end
 --- Stops emission and holds. The schedule and the particles both keep their
 --- state, and neither ages while this is on.
 function ParticleEmitter:pause()
-    if self.state == "stopped" then return end
+    if self.state == "stopped" then
+        return
+    end
     self.state = "paused"
 end
 
@@ -1029,7 +1064,9 @@ end
 --- A no-op on a stopped emitter. More than the emitter's own free capacity is
 --- truncated to what fits rather than refused.
 function ParticleEmitter:burst(count: number)
-    if self.state ~= "playing" then return end
+    if self.state ~= "playing" then
+        return
+    end
     self._burst = (self._burst or 0.0) + (count or 0.0)
 end
 
@@ -1041,13 +1078,17 @@ end
 --- unlike a count it needs nothing read back from the GPU.
 function ParticleEmitter:finished(): boolean
     local effect <const> = self.effect
-    if effect == nil then return true end
-    if self.state == "playing" and effect.emitFor < 0.0 then return false end
-    if self.state == "paused" then return false end
-    local seconds <const> = (self._clock - self._startStep)
-        * self._stepSeconds * self.timeScale
-    local last <const> = (self.state == "playing" and effect.emitFor or 0.0)
-        + effect.maxLifetime
+    if effect == nil then
+        return true
+    end
+    if self.state == "playing" and effect.emitFor < 0.0 then
+        return false
+    end
+    if self.state == "paused" then
+        return false
+    end
+    local seconds <const> = (self._clock - self._startStep) * self._stepSeconds * self.timeScale
+    local last <const> = (self.state == "playing" and effect.emitFor or 0.0) + effect.maxLifetime
     return seconds >= last
 end
 
@@ -1055,12 +1096,12 @@ end
 ---
 --- The integral of the emission rate plus every burst whose time has passed,
 --- counted once per cycle a loop has been through.
-local function emittedBy(item: ParticleEmitter, effect: Effect,
-                         at: number): number
-    if at <= effect.delay then return 0.0 end
+local function emittedBy(item: ParticleEmitter, effect: Effect, at: number): number
+    if at <= effect.delay then
+        return 0.0
+    end
     local into = at - effect.delay
-    if effect.duration > 0.0 and not effect.looping
-        and into > effect.duration then
+    if effect.duration > 0.0 and not effect.looping and into > effect.duration then
         into = effect.duration
     end
 
@@ -1070,7 +1111,9 @@ local function emittedBy(item: ParticleEmitter, effect: Effect,
         local cycles = 1.0
         if effect.looping and effect.duration > 0.0 then
             cycles = floor((into - bursts[index]) / effect.duration) + 1.0
-            if cycles < 0.0 then cycles = 0.0 end
+            if cycles < 0.0 then
+                cycles = 0.0
+            end
         elseif into < bursts[index] then
             cycles = 0.0
         end
@@ -1089,16 +1132,18 @@ end
 --- the thing this whole design refuses.
 function ParticleEmitter:estimatedCount(): integer
     local effect <const> = self.effect
-    if effect == nil then return 0 end
-    local now <const> = (self._clock - self._startStep) * self._stepSeconds
-        * self.timeScale
+    if effect == nil then
+        return 0
+    end
+    local now <const> = (self._clock - self._startStep) * self._stepSeconds * self.timeScale
     -- Averaged rather than the longest, since half the particles emitted a
     -- lifetime ago are gone and half are not.
     local mean <const> = effect.maxLifetime * 0.5
-    local alive <const> = emittedBy(self, effect, now)
-        - emittedBy(self, effect, now - mean)
+    local alive <const> = emittedBy(self, effect, now) - emittedBy(self, effect, now - mean)
 
-    if alive <= 0.0 then return 0 end
+    if alive <= 0.0 then
+        return 0
+    end
     return floor(min(alive, effect.capacity) + 0.5)
 end
 
@@ -1148,8 +1193,7 @@ local function initEmitter(item: ParticleEmitter, options: EmitterOptions)
     end
     local state <const> = options.state or "playing"
     if state ~= "playing" and state ~= "paused" and state ~= "stopped" then
-        error(("tecs: '%s' is not an emitter state; use playing, paused or "
-            .. "stopped"):format(tostring(state)), 3)
+        error(("tecs: '%s' is not an emitter state; use playing, paused or " .. "stopped"):format(tostring(state)), 3)
     end
 
     item.effect = options.effect
@@ -1225,15 +1269,14 @@ local record Pool
     _destroyed: boolean
 end
 
-local PoolMT <const>: metatable<Pool> = { __index = Pool }
+local PoolMT <const>: metatable<Pool> = {__index = Pool}
 
 --- Nothing changed, ever. The instance region is written by compute rather
 --- than through staging, so the run this producer holds is one the host flush
 --- never covers. Returning an empty list every time is what arranges that.
 local NOTHING <const>: {integer} = {}
 
-local function newPool(renderer: Renderer, capacity: integer,
-                       maxEmitters: integer): Pool
+local function newPool(renderer: Renderer, capacity: integer, maxEmitters: integer): Pool
     local self = setmetatable({} as Pool, PoolMT)
     local device <const> = renderer:device()
     self.capacity = capacity
@@ -1257,31 +1300,46 @@ local function newPool(renderer: Renderer, capacity: integer,
     self._ownersDirty = true
     self._destroyed = false
 
-    self._effects = Buffer.create(device, {
-        usage = { "computeRead" },
-        size = EFFECT_TABLE_FLOATS * 4,
-        name = "tecs.particle.effects",
-    })
-    self._emitters = Buffer.create(device, {
-        usage = { "computeRead" },
-        size = maxEmitters * EMITTER_FLOATS * 4,
-        name = "tecs.particle.emitters",
-    })
-    self._runtime = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = maxEmitters * RUNTIME_UINTS * 4,
-        name = "tecs.particle.runtime",
-    })
-    self._owners = Buffer.create(device, {
-        usage = { "computeRead" },
-        size = capacity * 4,
-        name = "tecs.particle.owners",
-    })
-    self._states = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = capacity * STATE_FLOATS * 4,
-        name = "tecs.particle.states",
-    })
+    self._effects = Buffer.create(
+        device,
+        {
+            usage = {"computeRead"},
+            size = EFFECT_TABLE_FLOATS * 4,
+            name = "tecs.particle.effects",
+        }
+    )
+    self._emitters = Buffer.create(
+        device,
+        {
+            usage = {"computeRead"},
+            size = maxEmitters * EMITTER_FLOATS * 4,
+            name = "tecs.particle.emitters",
+        }
+    )
+    self._runtime = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = maxEmitters * RUNTIME_UINTS * 4,
+            name = "tecs.particle.runtime",
+        }
+    )
+    self._owners = Buffer.create(
+        device,
+        {
+            usage = {"computeRead"},
+            size = capacity * 4,
+            name = "tecs.particle.owners",
+        }
+    )
+    self._states = Buffer.create(
+        device,
+        {
+            usage = {"computeRead", "computeWrite"},
+            size = capacity * STATE_FLOATS * 4,
+            name = "tecs.particle.states",
+        }
+    )
 
     self._emitterSlot = 0
     self._emitterData = loader.newArray("float[?]", maxEmitters * EMITTER_FLOATS)
@@ -1292,12 +1350,15 @@ local function newPool(renderer: Renderer, capacity: integer,
     -- the two the shaders read before they write are zeroed once here. Without
     -- it the first frame reads whatever the driver left and draws a field
     -- nothing emitted.
-    local zeros <const> = loader.newArray("uint32_t[?]",
-        max(capacity * STATE_FLOATS, maxEmitters * RUNTIME_UINTS))
-    for index = 0, capacity * STATE_FLOATS - 1 do zeros[index] = 0 end
+    local zeros <const> = loader.newArray("uint32_t[?]", max(capacity * STATE_FLOATS, maxEmitters * RUNTIME_UINTS))
+    for index = 0, capacity * STATE_FLOATS - 1 do
+        zeros[index] = 0
+    end
     self._states:upload(zeros, capacity * STATE_FLOATS * 4)
     self._runtime:upload(zeros, maxEmitters * RUNTIME_UINTS * 4)
-    for index = 0, capacity - 1 do self._ownerData[index] = 0 end
+    for index = 0, capacity - 1 do
+        self._ownerData[index] = 0
+    end
 
     self._emit = ComputePipeline.load(device, "particle.emit.comp", {})
     self._spawn = ComputePipeline.load(device, "particle.spawn.comp", {})
@@ -1318,7 +1379,9 @@ local function allocate(self: Pool, count: integer): integer
         free[#free] = nil
         return base
     end
-    if self._high + count > self.capacity then return -1 end
+    if self._high + count > self.capacity then
+        return -1
+    end
     local base <const> = self._high
     self._high = base + count
     return base
@@ -1337,20 +1400,26 @@ end
 --- Points every slot of a range at an emitter, or at nobody.
 local function own(self: Pool, base: integer, count: integer, owner: integer)
     local data <const> = self._ownerData
-    for slot = base, base + count - 1 do data[slot] = owner end
+    for slot = base, base + count - 1 do
+        data[slot] = owner
+    end
     self._ownersDirty = true
 end
 
 --- Gives an emitter a place in the pool, or leaves it without one.
 local function admit(self: Pool, item: ParticleEmitter): Holding
     local effect <const> = item.effect
-    if effect == nil then return nil end
+    if effect == nil then
+        return nil
+    end
 
     local base <const> = allocate(self, effect.capacity)
     if base < 0 then
-        logger:warn("a particle pool of %d slots has no room for an effect "
-            .. "needing %d; the emitter draws nothing", self.capacity,
-            effect.capacity)
+        logger:warn(
+            "a particle pool of %d slots has no room for an effect " .. "needing %d; the emitter draws nothing",
+            self.capacity,
+            effect.capacity
+        )
         return nil
     end
 
@@ -1362,9 +1431,11 @@ local function admit(self: Pool, item: ParticleEmitter): Holding
     else
         if self._indexHigh >= self._maxEmitters then
             release(self, base, effect.capacity)
-            logger:warn("a particle pool holds %d emitters and a %dth was "
-                .. "spawned; it draws nothing", self._maxEmitters,
-                self._maxEmitters + 1)
+            logger:warn(
+                "a particle pool holds %d emitters and a %dth was " .. "spawned; it draws nothing",
+                self._maxEmitters,
+                self._maxEmitters + 1
+            )
             return nil
         end
         index = self._indexHigh
@@ -1389,8 +1460,15 @@ local function admit(self: Pool, item: ParticleEmitter): Holding
 
     local r, g, b, a = colorOf(item.tint, "tint", 2)
     local holding <const>: Holding = {
-        item = item, index = index, base = base, count = effect.capacity,
-        tint = item.tint, tintR = r, tintG = g, tintB = b, tintA = a,
+        item = item,
+        index = index,
+        base = base,
+        count = effect.capacity,
+        tint = item.tint,
+        tintR = r,
+        tintG = g,
+        tintB = b,
+        tintA = a,
     }
     self._holdings[item] = holding
     self._live = self._live + 1
@@ -1411,8 +1489,7 @@ local function retire(self: Pool, holding: Holding, step: number)
 
     local effect <const> = item.effect
     local seconds <const> = effect ~= nil and effect.maxLifetime or 0.0
-    local steps <const> = self._timestep > 0.0
-        and math.ceil(seconds / self._timestep) or 0.0
+    local steps <const> = self._timestep > 0.0 and math.ceil(seconds / self._timestep) or 0.0
     self._draining[#self._draining + 1] = {
         base = holding.base,
         count = holding.count,
@@ -1445,13 +1522,22 @@ local function drain(self: Pool, step: number)
             held[kept] = entry
         end
     end
-    for index = #held, kept + 1, -1 do held[index] = nil end
+    for index = #held, kept + 1, -1 do
+        held[index] = nil
+    end
 end
 
 --- Writes one emitter's record into the staging the record pass uploads.
-local function writeEmitter(self: Pool, holding: Holding, x: number, y: number,
-                            previousX: number, previousY: number,
-                            rotation: number, steps: number)
+local function writeEmitter(
+    self: Pool,
+    holding: Holding,
+    x: number,
+    y: number,
+    previousX: number,
+    previousY: number,
+    rotation: number,
+    steps: number
+)
     local item <const> = holding.item
     local data <const> = self._emitterData
     local base <const> = holding.index * EMITTER_FLOATS
@@ -1474,8 +1560,7 @@ local function writeEmitter(self: Pool, holding: Holding, x: number, y: number,
     data[base + EMITTER.TIME_SCALE] = item.timeScale
     if holding.tint ~= item.tint then
         holding.tint = item.tint
-        holding.tintR, holding.tintG, holding.tintB, holding.tintA =
-            colorOf(item.tint, "tint", 2)
+        holding.tintR, holding.tintG, holding.tintB, holding.tintA = colorOf(item.tint, "tint", 2)
     end
     data[base + EMITTER.TINT_R] = holding.tintR
     data[base + EMITTER.TINT_G] = holding.tintG
@@ -1504,14 +1589,15 @@ end
 --- dirty. What it writes is the hidden slot every reserved run writes, and the
 --- simulate pass overwrites the live ones later on the same frame: the flush is
 --- recorded before the dispatch, so a relayout cannot lose a particle.
-function Pool:write(floats: loader.CArray, bounds: loader.CArray,
-                    base: integer, first: integer, last: integer)
+function Pool:write(floats: loader.CArray, bounds: loader.CArray, base: integer, first: integer, last: integer)
     self._base = base
     local instanceFloats <const> = instancelayout.FLOATS
     local boundFloats <const> = instancelayout.BOUND_FLOATS
     for slot = base + first - 1, base + last - 1 do
         local at <const> = slot * instanceFloats
-        for lane = 0, instanceFloats - 1 do floats[at + lane] = 0.0 end
+        for lane = 0, instanceFloats - 1 do
+            floats[at + lane] = 0.0
+        end
         floats[at + 3] = instancelayout.HIDDEN_DEPTH
         local bound <const> = slot * boundFloats
         bounds[bound] = instancelayout.HIDDEN
@@ -1548,8 +1634,12 @@ function Pool:record(frame: Frame, instances: Buffer, bounds: Buffer)
         end
         local bytes <const> = assembledFloats * 4
         if bytes > self._effects.size then
-            error(("tecs: the particle effect table needs %d bytes and the "
-                .. "buffer holds %d"):format(bytes, self._effects.size), 2)
+            error(
+                ("tecs: the particle effect table needs %d bytes and the " .. "buffer holds %d"):format(
+                    bytes, self._effects.size
+                ),
+                2
+            )
         end
         self._effects:write(0, assembled as loader.CValue, bytes)
         self._effects:flush(commandBuffer)
@@ -1557,8 +1647,7 @@ function Pool:record(frame: Frame, instances: Buffer, bounds: Buffer)
 
     if self._ownersDirty then
         self._ownersDirty = false
-        self._owners:write(0, self._ownerData as loader.CValue,
-            self.capacity * 4)
+        self._owners:write(0, self._ownerData as loader.CValue, self.capacity * 4)
         self._owners:flush(commandBuffer)
     end
 
@@ -1597,30 +1686,26 @@ function Pool:record(frame: Frame, instances: Buffer, bounds: Buffer)
     -- because each declares what it writes.
     local emitters <const> = math.ceil(self._indexHigh / GROUP)
     if emitters > 0 then
-        local emit <const> = ComputePass.begin(commandBuffer,
-            { self._runtime.handle })
+        local emit <const> = ComputePass.begin(commandBuffer, {self._runtime.handle})
         emit:bindPipeline(self._emit.handle)
-        emit:bindStorageBuffers(0,
-            { self._effects.handle, self._emitters.handle })
+        emit:bindStorageBuffers(0, {self._effects.handle, self._emitters.handle})
         C.SDL_PushGPUComputeUniformData(commandBuffer, 0, uniform, 32)
         emit:dispatch(emitters)
         emit:finish()
     end
 
-    local spawn <const> = ComputePass.begin(commandBuffer,
-        { self._states.handle })
+    local spawn <const> = ComputePass.begin(commandBuffer, {self._states.handle})
     spawn:bindPipeline(self._spawn.handle)
-    spawn:bindStorageBuffers(0, { self._effects.handle, self._emitters.handle,
-        self._owners.handle, self._runtime.handle })
+    spawn:bindStorageBuffers(
+        0, {self._effects.handle, self._emitters.handle, self._owners.handle, self._runtime.handle}
+    )
     C.SDL_PushGPUComputeUniformData(commandBuffer, 0, uniform, 32)
     spawn:dispatch(slots)
     spawn:finish()
 
-    local simulate <const> = ComputePass.begin(commandBuffer,
-        { self._states.handle, instances.handle, bounds.handle })
+    local simulate <const> = ComputePass.begin(commandBuffer, {self._states.handle, instances.handle, bounds.handle})
     simulate:bindPipeline(self._simulate.handle)
-    simulate:bindStorageBuffers(0, { self._effects.handle,
-        self._emitters.handle, self._owners.handle })
+    simulate:bindStorageBuffers(0, {self._effects.handle, self._emitters.handle, self._owners.handle})
     C.SDL_PushGPUComputeUniformData(commandBuffer, 0, uniform, 32)
     simulate:dispatch(slots)
     simulate:finish()
@@ -1628,7 +1713,9 @@ end
 
 --- Releases everything the pool owns. Safe to call more than once.
 function Pool:destroy()
-    if self._destroyed then return end
+    if self._destroyed then
+        return
+    end
     self._destroyed = true
     self._effects:destroy()
     self._emitters:destroy()
@@ -1658,8 +1745,7 @@ end
 
 --- Pools installed per world, so a second install is a no-op and a debugger
 --- has somewhere to ask.
-local pools: {World: Pool} = setmetatable({},
-    { __mode = "k" } as metatable<{World: Pool}>)
+local pools: {World: Pool} = setmetatable({}, {__mode = "k"} as metatable<{World: Pool}>)
 
 --- Walks the emitters, keeps the pool's bookkeeping in step, and writes their
 --- records.
@@ -1670,8 +1756,7 @@ local pools: {World: Pool} = setmetatable({},
 --- schedule advances without anything writing anything. Emitters are counted
 --- in tens, so the walk is cheaper than any arrangement that tried to avoid it
 --- would be to get right.
-local function walkEmitters(self: Pool, query: ecs.Query,
-                            advancing: boolean): integer
+local function walkEmitters(self: Pool, query: ecs.Query, advancing: boolean): integer
     local seen <const> = self._seen
     local step <const> = self._step
     local timestep <const> = self._timestep
@@ -1702,19 +1787,24 @@ local function walkEmitters(self: Pool, query: ecs.Query,
                 local steps = 0.0
                 if advancing and item.state == "playing" then
                     steps = step - item._worldStep
-                    if steps < 0.0 then steps = 0.0 end
-                    if steps > MAX_STEPS then steps = MAX_STEPS end
+                    if steps < 0.0 then
+                        steps = 0.0
+                    end
+                    if steps > MAX_STEPS then
+                        steps = MAX_STEPS
+                    end
                     item._clock = item._clock + steps
                 end
                 item._worldStep = step
                 item._stepSeconds = timestep
 
-                writeEmitter(self, holding, transform.x, transform.y,
-                    beforeX, beforeY, transform.rotation, steps)
+                writeEmitter(self, holding, transform.x, transform.y, beforeX, beforeY, transform.rotation, steps)
                 -- Taken by the step boundary that just passed, so a burst
                 -- asked for between two of them waits for one rather than
                 -- being emitted twice or not at all.
-                if steps > 0.0 then item._burst = 0.0 end
+                if steps > 0.0 then
+                    item._burst = 0.0
+                end
                 live = live + 1
             end
         end
@@ -1722,19 +1812,21 @@ local function walkEmitters(self: Pool, query: ecs.Query,
     return live
 end
 
-local function sync(self: Pool, world: World, running: ecs.Query,
-                    held: ecs.Query)
+local function sync(self: Pool, world: World, running: ecs.Query, held: ecs.Query)
     local timestep, accumulator = world:getFixedTiming()
     self._timestep = timestep
     self._alpha = timestep > 0.0 and accumulator / timestep or 1.0
-    if self._alpha > 1.0 then self._alpha = 1.0 end
+    if self._alpha > 1.0 then
+        self._alpha = 1.0
+    end
     self._step = world:fixedStepCount()
 
     local seen <const> = self._seen
-    for item in pairs(seen) do seen[item] = nil end
+    for item in pairs(seen) do
+        seen[item] = nil
+    end
 
-    local live = walkEmitters(self, running, true)
-        + walkEmitters(self, held, false)
+    local live = walkEmitters(self, running, true) + walkEmitters(self, held, false)
 
     -- An emitter that lost its component or its entity leaves a range nothing
     -- points at, and nothing reports either. Comparing what was walked against
@@ -1742,7 +1834,9 @@ local function sync(self: Pool, world: World, running: ecs.Query,
     -- component replaced rather than removed is caught too.
     if self._live > live then
         for item, holding in pairs(self._holdings) do
-            if not seen[item] then retire(self, holding, self._step) end
+            if not seen[item] then
+                retire(self, holding, self._step)
+            end
         end
     end
     drain(self, self._step)
@@ -1770,7 +1864,9 @@ local function plugin(options: PoolOptions): function(World)
     local maxEmitters <const> = options.maxEmitters or DEFAULT_EMITTERS
 
     return function(world: World)
-        if pools[world] ~= nil then return end
+        if pools[world] ~= nil then
+            return
+        end
         local self <const> = newPool(renderer, capacity, maxEmitters)
         pools[world] = self
 
@@ -1781,12 +1877,12 @@ local function plugin(options: PoolOptions): function(World)
         -- per row.
         local running <const> = world:query({
             name = "tecs.ParticleEmitters",
-            include = { ParticleEmitter, Transform },
-            exclude = { ecs.builtins.Paused },
+            include = {ParticleEmitter, Transform},
+            exclude = {ecs.builtins.Paused},
         })
         local held <const> = world:query({
             name = "tecs.PausedParticleEmitters",
-            include = { ParticleEmitter, Transform, ecs.builtins.Paused },
+            include = {ParticleEmitter, Transform, ecs.builtins.Paused},
         })
 
         renderer:addProducer(self as Renderer.InstanceProducer)
@@ -1798,10 +1894,8 @@ local function plugin(options: PoolOptions): function(World)
         world:addSystem({
             name = "tecs.ParticleEmitterSync",
             phase = ecs.phases.PostUpdate,
-            after = { "RelativeTransform" },
-            run = function()
-                sync(self, world, running, held)
-            end,
+            after = {"RelativeTransform"},
+            run = function() sync(self, world, running, held) end,
         })
     end
 end
@@ -1890,73 +1984,82 @@ function particles.poolOf(world: World): Pool
     return pools[world]
 end
 
-particles.ParticleEmitter = ecs.newComponent({
-    name = "ParticleEmitter",
-    container = ParticleEmitter,
-    -- An emitter is a position and an effect. Requiring the position means one
-    -- is never accidentally left off, which would leave the emitter out of the
-    -- pool's query and quietly emitting nothing.
-    requires = { Transform },
-    -- One options table rather than seven positional arguments. Six of the
-    -- seven are scales a caller almost never sets, and the one that matters is
-    -- named: `ParticleEmitter({ effect = sparks })` says what it is, and
-    -- `ParticleEmitter(sparks, nil, nil, 1, 1, 1)` does not.
-    __call = function(item: ParticleEmitter, options: EmitterOptions)
-        initEmitter(item, options)
-    end,
-    new = function(data: {string: any}): ParticleEmitter
-        local item <const> = {} as ParticleEmitter
-        initEmitter(item, data as EmitterOptions)
-        return item
-    end,
-    serialize = function(item: ParticleEmitter): {string: any}
-        -- The configuration and nothing else. Not one particle of the field
-        -- can cross, for the reason the mixer's voices cannot: it lives where
-        -- a snapshot cannot reach, and what a restore rebuilds is the emitter.
-        -- A burst effect nobody notices; an ambient one comes back empty and
-        -- refills over a lifetime.
-        --
-        -- The effect crosses as its name, the way a Sprite carries its image
-        -- and an Animation its sheet. Its index is a position in registration
-        -- order, so a saved one names whichever effect the loading process put
-        -- there: one conditional registration or one plugin installed earlier
-        -- is enough to play a different effect and say nothing about it.
-        return {
-            state = item.state,
-            seed = item.seed,
-            rateScale = item.rateScale,
-            sizeScale = item.sizeScale,
-            timeScale = item.timeScale,
-            effect = item.effect ~= nil and item.effect.name or nil,
-        }
-    end,
-    deserialize = function(_world: World, data: {string: any}): ParticleEmitter
-        local name <const> = data.effect as string
-        if name == nil or name == "" then
-            error("loadSnapshot: snapshot holds a ParticleEmitter that names "
-                .. "no effect", 0)
-        end
-        -- Neither the first effect nor a dropped component. Both of those load
-        -- without a word and leave the scene playing something nobody asked
-        -- for, which is the failure the name is written to prevent; refusing
-        -- is the only answer here that is not a guess.
-        local effect <const> = findEffect(name)
-        if effect == nil then
-            local known <const> = effectNames()
-            error(("loadSnapshot: snapshot references particle effect '%s' "
-                .. "which this build does not have; found %s")
-                :format(name, #known > 0 and table.concat(known, ", ")
-                    or "none"), 0)
-        end
-        return particles.ParticleEmitter({
-            effect = effect,
-            state = data.state as EmitterState,
-            seed = data.seed as number,
-            rateScale = data.rateScale as number,
-            sizeScale = data.sizeScale as number,
-            timeScale = data.timeScale as number,
-        })
-    end,
-})
+particles.ParticleEmitter = ecs.newComponent(
+    {
+        name = "ParticleEmitter",
+        container = ParticleEmitter,
+        -- An emitter is a position and an effect. Requiring the position means one
+        -- is never accidentally left off, which would leave the emitter out of the
+        -- pool's query and quietly emitting nothing.
+        requires = {Transform},
+        -- One options table rather than seven positional arguments. Six of the
+        -- seven are scales a caller almost never sets, and the one that matters is
+        -- named: `ParticleEmitter({ effect = sparks })` says what it is, and
+        -- `ParticleEmitter(sparks, nil, nil, 1, 1, 1)` does not.
+        __call = function(item: ParticleEmitter, options: EmitterOptions) initEmitter(item, options) end,
+        new = function(data: {string: any}): ParticleEmitter
+            local item <const> = {} as ParticleEmitter
+            initEmitter(item, data as EmitterOptions)
+            return item
+        end,
+        serialize = function(item: ParticleEmitter): {string: any}
+            -- The configuration and nothing else. Not one particle of the field
+            -- can cross, for the reason the mixer's voices cannot: it lives where
+            -- a snapshot cannot reach, and what a restore rebuilds is the emitter.
+            -- A burst effect nobody notices; an ambient one comes back empty and
+            -- refills over a lifetime.
+            --
+            -- The effect crosses as its name, the way a Sprite carries its image
+            -- and an Animation its sheet. Its index is a position in registration
+            -- order, so a saved one names whichever effect the loading process put
+            -- there: one conditional registration or one plugin installed earlier
+            -- is enough to play a different effect and say nothing about it.
+            -- The tint crosses whole rather than as the four numbers it parses
+            -- to. A `Color` is a name, a packed number or a table, and the parsed
+            -- form is a cache on the pool's own record; writing the parsed one back
+            -- would turn every named colour into an anonymous quadruple that no
+            -- longer follows the palette it was named from.
+            return {
+                state = item.state,
+                seed = item.seed,
+                rateScale = item.rateScale,
+                sizeScale = item.sizeScale,
+                timeScale = item.timeScale,
+                tint = item.tint,
+                effect = item.effect ~= nil and item.effect.name or nil,
+            }
+        end,
+        deserialize = function(_world: World, data: {string: any}): ParticleEmitter
+            local name <const> = data.effect as string
+            if name == nil or name == "" then
+                error("loadSnapshot: snapshot holds a ParticleEmitter that names " .. "no effect", 0)
+            end
+            -- Neither the first effect nor a dropped component. Both of those load
+            -- without a word and leave the scene playing something nobody asked
+            -- for, which is the failure the name is written to prevent; refusing
+            -- is the only answer here that is not a guess.
+            local effect <const> = findEffect(name)
+            if effect == nil then
+                local known <const> = effectNames()
+                error(
+                    (
+                        "loadSnapshot: snapshot references particle effect '%s' "
+                        .. "which this build does not have; found %s"
+                    ):format(name, #known > 0 and table.concat(known, ", ") or "none"),
+                    0
+                )
+            end
+            return particles.ParticleEmitter({
+                effect = effect,
+                state = data.state as EmitterState,
+                seed = data.seed as number,
+                rateScale = data.rateScale as number,
+                sizeScale = data.sizeScale as number,
+                timeScale = data.timeScale as number,
+                tint = data.tint as Color,
+            })
+        end,
+    }
+)
 
 return particles

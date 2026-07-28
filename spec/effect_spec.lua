@@ -101,6 +101,26 @@ describe("particle effect identity across a snapshot", function()
         assert.are.equal(3, emitter.seed)
     end)
 
+    -- The tint is a game-set value that nothing else records, so an emitter
+    -- that came back the right effect but the wrong colour would look like a
+    -- rendering fault rather than a save one.
+    it("carries the tint a game set on it", function()
+        local effect = register("specTinted", 8)
+        local world = tecs.newWorld()
+        local entity =
+            world:spawn(Transform(0, 0), ParticleEmitter({ effect = effect, tint = { 0.25, 0.5, 0.75, 0.5 } }))
+
+        local restored = tecs.newWorld()
+        restored:loadSnapshot(world:saveSnapshot({ format = "table" }).snapshot)
+
+        local tint = restored:get(entity, ParticleEmitter).tint
+        assert.is_table(tint, "the tint did not cross at all")
+        assert.are.equal(0.25, tint[1])
+        assert.are.equal(0.5, tint[2])
+        assert.are.equal(0.75, tint[3])
+        assert.are.equal(0.5, tint[4])
+    end)
+
     it("survives the same reordering through the binary format", function()
         register("specSparks", 8)
         local smoke = register("specSmoke", 64)
