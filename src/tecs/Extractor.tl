@@ -1172,12 +1172,9 @@ function Extractor:install(world: ecs.World, packet: FramePacket, published: fun
         phase = ecs.phases.FixedFirst,
         run = function()
             for archetype, length in interpolated:iter() do
-                -- The previous pose below is taken mutable, because this
-                -- writes every row it visits: the whole column is what the
-                -- next frame interpolates from. Said here rather than on that
-                -- line, which the formatter miscompiles a comment above once
-                -- the line before it is short enough.
                 local transforms = archetype:get(Transform)
+                -- Mutable, because this writes every row it visits: the whole
+                -- column is what the next frame interpolates from.
                 local before = archetype:getMut(components.PreviousTransform)
                 for row = 1, length do
                     local transform = transforms[row]

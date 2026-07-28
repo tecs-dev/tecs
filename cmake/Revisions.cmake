@@ -86,5 +86,5 @@ set(TECS_MBEDTLS_TAG "mbedtls-4.1.1" CACHE STRING "Mbed TLS revision, curl's TLS
 # the formatted sources have to agree, and reformatting here to match a newer
 # Cerulean would duplicate a reformat that already happened elsewhere.
 set(TECS_TL_REF "1326d829790b92e23defe69fcf40460103b60d1d" CACHE STRING "Teal revision")
-set(TECS_CERULEAN_REF "ae9c61af4747d3db0a3fa99fde7157ed6c39bf65" CACHE STRING "Cerulean revision")
+set(TECS_CERULEAN_REF "a09b6d734a55d58489e16498bd83387d39c4cafe" CACHE STRING "Cerulean revision")
 set(TECS_TEALDOC_REF "347342ba0aa5d55868e48319ca275be93b174d70" CACHE STRING "tealdoc revision")
