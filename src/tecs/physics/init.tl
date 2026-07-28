@@ -37,6 +37,7 @@ local World <const> = require("tecs.physics.World")
 local box2d <const> = require("tecs.ffi.box2d")
 local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
+local table_clear <const> = require("table.clear")
 
 local atan2 <const> = math.atan2
 
@@ -60,6 +61,11 @@ local BODY_KINDS <const>: {string: integer} = {
     static = 0,
     kinematic = 1,
     dynamic = 2,
+}
+local BODY_NAMES <const>: {integer: string} = {
+    [0] = "static",
+    [1] = "kinematic",
+    [2] = "dynamic",
 }
 
 --- What a game asked a body to be: the fields Box2D applies through `b2Body_*`.
@@ -223,23 +229,46 @@ ecs.newFFIComponent({
         {"generation", "uint16_t"},
     },
     defaults = {0, 0, 0},
-    serialize = function(_instance: RigidBody): {string: any}
-        -- The handle stays out of the file. It is this run's numbering:
-        -- Box2D keeps `index1` dense and reuses it, so a saved one names
-        -- whichever body the loading run happens to have put in that slot,
-        -- and the sync would write a stranger's pose into this entity's
-        -- Transform with nothing to signal it.
-        return {}
-    end,
-    deserialize = function(_world: ecs.World, _data: {string: any}): RigidBody
-        -- Restored as the null handle, which is inert everywhere: the sync
-        -- reads no movement for it, the impulse and velocity calls refuse
-        -- it, and `physics.hasBody` answers false. The file does carry the
-        -- description now, in `Body` and `Collider`, so a rebuild has what it
-        -- needs; nothing rebuilds yet, so an entity that simulated before a
-        -- load does not simulate after it until something attaches again.
-        return RigidBody(0, 0, 0)
-    end,
+    transient = true,
+})
+
+--- Marks a paused body that has been changed to static and had its motion
+--- stored. Engine-owned and transient.
+local record PhysicsHeld is Component
+end
+ecs.newComponent({name = "PhysicsHeld", container = PhysicsHeld, transient = true})
+
+local record PhysicsDisabled is Component
+end
+ecs.newComponent({name = "PhysicsDisabled", container = PhysicsDisabled, transient = true})
+
+--- The live shape owned by a secondary collider entity.
+local record ColliderShape is Component
+    index1: number
+    world0: number
+    generation: number
+end
+ecs.newFFIComponent({
+    name = "ColliderShape",
+    container = ColliderShape,
+    fields = {
+        {"index1", "int32_t"},
+        {"world0", "uint16_t"},
+        {"generation", "uint16_t"},
+    },
+    defaults = {0, 0, 0},
+    transient = true,
+})
+
+--- A secondary collider's owning body. The relationship is sparse so adding
+--- shapes does not split body archetypes, reverse-indexed for inspection, and
+--- cascade-deleted with the body.
+local ColliderOf <const> = ecs.newRelationship({
+    name = "ColliderOf",
+    exclusive = true,
+    sparse = true,
+    reverseIndex = true,
+    cascadeDelete = true,
 })
 
 local record BodyOptions
@@ -254,6 +283,73 @@ local record BodyOptions
     friction: number
     restitution: number
     fixedRotation: boolean
+    gravityScale: number
+    linearDamping: number
+    angularDamping: number
+    sleepEnabled: boolean
+    isBullet: boolean
+    categoryBits: number
+    maskBits: number
+    groupIndex: integer
+    isSensor: boolean
+    offsetX: number
+    offsetY: number
+    --- Selects a vertical capsule. Radius remains the cap radius.
+    capsuleLength: number
+end
+
+local record QueryOptions
+    categoryBits: number
+    maskBits: number
+end
+
+local record RaycastHit
+    entity: integer
+    x: number
+    y: number
+    normalX: number
+    normalY: number
+    fraction: number
+end
+
+local record PendingCreation
+    entity: integer
+    transform: Transform
+    body: Body
+    collider: Collider
+    motion: Motion
+end
+
+local record PendingShape
+    entity: integer
+    owner: integer
+    collider: Collider
+end
+
+local record ContactBegin is ecs.Event
+    entityA: integer
+    entityB: integer
+end
+local record ContactEnd is ecs.Event
+    entityA: integer
+    entityB: integer
+end
+local record ContactHit is ecs.Event
+    entityA: integer
+    entityB: integer
+    x: number
+    y: number
+    normalX: number
+    normalY: number
+    approachSpeed: number
+end
+local record SensorBegin is ecs.Event
+    sensor: integer
+    visitor: integer
+end
+local record SensorEnd is ecs.Event
+    sensor: integer
+    visitor: integer
 end
 
 local record PhysicsOptions
@@ -271,7 +367,13 @@ local record physics
     RigidBody: RigidBody
     Body: Body
     Collider: Collider
+    ColliderOf: Component
     Motion: Motion
+    ContactBegin: ContactBegin
+    ContactEnd: ContactEnd
+    ContactHit: ContactHit
+    SensorBegin: SensorBegin
+    SensorEnd: SensorEnd
     --- Pixels per simulated metre.
     scale: number
 
@@ -281,8 +383,36 @@ end
 physics.RigidBody = RigidBody
 physics.Body = Body
 physics.Collider = Collider
+physics.ColliderOf = ColliderOf
 physics.Motion = Motion
+physics.ContactBegin = ContactBegin
+physics.ContactEnd = ContactEnd
+physics.ContactHit = ContactHit
+physics.SensorBegin = SensorBegin
+physics.SensorEnd = SensorEnd
 physics.scale = PIXELS_PER_METRE
+
+ContactBegin.init = function(event: ContactBegin, a: integer, b: integer) event.entityA, event.entityB = a, b end
+ContactEnd.init = function(event: ContactEnd, a: integer, b: integer) event.entityA, event.entityB = a, b end
+ContactHit.init = function(
+    event: ContactHit, a: integer, b: integer, x: number, y: number, nx: number, ny: number, speed: number
+)
+    event.entityA, event.entityB = a, b
+    event.x, event.y = x, y
+    event.normalX, event.normalY = nx, ny
+    event.approachSpeed = speed
+end
+SensorBegin.init = function(event: SensorBegin, sensor: integer, visitor: integer)
+    event.sensor, event.visitor = sensor, visitor
+end
+SensorEnd.init = function(event: SensorEnd, sensor: integer, visitor: integer)
+    event.sensor, event.visitor = sensor, visitor
+end
+ecs.newEvent(ContactBegin)
+ecs.newEvent(ContactEnd)
+ecs.newEvent(ContactHit)
+ecs.newEvent(SensorBegin)
+ecs.newEvent(SensorEnd)
 
 --- The simulation installed into a world, or nil when none has been.
 ---
@@ -310,17 +440,43 @@ local function toPixels(metres: number): number
     return metres * PIXELS_PER_METRE
 end
 
---- Declares a body on `entity` and creates it in the world's simulation.
+local function colliderFrom(options: BodyOptions): Collider
+    local shape = COLLIDER_SHAPES.box
+    if options.capsuleLength ~= nil then
+        shape = COLLIDER_SHAPES.capsule
+        if options.radius == nil or options.radius <= 0 then
+            error("tecs: a capsule needs a positive radius", 3)
+        end
+    elseif options.radius ~= nil then
+        shape = COLLIDER_SHAPES.circle
+    end
+    return Collider(
+        shape,
+        options.halfWidth or 8.0,
+        options.halfHeight or 8.0,
+        options.radius or 0.0,
+        options.capsuleLength or 0.0,
+        options.offsetX or 0.0,
+        options.offsetY or 0.0,
+        options.density,
+        options.friction,
+        options.restitution,
+        options.categoryBits or 1,
+        options.maskBits or 0xFFFFFFFF,
+        options.groupIndex or 0,
+        options.isSensor and 1 or 0
+    )
+end
+
+--- Declares a body on `entity`.
 ---
---- Writes `Body` and `Collider`, which are the description a snapshot and a
---- rebuild read, and `Motion`, which `Body` requires. The pose comes from the
---- entity's Transform, so an entity is positioned the same way whether or not
---- it simulates.
-function physics.attach(world: ecs.World, entity: integer, options: BodyOptions): loader.CValue
+--- Creation happens at the next fixed step. Keeping it declarative makes the
+--- same path work for spawn, batch spawn, snapshots and debug tools, and no
+--- raw Box2D handle escapes the module.
+function physics.attach(world: ecs.World, entity: integer, options: BodyOptions)
     options = options or {}
 
-    local simulation = physics.of(world)
-    if simulation == nil then
+    if physics.of(world) == nil then
         error("tecs: this world has no physics simulation; add physics.plugin to it first", 2)
     end
 
@@ -328,73 +484,40 @@ function physics.attach(world: ecs.World, entity: integer, options: BodyOptions)
     if kind == nil then
         error(("tecs: unknown body type %q; expected static, kinematic or dynamic"):format(options.type), 2)
     end
-    local round = options.radius ~= nil
-
-    -- The declaration goes on first, and `Body` requires `Transform`, so an
-    -- entity that had no pose has a default one at the origin by the time the
-    -- pose is read below. That is what closes the case rather than a nil test:
-    -- the sync writes back into `Transform` unconditionally, so a body with
-    -- none would be a body nothing can see.
-    world:set(entity, Body(kind, options.fixedRotation and 1 or 0))
+    world:defer()
     world:set(
         entity,
-        Collider(
-            round and COLLIDER_SHAPES.circle or COLLIDER_SHAPES.box,
-            options.halfWidth or 8.0,
-            options.halfHeight or 8.0,
-            round and options.radius or 0.0,
-            -- length, offsetX, offsetY: reserved, and not reachable through
-            -- the options table until the capsule and offset shapes are.
-            0.0,
-            0.0,
-            0.0,
-            options.density,
-            options.friction,
-            options.restitution
+        Body(
+            kind,
+            options.fixedRotation and 1 or 0,
+            options.isBullet and 1 or 0,
+            options.sleepEnabled == false and 0 or 1,
+            options.gravityScale or 1.0,
+            options.linearDamping or 0.0,
+            options.angularDamping or 0.0
         )
     )
+    world:set(entity, colliderFrom(options))
+    world:commit()
+end
 
-    local transform = world:get(entity, Transform)
-    local body = simulation:createBody({
-        type = options.type or "dynamic",
-        position = {x = toMetres(transform.x), y = toMetres(transform.y)},
-        angle = transform.rotation,
-        fixedRotation = options.fixedRotation,
-    })
-
-    if round then
-        World.addCircle(
-            body,
-            toMetres(options.radius),
-            {
-                density = options.density,
-                friction = options.friction,
-                restitution = options.restitution,
-            }
-        )
-    else
-        World.addBox(
-            body,
-            toMetres(options.halfWidth or 8.0),
-            toMetres(options.halfHeight or 8.0),
-            {
-                density = options.density,
-                friction = options.friction,
-                restitution = options.restitution,
-            }
-        )
+--- Adds another collider to a declared body. The collider is its own entity,
+--- which makes each shape independently inspectable and mutable.
+function physics.attachCollider(world: ecs.World, entity: integer, body: integer, options: BodyOptions)
+    options = options or {}
+    if world:get(body, Body) == nil then
+        error("tecs: ColliderOf target has no Body", 2)
     end
+    world:defer()
+    world:set(entity, colliderFrom(options))
+    world:set(entity, ColliderOf(body))
+    world:commit()
+end
 
-    local handle = body as loader.CStruct
-    world:set(entity, RigidBody(handle.index1 as number, handle.world0 as number, handle.generation as number))
-
-    -- Seeded from where the body starts, so the first frame interpolates
-    -- between a real position and a real position rather than from the
-    -- origin. A body advances in fixed steps while frames arrive whenever the
-    -- display asks, so without this it steps visibly instead of moving.
-    world:set(entity, components.PreviousTransform(transform.x, transform.y, transform.rotation))
-
-    return body
+--- Removes a body's declaration. Its native body is destroyed at the next
+--- fixed step.
+function physics.detach(world: ecs.World, entity: integer)
+    world:remove(entity, Body)
 end
 
 -- One handle for the lifetime of the process. The sync rebuilds a handle per
@@ -412,6 +535,16 @@ local function handleOf(row: RigidBody): loader.CValue
     scratchFields.world0 = row.world0
     scratchFields.generation = row.generation
     return scratchHandle
+end
+
+local scratchShape <const> = loader.newStruct("b2ShapeId")
+local scratchShapeFields <const> = scratchShape as loader.CStruct
+
+local function shapeOf(row: ColliderShape): loader.CValue
+    scratchShapeFields.index1 = row.index1
+    scratchShapeFields.world0 = row.world0
+    scratchShapeFields.generation = row.generation
+    return scratchShape
 end
 
 --- Whether `entity` has a body Box2D is still solving.
@@ -464,6 +597,15 @@ function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
     B.b2Body_ApplyLinearImpulseToCenter(body, impulse, true)
 end
 
+--- Applies an impulse at a world-space point, all in pixel-scaled units.
+function physics.applyImpulseAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.applyImpulseAt(handleOf(row), toMetres(x), toMetres(y), toMetres(pointX), toMetres(pointY))
+end
+
 --- Reads a body's velocity, live from Box2D, in pixels per second.
 ---
 --- Pixels, like every other number this module takes and returns: the extents
@@ -494,6 +636,103 @@ function physics.setVelocity(world: ecs.World, entity: integer, vx: number, vy: 
     World.setVelocity(handleOf(row), toMetres(vx), toMetres(vy))
 end
 
+--- Applies a continuous force at the body's centre and wakes it.
+function physics.applyForce(world: ecs.World, entity: integer, x: number, y: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.applyForce(handleOf(row), toMetres(x), toMetres(y))
+end
+
+--- Applies a continuous force at a world-space point and wakes the body.
+function physics.applyForceAt(world: ecs.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.applyForceAt(handleOf(row), toMetres(x), toMetres(y), toMetres(pointX), toMetres(pointY))
+end
+
+--- Applies torque and wakes the body.
+function physics.applyTorque(world: ecs.World, entity: integer, torque: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.applyTorque(handleOf(row), torque)
+end
+
+--- Reads angular velocity in radians per second.
+function physics.angularVelocity(world: ecs.World, entity: integer): number
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return 0.0
+    end
+    return World.angularVelocity(handleOf(row))
+end
+
+--- Sets angular velocity in radians per second and wakes the body.
+function physics.setAngularVelocity(world: ecs.World, entity: integer, omega: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.setAngularVelocity(handleOf(row), omega)
+end
+
+--- Whether Box2D currently considers the body awake.
+function physics.isAwake(world: ecs.World, entity: integer): boolean
+    local row = world:get(entity, RigidBody)
+    return row ~= nil and row.index1 ~= 0 and World.isAwake(handleOf(row))
+end
+
+--- Wakes or sleeps a body.
+function physics.setAwake(world: ecs.World, entity: integer, awake: boolean)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.setAwake(handleOf(row), awake)
+end
+
+--- Teleports a body and immediately updates its Transform.
+function physics.teleport(world: ecs.World, entity: integer, x: number, y: number, angle: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    local rotation = angle or world:get(entity, Transform).rotation
+    World.setTransform(handleOf(row), toMetres(x), toMetres(y), rotation)
+    local transform = world:getMut(entity, Transform)
+    transform.x, transform.y, transform.rotation = x, y, rotation
+end
+
+--- Casts a segment and returns its nearest collider, in pixels.
+function physics.raycast(
+    world: ecs.World, x1: number, y1: number, x2: number, y2: number, options: QueryOptions
+): RaycastHit
+    local simulation = physics.of(world)
+    if simulation == nil then
+        return nil
+    end
+    options = options or {}
+    local entity, x, y, nx, ny, fraction = simulation:raycast(
+        toMetres(x1), toMetres(y1), toMetres(x2), toMetres(y2), options.categoryBits, options.maskBits
+    )
+    if entity == nil then
+        return nil
+    end
+    return {
+        entity = entity,
+        x = toPixels(x),
+        y = toPixels(y),
+        normalX = nx,
+        normalY = ny,
+        fraction = fraction,
+    }
+end
+
 --- Installs the simulation and its sync.
 function physics.plugin(options: PhysicsOptions): function(ecs.World)
     options = options or {}
@@ -513,18 +752,113 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
         })
         world.resources[simulationKey] = simulation
 
-        -- A logic query, so a paused entity keeps its Transform where it was
-        -- instead of being followed around by its body. This gates the
-        -- write-back and not the solve: Box2D steps a world rather than a
-        -- body, so a paused body is still in the pile, still colliding, and
-        -- still moving, and unpausing snaps its Transform to wherever it got
-        -- to. Taking it out of the solve properly means putting its type and
-        -- its velocity somewhere they survive the pause, which is a decision
-        -- about what a RigidBody holds rather than a change to this query.
+        local function addShape(body: loader.CValue, entity: integer, collider: Collider): loader.CValue
+            local shapeSettings = World.shapeOptions(
+                collider.density,
+                collider.friction,
+                collider.restitution,
+                toMetres(collider.offsetX),
+                toMetres(collider.offsetY),
+                collider.categoryBits,
+                collider.maskBits,
+                collider.groupIndex as integer,
+                collider.isSensor ~= 0,
+                entity
+            )
+            if collider.shape == COLLIDER_SHAPES.circle then
+                return World.addCircle(body, toMetres(collider.radius), shapeSettings)
+            elseif collider.shape == COLLIDER_SHAPES.capsule then
+                return World.addCapsule(body, toMetres(collider.radius), toMetres(collider.length), shapeSettings)
+            else
+                return World.addBox(body, toMetres(collider.halfWidth), toMetres(collider.halfHeight), shapeSettings)
+            end
+        end
+
+        local function createBody(
+            entity: integer, transform: Transform, declared: Body, collider: Collider
+        ): loader.CValue
+            local body = simulation:createBody({
+                type = BODY_NAMES[declared.kind as integer] or "dynamic",
+                position = {x = toMetres(transform.x), y = toMetres(transform.y)},
+                angle = transform.rotation,
+                fixedRotation = declared.fixedRotation ~= 0,
+                gravityScale = declared.gravityScale,
+                linearDamping = declared.linearDamping,
+                angularDamping = declared.angularDamping,
+                sleepEnabled = declared.sleepEnabled ~= 0,
+                isBullet = declared.isBullet ~= 0,
+                entity = entity,
+            })
+            addShape(body, entity, collider)
+            return body
+        end
+
+        local pendingBodies = world:query({
+            name = "tecs.PendingBodies",
+            include = {Transform, Body, Collider},
+            exclude = {RigidBody},
+        })
+        local detachedBodies = world:query({
+            name = "tecs.DetachedBodies",
+            include = {RigidBody},
+            exclude = {Body},
+        })
+        local detachedDisabledBodies = world:query({
+            name = "tecs.DetachedDisabledBodies",
+            include = {RigidBody, ecs.builtins.Disabled},
+            exclude = {Body},
+        })
+        local pausedBodies = world:query({
+            name = "tecs.PausedBodies",
+            include = {Body, Motion, RigidBody, ecs.builtins.Paused},
+            exclude = {PhysicsHeld},
+        })
+        local resumedBodies = world:query({
+            name = "tecs.ResumedBodies",
+            include = {Body, Motion, RigidBody, PhysicsHeld},
+            exclude = {ecs.builtins.Paused},
+        })
+        local disabledBodies = world:query({
+            name = "tecs.DisabledBodies",
+            include = {RigidBody, ecs.builtins.Disabled},
+            exclude = {PhysicsDisabled},
+        })
+        local enabledBodies = world:query({
+            name = "tecs.EnabledBodies",
+            include = {RigidBody, PhysicsDisabled},
+            exclude = {ecs.builtins.Disabled},
+        })
+        local declaredBodies = world:query({
+            name = "tecs.LiveBodyDeclarations",
+            include = {Body, RigidBody},
+            exclude = {PhysicsHeld, PhysicsDisabled},
+        })
+        local colliders = world:query({
+            name = "tecs.LiveColliders",
+            include = {Collider, RigidBody},
+        })
+        local pendingSecondary = world:query({
+            name = "tecs.PendingSecondaryColliders",
+            include = {Collider, ColliderOf},
+            exclude = {ColliderShape},
+        })
+        local secondaryColliders = world:query({
+            name = "tecs.LiveSecondaryColliders",
+            include = {Collider, ColliderOf, ColliderShape},
+        })
+        local createQueue: {PendingCreation} = {}
+        local shapeQueue: {PendingShape} = {}
+        local createdBodies: {integer: loader.CValue} = {}
+
         local bodies = world:query({
             name = "tecs.SimulatedBodies",
             type = "logic",
             include = {Transform, RigidBody},
+        })
+        local snapshotBodies = world:query({
+            name = "tecs.SnapshotBodies",
+            include = {Motion, RigidBody},
+            exclude = {PhysicsHeld},
         })
 
         -- A body outlives its entity otherwise. Box2D owns it until something
@@ -534,6 +868,13 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             0,
             ecs.builtins.OnDespawn,
             function(event: ecs.builtins.OnDespawn)
+                local colliderShape = world:get(event.entity, ColliderShape)
+                if colliderShape ~= nil and colliderShape.index1 ~= 0 then
+                    local shape = shapeOf(colliderShape)
+                    if B.b2Shape_IsValid(shape) as boolean then
+                        B.b2DestroyShape(shape, true)
+                    end
+                end
                 local row = world:get(event.entity, RigidBody)
                 if row == nil or row.index1 == 0 then
                     return
@@ -562,6 +903,237 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
         local SYNC <const> = timing.stage("physics.sync")
 
         world:addSystem({
+            name = "tecs.ReconcileBodies",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length, entities in detachedBodies:iter() do
+                    local rows = archetype:get(RigidBody)
+                    for row = 1, length do
+                        local body = handleOf(rows[row])
+                        if B.b2Body_IsValid(body) as boolean then
+                            B.b2DestroyBody(body)
+                        end
+                        world:remove(entities[row], RigidBody)
+                    end
+                end
+                for archetype, length, entities in detachedDisabledBodies:iter() do
+                    local rows = archetype:get(RigidBody)
+                    for row = 1, length do
+                        local body = handleOf(rows[row])
+                        if B.b2Body_IsValid(body) as boolean then
+                            B.b2DestroyBody(body)
+                        end
+                        world:remove(entities[row], RigidBody)
+                    end
+                end
+
+                table_clear(createQueue)
+                table_clear(createdBodies)
+                for archetype, length, entities in pendingBodies:iter() do
+                    local transforms = archetype:get(Transform)
+                    local declarations = archetype:get(Body)
+                    local shapes = archetype:get(Collider)
+                    local motions = archetype:get(Motion)
+                    for row = 1, length do
+                        createQueue[#createQueue + 1] = {
+                            entity = entities[row],
+                            transform = transforms[row],
+                            body = declarations[row],
+                            collider = shapes[row],
+                            motion = motions[row],
+                        }
+                    end
+                end
+                table.sort(
+                    createQueue,
+                    function(a: PendingCreation, b: PendingCreation): boolean return a.entity < b.entity end
+                )
+                world:defer()
+                for index = 1, #createQueue do
+                    local pending = createQueue[index]
+                    local native = createBody(pending.entity, pending.transform, pending.body, pending.collider)
+                    createdBodies[pending.entity] = native
+                    World.setVelocity(native, toMetres(pending.motion.vx), toMetres(pending.motion.vy))
+                    World.setAngularVelocity(native, pending.motion.omega)
+                    local handle = native as loader.CStruct
+                    world:set(
+                        pending.entity,
+                        RigidBody(handle.index1 as number, handle.world0 as number, handle.generation as number)
+                    )
+                    world:set(
+                        pending.entity,
+                        components.PreviousTransform(
+                            pending.transform.x, pending.transform.y, pending.transform.rotation
+                        )
+                    )
+                end
+                table_clear(createQueue)
+
+                table_clear(shapeQueue)
+                for archetype, length, entities in pendingSecondary:iter() do
+                    local shapes = archetype:get(Collider)
+                    for row = 1, length do
+                        local entity = entities[row]
+                        local relationship = world:getFirstRelationship(entity, ColliderOf)
+                        if relationship ~= nil then
+                            local owner = world:get(relationship.target, RigidBody)
+                            if createdBodies[relationship.target] ~= nil or (owner ~= nil and owner.index1 ~= 0) then
+                                shapeQueue[#shapeQueue + 1] = {
+                                    entity = entity,
+                                    owner = relationship.target,
+                                    collider = shapes[row],
+                                }
+                            end
+                        end
+                    end
+                end
+                table.sort(
+                    shapeQueue, function(a: PendingShape, b: PendingShape): boolean return a.entity < b.entity end
+                )
+                for index = 1, #shapeQueue do
+                    local pending = shapeQueue[index]
+                    local owner = createdBodies[pending.owner]
+                    if owner == nil then
+                        owner = handleOf(world:get(pending.owner, RigidBody))
+                    end
+                    local shape = addShape(owner, pending.entity, pending.collider) as loader.CStruct
+                    world:set(
+                        pending.entity,
+                        ColliderShape(shape.index1 as number, shape.world0 as number, shape.generation as number)
+                    )
+                end
+                table_clear(shapeQueue)
+                table_clear(createdBodies)
+                world:commit()
+            end,
+        })
+
+        world:addSystem({
+            name = "tecs.HoldPausedBodies",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length, entities in pausedBodies:iter() do
+                    local rows = archetype:get(RigidBody)
+                    local motions = archetype:getMut(Motion)
+                    for row = 1, length do
+                        local body = handleOf(rows[row])
+                        local vx, vy = World.getVelocity(body)
+                        motions[row].vx, motions[row].vy = toPixels(vx), toPixels(vy)
+                        motions[row].omega = World.angularVelocity(body)
+                        World.setVelocity(body, 0.0, 0.0)
+                        World.setAngularVelocity(body, 0.0)
+                        B.b2Body_SetType(body, 0)
+                        world:set(entities[row], PhysicsHeld)
+                    end
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "tecs.ReleasePausedBodies",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length, entities in resumedBodies:iter() do
+                    local declarations = archetype:get(Body)
+                    local rows = archetype:get(RigidBody)
+                    local motions = archetype:get(Motion)
+                    for row = 1, length do
+                        local body = handleOf(rows[row])
+                        B.b2Body_SetType(body, declarations[row].kind)
+                        World.setVelocity(body, toMetres(motions[row].vx), toMetres(motions[row].vy))
+                        World.setAngularVelocity(body, motions[row].omega)
+                        world:remove(entities[row], PhysicsHeld)
+                    end
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "tecs.ApplyColliderChanges",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length, entities in colliders:iter() do
+                    if archetype:isComponentDirty(Collider) then
+                        local shapes = archetype:get(Collider)
+                        local rows = archetype:get(RigidBody)
+                        for row = 1, length do
+                            local body = handleOf(rows[row])
+                            World.removeShape(body)
+                            addShape(body, entities[row], shapes[row])
+                        end
+                    end
+                end
+                for archetype, length, entities in secondaryColliders:iter() do
+                    if archetype:isComponentDirty(Collider) then
+                        local collidersInArchetype = archetype:get(Collider)
+                        local rows = archetype:getMut(ColliderShape)
+                        for row = 1, length do
+                            local old = shapeOf(rows[row])
+                            local body = B.b2Shape_GetBody(old) as loader.CValue
+                            B.b2DestroyShape(old, true)
+                            local shape = addShape(body, entities[row], collidersInArchetype[row]) as loader.CStruct
+                            rows[row].index1 = shape.index1 as number
+                            rows[row].world0 = shape.world0 as number
+                            rows[row].generation = shape.generation as number
+                        end
+                    end
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "tecs.ApplyBodyChanges",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length in declaredBodies:iter() do
+                    if archetype:isComponentDirty(Body) then
+                        local declarations = archetype:get(Body)
+                        local rows = archetype:get(RigidBody)
+                        for row = 1, length do
+                            local declared = declarations[row]
+                            local body = handleOf(rows[row])
+                            B.b2Body_SetType(body, declared.kind)
+                            B.b2Body_SetLinearDamping(body, declared.linearDamping)
+                            B.b2Body_SetAngularDamping(body, declared.angularDamping)
+                            B.b2Body_SetGravityScale(body, declared.gravityScale)
+                            B.b2Body_SetFixedRotation(body, declared.fixedRotation ~= 0)
+                            B.b2Body_SetBullet(body, declared.isBullet ~= 0)
+                            B.b2Body_EnableSleep(body, declared.sleepEnabled ~= 0)
+                        end
+                    end
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "tecs.DisablePhysicsBodies",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length, entities in disabledBodies:iter() do
+                    local rows = archetype:get(RigidBody)
+                    for row = 1, length do
+                        B.b2Body_Disable(handleOf(rows[row]))
+                        world:set(entities[row], PhysicsDisabled)
+                    end
+                end
+            end,
+        })
+
+        world:addSystem({
+            name = "tecs.EnablePhysicsBodies",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length, entities in enabledBodies:iter() do
+                    local rows = archetype:get(RigidBody)
+                    for row = 1, length do
+                        B.b2Body_Enable(handleOf(rows[row]))
+                        world:remove(entities[row], PhysicsDisabled)
+                    end
+                end
+            end,
+        })
+
+        world:addSystem({
             name = "tecs.StepPhysics",
             phase = ecs.phases.FixedUpdate,
             run = function()
@@ -571,6 +1143,70 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                 -- simulation that integrates at one rate while the phase
                 -- driving it runs at another.
                 simulation:step((world:getFixedTiming()))
+
+                -- Box2D returns contiguous event buffers valid until the next
+                -- step. Draining them here is callback-safe and gives gameplay
+                -- observers the fixed-step result before FixedPostUpdate.
+                local contacts = B.b2World_GetContactEvents(simulation.handle) as loader.CStruct
+                local begins = contacts.beginEvents as {integer: loader.CStruct}
+                for index = 0, (contacts.beginCount as integer) - 1 do
+                    local event = begins[index]
+                    world:emit(
+                        0,
+                        ContactBegin,
+                        World.entityOfShape(event.shapeIdA as loader.CValue),
+                        World.entityOfShape(event.shapeIdB as loader.CValue)
+                    )
+                end
+                local ends = contacts.endEvents as {integer: loader.CStruct}
+                for index = 0, (contacts.endCount as integer) - 1 do
+                    local event = ends[index]
+                    world:emit(
+                        0,
+                        ContactEnd,
+                        World.entityOfShape(event.shapeIdA as loader.CValue),
+                        World.entityOfShape(event.shapeIdB as loader.CValue)
+                    )
+                end
+                local hits = contacts.hitEvents as {integer: loader.CStruct}
+                for index = 0, (contacts.hitCount as integer) - 1 do
+                    local event = hits[index]
+                    local point = event.point as loader.CStruct
+                    local normal = event.normal as loader.CStruct
+                    world:emit(
+                        0,
+                        ContactHit,
+                        World.entityOfShape(event.shapeIdA as loader.CValue),
+                        World.entityOfShape(event.shapeIdB as loader.CValue),
+                        toPixels(point.x as number),
+                        toPixels(point.y as number),
+                        normal.x as number,
+                        normal.y as number,
+                        toPixels(event.approachSpeed as number)
+                    )
+                end
+
+                local sensors = B.b2World_GetSensorEvents(simulation.handle) as loader.CStruct
+                local sensorBegins = sensors.beginEvents as {integer: loader.CStruct}
+                for index = 0, (sensors.beginCount as integer) - 1 do
+                    local event = sensorBegins[index]
+                    world:emit(
+                        0,
+                        SensorBegin,
+                        World.entityOfShape(event.sensorShapeId as loader.CValue),
+                        World.entityOfShape(event.visitorShapeId as loader.CValue)
+                    )
+                end
+                local sensorEnds = sensors.endEvents as {integer: loader.CStruct}
+                for index = 0, (sensors.endCount as integer) - 1 do
+                    local event = sensorEnds[index]
+                    world:emit(
+                        0,
+                        SensorEnd,
+                        World.entityOfShape(event.sensorShapeId as loader.CValue),
+                        World.entityOfShape(event.visitorShapeId as loader.CValue)
+                    )
+                end
                 timing.finish(STEP, started)
             end,
         })
@@ -609,6 +1245,26 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
 
                 simulation:endMoves()
                 timing.finish(SYNC, started)
+            end,
+        })
+
+        world:addSnapshotHandler({
+            name = "tecs.physics",
+            save = function(_world: ecs.World): any
+                for archetype, length in snapshotBodies:iter() do
+                    local rows = archetype:get(RigidBody)
+                    local motions = archetype:getMut(Motion)
+                    for row = 1, length do
+                        local body = handleOf(rows[row])
+                        local vx, vy = World.getVelocity(body)
+                        motions[row].vx, motions[row].vy = toPixels(vx), toPixels(vy)
+                        motions[row].omega = World.angularVelocity(body)
+                    end
+                end
+                return {
+                    workerCount = simulation.taskPool.workerCount,
+                    subStepCount = simulation.subStepCount,
+                }
             end,
         })
 

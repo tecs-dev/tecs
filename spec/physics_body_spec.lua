@@ -128,6 +128,7 @@ describe("ecs.physics declaration", function()
         local entity = world:spawn()
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
+        world:update(1 / 60)
         assert.is_true(physics.hasBody(world, entity))
         for _ = 1, 30 do
             world:update(1 / 60)
@@ -167,6 +168,7 @@ describe("ecs.physics velocity", function()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
+        world:update(1 / 60)
         physics.setVelocity(world, entity, 320, 0)
         local vx = physics.velocity(world, entity)
         assert.is_true(math.abs(vx - 320) < 1e-3, ("expected 320 px/s back, got %.4f"):format(vx))

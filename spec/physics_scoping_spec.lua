@@ -65,6 +65,7 @@ describe("ecs.physics world scoping", function()
         local before = physics.of(second):bodyCount()
         local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+        first:update(1 / 60)
 
         assert.equal(1, physics.of(first):bodyCount())
         assert.equal(before, physics.of(second):bodyCount(), "a body must land in its own world's simulation")

@@ -865,34 +865,20 @@ been destroyed both pass through it safely.
 a slot to the next body the moment the one holding it is destroyed, so a saved
 handle names whichever body the loading run happens to have put there. Restoring
 one verbatim writes that body's pose into this entity's `Transform`, every step,
-with no error and nothing out of place to notice. So `RigidBody` serializes to
-nothing and deserializes to the null handle, the same reasoning that keeps a
-`Sound`'s voice out of a save.
+with no error and nothing out of place to notice. So `RigidBody` is transient.
+The stable declaration lives in `Body` and `Collider`, while `Motion` stores the
+live velocity immediately before a save. After load the ordinary fixed-step
+reconcile path rebuilds the body from those columns and restores its motion. A
+loaded body therefore takes the same path as one created by `spawn`,
+`batchSpawn`, or the world tools.
 
-The consequence is plain and is not yet fixed: **an entity that simulated before
-a load does not simulate after it.** Rebuilding the body needs its shape,
-density, friction, restitution and type, and none of those are in the world for
-a snapshot to carry. Where they should live is a question about what a
-`RigidBody` holds, not about the snapshot format, and it is being answered
-separately. Until it is, `physics.hasBody` is how a game tells an entity whose
-body is gone from one that never had a body, and a game that wants physics back
-after a load attaches it again itself. The restored row is inert rather than
-merely wrong: the write-back reads no movement for the null handle, and
-`applyImpulse` and `velocity` refuse it instead of indexing off the front of
-Box2D's body array.
-
-**`Paused` stops the write-back and not the solve.** The query the sync walks is
-a logic query, so a paused entity's `Transform` stays where it was, which is what
-`Paused` means everywhere else in the engine. Box2D steps a world rather than a
-body, though, so underneath that the body is still in the pile: still falling,
-still colliding, still pushing its neighbours. Unpausing snaps the `Transform` to
-wherever the body reached. That is a real limit rather than a description of
-pausing, and the two primitives available for closing it are both wrong in their
-own way. Disabling a body takes it out of the broad phase entirely, so the world
-around it falls through where it used to be, and it comes back with its velocity
-lost. Making it static instead keeps it solid but needs its type and its velocity
-stored somewhere they survive the pause, which is another field on `RigidBody`
-and so another part of the same question above.
+**`Paused` holds a body rather than hiding it.** Box2D steps a world rather than
+a body, and disabling one removes its support from the broad phase. Physics
+instead stores its linear and angular velocity in `Motion`, changes it to
+static, and leaves it solid and immovable. Removing `Paused` restores the
+declared kind and the stored motion. This is why `Body`, `Motion`, and the live
+handle are separate components: declaration, resumable state, and native
+identity have different owners and lifetimes.
 
 ## Events
 

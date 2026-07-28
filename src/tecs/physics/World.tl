@@ -26,12 +26,24 @@ local record BodyOptions
     angle: number
     fixedRotation: boolean
     gravityScale: number
+    linearDamping: number
+    angularDamping: number
+    sleepEnabled: boolean
+    isBullet: boolean
+    entity: integer
 end
 
 local record ShapeOptions
     density: number
     friction: number
     restitution: number
+    offsetX: number
+    offsetY: number
+    categoryBits: number
+    maskBits: number
+    groupIndex: integer
+    isSensor: boolean
+    entity: integer
 end
 
 local record WorldOptions
@@ -66,6 +78,33 @@ local BODY_TYPES <const>: {string: integer} = {
     kinematic = 1,
     dynamic = 2,
 }
+
+--- Builds the internal shape options without exposing Box2D definitions.
+function World.shapeOptions(
+    density: number,
+    friction: number,
+    restitution: number,
+    offsetX: number,
+    offsetY: number,
+    categoryBits: number,
+    maskBits: number,
+    groupIndex: integer,
+    isSensor: boolean,
+    entity: integer
+): ShapeOptions
+    return {
+        density = density,
+        friction = friction,
+        restitution = restitution,
+        offsetX = offsetX,
+        offsetY = offsetY,
+        categoryBits = categoryBits,
+        maskBits = maskBits,
+        groupIndex = groupIndex,
+        isSensor = isSensor,
+        entity = entity,
+    }
+end
 
 --- Creates a simulation world.
 function World.create(options: WorldOptions): World
@@ -217,6 +256,21 @@ function World:createBody(options: BodyOptions): loader.CValue
     if options.gravityScale ~= nil then
         settings.gravityScale = options.gravityScale
     end
+    if options.linearDamping ~= nil then
+        settings.linearDamping = options.linearDamping
+    end
+    if options.angularDamping ~= nil then
+        settings.angularDamping = options.angularDamping
+    end
+    if options.sleepEnabled ~= nil then
+        settings.enableSleep = options.sleepEnabled
+    end
+    if options.isBullet ~= nil then
+        settings.isBullet = options.isBullet
+    end
+    if options.entity ~= nil then
+        settings.userData = ffi.cast("void *", options.entity)
+    end
 
     return C.b2CreateBody(self.handle, def) as loader.CValue
 end
@@ -227,6 +281,9 @@ local function shapeDef(options: ShapeOptions): loader.CArray
     def[0] = C.b2DefaultShapeDef()
 
     local settings = def[0] as loader.CStruct
+    if options.entity ~= nil then
+        settings.userData = ffi.cast("void *", options.entity)
+    end
     if options.density ~= nil then
         settings.density = options.density
     end
@@ -238,6 +295,26 @@ local function shapeDef(options: ShapeOptions): loader.CArray
         local material = settings.material as loader.CStruct
         material.restitution = options.restitution
     end
+    local filter = settings.filter as loader.CStruct
+    if options.categoryBits ~= nil then
+        filter.categoryBits = options.categoryBits
+    end
+    if options.maskBits ~= nil then
+        filter.maskBits = options.maskBits
+    end
+    if options.groupIndex ~= nil then
+        filter.groupIndex = options.groupIndex
+    end
+    if options.isSensor ~= nil then
+        settings.isSensor = options.isSensor
+    end
+    -- Events are buffer-backed and are drained after each step. No Lua
+    -- callback is crossed from Box2D.
+    settings.enableContactEvents = not options.isSensor
+    settings.enableHitEvents = not options.isSensor
+    -- Box2D requires sensor events enabled on the visitor as well as the
+    -- sensor shape, so every public collider opts in.
+    settings.enableSensorEvents = true
     return def
 end
 
@@ -245,7 +322,14 @@ end
 --- Box2D's convention.
 function World.addBox(body: loader.CValue, halfWidth: number, halfHeight: number, options: ShapeOptions): loader.CValue
     local polygon = ffi.new("b2Polygon[1]") as loader.CArray
-    polygon[0] = C.b2MakeBox(halfWidth, halfHeight)
+    local offset = ffi.new("b2Vec2[1]") as loader.CArray
+    local centre = offset[0] as loader.CStruct
+    centre.x = options.offsetX or 0.0
+    centre.y = options.offsetY or 0.0
+    local rotation = ffi.new("b2Rot[1]") as loader.CArray
+    local angle = rotation[0] as loader.CStruct
+    angle.c, angle.s = 1.0, 0.0
+    polygon[0] = C.b2MakeOffsetBox(halfWidth, halfHeight, offset[0], rotation[0])
     return C.b2CreatePolygonShape(body, shapeDef(options), polygon) as loader.CValue
 end
 
@@ -254,10 +338,135 @@ function World.addCircle(body: loader.CValue, radius: number, options: ShapeOpti
     local circle = ffi.new("b2Circle[1]") as loader.CArray
     local shape = circle[0] as loader.CStruct
     local centre = shape.center as loader.CStruct
-    centre.x = 0.0
-    centre.y = 0.0
+    centre.x = options.offsetX or 0.0
+    centre.y = options.offsetY or 0.0
     shape.radius = radius
     return C.b2CreateCircleShape(body, shapeDef(options), circle) as loader.CValue
+end
+
+--- Attaches a vertical capsule. `length` is the distance between the two end
+--- centres, excluding the caps.
+function World.addCapsule(body: loader.CValue, radius: number, length: number, options: ShapeOptions): loader.CValue
+    local capsule = ffi.new("b2Capsule[1]") as loader.CArray
+    local shape = capsule[0] as loader.CStruct
+    local centre1 = shape.center1 as loader.CStruct
+    local centre2 = shape.center2 as loader.CStruct
+    local x = options.offsetX or 0.0
+    local y = options.offsetY or 0.0
+    centre1.x, centre1.y = x, y - length * 0.5
+    centre2.x, centre2.y = x, y + length * 0.5
+    shape.radius = radius
+    return C.b2CreateCapsuleShape(body, shapeDef(options), capsule) as loader.CValue
+end
+
+local shapeScratch <const> = ffi.new("b2ShapeId[1]") as loader.CArray
+
+--- Removes a body's single primary shape.
+function World.removeShape(body: loader.CValue)
+    if (tonumber(C.b2Body_GetShapes(body, shapeScratch, 1)) as integer) > 0 then
+        C.b2DestroyShape(shapeScratch[0], true)
+    end
+end
+
+--- Returns the entity stored on a body, or zero when none was.
+function World.entityOfBody(body: loader.CValue): integer
+    return tonumber(ffi.cast("intptr_t", C.b2Body_GetUserData(body))) as integer
+end
+
+--- Returns the entity owning a shape, or zero when none was.
+function World.entityOfShape(shape: loader.CValue): integer
+    if not (C.b2Shape_IsValid(shape) as boolean) then
+        return 0
+    end
+    local entity = tonumber(ffi.cast("intptr_t", C.b2Shape_GetUserData(shape))) as integer
+    if entity ~= 0 then
+        return entity
+    end
+    return World.entityOfBody(C.b2Shape_GetBody(shape))
+end
+
+local queryFilterScratch <const> = ffi.new("b2QueryFilter[1]") as loader.CArray
+local rayOriginScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
+local rayTranslationScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
+local forceScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
+local forcePointScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
+
+--- Casts a segment and returns the nearest hit. All positions are metres.
+function World:raycast(
+    x1: number, y1: number, x2: number, y2: number, categoryBits: number, maskBits: number
+): integer, number, number, number, number, number
+    queryFilterScratch[0] = C.b2DefaultQueryFilter()
+    local filter = queryFilterScratch[0] as loader.CStruct
+    filter.categoryBits = categoryBits or 0xFFFFFFFF
+    filter.maskBits = maskBits or 0xFFFFFFFF
+    local origin = rayOriginScratch[0] as loader.CStruct
+    origin.x, origin.y = x1, y1
+    local translation = rayTranslationScratch[0] as loader.CStruct
+    translation.x, translation.y = x2 - x1, y2 - y1
+    local hit = C.b2World_CastRayClosest(
+        self.handle, rayOriginScratch[0], rayTranslationScratch[0], queryFilterScratch[0]
+    ) as loader.CStruct
+    if not (hit.hit as boolean) then
+        return nil
+    end
+    local point = hit.point as loader.CStruct
+    local normal = hit.normal as loader.CStruct
+    return World.entityOfShape(
+        hit.shapeId as loader.CValue
+    ), point.x as number, point.y as number, normal.x as number, normal.y as number, hit.fraction as number
+end
+
+--- Applies a force at the centre. Force uses Box2D's metre-based units.
+function World.applyForce(body: loader.CValue, x: number, y: number)
+    local vector = forceScratch[0] as loader.CStruct
+    vector.x, vector.y = x, y
+    C.b2Body_ApplyForceToCenter(body, forceScratch[0], true)
+end
+
+function World.applyForceAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
+    local vector = forceScratch[0] as loader.CStruct
+    vector.x, vector.y = x, y
+    local point = forcePointScratch[0] as loader.CStruct
+    point.x, point.y = pointX, pointY
+    C.b2Body_ApplyForce(body, forceScratch[0], forcePointScratch[0], true)
+end
+
+function World.applyImpulseAt(body: loader.CValue, x: number, y: number, pointX: number, pointY: number)
+    local vector = forceScratch[0] as loader.CStruct
+    vector.x, vector.y = x, y
+    local point = forcePointScratch[0] as loader.CStruct
+    point.x, point.y = pointX, pointY
+    C.b2Body_ApplyLinearImpulse(body, forceScratch[0], forcePointScratch[0], true)
+end
+
+function World.applyTorque(body: loader.CValue, torque: number)
+    C.b2Body_ApplyTorque(body, torque, true)
+end
+
+function World.angularVelocity(body: loader.CValue): number
+    return C.b2Body_GetAngularVelocity(body) as number
+end
+
+function World.setAngularVelocity(body: loader.CValue, omega: number)
+    C.b2Body_SetAngularVelocity(body, omega)
+    C.b2Body_SetAwake(body, true)
+end
+
+function World.setAwake(body: loader.CValue, awake: boolean)
+    C.b2Body_SetAwake(body, awake)
+end
+
+function World.isAwake(body: loader.CValue): boolean
+    return C.b2Body_IsAwake(body) as boolean
+end
+
+function World.setTransform(body: loader.CValue, x: number, y: number, angle: number)
+    local position = rayOriginScratch[0] as loader.CStruct
+    position.x, position.y = x, y
+    local rotation = ffi.new("b2Rot[1]") as loader.CArray
+    local fields = rotation[0] as loader.CStruct
+    fields.c, fields.s = math.cos(angle), math.sin(angle)
+    C.b2Body_SetTransform(body, rayOriginScratch[0], rotation[0])
 end
 
 --- How many bodies the world currently holds.

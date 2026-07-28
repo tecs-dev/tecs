@@ -27,6 +27,8 @@ local record ecs
     type Component = types.components.Component
     type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
     type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
+    type Relationship = types.components.Relationship
+    type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
     type Event = types.events.Event
     type Plugin = types.Plugin
     type Query = types.Query
@@ -41,6 +43,7 @@ local record ecs
     newWorld: function(config?: types.World.Config): World
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
+    newRelationship: function<R is Relationship>(options: RelationshipOptions<R>): R
     newEvent: function<E is Event>(event: E)
 
     --- A typed key for `world.resources`, the way an engine module stores
@@ -94,6 +97,9 @@ ecs.newComponent = components.newComponent as function<C is types.components.Com
 ecs.newFFIComponent = components.newFFIComponent as function<C is types.components.Component>(
     options: types.components.FFIComponentOptions<C>
 ): C
+ecs.newRelationship = components.newRelationship as function<R is types.components.Relationship>(
+    options: types.components.RelationshipOptions<R>
+): R
 ecs.newKey = Context.newKey as function<T>(name?: string, forType?: T): types.Context.Key<T>
 
 function ecs.componentByName(name: string): types.components.Component
