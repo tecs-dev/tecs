@@ -158,7 +158,7 @@ drawing the layer the old name resolved to.
 :::
 
 The UV rect selects a region, so an atlas is the same thing as a whole image with the rect set to the full
-range. A Sprite is normally not built by hand: [`Renderer`](/modules/renderer) hands one back when an image is
+range. A Sprite is normally not built by hand: [`Renderer`](/modules/gfx/) hands one back when an image is
 registered, and [`animation`](/modules/gfx/animation) builds them per frame and per slice.
 
 **Pairs with:** `Renderable` and `Tint`, which the renderable query requires; `Animation` from
@@ -223,7 +223,7 @@ fragments it produces never read the region table. A world that clips nothing pa
 
 Nesting is the caller's. A region is one rectangle, so a panel inside a panel is set up as the intersection of
 the two rather than as two regions an instance sits in at once. The rectangle itself is set through
-[`Renderer`](/modules/renderer), and clearing one puts it back to clipping nothing, so an index handed out and
+[`Renderer`](/modules/gfx/), and clearing one puts it back to clipping nothing, so an index handed out and
 taken back leaves the instances still pointing at it drawing whole rather than silently gone.
 
 ## Occluder
@@ -247,7 +247,7 @@ default height. So an occluder at `1.0` under a default light is level with it a
 horizon; at `0.5` the light clears it and the shadow ends.
 
 **Pairs with:** `Transform`, `Tint`, `Renderable`, and shadows turned on. Without
-[`shadows`](/modules/renderer#shadows) on the renderer the entity draws exactly as it would without this
+[`shadows`](/modules/gfx/#shadows) on the renderer the entity draws exactly as it would without this
 component. A translucent entity casts nothing whatever it carries: it is drawn forward over the composited
 image and never reaches the G-buffer, so a hard silhouette of it would be a lie.
 

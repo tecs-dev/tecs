@@ -87,6 +87,9 @@ end
 --- work from the system it registered and from `render`. It owns the packet,
 --- the extractor and the backend, and `destroy` takes all three with it.
 local record Renderer
+    --- What `newRenderer` takes, named here so a game can annotate the table it
+    --- passes without reaching into this file.
+    type Options = RendererOptions
     --- Re-exported for whoever writes one and passes it to `addProducer`.
     type InstanceProducer = InstanceProducer
     --- Re-exported for whoever names a rectangle for `setClipRegion`.
@@ -146,7 +149,7 @@ local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
 --- @param swapchainFormat The `SDL_GPUTextureFormat` present copies into.
 --- @param options Every field has a default, and nil is accepted at runtime
 ---     even though the signature does not mark it optional.
-function Renderer.create(device: loader.CPtr, swapchainFormat: integer, options: RendererOptions): Renderer
+function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, options: RendererOptions): Renderer
     options = options or {}
 
     local self = setmetatable({} as Renderer, RendererMT)

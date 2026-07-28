@@ -882,8 +882,8 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer, options: 
     quad[3], quad[4], quad[5] = 1, 3, 2
     self._indices:upload(quad, QUAD_INDICES * 2)
 
-    self._view = Camera.create()
-    self._maskView = Camera.create()
+    self._view = Camera.newCamera()
+    self._maskView = Camera.newCamera()
     -- Three vec4s: the world rectangle the camera sees, the counts, and what
     -- the shadow lane needs that the other two do not.
     self._cullUniform = loader.newArray("float[12]")

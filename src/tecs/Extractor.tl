@@ -233,7 +233,7 @@ local ExtractorMT <const>: metatable<Extractor> = {__index = Extractor}
 --- Builds an extractor. Nothing here needs a device.
 function Extractor.create(options: ExtractorOptions): Extractor
     local self = setmetatable({} as Extractor, ExtractorMT)
-    self.camera = Camera.create()
+    self.camera = Camera.newCamera()
     self.capacity = options.capacity
     self._extractSeconds = 0.0
     self._alpha = 1.0

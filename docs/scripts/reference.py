@@ -43,10 +43,14 @@ Every function and type this module carries, rendered from {sources}."""
 # page -> the sources it renders, each with the name a game writes that source's
 # members under.
 #
-# A class module renders under the class as well as the module, because that is
-# how a game reaches it: `tecs.camera.Camera.create`, never `tecs.camera.create`.
-# `tecs.audio` and `tecs.input` are the pages with several sources, because each
-# is one module to a game and several files here.
+# A class renders under the name a game reaches it by, which is the namespace
+# and then the class: `tecs.gfx.Camera.toWorld`, never `tecs.gfx.toWorld`. The
+# constructor is the exception a reader should expect, since a module owns its
+# type and exposes it: `tecs.gfx.newCamera` sits on the namespace and is
+# rendered under the class it builds.
+#
+# `tecs.audio`, `tecs.input` and `tecs.gfx` are the pages with several sources,
+# because each is one module to a game and several files here.
 #
 # A module that sits inside another module has its own page in a directory
 # named for the parent, rather than a section of the parent's page. One page per
@@ -63,12 +67,11 @@ Every function and type this module carries, rendered from {sources}."""
 # public name `src/tecs/init.tl` types by that module's own record rather than
 # by a second copy of it.
 #
-# `tecs.version` is a string and has no source to render, and neither has a
-# namespace that carries only other modules: `docs/modules/gfx/index.md` is
-# prose and a list of what is under it. `tecs.http` and `tecs.physics` are left
-# out on purpose: the first is being rewritten and the second is a stub whose
-# module is mid-replacement, so a rendered reference would describe something
-# that is about to move. Both come back here when they settle.
+# `tecs.version` is a string and has no source to render. `tecs.http` and
+# `tecs.physics` are left out on purpose: the first is being rewritten and the
+# second is a stub whose module is mid-replacement, so a rendered reference
+# would describe something that is about to move. Both come back here when they
+# settle.
 MODULES = [
     ("docs/ecs/index.md", [("src/tecs/ecs.tl", "tecs.ecs")]),
     ("docs/modules/application.md", [("src/tecs/Application.tl", "tecs.application.Application")]),
@@ -77,13 +80,16 @@ MODULES = [
         "docs/modules/audio.md",
         [("src/tecs/Audio.tl", "tecs.audio.Audio"), ("src/tecs/platform/audio.tl", "tecs.audio")],
     ),
-    ("docs/modules/camera.md", [("src/tecs/gfx/Camera.tl", "tecs.camera.Camera")]),
     ("docs/modules/components.md", [("src/tecs/components.tl", "tecs.components")]),
     ("docs/modules/data.md", [("src/tecs/data.tl", "tecs.data")]),
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
     ("docs/modules/filesystem/index.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
     ("docs/modules/filesystem/watch.md", [("src/tecs/platform/watch.tl", "tecs.filesystem.watch")]),
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
+    (
+        "docs/modules/gfx/index.md",
+        [("src/tecs/gfx/Camera.tl", "tecs.gfx.Camera"), ("src/tecs/Renderer.tl", "tecs.gfx.Renderer")],
+    ),
     ("docs/modules/gfx/animation.md", [("src/tecs/gfx/animation.tl", "tecs.gfx.animation")]),
     ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),
     ("docs/modules/gfx/materials.md", [("src/tecs/gpu/materials.tl", "tecs.gfx.materials")]),
@@ -99,7 +105,6 @@ MODULES = [
     ("docs/modules/log.md", [("src/tecs/log.tl", "tecs.log")]),
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
     ("docs/modules/net.md", [("src/tecs/net.tl", "tecs.net")]),
-    ("docs/modules/renderer.md", [("src/tecs/Renderer.tl", "tecs.renderer.Renderer")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/text.md", [("src/tecs/gfx/text.tl", "tecs.text")]),

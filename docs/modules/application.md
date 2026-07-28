@@ -131,7 +131,7 @@ These are fields on the application a plugin is handed, so nothing has to be loo
 - `app.window` — [`Window`](/modules/window)
 - `app.device` — the GPU device
 - `app.world` — the [world](/ecs/world)
-- `app.renderer` — [`Renderer`](/modules/renderer)
+- `app.renderer` — [`Renderer`](/modules/gfx/)
 - `app.input` — [`Input`](/modules/input)
 - `app.audio` — [`Audio`](/modules/audio)
 - `app.mcp` — the debug server, when `mcpPort` asked for one

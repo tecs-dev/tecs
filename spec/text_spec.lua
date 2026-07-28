@@ -60,7 +60,7 @@ describe("gfx.text", function()
     -- glyph's colour reaches the screen without a light in the way.
     local function newScene()
         local world = tecs.ecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT, {
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
             capacity = 4096,
         })

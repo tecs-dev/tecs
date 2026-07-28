@@ -13,7 +13,7 @@ syscall a frame should not wait on.
 
 Nothing here creates a GPU resource. Decoding and residency are separate decisions: the renderer knows what
 layout its textures need, and an asset that has been decoded is useful before anything has decided where it
-will live. Turning a decoded image into something drawable is [`Renderer`](/modules/renderer); turning a
+will live. Turning a decoded image into something drawable is [`Renderer`](/modules/gfx/); turning a
 decoded clip into something audible is [`Audio`](/modules/audio).
 
 ::: info An image is a PNG or a JPEG

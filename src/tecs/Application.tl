@@ -609,7 +609,7 @@ function Application:_init(): boolean
         fixedMaxSteps = config.fixedMaxSteps,
         fixedOverload = config.fixedOverload,
     })
-    self.renderer = Renderer.create(
+    self.renderer = Renderer.newRenderer(
         self.device.handle,
         self.device:getSwapchainFormat(),
         {

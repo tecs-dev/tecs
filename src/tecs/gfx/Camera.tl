@@ -48,6 +48,10 @@ end
 --- draws from at extraction, so a camera moved after that moves the next frame
 --- and not the one in flight.
 local record Camera
+    --- What `newCamera` takes, named here so a game can annotate the table it
+    --- passes without reaching into this file.
+    type Options = CameraOptions
+
     --- Centre of the view, in world units.
     x: number
     --- The other half of it, running down: increasing y moves the view towards
@@ -80,7 +84,7 @@ local record Camera
     ---     values are taken as given.
     --- @return A camera whose fields are plain and meant to be assigned to
     ---     directly, frame by frame.
-    create: function(options?: CameraOptions): Camera
+    newCamera: function(options?: CameraOptions): Camera
 
     --- Writes the world-to-clip matrix for a viewport of `width` by `height`.
     ---
@@ -140,7 +144,7 @@ end
 
 local CameraMT <const>: metatable<Camera> = {__index = Camera}
 
-function Camera.create(options?: CameraOptions): Camera
+function Camera.newCamera(options?: CameraOptions): Camera
     options = options or {}
     local self = setmetatable({} as Camera, CameraMT)
     self.x = options.x or 0.0

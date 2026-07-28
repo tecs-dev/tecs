@@ -13,7 +13,7 @@ local ecs <const> = require("tecs.ecs")
 -- The engine half, named for its types and loaded on demand.
 --
 -- `local type` is erased at codegen, so these lines cost nothing at runtime and
--- the module below can still name `tecs.camera.Camera` as a type. The values
+-- the module below can still name `tecs.gfx.Camera` as a type. The values
 -- arrive through the metatable further down.
 --
 -- Loading them here instead would end headless use. The engine reaches SDL,
@@ -49,6 +49,7 @@ local type data = require("tecs.data")
 local type system = require("tecs.platform.system")
 local type sensors = require("tecs.platform.sensors")
 local type platformAudio = require("tecs.platform.audio")
+local type loader = require("tecs.ffi.loader")
 
 -- A record below is written for one reason: a public name that no single module
 -- answers. A namespace assembled from a class and the records beside it, or
@@ -63,7 +64,7 @@ local type platformAudio = require("tecs.platform.audio")
 -- the module already carries and nothing checks the two against each other.
 --
 -- A class gets a module of its own, lowercase, and the class sits inside it
--- under its own name: `tecs.camera.Camera`. One name is the namespace and the
+-- under its own name: `tecs.gfx.Camera`. One name is the namespace and the
 -- other is the type, so no name is both at once. The satellite records each
 -- class carries are named here too, so a game reaches `tecs.window.Options`
 -- without going through `Window` first.
@@ -95,14 +96,6 @@ local record application
     create: function(config: Application.Config): Application
 end
 
---- A world to a frame, through an extractor and a backend.
-local record renderer
-    Renderer: Renderer
-    type InstanceProducer = Renderer.InstanceProducer
-    type ClipRegion = Renderer.ClipRegion
-    type ComputeStage = Renderer.ComputeStage
-end
-
 --- Sound, at both levels: a mixer with clips, voices, groups and limits, and
 --- the physical devices it opens and records from.
 local record audio
@@ -131,11 +124,6 @@ local record audio
     --- No callback is installed. SDL's audio thread fills its own stream and
     --- the game pulls completed bytes from the main thread with `read`.
     openMicrophone: function(config?: platformAudio.MicrophoneConfig): platformAudio.Microphone, string
-end
-
---- The view a frame is drawn from.
-local record camera
-    Camera: Camera
 end
 
 --- The window, its size, its display and its mode.
@@ -216,12 +204,50 @@ local record future
     type Source = Future.Source
 end
 
---- Drawing, and the vocabularies a scene is described in.
+--- Drawing: what a frame is drawn from, what draws it, and the vocabularies a
+--- scene is described in.
 ---
---- Each of those is its own module a level down rather than a section of this
---- one, because they share a subject and nothing else: a game that positions
---- bands never reads a glyph, and loading one has no reason to load the rest.
+--- The facilities every scene reaches for sit here directly. The four
+--- vocabularies are each their own module a level down rather than a section of
+--- this one, because they share a subject and nothing else: a game that
+--- positions bands never reads a glyph, and loading one has no reason to load
+--- the rest.
 local record gfx
+    --- The view a frame is drawn from.
+    Camera: Camera
+    type CameraOptions = Camera.Options
+
+    --- A world to a frame, through an extractor and a backend.
+    Renderer: Renderer
+    type RendererOptions = Renderer.Options
+    type InstanceProducer = Renderer.InstanceProducer
+    type ClipRegion = Renderer.ClipRegion
+    type ComputeStage = Renderer.ComputeStage
+
+    --- Builds a view onto the world.
+    ---
+    --- @param options Omit for an unrotated, unzoomed view at the world origin,
+    ---     which a renderer recentres on its first drawn frame if the game
+    ---     never moves it. No field is validated.
+    --- @return A camera whose fields are plain and meant to be assigned to
+    ---     frame by frame. It is not attached to anything: a renderer draws
+    ---     from the one on `renderer.camera`, so a second is for a calculation
+    ---     rather than a second view.
+    newCamera: function(options?: Camera.Options): Camera
+
+    --- Builds a renderer against an open GPU device.
+    ---
+    --- @param device The `SDL_GPUDevice` to draw through, which stays the
+    ---     caller's to destroy and must outlive the renderer.
+    --- @param swapchainFormat The `SDL_GPUTextureFormat` present copies into.
+    --- @param options Every field has a default, and nil is accepted even
+    ---     though the signature does not mark it optional. `capacity` is a
+    ---     ceiling rather than a hint: rows past it are dropped rather than
+    ---     growing a buffer mid-frame.
+    --- @return The renderer, which owns the packet, the extractor and the
+    ---     backend, and releases all three from `destroy`.
+    newRenderer: function(device: loader.CPtr, swapchainFormat: integer, options: Renderer.Options): Renderer
+
     animation: animation
     layers: layers
     materials: materials
@@ -276,7 +302,6 @@ local record tecs
     application: application
     assets: assets
     audio: audio
-    camera: camera
     components: components
     data: data
     events: events
@@ -289,7 +314,6 @@ local record tecs
     mcp: mcp
     net: net
     physics: physics
-    renderer: renderer
     sequence: sequence
     system: system
     text: text
@@ -341,15 +365,16 @@ end
 --- Listed rather than discovered, so `tecs.anmation` is an error where it is
 --- written instead of a nil where it is called.
 ---
---- `audio` and `input` are the two namespaces reading more than one module at
---- one level, and both are a class with satellites rather than a merge. Every
---- other name here answers with one module, which is what lets the module's own
---- record type it.
+--- `audio`, `input` and `gfx` are the namespaces reading more than one module
+--- at one level. The first two are a class with satellites; `gfx` is the one
+--- name several substantial modules answer, and no candidate could be its
+--- principal without being loaded the moment the name is read, which every one
+--- of them reaches SDL to do. Every other name here answers with one module,
+--- which is what lets the module's own record type it.
 local SURFACE <const>: {string: Namespace} = {
     application = {module = "tecs.Application", class = "Application"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
-    camera = {module = "tecs.gfx.Camera", class = "Camera"},
     components = {module = "tecs.components"},
     data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
@@ -359,7 +384,10 @@ local SURFACE <const>: {string: Namespace} = {
     },
     future = {module = "tecs.Future", class = "Future"},
     gfx = {
+        beside = {"tecs.gfx.Camera", "tecs.Renderer"},
         within = {
+            Camera = {module = "tecs.gfx.Camera"},
+            Renderer = {module = "tecs.Renderer"},
             animation = {module = "tecs.gfx.animation"},
             layers = {module = "tecs.gfx.layers"},
             materials = {module = "tecs.gpu.materials"},
@@ -377,7 +405,6 @@ local SURFACE <const>: {string: Namespace} = {
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net"},
     physics = {module = "tecs.physics"},
-    renderer = {module = "tecs.Renderer", class = "Renderer"},
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     text = {module = "tecs.gfx.text"},
@@ -559,7 +586,7 @@ tecs.version = "0.1.0"
 --- the global is a consequence of it.
 ---
 --- It is the same table `require` returns, metatable included, so reading
---- `tecs.camera` off the global loads the engine module on demand exactly as
+--- `tecs.gfx` off the global loads the engine module on demand exactly as
 --- reading it off the required value does. `require` caches, so this runs
 --- once; a game that assigns `tecs` itself afterwards owns the name and the
 --- declaration no longer describes it.

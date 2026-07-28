@@ -13,7 +13,7 @@ particle expires. What crosses back to the host is nothing at all.
 Three things share the work. An `Effect` is immutable data describing how particles spawn and evolve,
 registered once and shared by every emitter naming it. A `ParticleEmitter` component names an effect
 and carries playback state and a few per-instance scales. A pool owns one run of the
-[renderer](/modules/renderer)'s instance buffer, sub-allocates a contiguous slot range to each
+[renderer](/modules/gfx/)'s instance buffer, sub-allocates a contiguous slot range to each
 emitter, and records the three compute passes that fill it.
 
 Drawing is not new work. A particle written into the instance buffer is an instance: the same sixteen

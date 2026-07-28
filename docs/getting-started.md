@@ -34,7 +34,7 @@ not built. See [Tecs CLI](/cli/).
 
 `tecs` is ambient in a game. The module installs itself as a global as it returns, and the host has already
 loaded it by the time an entry file runs, so every file in a game reaches `tecs.ecs.newWorld()` and
-`tecs.camera.Camera` with no require line. It is the same table `require` gives back, metatable included, so a
+`tecs.gfx.Camera` with no require line. It is the same table `require` gives back, metatable included, so a
 headless tool or a spec that does not go through the host writes `local tecs <const> = require("tecs")` first
 and gets exactly that.
 

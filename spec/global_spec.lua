@@ -75,24 +75,24 @@ describe("the tecs global", function()
         -- state it is in before anything reads it, and reading it through the
         -- global has to resolve and memoize exactly as reading it off the
         -- required value does.
-        rawset(_G.tecs, "camera", nil)
-        assert.is_nil(rawget(_G.tecs, "camera"))
+        rawset(_G.tecs, "gfx", nil)
+        assert.is_nil(rawget(_G.tecs, "gfx"))
 
-        local camera = _G.tecs.camera
-        assert.is_not_nil(camera)
-        assert.is_true(rawequal(camera, rawget(_G.tecs, "camera")))
+        local gfx = _G.tecs.gfx
+        assert.is_not_nil(gfx)
+        assert.is_true(rawequal(gfx, rawget(_G.tecs, "gfx")))
 
         -- The class a namespace carries is the module itself rather than a
         -- copy of it, and reading it twice answers the same table. What was
         -- resolved is held beside the namespace rather than on it, so the
         -- table a caller holds stays empty and its metamethods keep firing.
-        assert.is_true(rawequal(camera.Camera, require("tecs.gfx.Camera")))
-        assert.is_true(rawequal(camera.Camera, camera.Camera))
-        assert.is_nil(rawget(camera, "Camera"))
+        assert.is_true(rawequal(gfx.Camera, require("tecs.gfx.Camera")))
+        assert.is_true(rawequal(gfx.Camera, gfx.Camera))
+        assert.is_nil(rawget(gfx, "Camera"))
     end)
 
     it("answers nil for a member a namespace does not have", function()
-        assert.is_nil(_G.tecs.camera.Nosuchthing)
+        assert.is_nil(_G.tecs.gfx.Nosuchthing)
     end)
 
     it("answers nil for a name that is not a module", function()

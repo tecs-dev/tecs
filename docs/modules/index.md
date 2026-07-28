@@ -10,8 +10,8 @@ the module installs itself as a global as it returns and the host has already lo
 file runs, so no file in a game needs a require line. A headless tool or a spec does not go through the host
 and writes `local tecs <const> = require("tecs")` first; it is the same table either way.
 
-Each module is one namespace, and the thing inside it carries its own name: `tecs.camera.Camera` is the class,
-`tecs.camera` is where it lives. So no name is a type and a namespace at once, and a satellite record sits
+Each module is one namespace, and the thing inside it carries its own name: `tecs.gfx.Camera` is the class,
+`tecs.gfx` is where it lives. So no name is a type and a namespace at once, and a satellite record sits
 beside the class rather than under it -- `tecs.window.Options`, not `tecs.window.Window.Options`.
 
 A module may also sit inside another module, one level and no deeper: `tecs.gfx.layers` is a module, and there
@@ -34,7 +34,6 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.application`](/modules/application)           | the object an entry file returns, and what builds one                     |
 | [`tecs.assets`](/modules/assets)                     | loading content, cached and off the main thread                           |
 | [`tecs.audio`](/modules/audio)                       | clips, voices, groups, limits, the `Sound` component, and devices         |
-| [`tecs.camera`](/modules/camera)                     | the view a frame is drawn from                                            |
 | [`tecs.components`](/modules/components)             | the engine's own components, the ones the renderer reads                  |
 | [`tecs.data`](/modules/data)                         | JSON, DEFLATE and hashes over byte strings                                |
 | [`tecs.ecs`](/ecs/)                                  | worlds, components, queries, systems, events and resources                |
@@ -42,7 +41,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.filesystem`](/modules/filesystem/)            | where a game may read and write, and what to do with a path               |
 | [`tecs.filesystem.watch`](/modules/filesystem/watch) | watching files for change                                                 |
 | [`tecs.future`](/modules/future)                     | a value that settles once                                                 |
-| [`tecs.gfx`](/modules/gfx/)                          | drawing, and the modules a scene is described in                          |
+| [`tecs.gfx`](/modules/gfx/)                          | the camera, the renderer, and the vocabularies a scene is described in    |
 | [`tecs.gfx.animation`](/modules/gfx/animation)       | sprite sheets, and the playback that reads them                           |
 | [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behaviour                                        |
 | [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to                                         |
@@ -53,7 +52,6 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.mcp`](/modules/mcp)                           | the debug server: transport, tools, sandbox                               |
 | [`tecs.net`](/modules/net)                           | nonblocking TCP streams and UDP datagrams                                 |
 | [`tecs.physics`](/modules/physics)                   | rigid-body simulation on Box2D 3                                          |
-| [`tecs.renderer`](/modules/renderer)                 | a world to a frame, through an extractor and a backend                    |
 | [`tecs.sequence`](/modules/sequence)                 | the sequencer, with the tween runtime inside it                           |
 | [`tecs.system`](/modules/system)                     | capabilities, the clipboard, child processes, and what the desktop offers |
 | [`tecs.text`](/modules/text)                         | distance-field text, drawn through an instance producer                   |
@@ -96,7 +94,7 @@ What follows are the concepts behind those names, which are pages rather than na
 `tecs.ecs` loads with `tecs`, because it reaches nothing below Lua. Every other module is named on `tecs` for
 its types and resolved on first field access, because each of them reaches SDL, Box2D or a worker library
 through the FFI, and loading them up front would make a test, a server or a tool demand a graphics stack it
-never asked for. Reading `tecs.camera` loads it; requiring `tecs` does not.
+never asked for. Reading `tecs.gfx` loads it; requiring `tecs` does not.
 
 A name that is not a module answers nil rather than raising, and the modules are written out in `init.tl`
 rather than derived from a module path, so `tecs.cmaera` is nil where it is written instead of an error out of

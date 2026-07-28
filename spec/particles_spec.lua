@@ -80,7 +80,7 @@ describe("tecs.gfx.particles", function()
     -- way, exactly as the renderer's own tests do.
     local function newScene(withPool, poolSize)
         local world = tecs.ecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT, {
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = { 1.0, 1.0, 1.0 },
             capacity = 4096,
         })

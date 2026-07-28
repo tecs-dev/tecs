@@ -75,7 +75,7 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | ----------------- | ------------------------------- | -------------------------------------------------- |
 | `First`           | `sequence.AdvanceFrame`         | [`sequence`](/modules/sequence), every application |
 | `FixedFirst`      | `tecs.EnterFixedInput`          | [`Application`](/modules/application)              |
-| `FixedFirst`      | `tecs.SnapshotTransforms`       | [`Renderer`](/modules/renderer)                    |
+| `FixedFirst`      | `tecs.SnapshotTransforms`       | [`Renderer`](/modules/gfx/)                        |
 | `FixedFirst`      | `sequence.Advance`              | [`sequence`](/modules/sequence), every application |
 | `FixedUpdate`     | `ttl`                           | builtins, every world                              |
 | `FixedUpdate`     | `tecs.StepPhysics`              | [`physics`](/modules/physics) plugin               |
@@ -89,7 +89,7 @@ well, because `Application` installs them itself. The rest arrive with the plugi
 | `PostUpdate`      | `tecs.ReportAnimation`          | [`animation`](/modules/gfx/animation) plugin       |
 | `PostUpdate`      | `tecs.TextLayout`               | [`text`](/modules/text) plugin                     |
 | `PostUpdate`      | `tecs.ParticleEmitterSync`      | [`particles`](/modules/gfx/particles) plugin       |
-| `RenderFirst`     | `tecs.SyncRenderState`          | [`Renderer`](/modules/renderer)                    |
+| `RenderFirst`     | `tecs.SyncRenderState`          | [`Renderer`](/modules/gfx/)                        |
 | `RenderLast`      | `RelativeTransformDirtySampler` | builtins, every world                              |
 
 Three things follow from that table and are worth stating outright.

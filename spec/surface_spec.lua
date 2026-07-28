@@ -261,10 +261,24 @@ describe("the public surface", function()
             assert.is_nil(tecs.animation)
             assert.is_nil(tecs.materials)
             assert.is_nil(tecs.particles)
+            assert.is_nil(tecs.camera)
+            assert.is_nil(tecs.renderer)
         end)
 
         it("answers nil for a name it does not carry", function()
             assert.is_nil(tecs.gfx.nosuchthing)
+        end)
+
+        it("carries a class beside the modules below it", function()
+            -- A PascalCase `within` name is a class reached through its
+            -- namespace rather than a module wanting a page of its own, and it
+            -- resolves to the module that declares it rather than a copy.
+            assert.is_true(rawequal(tecs.gfx.Camera, require("tecs.gfx.Camera")))
+            assert.is_true(rawequal(tecs.gfx.Renderer, require("tecs.Renderer")))
+            -- The constructor sits on the namespace, not on the class, which
+            -- is what `newCamera` means: the module owns the type.
+            assert.are.equal(require("tecs.gfx.Camera").newCamera, tecs.gfx.newCamera)
+            assert.are.equal(require("tecs.Renderer").newRenderer, tecs.gfx.newRenderer)
         end)
     end)
 

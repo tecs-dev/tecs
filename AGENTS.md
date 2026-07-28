@@ -92,7 +92,7 @@ tecs/
 ### The dependency rule
 
 `tecs` is what a game reaches, and every public name on it is `tecs.<module>.<thing>`: `tecs.ecs.newWorld`,
-`tecs.camera.Camera`, `tecs.application.create`. A module may sit inside another module, one level and no
+`tecs.gfx.Camera`, `tecs.application.create`. A module may sit inside another module, one level and no
 deeper, so `tecs.gfx.layers.configure` is also a public name and nothing goes past it. The host loads `tecs`
 before a game's first line, so a game writes no require; a headless tool or a spec writes `require("tecs")`
 and gets the same table.

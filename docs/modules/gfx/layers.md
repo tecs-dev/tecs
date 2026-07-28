@@ -173,7 +173,7 @@ sort at any point after the depth target exists. The number is derived from `MAX
 raising an extent moves it.
 
 What a device's depth target holds is the other half of that comparison, and
-[`Renderer:depthSortCollapse`](/modules/renderer#tecs.renderer.Renderer.depthSortCollapse) is what makes the two
+[`Renderer:depthSortCollapse`](/modules/gfx/#tecs.gfx.Renderer.depthSortCollapse) is what makes the two
 answerable: it
 reports the world units that collapse onto one depth value there, which is the factor `maxY` and `maxZ`
 divide by to resolve the sort again.
@@ -231,7 +231,7 @@ packed at, so the number itself means nothing beyond having changed.
 
 A layer decides where its contents are placed and how they sort; it does not bound them. Keeping an
 entity's fragments inside a rectangle is the `Clip` component, whose index names a rectangle set through
-the [Renderer](/modules/renderer). Zero, the default, means no clipping, and a world that clips nothing
+the [Renderer](/modules/gfx/). Zero, the default, means no clipping, and a world that clips nothing
 pays for it exactly nowhere.
 
 The rectangle is in target pixels and is tested against the fragment's own position, which is what a

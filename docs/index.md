@@ -223,7 +223,6 @@ behind each one.
 - [`tecs.application`](/modules/application) - the object an entry file returns, and what builds one
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
-- [`tecs.camera`](/modules/camera) - the view a frame is drawn from
 - [`tecs.components`](/modules/components) - the components the renderer reads
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
@@ -231,7 +230,7 @@ behind each one.
 - [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
 - [`tecs.filesystem.watch`](/modules/filesystem/watch) - watching files for change
 - [`tecs.future`](/modules/future) - a value that settles once
-- [`tecs.gfx`](/modules/gfx/) - drawing, and the modules a scene is described in
+- [`tecs.gfx`](/modules/gfx/) - the camera, the renderer, and the vocabularies a scene is described in
 - [`tecs.gfx.animation`](/modules/gfx/animation) - sprite sheets, and the playback that reads them
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
 - [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
@@ -242,7 +241,6 @@ behind each one.
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net) - nonblocking TCP streams and UDP datagrams
 - [`tecs.physics`](/modules/physics) - Box2D 3, solved across a shared thread pool
-- [`tecs.renderer`](/modules/renderer) - deferred and GPU-driven, with compute culling and one indirect draw
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer

@@ -67,7 +67,7 @@ describe("ecs.Renderer", function()
     -- default so transport can be tested without lighting in the way.
     local function newScene(ambient, capacity, reserveRuns)
         local world = tecs.ecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT, {
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, {
             ambient = ambient or { 1.0, 1.0, 1.0 },
             capacity = capacity or 256,
             reserveRuns = reserveRuns,
@@ -455,7 +455,7 @@ describe("ecs.Renderer", function()
     describe("a packed image array", function()
         local function packedScene(layers)
             local world = tecs.ecs.newWorld()
-            local renderer = Renderer.create(device.handle, FORMAT, {
+            local renderer = Renderer.newRenderer(device.handle, FORMAT, {
                 ambient = { 1.0, 1.0, 1.0 },
                 capacity = 256,
                 cell = 64,
@@ -1149,7 +1149,7 @@ describe("ecs.Renderer", function()
 
     it("drops rows past capacity rather than overrunning the buffer", function()
         local world = tecs.ecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
         renderer:install(world)
 
         for _ = 1, 10 do
@@ -1168,7 +1168,7 @@ describe("ecs.Renderer", function()
     -- same either way, so it takes a spawn after the sync to tell.
     it("leaves the world undeferred after dropping rows", function()
         local world = tecs.ecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
+        local renderer = Renderer.newRenderer(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
         renderer:install(world)
 
         -- Two archetypes, because the break has to actually execute. With one,
@@ -2037,7 +2037,7 @@ describe("ecs.Renderer", function()
     it("agrees with itself converting between world and screen", function()
         -- toWorld and toScreen are written out rather than inverted, so the
         -- only thing keeping them consistent is that they round-trip.
-        local camera = Camera.create({ x = 120, y = 80, zoom = 1.5, rotation = 0.7 })
+        local camera = Camera.newCamera({ x = 120, y = 80, zoom = 1.5, rotation = 0.7 })
         local screenX, screenY = camera:toScreen(200, 140, SIZE, SIZE)
         local worldX, worldY = camera:toWorld(screenX, screenY, SIZE, SIZE)
         assert.is_true(math.abs(worldX - 200) < 0.01)
@@ -2059,7 +2059,7 @@ describe("ecs.Renderer", function()
         --- A world whose body teleports one span to the right per fixed step.
         local function movingScene(span)
             local world = tecs.ecs.newWorld()
-            local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
+            local renderer = Renderer.newRenderer(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
             renderer:install(world)
 
             local entity = world:spawn(
@@ -2111,7 +2111,7 @@ describe("ecs.Renderer", function()
 
         it("leaves an entity without the component alone", function()
             local world = tecs.ecs.newWorld()
-            local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
+            local renderer = Renderer.newRenderer(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
             renderer:install(world)
             world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE), Tint(1, 1, 1, 1), Renderable())
 

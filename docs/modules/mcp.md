@@ -542,7 +542,7 @@ function world.bind(w: ecs.World)
 
 `tools.bind` supplies what the frame-facing tools look at. `tools.bindReload` supplies the device's half of a
 shader reload: swapping a pipeline means destroying live GPU handles and creating new ones against the formats
-the device claimed, which is knowledge the [`Renderer`](/modules/renderer) has and nothing in the tools does.
+the device claimed, which is knowledge the [`Renderer`](/modules/gfx/) has and nothing in the tools does.
 `world.bind` is what the eight world tools act on. A tool called before its binding exists reports why rather
 than failing obscurely.
 
