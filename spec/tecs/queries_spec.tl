@@ -1770,10 +1770,11 @@ describe(
                         end
 
                         local seen: {integer: integer} = {}
-                        eachEntityInQuery(
-                            world:query({name = "dupe_probe_A", include = {TagA}, temp = true}),
-                            function(id: integer) seen[id] = (seen[id] or 0) + 1 end
+                        eachEntityInQuery(world:query({name = "dupe_probe_A", include = {TagA}, temp = true}), function(
+                            id: integer
                         )
+                            seen[id] = (seen[id] or 0) + 1
+                        end)
                         for i = 1, 3 do
                             luassert.equals(
                                 1, seen[ids[i]], "entity " .. i .. " must be in exactly one archetype matching {TagA}"

@@ -139,8 +139,33 @@ Not ported: shadows, post-processing, UI, tiled maps and multi-camera.
 
 ### Documentation
 
-- `README.md` is the design record. Update it when public behavior or a design decision changes.
+**A user-facing change is not done until its documentation is.** Landing one without the other is
+the same defect as landing one without a test: the tree says something that is not true, and the
+next person believes it. This is not a nicety, and reviews should treat a missing page edit the way
+they treat a missing spec.
+
+What "user-facing" means here: anything a game can call, configure, spawn or observe. A new module,
+a new function, a renamed or removed field, a changed default, a changed error, a behaviour a game
+could depend on. Internals under `internal/` are not, unless the change is visible through something
+that is.
+
+Two places, and they hold different things:
+
+- **`docs/`** is the reference. A module's page says what it is, what it takes and what it answers.
+  `make docs-check` requires every page to carry a one-line `description:`, and `make docs-dev`
+  serves the site with hot reload while you write.
+- **`README.md`** is the design record. It holds why, not what: the decision, the alternative that
+  lost, and the constraint that forced it. A change that only adds a function needs no entry; a
+  change that settles a question does.
+
+The failure this exists to prevent has already happened here. Pages ported from an earlier tree
+claimed writing `Transform` needed no dirty tracking and that `archetype:get` on a tag returns nil.
+Both read as authoritative and both were false, and neither was caught by a test, because nothing
+tests prose. The only defence is the person making the change, at the time they make it.
+
 - Prefer linking to entry points that exist in this repo, not guessed future paths.
+- A page that cannot be verified against the code should not be written. A gap is honest; a
+  confident wrong answer is not.
 
 ### Mutation and Dirty Model
 

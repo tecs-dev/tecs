@@ -1011,9 +1011,9 @@ end
 
 --- Layouts run, by world, for a test or a tool that wants to see the gate
 --- working. Weak keys, so a discarded world is not held alive by its count.
-local layoutCounts <const>: {World: integer} = setmetatable(
-    {} as {World: integer}, {__mode = "k"} as metatable<{World: integer}>
-)
+local layoutCounts <const>: {World: integer} = setmetatable({} as {World: integer}, {
+    __mode = "k"
+} as metatable<{World: integer}>)
 
 --- What the plugin holds on one world, for the same reason and on the same
 --- terms: a reload is asked for from outside any frame and has to reach the run
@@ -1034,9 +1034,9 @@ local record Install
     reloaded: {Font: boolean}
 end
 
-local installs <const>: {World: Install} = setmetatable(
-    {} as {World: Install}, {__mode = "k"} as metatable<{World: Install}>
-)
+local installs <const>: {World: Install} = setmetatable({} as {World: Install}, {
+    __mode = "k"
+} as metatable<{World: Install}>)
 
 -------------------------------------------------------------------------------
 -- Re-reading a font

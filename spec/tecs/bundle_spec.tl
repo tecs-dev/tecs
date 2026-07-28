@@ -353,8 +353,9 @@ describe(
                         ) as Bundle
 
                         -- Only 1 required arg passed, second slot is nil, codegen errors.
-                        luassert.has_error(
-                            function() bundle:spawn(TC2("hi")) end, "Required component missing: RequiredTag4"
+                        luassert.has_error(function()
+                            bundle:spawn(TC2("hi"))
+                        end, "Required component missing: RequiredTag4"
                         )
                     end
                 )
@@ -440,8 +441,9 @@ describe(
                         luassert.is_true((world:get(entityId, Tag9) ~= nil))
 
                         -- Missing second required arg errors with that component's name.
-                        luassert.has_error(
-                            function() bundle:spawn(Tag7()) end, "Required component missing: BundleChainTag9"
+                        luassert.has_error(function()
+                            bundle:spawn(Tag7())
+                        end, "Required component missing: BundleChainTag9"
                         )
                     end
                 )
@@ -542,8 +544,9 @@ describe(
                 it(
                     "errors on unknown bundle name",
                     function()
-                        luassert.has_error(
-                            function() world:spawnBundle("NonExistentBundle") end, "Unknown bundle: NonExistentBundle"
+                        luassert.has_error(function()
+                            world:spawnBundle("NonExistentBundle")
+                        end, "Unknown bundle: NonExistentBundle"
                         )
                     end
                 )

@@ -405,15 +405,12 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
 
     LOGGER:info("sample session started (intervalMs=%d, zone=%s)", intervalMs, zoneFilter or "*")
 
-    local session = setmetatable(
-        {
-            _agg = agg,
-            _zoneFilter = zoneFilter,
-            _stopped = false,
-            _setPaused = function(v: boolean) paused = v end,
-        } as profile.SampleSession,
-        SAMPLE_MT
-    )
+    local session = setmetatable({
+        _agg = agg,
+        _zoneFilter = zoneFilter,
+        _stopped = false,
+        _setPaused = function(v: boolean) paused = v end,
+    } as profile.SampleSession, SAMPLE_MT)
     return session
 end
 
@@ -589,16 +586,13 @@ local function serializeTraceReport(r: profile.TraceReport): string
     local lines: {string} = {"severity,count,reason,location,zone"}
     for i = 1, #r.sites do
         local s = r.sites[i]
-        lines[#lines + 1] = table_concat(
-            {
-                s.severity,
-                string_format("%d", s.count),
-                csvField(s.reason),
-                csvField(s.location),
-                csvField(s.zone),
-            },
-            ","
-        )
+        lines[#lines + 1] = table_concat({
+            s.severity,
+            string_format("%d", s.count),
+            csvField(s.reason),
+            csvField(s.location),
+            csvField(s.zone),
+        }, ",")
     end
     return table_concat(lines, "\n")
 end
@@ -663,17 +657,14 @@ function profile.trace(opts?: profile.TraceOptions): profile.TraceSession
 
     LOGGER:info("trace session started (includeBenign=%s)", tostring(includeBenign))
 
-    local session = setmetatable(
-        {
-            _callback = callback,
-            _sites = sites,
-            _counters = counters,
-            _startTime = startTime,
-            _stopped = false,
-            _setPaused = function(v: boolean) paused = v end,
-        } as profile.TraceSession,
-        TRACE_MT
-    )
+    local session = setmetatable({
+        _callback = callback,
+        _sites = sites,
+        _counters = counters,
+        _startTime = startTime,
+        _stopped = false,
+        _setPaused = function(v: boolean) paused = v end,
+    } as profile.TraceSession, TRACE_MT)
     return session
 end
 
@@ -725,14 +716,12 @@ function profile.TraceSession:stop(filename?: string): profile.TraceReport
     )
 
     local counters = s._counters as {string: integer}
-    local report = setmetatable(
-        {
-            durationSec = os.time() - (s._startTime as number),
-            totalAborts = counters.total,
-            blacklisted = counters.black,
-            sites = sites,
-        } as profile.TraceReport,
-        TRACE_REPORT_MT
+    local report = setmetatable({
+        durationSec = os.time() - (s._startTime as number),
+        totalAborts = counters.total,
+        blacklisted = counters.black,
+        sites = sites,
+    } as profile.TraceReport, TRACE_REPORT_MT
     )
     if filename then
         writeToFile(filename, tostring(report))

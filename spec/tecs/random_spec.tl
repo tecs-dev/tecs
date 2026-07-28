@@ -193,8 +193,9 @@ describe(
                     "refuses an empty integer range",
                     function()
                         local generator <const> = random.new(1)
-                        luassert.has_error(
-                            function() generator:integer(5, 3) end, "random: integer(5, 3) has an empty range"
+                        luassert.has_error(function()
+                            generator:integer(5, 3)
+                        end, "random: integer(5, 3) has an empty range"
                         )
                     end
                 )
@@ -270,8 +271,9 @@ describe(
                     "refuses a state that is not four words",
                     function()
                         local generator <const> = random.new(1)
-                        luassert.has_error(
-                            function() generator:setState({1, 2, 3}) end, "random: setState needs four state words"
+                        luassert.has_error(function()
+                            generator:setState({1, 2, 3})
+                        end, "random: setState needs four state words"
                         )
                     end
                 )
@@ -280,9 +282,9 @@ describe(
                     "refuses the all-zero state",
                     function()
                         local generator <const> = random.new(1)
-                        luassert.has_error(
-                            function() generator:setState({0, 0, 0, 0}) end,
-                            "random: the all-zero state is the one xoshiro cannot leave"
+                        luassert.has_error(function()
+                            generator:setState({0, 0, 0, 0})
+                        end, "random: the all-zero state is the one xoshiro cannot leave"
                         )
                     end
                 )
@@ -305,8 +307,9 @@ describe(
                     "refuses an unnamed stream",
                     function()
                         local world <const> = tecs.newWorld()
-                        luassert.has_error(
-                            function() random.stream(world, "") end, "random: a stream needs a non-empty name"
+                        luassert.has_error(function()
+                            random.stream(world, "")
+                        end, "random: a stream needs a non-empty name"
                         )
                     end
                 )
@@ -645,11 +648,13 @@ describe(
                     "refuses an octave count below one",
                     function()
                         local field <const> = random.noise(1)
-                        luassert.has_error(
-                            function() field:fbm2(0.5, 0.5, 0) end, "random: fbm needs at least one octave"
+                        luassert.has_error(function()
+                            field:fbm2(0.5, 0.5, 0)
+                        end, "random: fbm needs at least one octave"
                         )
-                        luassert.has_error(
-                            function() field:fbm3(0.5, 0.5, 0.5, -1) end, "random: fbm needs at least one octave"
+                        luassert.has_error(function()
+                            field:fbm3(0.5, 0.5, 0.5, -1)
+                        end, "random: fbm needs at least one octave"
                         )
                     end
                 )

@@ -36,9 +36,9 @@ describe(
                 it(
                     "errors on empty field name",
                     function()
-                        assert.has_error(
-                            function() schema.validateFields({{"", "float"}}) end,
-                            "Field #1: field name cannot be empty"
+                        assert.has_error(function()
+                            schema.validateFields({{"", "float"}})
+                        end, "Field #1: field name cannot be empty"
                         )
                     end
                 )
@@ -53,9 +53,9 @@ describe(
                 it(
                     "errors on empty field type",
                     function()
-                        assert.has_error(
-                            function() schema.validateFields({{"x", ""}}) end,
-                            "Field #1: field type cannot be empty for field: x"
+                        assert.has_error(function()
+                            schema.validateFields({{"x", ""}})
+                        end, "Field #1: field type cannot be empty for field: x"
                         )
                     end
                 )
@@ -70,9 +70,9 @@ describe(
                 it(
                     "errors on duplicate field names",
                     function()
-                        assert.has_error(
-                            function() schema.validateFields({{"x", "float"}, {"y", "float"}, {"x", "int32_t"}}) end,
-                            "Field #3: duplicate field name: x"
+                        assert.has_error(function()
+                            schema.validateFields({{"x", "float"}, {"y", "float"}, {"x", "int32_t"}})
+                        end, "Field #3: duplicate field name: x"
                         )
                     end
                 )
@@ -80,9 +80,9 @@ describe(
                 it(
                     "errors on invalid C identifier starting with digit",
                     function()
-                        assert.has_error(
-                            function() schema.validateFields({{"3d", "float"}}) end,
-                            "Field #1: invalid C identifier: 3d"
+                        assert.has_error(function()
+                            schema.validateFields({{"3d", "float"}})
+                        end, "Field #1: invalid C identifier: 3d"
                         )
                     end
                 )
@@ -100,9 +100,9 @@ describe(
                 it(
                     "errors on reserved field name",
                     function()
-                        assert.has_error(
-                            function() schema.validateFields({{"eventId", "int32_t"}}, {eventId = true}) end,
-                            "Field #1: 'eventId' is reserved and must not be specified manually"
+                        assert.has_error(function()
+                            schema.validateFields({{"eventId", "int32_t"}}, {eventId = true})
+                        end, "Field #1: 'eventId' is reserved and must not be specified manually"
                         )
                     end
                 )
@@ -119,11 +119,9 @@ describe(
                 it(
                     "supports multiple reserved fields",
                     function()
-                        assert.has_error(
-                            function()
-                                schema.validateFields({{"typeId", "int32_t"}}, {eventId = true, typeId = true})
-                            end,
-                            "Field #1: 'typeId' is reserved and must not be specified manually"
+                        assert.has_error(function()
+                            schema.validateFields({{"typeId", "int32_t"}}, {eventId = true, typeId = true})
+                        end, "Field #1: 'typeId' is reserved and must not be specified manually"
                         )
                     end
                 )
@@ -131,9 +129,9 @@ describe(
                 it(
                     "includes field index in error messages",
                     function()
-                        assert.has_error(
-                            function() schema.validateFields({{"a", "float"}, {"b", "float"}, {"", "int32_t"}}) end,
-                            "Field #3: field name cannot be empty"
+                        assert.has_error(function()
+                            schema.validateFields({{"a", "float"}, {"b", "float"}, {"", "int32_t"}})
+                        end, "Field #3: field name cannot be empty"
                         )
                     end
                 )

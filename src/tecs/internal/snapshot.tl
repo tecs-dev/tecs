@@ -1409,10 +1409,11 @@ end
 
 -- Weak map from built-in reader -> function that stamps the World reference
 -- onto it. Used by `loadSnapshotTable` so deserialize() gets a world.
-local worldAttachers: {snapshot.Reader: function(snapshot.Reader, World)} = setmetatable(
-    {} as {snapshot.Reader: function(snapshot.Reader, World)},
-    {__mode = "k"} as metatable<{snapshot.Reader: function(snapshot.Reader, World)}>
-)
+local worldAttachers: {snapshot.Reader: function(snapshot.Reader, World)} = setmetatable({
+
+} as {snapshot.Reader: function(snapshot.Reader, World)}, {__mode = "k"} as metatable<{snapshot.Reader: function(
+    snapshot.Reader, World
+)}>)
 
 attachWorld = function(reader: snapshot.Reader, world: World)
     local fn = worldAttachers[reader]
@@ -1704,14 +1705,11 @@ end
 
 function newTableReaderImpl(snap: SnapshotTable): snapshot.Reader
     assert(snap, "newTableReader requires a snapshot")
-    local impl: TableReaderImpl = setmetatable(
-        {
-            _snap = snap,
-            _archCursor = 0,
-            _entityCursor = 0,
-        } as TableReaderImpl,
-        TABLE_READER_MT
-    )
+    local impl: TableReaderImpl = setmetatable({
+        _snap = snap,
+        _archCursor = 0,
+        _entityCursor = 0,
+    } as TableReaderImpl, TABLE_READER_MT)
     worldAttachers[impl as snapshot.Reader] = function(r: snapshot.Reader, w: World)
         (r as TableReaderImpl)._world = w
     end
@@ -1879,12 +1877,9 @@ end
 
 function newBufferWriterImpl(buf: any): snapshot.Writer
     assert(buf, "newBufferWriter requires a LuaJIT string.buffer")
-    local impl: BufferWriterImpl = setmetatable(
-        {
-            _buf = buf,
-        } as BufferWriterImpl,
-        BUFFER_WRITER_MT
-    )
+    local impl: BufferWriterImpl = setmetatable({
+        _buf = buf,
+    } as BufferWriterImpl, BUFFER_WRITER_MT)
     return impl as snapshot.Writer
 end
 
@@ -2146,14 +2141,11 @@ end
 
 function newBufferReaderImpl(buf: any): snapshot.Reader
     assert(buf, "newBufferReader requires a LuaJIT string.buffer")
-    local impl: BufferReaderImpl = setmetatable(
-        {
-            _buf = buf,
-            _archRemaining = 0,
-            _archetypesRemaining = 0,
-        } as BufferReaderImpl,
-        BUFFER_READER_MT
-    )
+    local impl: BufferReaderImpl = setmetatable({
+        _buf = buf,
+        _archRemaining = 0,
+        _archetypesRemaining = 0,
+    } as BufferReaderImpl, BUFFER_READER_MT)
     worldAttachers[impl as snapshot.Reader] = function(r: snapshot.Reader, w: World)
         (r as BufferReaderImpl)._world = w
     end

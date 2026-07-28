@@ -84,9 +84,8 @@ describe(
                         local e1, e2 = {}, {}
                         mgr1:registerEvent(e1, {{"val", "double"}}, "FFIEvSpecSame")
                         -- Same name, same fields on a different manager; should not error
-                        assert.has_no.errors(function()
-                            mgr2:registerEvent(e2, {{"val", "double"}}, "FFIEvSpecSame")
-                        end)
+                        assert.has_no.errors(function() mgr2:registerEvent(e2, {{"val", "double"}}, "FFIEvSpecSame") end
+                        )
                     end
                 )
             end

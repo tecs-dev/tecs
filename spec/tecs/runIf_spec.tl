@@ -204,15 +204,12 @@ describe(
                     function()
                         world:addSystem({name = "DuplicateSystem", phase = tecs.phases.Update, run = function() end})
 
-                        luassert.error_matches(
-                            function()
-                                world:addSystem({
-                                    name = "DuplicateSystem", phase = tecs.phases.PostUpdate, run = function() end
-                                })
-                            end,
-                            "System with name 'DuplicateSystem' already exists",
-                            "Should error on duplicate system name"
-                        )
+                        luassert.error_matches(function()
+                            world:addSystem({
+                                name = "DuplicateSystem", phase = tecs.phases.PostUpdate, run = function() end
+                            })
+                        end, "System with name 'DuplicateSystem' already exists",
+                        "Should error on duplicate system name")
                     end
                 )
 
@@ -263,10 +260,10 @@ describe(
                 it(
                     "should error when removing non-existent system",
                     function()
-                        luassert.error_matches(
-                            function() world:removeSystem("NonExistentSystem") end,
-                            "System 'NonExistentSystem' not found",
-                            "Should error when system not found"
+                        luassert.error_matches(function()
+                            world:removeSystem("NonExistentSystem")
+                        end, "System 'NonExistentSystem' not found",
+                        "Should error when system not found"
                         )
                     end
                 )

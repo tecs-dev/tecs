@@ -37,34 +37,28 @@ describe(
                 it(
                     "should error if cascadeDelete without reverseIndex",
                     function()
-                        luassert.error_matches(
-                            function()
-                                tecs.newRelationship({
-                                    name = "SparseRegBad1",
-                                    exclusive = true,
-                                    sparse = true,
-                                    cascadeDelete = true,
-                                })
-                            end,
-                            "reverseIndex"
-                        )
+                        luassert.error_matches(function()
+                            tecs.newRelationship({
+                                name = "SparseRegBad1",
+                                exclusive = true,
+                                sparse = true,
+                                cascadeDelete = true,
+                            })
+                        end, "reverseIndex")
                     end
                 )
 
                 it(
                     "should error if cascadeDelete without exclusive",
                     function()
-                        luassert.error_matches(
-                            function()
-                                tecs.newRelationship({
-                                    name = "SparseRegBad2",
-                                    sparse = true,
-                                    reverseIndex = true,
-                                    cascadeDelete = true,
-                                })
-                            end,
-                            "exclusive"
-                        )
+                        luassert.error_matches(function()
+                            tecs.newRelationship({
+                                name = "SparseRegBad2",
+                                sparse = true,
+                                reverseIndex = true,
+                                cascadeDelete = true,
+                            })
+                        end, "exclusive")
                     end
                 )
 

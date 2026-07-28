@@ -46,9 +46,9 @@ local record components
 end
 
 components.registeredComponents = {}
-components.componentsById = setmetatable(
-    {} as {integer: Component}, {__newindex = function() error("componentsById is read-only") end}
-)
+components.componentsById = setmetatable({} as {integer: Component}, {
+    __newindex = function() error("componentsById is read-only") end
+})
 
 -------------------------------------------------------------------------------
 -- Component creation

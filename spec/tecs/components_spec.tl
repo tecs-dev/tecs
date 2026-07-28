@@ -78,11 +78,10 @@ describe(
                         local container2 = {}
                         tecs.newComponent({name = "Hi__World", container = container1})
 
-                        luassert.error_matches(
-                            function() tecs.newComponent({name = "Hi__World", container = container2}) end,
-                            "Component Hi__World already registered",
-                            nil
-                        ) -- TODO: Why do the types want nil here?
+                        luassert.error_matches(function()
+                            tecs.newComponent({name = "Hi__World", container = container2})
+                        end, "Component Hi__World already registered",
+                        nil) -- TODO: Why do the types want nil here?
                     end
                 )
             end
@@ -177,17 +176,14 @@ describe(
                         local record Broken is tecs.Component
                             value: number
                         end
-                        luassert.error_matches(
-                            function()
-                                tecs.newComponent({
-                                    name = "BrokenCtorOnlyTest",
-                                    container = Broken as tecs.Component,
-                                    init = function(instance: Broken, v: number) instance.value = v end,
-                                })
-                            end,
-                            "requires either `fields`",
-                            nil
-                        )
+                        luassert.error_matches(function()
+                            tecs.newComponent({
+                                name = "BrokenCtorOnlyTest",
+                                container = Broken as tecs.Component,
+                                init = function(instance: Broken, v: number) instance.value = v end,
+                            })
+                        end, "requires either `fields`",
+                        nil)
                     end
                 )
 
@@ -304,11 +300,10 @@ describe(
 
                         components.registerComponent(container1)
 
-                        luassert.error_matches(
-                            function() components.registerComponent(container1) end,
-                            "Component MyComponent5 already registered",
-                            nil
-                        ) -- TODO: Why do the types want nil here?
+                        luassert.error_matches(function()
+                            components.registerComponent(container1)
+                        end, "Component MyComponent5 already registered",
+                        nil) -- TODO: Why do the types want nil here?
                     end
                 )
 
@@ -439,16 +434,13 @@ describe(
                     "rejects init without container",
                     function()
                         -- Should error if init is provided without container
-                        luassert.has_error(
-                            function()
-                                tecs.newRelationship({
-                                    name = "BadRelationship",
-                                    fields = {},
-                                    init = function(instance: tecs.Relationship, id: integer) instance.target = id end,
-                                })
-                            end,
-                            "Cannot provide init for relationship without a container"
-                        )
+                        luassert.has_error(function()
+                            tecs.newRelationship({
+                                name = "BadRelationship",
+                                fields = {},
+                                init = function(instance: tecs.Relationship, id: integer) instance.target = id end,
+                            })
+                        end, "Cannot provide init for relationship without a container")
                     end
                 )
 
@@ -512,17 +504,14 @@ describe(
                 it(
                     "rejects relationship init without fields or new",
                     function()
-                        luassert.error_matches(
-                            function()
-                                tecs.newRelationship({
-                                    name = "BadRelCtorOnly",
-                                    container = {},
-                                    init = function(_instance: tecs.Relationship, id: integer) end,
-                                })
-                            end,
-                            "requires either `fields`",
-                            nil
-                        )
+                        luassert.error_matches(function()
+                            tecs.newRelationship({
+                                name = "BadRelCtorOnly",
+                                container = {},
+                                init = function(_instance: tecs.Relationship, id: integer) end,
+                            })
+                        end, "requires either `fields`",
+                        nil)
                     end
                 )
 
@@ -556,15 +545,13 @@ describe(
                 it(
                     "rejects defaults without fields on relationships",
                     function()
-                        luassert.has_error(
-                            function()
-                                tecs.newRelationship({
-                                    name = "BadRelDefaults",
-                                    container = {},
-                                    defaults = {0},
-                                })
-                            end,
-                            "Relationship BadRelDefaults: `defaults` requires `fields`"
+                        luassert.has_error(function()
+                            tecs.newRelationship({
+                                name = "BadRelDefaults",
+                                container = {},
+                                defaults = {0},
+                            })
+                        end, "Relationship BadRelDefaults: `defaults` requires `fields`"
                         )
                     end
                 )
@@ -788,9 +775,9 @@ describe(
                         it(
                             "should reject layer 0 as invalid",
                             function()
-                                luassert.has_error(
-                                    function() tecs.builtins.Transform(10, 20, 30, 0) end,
-                                    "Transform layer must be greater than 0, got: 0"
+                                luassert.has_error(function()
+                                    tecs.builtins.Transform(10, 20, 30, 0)
+                                end, "Transform layer must be greater than 0, got: 0"
                                 )
                             end
                         )
@@ -809,9 +796,9 @@ describe(
                         it(
                             "should reject negative layer values",
                             function()
-                                luassert.has_error(
-                                    function() tecs.builtins.Transform(0, 0, 0, -1) end,
-                                    "Transform layer must be greater than 0, got: -1"
+                                luassert.has_error(function()
+                                    tecs.builtins.Transform(0, 0, 0, -1)
+                                end, "Transform layer must be greater than 0, got: -1"
                                 )
                             end
                         )
@@ -819,9 +806,9 @@ describe(
                         it(
                             "should reject negative layer values with table argument",
                             function()
-                                luassert.has_error(
-                                    function() tecs.builtins.Transform.new({x = 0, y = 0, z = 0, layer = -5}) end,
-                                    "Transform layer must be greater than 0, got: -5"
+                                luassert.has_error(function()
+                                    tecs.builtins.Transform.new({x = 0, y = 0, z = 0, layer = -5})
+                                end, "Transform layer must be greater than 0, got: -5"
                                 )
                             end
                         )
@@ -842,9 +829,9 @@ describe(
                         it(
                             "should reject layer 0 with table argument",
                             function()
-                                luassert.has_error(
-                                    function() tecs.builtins.Transform.new({x = 50, y = 60, z = 70, layer = 0}) end,
-                                    "Transform layer must be greater than 0, got: 0"
+                                luassert.has_error(function()
+                                    tecs.builtins.Transform.new({x = 50, y = 60, z = 70, layer = 0})
+                                end, "Transform layer must be greater than 0, got: 0"
                                 )
                             end
                         )
@@ -1104,15 +1091,13 @@ describe(
                 it(
                     "errors when defaults provided without fields",
                     function()
-                        luassert.has_error(
-                            function()
-                                tecs.newComponent({
-                                    name = "BadDefaultsComp",
-                                    container = {},
-                                    defaults = {0, 0},
-                                })
-                            end,
-                            "Component BadDefaultsComp: `defaults` requires `fields`"
+                        luassert.has_error(function()
+                            tecs.newComponent({
+                                name = "BadDefaultsComp",
+                                container = {},
+                                defaults = {0, 0},
+                            })
+                        end, "Component BadDefaultsComp: `defaults` requires `fields`"
                         )
                     end
                 )

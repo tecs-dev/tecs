@@ -342,15 +342,12 @@ function QueryImpl:iter(): (Query.IterFn, Query, any)
 end
 
 function QueryImpl:cursor(): QueryCursor
-    local cursor: QueryCursorImpl = setmetatable(
-        {
-            _query = self,
-            _open = false,
-            _closed = false,
-            _prepared = false,
-        },
-        QUERY_CURSOR_MT
-    )
+    local cursor: QueryCursorImpl = setmetatable({
+        _query = self,
+        _open = false,
+        _closed = false,
+        _prepared = false,
+    }, QUERY_CURSOR_MT)
     return cursor
 end
 
@@ -751,31 +748,28 @@ local function newQuery(
     local isTemp = descriptor.temp or false
     local onEntitiesAdded = descriptor.onEntitiesAdded
 
-    local self: QueryImpl = setmetatable(
-        {
-            descriptor = descriptor,
-            _world = world as WorldImpl,
-            _archetypes = matchingArchetypes,
-            _archetypeIndices = archetypeIndices,
-            _archetypeGroups = archetypeGroups,
-            _includeBits = masks.includeBits,
-            _includeWordBits = masks.includeWordBits,
-            _includeAnyBits = masks.includeAnyBits,
-            _includeAnyWordBits = masks.includeAnyWordBits,
-            _excludeBits = masks.excludeBits,
-            _excludeWordBits = masks.excludeWordBits,
-            _activeItems = activeItems,
-            _activeIndices = activeIndices,
-            _activeGroupItems = activeGroupItems,
-            _activeGroupIndices = activeGroupIndices,
-            _activeGroupList = activeGroupList,
-            _activeGroupListIndices = activeGroupListIndices,
-            _groupBy = groupBy,
-            onEntitiesAdded = wantAdd and queryOnEntitiesAdded or nil,
-            onEntitiesRemoved = wantRemove and queryOnEntitiesRemoved or nil,
-        },
-        QUERY_MT
-    )
+    local self: QueryImpl = setmetatable({
+        descriptor = descriptor,
+        _world = world as WorldImpl,
+        _archetypes = matchingArchetypes,
+        _archetypeIndices = archetypeIndices,
+        _archetypeGroups = archetypeGroups,
+        _includeBits = masks.includeBits,
+        _includeWordBits = masks.includeWordBits,
+        _includeAnyBits = masks.includeAnyBits,
+        _includeAnyWordBits = masks.includeAnyWordBits,
+        _excludeBits = masks.excludeBits,
+        _excludeWordBits = masks.excludeWordBits,
+        _activeItems = activeItems,
+        _activeIndices = activeIndices,
+        _activeGroupItems = activeGroupItems,
+        _activeGroupIndices = activeGroupIndices,
+        _activeGroupList = activeGroupList,
+        _activeGroupListIndices = activeGroupListIndices,
+        _groupBy = groupBy,
+        onEntitiesAdded = wantAdd and queryOnEntitiesAdded or nil,
+        onEntitiesRemoved = wantRemove and queryOnEntitiesRemoved or nil,
+    }, QUERY_MT)
 
     if isTemp then
         if onEntitiesAdded or descriptor.onEntitiesRemoved then

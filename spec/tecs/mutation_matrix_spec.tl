@@ -136,80 +136,86 @@ describe(
         it(
             "set applies the requires closure in every mode",
             function()
-                forEachMode(
-                    function(w: tecs.World): integer return w:spawn(MatPos(1)) end,
-                    function(w: tecs.World, e: integer) w:set(e, MatArmor(5)) end,
-                    function(w: tecs.World, e: integer, mode: string)
-                        luassert.is_true(w:has(e, MatArmor), "armor present, mode: " .. mode)
-                        luassert.equals(5, w:get(e, MatArmor).ar, "armor value, mode: " .. mode)
-                        luassert.is_true(w:has(e, MatHealth), "required health present, mode: " .. mode)
-                        luassert.equals(100, w:get(e, MatHealth).hp, "required default, mode: " .. mode)
-                    end
+                forEachMode(function(w: tecs.World): integer return w:spawn(MatPos(1)) end, function(
+                    w: tecs.World, e: integer
                 )
+                    w:set(e, MatArmor(5))
+                end,
+                function(w: tecs.World, e: integer, mode: string)
+                    luassert.is_true(w:has(e, MatArmor), "armor present, mode: " .. mode)
+                    luassert.equals(5, w:get(e, MatArmor).ar, "armor value, mode: " .. mode)
+                    luassert.is_true(w:has(e, MatHealth), "required health present, mode: " .. mode)
+                    luassert.equals(100, w:get(e, MatHealth).hp, "required default, mode: " .. mode)
+                end)
             end
         )
 
         it(
             "remove-then-set of one component converges in every mode",
             function()
-                forEachMode(
-                    function(w: tecs.World): integer return w:spawn(MatPos(1)) end,
-                    function(w: tecs.World, e: integer) w:remove(e, MatPos); w:set(e, MatPos(8)) end,
-                    function(w: tecs.World, e: integer, mode: string)
-                        luassert.is_true(w:isAlive(e), "alive, mode: " .. mode)
-                        luassert.is_true(w:has(e, MatPos), "has, mode: " .. mode)
-                        luassert.equals(8, w:get(e, MatPos).x, "value, mode: " .. mode)
-                        luassert.equals(1, countMatching(w, MatPos), "queryable, mode: " .. mode)
-                    end
+                forEachMode(function(w: tecs.World): integer return w:spawn(MatPos(1)) end, function(
+                    w: tecs.World, e: integer
                 )
+                    w:remove(e, MatPos)
+                    w:set(e, MatPos(8))
+                end,
+                function(w: tecs.World, e: integer, mode: string)
+                    luassert.is_true(w:isAlive(e), "alive, mode: " .. mode)
+                    luassert.is_true(w:has(e, MatPos), "has, mode: " .. mode)
+                    luassert.equals(8, w:get(e, MatPos).x, "value, mode: " .. mode)
+                    luassert.equals(1, countMatching(w, MatPos), "queryable, mode: " .. mode)
+                end)
             end
         )
 
         it(
             "set-then-remove leaves the component absent in every mode",
             function()
-                forEachMode(
-                    function(w: tecs.World): integer return w:spawn(MatPos(1)) end,
-                    function(w: tecs.World, e: integer) w:set(e, MatVel(9)); w:remove(e, MatVel) end,
-                    function(w: tecs.World, e: integer, mode: string)
-                        luassert.is_false(w:has(e, MatVel), "removed, mode: " .. mode)
-                        luassert.is_true(w:has(e, MatPos), "untouched survives, mode: " .. mode)
-                        luassert.equals(1, w:get(e, MatPos).x, "untouched value, mode: " .. mode)
-                    end
+                forEachMode(function(w: tecs.World): integer return w:spawn(MatPos(1)) end, function(
+                    w: tecs.World, e: integer
                 )
+                    w:set(e, MatVel(9))
+                    w:remove(e, MatVel)
+                end,
+                function(w: tecs.World, e: integer, mode: string)
+                    luassert.is_false(w:has(e, MatVel), "removed, mode: " .. mode)
+                    luassert.is_true(w:has(e, MatPos), "untouched survives, mode: " .. mode)
+                    luassert.equals(1, w:get(e, MatPos).x, "untouched value, mode: " .. mode)
+                end)
             end
         )
 
         it(
             "last write wins in every mode",
             function()
-                forEachMode(
-                    function(w: tecs.World): integer return w:spawn(MatPos(1)) end,
-                    function(w: tecs.World, e: integer)
-                        w:set(e, MatPos(2))
-                        w:set(e, MatVel(9))
-                        w:set(e, MatPos(3))
-                        w:set(e, MatPos(4))
-                    end,
-                    function(w: tecs.World, e: integer, mode: string)
-                        luassert.equals(4, w:get(e, MatPos).x, "last set wins, mode: " .. mode)
-                        luassert.equals(9, w:get(e, MatVel).dx, "structural add value, mode: " .. mode)
-                    end
+                forEachMode(function(w: tecs.World): integer return w:spawn(MatPos(1)) end, function(
+                    w: tecs.World, e: integer
                 )
+                    w:set(e, MatPos(2))
+                    w:set(e, MatVel(9))
+                    w:set(e, MatPos(3))
+                    w:set(e, MatPos(4))
+                end,
+                function(w: tecs.World, e: integer, mode: string)
+                    luassert.equals(4, w:get(e, MatPos).x, "last set wins, mode: " .. mode)
+                    luassert.equals(9, w:get(e, MatVel).dx, "structural add value, mode: " .. mode)
+                end)
             end
         )
 
         it(
             "despawn cancels staged operations in every mode",
             function()
-                forEachMode(
-                    function(w: tecs.World): integer return w:spawn(MatPos(1)) end,
-                    function(w: tecs.World, e: integer) w:set(e, MatVel(9)); w:despawn(e) end,
-                    function(w: tecs.World, e: integer, mode: string)
-                        luassert.is_false(w:isAlive(e), "despawned, mode: " .. mode)
-                        luassert.is_nil(w:get(e, MatPos), "no reads, mode: " .. mode)
-                    end
+                forEachMode(function(w: tecs.World): integer return w:spawn(MatPos(1)) end, function(
+                    w: tecs.World, e: integer
                 )
+                    w:set(e, MatVel(9))
+                    w:despawn(e)
+                end,
+                function(w: tecs.World, e: integer, mode: string)
+                    luassert.is_false(w:isAlive(e), "despawned, mode: " .. mode)
+                    luassert.is_nil(w:get(e, MatPos), "no reads, mode: " .. mode)
+                end)
             end
         )
 
@@ -345,9 +351,8 @@ describe(
                 luassert.equals(id, w:byKey("matrixHero"))
                 luassert.equals(3, w:get(id, MatPos).x)
 
-                local ok = pcall(function()
-                    w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(4))
-                end)
+                local ok = pcall(function() w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(4)) end
+                )
                 luassert.is_false(ok, "duplicate live key must error")
 
                 -- Despawn releases the key for reclaiming.

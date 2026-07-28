@@ -762,14 +762,12 @@ local function sourceFor(inputs: {Future<any>}): Source
     if count == 1 then
         return distinct[1]
     end
-    return setmetatable(
-        {
-            sources = distinct,
-            at = 0,
-            sliceMs = distinct[1].sliceMs,
-            defaultWaitMs = distinct[1].defaultWaitMs,
-        } as RoundRobin,
-        RoundRobinMT
+    return setmetatable({
+        sources = distinct,
+        at = 0,
+        sliceMs = distinct[1].sliceMs,
+        defaultWaitMs = distinct[1].defaultWaitMs,
+    } as RoundRobin, RoundRobinMT
     ) as Source
 end
 

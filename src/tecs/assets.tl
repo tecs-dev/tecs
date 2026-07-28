@@ -335,16 +335,13 @@ end
 function assets.loadSound(path: string, mode: string, streamMs: integer): Handle
     filesystem.note(path, "sound")
     if not sdl3mixer.init() then
-        local failed = setmetatable(
-            {
-                kind = "sound",
-                status = "failed",
-                path = path,
-                _shares = 1,
-                error = "cannot load " .. path,
-            } as Handle,
-            HandleMT
-        )
+        local failed = setmetatable({
+            kind = "sound",
+            status = "failed",
+            path = path,
+            _shares = 1,
+            error = "cannot load " .. path,
+        } as Handle, HandleMT)
         return failed
     end
     local handle = setmetatable({kind = "sound", status = "loading", path = path} as Handle, HandleMT)
@@ -538,13 +535,11 @@ function assets.batch<T>(finished: function(key: T, handle: Handle)): Batch<T>
     if finished == nil then
         error("tecs: a batch needs something to hand finished loads to", 2)
     end
-    return setmetatable(
-        {
-            _finished = finished,
-            _handles = {},
-            _keys = {},
-        } as Batch<T>,
-        BatchMT as metatable<Batch<T>>
+    return setmetatable({
+        _finished = finished,
+        _handles = {},
+        _keys = {},
+    } as Batch<T>, BatchMT as metatable<Batch<T>>
     )
 end
 

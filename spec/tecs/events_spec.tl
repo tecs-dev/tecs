@@ -490,17 +490,15 @@ describe(
                             metamethod __call: function(self: FFIReservedField, value: integer): FFIReservedField
                         end
 
-                        assert.has_error(
-                            function()
-                                tecs.newFFIEvent(
-                                    FFIReservedField,
-                                    {
-                                        {"typeId", "int32_t"},
-                                        {"value", "int32_t"},
-                                    }
-                                )
-                            end,
-                            "Field #1: 'typeId' is reserved and must not be specified manually"
+                        assert.has_error(function()
+                            tecs.newFFIEvent(
+                                FFIReservedField,
+                                {
+                                    {"typeId", "int32_t"},
+                                    {"value", "int32_t"},
+                                }
+                            )
+                        end, "Field #1: 'typeId' is reserved and must not be specified manually"
                         )
 
                         luassert.is_nil(

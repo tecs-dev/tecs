@@ -122,18 +122,15 @@ function pool.newTablePool(opts?: TablePoolOpts): TablePool
     local maxSize = opts and opts.maxSize or DEFAULT_MAX_SIZE
     local arrayHint = opts and opts.arrayHint or 0
     local hashHint = opts and opts.hashHint or 0
-    local p: TablePool = setmetatable(
-        {
-            _stack = table_new(maxSize, 0),
-            _size = 0,
-            _maxSize = maxSize,
-            _arrayHint = arrayHint,
-            _hashHint = hashHint,
-            _clearOnAcquire = clearOn == "acquire",
-            _clearOnRelease = clearOn == "release",
-        },
-        TABLE_POOL_MT
-    )
+    local p: TablePool = setmetatable({
+        _stack = table_new(maxSize, 0),
+        _size = 0,
+        _maxSize = maxSize,
+        _arrayHint = arrayHint,
+        _hashHint = hashHint,
+        _clearOnAcquire = clearOn == "acquire",
+        _clearOnRelease = clearOn == "release",
+    }, TABLE_POOL_MT)
     return p
 end
 

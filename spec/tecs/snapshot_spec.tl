@@ -788,15 +788,12 @@ describe(
             function()
                 local world = tecs.newWorld()
 
-                luassert.has_error(
-                    function()
-                        world:addSnapshotHandler({
-                            name = "",
-                            save = function(_world: tecs.World): any return true end,
-                        })
-                    end,
-                    "snapshot handler requires a non-empty name"
-                )
+                luassert.has_error(function()
+                    world:addSnapshotHandler({
+                        name = "",
+                        save = function(_world: tecs.World): any return true end,
+                    })
+                end, "snapshot handler requires a non-empty name")
             end
         )
 

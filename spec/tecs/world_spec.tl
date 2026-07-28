@@ -292,9 +292,8 @@ describe(
                         w2:commit()
                         luassert.not_equals(stale, fresh)
 
-                        luassert.has_error(
-                            function() w2:set(stale, PosComponent(9, 9)) end, "Entity ID not found: " .. stale
-                        )
+                        luassert.has_error(function() w2:set(stale, PosComponent(9, 9)) end, "Entity ID not found: "
+                            .. stale)
                         luassert.equals(
                             5,
                             (w2:get(fresh, PosComponent) as TestHelpers.Pos).x,
@@ -345,16 +344,13 @@ describe(
                         w2:despawn(a)
                         w2:commit()
 
-                        w2:batchSpawnAt(
-                            {a},
-                            {PosComponent},
-                            function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _n: integer)
-                                local ps = arch:getMut(PosComponent)
-                                for i = startRow, lastRow do
-                                    ps[i] = PosComponent(9, 9)
-                                end
+                        w2:batchSpawnAt({a}, {PosComponent},
+                        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _n: integer)
+                            local ps = arch:getMut(PosComponent)
+                            for i = startRow, lastRow do
+                                ps[i] = PosComponent(9, 9)
                             end
-                        )
+                        end)
                         w2:commit()
 
                         local b = w2:spawn(PosComponent(2, 2))
@@ -645,10 +641,10 @@ describe(
                     function()
                         local w2 = tecs.newWorld()
 
-                        luassert.error_matches(
-                            function() w2:set(12345, tecs.builtins.Name("TestEntity")) end,
-                            "Entity ID not found: 12345",
-                            "Should fail when adding component to an unknown entity"
+                        luassert.error_matches(function()
+                            w2:set(12345, tecs.builtins.Name("TestEntity"))
+                        end, "Entity ID not found: 12345",
+                        "Should fail when adding component to an unknown entity"
                         )
                     end
                 )

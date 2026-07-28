@@ -715,16 +715,13 @@ local function newTarget(component: Component, fields: {string}, mode?: TargetMo
     for i = 1, #fields do
         parts = parts .. "." .. fields[i]
     end
-    local t: TargetImpl = setmetatable(
-        {
-            id = id or parts,
-            component = component,
-            componentName = component.componentName,
-            fields = fields,
-            mode = mode or (#fields == 2 and "field2" or "field"),
-        },
-        TARGET_MT
-    )
+    local t: TargetImpl = setmetatable({
+        id = id or parts,
+        component = component,
+        componentName = component.componentName,
+        fields = fields,
+        mode = mode or (#fields == 2 and "field2" or "field"),
+    }, TARGET_MT)
     t.init = function(
         world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
     ): (number, number, number, number, number, number, number, number)
@@ -1074,18 +1071,16 @@ function tweeneval.deserializeTimeline(data: {string: any}): TimelineImpl
             }
         end
     end
-    return setmetatable(
-        {
-            slots = slots,
-            runs = runs,
-            emits = data.emits as {EmitSlot},
-            totalDuration = (data.totalDuration as number) or 0,
-            stateSize = (data.stateSize as integer) or #slots,
-            channel = data.channel as string,
-            presetName = data.presetName as string,
-            pinned = data.pinned == true,
-        } as TimelineImpl,
-        TIMELINE_MT
+    return setmetatable({
+        slots = slots,
+        runs = runs,
+        emits = data.emits as {EmitSlot},
+        totalDuration = (data.totalDuration as number) or 0,
+        stateSize = (data.stateSize as integer) or #slots,
+        channel = data.channel as string,
+        presetName = data.presetName as string,
+        pinned = data.pinned == true,
+    } as TimelineImpl, TIMELINE_MT
     )
 end
 

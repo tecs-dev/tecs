@@ -106,10 +106,9 @@ describe(
                         local v1 = sequence.define(
                             name,
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(2), sequence.call("spec.noop")},
-                                    {sequence.waitSteps(6), sequence.call("spec.noop")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(2), sequence.call("spec.noop")}, {
+                                    sequence.waitSteps(6), sequence.call("spec.noop")
+                                }),
                             }
                         )
                         sequence.play(world, v1)
@@ -263,10 +262,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(1), sequence.call("spec.count")},
-                                    {sequence.waitSteps(1), sequence.call("spec.count")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(1), sequence.call("spec.count")}, {
+                                    sequence.waitSteps(1), sequence.call("spec.count")
+                                }),
                             },
                             {clock = "frame"}
                         )
@@ -569,10 +567,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(3), sequence.call("spec.a")},
-                                    {sequence.waitSteps(1), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(3), sequence.call("spec.a")}, {
+                                    sequence.waitSteps(1), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -601,8 +598,8 @@ describe(
                         sequence.play(world, prog)
 
                         stepWorld(world, 1)
-                        luassert.same(
-                            {"a", "b", "done"}, order, "blocks run in fork order, and the join resumes in the same step"
+                        luassert.same({"a", "b", "done"}, order,
+                        "blocks run in fork order, and the join resumes in the same step"
                         )
                     end
                 )
@@ -613,10 +610,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(4), sequence.call("spec.a")},
-                                    {sequence.waitSteps(2), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(4), sequence.call("spec.a")}, {
+                                    sequence.waitSteps(2), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -694,13 +690,11 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {
-                                        sequence.fork({sequence.waitSteps(2), sequence.call("spec.a")}),
-                                        sequence.waitSteps(3),
-                                        sequence.call("spec.b"),
-                                    },
-                                    {sequence.waitSteps(3), sequence.call("spec.c")}
+                                sequence.parallel({
+                                    sequence.fork({sequence.waitSteps(2), sequence.call("spec.a")}),
+                                    sequence.waitSteps(3),
+                                    sequence.call("spec.b"),
+                                }, {sequence.waitSteps(3), sequence.call("spec.c")}
                                 ),
                                 sequence.call("spec.done"),
                             }
@@ -724,10 +718,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(3), sequence.call("spec.a")},
-                                    {sequence.waitSteps(3), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(3), sequence.call("spec.a")}, {
+                                    sequence.waitSteps(3), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -753,10 +746,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.call("spec.selfCancel"), sequence.call("spec.a")},
-                                    {sequence.waitSteps(2), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.call("spec.selfCancel"), sequence.call("spec.a")}, {
+                                    sequence.waitSteps(2), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -775,9 +767,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.call("spec.boom")}, {sequence.waitSteps(3), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.call("spec.boom")}, {
+                                    sequence.waitSteps(3), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -826,10 +818,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(2), sequence.call("spec.a")},
-                                    {sequence.waitSteps(2), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(2), sequence.call("spec.a")}, {
+                                    sequence.waitSteps(2), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -852,10 +843,9 @@ describe(
                         local prog = sequence.define(
                             uniqueName(),
                             {
-                                sequence.parallel(
-                                    {sequence.waitSteps(3), sequence.call("spec.a")},
-                                    {sequence.waitSteps(5), sequence.call("spec.b")}
-                                ),
+                                sequence.parallel({sequence.waitSteps(3), sequence.call("spec.a")}, {
+                                    sequence.waitSteps(5), sequence.call("spec.b")
+                                }),
                                 sequence.call("spec.done"),
                             }
                         )
@@ -2338,11 +2328,9 @@ describe(
                     "repeats a nested run for its pass count",
                     function()
                         local entity <const> = start({
-                            sequence.tweenRun(
-                                {
-                                    sequence.tweenAdjust(0.25, "linear", "transform.x", 10),
-                                },
-                                {mode = "loop", count = 3}
+                            sequence.tweenRun({
+                                sequence.tweenAdjust(0.25, "linear", "transform.x", 10),
+                            }, {mode = "loop", count = 3}
                             ),
                         })
                         for _ = 1, 50 do
@@ -2355,18 +2343,12 @@ describe(
                 it(
                     "takes speed and delay from params",
                     function()
-                        local slow <const> = start(
-                            {
-                                sequence.tweenTo(1.0, "linear", "transform.x", 100),
-                            },
-                            {speed = 0.5}
-                        )
-                        local late <const> = start(
-                            {
-                                sequence.tweenTo(1.0, "linear", "transform.x", 100),
-                            },
-                            {delay = 0.5}
-                        )
+                        local slow <const> = start({
+                            sequence.tweenTo(1.0, "linear", "transform.x", 100),
+                        }, {speed = 0.5})
+                        local late <const> = start({
+                            sequence.tweenTo(1.0, "linear", "transform.x", 100),
+                        }, {delay = 0.5})
 
                         for _ = 1, 30 do
                             world:update(1 / 60)
@@ -2514,12 +2496,9 @@ describe(
                                     sequence.tweenAdjust(0.2, "linear", "transform.y", 10)
                                 ),
                                 sequence.tweenEmit("arrived"),
-                                sequence.tweenRun(
-                                    {
-                                        sequence.tweenTo(0.1, "linear", sequence.target.field(Transform, "scaleX"), 2),
-                                    },
-                                    {mode = "loop", count = 2}
-                                ),
+                                sequence.tweenRun({
+                                    sequence.tweenTo(0.1, "linear", sequence.target.field(Transform, "scaleX"), 2),
+                                }, {mode = "loop", count = 2}),
                             }
                         )
                         local seen: {string} = {}

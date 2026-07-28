@@ -625,15 +625,12 @@ function Runner:cancel(future: Future<any>)
     worker:send({kind = "kill", id = entry.id, force = true})
 end
 
-local runner <const> = setmetatable(
-    {
-        -- Both live here rather than in `Future`, which is what lets a child
-        -- process keep a longer default than a decode without a second convention.
-        sliceMs = SLICE_MS,
-        defaultWaitMs = DEFAULT_WAIT_MS,
-    } as Runner,
-    RunnerMT
-)
+local runner <const> = setmetatable({
+    -- Both live here rather than in `Future`, which is what lets a child
+    -- process keep a longer default than a decode without a second convention.
+    sliceMs = SLICE_MS,
+    defaultWaitMs = DEFAULT_WAIT_MS,
+} as Runner, RunnerMT)
 
 local source <const> = runner as Future.Source
 
@@ -660,16 +657,13 @@ function proc.run(options: Options): Future<Result>
     local entry: Entry = {
         id = id,
         future = future,
-        result = setmetatable(
-            {
-                args = options.args,
-                pid = 0,
-                exitCode = 0,
-                output = "",
-                errorOutput = "",
-            } as Result,
-            ResultMT
-        ),
+        result = setmetatable({
+            args = options.args,
+            pid = 0,
+            exitCode = 0,
+            output = "",
+            errorOutput = "",
+        } as Result, ResultMT),
     }
     pending[id] = entry
     byFuture[future] = entry
