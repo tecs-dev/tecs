@@ -79,26 +79,50 @@ PREAMBLE
     # here rather than left to mislead. The module heading and its anchor go
     # with it, since the preamble already says what the page is.
     #
-    # `v-pre` on the signature blocks is not decoration. VitePress compiles a
-    # page as a Vue template, and `newFFIEvent` takes `{{string, string}}`,
-    # which Vue reads as an interpolation. Inside a code element `v-pre` stops
-    # that; inline code gets the same treatment from a markdown-it rule in the
-    # site config, which raw HTML never reaches. Prose gets neither, and the
-    # `@param` on `newFFIEvent` writes `{{"name", "type"}, ...}` in plain
-    # words, which fails the build outright: Vue looks for the closing `}}`
-    # and reaches the end of the page without finding one. The awk below wraps
-    # a bare `{{` in `v-pre` so Vue reads it as two characters. An HTML entity
-    # would not do: markdown-it decodes it back to a brace before Vue ever
-    # sees the page. It tracks backticks because inline code is already
-    # covered, and wrapping there would print the span rather than hide it.
+    # Tealdoc writes signatures as raw HTML code blocks so it can put links
+    # inside them. The site wants actual Markdown fences: they get Teal syntax
+    # highlighting, keep braces away from Vue interpolation, and remain useful
+    # when the page is read as plain Markdown. The awk below changes each
+    # signature to a `teal` fence, drops links that cannot exist inside a code
+    # fence, and decodes the HTML entities tealdoc escaped for its old block.
+    #
+    # Prose still needs the `v-pre` guard. The `@param` on `newFFIEvent` writes
+    # `{{"name", "type"}, ...}` in plain words, which Vue otherwise reads as
+    # an interpolation. Backtick spans already receive the same protection
+    # from the site's Markdown rule, so only bare braces are wrapped here.
     sed -e 's/tecs\.init\./tecs./g' \
-        -e 's|^<pre><code>|<pre><code v-pre>|' \
         -e '/^<a id="\$tecs\.init"><\/a>$/d' \
         -e '/^<a id="tecs\.init"><\/a>$/d' \
         -e '/^# Module: tecs\.init$/d' \
         "$scratch/raw.md" |
         awk '
-            /^<pre><code/ { print; next }
+            function signature(line) {
+                gsub(/<[^>]+>/, "", line)
+                gsub(/&lt;/, "<", line)
+                gsub(/&gt;/, ">", line)
+                gsub(/&quot;/, "\"", line)
+                gsub(/&#39;/, sprintf("%c", 39), line)
+                gsub(/&amp;/, sprintf("%c", 38), line)
+                if (length(line) > 0) {
+                    print line
+                }
+            }
+            /^<pre><code[^>]*>/ {
+                in_signature = 1
+                sub(/^<pre><code[^>]*>/, "")
+                print "```teal"
+                signature($0)
+                next
+            }
+            in_signature && /^<\/code><\/pre>$/ {
+                print "```"
+                in_signature = 0
+                next
+            }
+            in_signature {
+                signature($0)
+                next
+            }
             {
                 out = ""
                 code = 0

@@ -19,239 +19,303 @@ its module and requiring `tecs` does not.
 
 <a id="tecs.Application"></a>
 ## tecs.Application
-<pre><code v-pre><a href="#tecs.Application">tecs.Application</a>: Application
-</code></pre>
+```teal
+tecs.Application: Application
+```
 
 The engine surface.
 <a id="tecs.Archetype"></a>
 ## tecs.Archetype
-<pre><code v-pre>type <a href="#tecs.Archetype">tecs.Archetype</a> = types.Archetype
-</code></pre>
+```teal
+type tecs.Archetype = types.Archetype
+```
 <a id="tecs.ArchetypeEntityObserver"></a>
 ## tecs.ArchetypeEntityObserver
-<pre><code v-pre>type <a href="#tecs.ArchetypeEntityObserver">tecs.ArchetypeEntityObserver</a> = types.ArchetypeEntityObserver
-</code></pre>
+```teal
+type tecs.ArchetypeEntityObserver = types.ArchetypeEntityObserver
+```
 <a id="tecs.Audio"></a>
 ## tecs.Audio
-<pre><code v-pre><a href="#tecs.Audio">tecs.Audio</a>: Audio
-</code></pre>
+```teal
+tecs.Audio: Audio
+```
 <a id="tecs.Bundle"></a>
 ## tecs.Bundle
-<pre><code v-pre>type <a href="#tecs.Bundle">tecs.Bundle</a> = types.Bundle
-</code></pre>
+```teal
+type tecs.Bundle = types.Bundle
+```
 <a id="tecs.BundleDef"></a>
 ## tecs.BundleDef
-<pre><code v-pre>type <a href="#tecs.BundleDef">tecs.BundleDef</a> = types.Bundle.Definition
-</code></pre>
+```teal
+type tecs.BundleDef = types.Bundle.Definition
+```
 <a id="tecs.Camera"></a>
 ## tecs.Camera
-<pre><code v-pre><a href="#tecs.Camera">tecs.Camera</a>: Camera
-</code></pre>
+```teal
+tecs.Camera: Camera
+```
 <a id="tecs.Component"></a>
 ## tecs.Component
-<pre><code v-pre>type <a href="#tecs.Component">tecs.Component</a> = types.components.Component
-</code></pre>
+```teal
+type tecs.Component = types.components.Component
+```
 <a id="tecs.ComponentOptions"></a>
 ## tecs.ComponentOptions
-<pre><code v-pre>type <a href="#tecs.ComponentOptions">tecs.ComponentOptions</a> = generic&lt;C&gt; types.components.ComponentOptions&lt;C&gt;
-</code></pre>
+```teal
+type tecs.ComponentOptions = generic<C> types.components.ComponentOptions<C>
+```
 #### Type Parameters
 
-- **`C`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>C</code> |  |  |
 
 <a id="tecs.Context"></a>
 ## tecs.Context
-<pre><code v-pre>type <a href="#tecs.Context">tecs.Context</a> = types.Context
-</code></pre>
+```teal
+type tecs.Context = types.Context
+```
 <a id="tecs.DEFAULT_MAX_ENTITIES"></a>
 ## tecs.DEFAULT_MAX_ENTITIES
-<pre><code v-pre><a href="#tecs.DEFAULT_MAX_ENTITIES">tecs.DEFAULT_MAX_ENTITIES</a>: integer
-</code></pre>
+```teal
+tecs.DEFAULT_MAX_ENTITIES: integer
+```
 
 Default `World.Config.maxEntities` when none is given (2^20).
 <a id="tecs.DoubleArray"></a>
 ## tecs.DoubleArray
-<pre><code v-pre>type <a href="#tecs.DoubleArray">tecs.DoubleArray</a> = types.DoubleArray
-</code></pre>
+```teal
+type tecs.DoubleArray = types.DoubleArray
+```
 <a id="tecs.Event"></a>
 ## tecs.Event
-<pre><code v-pre>type <a href="#tecs.Event">tecs.Event</a> = types.events.Event
-</code></pre>
+```teal
+type tecs.Event = types.events.Event
+```
 <a id="tecs.EventInit"></a>
 ## tecs.EventInit
-<pre><code v-pre>type <a href="#tecs.EventInit">tecs.EventInit</a> = types.events.EventInit
-</code></pre>
+```teal
+type tecs.EventInit = types.events.EventInit
+```
 <a id="tecs.EventListener"></a>
 ## tecs.EventListener
-<pre><code v-pre>type <a href="#tecs.EventListener">tecs.EventListener</a> = types.events.EventListener
-</code></pre>
+```teal
+type tecs.EventListener = types.events.EventListener
+```
 <a id="tecs.FFIComponentOptions"></a>
 ## tecs.FFIComponentOptions
-<pre><code v-pre>type <a href="#tecs.FFIComponentOptions">tecs.FFIComponentOptions</a> = generic&lt;C&gt; types.components.FFIComponentOptions&lt;C&gt;
-</code></pre>
+```teal
+type tecs.FFIComponentOptions = generic<C> types.components.FFIComponentOptions<C>
+```
 #### Type Parameters
 
-- **`C`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>C</code> |  |  |
 
 <a id="tecs.FFIRelationshipOptions"></a>
 ## tecs.FFIRelationshipOptions
-<pre><code v-pre>type <a href="#tecs.FFIRelationshipOptions">tecs.FFIRelationshipOptions</a> = generic&lt;R is Relationship&gt; types.components.FFIRelationshipOptions&lt;R&gt;
-</code></pre>
+```teal
+type tecs.FFIRelationshipOptions = generic<R is Relationship> types.components.FFIRelationshipOptions<R>
+```
 #### Type Parameters
 
-- **`R`** ( is `Relationship`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>R</code> | <code v-pre><a href="#tecs.Relationship">Relationship</a></code> |  |
 
 <a id="tecs.FixedOverload"></a>
 ## tecs.FixedOverload
-<pre><code v-pre>type <a href="#tecs.FixedOverload">tecs.FixedOverload</a> = types.FixedOverload
-</code></pre>
+```teal
+type tecs.FixedOverload = types.FixedOverload
+```
 <a id="tecs.Future"></a>
 ## tecs.Future
-<pre><code v-pre><a href="#tecs.Future">tecs.Future</a>: Future
-</code></pre>
+```teal
+tecs.Future: Future
+```
 <a id="tecs.Gamepad"></a>
 ## tecs.Gamepad
-<pre><code v-pre><a href="#tecs.Gamepad">tecs.Gamepad</a>: Gamepad
-</code></pre>
+```teal
+tecs.Gamepad: Gamepad
+```
 <a id="tecs.Input"></a>
 ## tecs.Input
-<pre><code v-pre><a href="#tecs.Input">tecs.Input</a>: Input
-</code></pre>
+```teal
+tecs.Input: Input
+```
 <a id="tecs.Key"></a>
 ## tecs.Key
-<pre><code v-pre>type <a href="#tecs.Key">tecs.Key</a> = generic&lt;T&gt; types.Context.Key&lt;T&gt;
-</code></pre>
+```teal
+type tecs.Key = generic<T> types.Context.Key<T>
+```
 #### Type Parameters
 
-- **`T`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>T</code> |  |  |
 
 <a id="tecs.MAX_ENTITIES"></a>
 ## tecs.MAX_ENTITIES
-<pre><code v-pre><a href="#tecs.MAX_ENTITIES">tecs.MAX_ENTITIES</a>: integer
-</code></pre>
+```teal
+tecs.MAX_ENTITIES: integer
+```
 
 Absolute ceiling for `World.Config.maxEntities` (2^22 - 1 usable
 slots; slot 0 is reserved by the entity-id format).
 <a id="tecs.MessageBus"></a>
 ## tecs.MessageBus
-<pre><code v-pre>type <a href="#tecs.MessageBus">tecs.MessageBus</a> = types.events.MessageBus
-</code></pre>
+```teal
+type tecs.MessageBus = types.events.MessageBus
+```
 <a id="tecs.Phase"></a>
 ## tecs.Phase
-<pre><code v-pre>type <a href="#tecs.Phase">tecs.Phase</a> = types.Phase
-</code></pre>
+```teal
+type tecs.Phase = types.Phase
+```
 <a id="tecs.Pipeline"></a>
 ## tecs.Pipeline
-<pre><code v-pre>type <a href="#tecs.Pipeline">tecs.Pipeline</a> = types.Pipeline
-</code></pre>
+```teal
+type tecs.Pipeline = types.Pipeline
+```
 <a id="tecs.Plugin"></a>
 ## tecs.Plugin
-<pre><code v-pre>type <a href="#tecs.Plugin">tecs.Plugin</a> = types.Plugin
-</code></pre>
+```teal
+type tecs.Plugin = types.Plugin
+```
 <a id="tecs.Query"></a>
 ## tecs.Query
-<pre><code v-pre>type <a href="#tecs.Query">tecs.Query</a> = types.Query
-</code></pre>
+```teal
+type tecs.Query = types.Query
+```
 <a id="tecs.QueryCursor"></a>
 ## tecs.QueryCursor
-<pre><code v-pre>type <a href="#tecs.QueryCursor">tecs.QueryCursor</a> = types.Query.Cursor
-</code></pre>
+```teal
+type tecs.QueryCursor = types.Query.Cursor
+```
 <a id="tecs.QueryDescriptor"></a>
 ## tecs.QueryDescriptor
-<pre><code v-pre>type <a href="#tecs.QueryDescriptor">tecs.QueryDescriptor</a> = types.Query.Descriptor
-</code></pre>
+```teal
+type tecs.QueryDescriptor = types.Query.Descriptor
+```
 <a id="tecs.Relationship"></a>
 ## tecs.Relationship
-<pre><code v-pre>type <a href="#tecs.Relationship">tecs.Relationship</a> = types.components.Relationship
-</code></pre>
+```teal
+type tecs.Relationship = types.components.Relationship
+```
 <a id="tecs.RelationshipOptions"></a>
 ## tecs.RelationshipOptions
-<pre><code v-pre>type <a href="#tecs.RelationshipOptions">tecs.RelationshipOptions</a> = generic&lt;R is Relationship&gt; types.components.RelationshipOptions&lt;R&gt;
-</code></pre>
+```teal
+type tecs.RelationshipOptions = generic<R is Relationship> types.components.RelationshipOptions<R>
+```
 #### Type Parameters
 
-- **`R`** ( is `Relationship`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>R</code> | <code v-pre><a href="#tecs.Relationship">Relationship</a></code> |  |
 
 <a id="tecs.Renderer"></a>
 ## tecs.Renderer
-<pre><code v-pre><a href="#tecs.Renderer">tecs.Renderer</a>: Renderer
-</code></pre>
+```teal
+tecs.Renderer: Renderer
+```
 <a id="tecs.ScalarComponent"></a>
 ## tecs.ScalarComponent
-<pre><code v-pre>type <a href="#tecs.ScalarComponent">tecs.ScalarComponent</a> = generic&lt;T&gt; types.components.ScalarComponent&lt;T&gt;
-</code></pre>
+```teal
+type tecs.ScalarComponent = generic<T> types.components.ScalarComponent<T>
+```
 #### Type Parameters
 
-- **`T`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>T</code> |  |  |
 
 <a id="tecs.ScalarComponentOptions"></a>
 ## tecs.ScalarComponentOptions
-<pre><code v-pre>type <a href="#tecs.ScalarComponentOptions">tecs.ScalarComponentOptions</a> = generic&lt;T&gt; types.components.ScalarComponentOptions&lt;T&gt;
-</code></pre>
+```teal
+type tecs.ScalarComponentOptions = generic<T> types.components.ScalarComponentOptions<T>
+```
 #### Type Parameters
 
-- **`T`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>T</code> |  |  |
 
 <a id="tecs.Snapshot"></a>
 ## tecs.Snapshot
-<pre><code v-pre>type <a href="#tecs.Snapshot">tecs.Snapshot</a> = types.World.Snapshot
-</code></pre>
+```teal
+type tecs.Snapshot = types.World.Snapshot
+```
 <a id="tecs.SnapshotComponentTableEntry"></a>
 ## tecs.SnapshotComponentTableEntry
-<pre><code v-pre>type <a href="#tecs.SnapshotComponentTableEntry">tecs.SnapshotComponentTableEntry</a> = types.World.SnapshotComponentTableEntry
-</code></pre>
+```teal
+type tecs.SnapshotComponentTableEntry = types.World.SnapshotComponentTableEntry
+```
 <a id="tecs.SnapshotHandler"></a>
 ## tecs.SnapshotHandler
-<pre><code v-pre>type <a href="#tecs.SnapshotHandler">tecs.SnapshotHandler</a> = types.World.SnapshotHandler
-</code></pre>
+```teal
+type tecs.SnapshotHandler = types.World.SnapshotHandler
+```
 <a id="tecs.SnapshotOptions"></a>
 ## tecs.SnapshotOptions
-<pre><code v-pre>type <a href="#tecs.SnapshotOptions">tecs.SnapshotOptions</a> = types.World.SnapshotOptions
-</code></pre>
+```teal
+type tecs.SnapshotOptions = types.World.SnapshotOptions
+```
 <a id="tecs.SnapshotOutput"></a>
 ## tecs.SnapshotOutput
-<pre><code v-pre>type <a href="#tecs.SnapshotOutput">tecs.SnapshotOutput</a> = types.World.SnapshotOutput
-</code></pre>
+```teal
+type tecs.SnapshotOutput = types.World.SnapshotOutput
+```
 <a id="tecs.SnapshotPrelude"></a>
 ## tecs.SnapshotPrelude
-<pre><code v-pre>type <a href="#tecs.SnapshotPrelude">tecs.SnapshotPrelude</a> = types.World.SnapshotPrelude
-</code></pre>
+```teal
+type tecs.SnapshotPrelude = types.World.SnapshotPrelude
+```
 <a id="tecs.StatePolicy"></a>
 ## tecs.StatePolicy
-<pre><code v-pre>type <a href="#tecs.StatePolicy">tecs.StatePolicy</a> = types.StatePolicy
-</code></pre>
+```teal
+type tecs.StatePolicy = types.StatePolicy
+```
 <a id="tecs.Stats"></a>
 ## tecs.Stats
-<pre><code v-pre>type <a href="#tecs.Stats">tecs.Stats</a> = types.World.Stats
-</code></pre>
+```teal
+type tecs.Stats = types.World.Stats
+```
 <a id="tecs.System"></a>
 ## tecs.System
-<pre><code v-pre>type <a href="#tecs.System">tecs.System</a> = types.System
-</code></pre>
+```teal
+type tecs.System = types.System
+```
 <a id="tecs.SystemConfig"></a>
 ## tecs.SystemConfig
-<pre><code v-pre>type <a href="#tecs.SystemConfig">tecs.SystemConfig</a> = types.SystemConfig
-</code></pre>
+```teal
+type tecs.SystemConfig = types.SystemConfig
+```
 <a id="tecs.TagComponentOptions"></a>
 ## tecs.TagComponentOptions
-<pre><code v-pre>type <a href="#tecs.TagComponentOptions">tecs.TagComponentOptions</a> = types.components.TagComponentOptions
-</code></pre>
+```teal
+type tecs.TagComponentOptions = types.components.TagComponentOptions
+```
 <a id="tecs.Window"></a>
 ## tecs.Window
-<pre><code v-pre><a href="#tecs.Window">tecs.Window</a>: Window
-</code></pre>
+```teal
+tecs.Window: Window
+```
 <a id="tecs.World"></a>
 ## tecs.World
-<pre><code v-pre>type <a href="#tecs.World">tecs.World</a> = types.World
-</code></pre>
+```teal
+type tecs.World = types.World
+```
 <a id="tecs.animation"></a>
 ## tecs.animation
-<pre><code v-pre><a href="#tecs.animation">tecs.animation</a>: animation
-</code></pre>
+```teal
+tecs.animation: animation
+```
 <a id="tecs.application"></a>
 ## tecs.application
-<pre><code v-pre>function <a href="#tecs.application">tecs.application</a>(config: Application.Config): Application
-</code></pre>
+```teal
+function tecs.application(config: Application.Config): Application
+```
 
 Builds the application an entry file returns.
 
@@ -260,243 +324,320 @@ Not a function that runs until done: an entry file ends with
 because a platform that never hands control back has no loop to block in.
 #### Parameters
 
-- **`config`** (`Application.Config`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.Application">Application</a>.Config</code> | <code v-pre>config</code> |  |
 
 #### Returns
 
-1. (`Application`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Application">Application</a></code> |  |
 
 <a id="tecs.assets"></a>
 ## tecs.assets
-<pre><code v-pre><a href="#tecs.assets">tecs.assets</a>: assets
-</code></pre>
+```teal
+tecs.assets: assets
+```
 <a id="tecs.audio"></a>
 ## tecs.audio
-<pre><code v-pre><a href="#tecs.audio">tecs.audio</a>: platformAudio
-</code></pre>
+```teal
+tecs.audio: platformAudio
+```
 <a id="tecs.builtins"></a>
 ## tecs.builtins
-<pre><code v-pre><a href="#tecs.builtins">tecs.builtins</a>: builtins
-</code></pre>
+```teal
+tecs.builtins: builtins
+```
 <a id="tecs.capabilities"></a>
 ## tecs.capabilities
-<pre><code v-pre><a href="#tecs.capabilities">tecs.capabilities</a>: capabilities
-</code></pre>
+```teal
+tecs.capabilities: capabilities
+```
 <a id="tecs.clipboard"></a>
 ## tecs.clipboard
-<pre><code v-pre><a href="#tecs.clipboard">tecs.clipboard</a>: clipboard
-</code></pre>
+```teal
+tecs.clipboard: clipboard
+```
 <a id="tecs.clock"></a>
 ## tecs.clock
-<pre><code v-pre><a href="#tecs.clock">tecs.clock</a>: clock
-</code></pre>
+```teal
+tecs.clock: clock
+```
 <a id="tecs.componentByName"></a>
 ## tecs.componentByName
-<pre><code v-pre>function <a href="#tecs.componentByName">tecs.componentByName</a>(string): Component
-</code></pre>
+```teal
+function tecs.componentByName(string): Component
+```
 
 Look up a registered component by name.
 #### Parameters
 
--  (`string`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>string</code> |  |  |
 
 #### Returns
 
-1. (`Component`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Component">Component</a></code> |  |
 
 <a id="tecs.components"></a>
 ## tecs.components
-<pre><code v-pre><a href="#tecs.components">tecs.components</a>: components
-</code></pre>
+```teal
+tecs.components: components
+```
 <a id="tecs.compress"></a>
 ## tecs.compress
-<pre><code v-pre><a href="#tecs.compress">tecs.compress</a>: compress
-</code></pre>
+```teal
+tecs.compress: compress
+```
 <a id="tecs.events"></a>
 ## tecs.events
-<pre><code v-pre><a href="#tecs.events">tecs.events</a>: events
-</code></pre>
+```teal
+tecs.events: events
+```
 <a id="tecs.filesystem"></a>
 ## tecs.filesystem
-<pre><code v-pre><a href="#tecs.filesystem">tecs.filesystem</a>: filesystem
-</code></pre>
+```teal
+tecs.filesystem: filesystem
+```
 <a id="tecs.findKey"></a>
 ## tecs.findKey
-<pre><code v-pre>function <a href="#tecs.findKey">tecs.findKey</a>&lt;T&gt;(name: string): Key&lt;T&gt; | nil
-</code></pre>
+```teal
+function tecs.findKey<T>(name: string): Key<T> | nil
+```
 
 Find a named key created by `newKey`. Returns nil when unknown.
 
 #### Type Parameters
 
-- **`T`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>T</code> |  |  |
 
 #### Parameters
 
-- **`name`** (`string`) — The name the key was created with.
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>string</code> | <code v-pre>name</code> | The name the key was created with. |
 
 #### Returns
 
-1. (`Key&lt;T&gt; | nil`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Key">Key</a>&lt;T&gt; \| nil</code> |  |
 
 <a id="tecs.getComponentById"></a>
 ## tecs.getComponentById
-<pre><code v-pre>function <a href="#tecs.getComponentById">tecs.getComponentById</a>(integer): Component
-</code></pre>
+```teal
+function tecs.getComponentById(integer): Component
+```
 
 Look up a registered component by numeric ID.
 #### Parameters
 
--  (`integer`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>integer</code> |  |  |
 
 #### Returns
 
-1. (`Component`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Component">Component</a></code> |  |
 
 <a id="tecs.hash"></a>
 ## tecs.hash
-<pre><code v-pre><a href="#tecs.hash">tecs.hash</a>: hash
-</code></pre>
+```teal
+tecs.hash: hash
+```
 <a id="tecs.http"></a>
 ## tecs.http
-<pre><code v-pre><a href="#tecs.http">tecs.http</a>: http
-</code></pre>
+```teal
+tecs.http: http
+```
 <a id="tecs.json"></a>
 ## tecs.json
-<pre><code v-pre><a href="#tecs.json">tecs.json</a>: json
-</code></pre>
+```teal
+tecs.json: json
+```
 <a id="tecs.layers"></a>
 ## tecs.layers
-<pre><code v-pre><a href="#tecs.layers">tecs.layers</a>: layers
-</code></pre>
+```teal
+tecs.layers: layers
+```
 <a id="tecs.listKeys"></a>
 ## tecs.listKeys
-<pre><code v-pre>function <a href="#tecs.listKeys">tecs.listKeys</a>(): {string : integer}
-</code></pre>
+```teal
+function tecs.listKeys(): {string : integer}
+```
 
 All named keys, as a fresh name -> numeric key id table.
 #### Returns
 
-1. (`{string : integer}`)
+| Type | Description |
+| --- | --- |
+| <code v-pre>{string : integer}</code> |  |
 
 <a id="tecs.log"></a>
 ## tecs.log
-<pre><code v-pre><a href="#tecs.log">tecs.log</a>: log
-</code></pre>
+```teal
+tecs.log: log
+```
 <a id="tecs.materials"></a>
 ## tecs.materials
-<pre><code v-pre><a href="#tecs.materials">tecs.materials</a>: materials
-</code></pre>
+```teal
+tecs.materials: materials
+```
 <a id="tecs.mcp"></a>
 ## tecs.mcp
-<pre><code v-pre><a href="#tecs.mcp">tecs.mcp</a>: mcp
-</code></pre>
+```teal
+tecs.mcp: mcp
+```
 <a id="tecs.net"></a>
 ## tecs.net
-<pre><code v-pre><a href="#tecs.net">tecs.net</a>: net
-</code></pre>
+```teal
+tecs.net: net
+```
 <a id="tecs.newComponent"></a>
 ## tecs.newComponent
-<pre><code v-pre>function <a href="#tecs.newComponent">tecs.newComponent</a>&lt;C is Component&gt;(ComponentOptions&lt;C&gt;): C
-</code></pre>
+```teal
+function tecs.newComponent<C is Component>(ComponentOptions<C>): C
+```
 
 Creates and registers a new table component. See `tecs.ComponentOptions` and the component docs for the
 shared `fields` / `defaults` / `init` / `.new` model.
 #### Type Parameters
 
-- **`C`** ( is `Component`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>C</code> | <code v-pre><a href="#tecs.Component">Component</a></code> |  |
 
 #### Parameters
 
--  (`ComponentOptions&lt;C&gt;`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.ComponentOptions">ComponentOptions</a>&lt;C&gt;</code> |  |  |
 
 #### Returns
 
-1. (`C`)
+| Type | Description |
+| --- | --- |
+| <code v-pre>C</code> |  |
 
 <a id="tecs.newContext"></a>
 ## tecs.newContext
-<pre><code v-pre>function <a href="#tecs.newContext">tecs.newContext</a>(): Context
-</code></pre>
+```teal
+function tecs.newContext(): Context
+```
 
 Create a new Context instance.
 #### Returns
 
-1. (`Context`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Context">Context</a></code> |  |
 
 <a id="tecs.newEvent"></a>
 ## tecs.newEvent
-<pre><code v-pre>function <a href="#tecs.newEvent">tecs.newEvent</a>&lt;E is Event&gt;(event: E)
-</code></pre>
+```teal
+function tecs.newEvent<E is Event>(event: E)
+```
 
 Configure an event to have an appropriate __call based constructor.
 
 #### Type Parameters
 
-- **`E`** ( is `Event`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>E</code> | <code v-pre><a href="#tecs.Event">Event</a></code> |  |
 
 #### Parameters
 
-- **`event`** (`E`) — The event instance to configure.
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>E</code> | <code v-pre>event</code> | The event instance to configure. |
 
 <a id="tecs.newFFIComponent"></a>
 ## tecs.newFFIComponent
-<pre><code v-pre>function <a href="#tecs.newFFIComponent">tecs.newFFIComponent</a>&lt;C is Component&gt;(FFIComponentOptions&lt;C&gt;): C
-</code></pre>
+```teal
+function tecs.newFFIComponent<C is Component>(FFIComponentOptions<C>): C
+```
 
 Creates and registers an FFI-based component. Same constructor model
 as `newComponent`, but the base instance is an FFI struct.
 #### Type Parameters
 
-- **`C`** ( is `Component`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>C</code> | <code v-pre><a href="#tecs.Component">Component</a></code> |  |
 
 #### Parameters
 
--  (`FFIComponentOptions&lt;C&gt;`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.FFIComponentOptions">FFIComponentOptions</a>&lt;C&gt;</code> |  |  |
 
 #### Returns
 
-1. (`C`)
+| Type | Description |
+| --- | --- |
+| <code v-pre>C</code> |  |
 
 <a id="tecs.newFFIEvent"></a>
 ## tecs.newFFIEvent
-<pre><code v-pre>function <a href="#tecs.newFFIEvent">tecs.newFFIEvent</a>&lt;E is Event&gt;(event: E, fields: {{string, string}}, structName: string)
-</code></pre>
+```teal
+function tecs.newFFIEvent<E is Event>(event: E, fields: {{string, string}}, structName: string)
+```
 
 Configure an FFI event to have an appropriate __call based constructor.
 
 #### Type Parameters
 
-- **`E`** ( is `Event`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>E</code> | <code v-pre><a href="#tecs.Event">Event</a></code> |  |
 
 #### Parameters
 
-- **`event`** (`E`) — The event type to configure.
-- **`fields`** (`{{string, string}}`) — Field definitions in format <span v-pre>{{</span>"name", "type"}, ...}
-- **`structName`** (`string`) — Optional struct name (auto-generated if not provided)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>E</code> | <code v-pre>event</code> | The event type to configure. |
+| <code v-pre><span v-pre>{{</span>string, string}}</code> | <code v-pre>fields</code> | Field definitions in format <span v-pre>{{</span>"name", "type"}, ...} |
+| <code v-pre>string</code> | <code v-pre>structName</code> | Optional struct name (auto-generated if not provided) |
 
 <a id="tecs.newFFIRelationship"></a>
 ## tecs.newFFIRelationship
-<pre><code v-pre>function <a href="#tecs.newFFIRelationship">tecs.newFFIRelationship</a>&lt;R is Relationship&gt;(FFIRelationshipOptions&lt;R&gt;): R
-</code></pre>
+```teal
+function tecs.newFFIRelationship<R is Relationship>(FFIRelationshipOptions<R>): R
+```
 
 Create an FFI-backed relationship with data fields.
 #### Type Parameters
 
-- **`R`** ( is `Relationship`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>R</code> | <code v-pre><a href="#tecs.Relationship">Relationship</a></code> |  |
 
 #### Parameters
 
--  (`FFIRelationshipOptions&lt;R&gt;`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.FFIRelationshipOptions">FFIRelationshipOptions</a>&lt;R&gt;</code> |  |  |
 
 #### Returns
 
-1. (`R`)
+| Type | Description |
+| --- | --- |
+| <code v-pre>R</code> |  |
 
 <a id="tecs.newKey"></a>
 ## tecs.newKey
-<pre><code v-pre>function <a href="#tecs.newKey">tecs.newKey</a>&lt;T&gt;(name: string, forType: T): Key&lt;T&gt;
-</code></pre>
+```teal
+function tecs.newKey<T>(name: string, forType: T): Key<T>
+```
 
 Create a new typed configuration key for storing resources in a Context.
 
@@ -509,31 +650,41 @@ warning and stays invisible to name-based lookups.
 
 #### Type Parameters
 
-- **`T`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>T</code> |  |  |
 
 #### Parameters
 
-- **`name`** (`string`) — A stable, unique name for the key, e.g. "game.state".
-- **`forType`** (`T`) — Optional type parameter for type inference.
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>string</code> | <code v-pre>name</code> | A stable, unique name for the key, e.g. "game.state". |
+| <code v-pre>T</code> | <code v-pre>forType</code> | Optional type parameter for type inference. |
 
 #### Returns
 
-1. (`Key&lt;T&gt;`) — A new key that can be used to store values of type T.
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Key">Key</a>&lt;T&gt;</code> | A new key that can be used to store values of type T. |
 
 <a id="tecs.newMessageBus"></a>
 ## tecs.newMessageBus
-<pre><code v-pre>function <a href="#tecs.newMessageBus">tecs.newMessageBus</a>(): MessageBus
-</code></pre>
+```teal
+function tecs.newMessageBus(): MessageBus
+```
 
 Create a new address-based event message bus.
 #### Returns
 
-1. (`MessageBus`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.MessageBus">MessageBus</a></code> |  |
 
 <a id="tecs.newRelationship"></a>
 ## tecs.newRelationship
-<pre><code v-pre>function <a href="#tecs.newRelationship">tecs.newRelationship</a>&lt;R is Relationship&gt;(RelationshipOptions&lt;R&gt;): R
-</code></pre>
+```teal
+function tecs.newRelationship<R is Relationship>(RelationshipOptions<R>): R
+```
 
 Creates and registers a new relationship component. See the relationship
 docs for target/exclusive/sparse semantics. A target-only relationship
@@ -542,122 +693,160 @@ struct automatically; add `container`/`fields` for relationships that
 carry data.
 #### Type Parameters
 
-- **`R`** ( is `Relationship`)
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>R</code> | <code v-pre><a href="#tecs.Relationship">Relationship</a></code> |  |
 
 #### Parameters
 
--  (`RelationshipOptions&lt;R&gt;`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.RelationshipOptions">RelationshipOptions</a>&lt;R&gt;</code> |  |  |
 
 #### Returns
 
-1. (`R`)
+| Type | Description |
+| --- | --- |
+| <code v-pre>R</code> |  |
 
 <a id="tecs.newScalarComponent"></a>
 ## tecs.newScalarComponent
-<pre><code v-pre>function <a href="#tecs.newScalarComponent">tecs.newScalarComponent</a>&lt;T&gt;(ScalarComponentOptions&lt;T&gt;): types.components.ScalarComponent&lt;T&gt;
-</code></pre>
+```teal
+function tecs.newScalarComponent<T>(ScalarComponentOptions<T>): types.components.ScalarComponent<T>
+```
 
 Creates and registers a new scalar component.
 #### Type Parameters
 
-- **`T`**
+| Name | Constraint | Description |
+| --- | --- | --- |
+| <code v-pre>T</code> |  |  |
 
 #### Parameters
 
--  (`ScalarComponentOptions&lt;T&gt;`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.ScalarComponentOptions">ScalarComponentOptions</a>&lt;T&gt;</code> |  |  |
 
 #### Returns
 
-1. (`types.components.ScalarComponent&lt;T&gt;`)
+| Type | Description |
+| --- | --- |
+| <code v-pre>types.components.ScalarComponent&lt;T&gt;</code> |  |
 
 <a id="tecs.newTagComponent"></a>
 ## tecs.newTagComponent
-<pre><code v-pre>function <a href="#tecs.newTagComponent">tecs.newTagComponent</a>(TagComponentOptions): Component
-</code></pre>
+```teal
+function tecs.newTagComponent(TagComponentOptions): Component
+```
 
 Creates and registers a new tag component that uses bitset storage for efficiency.
 #### Parameters
 
--  (`TagComponentOptions`)
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre><a href="#tecs.TagComponentOptions">TagComponentOptions</a></code> |  |  |
 
 #### Returns
 
-1. (`Component`)
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.Component">Component</a></code> |  |
 
 <a id="tecs.newWorld"></a>
 ## tecs.newWorld
-<pre><code v-pre>function <a href="#tecs.newWorld">tecs.newWorld</a>(config: types.World.Config): World
-</code></pre>
+```teal
+function tecs.newWorld(config: types.World.Config): World
+```
 
 Create a new World.
 
 #### Parameters
 
-- **`config`** (`types.World.Config`) — Optional world configuration.
+| Type | Name | Description |
+| --- | --- | --- |
+| <code v-pre>types.World.Config</code> | <code v-pre>config</code> | Optional world configuration. |
 
 #### Returns
 
-1. (`World`) — the created World.
+| Type | Description |
+| --- | --- |
+| <code v-pre><a href="#tecs.World">World</a></code> | the created World. |
 
 <a id="tecs.particles"></a>
 ## tecs.particles
-<pre><code v-pre><a href="#tecs.particles">tecs.particles</a>: particles
-</code></pre>
+```teal
+tecs.particles: particles
+```
 <a id="tecs.paths"></a>
 ## tecs.paths
-<pre><code v-pre><a href="#tecs.paths">tecs.paths</a>: paths
-</code></pre>
+```teal
+tecs.paths: paths
+```
 <a id="tecs.phases"></a>
 ## tecs.phases
-<pre><code v-pre><a href="#tecs.phases">tecs.phases</a>: phases
-</code></pre>
+```teal
+tecs.phases: phases
+```
 <a id="tecs.physics"></a>
 ## tecs.physics
-<pre><code v-pre><a href="#tecs.physics">tecs.physics</a>: physics
-</code></pre>
+```teal
+tecs.physics: physics
+```
 <a id="tecs.proc"></a>
 ## tecs.proc
-<pre><code v-pre><a href="#tecs.proc">tecs.proc</a>: proc
-</code></pre>
+```teal
+tecs.proc: proc
+```
 <a id="tecs.random"></a>
 ## tecs.random
-<pre><code v-pre><a href="#tecs.random">tecs.random</a>: random
-</code></pre>
+```teal
+tecs.random: random
+```
 <a id="tecs.runif"></a>
 ## tecs.runif
-<pre><code v-pre><a href="#tecs.runif">tecs.runif</a>: runIfHelpers
-</code></pre>
+```teal
+tecs.runif: runIfHelpers
+```
 <a id="tecs.sensors"></a>
 ## tecs.sensors
-<pre><code v-pre><a href="#tecs.sensors">tecs.sensors</a>: sensors
-</code></pre>
+```teal
+tecs.sensors: sensors
+```
 <a id="tecs.sequence"></a>
 ## tecs.sequence
-<pre><code v-pre><a href="#tecs.sequence">tecs.sequence</a>: sequence
-</code></pre>
+```teal
+tecs.sequence: sequence
+```
 <a id="tecs.sheet"></a>
 ## tecs.sheet
-<pre><code v-pre><a href="#tecs.sheet">tecs.sheet</a>: sheet
-</code></pre>
+```teal
+tecs.sheet: sheet
+```
 <a id="tecs.system"></a>
 ## tecs.system
-<pre><code v-pre><a href="#tecs.system">tecs.system</a>: system
-</code></pre>
+```teal
+tecs.system: system
+```
 <a id="tecs.text"></a>
 ## tecs.text
-<pre><code v-pre><a href="#tecs.text">tecs.text</a>: text
-</code></pre>
+```teal
+tecs.text: text
+```
 <a id="tecs.version"></a>
 ## tecs.version
-<pre><code v-pre><a href="#tecs.version">tecs.version</a>: string
-</code></pre>
+```teal
+tecs.version: string
+```
 
 Version of this build.
 <a id="tecs.watch"></a>
 ## tecs.watch
-<pre><code v-pre><a href="#tecs.watch">tecs.watch</a>: watch
-</code></pre>
+```teal
+tecs.watch: watch
+```
 <a id="tecs.workers"></a>
 ## tecs.workers
-<pre><code v-pre><a href="#tecs.workers">tecs.workers</a>: workers
-</code></pre>
+```teal
+tecs.workers: workers
+```
