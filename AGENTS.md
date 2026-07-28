@@ -129,6 +129,38 @@ Not ported: shadows, post-processing, UI, tiled maps and multi-camera.
 - Avoid `any` unless the boundary is genuinely dynamic, for example generic JSON payloads.
 - Keep casts narrow and justified.
 
+### Binding a C library that calls back
+
+A C library that takes a function pointer is the one binding shape with a rule, and it is not
+obvious, so it is written here rather than learned twice.
+
+**A Lua function reached through `ffi.cast` cannot be entered from a compiled trace, and cannot be
+entered from a thread the VM never created.** The first raises; the second is undefined. Both are
+hazards of the callee, not the caller: calling _into_ a cast function pointer from Lua is fine and
+compiles fine. What breaks is C calling back while a trace is running, which is exactly what
+happens when the C call sits in a loop hot enough to compile.
+
+That is why the two places this tree already needs a callback are C rather than Lua, and each says
+so at the top of its file. `native/logsink.c` takes SDL's log output function because SDL logs from
+threads it created, the audio device thread and the async IO pool among them. `native/worker.c`
+owns the thread entry point for the same reason, and `src/tecs/workers.tl` states the rule from the
+other side: raw thread creation is deliberately not exposed, because a thread entry written in Lua
+is precisely that mistake. `physics/TaskPool.tl` takes its two callbacks from C through
+`tecsTaskPoolEnqueueCallback` rather than casting Lua ones.
+
+So, in order of preference:
+
+1. **Let the library write into memory instead.** Many callback APIs have a buffer or a queue form,
+   and it is worth looking for one before writing a callback at all.
+2. **Put the callback in C**, in `native/`, and hand results across a queue the Lua side drains.
+   This is what the three cases above do.
+3. **If a Lua callback is genuinely unavoidable**, keep the C call that triggers it off any path
+   that compiles, and say in a comment why it cannot compile. This is fragile: a loop that was cold
+   yesterday is hot after somebody calls it more often.
+
+There are currently no `ffi.cast` callbacks in Lua anywhere in `src/`. Adding the first one is a
+decision worth making deliberately.
+
 ### Testing
 
 - Add or update tests when changing behavior, fixing bugs or extending public APIs.
