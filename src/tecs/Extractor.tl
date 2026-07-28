@@ -363,7 +363,7 @@ local function writeRun(
     -- derived later because the sign that carries it is written here, so the
     -- count and the lane are right together or wrong together.
     local blended = 0
-    local transforms = archetype:get(components.Transform)
+    local transforms = archetype:get(ecs.builtins.Transform)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
     local materialColumn = archetype:get(components.Material)
@@ -1020,7 +1020,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         local dirty = relayout
             or run.moved
             or run.length ~= pending
-            or archetype:isComponentDirty(components.Transform)
+            or archetype:isComponentDirty(ecs.builtins.Transform)
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
@@ -1106,7 +1106,7 @@ end
 --- Collects lights from the world into the packet.
 local function syncLights(self: Extractor, packet: FramePacket)
     for archetype, length in self._lightSources:iter() do
-        local transforms = archetype:get(components.Transform)
+        local transforms = archetype:get(ecs.builtins.Transform)
         local sources = archetype:get(components.PointLight)
         for row = 1, length do
             local transform = transforms[row]
@@ -1161,14 +1161,14 @@ function Extractor:install(world: ecs.World, packet: FramePacket, published: fun
     -- pair: taken later, the two would be the same value and every frame would
     -- draw the entity where the step left it.
     local interpolated = world:query({
-        include = {components.Transform, components.PreviousTransform},
+        include = {ecs.builtins.Transform, components.PreviousTransform},
     })
     world:addSystem({
         name = "tecs.SnapshotTransforms",
         phase = ecs.phases.FixedFirst,
         run = function()
             for archetype, length in interpolated:iter() do
-                local transforms = archetype:get(components.Transform)
+                local transforms = archetype:get(ecs.builtins.Transform)
                 -- Mutable, because this writes every row it visits: the whole
                 -- column is what the next frame interpolates from.
                 local before = archetype:getMut(components.PreviousTransform)
@@ -1185,13 +1185,13 @@ function Extractor:install(world: ecs.World, packet: FramePacket, published: fun
 
     self._renderables = world:query({
         include = {
-            components.Transform,
+            ecs.builtins.Transform,
             components.Tint,
             components.Renderable,
         },
     })
     self._lightSources = world:query({
-        include = {components.Transform, components.PointLight},
+        include = {ecs.builtins.Transform, components.PointLight},
     })
 
     world:addSystem({

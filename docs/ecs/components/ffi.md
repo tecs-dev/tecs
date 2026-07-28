@@ -29,7 +29,7 @@ some other way (`Sprite` carries an interned image index, not a name), and the s
 registration. That bargain is worth taking for a component the renderer reads every frame and rarely worth it
 for one only game logic touches.
 
-See [components](/modules/components) for the per-component reference.
+See [components](/modules/gfx/) for the per-component reference.
 
 ## Basic usage
 

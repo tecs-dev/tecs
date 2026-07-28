@@ -109,7 +109,6 @@ export default defineConfig({
                     { text: "tecs.application", link: "/modules/application" },
                     { text: "tecs.assets", link: "/modules/assets" },
                     { text: "tecs.audio", link: "/modules/audio" },
-                    { text: "tecs.components", link: "/modules/components" },
                     { text: "tecs.data", link: "/modules/data" },
                     { text: "tecs.events", link: "/modules/events" },
                     {

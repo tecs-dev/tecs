@@ -23,6 +23,7 @@ local Texture = require("tecs.gpu.Texture")
 local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local components = require("tecs.components")
+local builtins = require("tecs.ecs").builtins
 local particles = require("tecs.gfx.particles")
 local sheet = require("tecs.gfx.sheet")
 local materials = require("tecs.gpu.materials")
@@ -31,7 +32,7 @@ local C = sdl.C
 local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform = components.Transform
+local Transform = builtins.Transform
 local Tint = components.Tint
 local Renderable = components.Renderable
 local ParticleEmitter = particles.ParticleEmitter

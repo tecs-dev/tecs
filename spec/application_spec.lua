@@ -14,6 +14,7 @@ local assets = require("tecs.assets")
 local events = require("tecs.platform.events")
 local phases = require("tecs.internal.phases")
 local components = require("tecs.components")
+local builtins = require("tecs.ecs").builtins
 local passscope = require("tecs.gpu.passscope")
 local ComputePass = require("tecs.gpu.ComputePass")
 local time = require("tecs.platform.time")
@@ -333,7 +334,7 @@ describe("Application", function()
         -- real work rather than returning early.
         local function scene(world)
             world:spawn(
-                components.Transform(32, 32, 0, 1, 0, 16, 16),
+                builtins.Transform(32, 32, 0, 1, 0, 16, 16),
                 components.Tint(1, 0, 0, 1),
                 components.Renderable()
             )
@@ -578,7 +579,7 @@ describe("Application", function()
                 debug = true,
                 plugin = function(world, self)
                     world:spawn(
-                        components.Transform(32, 32, 0, 1, 0, 16, 16),
+                        builtins.Transform(32, 32, 0, 1, 0, 16, 16),
                         components.Tint(1, 0, 0, 1),
                         components.Renderable()
                     )
@@ -820,7 +821,7 @@ describe("Application", function()
             local app = build({
                 plugin = function(world)
                     world:spawn(
-                        components.Transform(32, 32, 0, 1, 0, 16, 16),
+                        builtins.Transform(32, 32, 0, 1, 0, 16, 16),
                         components.Tint(1, 0, 0, 1),
                         components.Renderable()
                     )

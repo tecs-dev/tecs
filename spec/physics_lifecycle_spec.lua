@@ -13,9 +13,10 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
+local builtins = require("tecs.ecs").builtins
 local physics = require("tecs.physics")
 
-local Transform = components.Transform
+local Transform = builtins.Transform
 local Paused = tecs.ecs.builtins.Paused
 
 -- Every world built here, so teardown can shut all of them down. The

@@ -124,7 +124,7 @@ several and a program driving input has to advance exactly once per frame either
 display's rate rather than the simulation's.
 
 Rendering between two fixed steps is the same problem, and the engine answers it with a component rather than a
-system: an entity carrying `tecs.components.PreviousTransform` alongside `Transform` is drawn between the two.
+system: an entity carrying `tecs.gfx.PreviousTransform` alongside `Transform` is drawn between the two.
 `tecs.SnapshotTransforms` copies the current transform into it in `FixedFirst`, before anything in the step moves,
 and extraction blends them.
 

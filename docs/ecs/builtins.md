@@ -111,9 +111,9 @@ See [Relationships](/ecs/relationships/) for sparse storage and cascade delete i
 
 An entity's position, rotation, scale and layer, backed by an FFI struct.
 
-This is the transform the renderer reads: [`components`](/modules/components) re-exports this exact component
-as `tecs.components.Transform` rather than declaring one of its own, so the hierarchy, the sequencer and the
-extractor all move the same values. Positions are in world units, which are pixels with the origin at the top
+This is the transform the renderer reads. [`tecs.gfx`](/modules/gfx/) does not carry a second one and does
+not re-export this: a transform positions everything a world holds rather than only what draws, so the
+hierarchy, the sequencer, physics and the extractor all move this one. Positions are in world units, which are pixels with the origin at the top
 left, and lighting works in the same units.
 
 **Fields and defaults:**
@@ -198,7 +198,7 @@ transform.scaleY = 2
 
 An entity is drawn when it carries `Transform`, `Tint` and `Renderable`, which is the query the extractor
 matches renderables with. A `Transform` on its own is a position, which is what most entities in a world
-actually are. See [`components`](/modules/components).
+actually are. See [`components`](/modules/gfx/).
 
 ### RelativeTransform {#relativetransform}
 

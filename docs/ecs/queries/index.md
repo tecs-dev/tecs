@@ -11,7 +11,7 @@ Use queries to find entities with specific [components](/ecs/components/). Most 
 Queries are how the engine reaches the world too. `tecs.SyncRenderState` extracts a frame from
 `{Transform, Tint, Renderable}` and `{Transform, PointLight}`; the physics, animation and text plugins each hold
 their own. The examples below use those same engine components, from `tecs.ecs.builtins` and
-[`tecs.components`](/modules/components).
+[`tecs.gfx`](/modules/gfx/).
 
 ## World methods
 
@@ -67,8 +67,8 @@ acts as an OR condition combined with the AND condition of `include`.
 -- Renderables that are textured or materialled: Transform AND Renderable,
 -- plus at least one of Sprite or Material.
 world:query({
-    include = {tecs.ecs.builtins.Transform, tecs.components.Renderable},
-    includeAny = {tecs.components.Sprite, tecs.components.Material}
+    include = {tecs.ecs.builtins.Transform, tecs.gfx.Renderable},
+    includeAny = {tecs.gfx.Sprite, tecs.gfx.Material}
 })
 ```
 
@@ -119,8 +119,8 @@ This is the query the renderer's extractor holds, verbatim:
 
 ```teal
 local Transform <const> = tecs.ecs.builtins.Transform
-local Tint <const> = tecs.components.Tint
-local Renderable <const> = tecs.components.Renderable
+local Tint <const> = tecs.gfx.Tint
+local Renderable <const> = tecs.gfx.Renderable
 
 local renderables = world:query({
     include = {Transform, Tint, Renderable}
@@ -339,7 +339,7 @@ observer registration. Temp queries cannot use `onEntitiesAdded` or `onEntitiesR
 raises an error at query construction.
 
 ```teal
-for archetype, len in world:query({include = {tecs.components.PointLight}, temp = true}):iter() do
+for archetype, len in world:query({include = {tecs.gfx.PointLight}, temp = true}):iter() do
     -- iterate once and discard query
 end
 ```
@@ -377,7 +377,7 @@ local movement = world:query({
 
 -- Presentation: paused entities keep drawing
 local sprites = world:query({
-    include = {Transform, tecs.components.Sprite, tecs.components.Renderable},
+    include = {Transform, tecs.gfx.Sprite, tecs.gfx.Renderable},
     type = "render",
 })
 ```
@@ -417,7 +417,7 @@ function World:findArchetypes(component: Component): function(): (Archetype, int
 **Returns:** an iterator over matching archetypes, yielding `(archetype, length, entities)`.
 
 ```teal
-local PointLight <const> = tecs.components.PointLight
+local PointLight <const> = tecs.gfx.PointLight
 
 for archetype, len, entities in world:findArchetypes(PointLight) do
     local lights = archetype:get(PointLight)

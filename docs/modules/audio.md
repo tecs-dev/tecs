@@ -741,7 +741,7 @@ sounding on the next audio pass, and stops when the component or the entity goes
 an entity rather than a handle a game has to remember to release, and it is why despawning something mid-sound
 does the obvious thing.
 
-`Sound` is declared by this module rather than in [`components`](/modules/components), and is reachable as
+`Sound` is declared by this module rather than in [`components`](/modules/gfx/), and is reachable as
 `tecs.audio.Sound`. It is an FFI component, so its columns are contiguous C memory and it holds numbers only.
 
 | Field     | Type     | Default | Description                                                                                                                                                                         |

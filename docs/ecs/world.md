@@ -196,7 +196,7 @@ function World:spawn(...: Component): integer
 **Example:**
 
 ```teal
-local components <const> = tecs.components
+local gfx <const> = tecs.gfx
 
 -- Spawn an entity with no components:
 local id = world:spawn()
@@ -204,16 +204,16 @@ local id = world:spawn()
 -- A renderable entity: a transform, a colour, and the marker that says it
 -- contributes geometry.
 local playerId = world:spawn(
-    components.Transform(100, 100),
-    components.Tint(1, 1, 1, 1),
-    components.Renderable,
+    tecs.ecs.builtins.Transform(100, 100),
+    gfx.Tint(1, 1, 1, 1),
+    gfx.Renderable,
     tecs.ecs.builtins.Name("Player")
 )
 
 -- A light is an entity too.
 local lightId = world:spawn(
-    components.Transform(640, 360),
-    components.PointLight(120, 512, 1, 0.9, 0.8, 3)
+    tecs.ecs.builtins.Transform(640, 360),
+    gfx.PointLight(120, 512, 1, 0.9, 0.8, 3)
 )
 
 -- Get notified when any entity spawns (world-level observer).
@@ -222,8 +222,9 @@ world:observe(0, tecs.ecs.builtins.OnSpawn, function(event: tecs.ecs.builtins.On
 end)
 ```
 
-`components.Transform` is the ECS builtin re-exported by the engine's component module: the hierarchy, the
-authoring systems and the renderer all move the same one.
+`Transform` is an ECS builtin rather than a graphics component, so it is written
+`tecs.ecs.builtins.Transform`: the hierarchy, the authoring systems, physics and the renderer all move the
+same one.
 
 ### spawnAt
 
@@ -270,14 +271,14 @@ function World:batchSpawn(
 **Example:**
 
 ```teal
-local components <const> = tecs.components
-local signature <const> = { components.Transform, components.Tint, components.Renderable }
+local gfx <const> = tecs.gfx
+local signature <const> = { tecs.ecs.builtins.Transform, gfx.Tint, gfx.Renderable }
 
 -- Seed a field of renderable quads in one batch.
 local firstId, ids = world:batchSpawn(1000, signature, function(arch, firstRow, lastRow)
     -- getMut marks the written columns dirty, which is what extraction reads.
-    local transforms = arch:getMut(components.Transform)
-    local tints = arch:getMut(components.Tint)
+    local transforms = arch:getMut(tecs.ecs.builtins.Transform)
+    local tints = arch:getMut(gfx.Tint)
     -- No constructors run for these rows: write every field the frame reads.
     for row = firstRow, lastRow do
         local transform = transforms[row]
@@ -329,7 +330,7 @@ columns are row-indexed read proxies that raise on write. Attach targets with
 placement.
 
 ```teal
-local Transform <const> = tecs.components.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 local ChildOf <const> = tecs.ecs.builtins.ChildOf
 
 local firstId, ids = world:batchSpawn(5, {Transform, ChildOf},
@@ -458,14 +459,14 @@ function World:batchDespawn(query: Query)
 **Example:**
 
 ```teal
-local components <const> = tecs.components
+local gfx <const> = tecs.gfx
 
 -- Build a persistent query once, reuse it for repeated bulk passes.
-local lights = world:query({ include = { components.PointLight } })
+local lights = world:query({ include = { gfx.PointLight } })
 world:batchDespawn(lights)
 
 -- Or use a temp query for a one-shot teardown.
-local drawn = world:query({ include = { components.Renderable }, temp = true })
+local drawn = world:query({ include = { gfx.Renderable }, temp = true })
 world:batchDespawn(drawn)
 ```
 
@@ -476,8 +477,8 @@ Bulk-set a component on every entity matching a query. Two forms:
 - **Constant form**: write a shared value to every matched row:
 
   ```teal
-  world:batchSet(query, tecs.components.Renderable)
-  world:batchSet(query, tecs.components.Tint(1, 0, 0, 1))
+  world:batchSet(query, tecs.gfx.Renderable)
+  world:batchSet(query, tecs.gfx.Tint(1, 0, 0, 1))
   ```
 
   If an archetype in the query lacks the component, entities are bulk-moved to the archetype reached by adding
@@ -485,7 +486,7 @@ Bulk-set a component on every entity matching a query. Two forms:
 
 - **Callback form**: ensure the component is present, then let the caller write the column directly:
   ```teal
-  local Tint <const> = tecs.components.Tint
+  local Tint <const> = tecs.gfx.Tint
 
   world:batchSet(query, Tint, function(arch, firstRow, lastRow, count)
       local tints = arch:getMut(Tint)
@@ -630,7 +631,7 @@ function World:clearEntities()
 ```teal
 -- In a test or bench, reset the state between iterations without
 -- rebuilding the pipeline or re-registering queries.
-local Transform <const> = tecs.components.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 local q = world:query({ include = { Transform } })
 for _ = 1, iterations do
     world:clearEntities()
@@ -756,15 +757,15 @@ Use `defer` when you want a block of mutations to appear atomically; for example
 partial archetype transitions being visible to observers mid-block.
 
 ```teal
-local components <const> = tecs.components
+local gfx <const> = tecs.gfx
 
 -- One archetype transition rather than three, and nothing observes the
 -- intermediate shapes.
 local function extinguish(world: tecs.World, entity: integer)
     world:defer()
-    world:set(entity, components.Tint(0.2, 0.2, 0.2, 1))
-    world:remove(entity, components.PointLight)
-    world:remove(entity, components.Renderable)
+    world:set(entity, gfx.Tint(0.2, 0.2, 0.2, 1))
+    world:remove(entity, gfx.PointLight)
+    world:remove(entity, gfx.Renderable)
     world:commit()  -- drain is issued here
 end
 ```
@@ -790,7 +791,7 @@ function World:commit()
 
 ```teal
 -- Force pending changes to be applied.
-local id: integer = world:spawn(tecs.components.Transform(10, 20))
+local id: integer = world:spawn(tecs.ecs.builtins.Transform(10, 20))
 world:commit()
 ```
 
@@ -840,8 +841,8 @@ function World:addPlugin(plugin: function(world: World))
 **Example:**
 
 ```teal
-local Transform <const> = tecs.components.Transform
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Renderable <const> = tecs.gfx.Renderable
 
 local SPIN: tecs.Key<number> = tecs.ecs.newKey("game.spinRate")
 

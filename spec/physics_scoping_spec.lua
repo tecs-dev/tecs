@@ -15,10 +15,11 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
+local builtins = require("tecs.ecs").builtins
 local physics = require("tecs.physics")
 local TaskPool = require("tecs.physics.TaskPool")
 
-local Transform = components.Transform
+local Transform = builtins.Transform
 
 -- Every world built here, so teardown can shut all of them down. A world
 -- nobody shuts down keeps its Box2D world and its hold on the solver's thread

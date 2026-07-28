@@ -31,7 +31,7 @@ angular velocities use radians. `tecs.physics.scale` is the pixels-per-metre con
 `attach` declares a body; Box2D creation happens at the next fixed step:
 
 ```teal
-local entity = world:spawn(tecs.components.Transform(100, 80))
+local entity = world:spawn(tecs.ecs.builtins.Transform(100, 80))
 tecs.physics.attach(world, entity, {
     type = "dynamic",
     radius = 12,

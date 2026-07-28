@@ -33,7 +33,7 @@ world:spawn(
 )
 ```
 
-`Material` carries an `id` and a `param` from zero to one; see [components](/modules/components).
+`Material` carries an `id` and a `param` from zero to one; see [components](/modules/gfx/).
 Resolve the id by name rather than writing a number: the numbering depends on which material files
 exist, and a literal would break the moment a material was added ahead of it alphabetically.
 

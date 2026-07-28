@@ -96,7 +96,7 @@ or an archetype transition that pulls it in); `onEntitiesRemoved` fires when the
 `world:remove`, despawn, or an exclusion flipping).
 
 ```teal
-local PointLight <const> = tecs.components.PointLight
+local PointLight <const> = tecs.gfx.PointLight
 
 -- React when a light appears or goes away, regardless of whatever
 -- other components the entity carries.
@@ -135,7 +135,7 @@ being clipped and again when it stops:
 
 ```teal
 world:query({
-    include = {tecs.components.Renderable, tecs.components.Clip},
+    include = {tecs.gfx.Renderable, tecs.gfx.Clip},
     onEntitiesAdded = function(
         arch: tecs.Archetype,
         firstRow: integer,

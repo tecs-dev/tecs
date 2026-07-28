@@ -42,7 +42,7 @@ local table_clear <const> = require("table.clear")
 local atan2 <const> = math.atan2
 
 local B <const> = box2d.C
-local Transform <const> = components.Transform
+local Transform <const> = ecs.builtins.Transform
 
 local type Component = ecs.Component
 

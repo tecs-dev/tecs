@@ -15,9 +15,9 @@ local COUNT <const> = 240
 --- archetype once and the callback writes columns in place. It skips FFI
 --- defaults, so every field is written here.
 local function spawnRing(world: tecs.ecs.World, width: number, height: number)
-    local Transform <const> = tecs.components.Transform
-    local Tint <const> = tecs.components.Tint
-    local Renderable <const> = tecs.components.Renderable
+    local Transform <const> = tecs.ecs.builtins.Transform
+    local Tint <const> = tecs.gfx.Tint
+    local Renderable <const> = tecs.gfx.Renderable
 
     local centreX <const> = width * 0.5
     local centreY <const> = height * 0.5
@@ -70,12 +70,12 @@ return tecs.application.create({
         spawnRing(world, width, height)
 
         world:spawn(
-            tecs.components.Transform(width * 0.5, height * 0.5, 0, 1),
-            tecs.components.PointLight(200.0, math.min(width, height) * 0.8, 1.0, 0.92, 0.8, 3.0)
+            tecs.ecs.builtins.Transform(width * 0.5, height * 0.5, 0, 1),
+            tecs.gfx.PointLight(200.0, math.min(width, height) * 0.8, 1.0, 0.92, 0.8, 3.0)
         )
 
         local elapsed = 0.0
-        local spinning <const> = world:query({include = {tecs.components.Transform, tecs.components.Renderable}})
+        local spinning <const> = world:query({include = {tecs.ecs.builtins.Transform, tecs.gfx.Renderable}})
 
         -- Rotation is a write, so the column is taken with getMut. Reads use
         -- get: taking getMut to read marks the component dirty on every
@@ -86,7 +86,7 @@ return tecs.application.create({
             run = function(dt: number)
                 elapsed = elapsed + dt
                 for archetype, length in spinning:iter() do
-                    local transforms = archetype:getMut(tecs.components.Transform)
+                    local transforms = archetype:getMut(tecs.ecs.builtins.Transform)
                     for row = 1, length do
                         transforms[row].rotation = transforms[row].rotation + dt
                     end

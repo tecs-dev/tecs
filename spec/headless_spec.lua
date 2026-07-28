@@ -222,7 +222,7 @@ describe("tecs headless", function()
                 world:addPlugin(tecs.physics.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))
-                local Transform = tecs.components.Transform
+                local Transform = tecs.ecs.builtins.Transform
                 local entity = world:spawn(Transform(0, 0, 0, 1, 0, 10, 10))
                 tecs.physics.attach(world, entity, {
                     type = "dynamic", halfWidth = 5, halfHeight = 5,

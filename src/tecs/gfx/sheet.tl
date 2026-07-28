@@ -15,7 +15,7 @@
 --- One component does live here. A `Pivot` is resolved from a slice, and a
 --- slice index is this sheet's answer alone, so writing the name a snapshot
 --- carries instead needs the registry at the bottom of this file. Putting the
---- component in `tecs.components` would point that module at this one, which
+--- component in `tecs.gfx` would point that module at this one, which
 --- already points the other way.
 ---
 --- Frames are addressed by index, counting from one, in the order the sheet

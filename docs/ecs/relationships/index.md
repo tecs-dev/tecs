@@ -272,7 +272,7 @@ the specified components, and you read both component data and relationship data
 
 ```teal
 local query: tecs.Query = world:query({
-    include = {Transform, tecs.components.Renderable, ChildOf}
+    include = {Transform, tecs.gfx.Renderable, ChildOf}
 })
 
 for archetype, len, entities in query:iter() do

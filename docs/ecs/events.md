@@ -36,7 +36,7 @@ next to its systems, so both are on the world and both run inside the crash guar
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.components.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 
 return tecs.application.create({
     plugin = function(world: tecs.World, app: tecs.application.Application)

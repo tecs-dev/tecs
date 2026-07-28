@@ -26,10 +26,10 @@ local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local Material <const> = tecs.components.Material
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local Material <const> = tecs.gfx.Material
+local Renderable <const> = tecs.gfx.Renderable
 
 --- Dynamic bodies. The default is chosen so a frame costs enough that
 --- simulation is the larger stage, which is the regime a frame-structure

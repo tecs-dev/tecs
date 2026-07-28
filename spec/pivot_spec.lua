@@ -21,10 +21,11 @@ local loader = require("tecs.ffi.loader")
 local Extractor = require("tecs.Extractor")
 local FramePacket = require("tecs.FramePacket")
 local components = require("tecs.components")
+local builtins = require("tecs.ecs").builtins
 local sheet = require("tecs.gfx.sheet")
 local instancelayout = require("tecs.gpu.instancelayout")
 
-local Transform = components.Transform
+local Transform = builtins.Transform
 local Tint = components.Tint
 local Renderable = components.Renderable
 local Pivot = sheet.Pivot

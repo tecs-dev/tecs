@@ -80,7 +80,6 @@ MODULES = [
         "docs/modules/audio.md",
         [("src/tecs/Audio.tl", "tecs.audio.Audio"), ("src/tecs/platform/audio.tl", "tecs.audio")],
     ),
-    ("docs/modules/components.md", [("src/tecs/components.tl", "tecs.components")]),
     ("docs/modules/data.md", [("src/tecs/data.tl", "tecs.data")]),
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
     ("docs/modules/filesystem/index.md", [("src/tecs/platform/filesystem.tl", "tecs.filesystem")]),
@@ -88,7 +87,11 @@ MODULES = [
     ("docs/modules/future.md", [("src/tecs/Future.tl", "tecs.future.Future")]),
     (
         "docs/modules/gfx/index.md",
-        [("src/tecs/gfx/Camera.tl", "tecs.gfx.Camera"), ("src/tecs/Renderer.tl", "tecs.gfx.Renderer")],
+        [
+            ("src/tecs/gfx/Camera.tl", "tecs.gfx.Camera"),
+            ("src/tecs/components.tl", "tecs.gfx"),
+            ("src/tecs/Renderer.tl", "tecs.gfx.Renderer"),
+        ],
     ),
     ("docs/modules/gfx/animation.md", [("src/tecs/gfx/animation.tl", "tecs.gfx.animation")]),
     ("docs/modules/gfx/layers.md", [("src/tecs/gfx/layers.tl", "tecs.gfx.layers")]),

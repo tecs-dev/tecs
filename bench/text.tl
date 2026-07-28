@@ -32,8 +32,8 @@ local tecs <const> = require("tecs")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
 local text <const> = require("tecs.gfx.text")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
 
 --- Text entities on screen.
 local TEXTS <const> = math.floor(tonumber(os.getenv("BENCH_TEXTS")) or 400)

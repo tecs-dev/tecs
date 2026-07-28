@@ -263,6 +263,15 @@ describe("the public surface", function()
             assert.is_nil(tecs.particles)
             assert.is_nil(tecs.camera)
             assert.is_nil(tecs.renderer)
+            assert.is_nil(tecs.components)
+        end)
+
+        it("does not carry the transform every subsystem moves", function()
+            -- Deliberate rather than an omission. `Transform` positions
+            -- everything a world holds, not only what draws, so it is the ECS
+            -- builtin and has one spelling.
+            assert.is_nil(tecs.gfx.Transform)
+            assert.is_not_nil(tecs.ecs.builtins.Transform)
         end)
 
         it("answers nil for a name it does not carry", function()

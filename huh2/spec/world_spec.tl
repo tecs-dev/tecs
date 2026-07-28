@@ -15,7 +15,7 @@ describe(
             "spawns an entity with a transform",
             function()
                 local world <const> = tecs.ecs.newWorld()
-                local Transform <const> = tecs.components.Transform
+                local Transform <const> = tecs.ecs.builtins.Transform
                 local entity <const> = world:spawn(Transform(10, 20))
                 world:update(1 / 60)
 
@@ -29,7 +29,7 @@ describe(
             "matches what a query asks for",
             function()
                 local world <const> = tecs.ecs.newWorld()
-                local Transform <const> = tecs.components.Transform
+                local Transform <const> = tecs.ecs.builtins.Transform
                 local Marker <const> = tecs.ecs.newTagComponent({name = "Marker"})
 
                 world:spawn(Transform(0, 0), Marker)

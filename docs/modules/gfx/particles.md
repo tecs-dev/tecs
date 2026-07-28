@@ -380,7 +380,7 @@ cheaper than any arrangement that tried to avoid it would be to get right.
 Integration is whole fixed steps against the emitter's own clock, so two machines fed the same steps
 hold the same field however many frames either drew. A frame that fell far behind advances an emitter
 by at most eight steps, which bounds the work rather than letting a stall compound into a longer one.
-An emitter carrying [`PreviousTransform`](/modules/components) reports where it stood before the
+An emitter carrying [`PreviousTransform`](/modules/gfx/) reports where it stood before the
 current fixed step as well as where it stands now; without one, both are the same position.
 
 Despawning an emitter stops emission and lets its field drain: the pool holds the slot range until

@@ -87,18 +87,18 @@ Three sets of components are already registered and ready to use.
 `RelativeTransform`, `Paused` and `Disabled`. `Transform` carries `x`, `y`, `z`, `layer`, `rotation`, `scaleX`
 and `scaleY`, and is what the hierarchy, the tweens and the renderer all read.
 
-**Engine components**, on `tecs.components`, are what the renderer consumes. They are FFI components on purpose:
+**Engine components**, on `tecs.gfx`, are what the renderer consumes. They are FFI components on purpose:
 their columns are contiguous C memory, which is what lets the extractor walk rows straight into mapped GPU
 staging instead of reading fields one entity at a time.
 
 ```teal
-local components <const> = tecs.components
+local gfx <const> = tecs.gfx
 
 world:spawn(
-    components.Transform(100, 100),
-    components.Sprite(components.imageId("sprites/cactus.png"), 0.0, 0.0, 1.0, 1.0),
-    components.Tint(1, 1, 1, 1),
-    components.Renderable()
+    tecs.ecs.builtins.Transform(100, 100),
+    gfx.Sprite(gfx.imageId("sprites/cactus.png"), 0.0, 0.0, 1.0, 1.0),
+    gfx.Tint(1, 1, 1, 1),
+    gfx.Renderable()
 )
 ```
 
@@ -107,8 +107,8 @@ position, which is what most entities in a world actually are. A light is an ent
 
 ```teal
 world:spawn(
-    components.Transform(640, 360),
-    components.PointLight(120.0, 500.0, 1.0, 0.42, 0.35, 3.0)
+    tecs.ecs.builtins.Transform(640, 360),
+    gfx.PointLight(120.0, 500.0, 1.0, 0.42, 0.35, 3.0)
 )
 ```
 
@@ -229,7 +229,7 @@ archetype and index it by row instead of fetching component by component per ent
 ```teal
 -- Read with :get, write through :getMut.
 local transforms = archetype:getMut(Transform)
-local tints = archetype:get(components.Tint)
+local tints = archetype:get(gfx.Tint)
 
 for row = 1, length do
     transforms[row].rotation = transforms[row].rotation + dt

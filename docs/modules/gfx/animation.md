@@ -52,7 +52,7 @@ ends on, so finding the current frame is a scan of numbers and never a branch on
 ### Two coordinate spaces
 
 A frame is written in pixels, because that is how an artist cuts an image up. What a
-[`Sprite`](/modules/components) carries is a region of a texture-array layer, which is the fraction of
+[`Sprite`](/modules/gfx/) carries is a region of a texture-array layer, which is the fraction of
 the image the frame covers scaled by the fraction of the layer the image itself covers. That second
 fraction is the renderer's answer, so a sheet holds pixels until [`bind`](#bind) hands it one. Before
 `bind`, a frame's region is its plain fraction of the image, which is what a sheet can say without a
@@ -600,7 +600,7 @@ entity's, and the first step after a load writes it from the registration this r
 
 ::: info Why the component lives here
 A `Pivot` is resolved from a slice, and a slice index is one sheet's answer alone, so writing the name a
-snapshot carries needs this module's registry. Putting the component in `tecs.components` would point
+snapshot carries needs this module's registry. Putting the component in `tecs.gfx` would point
 that module at this one, which already points the other way.
 :::
 
@@ -768,7 +768,7 @@ gameplay logic in `FixedUpdate` has already chosen what should be playing.
 
 ## The Animation component
 
-An entity also needs a [`Sprite`](/modules/components), which is what the query matches on and what
+An entity also needs a [`Sprite`](/modules/gfx/), which is what the query matches on and what
 playback writes into. An `Animation` on its own advances nothing.
 
 | Field     | Type      | Default | Description                                                                                                                                                                                                   |
@@ -833,11 +833,11 @@ function animation.of(source: Sheet, tag?: string, options?: PlayOptions): Anima
 
 ```teal
 local animation <const> = tecs.gfx.animation
-local components <const> = tecs.components
+local gfx <const> = tecs.gfx
 
 local hero <const> = world:spawn(
-    components.Transform(200, 140),
-    components.Renderable,
+    tecs.ecs.builtins.Transform(200, 140),
+    gfx.Renderable,
     heroSheet:sprite(),
     animation.of(heroSheet, "walk"),
     heroSheet:pivot("feet")

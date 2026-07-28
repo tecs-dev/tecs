@@ -100,7 +100,7 @@ describe("mcp world tools", function()
 
     it("queries by component and reports what it did not return", function()
         for index = 1, 5 do
-            world:spawn(components.Transform(index, 0, 0, 1, 0, 1, 1), components.Renderable())
+            world:spawn(builtins.Transform(index, 0, 0, 1, 0, 1, 1), components.Renderable())
         end
         local result = ok("query", { include = { "Transform", "Renderable" }, limit = 2 })
 

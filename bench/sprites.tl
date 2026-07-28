@@ -51,10 +51,10 @@ local filesystem <const> = require("tecs.platform.filesystem")
 local sheet <const> = require("tecs.gfx.sheet")
 local animation <const> = require("tecs.gfx.animation")
 local timing <const> = require("tecs.timing")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local Sprite <const> = tecs.components.Sprite
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local Sprite <const> = tecs.gfx.Sprite
+local Renderable <const> = tecs.gfx.Renderable
 local Animation <const> = animation.Animation
 
 --- Sprites in the resident field. The churn pool sits on top of this, so the
@@ -121,7 +121,7 @@ timing.enable()
 local DELTA <const> = timing.stage("delta")
 
 local playbook: sheet.Sheet = nil
-local resident: tecs.components.Sprite = nil
+local resident: tecs.gfx.Sprite = nil
 
 --- The churn pool, as a ring. A sprite spawned into a slot is despawned when
 --- the ring comes round to that slot again, which is `LIFETIME` frames later,

@@ -207,7 +207,7 @@ An `align` that is none of the three raises where the component is constructed.
 top-left corner of the text block and orients and scales the whole block; a `Tint` colours every
 glyph; a `Clip` keeps the glyphs inside a rectangle exactly as it would any other quad. All three
 are ordinary components on an ordinary entity, so a text is moved, parented, tweened and layered
-like anything else. See [components](/modules/components) for `Tint` and `Clip`.
+like anything else. See [components](/modules/gfx/) for `Tint` and `Clip`.
 
 **Constructing one**, positionally or by name:
 

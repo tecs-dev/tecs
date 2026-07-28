@@ -22,9 +22,9 @@ guard.
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local Renderable <const> = tecs.gfx.Renderable
 
 return tecs.application.create({
     window = { title = "my game", width = 1280, height = 720 },
@@ -75,7 +75,7 @@ A plugin declares its own components, builds its queries once, and registers the
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.components.Transform
+local Transform <const> = tecs.ecs.builtins.Transform
 
 --- Health, declared by the game rather than by the engine.
 local record Health is tecs.Component
@@ -144,7 +144,7 @@ it keeps the configuration typed rather than reaching it out of a table at run t
 local function spinPlugin(speed: number): tecs.Plugin
     return function(world: tecs.World)
         local spinning <const> = world:query({
-            include = { tecs.components.Transform, tecs.components.Renderable },
+            include = { tecs.ecs.builtins.Transform, tecs.gfx.Renderable },
         })
 
         world:addSystem({
@@ -152,7 +152,7 @@ local function spinPlugin(speed: number): tecs.Plugin
             phase = tecs.ecs.phases.Update,
             run = function(dt: number)
                 for archetype, length in spinning:iter() do
-                    local transforms = archetype:getMut(tecs.components.Transform)
+                    local transforms = archetype:getMut(tecs.ecs.builtins.Transform)
                     for row = 1, length do
                         transforms[row].rotation = transforms[row].rotation + speed * dt
                     end

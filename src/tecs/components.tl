@@ -1,23 +1,22 @@
 --- Render components.
 ---
+--- A game reaches these as `tecs.gfx.Sprite` and the rest; this file is where
+--- they are declared and registered, and engine code requires it directly to
+--- stay below `tecs`.
+---
 --- These are FFI components on purpose. Their columns are contiguous C memory,
 --- which is what lets the sync walk rows and write straight into mapped GPU
 --- staging instead of reading fields one entity at a time through a table.
+---
+--- The name each one is registered under is a compatibility surface rather
+--- than an identifier: a snapshot names components by string, so `"Sprite"`
+--- and `"Renderable"` are a save format and stay what they are however the
+--- module they are declared in is reached.
 
 local ecs <const> = require("tecs.ecs")
 local materials <const> = require("tecs.gpu.materials")
 
 local type Component = ecs.Component
-
---- Position, rotation and scale in world units, which are pixels with the
---- origin at the top left. Lighting works in the same units, so a light's
---- position needs no conversion.
----
---- The ECS builtin rather than a component declared here. It is a superset,
---- carrying `z` and `layer` besides, and it is what the hierarchy and the
---- authoring systems already move: a renderer reading its own transform would
---- draw an entity that a parent transform or a tween had moved somewhere else.
-local Transform <const> = ecs.builtins.Transform
 
 --- The transform as it stood before the current fixed step.
 ---
@@ -437,13 +436,12 @@ ecs.newComponent({
 --- through `world:get` therefore needs an explicit
 --- `world:markComponentDirty(entity, Component)`; only `getMut` marks the
 --- column on its own.
+---
+--- `Transform` is not among them. It positions everything a world holds, not
+--- only what draws, so it is the ECS builtin and is reached as
+--- `tecs.ecs.builtins.Transform`; a second spelling here would say the
+--- hierarchy, physics and the tweens were moving a graphics component.
 local record components
-    --- Position, rotation and scale, in world units, which are pixels with
-    --- the origin at the top left and y increasing downwards. Also carries
-    --- `z` and `layer`. This is the ECS builtin, so the hierarchy, the
-    --- tweens and the renderer all move the same transform.
-    Transform: Transform
-
     --- The transform as it stood before the current fixed step. Presence is
     --- the opt-in to interpolation: an entity carrying it is drawn between
     --- this and its current transform, so physics does not step visibly.
@@ -528,7 +526,6 @@ local record components
     imageName: function(id: integer): string
 end
 
-components.Transform = Transform
 components.PreviousTransform = PreviousTransform
 components.Tint = Tint
 components.Sprite = Sprite

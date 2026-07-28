@@ -77,9 +77,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local time <const> = require("tecs.platform.time")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local Renderable <const> = tecs.gfx.Renderable
 
 --- Entities in the scene. Allocation per frame is load independent where the
 --- frame path is allocation free and load dependent where it is not, so a

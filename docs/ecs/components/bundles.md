@@ -19,8 +19,8 @@ Create bundles through the world with a declarative definition:
 
 ```teal
 local Transform <const> = tecs.ecs.builtins.Transform
-local Renderable <const> = tecs.components.Renderable
-local Tint <const> = tecs.components.Tint
+local Renderable <const> = tecs.gfx.Renderable
+local Tint <const> = tecs.gfx.Tint
 
 local playerBundle: tecs.Bundle = world:newBundle("Player", {
     required = { Transform, Health },

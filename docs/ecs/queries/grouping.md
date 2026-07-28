@@ -34,9 +34,9 @@ matching the query and stores the key with the archetype, so iteration can keep 
 
 ```teal
 local Transform <const> = tecs.ecs.builtins.Transform
-local Renderable <const> = tecs.components.Renderable
-local Sprite <const> = tecs.components.Sprite
-local Material <const> = tecs.components.Material
+local Renderable <const> = tecs.gfx.Renderable
+local Sprite <const> = tecs.gfx.Sprite
+local Material <const> = tecs.gfx.Material
 
 local Kind <const> = { Textured = 1, Shaded = 2, Flat = 3 }
 

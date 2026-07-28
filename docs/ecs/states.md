@@ -170,9 +170,9 @@ Entities spawned while a state is on top automatically receive that state's tag 
 the spawn path itself, on the instant, deferred and batch paths alike, so nothing has to remember to add it.
 
 ```teal
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local Renderable <const> = tecs.gfx.Renderable
 
 world:pushState("game")
 

@@ -23,7 +23,7 @@ Tecs provides several component kinds for different use cases.
 
 The engine's own render components go through the same factories: `Sprite`, `Tint`, `Material`, `Clip`,
 `PointLight` and `PreviousTransform` are FFI components and `Renderable` is a table component. See
-[components](/modules/components) for the catalogue and what each field means.
+[components](/modules/gfx/) for the catalogue and what each field means.
 
 ## World methods
 

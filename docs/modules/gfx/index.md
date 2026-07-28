@@ -5,9 +5,11 @@ outline: deep
 
 # tecs.gfx
 
-`tecs.gfx` is where drawing lives. Two things sit on it directly, because every scene reaches for both:
-the [camera](#the-camera) a frame is drawn from, and the [renderer](#the-renderer) that draws it. The
-vocabularies a scene is described in are each a module one level below, with a page of its own.
+`tecs.gfx` is where drawing lives. Three things sit on it directly, because every scene reaches for all
+three: the [camera](#the-camera) a frame is drawn from, the
+[components](#the-components-a-scene-is-drawn-from) an entity carries to be drawn, and the
+[renderer](#the-renderer) that draws them. The vocabularies a scene is described in are each a module one
+level below, with a page of its own.
 
 ## What is under it
 
@@ -56,7 +58,7 @@ the cull, cares which built it.
 Position is the centre of the view rather than a corner, so a camera that has never been moved shows the
 world origin in the middle of the window. The renderer centres a default camera on the first frame it
 draws, so a scene that never mentions a camera behaves as though world coordinates were screen
-coordinates. See [Renderer](/modules/gfx/) for how a camera reaches a frame.
+coordinates. See [the renderer](#the-renderer) for how a camera reaches a frame.
 
 ### Creating a camera
 
@@ -244,7 +246,7 @@ Lights are placed in world units like everything else, and the lighting pass is 
 it can take each fragment back out to the world rather than bringing the lights in. Moving the camera
 therefore moves what is lit, and zoom scales what a light's radius covers on screen rather than what
 it covers in the world. A light needs no conversion and no projection of its own; see
-[`PointLight`](/modules/components#pointlight).
+[`PointLight`](#pointlight).
 
 ### What the camera does not place
 
@@ -252,6 +254,316 @@ A layer can ask to be positioned in screen pixels, in a virtual resolution, at i
 outside the camera's zoom. Contents of such a layer are not placed where the camera would put them, and
 the cull gives up on them rather than testing a world bound that does not describe where they draw.
 [layers](/modules/gfx/layers) has the rules.
+
+## The components a scene is drawn from
+
+The components the engine itself reads describe what an entity looks like: what colour it is, which
+image it samples, which material shades it, whether it is clipped, whether it lights the scene, and
+whether it contributes geometry at all. None of them is required to use a world; an entity carrying none
+is a position and some game state.
+
+These are not the ECS builtins. `ChildOf`, `TTL`, `Paused`, `Disabled`, `Key` and the state transition
+events are registered by every world whether or not a renderer exists, and they are documented at
+[builtins](/ecs/builtins). The ones here are registered when the engine half is first touched.
+
+`Transform` is deliberately not among them. It positions everything a world holds rather than only what
+draws, so it is the ECS builtin and is written `tecs.ecs.builtins.Transform`; a second spelling here would
+say the hierarchy, physics and the tweens were moving a graphics component.
+
+```teal
+local entity <const> = world:spawn(
+    tecs.ecs.builtins.Transform(120, 80),
+    tecs.gfx.Tint(1, 0.4, 0.2, 1),
+    tecs.gfx.Renderable()
+)
+```
+
+### The set
+
+| Component           | Storage          | Fields                                    | Read by                                       |
+| ------------------- | ---------------- | ----------------------------------------- | --------------------------------------------- |
+| `PreviousTransform` | FFI              | `x` `y` `rotation`                        | extraction, for interpolation                 |
+| `Tint`              | FFI              | `r` `g` `b` `a`                           | extraction, into the G-buffer's albedo target |
+| `Sprite`            | FFI              | `image` `u0` `v0` `u1` `v1` `slot`        | extraction, sprite sheets, animation          |
+| `Material`          | FFI              | `id` `param`                              | extraction, into the material dispatch        |
+| `PointLight`        | FFI              | `height` `radius` `r` `g` `b` `intensity` | extraction, into the frame's light list       |
+| `Clip`              | FFI              | `index`                                   | extraction, then the fragment shader          |
+| `Occluder`          | FFI              | `height`                                  | extraction, into the occluder mask            |
+| `DropShadow`        | FFI              | `height`                                  | extraction, into the drop-shadow target       |
+| `Renderable`        | table, no fields | none                                      | the extractor's renderable query              |
+
+Everything except `Renderable` is an FFI component on purpose. Their columns are contiguous C memory, which is
+what lets the sync walk rows and write straight into mapped GPU staging instead of reading fields one entity at
+a time through a table.
+
+::: warning Dirty bits decide whether a frame resyncs
+Extraction rewrites an archetype's run only when one of `Transform`, `Tint`, `Sprite`, `Material`, `Clip`,
+`Pivot`, `Occluder` or `DropShadow` is dirty on it, or when the archetype carries `PreviousTransform` and the
+frame is interpolating. A write through `world:getMut` marks the column; a cdata write reached through
+`world:get` does not, and needs `world:markComponentDirty(entity, Component)` after it or the GPU keeps drawing
+the old value. `world:batchSpawn` skips FFI defaults, so a callback has to set every field it cares about.
+:::
+
+### PreviousTransform
+
+The transform as it stood before the current fixed step.
+
+Presence is the opt-in. An entity carrying it is drawn somewhere between this and its current transform,
+according to how far through the step the frame falls. Simulation advances in fixed jumps and frames arrive
+whenever the display asks for one, so without this an entity moved by physics steps visibly rather than moving.
+
+| Field      | Type    | Default | Description                        |
+| ---------- | ------- | ------- | ---------------------------------- |
+| `x`        | `float` | `0`     | World x as of the last fixed step. |
+| `y`        | `float` | `0`     | World y as of the last fixed step. |
+| `rotation` | `float` | `0`     | Radians as of the last fixed step. |
+
+Only the fields that move continuously are here. Scale and layer change by assignment rather than by
+integration, and a half-applied assignment is not a value anything asked for.
+
+**Pairs with:** `Transform`. The engine installs a `tecs.SnapshotTransforms` system in the `FixedFirst` phase
+that copies `Transform` into `PreviousTransform` for every entity carrying both, before anything in the step
+moves. Adding the component is all that is needed; the physics plugin adds it to bodies it creates.
+
+### Tint
+
+Base colour, and how much of what is behind the entity survives it.
+
+| Field | Type    | Default | Description                                 |
+| ----- | ------- | ------- | ------------------------------------------- |
+| `r`   | `float` | `1`     | Red, 0 to 1.                                |
+| `g`   | `float` | `1`     | Green, 0 to 1.                              |
+| `b`   | `float` | `1`     | Blue, 0 to 1.                               |
+| `a`   | `float` | `1`     | Alpha, 0 to 1. At one the entity is opaque. |
+
+**Required for drawing.** The extractor's renderable query is `Transform`, `Tint` and `Renderable` together, so
+an entity missing a `Tint` is not extracted at all. It is also what the sequencer's built-in `color.a` and
+`color.rgba` tween targets write; see [sequence](/modules/sequence#targets).
+
+The alpha is what decides which pass draws the entity. At exactly one it is opaque and goes through the
+G-buffer, where lighting resolves it once for the whole scene however many things overlap. Below one it goes
+through the forward pass instead, which runs after the frame has been composited, blends straight alpha over it,
+and lights itself out of the same lights and the same ambient the resolve used, so the only thing that changes as
+alpha crosses one is how much of the fragment lands.
+
+What crossing one gives up is the G-buffer. A blended entity writes no depth, so it hides nothing behind it and
+nothing that reads a normal or an emission later can see it; blended entities are sorted back to front against
+each other, and against opaque geometry the depth the G-buffer already holds decides. The forward list is shorter
+than the instance buffer, so a scene with more than 65,536 blended entities visible at once draws the ones
+earliest in the buffer and drops the rest. An entity meant to be solid should say so with an alpha of exactly one.
+
+::: warning Not yet reachable from a world
+The renderer half of this is in: the pass, the pipeline, the sort and the lane are built and covered by
+`spec/blend_spec.lua`. What routes a row into the forward lane is extraction writing the cull bound's first half
+extent negated, and extraction does not do that yet, so today an alpha below one is carried into the instance and
+still drawn opaque. This note goes when `src/tecs/Extractor.tl` marks the row.
+:::
+
+### Sprite
+
+Samples a texture instead of drawing flat colour.
+
+| Field   | Type      | Default | Description                                                            |
+| ------- | --------- | ------- | ---------------------------------------------------------------------- |
+| `image` | `int32_t` | `0`     | Intern index of the image's name, from `imageId`. Zero names no image. |
+| `u0`    | `float`   | `0`     | UV rect, left.                                                         |
+| `v0`    | `float`   | `0`     | UV rect, top.                                                          |
+| `u1`    | `float`   | `1`     | UV rect, right.                                                        |
+| `v1`    | `float`   | `1`     | UV rect, bottom.                                                       |
+| `slot`  | `int32_t` | `-1`    | Texture-array layer the name resolved to. Negative means unresolved.   |
+
+`image` names the image and `slot` is the texture-array layer the renderer resolved that name to. Both are here
+because extraction reads the slot for every row it writes and wants a field rather than a lookup, while a
+snapshot needs something a slot cannot give it: slots are handed out in registration order, so slot seven means
+whichever image registered seventh, and a number that depends on load order cannot survive a round trip through
+a save. Only the name is written to a snapshot, and `deserialize` interns it again on the way back.
+
+A negative slot means unresolved. The renderer fills it in the first time it writes the row, so a Sprite
+restored from a snapshot or built by hand resolves once rather than once per frame.
+
+::: warning Repointing a live Sprite
+Pointing a Sprite at another image means writing a negative `slot` along with the new `image`, or the row keeps
+drawing the layer the old name resolved to.
+:::
+
+The UV rect selects a region, so an atlas is the same thing as a whole image with the rect set to the full
+range. A Sprite is normally not built by hand: [the renderer](#images) hands one back when an image is
+registered, and [`animation`](/modules/gfx/animation) builds them per frame and per slice.
+
+**Pairs with:** `Renderable` and `Tint`, which the renderable query requires; `Animation` from
+[`animation`](/modules/gfx/animation), which drives playback by writing the UV lanes. When an animation resolves on
+the GPU those four lanes carry a playback rather than a rect, which is why a serialized Sprite in that state
+writes the whole image and lets the animation put its own answer back on the first step after a load.
+
+### Material
+
+Which material shades a renderable's quad.
+
+| Field   | Type      | Default | Description                                                                                                                  |
+| ------- | --------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `id`    | `int32_t` | `0`     | Material id, from `tecs.gfx.materials.id(name)`.                                                                             |
+| `param` | `float`   | `0.25`  | Passed to the material, 0 to 1. What it means is the material's business; the rounded rectangle reads it as a corner radius. |
+
+Absent means the default, which samples the image array and covers the whole quad, so an entity with neither a
+`Sprite` nor a `Material` still draws. Present selects one of the materials found under `materials/`.
+
+The id comes from [`materials`](/modules/gfx/materials) rather than being written as a number, because the numbering
+depends on which material files exist and a literal would break the moment one was added ahead of it
+alphabetically. One instance format either way: the batch, the cull and the draw do not know which material an
+entity uses, which is what keeps the whole scene one draw.
+
+### PointLight
+
+A light resolved by the deferred lighting pass.
+
+| Field       | Type    | Default | Description                     |
+| ----------- | ------- | ------- | ------------------------------- |
+| `height`    | `float` | `64`    | Height above the surface plane. |
+| `radius`    | `float` | `256`   | Reach, in world units.          |
+| `r`         | `float` | `1`     | Red, 0 to 1.                    |
+| `g`         | `float` | `1`     | Green, 0 to 1.                  |
+| `b`         | `float` | `1`     | Blue, 0 to 1.                   |
+| `intensity` | `float` | `1`     | Multiplier on the colour.       |
+
+At zero `height` the Lambert term vanishes and the light contributes nothing, which reads as the light being
+broken rather than as a value being wrong.
+
+**Pairs with:** `Transform`, and nothing else. Lights are collected by their own query, `Transform` and
+`PointLight`, so a light needs neither `Renderable` nor `Tint` and an entity can be a light, a drawn thing, or
+both. A light is placed in world units like everything else, so moving the camera moves what is lit and zoom
+scales what a radius covers on screen rather than what it covers in the world.
+
+### Clip
+
+Which clip region a renderable's fragments are kept inside.
+
+| Field   | Type      | Default | Description                                                                  |
+| ------- | --------- | ------- | ---------------------------------------------------------------------------- |
+| `index` | `int32_t` | `0`     | Names a rectangle set with `Renderer:setClipRegion`. Zero means no clipping. |
+
+The rectangle is in target pixels measured from the top left, and each fragment is tested against where it
+landed rather than against where the entity is in the world. That is what a scrollable list inside a panel
+means, and it is one rectangle for all of it: a panel occupies a part of the window whether its contents are
+placed by the camera, in screen pixels, or in virtual coordinates.
+
+A component rather than a field on something every renderable has, because presence is the opt-in and absence is
+the common case: an archetype without this column is written by a loop that never mentions clipping, and the
+fragments it produces never read the region table. A world that clips nothing pays for this exactly nowhere.
+
+Nesting is the caller's. A region is one rectangle, so a panel inside a panel is set up as the intersection of
+the two rather than as two regions an instance sits in at once. The rectangle itself is set through
+[the renderer](#extending-a-frame), and clearing one puts it back to clipping nothing, so an index handed out and
+taken back leaves the instances still pointing at it drawing whole rather than silently gone.
+
+### Occluder
+
+Stands between a light and what is behind it.
+
+| Field    | Type    | Default | Description                                                                    |
+| -------- | ------- | ------- | ------------------------------------------------------------------------------ |
+| `height` | `float` | `1.0`   | How tall the entity stands, 0 to 1 of the world height `shadows.height` names. |
+
+The silhouette goes into one mask that every light marches against, so an entity blocks every light in the
+scene at the cost of one drawing of itself rather than one drawing per light. What it takes away is a light's
+own contribution and never the ambient term, because a mask read inside the light loop has no way to reach a
+term that is not in it. `DropShadow` is the other half of that.
+
+Coverage is the silhouette, so a circle, a rounded box or a glyph casts the shape it draws and there is no
+alpha threshold to set: the material dispatch already decided which fragments the entity covers.
+
+The height reads against `shadows.height` on the renderer, which defaults to 64, the same as a `PointLight`'s
+default height. So an occluder at `1.0` under a default light is level with it and its shadow runs to the
+horizon; at `0.5` the light clears it and the shadow ends.
+
+**Pairs with:** `Transform`, `Tint`, `Renderable`, and shadows turned on. Without
+[`shadows`](#shadows) on the renderer the entity draws exactly as it would without this
+component. A translucent entity casts nothing whatever it carries: it is drawn forward over the composited
+image and never reaches the G-buffer, so a hard silhouette of it would be a lie.
+
+### DropShadow
+
+Throws a stretched copy of the entity along the ground, away from the light.
+
+| Field    | Type    | Default | Description                                                         |
+| -------- | ------- | ------- | ------------------------------------------------------------------- |
+| `height` | `float` | `1.0`   | How far off the ground the copy is thrown from, on the same 0 to 1. |
+
+What this darkens is everything a light left, ambient included, which is exactly what `Occluder` cannot do and
+the reason both exist. Under a black light and full ambient an occluder has nothing to take away and this still
+throws a shadow.
+
+It blocks no light in return, and that is the design rather than a limitation: a crowd of light-blocking
+silhouettes merges under the mask into one flat mat of darkness, so the thing that wants a contact shadow is
+exactly the thing that must not be an occluder. An entity carrying both components is an occluder, because
+dropping that half would unblock a light without saying so.
+
+The copy is thrown by the nearest few lights by weight rather than by every light, so a light spawned elsewhere
+in the world does not move a shadow that had already settled. How dark it is and how long it may run are
+`shadows.dropOpacity` and `shadows.dropLength` on the renderer.
+
+**Pairs with:** the same as `Occluder`, under the same conditions.
+
+### Renderable
+
+Marks an entity as contributing geometry. Without it a `Transform` is just a position, which is what most
+entities in a world actually are.
+
+It carries no fields; presence is the whole of it. Together with `Transform` and `Tint` it is what the
+extractor's renderable query includes, so those three are the minimum an entity needs to be drawn.
+
+### Image names
+
+An image's name is its identity, and a texture-array slot is not. A component is plain C memory and a string
+does not fit there, so what a `Sprite` carries is the name's intern index. The index is process-local and never
+leaves the process.
+
+#### imageId
+
+Index of the given image name, assigning one the first time it is seen.
+
+```teal
+function tecs.gfx.imageId(name: string): integer
+```
+
+**Parameters:**
+
+- `name`: the image's path. Empty or nil raises.
+
+**Returns:** an index, starting at one, so zero is the index of no image at all and that is what a `Sprite`
+carries until something names one.
+
+The name is normalised lexically first, so what an image is identified by is the path it names rather than the
+spelling it was named with: repeated separators, `.` segments and a trailing separator are dropped. Nothing here
+reads the filesystem, so a name normalises the same before its file exists as after. Three things are
+deliberately left alone: `..`, because resolving it without the filesystem renames a path across a symlink;
+letter case, because folding it merges two files a case-sensitive filesystem keeps apart; and the asset root,
+because stripping it would make an identity depend on process state that `TECS_ASSETS` and
+`tecs.filesystem.setAssetRoot` move.
+
+#### imageName
+
+Name an index stands for.
+
+```teal
+function tecs.gfx.imageName(id: integer): string
+```
+
+**Returns:** the name, or nil when the index names nothing.
+
+### Components declared elsewhere
+
+Subsystems register components of their own, and they are documented with the subsystem rather than here:
+
+| Component             | Module                                           | What it does                                          |
+| --------------------- | ------------------------------------------------ | ----------------------------------------------------- |
+| `Pivot`               | [`animation`](/modules/gfx/animation)            | Hangs the quad off a point other than its middle.     |
+| `Animation`           | [`animation`](/modules/gfx/animation)            | Sprite-sheet playback, resolved in the vertex shader. |
+| `AnimationEvents`     | [`animation`](/modules/gfx/animation)            | Events derived from playback.                         |
+| `Text`                | [`text`](/modules/text)                          | A run of distance-field text.                         |
+| `ParticleEmitter`     | [`particles`](/modules/gfx/particles)            | An emitter, whose particles are not entities.         |
+| `Sound`               | [`Audio`](/modules/audio)                        | A voice attached to an entity.                        |
+| `RigidBody`           | [`physics`](/modules/physics)                    | The body an entity is.                                |
+| `TweenTrackingTarget` | [`sequence`](/modules/sequence#tracking-sources) | Selects the entity a tracking tween chases.           |
 
 ## The renderer
 
@@ -370,8 +682,8 @@ scene with no opinion about them passes:
 local renderer <const> = tecs.gfx.newRenderer(device, format, {shadows = {}})
 ```
 
-On, an entity carrying [`Occluder`](/modules/components#occluder) blocks light, and one carrying
-[`DropShadow`](/modules/components#dropshadow) darkens the ground away from it. Off, both components draw the
+On, an entity carrying [`Occluder`](#occluder) blocks light, and one carrying
+[`DropShadow`](#dropshadow) darkens the ground away from it. Off, both components draw the
 entity and cast nothing, so a scene can carry them before it can afford them.
 
 The two are different things rather than one thing at two strengths. An occluder's silhouette goes into a mask
@@ -405,12 +717,11 @@ that never casts pays for that and for nothing else.
 
 ### What feeds it
 
-Everything the renderer draws is an entity in a world. The components it reads are on
-[`tecs.components`](/modules/components) — `Transform`, `PreviousTransform`, `Tint`, `Sprite`, `Material`,
-`PointLight`, `Clip`, `Occluder`, `DropShadow` and `Renderable` — and the modules that produce them have their
-own pages:
+Everything the renderer draws is an entity in a world. The components it reads are
+[above](#the-components-a-scene-is-drawn-from), together with the ECS builtin `Transform`, and the
+modules that produce them have pages of their own:
 
-- [`tecs.gfx.Camera`](/modules/gfx/), the view it draws from
+- [`tecs.gfx.Camera`](#the-camera), the view it draws from
 - [`tecs.gfx.layers`](/modules/gfx/layers), z-ordering and per-layer behaviour
 - [`tecs.gfx.animation`](/modules/gfx/animation), sprite sheets and playback
 - [`tecs.text`](/modules/text), distance-field text drawn through an instance producer
@@ -526,11 +837,11 @@ is still re-extracted while the alpha is moving, because its drawn position move
 about the entity did.
 
 Nothing has to be enabled: spawn `PreviousTransform` beside `Transform` and the entity interpolates.
-<!-- @generated by docs/scripts/reference.py from src/tecs/gfx/Camera.tl, src/tecs/Renderer.tl. Do not edit below this line. -->
+<!-- @generated by docs/scripts/reference.py from src/tecs/gfx/Camera.tl, src/tecs/components.tl, src/tecs/Renderer.tl. Do not edit below this line. -->
 
 ## Reference
 
-Every function and type this module carries, rendered from `src/tecs/gfx/Camera.tl` and `src/tecs/Renderer.tl`.
+Every function and type this module carries, rendered from `src/tecs/gfx/Camera.tl`, `src/tecs/components.tl` and `src/tecs/Renderer.tl`.
 
 <a id="tecs.gfx.Camera.Options"></a>
 
@@ -726,6 +1037,161 @@ the bottom of the world.
 
 Above one magnifies. Applied about the centre, so zooming does not move
 what is under the middle of the window.
+
+<a id="tecs.gfx.Clip"></a>
+
+### tecs.gfx.Clip
+
+<pre><code v-pre><a href="#tecs.gfx.Clip">tecs.gfx.Clip</a>: Clip
+</code></pre>
+
+Keeps a renderable's fragments inside one rectangle. `index` names a
+region set with `Renderer:setClipRegion`, and 0, the default, means
+no clipping. A region is a single rectangle, so nesting is the
+caller's job: intersect the two and set that.
+<a id="tecs.gfx.DropShadow"></a>
+
+### tecs.gfx.DropShadow
+
+<pre><code v-pre><a href="#tecs.gfx.DropShadow">tecs.gfx.DropShadow</a>: DropShadow
+</code></pre>
+
+Darkens the ground away from each of the nearest lights, ambient
+included, and blocks no light. `height` is 0 to 1 and decides how far
+the copy is thrown, under the same reading as `Occluder.height`. An
+entity carrying both is an occluder.
+<a id="tecs.gfx.Material"></a>
+
+### tecs.gfx.Material
+
+<pre><code v-pre><a href="#tecs.gfx.Material">tecs.gfx.Material</a>: Material
+</code></pre>
+
+Selects one of the materials found under `materials/`. Absent means
+the default, which samples the image array over the whole quad, so an
+entity with neither this nor a Sprite still draws. Take `id` from
+`materials.id(name)` rather than writing a number: ids are positions
+in sorted order and move when a material file is added. `param` is 0
+to 1 and means whatever the material says it does.
+<a id="tecs.gfx.Occluder"></a>
+
+### tecs.gfx.Occluder
+
+<pre><code v-pre><a href="#tecs.gfx.Occluder">tecs.gfx.Occluder</a>: Occluder
+</code></pre>
+
+Blocks every light with the shape the entity draws. `height` is 0 to
+1 of the world height `Deferred.shadowHeight` sets, so 1 is a full
+wall and 0 is something lying flat that blocks nothing. Needs
+`shadows` on the renderer; without it the entity draws and casts
+nothing.
+<a id="tecs.gfx.PointLight"></a>
+
+### tecs.gfx.PointLight
+
+<pre><code v-pre><a href="#tecs.gfx.PointLight">tecs.gfx.PointLight</a>: PointLight
+</code></pre>
+
+A light the deferred lighting pass resolves, positioned by the
+entity's Transform and in the same world units. `height` is above the
+surface plane and at 0 the light contributes nothing at all;
+`radius` is its reach in world units; `r`, `g`, `b` and `intensity`
+default to white at 1.
+<a id="tecs.gfx.PreviousTransform"></a>
+
+### tecs.gfx.PreviousTransform
+
+<pre><code v-pre><a href="#tecs.gfx.PreviousTransform">tecs.gfx.PreviousTransform</a>: PreviousTransform
+</code></pre>
+
+The transform as it stood before the current fixed step. Presence is
+the opt-in to interpolation: an entity carrying it is drawn between
+this and its current transform, so physics does not step visibly.
+Carries `x`, `y` and `rotation` (radians) only, because scale and
+layer change by assignment rather than by integration.
+<a id="tecs.gfx.Renderable"></a>
+
+### tecs.gfx.Renderable
+
+<pre><code v-pre><a href="#tecs.gfx.Renderable">tecs.gfx.Renderable</a>: Renderable
+</code></pre>
+
+Marks an entity as contributing geometry. A tag, so it costs a
+column of nothing; without it a Transform is only a position, which
+is what most entities in a world are.
+<a id="tecs.gfx.Sprite"></a>
+
+### tecs.gfx.Sprite
+
+<pre><code v-pre><a href="#tecs.gfx.Sprite">tecs.gfx.Sprite</a>: Sprite
+</code></pre>
+
+Samples a texture instead of drawing flat colour. `image` is an
+`imageId` index, and 0 means no image; `u0, v0, u1, v1` select the
+region, defaulting to the whole of it, so an atlas entry and a whole
+image are the same thing. `slot` is the texture-array layer the
+renderer resolved `image` to, and a negative value means unresolved:
+pointing a live Sprite at another image means writing a negative slot
+along with the new `image`, or the row keeps drawing the old layer.
+Only the image name survives a snapshot.
+<a id="tecs.gfx.Tint"></a>
+
+### tecs.gfx.Tint
+
+<pre><code v-pre><a href="#tecs.gfx.Tint">tecs.gfx.Tint</a>: Tint
+</code></pre>
+
+Base colour and coverage, each channel 0 to 1, defaulting to opaque
+white. The alpha decides which pass draws the entity: exactly 1 goes
+through the G-buffer and is lit once for the whole scene, anything
+below 1 goes through the forward pass instead, writes no depth, and
+is dropped when the forward list is full. Say 1 exactly for anything
+meant to be solid.
+<a id="tecs.gfx.imageId"></a>
+
+### tecs.gfx.imageId
+
+<pre><code v-pre>function <a href="#tecs.gfx.imageId">tecs.gfx.imageId</a>(name: string): integer
+</code></pre>
+
+Index of an image name, assigning one the first time it is seen.
+
+The name is normalised lexically first, so `"a/b.png"` and
+`"a/./b.png"` are one image. Case, `..` and the asset root are
+deliberately left alone, and nothing here touches the filesystem.
+
+#### Parameters
+
+| Type                      | Name                    | Description                                                           |
+| ------------------------- | ----------------------- | --------------------------------------------------------------------- |
+| <code v-pre>string</code> | <code v-pre>name</code> | Must be non-empty; an empty or nil name errors rather than interning. |
+
+#### Returns
+
+| Type                       | Description                                                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>integer</code> | An index from 1 upwards, stable for the life of the process and meaningless outside it. 0 is never returned and is what a Sprite carries until something names an image. |
+
+<a id="tecs.gfx.imageName"></a>
+
+### tecs.gfx.imageName
+
+<pre><code v-pre>function <a href="#tecs.gfx.imageName">tecs.gfx.imageName</a>(id: integer): string
+</code></pre>
+
+Name an image index stands for.
+
+#### Parameters
+
+| Type                       | Name                  | Description                                  |
+| -------------------------- | --------------------- | -------------------------------------------- |
+| <code v-pre>integer</code> | <code v-pre>id</code> | An index previously handed out by `imageId`. |
+
+#### Returns
+
+| Type                      | Description                                               |
+| ------------------------- | --------------------------------------------------------- |
+| <code v-pre>string</code> | The normalised name, or nil when the index names nothing. |
 
 <a id="tecs.gfx.Renderer.ClipRegion"></a>
 

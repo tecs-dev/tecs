@@ -80,7 +80,7 @@ Most components serialize with no work. A component whose fields are this proces
 durable data opts out of the bulk path with `serialize` / `deserialize` hooks, and the engine's own components
 are the worked examples of why:
 
-- **`tecs.components.Sprite`** holds an image's intern index, handed out in the order images were registered.
+- **`tecs.gfx.Sprite`** holds an image's intern index, handed out in the order images were registered.
   A number that depends on load order cannot survive a save, so `serialize` writes the image's _name_ and
   `deserialize` interns it again. What a saved sprite refers to is decided by the name on both sides.
 - **`tecs.gfx.animation.Animation`** holds a sheet id and a tag id, both decided by the order sheets were built in,

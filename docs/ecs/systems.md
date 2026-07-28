@@ -20,9 +20,9 @@ where queries are built once and the systems that use them are declared:
 
 ```teal
 local tecs <const> = require("tecs")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local Renderable <const> = tecs.gfx.Renderable
 
 return tecs.application.create({
     plugin = function(world: tecs.World, app: tecs.application.Application)

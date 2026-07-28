@@ -34,14 +34,13 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.application`](/modules/application)           | the object an entry file returns, and what builds one                     |
 | [`tecs.assets`](/modules/assets)                     | loading content, cached and off the main thread                           |
 | [`tecs.audio`](/modules/audio)                       | clips, voices, groups, limits, the `Sound` component, and devices         |
-| [`tecs.components`](/modules/components)             | the engine's own components, the ones the renderer reads                  |
 | [`tecs.data`](/modules/data)                         | JSON, DEFLATE and hashes over byte strings                                |
 | [`tecs.ecs`](/ecs/)                                  | worlds, components, queries, systems, events and resources                |
 | [`tecs.events`](/modules/events)                     | platform events, typed once and routed                                    |
 | [`tecs.filesystem`](/modules/filesystem/)            | where a game may read and write, and what to do with a path               |
 | [`tecs.filesystem.watch`](/modules/filesystem/watch) | watching files for change                                                 |
 | [`tecs.future`](/modules/future)                     | a value that settles once                                                 |
-| [`tecs.gfx`](/modules/gfx/)                          | the camera, the renderer, and the vocabularies a scene is described in    |
+| [`tecs.gfx`](/modules/gfx/)                          | the camera, the components, the renderer, and the vocabularies below them |
 | [`tecs.gfx.animation`](/modules/gfx/animation)       | sprite sheets, and the playback that reads them                           |
 | [`tecs.gfx.layers`](/modules/gfx/layers)             | z-ordering and per-layer behaviour                                        |
 | [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to                                         |

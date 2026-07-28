@@ -25,10 +25,10 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs <const> = require("tecs")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
-local Transform <const> = tecs.components.Transform
-local Tint <const> = tecs.components.Tint
-local PointLight <const> = tecs.components.PointLight
-local Renderable <const> = tecs.components.Renderable
+local Transform <const> = tecs.ecs.builtins.Transform
+local Tint <const> = tecs.gfx.Tint
+local PointLight <const> = tecs.gfx.PointLight
+local Renderable <const> = tecs.gfx.Renderable
 
 local COUNT <const> = math.floor(tonumber(os.getenv("TECS_INSTANCES")) or 4000)
 

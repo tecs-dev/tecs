@@ -248,6 +248,99 @@ local record gfx
     ---     backend, and releases all three from `destroy`.
     newRenderer: function(device: loader.CPtr, swapchainFormat: integer, options: Renderer.Options): Renderer
 
+    -- The components a game spawns to put something on screen. All but
+    -- `Renderable` are FFI components, so their columns are contiguous C
+    -- memory the sync walks row by row into mapped GPU staging: writing one
+    -- through `world:get` needs an explicit `world:markComponentDirty`, since
+    -- only `getMut` marks the column on its own.
+    --
+    -- `Transform` is not among them. It positions everything a world holds
+    -- rather than only what draws, so it is the ECS builtin and is reached as
+    -- `tecs.ecs.builtins.Transform`.
+
+    --- The transform as it stood before the current fixed step. Presence is
+    --- the opt-in to interpolation: an entity carrying it is drawn between
+    --- this and its current transform, so physics does not step visibly.
+    --- Carries `x`, `y` and `rotation` (radians) only, because scale and
+    --- layer change by assignment rather than by integration.
+    PreviousTransform: components.PreviousTransform
+
+    --- Base colour and coverage, each channel 0 to 1, defaulting to opaque
+    --- white. The alpha decides which pass draws the entity: exactly 1 goes
+    --- through the G-buffer and is lit once for the whole scene, anything
+    --- below 1 goes through the forward pass instead, writes no depth, and
+    --- is dropped when the forward list is full. Say 1 exactly for anything
+    --- meant to be solid.
+    Tint: components.Tint
+
+    --- Samples a texture instead of drawing flat colour. `image` is an
+    --- `imageId` index, and 0 means no image; `u0, v0, u1, v1` select the
+    --- region, defaulting to the whole of it, so an atlas entry and a whole
+    --- image are the same thing. `slot` is the texture-array layer the
+    --- renderer resolved `image` to, and a negative value means unresolved:
+    --- pointing a live Sprite at another image means writing a negative slot
+    --- along with the new `image`, or the row keeps drawing the old layer.
+    --- Only the image name survives a snapshot.
+    Sprite: components.Sprite
+
+    --- Selects one of the materials found under `materials/`. Absent means
+    --- the default, which samples the image array over the whole quad, so an
+    --- entity with neither this nor a Sprite still draws. Take `id` from
+    --- `materials.id(name)` rather than writing a number: ids are positions
+    --- in sorted order and move when a material file is added. `param` is 0
+    --- to 1 and means whatever the material says it does.
+    Material: components.Material
+
+    --- A light the deferred lighting pass resolves, positioned by the
+    --- entity's Transform and in the same world units. `height` is above the
+    --- surface plane and at 0 the light contributes nothing at all;
+    --- `radius` is its reach in world units; `r`, `g`, `b` and `intensity`
+    --- default to white at 1.
+    PointLight: components.PointLight
+
+    --- Keeps a renderable's fragments inside one rectangle. `index` names a
+    --- region set with `Renderer:setClipRegion`, and 0, the default, means
+    --- no clipping. A region is a single rectangle, so nesting is the
+    --- caller's job: intersect the two and set that.
+    Clip: components.Clip
+
+    --- Blocks every light with the shape the entity draws. `height` is 0 to
+    --- 1 of the world height `Deferred.shadowHeight` sets, so 1 is a full
+    --- wall and 0 is something lying flat that blocks nothing. Needs
+    --- `shadows` on the renderer; without it the entity draws and casts
+    --- nothing.
+    Occluder: components.Occluder
+
+    --- Darkens the ground away from each of the nearest lights, ambient
+    --- included, and blocks no light. `height` is 0 to 1 and decides how far
+    --- the copy is thrown, under the same reading as `Occluder.height`. An
+    --- entity carrying both is an occluder.
+    DropShadow: components.DropShadow
+
+    --- Marks an entity as contributing geometry. A tag, so it costs a
+    --- column of nothing; without it a Transform is only a position, which
+    --- is what most entities in a world are.
+    Renderable: components.Renderable
+
+    --- Index of an image name, assigning one the first time it is seen.
+    ---
+    --- The name is normalised lexically first, so `"a/b.png"` and
+    --- `"a/./b.png"` are one image. Case, `..` and the asset root are
+    --- deliberately left alone, and nothing here touches the filesystem.
+    ---
+    --- @param name Must be non-empty; an empty or nil name errors rather
+    ---     than interning.
+    --- @return An index from 1 upwards, stable for the life of the process
+    ---     and meaningless outside it. 0 is never returned and is what a
+    ---     Sprite carries until something names an image.
+    imageId: function(name: string): integer
+
+    --- Name an image index stands for.
+    ---
+    --- @param id An index previously handed out by `imageId`.
+    --- @return The normalised name, or nil when the index names nothing.
+    imageName: function(id: integer): string
+
     animation: animation
     layers: layers
     materials: materials
@@ -302,7 +395,6 @@ local record tecs
     application: application
     assets: assets
     audio: audio
-    components: components
     data: data
     events: events
     filesystem: filesystem
@@ -375,7 +467,6 @@ local SURFACE <const>: {string: Namespace} = {
     application = {module = "tecs.Application", class = "Application"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
-    components = {module = "tecs.components"},
     data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
     filesystem = {
@@ -384,7 +475,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     future = {module = "tecs.Future", class = "Future"},
     gfx = {
-        beside = {"tecs.gfx.Camera", "tecs.Renderer"},
+        beside = {"tecs.components", "tecs.gfx.Camera", "tecs.Renderer"},
         within = {
             Camera = {module = "tecs.gfx.Camera"},
             Renderer = {module = "tecs.Renderer"},
