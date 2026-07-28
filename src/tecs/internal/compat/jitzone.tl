@@ -1,7 +1,11 @@
--- LOVE release packages may omit LuaJIT's jit/*.lua library files, so
--- require("jit.zone") can fail even though jit.profile is available. Register
--- a fallback in package.preload without replacing an already-loaded module or
--- an existing preload entry.
+-- A packaged tree installs LuaJIT's shared library and not its `jit/*.lua`
+-- files, so `require("jit.zone")` fails there even though `jit.profile` is
+-- available. A fallback goes into `package.preload` without replacing an
+-- already-loaded module or an existing preload entry.
+--
+-- The better fix is for the package to carry those files, which would delete
+-- this; it is recorded in the backlog rather than done here, because the
+-- install rules belong to the build rather than to the engine.
 --
 -- Based on LuaJIT 2.1/src/jit/zone.lua, with __call defaulting to a no-op.
 -- The real/no-op handlers are kept on the metatable for compatibility with

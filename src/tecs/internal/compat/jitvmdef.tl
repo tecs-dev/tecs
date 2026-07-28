@@ -1,8 +1,12 @@
--- LOVE release packages may omit LuaJIT's jit/*.lua library files, so
--- require("jit.vmdef") can fail. Profile trace reports need `traceerr` and
--- `bcnames` to turn abort codes into readable reasons and bytecode names.
--- Register only that fallback shape without replacing an already-loaded module
--- or an existing preload entry.
+-- A packaged tree installs LuaJIT's shared library and not its `jit/*.lua`
+-- files, so `require("jit.vmdef")` fails there while working in a build tree.
+-- Profile trace reports need `traceerr` and `bcnames` to turn abort codes into
+-- readable reasons and bytecode names, so a fallback is registered without
+-- replacing an already-loaded module or an existing preload entry.
+--
+-- The better fix is for the package to carry those files, which would delete
+-- this; it is recorded in the backlog rather than done here, because the
+-- install rules belong to the build rather than to the engine.
 --
 -- The tables below are baked from LuaJIT 2.1's jit/vmdef.lua. Regenerate with:
 --   luajit -e 'local v=require"jit.vmdef".traceerr; local i=0; while v[i] do io.write(string.format("[%d] = %q,\n",i,v[i])); i=i+1 end'

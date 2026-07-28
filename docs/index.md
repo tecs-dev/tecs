@@ -26,9 +26,9 @@ features:
   - title: ECS built for LuaJIT
     details: An <a href="/ecs/archetype">archetype-based ECS</a> with FFI components, contiguous columns, and a dirty model the GPU reads.
     icon: ⚡
-  - title: One project, not two
-    details: The ECS knows what the GPU reads, so <a href="/modules/Renderer">rendering</a> is not a layer bolted on top of a renderer-agnostic core.
-    icon: 🧩
+  - title: Batteries included
+    details: <a href="/modules/physics">Physics</a>, <a href="/modules/Audio">audio</a>, <a href="/modules/particles">particles</a>, <a href="/modules/text">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/sheet">sprite sheets</a> and hot reload ship in the box, sharing one data model.
+    icon: 🔋
   - title: Static typing
     details: Catch errors at compile time, not runtime. Tecs is designed from the ground up for static typing with <a href="https://github.com/teal-language/tl"><u>Teal</u></a>.
     icon:
@@ -184,7 +184,7 @@ world:emit(0, DamageEvent, enemyId, 25)
 
 :::
 
-## What is here
+## Features
 
 <div class="feature-grid">
 <div class="feature-group">
