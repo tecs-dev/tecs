@@ -24,14 +24,16 @@ and per particle rather than conservative around an emitter, and a slot with no 
 writes a hidden bound that costs a bounds read and never reaches the draw.
 
 ::: warning Particles are opaque
-There is no blend state anywhere in this engine yet: the geometry pass writes with replace, so a
-colour's alpha channel reaches the swapchain and nothing blends against it. A gradient ending at
-transparent black writes opaque black over whatever was behind it, which is worse than not fading at
-all. Alpha is carried, and it is inert.
+The forward blended lane exists and nothing particle-shaped reaches it: a row is routed forward by
+extraction negating the first half extent of its cull bound, and the simulate pass writes every
+particle's bound with both extents positive. So a particle goes to the G-buffer, which is written
+with replace, and a colour's alpha channel reaches the swapchain having blended against nothing. A
+gradient ending at transparent black writes opaque black over whatever was behind it, which is worse
+than not fading at all. Alpha is carried, and it is inert.
 
 What works today is debris, chunks, gibs, snow, rain, confetti and hard-edged sparks; the only fade
-available is the size curve going to zero. Fire, smoke, glow and soft dust want the blended pass and
-are not here.
+available is the size curve going to zero. Fire, smoke, glow and soft dust want the blended lane and
+do not yet reach it.
 :::
 
 What is deliberately unavailable, and structurally rather than because nobody wrote it: no particle

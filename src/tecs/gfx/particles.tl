@@ -26,14 +26,17 @@
 --- `Backend.ComputeStage`, which is what lets it write that region before the
 --- cull reads it.
 ---
---- **Particles are opaque.** There is no blend state anywhere in this engine
---- yet: the geometry pass writes with replace, so a colour's alpha channel
---- reaches the swapchain and nothing blends against it. A gradient ending at
+--- **Particles are opaque.** The forward blended lane exists and nothing
+--- particle-shaped reaches it: a row is routed forward by extraction negating
+--- the first half extent of its cull bound, and the simulate pass writes every
+--- particle's bound with both extents positive. So a particle goes to the
+--- G-buffer, which is written with replace, and a colour's alpha channel
+--- reaches the swapchain having blended against nothing. A gradient ending at
 --- transparent black writes opaque black over whatever was behind it, which is
 --- worse than not fading at all. Alpha is carried, and it is inert. What works
 --- today is debris, chunks, gibs, snow, rain, confetti and hard-edged sparks;
 --- the only fade available is the size curve going to zero. Fire, smoke, glow
---- and soft dust want the blended pass and are not here.
+--- and soft dust want the blended lane and do not yet reach it.
 ---
 --- What is deliberately unavailable, and structurally rather than because
 --- nobody wrote it: no particle can be inspected, moved, killed or counted
@@ -238,7 +241,8 @@ end
 
 --- A colour gradient over normalised age, compiled to a lookup table.
 ---
---- The alpha channel is carried and is inert until there is a blended pass.
+--- The alpha channel is carried and is inert until a particle can be routed
+--- into the forward blended lane.
 local record Gradient
     --- Evenly spaced RGBA samples over zero to one, four floats each.
     samples: {number}
@@ -340,7 +344,7 @@ local record UpdateOptions
     --- Multiplies the particle's own size over its life.
     size: Curve
     --- Multiplies the particle's own colour over its life. Its alpha channel
-    --- is inert until there is a blended pass.
+    --- is inert until a particle can be routed into the forward blended lane.
     color: Gradient
 end
 
@@ -373,9 +377,9 @@ local record RenderOptions
     alignment: string
     --- Multiplies the along-path axis when aligned to velocity.
     stretch: number
-    --- Accepted, logged once, and ignored. There is no blend state in this
-    --- engine yet, so an effect authored with one today draws opaque and will
-    --- draw as written when there is.
+    --- Accepted, logged once, and ignored. Nothing particle-shaped reaches the
+    --- forward blended lane, so an effect authored with one today draws opaque
+    --- and will draw as written once the simulate pass can pick that lane.
     blend: string
     --- Which clip region the fragments are kept inside. Zero is no clipping.
     clip: integer
@@ -599,8 +603,9 @@ end
 --- Compiles keyframes into a colour gradient.
 ---
 --- Keys are `{ age, colour }`. The alpha channel is carried and is inert until
---- there is a blended pass: today a fade to transparent writes opaque, and the
---- only fade that works is the size curve going to zero.
+--- a particle can be routed into the forward blended lane: today a fade to
+--- transparent writes opaque, and the only fade that works is the size curve
+--- going to zero.
 local function newGradient(keys: {CurveKey}): Gradient
     return {
         samples = sampleKeys(
@@ -820,9 +825,10 @@ local function newEffect(options: EffectOptions): Effect
     if render.blend ~= nil and not blendNoted[render.blend] then
         blendNoted[render.blend] = true
         logger:warn(
-            "particle blend '%s' is accepted and ignored: this "
-                .. "engine has no blend state, so particles draw opaque and a "
-                .. "colour's alpha reaches the target unblended",
+            "particle blend '%s' is accepted and ignored: nothing "
+                .. "particle-shaped reaches the forward blended lane, so "
+                .. "particles draw opaque and a colour's alpha reaches the "
+                .. "target unblended",
             render.blend
         )
     end
@@ -975,8 +981,8 @@ local record ParticleEmitter is ecs.Component
     rateScale: number
     sizeScale: number
     timeScale: number
-    --- Multiplies every particle's colour. Its alpha is inert until there is a
-    --- blended pass.
+    --- Multiplies every particle's colour. Its alpha is inert until a particle
+    --- can be routed into the forward blended lane.
     tint: Color
 
     --- The pool's answer for this emitter, and this process's answer only.

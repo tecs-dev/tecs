@@ -10,32 +10,42 @@ from `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate`, and `SDL_AppQuit`:
 
 ```lua
 return tecs.application.create({
-    load = function(app) end,
-    update = function(app, dt) end,
-    event = function(app, event)
-        if event.kind == "appWillEnterBackground" then end
+    window = {title = "game", width = 1280, height = 720},
+
+    plugin = function(world, app)
+        world:addSystem({
+            name = "game.Tick",
+            phase = tecs.ecs.phases.Update,
+            run = function(dt) end,
+        })
+        world:observe(0, tecs.events.on.appWillEnterBackground, function() end)
     end,
-    quit = function(app) end,
 })
 ```
 
 That shape is not a preference. iOS never hands control back for a blocking
 loop to sit in, so a host that cannot be entered by callback cannot run there
 at all. The same shape works on desktop, so there is one lifecycle rather than
-one per platform. The callbacks are C reaching Lua through the Lua C API, not
-FFI callbacks, which are a trace barrier and unsafe from a thread the VM did
-not create.
+one per platform. The host's calls into Lua are C reaching Lua through the Lua
+C API, not FFI callbacks, which are a trace barrier and unsafe from a thread
+the VM did not create.
 
-Everything below Lua is reached through the FFI. There are no Lua C extensions:
-the only native code is a host that owns `main`, and even that is never called
-from Lua.
+Everything below Lua is reached through the FFI. What C there is under
+`native/` is mostly there because something below Lua needs an address a Lua
+function cannot safely be: a host that owns `main`, a worker thread runner, a
+log sink, the thread pool Box2D solves across, the file dialogs, the HTTP
+response buffers, the machine-code arena, a shared-object stub for SPIRV-Cross,
+and the table of function pointers a target without `dlopen` reaches its
+libraries through. The host itself is never called from Lua. The one Lua C
+module is lua-cjson, compiled in and announced through `package.preload` rather
+than found on a search path, for the reason that table of pointers exists.
 
 ## Status
 
 Working today:
 
-- Generated FFI bindings for SDL3, Box2D 3, shaderc, and SPIRV-Cross, verified
-  against the C ABI
+- Generated FFI bindings for SDL3, SDL3_image, SDL3_mixer, SDL3_net, Box2D 3,
+  shaderc, SPIRV-Cross, libcurl and zlib, verified against the C ABI
 - A window, a Metal/Vulkan/D3D12 GPU device, and a swapchain render loop
 - GLSL compiled at runtime to SPIR-V and translated to MSL, with resource
   bindings reflected and remapped for the backend
@@ -48,14 +58,16 @@ Working today:
   another, deciding how its contents sort within that band, where they are
   positioned (by the camera, in screen pixels, in a virtual resolution, at
   their own parallax, or at a fixed size under zoom) and whether they are lit
-- An ECS binding: Transform2D, Tint, Sprite, Material, PointLight, Clip and
-  Renderable components, with a sync that walks archetype columns straight into
-  mapped GPU staging, and a depth-tested G-buffer
+- An ECS binding: the builtin `Transform` plus Tint, Sprite, Material,
+  PointLight, Clip, Occluder, DropShadow and Renderable components, with a sync
+  that walks archetype columns straight into mapped GPU staging, and a
+  depth-tested G-buffer
 - Physics in the world: a RigidBody component holding a value-typed Box2D
   handle, stepped in the fixed phases, solved across a native thread pool, and
   written back from the movement Box2D reports rather than by asking per body.
-  A despawn destroys the body; a snapshot restores the handle as null, because
-  nothing yet carries the shape a rebuild would need
+  A despawn destroys the body; a snapshot carries the `Body`, `Collider` and
+  `Motion` columns instead of the handle, and the fixed-step reconcile rebuilds
+  the body from them on load
 - Input in three tiers behind a layer stack, latched for fixed steps, with
   per-device gamepads, text input bound to a layer, touch and pen
 - Worker threads with serialized channels, and asset loading that decodes on
@@ -90,9 +102,11 @@ Working today:
   JSON export; with playback resolved in the vertex shader against a shared
   frame table, so a frame changing writes nothing and two hundred thousand
   animating sprites cost what two hundred thousand still ones do
-- Layers: sixteen bands of the depth range, each choosing how its contents sort
-  within it, and each able to sit in screen pixels, in virtual coordinates,
-  outside the camera's zoom, at its own parallax, or unlit
+- Two shadows: an `Occluder` puts its silhouette into one mask that every light
+  marches, so blocking a light costs one drawing of the caster rather than one
+  per light, and a `DropShadow` throws a stretched copy along the ground, which
+  is the half that reaches ambient. Both arrive through the renderer's
+  `shadows` option and cost nothing without it
 - Sound: clips read on the asset worker through SDL_mixer's decoders, a voice
   per mixer track, groups by tag with a gain, a mute and a sticky pause each,
   keyed limits with cooldowns, fades, pitch, loop points that change mid-play,
@@ -117,7 +131,7 @@ Working today:
   only: the forward blended lane exists, and nothing particle-shaped routes
   into it yet
 
-Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
+Not built yet: post-processing, UI, tiled maps and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -1231,6 +1245,11 @@ and `glob`, `SDL_LoadFile` behind `read`, then `createDirectory`, `remove`,
 filesystem and no invented path scheme, so a failure is the platform's failure
 and the name says which call to read about. Like `proc` it initialises no
 subsystem and is more useful with no window than with one.
+
+`openWrite` and `openRead` are the pair that is not one call, and they are the
+exception the streaming body needed: a backend that can open a file is asked
+to, and one that cannot is buffered over, so a download that ends in a file and
+an upload read out of one both work whatever a port supplied.
 
 Nothing here reaches the operating system, because `adapter` names storage as a
 seam and a seam that covered only _where_ content is would leave every read of a
@@ -2613,14 +2632,16 @@ a panel is set up as the intersection of the two and the fragment tests once.
 out and taken back leaves instances still pointing at it drawing whole rather
 than silently gone.
 
-The index rides in `origin.z` beside the texture-array layer, as
-`clip * 64 + layer`. A layer is a small integer bounded by the array's 64
-slots, and a float32 represents integers exactly to 16,777,216, so the largest
-value the pair packs is 16,383 and both halves come back out exactly: the
-shader takes the layer with a modulo and the region with a division. That keeps
-the instance at four vec4s, which is the point. `instancelayout` owns the
-packing so the renderer's sync and the text producer state it once between
-them.
+The index rides in `origin.z` beside the texture-array layer and the caster
+height, as `height * 16384 + clip * 64 + layer`. Each is a small integer
+bounded by what it counts, which is the array's 64 slots, 256 regions and 256
+height steps, and a float32 represents integers exactly to 16,777,216, so the
+largest value the three pack is 4,194,303 and every one of them comes back out
+exactly: the shader takes the layer with a modulo, the region with a division
+and a modulo, and the height with a division. That keeps the instance at four
+vec4s, which is the point. `instancelayout.packSlot` owns the packing and
+`assets/shaders/include/slot.glsl` owns the recovery, so the renderer's sync,
+the text producer and the particle pool state it once between them.
 
 Not clipping costs nothing. An archetype with no `Clip` column is written by a
 loop that never mentions a region, and the float it writes is the layer as it
@@ -3195,8 +3216,11 @@ every drawing site.
 **Nondeterminism is injectable.** `platform.clock` and `platform.events` both
 read through a provider that defaults to the real source. A replay driver
 substitutes recorded dt and recorded input without either subsystem knowing.
-Events are delivered as a reused `SDL_Event`, so recording is a 128 byte copy
-and replay is the same copy back, with no second representation to keep in sync.
+What a source hands over is the engine's own `Event` record rather than an
+`SDL_Event`, which is what makes a platform that has no `SDL_Event` able to
+supply one; the record is reused, so anything a recorder retains it takes
+through `events.copy`. A replayed event carries no `arrival`, because a
+synthesised one would be a latency measurement of the replay driver.
 
 **Randomness is seeded, and split by name rather than by order.** `tecs.ecs.random`
 gives a world a generator per name, each seeded by hashing the name against the
@@ -3255,8 +3279,8 @@ worker that fails to start looks like a worker that had nothing to do.
  sdl3net      34
  worker       10
  dialogs      10
+ http          8
  taskpool      7
- http          7
  logsink       3
 ```
 
@@ -3288,7 +3312,7 @@ matching misses.
 A hand-maintained cdef does not fail to link when it drifts. It reinterprets
 memory and surfaces later as corruption far from the cause. `make abi-check`
 compares LuaJIT's view of every generated record against the C compiler's:
-size, alignment, and the offset of every field. It currently verifies 194
+size, alignment, and the offset of every field. It currently verifies 219
 records. A binding whose header is written against another library's types
 names that one as a prerequisite, which is how SDL_mixer's records are
 declared against SDL's.
@@ -3301,15 +3325,20 @@ Lua where it cannot inline across an FFI call. `World.getAngle` converting a
 ## Layout
 
 ```
-native/host.c               process entry: a Lua state and argv, nothing else
-scripts/gencdef.py          header -> cdef + constants generator
-scripts/abicheck.py         cdef vs C compiler layout verification
+native/host.c             process entry, the event batches, the lifecycle hooks
+native/registry.c         function pointers, for a target without `dlopen`
+native/                   worker runner, log sink, task pool, dialogs, HTTP
+scripts/gencdef.py        header -> cdef + constants generator
+scripts/abicheck.py       cdef vs C compiler layout verification
+src/tecs/init.tl          the public API: one module per name, ECS and engine
+src/tecs/ecs.tl           what a game writes, and what engine modules require
 src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
+src/tecs/Application.tl   the lifecycle the host drives
 src/tecs/ffi/             library loading and generated binding wrappers
-src/tecs/platform/        window, input, audio, dialogs, sensors, OS services
+src/tecs/platform/        window, input, audio, sensors, files, OS services
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
-src/tecs/gfx/             camera, layers, sprite sheets and their playback
+src/tecs/gfx/             camera, layers, sheets and playback, text, particles
 src/tecs/Renderer.tl      the world-to-GPU bridge, owning both halves below
 src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
 src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
@@ -3317,10 +3346,18 @@ src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/Audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
+src/tecs/mcp/             the debug server: transport, tools, sandbox
+src/tecs/assets.tl        images and clips, decoded on a worker
+src/tecs/workers.tl       threads with serialized channels
+src/tecs/Future.tl        the value everything asynchronous settles into
+src/tecs/http/            requests, and the clients the loop turns
 src/tecs/net.tl           nonblocking TCP and UDP transport
+src/tecs/random.tl        seeded streams and Perlin noise
 src/tecs/hash.tl          FNV-1a, Adler-32 and CRC-32 over byte strings
 src/tecs/compress.tl      zlib and raw DEFLATE in both directions
-spec/                       busted suite
+assets/                   shaders, materials and fonts, globbed at build time
+spec/                     busted suite
+bench/                    where the numbers in this file come from
 ```
 
 ## Build
@@ -3390,11 +3427,21 @@ a real window to completion.
 
 ## Requirements
 
-CMake 3.24+, LuaJIT, SDL3 (3.4+, for SDL_GPU), SDL3_image, SDL3_mixer, SDL3_net,
+CMake 3.24+, LuaJIT, SDL3 (3.4, for SDL_GPU), SDL3_image, SDL3_mixer, SDL3_net,
 Box2D 3.x, shaderc, SPIRV-Cross, libcurl, zlib, and Teal (`tl`). The configure
 requires every one of them. `make deps` installs the ones Homebrew supplies;
 libcurl and zlib are not among them, because a development preset finds the
 host's.
+
+A version is a requirement rather than a floor. The spec suite runs against
+whatever a development preset resolved, so a suite run against a different SDL,
+SDL_image, SDL_mixer, SDL_net, LuaJIT or shaderc than `cmake/Revisions.cmake`
+names is not testing what a release ships, and the configure fails on the
+difference rather than leaving it to be found as a spec that passes on one
+machine and not another. `-DTECS_ALLOW_VERSION_DRIFT=ON` proceeds anyway, which
+is for working on a dependency before its revision is raised. Box2D,
+SPIRV-Cross, libcurl and zlib are unchecked, and `cmake/SystemVersions.cmake`
+says why each is.
 
 A development build takes SDL_mixer from the system, and a system build is
 whatever the packager configured: Homebrew's loads its optional decoders by

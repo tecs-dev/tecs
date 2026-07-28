@@ -308,8 +308,9 @@ Marks this run as a development one, which two things read.
 
 The device is created with its validation layers on, and the log
 file below is written without being asked for. It is also one of
-the two settings `clearCrash` looks at to decide whether resuming
-after a gameplay crash is something this build does at all.
+the three settings `clearCrash` looks at, beside `mcpPort` and
+`watch`, to decide whether resuming after a gameplay crash is
+something this build does at all.
 <a id="tecs.application.Application.Config.framesInFlight"></a>
 
 ### tecs.application.Application.Config.framesInFlight

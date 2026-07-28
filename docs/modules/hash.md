@@ -38,7 +38,7 @@ strings.
 **Example:**
 
 ```teal
-local source <const> = tecs.assets.read(path)
+local source <const> = tecs.filesystem.read(path)
 local stamp <const> = tecs.hash.fnv1a64(source)
 if stamp ~= recorded then
     rebuild()
