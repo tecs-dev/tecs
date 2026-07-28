@@ -3,7 +3,7 @@ description: "Tour of the ECS half of Tecs: worlds, entities, components, system
 outline: deep
 ---
 
-# The ECS
+# tecs.ecs
 
 Tecs is a typed, archetype-based entity component system for [LuaJIT](https://luajit.org) and
 [Teal](https://teal-language.org), and the game engine built around it. The two are one project, not a
@@ -32,6 +32,13 @@ local tecs <const> = require("tecs")
 file with no require line. It is the same table `require` gives back, metatable included. The engine half is
 resolved lazily on first field access, so `require("tecs")` alone loads no engine module and a headless tool, a
 test or a server never demands a graphics stack.
+
+There is a module called `tecs.ecs`, which is what this section is named for, and **a game does not require it.**
+It is the ECS half on its own, and it exists because `tecs` is the aggregator that pulls every engine module in:
+a module the surface exports cannot also depend on the surface without making a cycle, which Teal rejects even
+through a type-only require. So engine modules require `tecs.ecs` and only a game requires the whole of `tecs`.
+Everything `tecs.ecs` carries is on `tecs` too — `tecs.newWorld`, `tecs.phases`, `tecs.builtins`, `tecs.runif`
+and the component constructors are all on [the surface](/modules/) — and that is where a game reads them.
 
 The `tecs.utils.*` modules, `profile`, `pool` and `Bitset`, are also supported API and are required directly.
 `tecs.internal.*` modules are implementation details with no stability guarantee.
