@@ -16,6 +16,13 @@
 --- than per graph because a pass that must not have one is as ordinary as a
 --- pass that must, and a pipeline bound in either has to agree with it.
 ---
+--- A colour clear comes from the target, which is right while one pass writes
+--- a target and wrong as soon as two do: the second would clear the first
+--- one's result away. A pass may therefore override it, with `PassGraph.LOAD`
+--- as the way to say "load, whatever the target asks for". That is what any
+--- pass accumulating into a target an earlier pass filled needs, and what a
+--- second view's lighting pass needs to leave the first view's pixels alone.
+---
 --- The graph knows nothing about entities, archetypes, or dirtiness. A pass
 --- that should be skipped says so through `enabled`, which is where an
 --- ECS-side dirty gate plugs in without the graph learning what dirty means.
@@ -31,6 +38,13 @@ local Frame <const> = require("tecs.gpu.Frame")
 --- enough for albedo and composited output; targets holding normals or
 --- lighting values ask for a wider format explicitly.
 local DEFAULT_FORMAT <const> = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+
+--- The clear a pass asks for when what it wants is not to clear at all.
+---
+--- A sentinel rather than a colour, matched by identity, because the field it
+--- goes in already uses nil for "the target decides" and a pass overriding a
+--- target that clears needs a third answer. Its contents are never read.
+local LOAD <const>: RenderPass.ClearColor = { r = 0, g = 0, b = 0, a = 0 }
 
 local record TargetSpec
     name: string
@@ -103,6 +117,11 @@ local record PassSpec
     outputs: {string}
     --- How this pass uses depth. Omit for a pass with no depth attachment.
     depth: DepthState
+    --- Colour clear for every output this pass writes, winning over what the
+    --- targets themselves declare. `PassGraph.LOAD` loads instead of clearing,
+    --- which is what a pass writing a target a previous pass already filled
+    --- asks for. Omit to take each target's own clear.
+    clear: RenderPass.ClearColor
     --- Consulted each frame. Returning false skips the pass entirely,
     --- including beginning it. This is the dirty gate.
     enabled: function(): boolean
@@ -114,6 +133,10 @@ local record PassGraph
     PassSpec: PassSpec
     PassContext: PassContext
     DepthState: DepthState
+
+    --- `PassSpec.clear` value meaning "load this target rather than clear it",
+    --- whatever the target's own spec says.
+    LOAD: RenderPass.ClearColor
 
     device: loader.CPtr
     --- Format the swapchain expects, for passes that render to it.
@@ -139,6 +162,8 @@ local record PassGraph
 end
 
 local PassGraphMT <const>: metatable<PassGraph> = { __index = PassGraph }
+
+PassGraph.LOAD = LOAD
 
 --- Creates an empty graph.
 function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGraph
@@ -366,17 +391,30 @@ function PassGraph:execute(frame: Frame)
             local outputs <const> = spec.outputs
             local width, height = frameWidth, frameHeight
 
+            -- Resolved once for the pass rather than once per output: the
+            -- override applies to every attachment, and LOAD is the one value
+            -- that has to become an absent clear rather than be passed on.
+            local override <const> = spec.clear
+            local overridden <const> = override ~= nil
+            local overrideClear <const> = override ~= LOAD and override or nil
+
             if outputs == nil or #outputs == 0 then
                 local attachment <const> = attachments[1]
                 attachment.texture = frame.swapchainTexture
-                attachment.clear = nil
+                -- Nil unless the pass asked for a clear, which is the same
+                -- answer the target-driven branch gives a target with none.
+                attachment.clear = overrideClear
             else
                 for slot = 1, #outputs do
                     local name <const> = outputs[slot]
                     local texture <const> = self._textures[name]
                     local attachment <const> = attachments[slot]
                     attachment.texture = texture.handle
-                    attachment.clear = self._targets[name].clear
+                    if overridden then
+                        attachment.clear = overrideClear
+                    else
+                        attachment.clear = self._targets[name].clear
+                    end
                     width, height = texture.width, texture.height
                 end
             end

@@ -1,19 +1,42 @@
 --- The standard deferred pipeline, assembled on a PassGraph.
 ---
---- Three passes: geometry fills a G-buffer, lighting resolves it against a
---- buffer of lights, and composite puts the result on screen. Geometry is a
+--- Four passes: geometry fills a G-buffer, lighting resolves it against a
+--- buffer of lights, composite turns that into the frame's image in the
+--- `scene` target, and present copies `scene` to the swapchain. Geometry is a
 --- callback because what to draw is the caller's problem; everything else is
 --- the engine's opinion and is built in.
+---
+--- Composite and present are two passes rather than one because a pass writing
+--- the swapchain is the end of the frame: the swapchain texture belongs to the
+--- presenter once submitted, is not created with the sampled usage bit, and is
+--- not a target the graph owns, so nothing can read it and nothing can follow
+--- it. `scene` is the seam that buys the gap. It is a graph target like any
+--- other, frame sized, sampled, and readable between frames, and everything
+--- declared between composite and present sees it:
+---
+--- * A forward pass drawing blended geometry over the composited image, with
+---   depth from `depthOf("geometry")` so it sorts against what the G-buffer
+---   kept.
+--- * A post-process reading `scene` and writing it back, or reading it and
+---   writing a target of its own that a later pass folds in.
+--- * A second view compositing into a rectangle of the same `scene`.
+---
+--- `scene` declares no clear, so every pass that writes it loads what is
+--- already there and each of those adds to the last. Composite is what makes
+--- that defined: it covers every pixel and runs first, so nothing downstream
+--- reads memory no frame has written. Where a shared target does declare a
+--- clear, as `lit` does, a pass that must not clear it says
+--- `clear = PassGraph.LOAD`.
 ---
 --- Deferred is what makes light count independent of object count: geometry is
 --- rasterised once regardless of how many lights touch it, and lighting runs
 --- once per pixel regardless of how many objects overlap it.
 ---
 --- Geometry owns the depth attachment, testing and writing, so wherever two
---- instances overlap the nearer one is what the G-buffer keeps. Lighting and
---- composite have none: each covers every pixel exactly once and has nothing
---- to be occluded by, so an attachment there would be state to keep in step
---- for no result.
+--- instances overlap the nearer one is what the G-buffer keeps. The three
+--- fullscreen passes have none: each covers every pixel exactly once and has
+--- nothing to be occluded by, so an attachment there would be state to keep in
+--- step for no result.
 ---
 --- One compute dispatch runs ahead of the graph, binning the lights into a
 --- grid over what the camera can see so the lighting pass reads a tile's worth
@@ -100,7 +123,7 @@ local record Deferred
     --- What a geometry callback receives. Re-exported so callers need not
     --- reach into PassGraph for it.
     PassContext: PassGraph.PassContext
-    --- The three passes, so a caller can add its own targets and passes around
+    --- The four passes, so a caller can add its own targets and passes around
     --- them or ask what a pass was built with.
     graph: PassGraph
     --- Lights the lighting pass reads. Set by `setLights` and kept until it is
@@ -139,6 +162,9 @@ local record Deferred
     _binUniform: loader.CArray
     _lightingPipeline: GraphicsPipeline
     _compositePipeline: GraphicsPipeline
+    --- Copies the scene target to the swapchain, and so the only pipeline here
+    --- built against the swapchain's format.
+    _presentPipeline: GraphicsPipeline
     --- Sixteen floats pushed to the lighting fragment stage: ambient, then
     --- the target size, then the view, then the grid's world rectangle, each
     --- padded out to a vec4. Held rather than allocated per frame, since the
@@ -191,13 +217,12 @@ end
 
 --- Builds the pipeline and its graph.
 ---
---- The lighting and composite shaders are loaded and their shader objects
---- released here, since SDL retains what a pipeline needs. What survives is
---- the two pipelines, the light buffer and the graph's targets, all of which
---- `destroy` releases.
---- @param swapchainFormat What composite writes to, from
----     `Device:getSwapchainFormat`. The G-buffer's own formats are fixed and
----     come back out of `geometryFormats`.
+--- The fullscreen shaders are loaded and their shader objects released here,
+--- since SDL retains what a pipeline needs. What survives is the pipelines,
+--- the light buffer and the graph's targets, all of which `destroy` releases.
+--- @param swapchainFormat What present writes to, from
+---     `Device:getSwapchainFormat`. Every other target's format is the
+---     graph's; the G-buffer's two come back out of `geometryFormats`.
 function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
                          options: DeferredOptions): Deferred
     options = options or {}
@@ -274,11 +299,21 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
         format = RGBA8,
         clear = { r = 0, g = 0, b = 0, a = 1 },
     })
+    graph:target({
+        -- No clear: this is what anything running between composite and
+        -- present writes into, and a clear here would be applied by each of
+        -- those passes in turn. Composite covers every pixel and goes first,
+        -- so there is nothing undefined for a later pass to load.
+        name = "scene",
+        format = RGBA8,
+    })
 
     self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag",
         RGBA8, "lighting")
     self._compositePipeline = buildPipeline(device, "deferred.composite.frag",
-        swapchainFormat, "composite")
+        RGBA8, "composite")
+    self._presentPipeline = buildPipeline(device, "deferred.present.frag",
+        swapchainFormat, "present")
 
     graph:pass({
         name = "geometry",
@@ -342,9 +377,22 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
     graph:pass({
         name = "composite",
         inputs = { "lit" },
-        outputs = {},
+        outputs = { "scene" },
         execute = function(context: PassGraph.PassContext)
             context.pass:bindPipeline(self._compositePipeline.handle)
+            context.pass:draw(3)
+        end,
+    })
+
+    graph:pass({
+        -- Declared last and executed last, since the graph runs passes in
+        -- declaration order and this is the one that writes the swapchain.
+        -- Anything added to the seam is declared above this, not after it.
+        name = "present",
+        inputs = { "scene" },
+        outputs = {},
+        execute = function(context: PassGraph.PassContext)
+            context.pass:bindPipeline(self._presentPipeline.handle)
             context.pass:draw(3)
         end,
     })
@@ -480,7 +528,7 @@ end
 --- leave the last frame's lists standing and light the scene by lights that
 --- have gone. A thousand threads writing a zero is cheaper than the guard that
 --- would be needed to make skipping safe.
---- @param frame The frame to record into. Composite writes to its swapchain
+--- @param frame The frame to record into. Present writes to its swapchain
 ---     texture and the graph sizes its targets to its width and height, so a
 ---     resized window is picked up here rather than announced.
 function Deferred:render(frame: Frame)
@@ -515,14 +563,14 @@ function Deferred:render(frame: Frame)
     self.graph:execute(frame)
 end
 
---- Rebuilds the lighting and composite pipelines from their shaders.
+--- Rebuilds the pipelines this owns from their shaders.
 ---
---- The same formats and the same graph: only the two pipeline objects change,
---- and both passes read them through `self` when they execute, so the next
---- frame binds the new ones with nothing rebuilt around them.
+--- The same formats and the same graph: only the pipeline objects change, and
+--- every pass reads them through `self` when it executes, so the next frame
+--- binds the new ones with nothing rebuilt around them.
 ---
---- Both are built before either old one is released, so a shader that no longer
---- compiles leaves the pipeline exactly as it was and raises. Must not run
+--- All are built before any old one is released, so a shader that no longer
+--- compiles leaves the pipelines exactly as they were and raises. Must not run
 --- inside a pass: what it releases is what a recorded pass is still reading.
 function Deferred:rebuildPipelines()
     local device <const> = self._device
@@ -530,29 +578,36 @@ function Deferred:rebuildPipelines()
 
     local lighting: GraphicsPipeline = nil
     local composite: GraphicsPipeline = nil
+    local present: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
     local built, reason = pcall(function(): string
         lighting = buildPipeline(device, "deferred.lighting.frag", RGBA8,
             "lighting")
-        composite = buildPipeline(device, "deferred.composite.frag",
-            self.graph.swapchainFormat, "composite")
+        composite = buildPipeline(device, "deferred.composite.frag", RGBA8,
+            "composite")
+        present = buildPipeline(device, "deferred.present.frag",
+            self.graph.swapchainFormat, "present")
         bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
     end)
     if not built then
         if lighting ~= nil then lighting:destroy() end
         if composite ~= nil then composite:destroy() end
+        if present ~= nil then present:destroy() end
         if bin ~= nil then bin:destroy() end
         error(reason, 0)
     end
 
     local oldLighting <const> = self._lightingPipeline
     local oldComposite <const> = self._compositePipeline
+    local oldPresent <const> = self._presentPipeline
     local oldBin <const> = self._binPipeline
     self._lightingPipeline = lighting
     self._compositePipeline = composite
+    self._presentPipeline = present
     self._binPipeline = bin
     oldLighting:destroy()
     oldComposite:destroy()
+    oldPresent:destroy()
     oldBin:destroy()
 end
 
@@ -580,6 +635,7 @@ function Deferred:destroy()
     self.graph:destroy()
     self._lightingPipeline:destroy()
     self._compositePipeline:destroy()
+    self._presentPipeline:destroy()
     self._binPipeline:destroy()
     self._lightBuffer:destroy()
     self._tileCounts:destroy()

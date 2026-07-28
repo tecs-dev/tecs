@@ -380,7 +380,7 @@ cancelling was invalid on essentially every frame that existed. `Frame:cancel`
 now refuses in that state and `Frame:abandon` is the recovery path: it ends the
 open pass and then submits when a texture was acquired and cancels when none
 was. What reaches the screen is what the frame drew before it threw, which for a
-throw ahead of the composite is whatever the swapchain texture last held.
+throw ahead of present is whatever the swapchain texture last held.
 Clearing it would be a decision about what the game looks like, and recovery is
 not the place that makes those.
 
@@ -1987,20 +1987,58 @@ pass that must not have an attachment is as ordinary as a pass that must, and a
 pipeline bakes its target info, so the graph answers both cases through
 `depthOf` rather than leaving the call site to assume one.
 
+A colour clear comes from the target rather than from the pass, which is right
+while one pass writes a target and wrong as soon as two do: the second clears
+the first one's result away. A pass may name its own clear, which wins, and
+`PassGraph.LOAD` is how it says "load, whatever the target asks for". That is
+what a pass accumulating into a target an earlier pass filled needs, and what a
+second view's lighting pass will need to leave the first view's pixels alone.
+
 `Deferred` assembles the standard pipeline on it: geometry fills a G-buffer,
-lighting resolves it against a storage buffer of lights, and composite puts the
-result on screen. Geometry is a callback because what to draw is the caller's
-problem. Deferred is what makes light count independent of object count:
-geometry rasterises once regardless of how many lights touch it, and lighting
-runs once per pixel regardless of how many objects overlap it.
+lighting resolves it against a storage buffer of lights, composite turns that
+into the frame's image in the `scene` target, and present copies `scene` to the
+swapchain. Geometry is a callback because what to draw is the caller's problem.
+Deferred is what makes light count independent of object count: geometry
+rasterises once regardless of how many lights touch it, and lighting runs once
+per pixel regardless of how many objects overlap it.
 
 Geometry is the pass that owns depth, testing and writing, so wherever two
 instances overlap the nearer one is what the G-buffer keeps. An instance's depth
 is the fourth float of its transform vector, and the comparison is
 `lessOrEqual` rather than `less`: equal depths let the later fragment through,
 so draw order still decides ties and depth only decides between instances that
-differ. Lighting and composite have no attachment. Each covers every pixel
+differ. The three fullscreen passes have no attachment. Each covers every pixel
 exactly once and has nothing to be occluded by.
+
+### The seam between composite and present
+
+Composite and present are two passes rather than one because a pass writing the
+swapchain is the end of the frame. The swapchain texture belongs to the
+presenter once the frame is submitted, is not created with the sampled usage
+bit, and is not a target the graph owns, so nothing can read it and nothing can
+follow it. `scene` is what buys the gap: a graph target like any other, frame
+sized, sampled, and readable between frames.
+
+Everything declared between the two sees it. A forward pass drawing blended
+geometry over the composited image, with depth loaded from the geometry pass so
+it sorts against what the G-buffer kept. A post-process reading `scene` and
+writing it back, or reading it and writing a target of its own that a later pass
+folds in. A second view compositing into a rectangle of the same `scene`. None
+of those exist yet and all of them were going to need the same thing, so it is
+one target and one pass rather than several arrangements that unpick each other.
+
+`scene` declares no clear, so every pass that writes it loads what is already
+there and each adds to the last. Composite is what makes that defined: it covers
+every pixel and runs first, so nothing downstream reads memory no frame has
+written. Present is declared last, because the graph runs passes in declaration
+order and present is the one that writes the swapchain; anything added to the
+seam is declared above it.
+
+`Backend:captureTexture` returns `scene` rather than `lit`, so a screenshot is
+the image that was presented rather than the image before whatever the seam
+holds. What the seam costs is one RGBA8 target at frame size, about 8 MB at
+1080p, one more render pass, and one more fullscreen triangle sampling a texture
+the size of the screen.
 
 ### Lights are in the world
 

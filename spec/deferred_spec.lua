@@ -47,6 +47,14 @@ void main() {
 }
 ]]
 
+-- Covers the target in a colour no clear under test uses, so a pixel read back
+-- says which of the three wrote it.
+local RED_FS = [[
+#version 450
+layout(location = 0) out vec4 color;
+void main() { color = vec4(1.0, 0.0, 0.0, 1.0); }
+]]
+
 describe("pass graph", function()
     local window, device
 
@@ -150,6 +158,87 @@ describe("pass graph", function()
         assert.are.equal(1, ran, "an enabled pass must run")
 
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+        graph:destroy()
+    end)
+
+    it("takes a pass's own clear over the target's, and loads when asked", function()
+        -- A clear read from the target is right while one pass writes it and
+        -- wrong as soon as two do: the second clears the first one's result
+        -- away. Both directions are under test, because a pass adding to a
+        -- target needs to refuse a clear the target declares and a pass
+        -- sharing a target needs to name one the target does not.
+        local graph = PassGraph.create(device.handle, FORMAT)
+        graph:target({
+            name = "canvas",
+            format = FORMAT,
+            clear = { r = 0, g = 0, b = 0, a = 1 },
+        })
+
+        local fill
+        local drawing, loading, overriding = true, false, false
+
+        graph:pass({
+            name = "fill",
+            outputs = { "canvas" },
+            enabled = function()
+                return drawing
+            end,
+            execute = function(context)
+                context.pass:bindPipeline(fill.handle)
+                context.pass:draw(3)
+            end,
+        })
+        graph:pass({
+            name = "loads",
+            outputs = { "canvas" },
+            clear = PassGraph.LOAD,
+            enabled = function()
+                return loading
+            end,
+            execute = function() end,
+        })
+        graph:pass({
+            name = "clears",
+            outputs = { "canvas" },
+            clear = { r = 0, g = 0, b = 1, a = 1 },
+            enabled = function()
+                return overriding
+            end,
+            execute = function() end,
+        })
+
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
+        local fragment = Shader.fromGLSL(device.handle, RED_FS, "fragment", {})
+        fill = GraphicsPipeline.create(device.handle, {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormat = FORMAT,
+        })
+        vertex:destroy()
+        fragment:destroy()
+
+        -- No swapchain texture: every pass here writes a graph target, and the
+        -- target is what is read back between runs.
+        local frame = { width = SIZE, height = SIZE, commandBuffer = nil, swapchainTexture = nil }
+        local function run()
+            frame.commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+            graph:execute(frame)
+            assert(C.SDL_SubmitGPUCommandBuffer(frame.commandBuffer))
+            local canvas = graph:texture("canvas")
+            return canvas:getPixel(canvas:readback(), SIZE / 2, SIZE / 2)
+        end
+
+        assert.are.equal(255, run().r, "the pass that fills the target must leave it red")
+
+        drawing, loading = false, true
+        assert.are.equal(255, run().r, "a pass asking to load must keep what the last one left")
+
+        loading, overriding = false, true
+        local blue = run()
+        assert.are.equal(255, blue.b)
+        assert.are.equal(0, blue.r, "a pass naming a clear must have it over the target's")
+
+        fill:destroy()
         graph:destroy()
     end)
 end)
@@ -314,6 +403,72 @@ void main() {
 
         assert.is_nil(pipeline.graph:depthOf("lighting"), "a fullscreen resolve has nothing to be occluded by")
         assert.is_nil(pipeline.graph:depthOf("composite"))
+        assert.is_nil(pipeline.graph:depthOf("present"))
+        pipeline:destroy()
+    end)
+
+    it("composites into a scene target and copies that to the screen", function()
+        -- The seam. Composite writes a target the graph owns and present puts
+        -- it on the swapchain, so anything wanting to run after compositing
+        -- has a target to read and a pass to sit before. What must not change
+        -- is the image, so the two are compared to each other rather than each
+        -- asserted against a colour: a flipped or offset copy fails here even
+        -- though both halves would look plausible alone.
+        local sizeUniform = require("tecs.ffi.loader").newArray("float[4]")
+        sizeUniform[0] = SIZE
+        sizeUniform[1] = SIZE
+
+        local geometryPipeline
+        local pipeline = Deferred.create(device.handle, FORMAT, {
+            ambient = { 1.0, 1.0, 1.0 },
+            geometry = function(context)
+                context.pass:bindPipeline(geometryPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, sizeUniform, 16)
+                context.pass:draw(3)
+            end,
+        })
+
+        local albedoFormat, normalFormat = pipeline:geometryFormats()
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
+        local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY, "fragment", {})
+        geometryPipeline = GraphicsPipeline.create(device.handle, {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormats = { albedoFormat, normalFormat },
+            depth = pipeline:geometryDepth(),
+        })
+        vertex:destroy()
+        fragment:destroy()
+
+        local screenPixels = render(pipeline)
+
+        local scene = pipeline.graph:texture("scene")
+        assert.is_not_nil(scene, "the graph must own a target named scene")
+        local scenePixels = scene:readback()
+
+        for _, point in ipairs({
+            { 4, 4 },
+            { SIZE - 4, 4 },
+            { 4, SIZE - 4 },
+            { SIZE - 4, SIZE - 4 },
+            { SIZE / 2, SIZE / 2 },
+        }) do
+            local x, y = point[1], point[2]
+            local shown = screen:getPixel(screenPixels, x, y)
+            local held = scene:getPixel(scenePixels, x, y)
+            assert.are.equal(shown.r, held.r, ("red differs at %d,%d"):format(x, y))
+            assert.are.equal(shown.g, held.g, ("green differs at %d,%d"):format(x, y))
+            assert.are.equal(shown.b, held.b, ("blue differs at %d,%d"):format(x, y))
+        end
+
+        -- And the scene really carries the image rather than a uniform fill,
+        -- which is what makes the comparison above worth making.
+        assert.is_true(
+            scene:getPixel(scenePixels, SIZE - 4, 4).r > scene:getPixel(scenePixels, 4, 4).r + 200,
+            "the scene target must hold the gradient composite produced"
+        )
+
+        geometryPipeline:destroy()
         pipeline:destroy()
     end)
 

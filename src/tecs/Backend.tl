@@ -729,12 +729,14 @@ end
 
 --- The composited image the last frame produced.
 ---
---- The lit target rather than the swapchain, because a swapchain texture
+--- The scene target rather than the swapchain, because a swapchain texture
 --- belongs to the presenter once the frame is submitted while this one
---- persists and can be read at any point between frames. What it does not
---- include is anything drawn after compose, which today is nothing.
+--- persists and can be read at any point between frames. Scene rather than
+--- lit, because scene is what present copies: everything drawn between
+--- composite and present is in it, so a screenshot stays the frame that was
+--- shown as passes are added to that seam.
 function Backend:captureTexture(): Texture
-    return self.deferred.graph:texture("lit")
+    return self.deferred.graph:texture("scene")
 end
 
 --- Releases everything the backend owns. Safe to call more than once.
