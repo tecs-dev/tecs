@@ -20,6 +20,7 @@ local events <const> = require("tecs.internal.events")
 local builtins <const> = require("tecs.internal.builtins")
 local phases <const> = require("tecs.internal.phases")
 local WorldImpl <const> = require("tecs.internal.world")
+local Context <const> = require("tecs.internal.Context")
 
 local record ecs
     type World = types.World
@@ -30,6 +31,8 @@ local record ecs
     type Plugin = types.Plugin
     type Query = types.Query
     type Archetype = types.Archetype
+    type Context = types.Context
+    type Key<T> = types.Context.Key<T>
     type FixedOverload = types.FixedOverload
 
     phases: phases
@@ -39,6 +42,24 @@ local record ecs
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
     newEvent: function<E is Event>(event: E)
+
+    --- A typed key for `world.resources`, the way an engine module stores
+    --- something scoped to one world.
+    ---
+    --- The same function the surface publishes as `tecs.newKey`, carried here
+    --- so a module that requires this half does not have to reach into
+    --- `tecs.internal`.
+    ---
+    --- Always pass a name. `Context.listKeys` reverse-maps names to ids, so a
+    --- named key is what lets a debug tool answer what is installed into a
+    --- world without every module exporting its key. Named keys are also
+    --- idempotent, so a module re-executed under hot reload keeps the same
+    --- identity and therefore the values already stored under it.
+    ---
+    --- `forType` carries the phantom type, because Teal has no explicit type
+    --- argument at a call site: pass `nil as T` for `world.resources[key]` to
+    --- read as a `T` rather than as `any`.
+    newKey: function<T>(name?: string, forType?: T): Key<T>
 
     --- The component registered under `name`, or nil.
     ---
@@ -73,6 +94,7 @@ ecs.newComponent = components.newComponent as function<C is types.components.Com
 ecs.newFFIComponent = components.newFFIComponent as function<C is types.components.Component>(
     options: types.components.FFIComponentOptions<C>
 ): C
+ecs.newKey = Context.newKey as function<T>(name?: string, forType?: T): types.Context.Key<T>
 
 function ecs.componentByName(name: string): types.components.Component
     return components.registeredComponents[name]

@@ -47,8 +47,8 @@ end
 local record World
     handle: loader.CValue
     subStepCount: integer
-    --- The threads the solver runs on. Owned by the world, because its
-    --- lifetime is exactly the world's.
+    --- The threads the solver runs on. Shared with every other simulation in
+    --- the process and held by reference for the world's lifetime.
     taskPool: TaskPool
     _destroyed: boolean
 
@@ -82,8 +82,10 @@ function World.create(options: WorldOptions): World
     end
 
     -- Box2D creates no threads of its own; it solves across the ones the
-    -- executor already has, so the pool exists before the world does.
-    local pool = TaskPool.create(options.workerCount)
+    -- executor already has, so the pool exists before the world does. It is
+    -- the process's one pool rather than this world's: see `TaskPool.acquire`
+    -- for why threads are shared and simulations are not.
+    local pool = TaskPool.acquire(options.workerCount)
     pool:install(settings)
 
     local self = setmetatable({} as World, WorldMT)
@@ -288,11 +290,28 @@ function World.getVelocity(body: loader.CValue): number, number
     return velocity.x as number, velocity.y as number
 end
 
+-- One vector for the lifetime of the process, filled and handed straight to
+-- Box2D. `b2Vec2` is passed by value, so nothing retains it.
+local velocityScratch <const> = ffi.new("b2Vec2[1]") as loader.CArray
+
+--- Sets a body's linear velocity and wakes it.
+---
+--- Waking is not optional: Box2D lets a resting island sleep, and a sleeping
+--- body given a velocity keeps sleeping and never moves.
+function World.setVelocity(body: loader.CValue, x: number, y: number)
+    local vector = velocityScratch[0] as loader.CStruct
+    vector.x = x
+    vector.y = y
+    C.b2Body_SetLinearVelocity(body, velocityScratch[0])
+    C.b2Body_SetAwake(body, true)
+end
+
 --- Destroys the world and invalidates every handle it issued.
 ---
 --- The solver threads go after the world, not before: they run solver code, so
---- joining them second is what guarantees none is inside a step when the pool
---- is released.
+--- giving the pool back second is what guarantees none is inside a step when
+--- it is joined. The pool is shared, so any other live simulation keeps it
+--- above zero references and this releases nothing but its own hold.
 function World:destroy()
     if self._destroyed then
         return
@@ -300,7 +319,7 @@ function World:destroy()
     self._destroyed = true
     C.b2DestroyWorld(self.handle)
     self.handle = nil
-    self.taskPool:destroy()
+    self.taskPool:release()
     self.taskPool = nil
 end
 

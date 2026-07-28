@@ -1,13 +1,35 @@
 --- Physics as part of the world.
 ---
---- A `RigidBody` holds a Box2D body handle. Box2D 3 handles are small value
---- structs rather than pointers to C++ objects, so the handle lives directly
---- in an archetype column: no userdata, no finalizers, and no boundary
---- crossing to read one back.
+--- A body is four components. `Body` and `Collider` are the declaration, what
+--- a game asked for; `Motion` is the one piece of simulation state that has to
+--- survive a body being taken out of the solve; `RigidBody` is the live Box2D
+--- handle. Box2D 3 handles are small value structs rather than pointers to C++
+--- objects, so the handle lives directly in an archetype column: no userdata,
+--- no finalizers, and no boundary crossing to read one back.
+---
+--- The description is in columns rather than in a side table keyed by entity,
+--- for four reasons that a side table gives up. The snapshot writer already
+--- walks columns, so putting a body's shape in one finishes the save side with
+--- no code. The MCP world tools read the component registry, so a `Collider`
+--- is queryable, describable and editable the moment it is a component, and a
+--- body that falls through the floor is exactly the bug an agent should be
+--- able to look at. `batchSpawn` has a column path and no side-table path, so
+--- a thousand bodies can be one archetype transition. And a module-level table
+--- keyed by entity is the defect class the engine is working its way out of,
+--- not one to add to.
+---
+--- Four components rather than one, because the fields have different Box2D
+--- surfaces (`b2Body_*` against `b2Shape_*`), different owners, and different
+--- lifetimes, and because one body can eventually carry more than one shape.
 ---
 --- Stepping happens in FixedUpdate. Box2D's solver is not robust to a varying
 --- timestep and a variable one makes replay diverge, so the fixed phase is not
 --- a preference here, it is a requirement.
+---
+--- The simulation is per world, reached through `physics.of`. Two worlds each
+--- installing the plugin get a Box2D world each and neither sees the other's
+--- bodies. The solver's thread pool goes the other way and is shared: threads
+--- are the machine, and worlds step serially on the game thread.
 
 local ecs <const> = require("tecs.ecs")
 local loader <const> = require("tecs.ffi.loader")
@@ -29,6 +51,158 @@ local type Component = ecs.Component
 --- directly in pixels puts every body far outside the range its solver
 --- tolerances were chosen for.
 local PIXELS_PER_METRE <const> = 32.0
+
+--- Body kinds, matching Box2D's `b2BodyType` and `World.tl`'s own map.
+---
+--- The integer is what the column holds. The string form stays on the options
+--- table a game writes, so a query over bodies never compares strings.
+local BODY_KINDS <const>: {string: integer} = {
+    static = 0,
+    kinematic = 1,
+    dynamic = 2,
+}
+
+--- What a game asked a body to be: the fields Box2D applies through `b2Body_*`.
+---
+--- Requiring `Transform` is what makes a body without a pose unrepresentable
+--- rather than a nil test. The pose has to come from somewhere, and the sync
+--- writes back into `Transform` unconditionally, so a body with no `Transform`
+--- would be a body nothing can see. Setting `Body` on an entity without one
+--- gains it a default at the origin.
+---
+--- Requiring `Motion` means every body carries that column from creation,
+--- which is the point: filling it at save time must not add a component to
+--- four thousand entities in the middle of serializing them.
+local record Body is Component
+    --- 0 static, 1 kinematic, 2 dynamic.
+    kind: number
+    fixedRotation: number
+    isBullet: number
+    sleepEnabled: number
+    gravityScale: number
+    linearDamping: number
+    angularDamping: number
+end
+
+--- A body's geometry and surface: the fields Box2D applies through `b2Shape_*`.
+---
+--- One record with a shape discriminant rather than a record per shape,
+--- because a component per shape would make "anything with a collider" a union
+--- across three archetypes.
+---
+--- The filter bits are 32 wide here and 64 wide in Box2D's `b2Filter`. A
+--- 64-bit column does not survive the table snapshot format, which carries a
+--- field as a Lua number, and thirty-two categories is what a game can express
+--- through a number anyway.
+local record Collider is Component
+    --- 0 box, 1 circle, 2 capsule.
+    shape: number
+    halfWidth: number
+    halfHeight: number
+    radius: number
+    --- Capsule only: the distance between its two end centres.
+    length: number
+    --- The shape's centre in the body frame.
+    offsetX: number
+    offsetY: number
+    density: number
+    friction: number
+    restitution: number
+    categoryBits: number
+    maskBits: number
+    groupIndex: number
+    isSensor: number
+end
+
+--- Collider shape kinds, matching `Collider.shape`.
+local COLLIDER_SHAPES <const>: {string: integer} = {
+    box = 0,
+    circle = 1,
+    capsule = 2,
+}
+
+--- A body's velocity, in pixels and radians per second.
+---
+--- A store, not a mirror. It is written at two moments, a pause and a save,
+--- and read at two, a resume and a load. Nothing writes it per step, so
+--- reading it mid-frame gives whatever the last of those four events left
+--- there. `physics.velocity` is the live read and stays the only way to ask
+--- what a body is doing right now.
+---
+--- Mirroring it per step is the one large per-frame cost this design could
+--- have taken on. It would be a write over every body every fixed step, and it
+--- would dirty the column for consumers gated on that bit even for a world
+--- whose bodies have all gone to sleep.
+local record Motion is Component
+    vx: number
+    vy: number
+    omega: number
+end
+
+ecs.newFFIComponent({
+    name = "Motion",
+    container = Motion,
+    fields = {
+        {"vx", "float"},
+        {"vy", "float"},
+        {"omega", "float"},
+    },
+    defaults = {0, 0, 0},
+})
+
+ecs.newFFIComponent({
+    name = "Body",
+    container = Body,
+    requires = {Transform, Motion},
+    fields = {
+        {"kind", "uint8_t"},
+        {"fixedRotation", "uint8_t"},
+        {"isBullet", "uint8_t"},
+        {"sleepEnabled", "uint8_t"},
+        {"gravityScale", "float"},
+        {"linearDamping", "float"},
+        {"angularDamping", "float"},
+    },
+    defaults = {BODY_KINDS.dynamic, 0, 0, 1, 1.0, 0.0, 0.0},
+})
+
+ecs.newFFIComponent({
+    name = "Collider",
+    container = Collider,
+    fields = {
+        {"shape", "uint8_t"},
+        {"halfWidth", "float"},
+        {"halfHeight", "float"},
+        {"radius", "float"},
+        {"length", "float"},
+        {"offsetX", "float"},
+        {"offsetY", "float"},
+        {"density", "float"},
+        {"friction", "float"},
+        {"restitution", "float"},
+        {"categoryBits", "uint32_t"},
+        {"maskBits", "uint32_t"},
+        {"groupIndex", "int32_t"},
+        {"isSensor", "uint8_t"},
+    },
+    -- The material defaults are Box2D's own, from `b2DefaultShapeDef`.
+    defaults = {
+        COLLIDER_SHAPES.box,
+        8.0,
+        8.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.6,
+        0.0,
+        1,
+        0xFFFFFFFF,
+        0,
+        0,
+    },
+})
 
 --- A body in the simulation.
 ---
@@ -60,10 +234,10 @@ ecs.newFFIComponent({
     deserialize = function(_world: ecs.World, _data: {string: any}): RigidBody
         -- Restored as the null handle, which is inert everywhere: the sync
         -- reads no movement for it, the impulse and velocity calls refuse
-        -- it, and `physics.hasBody` answers false. Rebuilding the body
-        -- instead would need its shape, and a snapshot does not carry one,
-        -- so an entity that simulated before a load does not simulate after
-        -- it until something attaches a body again.
+        -- it, and `physics.hasBody` answers false. The file does carry the
+        -- description now, in `Body` and `Collider`, so a rebuild has what it
+        -- needs; nothing rebuilds yet, so an entity that simulated before a
+        -- load does not simulate after it until something attaches again.
         return RigidBody(0, 0, 0)
     end,
 })
@@ -95,15 +269,38 @@ end
 
 local record physics
     RigidBody: RigidBody
+    Body: Body
+    Collider: Collider
+    Motion: Motion
     --- Pixels per simulated metre.
     scale: number
-    world: World
 
     applyImpulseTo: function(row: RigidBody, x: number, y: number)
 end
 
 physics.RigidBody = RigidBody
+physics.Body = Body
+physics.Collider = Collider
+physics.Motion = Motion
 physics.scale = PIXELS_PER_METRE
+
+--- The simulation installed into a world, or nil when none has been.
+---
+--- Module-private, because `physics.of` is the door: an accessor reads better
+--- than a table index, and one door is what lets this module change how it
+--- stores the simulation later. What is published is the name, because
+--- `Context.listKeys` reverse-maps names to ids, so a debug tool can answer
+--- what is installed into a world without every module exporting its key.
+local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
+
+--- The simulation installed into `world`, or nil when none has been.
+---
+--- What lets something holding only the ECS world reach the Box2D one, which
+--- is what the debug tools have and what a game writing its own systems often
+--- has too.
+function physics.of(world: ecs.World): World
+    return world.resources[simulationKey]
+end
 
 local function toMetres(pixels: number): number
     return pixels / PIXELS_PER_METRE
@@ -113,27 +310,59 @@ local function toPixels(metres: number): number
     return metres * PIXELS_PER_METRE
 end
 
---- Creates a body for `entity` and attaches a RigidBody to it.
+--- Declares a body on `entity` and creates it in the world's simulation.
 ---
---- Reads the entity's Transform for the initial pose, so an entity is
---- positioned the same way whether or not it simulates.
+--- Writes `Body` and `Collider`, which are the description a snapshot and a
+--- rebuild read, and `Motion`, which `Body` requires. The pose comes from the
+--- entity's Transform, so an entity is positioned the same way whether or not
+--- it simulates.
 function physics.attach(world: ecs.World, entity: integer, options: BodyOptions): loader.CValue
     options = options or {}
 
-    local transform = world:get(entity, Transform)
-    local x, y, angle = 0.0, 0.0, 0.0
-    if transform ~= nil then
-        x, y, angle = transform.x, transform.y, transform.rotation
+    local simulation = physics.of(world)
+    if simulation == nil then
+        error("tecs: this world has no physics simulation; add physics.plugin to it first", 2)
     end
 
-    local body = physics.world:createBody({
+    local kind = BODY_KINDS[options.type or "dynamic"]
+    if kind == nil then
+        error(("tecs: unknown body type %q; expected static, kinematic or dynamic"):format(options.type), 2)
+    end
+    local round = options.radius ~= nil
+
+    -- The declaration goes on first, and `Body` requires `Transform`, so an
+    -- entity that had no pose has a default one at the origin by the time the
+    -- pose is read below. That is what closes the case rather than a nil test:
+    -- the sync writes back into `Transform` unconditionally, so a body with
+    -- none would be a body nothing can see.
+    world:set(entity, Body(kind, options.fixedRotation and 1 or 0))
+    world:set(
+        entity,
+        Collider(
+            round and COLLIDER_SHAPES.circle or COLLIDER_SHAPES.box,
+            options.halfWidth or 8.0,
+            options.halfHeight or 8.0,
+            round and options.radius or 0.0,
+            -- length, offsetX, offsetY: reserved, and not reachable through
+            -- the options table until the capsule and offset shapes are.
+            0.0,
+            0.0,
+            0.0,
+            options.density,
+            options.friction,
+            options.restitution
+        )
+    )
+
+    local transform = world:get(entity, Transform)
+    local body = simulation:createBody({
         type = options.type or "dynamic",
-        position = {x = toMetres(x), y = toMetres(y)},
-        angle = angle,
+        position = {x = toMetres(transform.x), y = toMetres(transform.y)},
+        angle = transform.rotation,
         fixedRotation = options.fixedRotation,
     })
 
-    if options.radius ~= nil then
+    if round then
         World.addCircle(
             body,
             toMetres(options.radius),
@@ -235,13 +464,34 @@ function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
     B.b2Body_ApplyLinearImpulseToCenter(body, impulse, true)
 end
 
---- Reads a body's velocity, in pixels per second.
+--- Reads a body's velocity, live from Box2D, in pixels per second.
+---
+--- Pixels, like every other number this module takes and returns: the extents
+--- and radius `attach` is given, the impulse components, and the plugin's
+--- gravity. A caller that wants metres divides by `physics.scale`.
+---
+--- This rather than the `Motion` column is what a body is doing right now.
+--- `Motion` is a store written at a pause and a save, not a mirror.
 function physics.velocity(world: ecs.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0, 0.0
     end
-    return World.getVelocity(handleOf(row))
+    local vx, vy = World.getVelocity(handleOf(row))
+    return toPixels(vx), toPixels(vy)
+end
+
+--- Sets a body's velocity, in pixels per second, and wakes it.
+---
+--- Does nothing for an entity with no live body, which is the same answer
+--- `physics.velocity` gives for one: a null handle indexes Box2D's body array
+--- without being checked, so it never reaches Box2D.
+function physics.setVelocity(world: ecs.World, entity: integer, vx: number, vy: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil or row.index1 == 0 then
+        return
+    end
+    World.setVelocity(handleOf(row), toMetres(vx), toMetres(vy))
 end
 
 --- Installs the simulation and its sync.
@@ -250,7 +500,10 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
     local gravity = options.gravity or {0.0, 980.0}
 
     return function(world: ecs.World)
-        physics.world = World.create({
+        -- Per world, so two worlds each installing this get a simulation each
+        -- and neither sees the other's bodies. Hoisted into a local here and
+        -- closed over by the systems below, so a step costs no resource lookup.
+        local simulation <const> = World.create({
             gravity = {
                 x = toMetres(gravity[1]),
                 y = toMetres(gravity[2]),
@@ -258,6 +511,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             subStepCount = options.subStepCount,
             workerCount = options.workerCount,
         })
+        world.resources[simulationKey] = simulation
 
         -- A logic query, so a paused entity keeps its Transform where it was
         -- instead of being followed around by its body. This gates the
@@ -286,8 +540,8 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                 end
                 local body = handleOf(row)
                 -- The handle names its own world, so this reaches the right
-                -- one whatever `physics.world` currently points at. The
-                -- validity check is what makes a row restored from a
+                -- one without going back through the entity's world at all.
+                -- The validity check is what makes a row restored from a
                 -- snapshot, or one whose world has been destroyed, safe to
                 -- meet here.
                 if not (B.b2Body_IsValid(body) as boolean) then
@@ -316,7 +570,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                 -- here. Two numbers that have to agree and can disagree is a
                 -- simulation that integrates at one rate while the phase
                 -- driving it runs at another.
-                physics.world:step((world:getFixedTiming()))
+                simulation:step((world:getFixedTiming()))
                 timing.finish(STEP, started)
             end,
         })
@@ -326,7 +580,6 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             phase = ecs.phases.FixedPostUpdate,
             run = function()
                 local started = timing.begin()
-                local simulation = physics.world
                 simulation:beginMoves()
 
                 for archetype, length in bodies:iter() do
@@ -357,6 +610,22 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                 simulation:endMoves()
                 timing.finish(SYNC, started)
             end,
+        })
+
+        -- Where the release goes, because there is no `world:destroy` in the
+        -- ECS: what exists is `world:shutdown`, which an application calls
+        -- first and deliberately, while what a system might give back still
+        -- exists. A world a spec built with no application gets the same
+        -- system and the same teardown from the same call.
+        --
+        -- A world simply dropped instead leaks its simulation and its hold on
+        -- the thread pool. Nothing at this layer can act on one nobody shuts
+        -- down; what it can do is leave the leak visible, and
+        -- `TaskPool.liveThreadCount` is where it shows.
+        world:addSystem({
+            name = "tecs.ShutdownPhysics",
+            phase = ecs.phases.Shutdown,
+            run = function() world.resources[simulationKey] = nil; simulation:destroy() end,
         })
     end
 end

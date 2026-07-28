@@ -18,11 +18,25 @@ local physics = require("tecs.physics")
 local Transform = components.Transform
 local Paused = tecs.builtins.Paused
 
+-- Every world built here, so teardown can shut all of them down. The
+-- simulation is per world now: a world nobody shuts down keeps its Box2D world
+-- and its hold on the solver's thread pool for the rest of the run, so a suite
+-- that built one per case and dropped it would leak one per case.
+local built = {}
+
 local function newWorld()
     local world = tecs.newWorld()
     world:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
+    built[#built + 1] = world
     return world
 end
+
+after_each(function()
+    for _, world in ipairs(built) do
+        world:shutdown()
+    end
+    built = {}
+end)
 
 describe("ecs.physics snapshots", function()
     -- A handle is this run's numbering. Box2D hands out `index1` densely and
@@ -146,30 +160,30 @@ end)
 describe("ecs.physics despawn", function()
     it("destroys the body when the entity goes", function()
         local world = newWorld()
-        local baseline = physics.world:bodyCount()
+        local baseline = physics.of(world):bodyCount()
 
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
-        assert.equal(baseline + 1, physics.world:bodyCount())
+        assert.equal(baseline + 1, physics.of(world):bodyCount())
 
         world:despawn(entity)
         world:update(1 / 60)
-        assert.equal(baseline, physics.world:bodyCount())
+        assert.equal(baseline, physics.of(world):bodyCount())
     end)
 
     it("destroys every body a batch despawn takes", function()
         local world = newWorld()
-        local baseline = physics.world:bodyCount()
+        local baseline = physics.of(world):bodyCount()
 
         for index = 1, 8 do
             local entity = world:spawn(Transform(index * 40, 0, 0, 1, 0, 16, 16))
             physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
         end
-        assert.equal(baseline + 8, physics.world:bodyCount())
+        assert.equal(baseline + 8, physics.of(world):bodyCount())
 
         world:batchDespawn(world:query({ include = { physics.RigidBody } }))
         world:update(1 / 60)
-        assert.equal(baseline, physics.world:bodyCount())
+        assert.equal(baseline, physics.of(world):bodyCount())
     end)
 
     -- A despawn inside a system runs against a deferred world, where the row
@@ -178,7 +192,7 @@ describe("ecs.physics despawn", function()
     -- way and only that way.
     it("destroys the body when a system despawns the entity", function()
         local world = newWorld()
-        local baseline = physics.world:bodyCount()
+        local baseline = physics.of(world):bodyCount()
 
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
@@ -198,12 +212,12 @@ describe("ecs.physics despawn", function()
 
         world:update(1 / 60)
         world:update(1 / 60)
-        assert.equal(baseline, physics.world:bodyCount())
+        assert.equal(baseline, physics.of(world):bodyCount())
     end)
 
     it("keeps other bodies when one entity goes", function()
         local world = newWorld()
-        local baseline = physics.world:bodyCount()
+        local baseline = physics.of(world):bodyCount()
 
         local kept = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         local gone = world:spawn(Transform(200, 0, 0, 1, 0, 16, 16))
@@ -212,7 +226,7 @@ describe("ecs.physics despawn", function()
 
         world:despawn(gone)
         world:update(1 / 60)
-        assert.equal(baseline + 1, physics.world:bodyCount())
+        assert.equal(baseline + 1, physics.of(world):bodyCount())
         assert.is_true(physics.hasBody(world, kept))
 
         for _ = 1, 30 do
@@ -271,7 +285,7 @@ describe("ecs.physics pausing", function()
 
     it("still destroys a paused entity's body on despawn", function()
         local world = newWorld()
-        local baseline = physics.world:bodyCount()
+        local baseline = physics.of(world):bodyCount()
 
         local held = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, held, { type = "dynamic", radius = 8, density = 1 })
@@ -280,6 +294,6 @@ describe("ecs.physics pausing", function()
 
         world:despawn(held)
         world:update(1 / 60)
-        assert.equal(baseline, physics.world:bodyCount())
+        assert.equal(baseline, physics.of(world):bodyCount())
     end)
 end)

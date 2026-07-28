@@ -16,13 +16,26 @@ local physics = require("tecs.physics")
 
 local Transform = components.Transform
 
-describe("ecs.physics", function()
-    local function newWorld(gravity)
-        local world = tecs.newWorld()
-        world:addPlugin(physics.plugin({ gravity = gravity or { 0, 980 } }))
-        return world
-    end
+-- Every world built here, so teardown can shut all of them down. The
+-- simulation is per world now, so a world nobody shuts down keeps its Box2D
+-- world and its hold on the solver's thread pool for the rest of the run.
+local built = {}
 
+local function newWorld(gravity)
+    local world = tecs.newWorld()
+    world:addPlugin(physics.plugin({ gravity = gravity or { 0, 980 } }))
+    built[#built + 1] = world
+    return world
+end
+
+after_each(function()
+    for _, world in ipairs(built) do
+        world:shutdown()
+    end
+    built = {}
+end)
+
+describe("ecs.physics", function()
     it("leaves a static body where it was placed", function()
         local world = newWorld()
         local entity = world:spawn(Transform(100, 200, 0, 1, 0, 32, 32))
@@ -114,12 +127,6 @@ describe("ecs.physics", function()
 end)
 
 describe("ecs.physics write-back", function()
-    local function newWorld(gravity)
-        local world = tecs.newWorld()
-        world:addPlugin(physics.plugin({ gravity = gravity or { 0, 980 } }))
-        return world
-    end
-
     -- The sync takes a transform column mutable only for a body the step
     -- actually moved. Everything downstream is gated on that bit, so a world
     -- whose bodies have settled must stop re-uploading them; taking the column
