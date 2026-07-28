@@ -270,15 +270,22 @@ is what a game writes. A namespace assembled from several modules with no
 principal one keeps the table built for the name, and keeps the record with it:
 `tecs.gfx` is the one left.
 
-`tecs.audio` and `tecs.input` were two of those until the constructors moved.
-Each was a class file, `Audio.tl` and `Input.tl`, reached through a namespace
-named for it, and a class file cannot be a principal module because the path
-has to end in the public name and the case does not match. Once `Audio.create`
-became `tecs.audio.newAudio` and `Input.create` became `tecs.input.newInput`,
-neither file was a class any more: it was a module that contains one, which
-`STYLE.md` names luacase. So they are `src/tecs/audio.tl` and
-`src/tecs/platform/input.tl`, each returning a module record with the class
-nested inside it, and the two records `init.tl` wrote for them are gone.
+`tecs.audio`, `tecs.input` and `tecs.window` were three of those until the
+constructors moved. Each was a class file reached through a namespace named for
+it, and a class file cannot be a principal module because the path has to end
+in the public name and the case does not match. Once `Audio.create` became
+`tecs.audio.newAudio`, and the same for the other two, none of the three files
+was a class any more: each was a module that contains one, which `STYLE.md`
+names luacase. So they are `src/tecs/audio.tl`, `src/tecs/platform/input.tl`
+and `src/tecs/platform/window.tl`, each returning a module record with the
+class nested inside it, and the three records `init.tl` wrote for them are
+gone.
+
+The `class` field in the descriptor went with them. It existed to make one
+member of a namespace answer with the namespace's own module, which is how
+`tecs.window.Window` used to resolve, and a class nested in the module it is
+named for needs nothing: `tecs.window` is the module and `Window` is a field on
+it like any other.
 
 Nesting the class inside the module record rather than hanging it off as a
 field is not a style choice. tealdoc documents a module's returned record and
@@ -1714,7 +1721,7 @@ a headless server using the ECS drive exactly the same module without an
 
 ## The window
 
-[`platform/Window.tl`](src/tecs/platform/Window.tl) is what SDL's window and
+[`platform/window.tl`](src/tecs/platform/window.tl) is what SDL's window and
 display API looks like in this engine's idiom, and the whole of it is reachable
 from `Application.Config.window`, which is passed through rather than copied
 field by field so a setting cannot exist in one place and not the other.

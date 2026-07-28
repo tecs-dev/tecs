@@ -17,7 +17,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
-local Window = require("tecs.platform.Window")
+local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 
 -- Loaded here so that reloading them below re-runs only these three: whatever
@@ -81,7 +81,7 @@ describe("gpu debug names", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "names", width = SIZE, height = SIZE })
+        window = newWindow({ title = "names", width = SIZE, height = SIZE })
         -- Debug mode, since that is the only mode in which SDL keeps a name at
         -- all, and the only one in which a wrong call is complained about.
         device = Device.create(window, { debug = true })

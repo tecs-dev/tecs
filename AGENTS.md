@@ -63,7 +63,7 @@ tecs/
 │   ├── ffi/               # Generated bindings: SDL3, SDL3_mixer, Box2D, shaderc, SPIRV-Cross
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
 │   ├── gfx/               # Camera, layers, distance-field text
-│   ├── platform/          # Window, input, audio, events, time, files, the OS
+│   ├── platform/          # window, input, audio, events, time, files, the OS
 │   ├── box2d/             # Box2D 3
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── mcp/               # Debug server: transport, tools, sandbox

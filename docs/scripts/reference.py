@@ -112,7 +112,7 @@ MODULES = [
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),
-    ("docs/modules/window.md", [("src/tecs/platform/Window.tl", "tecs.window.Window")]),
+    ("docs/modules/window.md", [("src/tecs/platform/window.tl", "tecs.window")]),
     ("docs/modules/workers.md", [("src/tecs/workers.tl", "tecs.workers")]),
 ]
 

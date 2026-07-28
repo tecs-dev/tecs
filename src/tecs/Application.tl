@@ -60,7 +60,8 @@ local time <const> = require("tecs.platform.time")
 local events <const> = require("tecs.platform.events")
 local input <const> = require("tecs.platform.input")
 local type Input = input.Input
-local Window <const> = require("tecs.platform.Window")
+local window <const> = require("tecs.platform.window")
+local type Window = window.Window
 local Device <const> = require("tecs.gpu.Device")
 local Frame <const> = require("tecs.gpu.Frame")
 local passscope <const> = require("tecs.gpu.passscope")
@@ -599,7 +600,7 @@ function Application:_init(): boolean
         error(("tecs: this build links no shader compiler and there is no " .. "pack at %s"):format(packPath))
     end
 
-    self.window = Window.newWindow(config.window or {} as Window.Options)
+    self.window = window.newWindow(config.window or {} as Window.Options)
 
     self.device = Device.create(self.window, {debug = config.debug})
     if config.framesInFlight ~= nil then

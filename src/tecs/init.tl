@@ -26,7 +26,7 @@ local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
 local type Camera = require("tecs.gfx.Camera")
 local type animation = require("tecs.gfx.animation")
-local type Window = require("tecs.platform.Window")
+local type window = require("tecs.platform.window")
 local type input = require("tecs.platform.input")
 local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
@@ -47,10 +47,10 @@ local type data = require("tecs.data")
 local type system = require("tecs.platform.system")
 local type loader = require("tecs.ffi.loader")
 
--- A record below is written for one reason: a public name that no single module
--- answers. A namespace assembled from a class and the records beside it, or
--- from nothing but the modules one level down, has no module whose own record
--- types it, so one is written here.
+-- The one record below is written for one reason: a public name that no single
+-- module answers. `tecs.gfx` is nothing but the modules one level down and the
+-- four things a scene reaches for directly, so no module's own record types it
+-- and one is written here.
 --
 -- A public name that one module answers needs none of this, and has none. It
 -- resolves to that module, is typed by the record the module declares, and
@@ -59,41 +59,16 @@ local type loader = require("tecs.ffi.loader")
 -- reach for, because a record here restates every signature and every docblock
 -- the module already carries and nothing checks the two against each other.
 --
--- A class gets a module of its own, lowercase, and the class sits inside it
--- under its own name: `tecs.gfx.Camera`. One name is the namespace and the
--- other is the type, so no name is both at once. The satellite records each
--- class carries are named here too, so a game reaches `tecs.window.Options`
--- without going through `Window` first.
+-- A class is a record nested inside the module named for it, so `tecs.audio` is
+-- `src/tecs/audio.tl` and `tecs.audio.Audio` is the class it declares. One name
+-- is the module and the other is the type, and the satellite records sit beside
+-- the class on the same module, so a game reaches `tecs.window.Options` without
+-- going through `Window` first.
 --
 -- A module may also sit inside another module, one level and no deeper:
 -- `tecs.gfx.layers`, `tecs.filesystem.watch`. `SURFACE` is what declares that,
 -- through `within`, and a lowercase field of a record here is one of them only
 -- where the parent has no module of its own.
-
---- The window, its size, its display and its mode.
-local record window
-    Window: Window
-    type Options = Window.Options
-    type DisplayMode = Window.DisplayMode
-    type Orientation = Window.Orientation
-    type Theme = Window.Theme
-    type Flash = Window.Flash
-    type Progress = Window.Progress
-
-    --- Opens a window, and raises rather than answering nil.
-    ---
-    --- The one place in this module that raises: every reader here answers a
-    --- harmless default when the platform cannot say, but a window that could
-    --- not be created is not a question with a sensible answer.
-    ---
-    --- @param options Validated here, so a bad size or an unreadable icon
-    ---     fails now rather than on the first frame. Omitted fields take the
-    ---     defaults `Options` documents.
-    --- @return The window, whose closing is the caller's through `destroy`. An
-    ---     application creates its own from `Config.window` and hands it to
-    ---     the entry plugin, so a game rarely calls this.
-    newWindow: function(options: Window.Options): Window
-end
 
 --- Drawing: what a frame is drawn from, what draws it, and the vocabularies a
 --- scene is described in.
@@ -414,9 +389,6 @@ tecs.Transform = ecs.Transform
 local record Namespace
     --- The module a member comes off when nothing above it answered.
     module: string
-    --- The member name that answers with `module` itself, which is how a class
-    --- sits inside a namespace named for it.
-    class: string
     --- The one name taken off `module`, for a public name that is a function
     --- rather than a table. `tecs.newApplication` is the constructor declared
     --- in `tecs.Application`, and naming it loads that module and nothing else.
@@ -440,12 +412,11 @@ end
 --- Listed rather than discovered, so `tecs.anmation` is an error where it is
 --- written instead of a nil where it is called.
 ---
---- `audio`, `input` and `gfx` are the namespaces reading more than one module
---- at one level. The first two are a class with satellites; `gfx` is the one
---- name several substantial modules answer, and no candidate could be its
---- principal without being loaded the moment the name is read, which every one
---- of them reaches SDL to do. Every other name here answers with one module,
---- which is what lets the module's own record type it.
+--- `gfx` is the one namespace reading more than one module at one level, and
+--- it is the one name several substantial modules answer: no candidate could
+--- be its principal without being loaded the moment the name is read, which
+--- every one of them reaches SDL to do. Every other name here answers with one
+--- module, which is what lets the module's own record type it.
 local SURFACE <const>: {string: Namespace} = {
     Application = {module = "tecs.Application"},
     Future = {module = "tecs.Future"},
@@ -477,7 +448,7 @@ local SURFACE <const>: {string: Namespace} = {
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     time = {module = "tecs.platform.time"},
-    window = {module = "tecs.platform.Window", class = "Window"},
+    window = {module = "tecs.platform.window"},
     workers = {module = "tecs.workers"},
 }
 
@@ -495,13 +466,13 @@ local SURFACE <const>: {string: Namespace} = {
 local resolve: function(spec: Namespace): any
 
 --- Builds the table a namespace answers with. Nothing under it loads until a
---- member is read, so naming `tecs.window` or `tecs.gfx` costs nothing until
---- something is taken out of it.
+--- member is read, so naming `tecs.gfx` costs nothing until something is taken
+--- out of it.
 ---
 --- `within` is searched first and `beside` second, both ahead of `module`,
 --- because they are the cheaper ones to load and no name is in more than one: a
---- module below is its own file, and listing a sound device does not open a
---- mixer.
+--- module below is its own file, and reading a layer band does not load the
+--- renderer.
 ---
 --- What is resolved is remembered in a table beside the one answered with
 --- rather than on it. The table a caller holds stays empty, so both metamethods
@@ -529,8 +500,7 @@ local function namespace(spec: Namespace): {string: any}
                 end
             end
             if member == nil and spec.module ~= nil then
-                local module = require(spec.module) as {string: any}
-                member = name == spec.class and module or module[name]
+                member = (require(spec.module) as {string: any})[name]
             end
             if member == nil then
                 return nil
@@ -615,7 +585,7 @@ local function hang(module: {string: any}, within: {string: Namespace})
 end
 
 resolve = function(spec: Namespace): any
-    if spec.class ~= nil or spec.beside ~= nil or spec.module == nil then
+    if spec.beside ~= nil or spec.module == nil then
         return namespace(spec)
     end
     local module = require(spec.module) as {string: any}

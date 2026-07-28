@@ -18,7 +18,7 @@ return {
             type_links = {
                 ["tecs.platform.system"] = "/modules/system#tecs.system",
                 ["tecs.Future"] = "/modules/Future#tecs.Future",
-                ["tecs.platform.Window"] = "/modules/window#tecs.window.Window",
+                ["tecs.platform.window"] = "/modules/window#tecs.window",
             },
         },
     },

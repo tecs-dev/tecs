@@ -24,7 +24,8 @@ local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
 local events = require("tecs.platform.events")
 local Application = require("tecs.Application")
-local Window = require("tecs.platform.Window")
+local Window = require("tecs.platform.window").Window
+local newWindow = require("tecs.platform.window").newWindow
 
 local C = sdl.C
 local SIZE = 64
@@ -57,7 +58,7 @@ describe("platform.Window", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "window", width = SIZE, height = SIZE })
+        window = newWindow({ title = "window", width = SIZE, height = SIZE })
     end)
 
     teardown(function()
@@ -163,7 +164,7 @@ describe("platform.Window", function()
         -- that has ever carried a content aspect ratio traps inside AppKit, and
         -- clearing the ratio first does not undo it, so a window that has been
         -- given one cannot be handed on to the maximize test above.
-        local shaped = Window.newWindow({ title = "shaped", width = SIZE, height = SIZE })
+        local shaped = newWindow({ title = "shaped", width = SIZE, height = SIZE })
         assert.is_true(shaped:setAspectRatio(1.0, 2.0))
         local minimum, maximum = shaped:aspectRatio()
         assert.are.equal(1.0, minimum)
@@ -452,7 +453,7 @@ describe("platform.Window created from options", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({
+        window = newWindow({
             title = "options",
             width = SIZE,
             height = SIZE,
@@ -490,7 +491,7 @@ describe("platform.Window created from options", function()
 
     it("keeps the defaults a window has always had", function()
         -- Adding creation flags must not have moved what omitting them means.
-        local plain = Window.newWindow({ title = "plain" })
+        local plain = newWindow({ title = "plain" })
         assert.is_true(plain:isResizable())
         assert.is_true(plain:isVisible())
         assert.is_false(plain:isFullscreen())
@@ -508,7 +509,7 @@ describe("platform.Window once it is destroyed", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "gone", width = SIZE, height = SIZE })
+        window = newWindow({ title = "gone", width = SIZE, height = SIZE })
         window:destroy()
     end)
 
@@ -606,7 +607,7 @@ describe("platform.Window changes the event stream reports", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "events", width = SIZE, height = SIZE })
+        window = newWindow({ title = "events", width = SIZE, height = SIZE })
         holder = loader.newArray("SDL_Event[1]")
         -- Whatever opening a window produced, so the first assertion is not
         -- reading the events that created it.

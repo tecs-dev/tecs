@@ -12,7 +12,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local filesystem = require("tecs.platform.filesystem")
-local Window = require("tecs.platform.Window")
+local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local assets = require("tecs.assets")
 
@@ -26,7 +26,7 @@ describe("assets", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "assets", width = 64, height = 64 })
+        window = newWindow({ title = "assets", width = 64, height = 64 })
         device = Device.create(window, { debug = true })
         assets.install()
     end)
@@ -272,7 +272,7 @@ describe("an asset batch", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "batch", width = 64, height = 64 })
+        window = newWindow({ title = "batch", width = 64, height = 64 })
         device = Device.create(window, { debug = true })
         assets.install()
     end)

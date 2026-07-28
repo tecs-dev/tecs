@@ -182,7 +182,7 @@ local shaderpack <const> = require("tecs.gpu.shaderpack")
 local workers <const> = require("tecs.workers")
 local time <const> = require("tecs.platform.time")
 local Future <const> = require("tecs.Future")
-local type Window = require("tecs.platform.Window")
+local type Window = require("tecs.platform.window").Window
 
 loader.declare("dialogs")
 

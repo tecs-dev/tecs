@@ -100,115 +100,155 @@ local C <const> = sdl.C
 local K <const> = sdl.K
 local VIDEO <const> = K.SDL_INIT_VIDEO
 
-local record Window
-    --- The `SDL_Window`. Nil once `destroy` has run, and what a device claims
-    --- for presentation.
-    handle: loader.CPtr
-    --- The title last set, kept so reading it back does not cross the FFI.
-    title: string
-    _destroyed: boolean
-
-    --- How a display is rotated relative to its natural orientation.
-    enum Orientation
-        "unknown"
-        "landscape"
-        "landscapeFlipped"
-        "portrait"
-        "portraitFlipped"
-    end
-
-    --- What the desktop asks applications to look like.
-    enum Theme
-        "unknown"
-        "light"
-        "dark"
-    end
-
-    --- How hard to ask for attention.
-    enum Flash
-        --- Stops a flash already running.
-        "cancel"
-        --- One flash, whether or not anybody was looking.
-        "brief"
-        --- Keeps flashing until the window is focused.
-        "untilFocused"
-    end
-
-    --- What the taskbar or dock shows over this application's icon.
-    enum Progress
-        --- Nothing shown, which is where a window starts.
-        "none"
-        --- Work is happening and its extent is not known.
-        "indeterminate"
-        "normal"
-        "paused"
-        --- Work stopped because it failed.
-        "error"
-    end
-
-    --- One video mode a display can be put into.
-    record DisplayMode
-        --- Display this mode belongs to.
-        display: integer
-        --- Size in screen coordinates. Multiply by `pixelDensity` for pixels.
-        width: integer
-        height: integer
-        --- Screen coordinates to pixels, so a 1920 by 1080 mode at 2.0 draws
-        --- 3840 by 2160.
-        pixelDensity: number
-        --- Refreshes per second, or 0 where the platform will not say.
-        refreshRate: number
-        --- SDL's own mode, which `setFullscreenMode` passes back to it. A mode
-        --- assembled by hand rather than taken from `fullscreenModes` or
-        --- `closestFullscreenMode` does not carry one and is rejected.
-        _mode: loader.CPtr
-    end
-
-    --- What `newWindow` takes. Every field is optional.
-    record Options
-        --- Defaults to "tecs".
+--- The window, its size, its display and its mode.
+local record window
+    --- One open window, and the displays around it. Every reader asks SDL
+    --- rather than caching, so what a getter answers is what the events were
+    --- derived from.
+    record Window
+        --- The `SDL_Window`. Nil once `destroy` has run, and what a device claims
+        --- for presentation.
+        handle: loader.CPtr
+        --- The title last set, kept so reading it back does not cross the FFI.
         title: string
-        --- Size in screen coordinates, not pixels: on a high-density display
-        --- the drawable is larger. Defaults to 1280 by 720.
-        width: integer
-        height: integer
-        --- Defaults to true, so omitting it gives a resizable window. Only an
-        --- explicit false turns it off.
-        resizable: boolean
-        --- Whether the drawable follows the display's density instead of being
-        --- stretched to it. Defaults to true, on the same terms, which is what
-        --- makes `getPixelSize` differ from `getSize`.
-        highPixelDensity: boolean
-        --- Starts fullscreen on whichever display the window manager picks.
-        --- Defaults to false.
-        fullscreen: boolean
-        --- Drops the title bar and the frame. Defaults to false.
-        borderless: boolean
-        --- Creates the window without mapping it, so nothing is shown until
-        --- `show` is called. Defaults to false, and is what a game that wants
-        --- to place and size the window before it is first seen sets.
-        hidden: boolean
-        --- Keeps the window above others. Defaults to false.
-        alwaysOnTop: boolean
-        --- Asks for a window whose buffer has an alpha channel the desktop
-        --- composites against. Defaults to false, and is refused outright on a
-        --- platform that cannot do it.
-        transparent: boolean
-        --- Position in screen coordinates. Both are needed for either to
-        --- apply; left unset, the window manager places the window.
-        x: integer
-        y: integer
-        --- Size limits, applied after creation. Each pair is needed together.
-        minWidth: integer
-        minHeight: integer
-        maxWidth: integer
-        maxHeight: integer
-        --- Image file the window is shown as. Decoded once, here, rather than
-        --- going through the asset system, which decodes on a worker and
-        --- answers with a GPU texture.
-        icon: string
+        _destroyed: boolean
+
+        --- How a display is rotated relative to its natural orientation.
+        enum Orientation
+            "unknown"
+            "landscape"
+            "landscapeFlipped"
+            "portrait"
+            "portraitFlipped"
+        end
+
+        --- What the desktop asks applications to look like.
+        enum Theme
+            "unknown"
+            "light"
+            "dark"
+        end
+
+        --- How hard to ask for attention.
+        enum Flash
+            --- Stops a flash already running.
+            "cancel"
+            --- One flash, whether or not anybody was looking.
+            "brief"
+            --- Keeps flashing until the window is focused.
+            "untilFocused"
+        end
+
+        --- What the taskbar or dock shows over this application's icon.
+        enum Progress
+            --- Nothing shown, which is where a window starts.
+            "none"
+            --- Work is happening and its extent is not known.
+            "indeterminate"
+            "normal"
+            "paused"
+            --- Work stopped because it failed.
+            "error"
+        end
+
+        --- One video mode a display can be put into.
+        record DisplayMode
+            --- Display this mode belongs to.
+            display: integer
+            --- Size in screen coordinates. Multiply by `pixelDensity` for pixels.
+            width: integer
+            height: integer
+            --- Screen coordinates to pixels, so a 1920 by 1080 mode at 2.0 draws
+            --- 3840 by 2160.
+            pixelDensity: number
+            --- Refreshes per second, or 0 where the platform will not say.
+            refreshRate: number
+            --- SDL's own mode, which `setFullscreenMode` passes back to it. A mode
+            --- assembled by hand rather than taken from `fullscreenModes` or
+            --- `closestFullscreenMode` does not carry one and is rejected.
+            _mode: loader.CPtr
+        end
+
+        --- What `newWindow` takes. Every field is optional.
+        record Options
+            --- Defaults to "tecs".
+            title: string
+            --- Size in screen coordinates, not pixels: on a high-density display
+            --- the drawable is larger. Defaults to 1280 by 720.
+            width: integer
+            height: integer
+            --- Defaults to true, so omitting it gives a resizable window. Only an
+            --- explicit false turns it off.
+            resizable: boolean
+            --- Whether the drawable follows the display's density instead of being
+            --- stretched to it. Defaults to true, on the same terms, which is what
+            --- makes `getPixelSize` differ from `getSize`.
+            highPixelDensity: boolean
+            --- Starts fullscreen on whichever display the window manager picks.
+            --- Defaults to false.
+            fullscreen: boolean
+            --- Drops the title bar and the frame. Defaults to false.
+            borderless: boolean
+            --- Creates the window without mapping it, so nothing is shown until
+            --- `show` is called. Defaults to false, and is what a game that wants
+            --- to place and size the window before it is first seen sets.
+            hidden: boolean
+            --- Keeps the window above others. Defaults to false.
+            alwaysOnTop: boolean
+            --- Asks for a window whose buffer has an alpha channel the desktop
+            --- composites against. Defaults to false, and is refused outright on a
+            --- platform that cannot do it.
+            transparent: boolean
+            --- Position in screen coordinates. Both are needed for either to
+            --- apply; left unset, the window manager places the window.
+            x: integer
+            y: integer
+            --- Size limits, applied after creation. Each pair is needed together.
+            minWidth: integer
+            minHeight: integer
+            maxWidth: integer
+            maxHeight: integer
+            --- Image file the window is shown as. Decoded once, here, rather than
+            --- going through the asset system, which decodes on a worker and
+            --- answers with a GPU texture.
+            icon: string
+        end
     end
+
+    --- What `newWindow` takes.
+    type Options = Window.Options
+    --- One fullscreen mode a display offers.
+    type DisplayMode = Window.DisplayMode
+    --- Which way up a display is.
+    type Orientation = Window.Orientation
+    --- Light or dark, as the desktop has it.
+    type Theme = Window.Theme
+    --- How hard a window asks for attention.
+    type Flash = Window.Flash
+    --- What a taskbar progress indicator shows.
+    type Progress = Window.Progress
+
+    --- Opens a window, and raises rather than answering nil.
+    ---
+    --- The one place in this module that raises: every reader here answers a
+    --- harmless default when the platform cannot say, but a window that could
+    --- not be created is not a question with a sensible answer.
+    ---
+    --- Requires SDL's video subsystem. Flags SDL only accepts at creation are
+    --- taken from `options` and set there; everything else in `options` is
+    --- applied straight afterwards and has a setter of its own, so nothing is
+    --- reachable at creation that is not reachable later.
+    ---
+    --- @param options Validated here, so a bad size or an unreadable icon
+    ---     fails now rather than on the first frame. Omitted fields take the
+    ---     defaults `Options` documents.
+    --- @return The window, whose closing is the caller's through `destroy`. An
+    ---     application creates its own from `Config.window` and hands it to
+    ---     the entry plugin, so a game rarely calls this.
+    newWindow: function(options: Window.Options): Window
 end
+
+local type Window = window.Window
 
 local WindowMT <const>: metatable<Window> = {__index = Window}
 
@@ -344,7 +384,7 @@ end
 --- here; everything else in `options` is applied straight afterwards, and has
 --- a setter of its own, so nothing is reachable at creation that is not
 --- reachable later.
-function Window.newWindow(options: Window.Options): Window
+function window.newWindow(options: Window.Options): Window
     local flags = 0
     if options.resizable ~= false then
         flags = flags + K.SDL_WINDOW_RESIZABLE
@@ -1281,4 +1321,4 @@ function Window.setScreenSaverEnabled(enabled: boolean): boolean
     return C.SDL_DisableScreenSaver() as boolean
 end
 
-return Window
+return window

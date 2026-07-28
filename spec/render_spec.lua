@@ -14,7 +14,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
-local Window = require("tecs.platform.Window")
+local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local Shader = require("tecs.gpu.Shader")
 local Buffer = require("tecs.gpu.Buffer")
@@ -40,7 +40,7 @@ describe("gpu rendering", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "spec", width = SIZE, height = SIZE })
+        window = newWindow({ title = "spec", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
         target = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
     end)

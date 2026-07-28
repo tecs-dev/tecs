@@ -190,7 +190,7 @@ local REACH = {
             .. "seam and needs no code here.",
         modules = {
             "tecs/Application.lua",
-            "tecs/platform/Window.lua",
+            "tecs/platform/window.lua",
         },
     },
     {
@@ -294,7 +294,7 @@ local STORAGE = {
             .. "affects no shipped build, which is why it is a bypass worth "
             .. "recording rather than one worth hurrying.",
     },
-    ["tecs/platform/Window.lua"] = {
+    ["tecs/platform/window.lua"] = {
         bucket = "bypass",
         symbols = { "IMG_Load" },
         reason = "Loads the window icon from a path. IMG_Load_IO over bytes "

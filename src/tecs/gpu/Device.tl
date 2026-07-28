@@ -9,7 +9,7 @@ local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
 local Frame <const> = require("tecs.gpu.Frame")
-local Window <const> = require("tecs.platform.Window")
+local type Window = require("tecs.platform.window").Window
 
 local C <const> = sdl.C
 

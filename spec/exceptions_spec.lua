@@ -20,7 +20,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
-local Window = require("tecs.platform.Window")
+local newWindow = require("tecs.platform.window").newWindow
 local Device = require("tecs.gpu.Device")
 local Texture = require("tecs.gpu.Texture")
 local Frame = require("tecs.gpu.Frame")
@@ -44,7 +44,7 @@ describe("exception safety", function()
 
     setup(function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-        window = Window.newWindow({ title = "exceptions", width = SIZE, height = SIZE })
+        window = newWindow({ title = "exceptions", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
         screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
     end)
