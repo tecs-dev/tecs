@@ -1,140 +1,74 @@
 ---
-description: "An HTTP client driven from a frame, where every request is a future and nothing ever blocks the loop"
+description: "An HTTP client where every request is a future, every body is a stream, and nothing goes in the frame loop"
 outline: deep
 ---
 
 # tecs.http
 
-`tecs.http` fetches things over HTTP and HTTPS without stopping the frame it was called from. Every request
-returns a [`Future`](/modules/Future), the loop pumps, and the answer arrives when it arrives.
-
-It is libcurl's multi interface underneath. The easy interface's `curl_easy_perform` runs a whole transfer
-before it returns, which in a game is a frame that does not end until the network answers; the multi interface
-does as much as can be done without waiting and reports what is still in flight, which is the same shape
-[`assets`](/modules/assets) and [`proc`](/modules/proc) already use.
-
-libcurl writes response bodies and raw headers into a native response buffer. Headers have their own allocation
-cap, and a nonzero `maxBytes` caps the body. Its callbacks stay in C because LuaJIT cannot re-enter a Lua FFI
-callback from a compiled pump loop. Lua reads the completed buffer, then parses only the final response's
-headers, so interim and redirect headers never appear in `Response.headers`.
-
-## Requiring it
+`tecs.http` fetches things over HTTP and HTTPS without stopping the frame it was called from. Make a client, send a
+request, attach a continuation. Nothing else is yours to do.
 
 ```teal
-local tecs <const> = require("tecs")
+tecs.http.client({ userAgent = "mygame/1.0" })
+    :send({ url = "https://example.com/manifest.json" })
+    :map(function(response: tecs.http.client.Response): Manifest
+        return tecs.json.decode(response.body:text()) as Manifest
+    end)
+    :onSettle(function(manifest: tecs.Future<Manifest>)
+        if manifest.status == "ready" then
+            world:spawn(Level, manifest.value.firstLevel)
+        else
+            log:warn("no manifest: %s", manifest.error)
+        end
+    end)
 ```
 
-The whole surface is `require("tecs")` and every module is a field on it, so this module is `tecs.http`. `tecs`
-is also set as a global, which makes the require line optional, and engine modules are resolved lazily on first
-field access, so a program that never mentions `tecs.http` never loads libcurl.
+There is no line missing from that. A client is driven by the application from the frame it already runs, the same
+way [`assets`](/modules/assets) and [`proc`](/modules/proc) are, so a request started anywhere settles on its own.
+
+`onSettle` is handed the future rather than the value, which is what lets one continuation answer both outcomes.
+[`map`](/modules/Future#map), [`flatMap`](/modules/Future#flatmap) and [`recover`](/modules/Future#recover) are
+the rest of it: everything a request returns is a [`Future`](/modules/Future) and behaves like every other one.
+
+Reading `future.status` yourself is fine, and is what a system that wants to check without a callback does. It is
+not the shape to reach for first.
+
+## A body is a `DataStream`
+
+One value for bytes, wherever they are. A request takes one, a response carries one, and neither the caller nor
+the client has to care which kind it is.
 
 ```teal
-local client <const> = tecs.http.client({ userAgent = "mygame/1.0" })
+local DataStream <const> = tecs.http.DataStream
 
-local manifest <const> = client:send({
-    url = "https://example.com/manifest.json",
-    headers = { accept = "application/json" },
-})
-
--- once per frame, from wherever the loop already runs
-client:pump()
-
-if manifest.status == "ready" then
-    print(manifest.value.status, manifest.value.body)
-end
+DataStream.ofString('{"score":11}', "application/json")
+DataStream.ofFile("saves/slot1.bin")            -- a path, written as it arrives
+DataStream.ofHandle(io.open("patch.bin", "wb")) -- your handle, and you close it
+DataStream.ofBytes(pointer, length)             -- an FFI buffer you keep alive
 ```
 
-`tecs.http.client` is callable and is also the namespace: calling it builds a `Client`, and `client.Request`,
-`client.Response` and `client.Options` are the records around it.
+| Field         | Type      | Description                                                                 |
+| ------------- | --------- | --------------------------------------------------------------------------- |
+| `kind`        | `string`  | `"string"`, `"bytes"`, `"file"` or `"handle"`.                              |
+| `length`      | `integer` | Bytes, when something can know before they are read. Nil when nothing can.  |
+| `contentType` | `string`  | What the bytes are. Sent as `Content-Type`, and set from one on a response. |
+| `path`        | `string`  | Where the bytes are, on a `"file"`.                                         |
+| `text()`      | `string`  | The whole thing as a string. Free for a `"string"`, a read for a `"file"`.  |
 
-## Every call returns a future
+**A destination is written as the transfer runs.** Each pump hands what has arrived to the destination and drops
+it, so a 500 MB download is never a 500 MB string: it is one frame's worth of arrival at a time. Files go through
+[`filesystem`](/modules/filesystem), and so through the storage seam a port replaces; a handle is yours and is
+written to directly.
 
-There is no `sendSync` and no `blocking = true`, because blocking is something done _to_ a future rather than a
-mode a request is issued in.
+A transfer that fails part way through leaves what had arrived where it was going: a file `into` named holds a
+partial body, not nothing. The future is `"failed"` and says why, so the answer to "is this file complete" is the
+future rather than the file.
 
-```teal
-local config <const> = client:send({ url = url })
-    :map(function(response: tecs.http.client.Response): string return response.body end)
-    :recover(function(): string return DEFAULTS end)
-    :wait(2000)
-```
+A request body is the other way round: a file or a handle given as `body` is read whole when `send` is called,
+and libcurl copies it, so sending one costs twice its size until it completes. Uploading something large is the
+case that is not served yet, and it needs the read side moved into C beside the buffering.
 
-::: tip Always name the timeout
-The number at the call site is the whole guard. A reviewer who sees `wait(2000)` asks why a frame is being held
-for two seconds, which is a question a boolean never prompts. A `wait` with no argument is bounded by the
-client's own `timeoutMs` rather than by an unrelated default, but write the number anyway.
-:::
-
-## A response is not a failure
-
-A 404 settles `"ready"` with `status` 404. `"failed"` means the transfer did not complete: the name did not
-resolve, the connection was refused, TLS did not verify, the deadline passed. `"cancelled"` means this process
-stopped it.
-
-This is the same reasoning [`proc`](/modules/proc) applies to an exit code. A status code is the answer to the
-request, and making it a failure would propagate a 404 through `map` as though the transfer broke.
-`Response:ok()` is the separate question about the answer.
-
-## Bodies do not default to strings
-
-Omitting `into` returns the body as a string, which is right for a manifest and wrong for a patch. `into` names
-a path to write it to instead, leaving `Response.body` nil, so the large case has a spelling of its own and a
-500 MB download is not the path of least resistance. The write goes through
-[`filesystem`](/modules/filesystem), so a port that replaced the storage backend gets it without this module
-knowing.
-
-::: warning `into` is not yet a memory bound
-It buys the file and the storage seam. The body is still assembled in memory and written once, because the
-storage backend has `write` and no append. Until that changes, `maxBytes` is the real ceiling: it is checked as
-the bytes arrive and again against a declared `Content-Length`, and a transfer that reaches it fails rather than
-growing.
-:::
-
-## TLS verification is on
-
-Peer and host verification are set explicitly on every handle rather than left to the library's default, and the
-protocol set is narrowed to `http` and `https` for the request and for anything it redirects to.
-
-There is no `insecure = true`. What exists is `insecureHosts`, an explicit list of host names whose certificates
-are not checked, each of which logs a warning when the client is built. No wildcard, port, scheme or URL is
-accepted in that list.
-
-```teal
-local client <const> = tecs.http.client({ insecureHosts = { "dev.example.com" } })
-```
-
-A self-signed development server is a real need and this serves it. Pinning a development CA through libcurl's
-own `CURLOPT_CAINFO` is better still and is what to reach for when the host is not on a developer's own machine.
-
-## Three timeouts
-
-`connectTimeoutMs` bounds getting a socket, `timeoutMs` bounds the whole transfer, and `stallTimeoutMs` bounds
-going nowhere. The third is the one that is easy to leave out: a whole-transfer deadline is the wrong bound for
-a download, because the number that stops a hung connection is far smaller than the number a large body
-legitimately needs. So a long `timeoutMs` beside a short `stallTimeoutMs` is what `into` wants. It is off by
-default, because a client that abandoned a request while a server was thinking would be doing something nobody
-asked it to.
-
-## Connections are pooled and bounded
-
-One client is one connection pool. It reuses sockets across requests, and `maxConnections` and
-`maxConnectionsPerHost` bound how many it opens; requests past the bound are held rather than refused, so a game
-that queues two hundred fetches opens six sockets to that host and not two hundred.
-
-That matters more than it might, because a packaged build is HTTP/1.1 only and has no multiplexing to make one
-connection carry many requests. A development preset resolves libcurl from the system and may well get HTTP/2,
-so this is one of the few places the two differ in behaviour rather than only in what they link.
-
-## DNS does not block
-
-libcurl's multi interface is non-blocking for transfer but resolves names synchronously unless the library was
-built with the threaded resolver or c-ares, and a cold lookup is comfortably a dropped frame.
-
-Both builds this tree uses resolve off the calling thread. The packaged libcurl is built with c-ares off, which
-is the condition under which libcurl's own build defaults the threaded resolver on, and its generated
-configuration carries it. The system library a development preset resolves reports the same. Worth re-checking
-on a new target, and the check is one call: `curl_version_info` sets `CURL_VERSION_ASYNCHDNS` in `features` when
-the resolver is asynchronous.
+`maxBytes` counts every byte a body has been, drained or not, so a destination is not a way around the ceiling.
 
 ## client
 
@@ -144,21 +78,31 @@ Builds a client. Every field is optional.
 local client <const> = tecs.http.client(options?: Options)
 ```
 
-**`Options` fields:**
+One client is one connection pool. Build one for the game and keep it; **call `close` when you are done with it**,
+because losing the last reference to one does not end it. That is deliberate: a request nobody kept a handle to
+still lands.
 
 | Field                   | Type               | Default | Description                                                                                                     |
 | ----------------------- | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------- |
 | `userAgent`             | `string`           | none    | Sent as `User-Agent`. Name the game and its version; a server operator reading a log has nothing else to go on. |
 | `headers`               | `{string: string}` | none    | Sent on every request, and overridden per request by the same name.                                             |
 | `timeoutMs`             | `number`           | `30000` | Milliseconds a whole transfer is given.                                                                         |
-| `connectTimeoutMs`      | `number`           | `10000` | Milliseconds the connection is given, inside that.                                                              |
-| `stallTimeoutMs`        | `number`           | `0`     | Milliseconds a transfer may make no progress before failing. Measured by libcurl in whole seconds.              |
+| `connectTimeoutMs`      | `number`           | `10000` | Milliseconds getting a socket is given, inside that.                                                            |
+| `stallTimeoutMs`        | `number`           | `0`     | Milliseconds a transfer may make no progress before it fails. `0` never gives up on a quiet connection.         |
 | `maxRedirects`          | `integer`          | `5`     | Redirects followed. `0` follows none.                                                                           |
 | `maxConnections`        | `integer`          | `16`    | Sockets kept open across every host.                                                                            |
-| `maxConnectionsPerHost` | `integer`          | `6`     | Sockets kept open to any one host.                                                                              |
+| `maxConnectionsPerHost` | `integer`          | `6`     | Sockets kept open to any one host. Requests past it are held, not refused.                                      |
 | `maxBytes`              | `integer`          | `0`     | Bytes a response body may reach before the transfer fails. `0` is unbounded.                                    |
-| `compressed`            | `boolean`          | `true`  | Offer the content encodings libcurl was built with, which is zlib here.                                         |
-| `insecureHosts`         | `{string}`         | none    | Host names whose certificates are not verified. Each logs a warning. Anything that is not a plain host raises.  |
+| `compressed`            | `boolean`          | `true`  | Offer the content encodings libcurl was built with.                                                             |
+| `insecureHosts`         | `{string}`         | none    | Host names whose certificates are not verified. Each logs a warning.                                            |
+| `proxy`                 | `string`           | none    | Proxy URL, as `http://host:3128` or `socks5h://host:1080`. See below.                                           |
+| `noProxy`               | `string`           | none    | Hosts the proxy is not used for, comma separated. `*` disables it entirely.                                     |
+| `proxyCredentials`      | `string`           | none    | `user:password` for the proxy.                                                                                  |
+
+::: tip Set a long `timeoutMs` and a short `stallTimeoutMs` for a download
+A whole-transfer deadline large enough for a big body is far too large to catch a hung connection, and a single
+number cannot be both. The pair is what a download wants.
+:::
 
 ## send
 
@@ -168,30 +112,21 @@ Starts a transfer and answers what it will settle to.
 function Client:send(request: Request): Future<Response>
 ```
 
-**Returns:** a future that reads `"pending"` until a [`pump`](#pump), or a `wait` on it, takes libcurl's answer.
-Nothing here blocks.
+| Field            | Type                   | Default  | Description                                                                       |
+| ---------------- | ---------------------- | -------- | --------------------------------------------------------------------------------- |
+| `url`            | `string`               | required | Absolute, with an `http` or `https` scheme.                                       |
+| `method`         | `string`               | `"GET"`  | Any method the server accepts. `POST`, `PUT` and `PATCH` always carry a body.     |
+| `headers`        | `{string: string}`     | none     | Merged over the client's, matched without case.                                   |
+| `body`           | `string \| DataStream` | none     | A string is the bytes themselves; a stream is a body from anywhere.               |
+| `into`           | `string \| DataStream` | none     | Where the body goes. A string is a path. Left out, it comes back as a string.     |
+| `timeoutMs`      | `number`               | client's | Milliseconds this transfer is given.                                              |
+| `stallTimeoutMs` | `number`               | client's | Milliseconds of no progress this transfer tolerates.                              |
+| `maxBytes`       | `integer`              | client's | Bytes this body may reach before it fails. `0` overrides a client's to unbounded. |
 
-Raises when the call itself is malformed: no request, no URL, a body given as bytes with no length. Everything
-only the network can judge settles the future instead, since a URL out of a manifest is data rather than a
-mistake in the program, so a non-`http` scheme comes back as a failed future.
-
-**`Request` fields:**
-
-| Field            | Type               | Default  | Description                                                                                                                                      |
-| ---------------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `url`            | `string`           | required | Absolute, with an `http` or `https` scheme.                                                                                                      |
-| `method`         | `string`           | `"GET"`  | Any method the server accepts. `POST`, `PUT` and `PATCH` always carry a body, even an empty one.                                                 |
-| `headers`        | `{string: string}` | none     | Merged over the client's, matched without case.                                                                                                  |
-| `body`           | `string`           | none     | The request body.                                                                                                                                |
-| `bodyBytes`      | `CValue`           | none     | The request body as an FFI buffer, with `bodyLength` beside it. libcurl copies during `send`, so the buffer may be reused as soon as it returns. |
-| `bodyLength`     | `integer`          | none     | Bytes to send from `bodyBytes`. Required with it.                                                                                                |
-| `into`           | `string`           | none     | Where to write the body, instead of returning it as a string.                                                                                    |
-| `timeoutMs`      | `number`           | client's | Milliseconds this transfer is given.                                                                                                             |
-| `stallTimeoutMs` | `number`           | client's | Milliseconds of no progress this transfer tolerates.                                                                                             |
-| `maxBytes`       | `integer`          | client's | Bytes this body may reach.                                                                                                                       |
-
-`body` and `bodyBytes` are two fields rather than one that takes either, because Teal discriminates a union by
-`type()` and cdata is neither of the two answers that would tell a string from a buffer.
+```teal
+client:send({ url = url, method = "PUT", body = DataStream.ofFile("saves/slot1.bin") })
+client:send({ url = url, into = "downloads/patch.bin" })
+```
 
 **`Response` fields:**
 
@@ -199,74 +134,99 @@ mistake in the program, so a non-`http` scheme comes back as a failed future.
 | --------- | ------------------ | ------------------------------------------------------------------------------------------ |
 | `status`  | `integer`          | The HTTP status code, after any redirects.                                                 |
 | `headers` | `{string: string}` | Response headers, with lower-cased names. A redirect's headers replace the ones before it. |
-| `body`    | `string`           | The body, when `into` was not given.                                                       |
-| `path`    | `string`           | Where the body was written, when `into` was given.                                         |
+| `body`    | `DataStream`       | The body, wherever it went. `body:text()` is the string, `body.length` the bytes.          |
 | `url`     | `string`           | The URL that actually answered, after any redirects.                                       |
-| `bytes`   | `integer`          | Body length in bytes, whether it was kept or written.                                      |
 | `ok()`    | `boolean`          | Whether `status` is a 2xx.                                                                 |
 
-## pump
+Response bodies and raw headers are buffered in C, because libcurl's callbacks cannot be Lua ones without
+costing the pump loop its compilation. Two things follow that a caller can see: `headers` are the final
+response's only, so a redirect's or an interim response's never appear in them, and they have an allocation cap
+of their own that a hostile peer cannot talk past.
 
-Advances every transfer as far as it can go without waiting.
+`send` raises when the call itself is malformed: no URL, or an `into` that is a string in memory rather than
+somewhere bytes can go. Everything only the network can judge settles the future instead, since a URL out of a
+manifest is data rather than a mistake in the program, so a non-`http` scheme comes back as a failed future.
+
+## A response is not a failure
+
+A 404 settles `"ready"` with `status` 404. `"failed"` means the transfer did not complete: the name did not
+resolve, the connection was refused, TLS did not verify, the deadline passed. `"cancelled"` means this process
+stopped it.
+
+This is the same reasoning [`proc`](/modules/proc) applies to an exit code. A status code is the answer to the
+request, and making it a failure would propagate a 404 through `map` as though the transfer broke. `Response:ok()`
+is the separate question about the answer.
+
+## Blocking, when you mean to
+
+There is no `sendSync` and no `blocking = true`, because blocking is something done _to_ a future rather than a
+mode a request is issued in. Startup and tools want it; a frame does not.
 
 ```teal
-function Client:pump(): integer
+local config <const> = client:send({ url = url })
+    :map(function(response: tecs.http.client.Response): string return response.body:text() end)
+    :recover(function(): string return DEFAULTS end)
+    :wait(2000)
 ```
 
-Call once per frame. Answers how many transfers settled, so a caller that wants to know whether anything
-happened does not have to ask each future.
-
-::: danger Pumping is not re-entrant
-`wait` advances this client, and settling a future runs its listeners, so a listener that calls `wait` or `pump`
-would re-enter libcurl's multi handle from inside a pump of it. libcurl does not define that, so it raises
-rather than being left to chance. Sending from a listener is fine.
+::: tip Always name the timeout
+The number at the call site is the whole guard. A reviewer who sees `wait(2000)` asks why a frame is being held
+for two seconds, which is a question a boolean never prompts.
 :::
 
-## pending
+## TLS verification is on
 
-Transfers that have not settled.
+Peer and host verification are set explicitly on every handle, and the protocol set is narrowed to `http` and
+`https` for the request and for anything it redirects to.
 
-```teal
-function Client:pending(): integer
-```
-
-## cancel
-
-Stops one transfer, whatever state it is in.
+There is no `insecure = true`. What exists is `insecureHosts`, an explicit list of host names whose certificates
+are not checked, each of which logs a warning when the client is built. No wildcard, port, scheme or URL is
+accepted in that list.
 
 ```teal
-function Client:cancel(future: Future<any>)
+local client <const> = tecs.http.client({ insecureHosts = { "dev.example.com" } })
 ```
 
-This is also what `Future:cancel` reaches once the last watcher of a transfer has gone, so prefer that; this
-exists for a caller holding the client rather than the future.
+A self-signed development server is a real need and this serves it. Pinning a development CA through libcurl's own
+`CURLOPT_CAINFO` is better still and is what to reach for when the host is not on a developer's own machine.
 
-## close
+## Proxies
 
-Stops every transfer and releases the connection pool.
+Unset, libcurl reads `http_proxy` and `https_proxy` from the environment, which is what a developer behind one
+expects. `proxy` overrides that, and `proxy = ""` is how a game ignores the environment and talks direct.
 
 ```teal
-function Client:close()
+tecs.http.client({ proxy = "http://cache.internal:3128", noProxy = "localhost,127.0.0.1" })
 ```
 
-Each unsettled future settles `"cancelled"`. A closed client raises on `send` and answers 0 to `pump`, rather
-than being silently useless.
+## A request as an entity
 
-## What is not here yet
+A future is the right shape for a loading screen and the wrong one for a request you want to be a thing in the
+world. The plugin gives it an entity instead, so it is listed by the [debug server](/modules/mcp), reacted to by a
+system, and cancelled when whatever asked for it despawns.
 
-**No ECS plugin, and it is the intended next step.** A plugin would own a `Client` as a world resource, pump it
-once per frame from a system in an early phase, and give a request an entity: an `http.Request` component
-carrying the fields of `Request`, spawned by a game and replaced with a `Response` component when the future
-settles, so a request is inspectable through the [debug server](/modules/mcp) like everything else. It is not
-built yet because its shape is the first real caller's to decide. Everything it needs is on this surface
-already.
+```teal
+world:addPlugin(tecs.http.plugin.install)
 
-**No platform adapter.** A console's HTTP stack is not libcurl and belongs beside audio and input behind the
-platform seam. `Request` and `Response` are already backend-neutral; `insecureHosts` is the part that is not,
-because it is expressed as two libcurl options today.
+world:spawn(tecs.http.plugin.Request({ url = "https://example.com/scores" }))
+```
 
-**No proxy configuration.** libcurl reads `http_proxy` and `https_proxy` from the environment already, which is
-what a developer behind one expects.
+Some frames later that entity carries a `Response` instead of a `Request`, so a system with
+`include = {http.plugin.Response}` picks it up. `Request` takes the fields [`send`](#send) takes; `Response`
+carries `status`, `headers`, `body`, `url` and an `error` that is set only when the transfer did not complete. A
+404 is a `status` of 404 and no error, as everywhere else here.
 
-**No response body handed over as a stream.** A stream the caller must close is a connection held until it does,
-which is the one shape a frame-driven client cannot take. `into` is that case answered differently.
+The plugin owns one client per world, reachable as `http.plugin.clientOf(world)` and closed by
+`http.plugin.close(world)`. Build a second one with `tecs.http.client` if a chatty API and a downloader want
+different pools.
+
+## Cancelling
+
+```teal
+local pending = client:send({ url = url })
+pending:cancel()
+```
+
+Cancelling the future is the way; it is reference counted, so a request two things are waiting on stops when the
+second of them gives up. `Client:cancel(future)` is the same thing for a caller holding the client rather than the
+future, and `Client:close()` cancels everything in flight and releases the pool.

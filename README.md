@@ -1306,6 +1306,62 @@ tracked, `isPending` answers false, and the parked cursor resumes on the next
 fixed step; a game that wants the wait to mean something re-issues the work and
 re-tracks it under the same key.
 
+## Asking the network for something
+
+Every HTTP request is a future, which is the easy half. The two questions worth
+recording are who drives the transfer and what a body is.
+
+**A game never pumps.** libcurl's multi interface has to be turned for a
+transfer to move, and the first shape of this made a game call `client:pump()`
+once a frame. That is engine work in a game's hands, and it is the same work
+`assets.update` and `proc.update` already do in the loop for the same reason: a
+decode that finished has finished, a child that exited has exited, a transfer
+that completed has completed, and nothing else in a frame is obliged to ask.
+The reason it was not simply a third line in `Application` is that `assets` and
+`proc` are module singletons and a client is an object a game constructs, maybe
+several of. So the clients come to the loop: building one registers it in
+`tecs.http.clients`, `close` takes it off, and the application turns whatever is
+on the list. That list is a module with no FFI in it, because
+`tecs.http.client` loads libcurl the moment it is required and a game with no
+HTTP in it must not link one. It holds its clients strongly, so a request whose
+future is the only thing a game kept still lands; the price is that `close` is
+what ends a client rather than losing the last reference to it, and the
+alternative -- a weak list -- is a fire-and-forget request that stops moving
+whenever a collection happens to run.
+
+**A body is one value.** The first shape had five: `body`, `bodyBytes` with
+`bodyLength` beside it, `into`, and a response whose `body` was nil exactly when
+its `path` was not. All of them answer one question, so they became one type. A
+`DataStream` is a string, a buffer, a path or a handle, and it reports a length
+when something can know one.
+
+What the type is for is `into`, which existed so a 500 MB download would not be
+a 500 MB Lua string and was exactly that. Now the native response buffer holds
+what has arrived, the pump hands it to the destination and consumes it, and the
+next pump starts from empty, so a body bound for a file is held for a frame.
+That needed the storage seam to be able to open a file rather than only take
+one whole, and it needed the C buffer to be able to give bytes back; the
+running total the ceiling is measured against is what keeps `maxBytes` meaning
+the same thing whether or not something is draining.
+
+**A request body is not streamed, and the asymmetry is the callback rule.** A
+destination is written _between_ calls into libcurl, where Lua may do anything.
+Feeding a body happens _inside_ one, through a read callback libcurl calls, and
+a Lua callback anywhere in a pump makes the loop around it uncompilable, which
+is the whole reason the response callbacks are in C. So a file or a handle given
+as a body is read at `send` and libcurl copies it, and an upload costs twice its
+size while it runs. Streaming one is a request buffer in `native/http.c` beside
+the response one, with a C read callback serving bytes Lua tops up each pump and
+returning `CURL_READFUNC_PAUSE` rather than 0 when it runs dry, since 0 is how a
+read callback says the body ended. That is a pause protocol across two
+languages, and it is not worth writing before something needs to upload
+something large. The bound in the meantime is stated rather than implied.
+
+A body is deliberately not a stream in the other sense either. It is only ever
+handed over settled, over a string that is complete or a file that is closed,
+because a stream the caller must close is a connection held until it does, which
+is the one shape a frame-driven client cannot take.
+
 ## Shelling out
 
 A command line tool, a resource pipeline or an asset build wants to run another
