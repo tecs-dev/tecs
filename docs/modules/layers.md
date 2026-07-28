@@ -172,6 +172,12 @@ Every mode is counted rather than the one a scene is using, because `configure` 
 sort at any point after the depth target exists. The number is derived from `MAX`, `maxZ` and `maxY`, so
 raising an extent moves it.
 
+What a device's depth target holds is the other half of that comparison, and
+[`Renderer:depthSortCollapse`](/modules/renderer#tecs.renderer.Renderer.depthSortCollapse) is what makes the two
+answerable: it
+reports the world units that collapse onto one depth value there, which is the factor `maxY` and `maxZ`
+divide by to resolve the sort again.
+
 ## Reading the table back
 
 These three are what the renderer packs into the uniform the vertex shader reads. A game rarely calls

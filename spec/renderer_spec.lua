@@ -2416,6 +2416,42 @@ describe("ecs.Renderer", function()
             -- is not reporting on every run.
             assert.are.equal(0, Texture.checkDepthSorting(Texture.depthFormat(device.handle)))
         end)
+
+        -- A log line is read by whoever is looking at one. What a game can act
+        -- on is a number it can ask the renderer for and answer with, which is
+        -- the whole reason the shortfall is reported rather than raised: there
+        -- is something to do about it.
+        it("answers what the depth target collapses, and takes the answer", function()
+            local _, renderer = newScene()
+
+            -- The extents this device holds, and the ones no device does. The
+            -- sort's resolution falls with the world it is spread over, so a
+            -- world wide enough out-resolves any format there is, and a test
+            -- written this way says the same thing on a machine whose depth
+            -- target is the floor and on one whose is not.
+            local restoreY, restoreZ = layers.maxY, layers.maxZ
+            local resident = renderer:depthSortCollapse()
+
+            layers.maxY = restoreY * 1e6
+            layers.maxZ = restoreZ * 1e6
+            local collapsed = renderer:depthSortCollapse()
+
+            -- The documented remedy, applied. Dividing both extents by the
+            -- factor raises the sort's own resolution by it, so the target
+            -- holds the sort again.
+            layers.maxY = layers.maxY / collapsed
+            layers.maxZ = layers.maxZ / collapsed
+            local resolved = renderer:depthSortCollapse()
+
+            layers.maxY, layers.maxZ = restoreY, restoreZ
+            local restored = renderer:depthSortCollapse()
+            renderer:destroy()
+
+            assert.are.equal(0, resident, "this device's depth target holds the sort at the default extents")
+            assert.is_true(collapsed > 1, ("a world a million times wider collapses, not %.4g"):format(collapsed))
+            assert.are.equal(0, resolved, "dividing both extents by what it answered resolves the sort again")
+            assert.are.equal(0, restored, "and the extents the rest of the suite runs at are back")
+        end)
     end)
 
     -- A producer draws instances it owns rather than entities. Text is why:

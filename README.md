@@ -2303,6 +2303,17 @@ pass that must not have an attachment is as ordinary as a pass that must, and a
 pipeline bakes its target info, so the graph answers both cases through
 `depthOf` rather than leaving the call site to assume one.
 
+Reporting settles what the engine does and leaves open what a game does, which
+is why the same number is also a question: `Renderer:depthSortCollapse` answers
+the world units that collapse onto one depth value, and zero when none do.
+Dividing `layers.maxY` and `layers.maxZ` by it raises the sort's resolution by
+the same factor, so a game trades world size for a sort that works and can ask
+again to see that the trade took. The number is derived on the call rather than
+stored when the target is made, because it is a comparison against extents a
+game moves and a stored one would go on answering for extents it no longer has.
+A log line on its own leaves the shortfall observable and unanswerable, and
+being answerable is the whole reason it is reported rather than raised.
+
 A colour clear comes from the target rather than from the pass, which is right
 while one pass writes a target and wrong as soon as two do: the second clears
 the first one's result away. A pass may name its own clear, which wins, and

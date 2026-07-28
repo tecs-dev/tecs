@@ -133,15 +133,50 @@ local DEPTH_FORMATS <const>: {DepthFormat} = {
     },
 }
 
---- Says so in the log when a depth format cannot hold the layer sort, and
---- answers by how much it misses.
+--- The entry for a format, or nil for one this table says nothing about.
+local function formatOf(format: integer): DepthFormat
+    for _, entry in ipairs(DEPTH_FORMATS) do
+        if entry.format == format then
+            return entry
+        end
+    end
+    return nil
+end
+
+--- World units that collapse onto one depth value in this depth format.
 ---
 --- The sort divides the depth range into bands and positions within a band,
 --- and the finest distinction it draws is `layers.depthResolution`. A format
 --- whose step is larger than that keeps the bands, so a HUD still covers a
 --- world, and loses the sort inside them: entities closer together than one
 --- step share a depth value and draw in the order they were written. Nothing
---- fails and nothing is dropped, so this is the only place it is visible.
+--- fails and nothing is dropped, so a caller asking is the only way it is
+--- visible from code.
+---
+--- Answers rather than reporting, so this is what a game reaches through
+--- `Renderer:depthSortCollapse` and `checkDepthSorting` is what says it in the
+--- log once. Derived on the call rather than stored, because it is a
+--- comparison against `layers.maxY` and `layers.maxZ` as they read now and a
+--- game that has narrowed those is asking whether that worked.
+--- @param format An `SDL_GPU_TEXTUREFORMAT_*` value. One whose step is not
+---     known here answers zero, since there is nothing to compare against.
+--- @return World units that collapse onto one depth value, and the factor
+---     `layers.maxY` and `layers.maxZ` divide by to resolve the sort again.
+---     Zero when the format resolves everything the sort produces.
+function Texture.depthSortCollapse(format: integer): number
+    local known <const> = formatOf(format)
+    if known == nil then
+        return 0.0
+    end
+    local needed <const> = layers.depthResolution()
+    if known.resolution <= needed then
+        return 0.0
+    end
+    return known.resolution / needed
+end
+
+--- Says so in the log when a depth format cannot hold the layer sort, and
+--- answers by how much it misses.
 ---
 --- Reports rather than raising. The shortfall is not fatal to every scene: a
 --- layer sorted by z alone resolves in the shallowest format SDL guarantees
@@ -150,24 +185,17 @@ local DEPTH_FORMATS <const>: {DepthFormat} = {
 --- take a device those scenes render correctly on and leave it with no
 --- picture at all, which is a worse answer than a wrong sort for a scene that
 --- never sorts by position. So the engine says what is lost and draws.
---- @param format An `SDL_GPU_TEXTUREFORMAT_*` value. One whose step is not
----     known here answers zero, since there is nothing to compare against.
---- @return World units that collapse onto one depth value, or zero when the
----     format resolves everything the sort produces.
+---
+--- Said once, where the format is chosen. A log line is read by whoever is
+--- looking at one, so what a game acts on is `Renderer:depthSortCollapse`
+--- rather than this.
+--- @param format An `SDL_GPU_TEXTUREFORMAT_*` value, under the same rule
+---     `depthSortCollapse` reads it by.
+--- @return What `depthSortCollapse` answers, so a caller that wants the number
+---     and not the line has somewhere else to ask.
 function Texture.checkDepthSorting(format: integer): number
-    local known: DepthFormat = nil
-    for _, entry in ipairs(DEPTH_FORMATS) do
-        if entry.format == format then
-            known = entry
-            break
-        end
-    end
-    if known == nil then
-        return 0.0
-    end
-
-    local needed <const> = layers.depthResolution()
-    if known.resolution <= needed then
+    local collapsed <const> = Texture.depthSortCollapse(format)
+    if collapsed == 0.0 then
         return 0.0
     end
 
@@ -175,13 +203,16 @@ function Texture.checkDepthSorting(format: integer): number
     -- native sink, and a texture is created by tools and tests that have no
     -- use for one; a depth format that falls short is a cold path met once.
     local log <const> = require("tecs.log")
-    local collapsed <const> = known.resolution / needed
+    local known <const> = formatOf(format)
+    local needed <const> = layers.depthResolution()
     log.get("tecs.gpu"):error(
         "the depth target is %s, which steps by %.3g, and the layer sort "
             .. "resolves to %.3g: entities within %.4g world units of each other "
             .. "share a depth value and draw in the order they were written "
             .. "rather than the order they were sorted into. Dividing "
-            .. "layers.maxY and layers.maxZ by %.4g resolves the sort again",
+            .. "layers.maxY and layers.maxZ by %.4g resolves the sort again, "
+            .. "and Renderer:depthSortCollapse answers with that factor for a "
+            .. "game doing it rather than reading it here",
         known.name,
         known.resolution,
         needed,

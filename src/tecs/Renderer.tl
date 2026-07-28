@@ -336,6 +336,33 @@ function Renderer:regionOf(path: string): TextureArray.Region
     return self._extractor:regionOf(components.imageId(path))
 end
 
+--- World units that collapse onto one depth value on this device.
+---
+--- Zero on a device whose depth target holds everything the layer sort
+--- produces, which is what a device offering `D32_FLOAT` or `D24_UNORM`
+--- answers at any extents a scene is likely to use. Above zero, the target is
+--- the floor SDL guarantees and its step is coarser than the sort's own: the
+--- bands still hold, so a HUD still covers a world, and entities closer
+--- together than this share a depth value and draw in the order they were
+--- written rather than the order they were sorted into.
+---
+--- Reachable rather than only logged, because there is something to do about
+--- it. Dividing `layers.maxY` and `layers.maxZ` by what this answers raises
+--- the sort's own resolution by the same factor, after which this answers
+--- zero and the scene sorts again inside a world that much smaller. A game
+--- that would rather keep its extents can drop to the `z` sort on the layers
+--- that matter, which resolves in the floor format with room to spare.
+---
+--- A startup question, asked once. It walks the format table and re-derives
+--- what the sort resolves to, so it is not for a frame loop, and it reads the
+--- extents as they are now rather than as they were when the target was
+--- created, which is what makes asking again after narrowing them meaningful.
+--- @return Zero, or world units, which is also the factor `layers.maxY` and
+---     `layers.maxZ` divide by to resolve the sort again.
+function Renderer:depthSortCollapse(): number
+    return Texture.depthSortCollapse(self.deferred.graph.depthFormat)
+end
+
 --- Whether archetype runs are laid out with room to grow.
 function Renderer:reservesRuns(): boolean
     return self._extractor:reservesRuns()

@@ -94,6 +94,23 @@ device with no picture at all over a sort many scenes never use. The log line na
 world units collapse onto one depth value, and says that dividing `layers.maxY` and `layers.maxZ` by that factor
 resolves the sort again.
 
+A log line is read by whoever is looking at one, so the same number is a question a game can ask.
+[`depthSortCollapse`](#tecs.renderer.Renderer.depthSortCollapse) answers zero on a device whose depth target holds the sort and, on one
+where it does not, answers the world units that collapse onto one depth value. That is the factor to divide both
+extents by, after which it answers zero and the scene sorts again inside a world that much smaller:
+
+```teal
+local collapse <const> = renderer:depthSortCollapse()
+if collapse > 0 then
+    tecs.layers.maxY = tecs.layers.maxY / collapse
+    tecs.layers.maxZ = tecs.layers.maxZ / collapse
+end
+```
+
+A game that would rather keep its extents can put the layers that matter on the `z` sort instead, which resolves
+in the floor format with room to spare. Either way it is a startup question: the answer is derived on the call
+against the extents as they read then, not stored when the target was made.
+
 ## Shadows
 
 Off by default. Pass `shadows` to `Renderer.create` to turn them on, and an empty table is the whole of what a
@@ -422,6 +439,47 @@ Builds a renderer for `device`.
 
 The pipeline the packet is drawn through, so a caller can add targets
 and passes around the three it already has.
+<a id="tecs.renderer.Renderer.depthSortCollapse"></a>
+
+### tecs.renderer.Renderer.depthSortCollapse
+
+<pre><code v-pre>function <a href="#tecs.renderer.Renderer.depthSortCollapse">tecs.renderer.Renderer.depthSortCollapse</a>(self: Renderer): number
+</code></pre>
+
+World units that collapse onto one depth value on this device.
+
+Zero on a device whose depth target holds everything the layer sort
+produces, which is what a device offering `D32_FLOAT` or `D24_UNORM`
+answers at any extents a scene is likely to use. Above zero, the target is
+the floor SDL guarantees and its step is coarser than the sort's own: the
+bands still hold, so a HUD still covers a world, and entities closer
+together than this share a depth value and draw in the order they were
+written rather than the order they were sorted into.
+
+Reachable rather than only logged, because there is something to do about
+it. Dividing `layers.maxY` and `layers.maxZ` by what this answers raises
+the sort's own resolution by the same factor, after which this answers
+zero and the scene sorts again inside a world that much smaller. A game
+that would rather keep its extents can drop to the `z` sort on the layers
+that matter, which resolves in the floor format with room to spare.
+
+A startup question, asked once. It walks the format table and re-derives
+what the sort resolves to, so it is not for a frame loop, and it reads the
+extents as they are now rather than as they were when the target was
+created, which is what makes asking again after narrowing them meaningful.
+
+#### Parameters
+
+| Type                        | Name                    | Description |
+| --------------------------- | ----------------------- | ----------- |
+| <code v-pre>Renderer</code> | <code v-pre>self</code> |             |
+
+#### Returns
+
+| Type                      | Description                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>number</code> | Zero, or world units, which is also the factor `layers.maxY` and `layers.maxZ` divide by to resolve the sort again. |
+
 <a id="tecs.renderer.Renderer.destroy"></a>
 
 ### tecs.renderer.Renderer.destroy
