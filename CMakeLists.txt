@@ -212,10 +212,11 @@ add_library(
     native/logsink.c
     native/taskpool.c
     native/dialogs.c
+    native/http.c
     native/luamods.c
 )
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit)
+target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit tecs::curl)
 # Box2D's headers, for the task callback types the pool is declared with. No
 # Box2D symbol is referenced: the solver calls in, through pointers it was
 # given, so this links nothing.
@@ -428,6 +429,7 @@ if(TECS_BUILD_LUA)
     tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(dialogs dialogs.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(http http.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -471,6 +473,7 @@ if(TECS_BUILD_LUA)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
     tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
     tecs_registry(dialogs TecsDialogsApi tecs dialogs.h)
+    tecs_registry(http TecsHttpApi tecs http.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and
@@ -537,6 +540,7 @@ if(TECS_BUILD_LUA)
             "${GEN}/workercdef.lua"
             "${GEN}/logsinkcdef.lua"
             "${GEN}/taskpoolcdef.lua"
+            "${GEN}/httpcdef.lua"
             "${GEN}/sdl3cdef.lua"
             "${GEN}/sdl3imagecdef.lua"
             "${GEN}/sdl3netcdef.lua"

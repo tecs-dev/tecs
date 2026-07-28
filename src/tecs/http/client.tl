@@ -188,8 +188,11 @@ local log <const> = require("tecs.log")
 local filesystem <const> = require("tecs.platform.filesystem")
 local Future <const> = require("tecs.Future")
 
+loader.declare("http")
+
 local C <const> = curl.C
 local K <const> = curl.K
+local H <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
 local LOGGER <const> = log.get("tecs.http")
 
 --- Milliseconds one blocking `wait` slice spends inside `curl_multi_poll`.
@@ -215,6 +218,12 @@ local DEFAULT_MAX_CONNECTIONS <const> = 16
 --- HTTP/1.1 clients settled on and the number that matters on a build with no
 --- HTTP/2 to multiplex over.
 local DEFAULT_MAX_CONNECTIONS_PER_HOST <const> = 6
+
+--- Response-header bytes retained across redirects and interim responses.
+---
+--- Headers are tiny beside bodies, but still come from an untrusted peer and
+--- need a finite allocation bound of their own.
+local MAX_HEADER_BYTES <const> = 256 * 1024
 
 --- What a request and a redirect are both allowed to speak.
 local PROTOCOLS <const> = "http,https"
@@ -316,15 +325,15 @@ local record client
         owner: Client
         easy: loader.CPtr
         slist: loader.CPtr
+        buffer: loader.CPtr
         future: Future<Response>
         response: Response
-        chunks: {string}
-        chunkCount: integer
+        body: string
         bytes: integer
         maxBytes: integer
         into: string
         url: string
-        overflowed: boolean
+        bufferError: integer
     end
 
     --- A pool of transfers over one libcurl multi handle.
@@ -410,16 +419,14 @@ end
 
 --- Every transfer in flight in this process, by the id its handles carry.
 ---
---- Global rather than per client, because the two write callbacks are global:
---- an `ffi.cast` to a callback type takes a slot from a small fixed pool, and
---- two slots for the process is the right number to spend where two per client
---- would not be.
+--- Global rather than per client because `CURLINFO_PRIVATE` carries only the
+--- integer id. It identifies a completion without using a cdata handle as a
+--- table key, where two pointer objects for one address would not compare as
+--- the same Lua key.
 local transfers <const>: {integer: Transfer} = {}
 local nextId = 1
 
 local started = false
-local writeCallback: loader.CValue = nil
-local headerCallback: loader.CValue = nil
 
 --- Out-parameter for `CURLINFO_PRIVATE`, reused because it is read once per
 --- completed transfer and never held.
@@ -435,54 +442,7 @@ local function idOf(pointer: loader.CValue): integer
     return math.floor(tonumber(ffi.cast("intptr_t", pointer)) or 0) as integer
 end
 
---- Takes one chunk of body.
----
---- Chunks are kept in a list and joined once, rather than concatenated as they
---- arrive, because joining as you go is quadratic in the number of chunks and
---- a body arrives in as many as the network felt like.
-local function onWrite(buffer: loader.CValue, size: any, nitems: any, context: loader.CValue): number
-    local length <const> = math.floor((tonumber(size) or 0) * (tonumber(nitems) or 0)) as integer
-    local transfer = transferOf(idOf(context))
-    if transfer == nil then
-        return length
-    end
-    if transfer.maxBytes > 0 and transfer.bytes + length > transfer.maxBytes then
-        -- Short of what curl handed over, which is how a write callback says
-        -- stop: the transfer ends with CURLE_WRITE_ERROR.
-        transfer.overflowed = true
-        return 0
-    end
-    transfer.bytes = transfer.bytes + length
-    local count = transfer.chunkCount + 1
-    transfer.chunkCount = count
-    transfer.chunks[count] = loader.toBytes(buffer, length)
-    return length
-end
-
---- Takes one header line, status lines included.
-local function onHeader(buffer: loader.CValue, size: any, nitems: any, context: loader.CValue): number
-    local length <const> = math.floor((tonumber(size) or 0) * (tonumber(nitems) or 0)) as integer
-    local transfer = transferOf(idOf(context))
-    if transfer == nil then
-        return length
-    end
-
-    local line = loader.toBytes(buffer, length)
-    if line:sub(1, 5) == "HTTP/" then
-        -- A second status line means a redirect was followed, and the headers
-        -- before it described a response the caller never sees.
-        transfer.response.headers = {}
-        return length
-    end
-
-    local name, value = line:match("^([^:]+):%s*(.-)%s*$")
-    if name ~= nil then
-        transfer.response.headers[name:lower()] = value
-    end
-    return length
-end
-
---- Brings libcurl up once, and takes the two callback slots this module uses.
+--- Brings libcurl up once.
 local function ensure()
     if started then
         return
@@ -491,12 +451,6 @@ local function ensure()
     if (tonumber(code) or 0) ~= 0 then
         error(("tecs: curl_global_init failed: %s"):format(curl.errorText(code)), 3)
     end
-    -- Never freed. The slots last as long as the process, which is what a
-    -- callback libcurl may reach for at any point in a transfer needs; freeing
-    -- them would leave the library calling a slot that had been handed out
-    -- again.
-    writeCallback = ffi.cast("curl_write_callback", onWrite) as loader.CValue
-    headerCallback = ffi.cast("curl_write_callback", onHeader) as loader.CValue
     privateOut = loader.newArray("char *[1]")
     started = true
 end
@@ -629,6 +583,31 @@ local function readResult(transfer: Transfer)
     else
         transfer.response.url = transfer.url
     end
+
+    local size = loader.newArray("uint64_t[1]")
+    local body = H.tecsHttpResponseBody(transfer.buffer, size)
+    transfer.bytes = math.floor(tonumber(size[0]) or 0) as integer
+    transfer.body = loader.toBytes(body, transfer.bytes)
+
+    local raw = H.tecsHttpResponseHeaders(transfer.buffer, size)
+    local headerBytes <const> = math.floor(tonumber(size[0]) or 0) as integer
+    local rawHeaders <const> = loader.toBytes(raw, headerBytes)
+    local headers: {string: string} = {}
+    -- The native callback retains exactly what curl provides. Parse it only
+    -- after completion, resetting at every status line so redirects and
+    -- interim responses cannot leak headers into the final response.
+    for line in (rawHeaders .. "\n"):gmatch("(.-)\r?\n") do
+        if line:sub(1, 5) == "HTTP/" then
+            headers = {}
+        else
+            local name, value = line:match("^([^:]+):%s*(.-)%s*$")
+            if name ~= nil then
+                headers[name:lower()] = value
+            end
+        end
+    end
+    transfer.response.headers = headers
+    transfer.bufferError = math.floor(tonumber(H.tecsHttpResponseBufferError(transfer.buffer)) or 0) as integer
 end
 
 --- Takes a transfer off its client and frees everything libcurl gave it.
@@ -655,19 +634,26 @@ local function release(transfer: Transfer)
         C.curl_slist_free_all(transfer.slist)
         transfer.slist = nil
     end
-end
-
---- The body, joined once from however many chunks arrived.
-local function joined(transfer: Transfer): string
-    return table.concat(transfer.chunks, "", 1, transfer.chunkCount)
+    if transfer.buffer ~= nil then
+        H.tecsHttpResponseBufferDestroy(transfer.buffer)
+        transfer.buffer = nil
+    end
 end
 
 --- Settles a released transfer's future.
 local function settle(transfer: Transfer, code: integer)
     local future = transfer.future
     if code ~= 0 then
-        if transfer.overflowed then
+        local bodyLimit <const> = tonumber(H.TECS_HTTP_BUFFER_BODY_LIMIT) or 1
+        local headerLimit <const> = tonumber(H.TECS_HTTP_BUFFER_HEADER_LIMIT) or 2
+        local outOfMemory <const> = tonumber(H.TECS_HTTP_BUFFER_OOM) or 3
+        local fileTooLarge <const> = tonumber(C.CURLE_FILESIZE_EXCEEDED) or -1
+        if transfer.bufferError == bodyLimit or code == fileTooLarge then
             future:fail(("tecs: %s exceeded %d bytes"):format(transfer.url, transfer.maxBytes))
+        elseif transfer.bufferError == headerLimit then
+            future:fail(("tecs: %s response headers exceeded %d bytes"):format(transfer.url, MAX_HEADER_BYTES))
+        elseif transfer.bufferError == outOfMemory then
+            future:fail(("tecs: %s: response buffering ran out of memory"):format(transfer.url))
         else
             local reason <const> = curl.errorText(ffi.cast("CURLcode", code) as loader.CValue)
             future:fail(("tecs: %s: %s"):format(transfer.url, reason))
@@ -678,14 +664,14 @@ local function settle(transfer: Transfer, code: integer)
     local response = transfer.response
     response.bytes = transfer.bytes
     if transfer.into ~= nil then
-        local ok, err = filesystem.write(transfer.into, joined(transfer))
+        local ok, err = filesystem.write(transfer.into, transfer.body)
         if not ok then
             future:fail(("tecs: cannot write %s: %s"):format(transfer.into, err or "unknown"))
             return
         end
         response.path = transfer.into
     else
-        response.body = joined(transfer)
+        response.body = transfer.body
     end
     future:complete(response)
 end
@@ -744,18 +730,6 @@ local function turn(self: Client, waitMs: number): integer
     end
     return collect(self)
 end
-
--- The second half of the same rule, for a different reason.
---
--- `curl_multi_perform` is what calls the two write callbacks, and LuaJIT
--- cannot enter a callback from a compiled trace: it panics with "bad callback"
--- and the process is gone, with no error to catch. A game pumps this from a
--- loop, and a loop is what gets compiled, so this too is a matter of how long
--- the program has been running rather than of what it asked for.
---
--- Nothing is lost by refusing it. This is one C call and a drain, and the work
--- it waits for is measured in milliseconds.
-refuseCompilation(turn, collect)
 
 --- `turn`, with the re-entrancy refusal around it.
 local function drive(self: Client, waitMs: number, level: integer): integer
@@ -854,6 +828,12 @@ function Client:send(request: Request): Future<Response>
     end
 
     local options <const> = self._options
+    local maxBytes <const> = request.maxBytes or options.maxBytes
+    local buffer = H.tecsHttpResponseBufferCreate(maxBytes, MAX_HEADER_BYTES) as loader.CPtr
+    if buffer == nil then
+        C.curl_easy_cleanup(easy)
+        return Future.failed("tecs: cannot allocate an http response buffer") as Future<Response>
+    end
     local id <const> = nextId
     nextId = nextId + 1
 
@@ -863,15 +843,15 @@ function Client:send(request: Request): Future<Response>
         owner = self,
         easy = easy,
         slist = nil,
+        buffer = buffer,
         future = future,
         response = setmetatable({status = 0, headers = {}, bytes = 0} as Response, ResponseMT),
-        chunks = {},
-        chunkCount = 0,
+        body = nil,
         bytes = 0,
-        maxBytes = request.maxBytes or options.maxBytes,
+        maxBytes = maxBytes,
         into = request.into,
         url = url,
-        overflowed = false,
+        bufferError = 0,
     }
 
     setPointer(easy, C.CURLOPT_URL, url)
@@ -880,10 +860,10 @@ function Client:send(request: Request): Future<Response>
     -- keying anything by the handle itself would silently never match.
     local tag <const> = ffi.cast("void *", id)
     setPointer(easy, C.CURLOPT_PRIVATE, tag)
-    setPointer(easy, C.CURLOPT_WRITEFUNCTION, writeCallback)
-    setPointer(easy, C.CURLOPT_WRITEDATA, tag)
-    setPointer(easy, C.CURLOPT_HEADERFUNCTION, headerCallback)
-    setPointer(easy, C.CURLOPT_HEADERDATA, tag)
+    setPointer(easy, C.CURLOPT_WRITEFUNCTION, H.tecsHttpWriteCallback)
+    setPointer(easy, C.CURLOPT_WRITEDATA, buffer)
+    setPointer(easy, C.CURLOPT_HEADERFUNCTION, H.tecsHttpHeaderCallback)
+    setPointer(easy, C.CURLOPT_HEADERDATA, buffer)
 
     -- Signals are how the synchronous resolver implements its timeout, and
     -- they are not usable from a library inside a game. curl documents this as
@@ -907,7 +887,7 @@ function Client:send(request: Request): Future<Response>
     end
     if transfer.maxBytes > 0 then
         -- The declared length, refused before a byte of it arrives. The write
-        -- callback is the other half, for a server that declares nothing.
+        -- buffer is the other half, for a server that declares nothing.
         setOffset(easy, C.CURLOPT_MAXFILESIZE_LARGE, transfer.maxBytes)
     end
     if options.userAgent ~= nil then

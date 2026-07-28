@@ -40,10 +40,19 @@ while true do
     if task == nil then break end
 
     local sdl = require("tecs.ffi.sdl3")
+    loader.declare("http")
+    local http, httpPath = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "http")
+    local buffer = http.tecsHttpResponseBufferCreate(16, 16)
+    local bytes = loader.fromString("ok")
+    local wrote = tonumber(http.tecsHttpWriteCallback(bytes, 1, 2, buffer))
+    http.tecsHttpResponseBufferDestroy(buffer)
     self:send({
         installed = _G.__tecsRegistry ~= nil,
         static = loader.isStatic("sdl3"),
+        staticHttp = loader.isStatic("http"),
         path = sdl.path,
+        httpPath = httpPath,
+        httpCallback = wrote,
         -- A call through the table, to prove the pointers are live rather
         -- than merely present.
         ticks = tonumber(sdl.C.SDL_GetTicks()) >= 0,
@@ -63,7 +72,10 @@ end
         assert.is_not_nil(result, "the worker never answered")
         assert.is_true(result.installed, "a worker state must get a registry")
         assert.is_true(result.static, "and resolve through it")
+        assert.is_true(result.staticHttp, "the native HTTP callback bridge must be registered too")
         assert.are.equal("(registry)", result.path)
+        assert.are.equal("(registry)", result.httpPath)
+        assert.are.equal(2, result.httpCallback, "the registered callback pointer must be live")
         assert.is_true(result.ticks, "a call through the table must work")
         assert.are.equal(0x100, result.quitKind, "constants must resolve through the same handle as functions")
     end)

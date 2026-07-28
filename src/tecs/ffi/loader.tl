@@ -39,10 +39,12 @@
 --- has to cross that threshold on purpose; `spec/http_spec.lua` sends a
 --- hundred and twenty requests for exactly that reason.
 ---
---- The remedy is `jit.off(fn)` on the calling function, which makes a trace
---- abort where it would have recorded the call. `tecs.http.client` keeps every
---- variadic call behind a named helper so there is a finite set of functions
---- to mark; a binding with the same shape should do the same.
+--- The remedy for a variadic call is `jit.off(fn)` on the calling function,
+--- which makes a trace abort where it would have recorded the call.
+--- `tecs.http.client` keeps every variadic call behind a named helper so there
+--- is a finite set of functions to mark. Its libcurl callbacks instead live
+--- in C, which lets the pump itself compile; prefer that for any callback on a
+--- hot path.
 
 local ffi <const> = require("ffi")
 

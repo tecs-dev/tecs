@@ -13,6 +13,11 @@ before it returns, which in a game is a frame that does not end until the networ
 does as much as can be done without waiting and reports what is still in flight, which is the same shape
 [`assets`](/modules/assets) and [`proc`](/modules/proc) already use.
 
+libcurl writes response bodies and raw headers into a native response buffer. Headers have their own allocation
+cap, and a nonzero `maxBytes` caps the body. Its callbacks stay in C because LuaJIT cannot re-enter a Lua FFI
+callback from a compiled pump loop. Lua reads the completed buffer, then parses only the final response's
+headers, so interim and redirect headers never appear in `Response.headers`.
+
 ## Requiring it
 
 ```teal

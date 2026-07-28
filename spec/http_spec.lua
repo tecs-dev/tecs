@@ -17,6 +17,7 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
+local net = require("tecs.ffi.sdl3net")
 local transport = require("tecs.mcp.transport")
 local http = require("tecs.http")
 
@@ -87,6 +88,13 @@ describe("http.client", function()
         return ("http://127.0.0.1:%d%s"):format(silentPort, path)
     end
 
+    --- Writes an exact HTTP response for protocol cases `respond` hides.
+    local function rawRespond(payload)
+        net.C.NET_WriteToStreamSocket(server._client, payload, #payload)
+        net.C.NET_WaitUntilStreamSocketDrained(server._client, 1000)
+        server:close()
+    end
+
     --- Pumps the client and the listener together until `future` settles.
     ---
     --- `respond` is called with each request the listener parses; nil leaves
@@ -152,6 +160,25 @@ describe("http.client", function()
         assert.are.equal("text/plain", response.headers["content-type"])
         assert.are.equal(url("/body"), response.url)
         assert.is_nil(response.path)
+    end)
+
+    it("keeps only the final response headers", function()
+        local pending = client:send({ url = url("/interim") })
+        drive(pending, function()
+            rawRespond(table.concat({
+                "HTTP/1.1 100 Continue\r\n",
+                "X-Interim: hidden\r\n\r\n",
+                "HTTP/1.1 200 OK\r\n",
+                "X-Final: visible\r\n",
+                "Content-Length: 2\r\n",
+                "Connection: close\r\n\r\n",
+                "ok",
+            }))
+        end)
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal("visible", pending.value.headers["x-final"])
+        assert.is_nil(pending.value.headers["x-interim"])
     end)
 
     it("sends a method and a body, and settles a non-2xx as ready", function()
@@ -336,7 +363,7 @@ describe("http.client", function()
     it("fails a body larger than maxBytes", function()
         -- Two halves, and this exercises the cheaper one: the listener
         -- declares a `Content-Length`, so `CURLOPT_MAXFILESIZE_LARGE` refuses
-        -- the transfer before a byte of the body arrives. The write callback
+        -- the transfer before a byte of the body arrives. The native buffer
         -- is the other half, for a server that declares nothing, and it fails
         -- the same way with the ceiling named in the message.
         local pending = client:send({ url = url("/too-big"), maxBytes = 8 })
@@ -348,6 +375,18 @@ describe("http.client", function()
         assert.is_string(pending.error)
         assert.is_truthy(pending.error:find(url("/too-big"), 1, true))
         assert.is_nil(pending.value)
+    end)
+
+    it("lets a request override maxBytes with unbounded zero", function()
+        client:close()
+        client = http.client({ maxBytes = 8 })
+        local pending = client:send({ url = url("/unbounded"), maxBytes = 0 })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "text/plain")
+        end)
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal(BODY, pending.value.body)
     end)
 
     it("takes a per-host list to skip TLS on, and nothing broader", function()
@@ -366,13 +405,11 @@ describe("http.client", function()
 
     it("still settles transfers after the pump loop has been compiled", function()
         -- The one property no single-request test can have. LuaJIT traces a
-        -- loop after fifty-six turns, and two things go wrong in compiled code
-        -- here: a C callback cannot be entered from a trace at all, and a
-        -- variadic call passes its arguments by the wrong ABI on this
-        -- platform, so `curl_easy_setopt` quietly stores something other than
-        -- what it was given. Both are refused in the module, and this is what
-        -- says so: a hundred and twenty transfers, which is twice the
-        -- threshold, every one of them settling with its body intact.
+        -- loop after fifty-six turns. The response callbacks are C so the pump
+        -- may compile, while the variadic option helpers remain interpreted
+        -- because compiled calls pass their arguments by the wrong ABI on this
+        -- platform. This crosses the threshold twice and checks that every
+        -- transfer still settles with its body intact.
         --
         -- Before the refusal this failed from about the sixtieth transfer on,
         -- with the transfer completing inside libcurl and its future never
