@@ -761,8 +761,7 @@ refuseCompilation(turn, collect)
 local function drive(self: Client, waitMs: number, level: integer): integer
     if self._pumping then
         error(
-            "tecs: this http client is already pumping; a listener cannot wait on or pump the client calling it",
-            level
+            "tecs: this http client is already pumping; a listener cannot wait on or pump the client calling it", level
         )
     end
     if self._multi == nil then
@@ -1097,9 +1096,7 @@ end
 setmetatable(
     client,
     {
-        __call = function(_self: client, options?: Options): Client
-            return newClient(options)
-        end,
+        __call = function(_self: client, options?: Options): Client return newClient(options) end,
     } as metatable<client>
 )
 

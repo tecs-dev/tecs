@@ -141,19 +141,19 @@ local client <const> = tecs.http.client(options?: Options)
 
 **`Options` fields:**
 
-| Field                   | Type               | Default | Description                                                                                                 |
-| ----------------------- | ------------------ | ------- | ----------------------------------------------------------------------------------------------------------- |
+| Field                   | Type               | Default | Description                                                                                                     |
+| ----------------------- | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------- |
 | `userAgent`             | `string`           | none    | Sent as `User-Agent`. Name the game and its version; a server operator reading a log has nothing else to go on. |
-| `headers`               | `{string: string}` | none    | Sent on every request, and overridden per request by the same name.                                          |
-| `timeoutMs`             | `number`           | `30000` | Milliseconds a whole transfer is given.                                                                      |
-| `connectTimeoutMs`      | `number`           | `10000` | Milliseconds the connection is given, inside that.                                                           |
-| `stallTimeoutMs`        | `number`           | `0`     | Milliseconds a transfer may make no progress before failing. Measured by libcurl in whole seconds.           |
-| `maxRedirects`          | `integer`          | `5`     | Redirects followed. `0` follows none.                                                                        |
-| `maxConnections`        | `integer`          | `16`    | Sockets kept open across every host.                                                                         |
-| `maxConnectionsPerHost` | `integer`          | `6`     | Sockets kept open to any one host.                                                                           |
-| `maxBytes`              | `integer`          | `0`     | Bytes a response body may reach before the transfer fails. `0` is unbounded.                                 |
-| `compressed`            | `boolean`          | `true`  | Offer the content encodings libcurl was built with, which is zlib here.                                      |
-| `insecureHosts`         | `{string}`         | none    | Host names whose certificates are not verified. Each logs a warning. Anything that is not a plain host raises. |
+| `headers`               | `{string: string}` | none    | Sent on every request, and overridden per request by the same name.                                             |
+| `timeoutMs`             | `number`           | `30000` | Milliseconds a whole transfer is given.                                                                         |
+| `connectTimeoutMs`      | `number`           | `10000` | Milliseconds the connection is given, inside that.                                                              |
+| `stallTimeoutMs`        | `number`           | `0`     | Milliseconds a transfer may make no progress before failing. Measured by libcurl in whole seconds.              |
+| `maxRedirects`          | `integer`          | `5`     | Redirects followed. `0` follows none.                                                                           |
+| `maxConnections`        | `integer`          | `16`    | Sockets kept open across every host.                                                                            |
+| `maxConnectionsPerHost` | `integer`          | `6`     | Sockets kept open to any one host.                                                                              |
+| `maxBytes`              | `integer`          | `0`     | Bytes a response body may reach before the transfer fails. `0` is unbounded.                                    |
+| `compressed`            | `boolean`          | `true`  | Offer the content encodings libcurl was built with, which is zlib here.                                         |
+| `insecureHosts`         | `{string}`         | none    | Host names whose certificates are not verified. Each logs a warning. Anything that is not a plain host raises.  |
 
 ## send
 
@@ -172,33 +172,33 @@ mistake in the program, so a non-`http` scheme comes back as a failed future.
 
 **`Request` fields:**
 
-| Field            | Type               | Default        | Description                                                                                              |
-| ---------------- | ------------------ | -------------- | -------------------------------------------------------------------------------------------------------- |
-| `url`            | `string`           | required       | Absolute, with an `http` or `https` scheme.                                                              |
-| `method`         | `string`           | `"GET"`        | Any method the server accepts. `POST`, `PUT` and `PATCH` always carry a body, even an empty one.         |
-| `headers`        | `{string: string}` | none           | Merged over the client's, matched without case.                                                          |
-| `body`           | `string`           | none           | The request body.                                                                                        |
-| `bodyBytes`      | `CValue`           | none           | The request body as an FFI buffer, with `bodyLength` beside it. libcurl copies during `send`, so the buffer may be reused as soon as it returns. |
-| `bodyLength`     | `integer`          | none           | Bytes to send from `bodyBytes`. Required with it.                                                        |
-| `into`           | `string`           | none           | Where to write the body, instead of returning it as a string.                                            |
-| `timeoutMs`      | `number`           | client's       | Milliseconds this transfer is given.                                                                     |
-| `stallTimeoutMs` | `number`           | client's       | Milliseconds of no progress this transfer tolerates.                                                     |
-| `maxBytes`       | `integer`          | client's       | Bytes this body may reach.                                                                               |
+| Field            | Type               | Default  | Description                                                                                                                                      |
+| ---------------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`            | `string`           | required | Absolute, with an `http` or `https` scheme.                                                                                                      |
+| `method`         | `string`           | `"GET"`  | Any method the server accepts. `POST`, `PUT` and `PATCH` always carry a body, even an empty one.                                                 |
+| `headers`        | `{string: string}` | none     | Merged over the client's, matched without case.                                                                                                  |
+| `body`           | `string`           | none     | The request body.                                                                                                                                |
+| `bodyBytes`      | `CValue`           | none     | The request body as an FFI buffer, with `bodyLength` beside it. libcurl copies during `send`, so the buffer may be reused as soon as it returns. |
+| `bodyLength`     | `integer`          | none     | Bytes to send from `bodyBytes`. Required with it.                                                                                                |
+| `into`           | `string`           | none     | Where to write the body, instead of returning it as a string.                                                                                    |
+| `timeoutMs`      | `number`           | client's | Milliseconds this transfer is given.                                                                                                             |
+| `stallTimeoutMs` | `number`           | client's | Milliseconds of no progress this transfer tolerates.                                                                                             |
+| `maxBytes`       | `integer`          | client's | Bytes this body may reach.                                                                                                                       |
 
 `body` and `bodyBytes` are two fields rather than one that takes either, because Teal discriminates a union by
 `type()` and cdata is neither of the two answers that would tell a string from a buffer.
 
 **`Response` fields:**
 
-| Field     | Type               | Description                                                                                     |
-| --------- | ------------------ | ----------------------------------------------------------------------------------------------- |
-| `status`  | `integer`          | The HTTP status code, after any redirects.                                                      |
-| `headers` | `{string: string}` | Response headers, with lower-cased names. A redirect's headers replace the ones before it.      |
-| `body`    | `string`           | The body, when `into` was not given.                                                            |
-| `path`    | `string`           | Where the body was written, when `into` was given.                                              |
-| `url`     | `string`           | The URL that actually answered, after any redirects.                                            |
-| `bytes`   | `integer`          | Body length in bytes, whether it was kept or written.                                           |
-| `ok()`    | `boolean`          | Whether `status` is a 2xx.                                                                      |
+| Field     | Type               | Description                                                                                |
+| --------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| `status`  | `integer`          | The HTTP status code, after any redirects.                                                 |
+| `headers` | `{string: string}` | Response headers, with lower-cased names. A redirect's headers replace the ones before it. |
+| `body`    | `string`           | The body, when `into` was not given.                                                       |
+| `path`    | `string`           | Where the body was written, when `into` was given.                                         |
+| `url`     | `string`           | The URL that actually answered, after any redirects.                                       |
+| `bytes`   | `integer`          | Body length in bytes, whether it was kept or written.                                      |
+| `ok()`    | `boolean`          | Whether `status` is a 2xx.                                                                 |
 
 ## pump
 

@@ -353,6 +353,10 @@ Look up a registered component by numeric ID.
 ## tecs.hash
 <pre><code v-pre><a href="#tecs.hash">tecs.hash</a>: hash
 </code></pre>
+<a id="tecs.http"></a>
+## tecs.http
+<pre><code v-pre><a href="#tecs.http">tecs.http</a>: http
+</code></pre>
 <a id="tecs.json"></a>
 ## tecs.json
 <pre><code v-pre><a href="#tecs.json">tecs.json</a>: json

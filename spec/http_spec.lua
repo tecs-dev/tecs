@@ -63,7 +63,7 @@ describe("http.client", function()
     -- fixture that is one request behind. Building the listener per test is
     -- what makes the suite deterministic rather than usually right.
     before_each(function()
-        client = http.client({userAgent = "tecs-spec/1.0"})
+        client = http.client({ userAgent = "tecs-spec/1.0" })
         server, port = listenSomewhere()
         -- A second listener that is never polled. A connection to it completes,
         -- because the kernel accepts into the backlog, and then nothing ever
@@ -122,7 +122,7 @@ describe("http.client", function()
         -- The proof of non-blocking, and the only state a blocking
         -- implementation cannot produce: `send` returned, a pump happened, and
         -- the listener has not so much as accepted the connection yet.
-        local pending = client:send({url = url("/still-running")})
+        local pending = client:send({ url = url("/still-running") })
         assert.are.equal("pending", pending.status)
 
         client:pump()
@@ -138,7 +138,7 @@ describe("http.client", function()
     end)
 
     it("settles a completed body, its status and its headers", function()
-        local pending = client:send({url = url("/body")})
+        local pending = client:send({ url = url("/body") })
         drive(pending, function()
             server:respond(200, "OK", BODY, "text/plain")
         end)
@@ -158,7 +158,7 @@ describe("http.client", function()
         local pending = client:send({
             url = url("/submit"),
             method = "POST",
-            headers = {["content-type"] = "application/json"},
+            headers = { ["content-type"] = "application/json" },
             body = '{"score":11}',
         })
         local seen = drive(pending, function()
@@ -178,11 +178,9 @@ describe("http.client", function()
     end)
 
     it("composes, because a request is a future like any other", function()
-        local length = client
-            :send({url = url("/compose")})
-            :map(function(response)
-                return #response.body
-            end)
+        local length = client:send({ url = url("/compose") }):map(function(response)
+            return #response.body
+        end)
 
         drive(length, function()
             server:respond(200, "OK", BODY, "text/plain")
@@ -193,7 +191,7 @@ describe("http.client", function()
 
     it("writes the body to a file when `into` names one", function()
         local path = os.tmpname()
-        local pending = client:send({url = url("/download"), into = path})
+        local pending = client:send({ url = url("/download"), into = path })
         drive(pending, function()
             server:respond(200, "OK", BODY, "application/octet-stream")
         end)
@@ -215,7 +213,7 @@ describe("http.client", function()
         -- Port 1 on loopback with nothing on it, so this fails without ever
         -- leaving the machine. libcurl reports a transport error on the multi
         -- handle's message queue, which is the only place it reports one.
-        local pending = client:send({url = "http://127.0.0.1:1/"})
+        local pending = client:send({ url = "http://127.0.0.1:1/" })
         drive(pending, nil)
 
         assert.are.equal("failed", pending.status)
@@ -227,7 +225,7 @@ describe("http.client", function()
     it("refuses a url that is not http or https", function()
         -- Data rather than a mistake in the program: a URL out of a manifest
         -- settles the future instead of raising at the call site.
-        local pending = client:send({url = "file:///etc/passwd"})
+        local pending = client:send({ url = "file:///etc/passwd" })
         assert.are.equal("failed", pending.status)
         assert.is_truthy(pending.error:find("not an http", 1, true))
     end)
@@ -235,7 +233,7 @@ describe("http.client", function()
     it("returns from wait inside its budget when nothing answers", function()
         -- Nothing ever answers this listener, so the wait ends because its
         -- budget ran out rather than because the transfer finished.
-        local pending = client:send({url = silentUrl("/never-answered")})
+        local pending = client:send({ url = silentUrl("/never-answered") })
 
         local before = sdl.C.SDL_GetTicks()
         pending:wait(120)
@@ -251,7 +249,7 @@ describe("http.client", function()
     it("returns from wait as soon as the transfer settles", function()
         -- The other direction: the work finishes well inside the budget, so
         -- `wait` returns because of the settlement rather than the clock.
-        local pending = client:send({url = "http://127.0.0.1:1/"})
+        local pending = client:send({ url = "http://127.0.0.1:1/" })
 
         local before = sdl.C.SDL_GetTicks()
         pending:wait(5000)
@@ -262,7 +260,7 @@ describe("http.client", function()
     end)
 
     it("stops a transfer when it is cancelled", function()
-        local pending = client:send({url = url("/cancelled")})
+        local pending = client:send({ url = url("/cancelled") })
         client:pump()
         assert.are.equal("pending", pending.status)
         assert.are.equal(1, client:pending())
@@ -289,8 +287,8 @@ describe("http.client", function()
     end)
 
     it("settles every transfer it still holds when it is closed", function()
-        local one = client:send({url = url("/closing-one")})
-        local two = client:send({url = url("/closing-two")})
+        local one = client:send({ url = url("/closing-one") })
+        local two = client:send({ url = url("/closing-two") })
         client:pump()
 
         client:close()
@@ -300,7 +298,7 @@ describe("http.client", function()
         -- A closed client is useless rather than silently useless.
         assert.are.equal(0, client:pump())
         assert.has_error(function()
-            client:send({url = url("/after-close")})
+            client:send({ url = url("/after-close") })
         end)
     end)
 
@@ -311,17 +309,17 @@ describe("http.client", function()
         -- chance. The pcall is the listener's own: `Future` logs a listener
         -- that raises rather than propagating it.
         local pumped, waited
-        local pending = client:send({url = url("/reentrant")})
+        local pending = client:send({ url = url("/reentrant") })
         -- A second transfer, because `wait` on a future that has just settled
         -- returns without advancing anything and so would prove nothing.
-        local other = client:send({url = silentUrl("/never-answered")})
+        local other = client:send({ url = silentUrl("/never-answered") })
         pending:onSettle(function()
-            pumped = {pcall(function()
+            pumped = { pcall(function()
                 client:pump()
-            end)}
-            waited = {pcall(function()
+            end) }
+            waited = { pcall(function()
                 other:wait(10)
-            end)}
+            end) }
         end)
 
         drive(pending, function()
@@ -341,7 +339,7 @@ describe("http.client", function()
         -- the transfer before a byte of the body arrives. The write callback
         -- is the other half, for a server that declares nothing, and it fails
         -- the same way with the ceiling named in the message.
-        local pending = client:send({url = url("/too-big"), maxBytes = 8})
+        local pending = client:send({ url = url("/too-big"), maxBytes = 8 })
         drive(pending, function()
             server:respond(200, "OK", BODY, "text/plain")
         end)
@@ -355,13 +353,13 @@ describe("http.client", function()
     it("takes a per-host list to skip TLS on, and nothing broader", function()
         -- There is no `insecure = true`. A wildcard, a port, a scheme and a
         -- URL are all refused, so what a reviewer reads is a list of hosts.
-        for _, bad in ipairs({"*", "", "localhost:8080", "https://example.com", "*.example.com"}) do
+        for _, bad in ipairs({ "*", "", "localhost:8080", "https://example.com", "*.example.com" }) do
             assert.has_error(function()
-                http.client({insecureHosts = {bad}})
+                http.client({ insecureHosts = { bad } })
             end)
         end
 
-        local allowed = http.client({insecureHosts = {"dev.example.com"}})
+        local allowed = http.client({ insecureHosts = { "dev.example.com" } })
         assert.is_not_nil(allowed)
         allowed:close()
     end)
@@ -382,7 +380,7 @@ describe("http.client", function()
         -- that was never in it.
         local completed = 0
         for request = 1, 120 do
-            local pending = client:send({url = url("/compiled")})
+            local pending = client:send({ url = url("/compiled") })
             drive(pending, function()
                 server:respond(200, "OK", BODY, "text/plain")
             end, 400)
@@ -402,7 +400,7 @@ describe("http.client", function()
             client:send({})
         end)
         assert.has_error(function()
-            client:send({url = url("/no-length"), bodyBytes = "bytes"})
+            client:send({ url = url("/no-length"), bodyBytes = "bytes" })
         end)
     end)
 end)
