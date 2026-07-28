@@ -318,19 +318,35 @@ describe("an asset batch", function()
             handle:release()
         end)
 
-        -- The first is finished before the second is queued, so one drain has
-        -- something to resolve and something to keep.
+        -- One drain has to have something to resolve and something to keep,
+        -- and both halves of that are pinned rather than timed. A real load
+        -- left outstanding is a race the batch always loses eventually: a
+        -- missing file fails as fast as the worker can look, so whether it is
+        -- still in flight by the time the drain runs is the scheduler's to
+        -- decide. Shutting the worker down is the documented way to hold one
+        -- at "loading" for good, so that is what the kept entry is.
+        local waiting = assets.loadImage("spec/fixtures/missing-later.png")
+        assets.shutdown()
+        assets.install()
+
         local done = assets.loadImage(FIXTURE)
         assets.waitAll()
         batch:add(done, "done")
-        batch:add(assets.loadImage("spec/fixtures/missing-later.png"), "waiting")
+        batch:add(waiting, "waiting")
+        assert.are.equal("loading", waiting.status, "the dropped load must not have been answered")
 
         assert.are.equal(1, batch:resolve())
         assert.are.same({ "done" }, resolved)
         assert.are.equal(1, batch:pending())
 
-        assert.are.equal(1, batch:wait())
+        -- Releasing is the other way off "loading", and it needs no worker, so
+        -- the drain that hands the kept entry over is as fixed as the one that
+        -- kept it. What is being read here is the key, which compaction has to
+        -- have moved down beside its handle.
+        waiting:release()
+        assert.are.equal(1, batch:resolve())
         assert.are.same({ "done", "waiting" }, resolved, "the surviving entry kept the wrong key")
+        assert.are.equal(0, batch:pending())
     end)
 
     it("drains the worker itself", function()
