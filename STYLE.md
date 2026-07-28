@@ -29,12 +29,16 @@ code; migrate old code opportunistically.
   (`tecs.log`, `tecs.json`, `tecs.utils.pool`). Internal helpers
   live under `internal/` and are not part of the supported surface.
 
-## Formatting and alignment
+## Layout, which the formatter owns
 
-- 4-space indentation. No tabs.
-- 120 columns.
-- Wrap long signatures with one parameter group per line, closing parenthesis
-  on the final line:
+`make format` decides all of this and `make format-check` fails on it, so none
+of it is worth reading a diff for or asking about in review. It is written down
+because knowing what the tool will do is how you stop fighting it, not because
+anybody has to apply it.
+
+- 4-space indentation, no tabs, and 120 columns. Both live in `tlconfig.lua`.
+- Long signatures wrap with one parameter group per line and the closing
+  parenthesis on its own:
 
   ```teal
   init: function(
@@ -43,15 +47,25 @@ code; migrate old code opportunistically.
   ): number, number
   ```
 
-- Multi-line call arguments hug the call: `f({` on the call line, fields
+- A call with a single table argument hugs it: `f({` on the call line, fields
   indented, `})` closing.
-- Group `require`s at the top of the file, followed by `local type` aliases.
-- Align record fields with a single space around `:`. Do not column-align
-  values or types; alignment breaks on rename and churns diffs.
+- Record fields take a single space around `:`. Values and types are not
+  column-aligned, because alignment breaks on the first rename and churns the
+  diff of every line around it.
+
+## What the formatter cannot decide
+
+These are judgement, and they are what a review is for.
+
+- Group `require`s at the top, followed by `local type` aliases. The formatter
+  deliberately does not sort them (`sort_requires = false`): import order is
+  meaningful where one module has to be reached before another runs, so a tool
+  that reordered them could change behaviour.
 - Prefer early returns over nested conditionals.
-- Comments are sparse and informational. Public functions, records, and
-  modules get `---` doc comments describing behavior and constraints, not
+- Comments are sparse and informational. Public functions, records and modules
+  get `---` doc comments describing behaviour and constraints rather than
   restating the signature. No commented-out code.
+- Names, and the file and module split above, which no tool can check.
 
 ## Formatters
 

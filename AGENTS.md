@@ -158,8 +158,10 @@ The rules that prevent the most common defect class:
 
 ### Code Style
 
-`STYLE.md` is the long form. In brief: 4-space indentation, reasonable line length, `local` and `<const>` where
-appropriate, early returns over deep nesting, comments sparse and informational.
+`STYLE.md` is the long form, and it separates what `make format` decides from what it cannot. Layout is the
+formatter's: indentation, columns, wrapping, alignment. What is left to a person is `local` and `<const>` where
+appropriate, early returns over deep nesting, require grouping (the formatter deliberately does not sort them,
+because import order is meaningful), comments sparse and informational, and the naming rules above.
 
 ### Naming
 
