@@ -11,6 +11,8 @@ typedef struct TecsHttpBytes {
     uint64_t size;
     uint64_t capacity;
     uint64_t limit;
+    /* Bytes handed over and dropped, which the limit still counts. */
+    uint64_t consumed;
 } TecsHttpBytes;
 
 struct TecsHttpResponseBuffer {
@@ -34,7 +36,9 @@ static int append(TecsHttpResponseBuffer *buffer, TecsHttpBytes *bytes, const vo
         return 0;
     }
     required = bytes->size + (uint64_t)size;
-    if (required > bytes->limit) {
+    /* Against everything this body has been, not against what is still held:
+     * a ceiling means the same thing whether or not something is draining. */
+    if (required > bytes->limit - bytes->consumed) {
         buffer->error = limitError;
         return 0;
     }
@@ -129,6 +133,28 @@ const uint8_t *tecsHttpResponseHeaders(const TecsHttpResponseBuffer *buffer, uin
         *size = buffer == NULL ? 0 : buffer->headers.size;
     }
     return buffer == NULL ? NULL : buffer->headers.data;
+}
+
+uint64_t tecsHttpResponseBodyConsume(TecsHttpResponseBuffer *buffer, uint64_t count)
+{
+    TecsHttpBytes *bytes;
+
+    if (buffer == NULL) {
+        return 0;
+    }
+    bytes = &buffer->body;
+    if (count > bytes->size) {
+        count = bytes->size;
+    }
+    bytes->consumed += count;
+    bytes->size -= count;
+    if (bytes->size != 0 && count != 0) {
+        /* The usual call takes everything, so this moves nothing. It is here
+         * for a caller that wrote only part of what had arrived. */
+        memmove(bytes->data, bytes->data + count, (size_t)bytes->size);
+    }
+    /* The capacity stays, so a transfer drained every pump allocates once. */
+    return bytes->size;
 }
 
 int tecsHttpResponseBufferError(const TecsHttpResponseBuffer *buffer)

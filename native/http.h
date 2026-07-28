@@ -35,4 +35,18 @@ const uint8_t *tecsHttpResponseBody(const TecsHttpResponseBuffer *buffer, uint64
 const uint8_t *tecsHttpResponseHeaders(const TecsHttpResponseBuffer *buffer, uint64_t *size);
 int tecsHttpResponseBufferError(const TecsHttpResponseBuffer *buffer);
 
+/* Drops the first `count` buffered body bytes, for a caller writing them
+ * somewhere as they arrive.
+ *
+ * Without this a body bound for a file is still a whole body in memory, just
+ * in this allocation rather than in Lua's. A caller that reads what
+ * tecsHttpResponseBody points at and then consumes it holds one pump's worth
+ * of arrival instead of the transfer.
+ *
+ * The limit is unaffected: what has been consumed still counts against
+ * maxBodyBytes, so a ceiling means the same thing whether or not anything is
+ * draining. Answers how many bytes remain buffered.
+ */
+uint64_t tecsHttpResponseBodyConsume(TecsHttpResponseBuffer *buffer, uint64_t count);
+
 #endif

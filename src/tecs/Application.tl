@@ -70,6 +70,7 @@ local filesystem <const> = require("tecs.platform.filesystem")
 local paths <const> = require("tecs.platform.paths")
 local proc <const> = require("tecs.platform.proc")
 local system <const> = require("tecs.platform.system")
+local httpClients <const> = require("tecs.http.clients")
 local watch <const> = require("tecs.platform.watch")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
@@ -858,6 +859,21 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- process that has never started a child.
     proc.update()
     system.updateDialogs()
+
+    -- And again for every open HTTP client. A transfer that completed while
+    -- the game was backgrounded has completed, so this is outside the
+    -- suspension guard like the two above it. It is outside the crash guard
+    -- too, and for a reason the event path does not have: an observer that
+    -- throws after a crash is a second traceback nobody needed, while a
+    -- future's listeners already run inside the drain's own pcall, so nothing
+    -- here can produce one. Not pumping would hold a socket open and let a
+    -- transfer reach a deadline it had no reason to.
+    --
+    -- Costs an integer compare on a process that has never built a client.
+    -- This module is what makes that true: `tecs.http.client` loads libcurl
+    -- when it is required, and the list of live clients deliberately does not,
+    -- so a game with no HTTP in it does not link one.
+    httpClients.pump()
 
     -- Outside the suspension and crash guards, for the reason above and one
     -- more: a shader edited to fix the crash is exactly what a stopped process

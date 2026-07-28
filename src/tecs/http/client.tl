@@ -2,19 +2,26 @@
 ---
 --- `curl_easy_perform` runs a whole transfer before it returns, so a frame that
 --- used it would not end until the network answered. This is libcurl's multi
---- interface instead: every request is added to one multi handle, `pump` does
+--- interface instead: every request is added to one multi handle, a pump does
 --- as much as can be done without waiting, and each request's answer arrives
 --- as a settled `Future<Response>`.
 ---
----     local client <const> = tecs.http.client({userAgent = "mygame/1.0"})
+---     tecs.http.client({userAgent = "mygame/1.0"})
+---         :send({
+---             url = "https://example.com/manifest.json",
+---             headers = {accept = "application/json"},
+---         })
+---         :map(function(response: Response): string return response.body:text() end)
+---         :onSettle(function(manifest: Future<string>)
+---             print(manifest.status, manifest.value)
+---         end)
 ---
----     local manifest <const> = client:send({
----         url = "https://example.com/manifest.json",
----         headers = {accept = "application/json"},
----     })
----
----     -- once per frame, from wherever the loop already runs
----     client:pump()
+--- Nothing there goes in a frame. Building a client puts it on
+--- `tecs.http.clients`, and `tecs.Application` turns that list once an
+--- iteration for the same reason it updates `assets` and `proc`: a transfer
+--- that finished has finished, and nothing else in the frame is obliged to
+--- ask. `pump` stays on this type because a headless tool has no application
+--- to do it, and because the specs drive it directly. A game never calls it.
 ---
 --- `tecs.http.client` is both callable and a namespace: calling it builds a
 --- `Client`, and `client.Request`, `client.Response` and `client.Options` are
@@ -49,23 +56,35 @@
 --- `"cancelled"` is this process stopping the transfer, through
 --- `Future:cancel` or `Client:close`.
 ---
---- ## Bodies do not default to strings
+--- ## A body is a `DataStream`, in both directions
 ---
---- Omitting `into` returns the body as a string, which is right for a manifest
---- and wrong for a patch. `into = "some/path"` writes it to a file instead and
---- leaves `Response.body` nil, so the large case has a spelling of its own and
---- a 500 MB download is not the path of least resistance.
+--- `body` and `into` are the same type, and a `Response` carries one too, so
+--- there is one answer to "where are the bytes" rather than a `body` beside a
+--- `path` where exactly one is meaningful. A string is the shorthand each
+--- direction wants: as a body it is the bytes, as a destination it is a path.
 ---
---- `into` goes through `tecs.platform.filesystem`, so a port that replaced the
---- storage backend gets it without this module knowing. **It buys the seam and
---- the file, not yet a memory ceiling**: `storagebackend.Backend` has `write`
---- and no append or open, so the body is still assembled in memory and written
---- once. Bounding the memory means an incremental write on that seam, which is
---- a change to `src/tecs/platform` with its own guard in `spec/adapter_spec.lua`
---- and is deliberately not made here. Until it exists, `maxBytes` is the honest
---- bound: it is a hard ceiling, checked as the bytes arrive and again through
---- `CURLOPT_MAXFILESIZE_LARGE` when the server declares a length, and a
---- transfer that reaches it fails rather than growing.
+--- A destination is written as the transfer runs. The native buffer holds what
+--- has arrived, the pump hands it to the destination and consumes it, and the
+--- next pump starts from empty, so a body bound for a file is held for a frame
+--- rather than for the length of the transfer. `maxBytes` still counts every
+--- byte the body has ever been, drained or not.
+---
+--- A request body is not streamed, and the asymmetry is the callback rule
+--- rather than an oversight. Writing a destination happens *between* calls
+--- into libcurl, where Lua may do anything; feeding a body happens *inside*
+--- one, through a read callback libcurl calls, and a Lua callback anywhere in
+--- a pump makes the loop around it uncompilable -- which is exactly what
+--- moving the response callbacks into `native/http.c` removed. So a body given
+--- as a file or a handle is read at `send`, and libcurl copies it, and an
+--- upload costs twice its size while it runs. The fix is a request buffer in
+--- `native/http.c` beside the response one: a C read callback serving bytes
+--- Lua tops up each pump, returning `CURL_READFUNC_PAUSE` rather than 0 when
+--- it runs dry, since 0 is how a read callback says the body ended. That is a
+--- pause protocol across two languages, and it is not worth writing before
+--- something needs to upload something large.
+---
+--- Files go through `tecs.platform.filesystem` and so through the storage
+--- seam a port replaces; a handle is the caller's own.
 ---
 --- ## TLS verification is on, and awkward to turn off
 ---
@@ -143,50 +162,40 @@
 --- development and a packaged build differ in behaviour rather than only in
 --- what they link. The bounds are what keep the slower of the two honest.
 ---
---- ## What is deliberately not here
+--- ## A body is never a live connection
 ---
---- **No ECS plugin, and it is the intended next step.** A plugin would own a
---- `Client` as a world resource, pump it once per frame from a system in an
---- early phase, and give a request an entity: an `http.Request` component
---- carrying the fields of `Request`, spawned by a game and replaced with a
---- `Response` component when the future settles, so a request is inspectable
---- through the debug server like everything else. It is not built here because
---- its shape is the first real caller's to decide, and guessing it now would
---- fix an answer nobody has the question for yet. Everything it needs is
---- already on this surface: `send`, `pump`, `pending`, and a future per
---- request.
+--- A `Response` carries a `DataStream`, which is a stream in the sense that
+--- matters -- the bytes did not all have to exist at once -- and not in the
+--- one that would be a mistake here. It is only ever handed over settled: over
+--- a string that is already complete, or over a file that has already been
+--- written and closed. There is no shape in which holding a body holds a
+--- socket, which is what a frame-driven client cannot afford and what an
+--- `InputStream` handed back from a request would be.
+---
+--- ## What is deliberately not here
 ---
 --- **No adapter seam.** A console's HTTP stack is not libcurl, and it belongs
 --- beside audio and input behind `tecs.platform.adapter`. Substituting one
---- would take a `Backend` record with `send`, `pump`, `cancel` and `close` --
---- which is what `Client` already is, minus its curl fields -- this module
---- becoming the argument checking, the header merging and the future
---- bookkeeping in front of it, and a guard spec in `spec/adapter_spec.lua`
---- asserting a replacement backend is reached. `Request` and `Response` are
---- already backend-neutral. What is not is `insecureHosts`, which is expressed
---- as two curl options today and would have to become something the seam
---- states rather than something a backend infers.
+--- takes a `Backend` record with `send`, `pump`, `cancel` and `close` -- which
+--- is what `Client` already is, minus its curl fields -- those records moving
+--- to a `httpbackend` module so the seam names them, this module becoming the
+--- argument checking and the future bookkeeping in front of it, and a guard in
+--- `spec/seams_spec.lua` asserting a replacement is reached. `Request`,
+--- `Response` and `DataStream` are already backend-neutral. What is not is
+--- `insecureHosts`, which is two curl options today and would have to become
+--- something the seam states rather than something a backend infers.
 ---
---- **No proxy configuration.** libcurl reads `http_proxy` and `https_proxy`
---- from the environment already, which is what a developer behind one expects
---- and most of the value. An explicit setting is `CURLOPT_PROXY` and a line
---- here when something needs to override the environment rather than follow
---- it.
----
---- **No lifecycle listeners, no protocol version policy, and no response
---- body handed over as a stream.** The first is what a future's `onSettle`
---- and the plugin above would be for; the second has nothing to choose
---- between while the pinned build is HTTP/1.1 only; and the third is the one
---- shape a frame-driven client cannot take, because a stream the caller must
---- close is a connection held until it does. `into` is that case answered
---- differently.
+--- **No protocol version policy**, because there is nothing to choose between
+--- while the pinned build is HTTP/1.1 only. Reach for `CURLOPT_HTTP_VERSION`
+--- when that changes.
 
 local ffi <const> = require("ffi")
 local curl <const> = require("tecs.ffi.curl")
 local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
-local filesystem <const> = require("tecs.platform.filesystem")
 local Future <const> = require("tecs.Future")
+local DataStream <const> = require("tecs.http.DataStream")
+local clients <const> = require("tecs.http.clients")
 
 loader.declare("http")
 
@@ -260,6 +269,18 @@ local record client
         --- Host names whose certificates are not verified. Each logs a warning
         --- when the client is built. No wildcard, no port, no scheme.
         insecureHosts: {string}
+        --- Proxy every request goes through, as a URL: `http://host:3128`, or
+        --- `socks5h://host:1080` for a SOCKS one. Unset follows the
+        --- environment's `http_proxy` and `https_proxy`, which is what a
+        --- developer behind one expects; `""` ignores the environment and
+        --- talks direct.
+        proxy: string
+        --- Hosts the proxy is not used for, comma separated, as
+        --- `CURLOPT_NOPROXY` takes them: `"localhost,127.0.0.1,.internal"`.
+        --- A single `*` disables the proxy for everything.
+        noProxy: string
+        --- Credentials for the proxy, as `user:password`.
+        proxyCredentials: string
     end
 
     --- One request. Only `url` is required.
@@ -270,20 +291,15 @@ local record client
         method: string
         --- Merged over the client's, matched case-insensitively.
         headers: {string: string}
-        --- The request body, as a string.
-        body: string
-        --- The request body, as an FFI buffer, with `bodyLength` beside it.
+        --- What to send. A string is the body itself; a `DataStream` is a body
+        --- from anywhere, including a file this reads at `send`.
+        body: string | DataStream
+        --- Where the body goes. A string is a path; a `DataStream` is any
+        --- destination, and both are written as the bytes arrive.
         ---
-        --- Two fields rather than one that takes either, because Teal
-        --- discriminates a union by `type()` and cdata is neither of the two
-        --- answers that would tell a string from a buffer. libcurl copies the
-        --- bytes during `send`, so the buffer may be reused as soon as it
-        --- returns.
-        bodyBytes: loader.CValue
-        --- Bytes to send from `bodyBytes`. Required with it.
-        bodyLength: integer
-        --- Where to write the body, instead of returning it as a string.
-        into: string
+        --- Left out, the body comes back as a stream over a string, which is
+        --- right for a manifest and wrong for a patch.
+        into: string | DataStream
         --- Milliseconds this transfer is given, overriding the client's.
         timeoutMs: number
         --- Milliseconds of no progress this transfer tolerates, overriding
@@ -301,14 +317,15 @@ local record client
         --- Response headers, with lower-cased names. A redirect's headers
         --- replace the ones before it, so this describes the final response.
         headers: {string: string}
-        --- The body, when `into` was not given.
-        body: string
-        --- Where the body was written, when `into` was given.
-        path: string
+        --- The body, wherever it went: a string when nothing asked for it
+        --- somewhere else, the destination `into` named when something did.
+        ---
+        --- One field rather than a `body` and a `path` where exactly one is
+        --- meaningful. `body:text()` is the string, `body.length` the bytes,
+        --- `body.path` where it was written when that is what happened.
+        body: DataStream
         --- The URL that actually answered, after any redirects.
         url: string
-        --- Body length in bytes, whether it was kept or written.
-        bytes: integer
 
         --- Whether the status is a 2xx.
         ---
@@ -329,11 +346,18 @@ local record client
         future: Future<Response>
         response: Response
         body: string
+        --- The in-memory body's length. A destination counts its own.
         bytes: integer
         maxBytes: integer
-        into: string
+        --- Where the body is being written, when something asked for one.
+        sink: DataStream
         url: string
         bufferError: integer
+        --- Whether the destination has been closed, since a released transfer
+        --- is settled afterwards and neither step owns the other.
+        closed: boolean
+        --- Why the transfer was stopped by something other than libcurl.
+        failure: string
     end
 
     --- A pool of transfers over one libcurl multi handle.
@@ -358,20 +382,30 @@ local record client
         _remaining: loader.CArray
         _finished: {Transfer}
         _codes: {integer}
+        --- Transfers with a destination, which is what the pump drains.
+        _streaming: {Transfer}
+        --- Out-parameter the drain reads a buffered length through, held here
+        --- rather than allocated once a pump per transfer.
+        _bodySize: loader.CArray
 
         --- Starts a transfer, and answers what it will settle to.
         ---
         --- Raises when the call itself is malformed: no request, no URL, a
-        --- body given as bytes with no length. Everything about the request
-        --- that only the network can judge settles the future instead, since a
-        --- URL out of a manifest is data rather than a mistake in the program.
+        --- destination that is a string in memory rather than somewhere bytes
+        --- can go. Everything about the request that only the network can
+        --- judge settles the future instead, since a URL out of a manifest is
+        --- data rather than a mistake in the program.
         send: function(self: Client, request: Request): Future<Response>
 
         --- Advances every transfer as far as it can go without waiting.
         ---
-        --- Call once per frame. Answers how many transfers settled, so a
-        --- caller that wants to know whether anything happened does not have
-        --- to ask each future.
+        --- **A game does not call this.** An application turns every open
+        --- client once an iteration, through `tecs.http.clients`. It is here
+        --- for a headless tool that has no application, and for a test that
+        --- drives a transfer a turn at a time.
+        ---
+        --- Answers how many transfers settled, so a caller that wants to know
+        --- whether anything happened does not have to ask each future.
         pump: function(self: Client): integer
 
         --- Transfers that have not settled.
@@ -388,6 +422,11 @@ local record client
         --- Each unsettled future settles `"cancelled"`. A closed client raises
         --- on `send` and answers 0 to `pump`, rather than being silently
         --- useless.
+        ---
+        --- Also what takes a client off the list a frame turns. Dropping the
+        --- last reference to one does not: the list holds it, so a request
+        --- nobody kept still lands, and a client nobody closes keeps its
+        --- sockets for the life of the process.
         close: function(self: Client)
 
         --- `Future.Source`: `pump`, under the name a future looks for.
@@ -585,9 +624,11 @@ local function readResult(transfer: Transfer)
     end
 
     local size = loader.newArray("uint64_t[1]")
-    local body = H.tecsHttpResponseBody(transfer.buffer, size)
-    transfer.bytes = math.floor(tonumber(size[0]) or 0) as integer
-    transfer.body = loader.toBytes(body, transfer.bytes)
+    if transfer.sink == nil then
+        local body = H.tecsHttpResponseBody(transfer.buffer, size)
+        transfer.bytes = math.floor(tonumber(size[0]) or 0) as integer
+        transfer.body = loader.toBytes(body, transfer.bytes)
+    end
 
     local raw = H.tecsHttpResponseHeaders(transfer.buffer, size)
     local headerBytes <const> = math.floor(tonumber(size[0]) or 0) as integer
@@ -608,6 +649,64 @@ local function readResult(transfer: Transfer)
     end
     transfer.response.headers = headers
     transfer.bufferError = math.floor(tonumber(H.tecsHttpResponseBufferError(transfer.buffer)) or 0) as integer
+end
+
+--- Writes whatever has arrived to a transfer's destination, and drops it.
+---
+--- The counterpart of buffering the body in C. The native callback appends and
+--- knows nothing about where the bytes are going; this runs from the pump,
+--- between calls into libcurl, and hands one pump's worth of arrival to the
+--- destination. So a body bound for a file is held for a frame rather than for
+--- the length of the transfer, and there is still no Lua callback anywhere
+--- libcurl can call: `turn` stays compilable.
+---
+--- What the consume answers is discarded because it is always zero: this takes
+--- everything it was shown.
+local function drain(transfer: Transfer): boolean
+    local sink <const> = transfer.sink
+    if sink == nil or transfer.buffer == nil or transfer.failure ~= nil then
+        return true
+    end
+
+    local size <const> = transfer.owner._bodySize
+    local body <const> = H.tecsHttpResponseBody(transfer.buffer, size)
+    local length <const> = math.floor(tonumber(size[0]) or 0) as integer
+    if length == 0 then
+        return true
+    end
+
+    local ok <const>, failure = sink:_write(loader.toBytes(body, length))
+    H.tecsHttpResponseBodyConsume(transfer.buffer, length)
+    if not ok then
+        transfer.failure = failure or "the body could not be written"
+        return false
+    end
+    return true
+end
+
+--- Closes a transfer's destination, whatever the outcome.
+---
+--- A failed transfer has the same handle open as a successful one, and a
+--- cancelled one too, so this runs on every path out. What closing said
+--- becomes the transfer's failure when nothing else already is one: that call
+--- is where a full disk is reported.
+local function closeSink(transfer: Transfer)
+    if transfer.closed then
+        return
+    end
+    transfer.closed = true
+
+    local sink <const> = transfer.sink
+    if sink == nil then
+        return
+    end
+    -- The last bytes, which arrived after the pump that drove the final
+    -- perform had already drained.
+    drain(transfer)
+    local ok <const>, failure = sink:_finish()
+    if not ok and transfer.failure == nil then
+        transfer.failure = failure or "the body could not be written"
+    end
 end
 
 --- Takes a transfer off its client and frees everything libcurl gave it.
@@ -634,6 +733,19 @@ local function release(transfer: Transfer)
         C.curl_slist_free_all(transfer.slist)
         transfer.slist = nil
     end
+    if transfer.sink ~= nil then
+        local streaming <const> = owner._streaming
+        for index = 1, #streaming do
+            if streaming[index] == transfer then
+                table.remove(streaming, index)
+                break
+            end
+        end
+    end
+    -- After the handle and before the buffer: the last bytes are still in
+    -- there, and until `curl_easy_cleanup` returned libcurl was entitled to
+    -- append more.
+    closeSink(transfer)
     if transfer.buffer ~= nil then
         H.tecsHttpResponseBufferDestroy(transfer.buffer)
         transfer.buffer = nil
@@ -654,6 +766,8 @@ local function settle(transfer: Transfer, code: integer)
             future:fail(("tecs: %s response headers exceeded %d bytes"):format(transfer.url, MAX_HEADER_BYTES))
         elseif transfer.bufferError == outOfMemory then
             future:fail(("tecs: %s: response buffering ran out of memory"):format(transfer.url))
+        elseif transfer.failure ~= nil then
+            future:fail(("tecs: %s: %s"):format(transfer.url, transfer.failure))
         else
             local reason <const> = curl.errorText(ffi.cast("CURLcode", code) as loader.CValue)
             future:fail(("tecs: %s: %s"):format(transfer.url, reason))
@@ -661,17 +775,18 @@ local function settle(transfer: Transfer, code: integer)
         return
     end
 
+    -- Closing the destination is where a full disk is reported, so a transfer
+    -- libcurl was happy with can still have failed to land.
+    if transfer.failure ~= nil then
+        future:fail(("tecs: %s: %s"):format(transfer.url, transfer.failure))
+        return
+    end
+
     local response = transfer.response
-    response.bytes = transfer.bytes
-    if transfer.into ~= nil then
-        local ok, err = filesystem.write(transfer.into, transfer.body)
-        if not ok then
-            future:fail(("tecs: cannot write %s: %s"):format(transfer.into, err or "unknown"))
-            return
-        end
-        response.path = transfer.into
+    if transfer.sink ~= nil then
+        response.body = transfer.sink
     else
-        response.body = transfer.body
+        response.body = DataStream.ofString(transfer.body, response.headers["content-type"])
     end
     future:complete(response)
 end
@@ -728,6 +843,14 @@ local function turn(self: Client, waitMs: number): integer
     if (tonumber(code) or 0) ~= 0 then
         LOGGER:error("curl_multi_perform failed: %s", curl.multiErrorText(code))
     end
+    -- Between the perform and the drain of completions, which is the one point
+    -- in a pump where libcurl is not inside a call and a transfer that has
+    -- finished has not been released yet. Empty for a client nothing is
+    -- streaming, which is almost every client.
+    local streaming <const> = self._streaming
+    for index = 1, #streaming do
+        drain(streaming[index])
+    end
     return collect(self)
 end
 
@@ -773,7 +896,7 @@ end
 
 --- Builds the header list for one request, or nil when there is nothing to
 --- send. Request headers win over the client's, matched without case.
-local function buildHeaders(self: Client, request: Request): loader.CPtr
+local function buildHeaders(self: Client, request: Request, source: DataStream): loader.CPtr
     local merged: {string: string} = nil
 
     local defaults = self._options.headers
@@ -792,6 +915,15 @@ local function buildHeaders(self: Client, request: Request): loader.CPtr
         end
     end
 
+    -- What the body says it is, and only when nothing said otherwise: a stream
+    -- built from a file knows less about the request than the caller does.
+    if source ~= nil and source.contentType ~= nil then
+        merged = merged or {}
+        if merged["content-type"] == nil then
+            merged["content-type"] = source.contentType
+        end
+    end
+
     if merged == nil then
         return nil
     end
@@ -803,6 +935,27 @@ local function buildHeaders(self: Client, request: Request): loader.CPtr
     return slist
 end
 
+--- The stream a `body` or an `into` means, whichever spelling was used.
+---
+--- A string is the body itself in one direction and a path in the other, which
+--- is the only place the two differ: a request says what to send, and a
+--- destination says where to put what comes back.
+local function streamOf(given: string | DataStream, sending: boolean, what: string): DataStream
+    if given == nil then
+        return nil
+    end
+    if given is string then
+        if sending then
+            return DataStream.ofString(given)
+        end
+        return DataStream.ofFile(given)
+    end
+    if not DataStream.is(given) then
+        error(("tecs: %s is not a string or a DataStream"):format(what), 3)
+    end
+    return given
+end
+
 function Client:send(request: Request): Future<Response>
     if self._multi == nil then
         error("tecs: this http client is closed", 2)
@@ -810,10 +963,11 @@ function Client:send(request: Request): Future<Response>
     if request == nil or type(request.url) ~= "string" or request.url == "" then
         error("tecs: http send needs a request with a url", 2)
     end
-    if request.bodyBytes ~= nil and request.body == nil then
-        if request.bodyLength == nil or request.bodyLength < 0 then
-            error("tecs: an http body given as bodyBytes needs bodyLength", 2)
-        end
+
+    local source <const> = streamOf(request.body, true, "a request body")
+    local sink <const> = streamOf(request.into, false, "into")
+    if sink ~= nil and not sink:writable() then
+        error(("tecs: a %s stream is not somewhere a body can be written"):format(sink.kind), 2)
     end
 
     local url <const> = request.url
@@ -845,14 +999,27 @@ function Client:send(request: Request): Future<Response>
         slist = nil,
         buffer = buffer,
         future = future,
-        response = setmetatable({status = 0, headers = {}, bytes = 0} as Response, ResponseMT),
+        response = setmetatable({status = 0, headers = {}} as Response, ResponseMT),
         body = nil,
         bytes = 0,
         maxBytes = maxBytes,
-        into = request.into,
+        sink = sink,
         url = url,
         bufferError = 0,
+        closed = false,
     }
+
+    -- Opened before the handle is armed, so a destination that cannot be
+    -- written is a failed future rather than a transfer that starts and dies
+    -- at the first byte.
+    if sink ~= nil then
+        local ok <const>, failure = sink:_beginWrite()
+        if not ok then
+            H.tecsHttpResponseBufferDestroy(buffer)
+            C.curl_easy_cleanup(easy)
+            return Future.failed(failure) as Future<Response>
+        end
+    end
 
     setPointer(easy, C.CURLOPT_URL, url)
     -- The id, not the transfer: a Lua table cannot be a `void *`, and two
@@ -897,6 +1064,20 @@ function Client:send(request: Request): Future<Response>
         setPointer(easy, C.CURLOPT_ACCEPT_ENCODING, "")
     end
 
+    -- Unset is not the same as empty. Nothing here means libcurl reads
+    -- `http_proxy` and `https_proxy` as it always has, and `""` is a stated
+    -- decision to ignore them, which is the only way a game can talk direct on
+    -- a machine that has them set.
+    if options.proxy ~= nil then
+        setPointer(easy, C.CURLOPT_PROXY, options.proxy)
+    end
+    if options.noProxy ~= nil then
+        setPointer(easy, C.CURLOPT_NOPROXY, options.noProxy)
+    end
+    if options.proxyCredentials ~= nil then
+        setPointer(easy, C.CURLOPT_PROXYUSERPWD, options.proxyCredentials)
+    end
+
     -- Set every time rather than left to the library's default, so this does
     -- not depend on how the libcurl that answered the load was built.
     setLong(easy, C.CURLOPT_SSL_VERIFYPEER, 1)
@@ -907,28 +1088,43 @@ function Client:send(request: Request): Future<Response>
         setLong(easy, C.CURLOPT_SSL_VERIFYHOST, 0)
     end
 
-    local slist <const> = buildHeaders(self, request)
+    local slist <const> = buildHeaders(self, request, source)
     if slist ~= nil then
         transfer.slist = slist
         setPointer(easy, C.CURLOPT_HTTPHEADER, slist)
     end
 
     local method <const> = (request.method or "GET"):upper()
-    local payload: any = nil
-    local length = 0
-    if request.body ~= nil then
-        payload = request.body
-        length = #request.body
-    elseif request.bodyBytes ~= nil then
-        payload = request.bodyBytes
-        length = request.bodyLength
-    end
+    local carries <const> = method == "POST" or method == "PUT" or method == "PATCH"
 
     -- A method that carries a body always gets one, even an empty one: with
     -- `CURLOPT_POST` set and no fields, libcurl reads the body from a read
     -- callback, and the default read callback is standard input.
-    if payload ~= nil or method == "POST" or method == "PUT" or method == "PATCH" then
-        payload = payload or ""
+    if source ~= nil or carries then
+        local payload: any = ""
+        local length = 0
+        if source ~= nil then
+            -- Read here rather than as libcurl asks for it. Asking would mean
+            -- a read callback, and the only kind this module can install from
+            -- Lua is one libcurl calls from inside `curl_multi_perform`, which
+            -- is exactly what moving the response callbacks into C got rid of:
+            -- a Lua callback anywhere in a pump makes the loop around it
+            -- uncompilable. The bound is the body, and libcurl copies it
+            -- again, so an upload costs twice its size until it completes.
+            -- Streaming one belongs in `native/http.c` beside the buffering,
+            -- and is written up in this module's notes.
+            local bytes <const>, failure = source:text()
+            if bytes == nil then
+                H.tecsHttpResponseBufferDestroy(buffer)
+                C.curl_easy_cleanup(easy)
+                if sink ~= nil then
+                    sink:_finish()
+                end
+                return Future.failed(failure or "tecs: the request body could not be read") as Future<Response>
+            end
+            payload = bytes
+            length = #bytes
+        end
         -- Size before fields. `CURLOPT_COPYPOSTFIELDS` copies what the size
         -- already set says, and with no size it measures a binary body as a C
         -- string.
@@ -937,7 +1133,7 @@ function Client:send(request: Request): Future<Response>
     end
     if method == "HEAD" then
         setLong(easy, C.CURLOPT_NOBODY, 1)
-    elseif method ~= "GET" or payload ~= nil then
+    elseif method ~= "GET" or source ~= nil then
         -- The verb, stated rather than inferred from which body option was
         -- set. A body alone would make this a POST whatever it says.
         setPointer(easy, C.CURLOPT_CUSTOMREQUEST, method)
@@ -946,6 +1142,12 @@ function Client:send(request: Request): Future<Response>
     transfers[id] = transfer
     self._byFuture[future] = transfer
     self._pending = self._pending + 1
+    -- Last, after every path that gives up before the transfer exists: a pump
+    -- walks this list and everything on it has a buffer to drain.
+    if sink ~= nil then
+        local streaming <const> = self._streaming
+        streaming[#streaming + 1] = transfer
+    end
 
     local code = C.curl_multi_add_handle(self._multi, easy)
     if (tonumber(code) or 0) ~= 0 then
@@ -979,6 +1181,9 @@ function Client:close()
     if self._pumping then
         error("tecs: cannot close an http client from inside its own pump", 2)
     end
+    -- Off the frame's list first: nothing below can settle a future whose
+    -- listener would find this client still there.
+    clients.remove(self as clients.Pumpable)
 
     -- Collected first: releasing a transfer removes it from the table being
     -- walked, and settling one runs listeners that may hold others.
@@ -1070,6 +1275,11 @@ local function newClient(options?: Options): Client
     self._remaining = loader.newArray("int[1]")
     self._finished = {}
     self._codes = {}
+    self._streaming = {}
+    self._bodySize = loader.newArray("uint64_t[1]")
+    -- On the list the frame turns, from here until `close`. A game that builds
+    -- a client and sends a request calls nothing else.
+    clients.add(self as clients.Pumpable)
     return self
 end
 

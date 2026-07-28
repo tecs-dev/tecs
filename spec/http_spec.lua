@@ -155,11 +155,15 @@ describe("http.client", function()
         local response = pending.value
         assert.are.equal(200, response.status)
         assert.is_true(response:ok())
-        assert.are.equal(BODY, response.body)
-        assert.are.equal(#BODY, response.bytes)
+        -- One field holding the body whatever it is, rather than a `body` and
+        -- a `path` where exactly one is meaningful.
+        assert.are.equal("string", response.body.kind)
+        assert.are.equal(BODY, response.body:text())
+        assert.are.equal(#BODY, response.body.length)
+        assert.are.equal("text/plain", response.body.contentType)
         assert.are.equal("text/plain", response.headers["content-type"])
         assert.are.equal(url("/body"), response.url)
-        assert.is_nil(response.path)
+        assert.is_nil(response.body.path)
     end)
 
     it("keeps only the final response headers", function()
@@ -206,7 +210,7 @@ describe("http.client", function()
 
     it("composes, because a request is a future like any other", function()
         local length = client:send({ url = url("/compose") }):map(function(response)
-            return #response.body
+            return response.body.length
         end)
 
         drive(length, function()
@@ -224,16 +228,94 @@ describe("http.client", function()
         end)
 
         assert.are.equal("ready", pending.status)
-        -- The large case has a spelling of its own, and it does not also hand
-        -- back the string it was asked not to build.
-        assert.is_nil(pending.value.body)
-        assert.are.equal(path, pending.value.path)
+        -- The body is where it was asked to go, and the response says so in
+        -- the same field a string body would have come back in.
+        local body = pending.value.body
+        assert.are.equal("file", body.kind)
+        assert.are.equal(path, body.path)
+        assert.are.equal(#BODY, body.length)
+        assert.are.equal(BODY, body:text())
 
         local file = assert(io.open(path, "rb"))
         local written = file:read("*a")
         file:close()
         os.remove(path)
         assert.are.equal(BODY, written)
+    end)
+
+    it("writes into a handle as the bytes arrive, never assembling them", function()
+        -- `into` streams. The native buffer holds what has arrived, the pump
+        -- hands it to the handle and consumes it, and the next pump starts
+        -- from empty, so there is no point at which the whole body is either a
+        -- Lua string or a whole allocation in C.
+        local path = os.tmpname()
+        local file = assert(io.open(path, "wb"))
+        local pending = client:send({
+            url = url("/streamed"),
+            into = http.DataStream.ofHandle(file),
+        })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "application/octet-stream")
+        end)
+        file:close()
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal("handle", pending.value.body.kind)
+        assert.are.equal(#BODY, pending.value.body.length)
+
+        local written = assert(io.open(path, "rb"))
+        local bytes = written:read("*a")
+        written:close()
+        os.remove(path)
+        assert.are.equal(BODY, bytes)
+    end)
+
+    it("counts a streamed body against maxBytes, though it holds none of it", function()
+        -- A destination is not a way around the ceiling. The native buffer is
+        -- drained and consumed every pump, and what it has handed over still
+        -- counts, so the limit means the same thing whether the body is going
+        -- to a string or to a file.
+        local path = os.tmpname()
+        local file = assert(io.open(path, "wb"))
+        local pending = client:send({
+            url = url("/too-big-streamed"),
+            into = http.DataStream.ofHandle(file),
+            maxBytes = 8,
+        })
+        drive(pending, function()
+            server:respond(200, "OK", BODY, "text/plain")
+        end)
+        file:close()
+        os.remove(path)
+
+        assert.are.equal("failed", pending.status)
+        assert.is_truthy(pending.error:find("exceeded", 1, true))
+    end)
+
+    it("sends a body read from a file", function()
+        -- The asymmetry, stated: a destination is written between calls into
+        -- libcurl, where Lua may do anything, and a body is fed from inside
+        -- one. Feeding one as libcurl asks would be a Lua read callback, which
+        -- is the thing the native buffering exists to avoid, so this is read
+        -- at `send`.
+        local path = os.tmpname()
+        local upload = assert(io.open(path, "wb"))
+        upload:write(BODY)
+        upload:close()
+
+        local pending = client:send({
+            url = url("/upload"),
+            method = "PUT",
+            body = http.DataStream.ofFile(path, "application/octet-stream"),
+        })
+        local seen = drive(pending, function()
+            server:respond(204, "No Content", "", "text/plain")
+        end)
+        os.remove(path)
+
+        assert.are.equal("ready", pending.status)
+        assert.are.equal("PUT", seen.method)
+        assert.are.equal(BODY, seen.body)
     end)
 
     it("reports a refused connection as a failure", function()
@@ -386,7 +468,7 @@ describe("http.client", function()
         end)
 
         assert.are.equal("ready", pending.status)
-        assert.are.equal(BODY, pending.value.body)
+        assert.are.equal(BODY, pending.value.body:text())
     end)
 
     it("takes a per-host list to skip TLS on, and nothing broader", function()
@@ -421,7 +503,7 @@ describe("http.client", function()
             drive(pending, function()
                 server:respond(200, "OK", BODY, "text/plain")
             end, 400)
-            if pending.status == "ready" and pending.value.body == BODY then
+            if pending.status == "ready" and pending.value.body:text() == BODY then
                 completed = completed + 1
             end
         end
@@ -436,8 +518,56 @@ describe("http.client", function()
         assert.has_error(function()
             client:send({})
         end)
+        -- A string in memory is a body, not somewhere a body can go.
         assert.has_error(function()
-            client:send({ url = url("/no-length"), bodyBytes = "bytes" })
+            client:send({
+                url = url("/nowhere-to-put-it"),
+                into = http.DataStream.ofString("not a destination"),
+            })
+        end)
+    end)
+
+    -- The loop's half. A game builds a client and sends a request; nothing in
+    -- a frame belongs to it and nothing in a frame is written by hand. What
+    -- `tecs.Application` calls each iteration is `clients.pump`, so that is
+    -- what these drive, and `client:pump` is never touched.
+    describe("the list a frame turns", function()
+        it("pumps a client the game only built, without the game asking", function()
+            local pending = client:send({ url = url("/unattended") })
+            assert.are.equal("pending", pending.status)
+
+            for turn = 1, 2000 do
+                -- The one call an application makes. Note what is absent.
+                http.clients.pump()
+                server:poll(turn * 0.05, function()
+                    server:respond(200, "OK", BODY, "text/plain")
+                end)
+                if pending.status ~= "pending" then
+                    break
+                end
+                sdl.C.SDL_Delay(1)
+            end
+
+            assert.are.equal("ready", pending.status)
+            assert.are.equal(BODY, pending.value.body:text())
+        end)
+
+        it("stops turning a client once it is closed", function()
+            -- Closing is what ends a client's place in a frame; dropping the
+            -- last reference to one deliberately does not, or a request nobody
+            -- kept would stop moving whenever a collection happened to run.
+            local before = http.clients.count()
+            local extra = http.client({ userAgent = "tecs-spec/1.0" })
+            assert.are.equal(before + 1, http.clients.count())
+
+            local pending = extra:send({ url = silentUrl("/never-answered") })
+            extra:close()
+            assert.are.equal(before, http.clients.count())
+            assert.are.equal("cancelled", pending.status)
+
+            -- And the list turns without it rather than reaching a closed
+            -- client, which is what a stale entry would look like.
+            assert.are.equal(0, http.clients.pump())
         end)
     end)
 end)
