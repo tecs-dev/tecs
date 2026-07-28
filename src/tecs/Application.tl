@@ -58,14 +58,16 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local time <const> = require("tecs.platform.time")
 local events <const> = require("tecs.platform.events")
-local Input <const> = require("tecs.platform.Input")
+local input <const> = require("tecs.platform.input")
+local type Input = input.Input
 local Window <const> = require("tecs.platform.Window")
 local Device <const> = require("tecs.gpu.Device")
 local Frame <const> = require("tecs.gpu.Frame")
 local passscope <const> = require("tecs.gpu.passscope")
 local Renderer <const> = require("tecs.Renderer")
 local type Deferred = require("tecs.gpu.Deferred")
-local Audio <const> = require("tecs.Audio")
+local audio <const> = require("tecs.audio")
+local type Audio = audio.Audio
 local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local filesystem <const> = require("tecs.platform.filesystem")
@@ -407,9 +409,9 @@ function Application:_recover()
     -- latched, so every later query would answer from the latched sets rather
     -- than the frame's. The engine enters and leaves that phase twice a frame
     -- through the same call, so this is the ordinary way out taken late.
-    local input = self.input
-    if input ~= nil then
-        input:exitFixedPhase()
+    local held = self.input
+    if held ~= nil then
+        held:exitFixedPhase()
     end
 
     timing.abandonInput()
@@ -609,7 +611,7 @@ function Application:_init(): boolean
 
     -- The window is what text input and the cursor modes act on, so input is
     -- created knowing it rather than being told later.
-    self.input = Input.newInput({window = self.window.handle})
+    self.input = input.newInput({window = self.window.handle})
     -- Passed through rather than validated here. `pipeline.new` is where a
     -- timestep of zero or a negative step count is refused, so there is one
     -- description of what is legal and it is the one the world enforces.
@@ -635,7 +637,7 @@ function Application:_init(): boolean
     -- Opened before the game's load, so a game may load a clip there. A
     -- machine with no output still gets an object: nothing here fails over
     -- the absence of a sound card.
-    self.audio = Audio.newAudio(config.audio)
+    self.audio = audio.newAudio(config.audio)
     self.audio:install(self.world)
 
     -- Tweening and sequencing are one plugin, and it belongs to the engine
@@ -655,16 +657,16 @@ function Application:_init(): boolean
     -- Latched input is what lets a fixed step see a press that began and ended
     -- between two steps. Bracketing the fixed phases is the whole mechanism,
     -- so the engine installs it rather than leaving it to the game.
-    local input = self.input
+    local held = self.input
     self.world:addSystem({
         name = "tecs.EnterFixedInput",
         phase = ecs.phases.FixedFirst,
-        run = function() input:enterFixedPhase() end,
+        run = function() held:enterFixedPhase() end,
     })
     self.world:addSystem({
         name = "tecs.ExitFixedInput",
         phase = ecs.phases.FixedLast,
-        run = function() input:exitFixedPhase() end,
+        run = function() held:exitFixedPhase() end,
     })
 
     -- The debug tools carry the reloads, and both the server and the file

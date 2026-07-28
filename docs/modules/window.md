@@ -487,6 +487,7 @@ Every function and type this module carries, rendered from `src/tecs/platform/Wi
 </code></pre>
 
 One video mode a display can be put into.
+
 <a id="tecs.window.Window.DisplayMode.display"></a>
 
 ### tecs.window.Window.DisplayMode.display
@@ -495,6 +496,7 @@ One video mode a display can be put into.
 </code></pre>
 
 Display this mode belongs to.
+
 <a id="tecs.window.Window.DisplayMode.width"></a>
 
 ### tecs.window.Window.DisplayMode.width
@@ -503,6 +505,7 @@ Display this mode belongs to.
 </code></pre>
 
 Size in screen coordinates. Multiply by `pixelDensity` for pixels.
+
 <a id="tecs.window.Window.DisplayMode.height"></a>
 
 ### tecs.window.Window.DisplayMode.height
@@ -519,6 +522,7 @@ Size in screen coordinates. Multiply by `pixelDensity` for pixels.
 
 Screen coordinates to pixels, so a 1920 by 1080 mode at 2.0 draws
 3840 by 2160.
+
 <a id="tecs.window.Window.DisplayMode.refreshRate"></a>
 
 ### tecs.window.Window.DisplayMode.refreshRate
@@ -527,6 +531,7 @@ Screen coordinates to pixels, so a 1920 by 1080 mode at 2.0 draws
 </code></pre>
 
 Refreshes per second, or 0 where the platform will not say.
+
 <a id="tecs.window.Window.Flash"></a>
 
 ### tecs.window.Window.Flash
@@ -535,21 +540,25 @@ Refreshes per second, or 0 where the platform will not say.
 </code></pre>
 
 How hard to ask for attention.
+
 <a id="tecs.window.Window.Flash.&quot;brief&quot;"></a>
 
 ### tecs.window.Window.Flash.&quot;brief&quot;
 
 One flash, whether or not anybody was looking.
+
 <a id="tecs.window.Window.Flash.&quot;cancel&quot;"></a>
 
 ### tecs.window.Window.Flash.&quot;cancel&quot;
 
 Stops a flash already running.
+
 <a id="tecs.window.Window.Flash.&quot;untilFocused&quot;"></a>
 
 ### tecs.window.Window.Flash.&quot;untilFocused&quot;
 
 Keeps flashing until the window is focused.
+
 <a id="tecs.window.Window.Options"></a>
 
 ### tecs.window.Window.Options
@@ -558,6 +567,7 @@ Keeps flashing until the window is focused.
 </code></pre>
 
 What `newWindow` takes. Every field is optional.
+
 <a id="tecs.window.Window.Options.title"></a>
 
 ### tecs.window.Window.Options.title
@@ -566,6 +576,7 @@ What `newWindow` takes. Every field is optional.
 </code></pre>
 
 Defaults to "tecs".
+
 <a id="tecs.window.Window.Options.width"></a>
 
 ### tecs.window.Window.Options.width
@@ -575,6 +586,7 @@ Defaults to "tecs".
 
 Size in screen coordinates, not pixels: on a high-density display
 the drawable is larger. Defaults to 1280 by 720.
+
 <a id="tecs.window.Window.Options.height"></a>
 
 ### tecs.window.Window.Options.height
@@ -591,6 +603,7 @@ the drawable is larger. Defaults to 1280 by 720.
 
 Defaults to true, so omitting it gives a resizable window. Only an
 explicit false turns it off.
+
 <a id="tecs.window.Window.Options.highPixelDensity"></a>
 
 ### tecs.window.Window.Options.highPixelDensity
@@ -601,6 +614,7 @@ explicit false turns it off.
 Whether the drawable follows the display's density instead of being
 stretched to it. Defaults to true, on the same terms, which is what
 makes `getPixelSize` differ from `getSize`.
+
 <a id="tecs.window.Window.Options.fullscreen"></a>
 
 ### tecs.window.Window.Options.fullscreen
@@ -610,6 +624,7 @@ makes `getPixelSize` differ from `getSize`.
 
 Starts fullscreen on whichever display the window manager picks.
 Defaults to false.
+
 <a id="tecs.window.Window.Options.borderless"></a>
 
 ### tecs.window.Window.Options.borderless
@@ -618,6 +633,7 @@ Defaults to false.
 </code></pre>
 
 Drops the title bar and the frame. Defaults to false.
+
 <a id="tecs.window.Window.Options.hidden"></a>
 
 ### tecs.window.Window.Options.hidden
@@ -628,6 +644,7 @@ Drops the title bar and the frame. Defaults to false.
 Creates the window without mapping it, so nothing is shown until
 `show` is called. Defaults to false, and is what a game that wants
 to place and size the window before it is first seen sets.
+
 <a id="tecs.window.Window.Options.alwaysOnTop"></a>
 
 ### tecs.window.Window.Options.alwaysOnTop
@@ -636,6 +653,7 @@ to place and size the window before it is first seen sets.
 </code></pre>
 
 Keeps the window above others. Defaults to false.
+
 <a id="tecs.window.Window.Options.transparent"></a>
 
 ### tecs.window.Window.Options.transparent
@@ -646,6 +664,7 @@ Keeps the window above others. Defaults to false.
 Asks for a window whose buffer has an alpha channel the desktop
 composites against. Defaults to false, and is refused outright on a
 platform that cannot do it.
+
 <a id="tecs.window.Window.Options.x"></a>
 
 ### tecs.window.Window.Options.x
@@ -655,6 +674,7 @@ platform that cannot do it.
 
 Position in screen coordinates. Both are needed for either to
 apply; left unset, the window manager places the window.
+
 <a id="tecs.window.Window.Options.y"></a>
 
 ### tecs.window.Window.Options.y
@@ -670,6 +690,7 @@ apply; left unset, the window manager places the window.
 </code></pre>
 
 Size limits, applied after creation. Each pair is needed together.
+
 <a id="tecs.window.Window.Options.minHeight"></a>
 
 ### tecs.window.Window.Options.minHeight
@@ -701,6 +722,7 @@ Size limits, applied after creation. Each pair is needed together.
 Image file the window is shown as. Decoded once, here, rather than
 going through the asset system, which decodes on a worker and
 answers with a GPU texture.
+
 <a id="tecs.window.Window.Orientation"></a>
 
 ### tecs.window.Window.Orientation
@@ -709,6 +731,7 @@ answers with a GPU texture.
 </code></pre>
 
 How a display is rotated relative to its natural orientation.
+
 <a id="tecs.window.Window.Orientation.&quot;landscape&quot;"></a>
 
 ### tecs.window.Window.Orientation.&quot;landscape&quot;
@@ -737,21 +760,25 @@ How a display is rotated relative to its natural orientation.
 </code></pre>
 
 What the taskbar or dock shows over this application's icon.
+
 <a id="tecs.window.Window.Progress.&quot;error&quot;"></a>
 
 ### tecs.window.Window.Progress.&quot;error&quot;
 
 Work stopped because it failed.
+
 <a id="tecs.window.Window.Progress.&quot;indeterminate&quot;"></a>
 
 ### tecs.window.Window.Progress.&quot;indeterminate&quot;
 
 Work is happening and its extent is not known.
+
 <a id="tecs.window.Window.Progress.&quot;none&quot;"></a>
 
 ### tecs.window.Window.Progress.&quot;none&quot;
 
 Nothing shown, which is where a window starts.
+
 <a id="tecs.window.Window.Progress.&quot;normal&quot;"></a>
 
 ### tecs.window.Window.Progress.&quot;normal&quot;
@@ -768,6 +795,7 @@ Nothing shown, which is where a window starts.
 </code></pre>
 
 What the desktop asks applications to look like.
+
 <a id="tecs.window.Window.Theme.&quot;dark&quot;"></a>
 
 ### tecs.window.Window.Theme.&quot;dark&quot;
@@ -1237,6 +1265,7 @@ target is sized to.
 
 The `SDL_Window`. Nil once `destroy` has run, and what a device claims
 for presentation.
+
 <a id="tecs.window.Window.hasFocus"></a>
 
 ### tecs.window.Window.hasFocus
@@ -2528,6 +2557,7 @@ video.
 </code></pre>
 
 The title last set, kept so reading it back does not cross the FFI.
+
 <a id="tecs.window.Window.usableBounds"></a>
 
 ### tecs.window.Window.usableBounds

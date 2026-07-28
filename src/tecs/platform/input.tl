@@ -35,6 +35,7 @@ local inputstate <const> = require("tecs.platform.inputstate")
 local inputbackend <const> = require("tecs.platform.inputbackend")
 local adapter <const> = require("tecs.platform.adapter")
 local Gamepad <const> = require("tecs.platform.Gamepad")
+local sensors <const> = require("tecs.platform.sensors")
 local loader <const> = require("tecs.ffi.loader")
 
 local type Layer = inputstate.Layer
@@ -93,154 +94,226 @@ local record InputOptions
     backend: Backend
 end
 
-local record Input
+--- What a player does, and the devices they do it with: gameplay input in
+--- three tiers behind a layer stack, the pads attached to it, and the
+--- standalone sensors a device carries.
+---
+--- One module because they are one question asked of three sources, and
+--- because the layer stack answers all three: a pad's buttons are gated by the
+--- same stack a keyboard's keys are, so `Input` and `Gamepad` cannot be reached
+--- from different places without the gate looking like a property of one of
+--- them. Platform events stay separate under `tecs.events`, since that stream
+--- also carries lifecycle, window, display and device arrival.
+local record input
+    --- Gameplay input, folded once a frame and read in three tiers: live
+    --- state, frame events and the latched sets a fixed step reads.
+    record Input
+        --- A position in the layer stack, from `pushLayer`.
+        Layer: Layer
+        --- One finger on the touch surface, as `touches` reports it.
+        Touch: Touch
+        --- Where edited text sits, for `setTextInputArea`.
+        TextArea: TextArea
+        --- What `startTextInput` takes besides a layer.
+        TextOptions: TextOptions
+        --- What `newInput` takes.
+        Options: InputOptions
+
+        --- Mouse position in window coordinates, from the top-left. The last
+        --- position reported, so it persists across frames that saw no motion.
+        mouseX: number
+        mouseY: number
+        --- Mouse motion accumulated this frame, summed over every motion event and
+        --- cleared by `beginFrame`. Under relative mouse mode this is the whole of
+        --- what the mouse said, since the position stops moving.
+        mouseDeltaX: number
+        mouseDeltaY: number
+        --- Wheel movement accumulated this frame, in the platform's own notches
+        --- rather than pixels. Cleared by `beginFrame`.
+        ---
+        --- One sign whatever the machine is set to: positive `wheelY` is a scroll
+        --- away from the player, positive `wheelX` a scroll to the right. A
+        --- platform with natural scrolling on reports the opposite pair and says
+        --- so, and the conversion in `events` puts it back, so a binding written
+        --- against these fields does not invert on somebody else's desk.
+        wheelX: number
+        wheelY: number
+        --- The same movement accumulated to whole notches by the platform, on the
+        --- same sign convention and cleared by `beginFrame` alongside the pair
+        --- above. What a menu stepping one item per notch reads, rather than
+        --- picking its own threshold on the fractional pair.
+        wheelTicksX: integer
+        wheelTicksY: integer
+        --- Device that produced the most recent mouse button, motion or wheel
+        --- event.
+        mouseWhich: number
+        --- Whether that event was the platform's own translation of a touch or a
+        --- pen. A game that handles touch itself reads this and ignores the
+        --- duplicate rather than acting on one gesture twice.
+        mouseSynthetic: boolean
+
+        --- Text committed this frame, from the text input events. Empty when
+        --- nothing was typed, so it can be appended without a nil check.
+        text: string
+        --- Text an input method is composing and has not committed. Empty when
+        --- nothing is being composed. A field is drawn as its own content plus
+        --- this, so the player sees what they are typing before it commits.
+        composition: string
+        --- Caret offset and selection length within `composition`, in the units
+        --- the platform counts it in. Both zero when nothing is being composed.
+        compositionStart: integer
+        compositionLength: integer
+
+        --- Pen position in window coordinates, from the top-left.
+        penX: number
+        penY: number
+        --- How hard the pen is pressed, in 0..1. Zero until the pen reports it,
+        --- and on a pen that measures no pressure it stays there.
+        penPressure: number
+        --- How far the pen leans from upright, in degrees, negative towards the
+        --- left and towards the top of the surface. Both zero on a pen that does
+        --- not report tilt.
+        penTiltX: number
+        penTiltY: number
+        --- Barrel rotation in degrees clockwise, for a pen with a chisel nib. Zero
+        --- on a pen that does not report it.
+        penRotation: number
+        --- Whether the pen is touching the surface. Cleared when the pen leaves
+        --- proximity, since a pen carried away never reports lifting.
+        penTouching: boolean
+        --- Whether the end in use is the eraser. Read at the moment the pen went
+        --- down, so it describes the current stroke.
+        penEraser: boolean
+        --- Pen the state describes, or nil when no pen has been seen. One pen's
+        --- state is kept, not one per device: a second pen overwrites the first.
+        penWhich: number
+
+        _gate: Gate
+        _keys: Buttons
+        _mouse: Buttons
+        --- Modifier mask from the most recent key event, cleared on focus loss
+        --- since the platform reports no key-up for a modifier released elsewhere.
+        _modifiers: integer
+        --- Fingers down, keyed by device and finger together, since a finger id is
+        --- only unique within its device.
+        _touches: {string: Touch}
+        --- The list `touches` hands back, reused rather than rebuilt.
+        _touchList: {Touch}
+        --- Pads by platform instance id, for routing an event to one.
+        _pads: {number: Gamepad}
+        --- The same pads in connection order, for iterating and for `gamepads`.
+        _padList: {Gamepad}
+        --- Scancodes already resolved from a name, since a binding screen asks for
+        --- the same names every frame.
+        _scancodes: {string: integer}
+        --- Platform numbers of the pen axes folded into fields above, resolved
+        --- once so an axis event costs comparisons rather than lookups.
+        _penPressureAxis: integer
+        _penTiltXAxis: integer
+        _penTiltYAxis: integer
+        _penRotationAxis: integer
+        _backend: Backend
+        --- The window text input and the cursor modes act on. Nil in a headless
+        --- test, where those commands report failure instead.
+        _window: loader.CPtr
+        --- System cursor this input state owns, or nil while using the platform
+        --- default.
+        _cursor: loader.CPtr
+        --- Layer the text-input session belongs to, or nil when none is running.
+        --- Popping that layer stops the session, so a menu takes its IME and its
+        --- on-screen keyboard with it.
+        _textLayer: Layer
+        --- Whether this state started a session, which is separate from whether it
+        --- named a layer: a session started without one runs until it is stopped
+        --- by hand.
+        _textStarted: boolean
+
+        --- Stops text input and clears whatever was being composed.
+        ---
+        --- Declared here because the layer stack and the shutdown path both stop a
+        --- session, and both read better above where text input is defined.
+        ---
+        --- @return False when no session was running, in which case the composition
+        ---     state is cleared anyway, so this is safe to call unconditionally on
+        ---     a teardown path.
+        stopTextInput: function(self: Input): boolean
+
+        --- Moves the area a running text session reports, for a field that scrolls
+        --- or a caret that moved since `startTextInput` was given one.
+        ---
+        --- @param area Read here and not retained, so a later edit to the same
+        ---     table has no effect until this is called again.
+        --- @return Whatever the platform answered. False is not worth acting on:
+        ---     the area is a hint, and text input keeps working without it.
+        setTextInputArea: function(self: Input, area: TextArea): boolean
+    end
+
+    --- One attached gamepad, which answers for itself: it has identity, a
+    --- lifetime, metadata and outputs, so it is a class rather than a reading
+    --- off the state above.
+    Gamepad: Gamepad
+
     --- A position in the layer stack, from `pushLayer`.
-    Layer: Layer
+    type Layer = Layer
     --- One finger on the touch surface, as `touches` reports it.
-    Touch: Touch
+    type Touch = Touch
     --- Where edited text sits, for `setTextInputArea`.
-    TextArea: TextArea
+    type TextArea = TextArea
     --- What `startTextInput` takes besides a layer.
-    TextOptions: TextOptions
-    --- What `create` takes.
-    Options: InputOptions
+    type TextOptions = TextOptions
+    --- What `newInput` takes.
+    type Options = InputOptions
+    --- One finger on a pad's touchpad.
+    type TouchpadFinger = Gamepad.TouchpadFinger
 
-    --- Mouse position in window coordinates, from the top-left. The last
-    --- position reported, so it persists across frames that saw no motion.
-    mouseX: number
-    mouseY: number
-    --- Mouse motion accumulated this frame, summed over every motion event and
-    --- cleared by `beginFrame`. Under relative mouse mode this is the whole of
-    --- what the mouse said, since the position stops moving.
-    mouseDeltaX: number
-    mouseDeltaY: number
-    --- Wheel movement accumulated this frame, in the platform's own notches
-    --- rather than pixels. Cleared by `beginFrame`.
+    --- An opened standalone sensor, read by polling.
+    type Sensor = sensors.Sensor
+
+    --- A standalone sensor the platform reports, before it is opened. Named
+    --- for what it is rather than `Device`, which on a module that also holds
+    --- gamepads would name two things.
+    type SensorDevice = sensors.Device
+
+    --- Builds the input state a game reads, with a single base layer.
     ---
-    --- One sign whatever the machine is set to: positive `wheelY` is a scroll
-    --- away from the player, positive `wheelX` a scroll to the right. A
-    --- platform with natural scrolling on reports the opposite pair and says
-    --- so, and the conversion in `events` puts it back, so a binding written
-    --- against these fields does not invert on somebody else's desk.
-    wheelX: number
-    wheelY: number
-    --- The same movement accumulated to whole notches by the platform, on the
-    --- same sign convention and cleared by `beginFrame` alongside the pair
-    --- above. What a menu stepping one item per notch reads, rather than
-    --- picking its own threshold on the fractional pair.
-    wheelTicksX: integer
-    wheelTicksY: integer
-    --- Device that produced the most recent mouse button, motion or wheel
-    --- event.
-    mouseWhich: number
-    --- Whether that event was the platform's own translation of a touch or a
-    --- pen. A game that handles touch itself reads this and ignores the
-    --- duplicate rather than acting on one gesture twice.
-    mouseSynthetic: boolean
-
-    --- Text committed this frame, from the text input events. Empty when
-    --- nothing was typed, so it can be appended without a nil check.
-    text: string
-    --- Text an input method is composing and has not committed. Empty when
-    --- nothing is being composed. A field is drawn as its own content plus
-    --- this, so the player sees what they are typing before it commits.
-    composition: string
-    --- Caret offset and selection length within `composition`, in the units
-    --- the platform counts it in. Both zero when nothing is being composed.
-    compositionStart: integer
-    compositionLength: integer
-
-    --- Pen position in window coordinates, from the top-left.
-    penX: number
-    penY: number
-    --- How hard the pen is pressed, in 0..1. Zero until the pen reports it,
-    --- and on a pen that measures no pressure it stays there.
-    penPressure: number
-    --- How far the pen leans from upright, in degrees, negative towards the
-    --- left and towards the top of the surface. Both zero on a pen that does
-    --- not report tilt.
-    penTiltX: number
-    penTiltY: number
-    --- Barrel rotation in degrees clockwise, for a pen with a chisel nib. Zero
-    --- on a pen that does not report it.
-    penRotation: number
-    --- Whether the pen is touching the surface. Cleared when the pen leaves
-    --- proximity, since a pen carried away never reports lifting.
-    penTouching: boolean
-    --- Whether the end in use is the eraser. Read at the moment the pen went
-    --- down, so it describes the current stroke.
-    penEraser: boolean
-    --- Pen the state describes, or nil when no pen has been seen. One pen's
-    --- state is kept, not one per device: a second pen overwrites the first.
-    penWhich: number
-
-    _gate: Gate
-    _keys: Buttons
-    _mouse: Buttons
-    --- Modifier mask from the most recent key event, cleared on focus loss
-    --- since the platform reports no key-up for a modifier released elsewhere.
-    _modifiers: integer
-    --- Fingers down, keyed by device and finger together, since a finger id is
-    --- only unique within its device.
-    _touches: {string: Touch}
-    --- The list `touches` hands back, reused rather than rebuilt.
-    _touchList: {Touch}
-    --- Pads by platform instance id, for routing an event to one.
-    _pads: {number: Gamepad}
-    --- The same pads in connection order, for iterating and for `gamepads`.
-    _padList: {Gamepad}
-    --- Scancodes already resolved from a name, since a binding screen asks for
-    --- the same names every frame.
-    _scancodes: {string: integer}
-    --- Platform numbers of the pen axes folded into fields above, resolved
-    --- once so an axis event costs comparisons rather than lookups.
-    _penPressureAxis: integer
-    _penTiltXAxis: integer
-    _penTiltYAxis: integer
-    _penRotationAxis: integer
-    _backend: Backend
-    --- The window text input and the cursor modes act on. Nil in a headless
-    --- test, where those commands report failure instead.
-    _window: loader.CPtr
-    --- System cursor this input state owns, or nil while using the platform
-    --- default.
-    _cursor: loader.CPtr
-    --- Layer the text-input session belongs to, or nil when none is running.
-    --- Popping that layer stops the session, so a menu takes its IME and its
-    --- on-screen keyboard with it.
-    _textLayer: Layer
-    --- Whether this state started a session, which is separate from whether it
-    --- named a layer: a session started without one runs until it is stopped
-    --- by hand.
-    _textStarted: boolean
-
-    --- Stops text input and clears whatever was being composed.
+    --- Holds no devices yet. `refreshDevices` opens the pads already attached,
+    --- and everything after that arrives as events.
     ---
-    --- Declared here because the layer stack and the shutdown path both stop a
-    --- session, and both read better above where text input is defined.
-    ---
-    --- @return False when no session was running, in which case the composition
-    ---     state is cleared anyway, so this is safe to call unconditionally on
-    ---     a teardown path.
-    stopTextInput: function(self: Input): boolean
+    --- @param options Omitted opens against no window, which is what a
+    ---     headless tool or a spec wants: keys and pads still fold, and
+    ---     anything asking about a window answers as if there is none.
+    --- @return The state. One per application; the application builds its own
+    ---     and a second is only for a test.
+    newInput: function(options?: InputOptions): Input
 
-    --- Moves the area a running text session reports, for a field that scrolls
-    --- or a caret that moved since `startTextInput` was given one.
+    --- Standalone sensors attached now, in platform order.
     ---
-    --- @param area Read here and not retained, so a later edit to the same
-    ---     table has no effect until this is called again.
-    --- @return Whatever the platform answered. False is not worth acting on:
-    ---     the area is a hint, and text input keeps working without it.
-    setTextInputArea: function(self: Input, area: TextArea): boolean
+    --- A snapshot rather than a subscription: a sensor unplugged after this
+    --- leaves an id `openSensor` refuses. Gamepad sensors are not here, since
+    --- their identity and event routing live on the pad.
+    ---
+    --- @return The sensors, listed afresh each call and the caller's to keep.
+    ---     Empty rather than nil when the subsystem cannot start, and most
+    ---     desktop machines genuinely have none.
+    --- @return SDL's reason, when something went wrong.
+    sensors: function(): {sensors.Device}, string
+
+    --- Opens an attached standalone sensor by instance id.
+    ---
+    --- @param id An instance id from `sensors`. An id names a device while it
+    ---     stays attached rather than a slot, so one kept across an unplug does
+    ---     not come back to the same sensor.
+    --- @return The open sensor, whose closing is the caller's through
+    ---     `destroy`. Nil on failure, and nothing is left open in that case.
+    --- @return The reason, when the first return is nil.
+    openSensor: function(id: number): sensors.Sensor, string
 end
+
+local type Input = input.Input
 
 local InputMT <const>: metatable<Input> = {__index = Input}
 
---- Creates an input state with a single base layer.
----
---- Holds no devices yet. `refreshDevices` opens the pads that are already
---- attached, and everything after that arrives as events.
-function Input.newInput(options?: InputOptions): Input
+function input.newInput(options?: InputOptions): Input
     local given = options or {} as InputOptions
     local self = setmetatable({} as Input, InputMT)
     self._gate = inputstate.Gate.create()
@@ -979,4 +1052,12 @@ function Input:screenKeyboardSupported(): boolean
     return self._backend.screenKeyboardSupported()
 end
 
-return Input
+input.Gamepad = Gamepad
+
+-- The standalone sensors, under this module's public names. `sensors.tl` is
+-- the seam and reaches only SDL; `tecs.input` is the surface, the way
+-- `tecs.filesystem` publishes what `platform/content.tl` holds.
+input.sensors = sensors.sensors
+input.openSensor = sensors.openSensor
+
+return input

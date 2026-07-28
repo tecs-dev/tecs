@@ -211,7 +211,7 @@ local REACH = {
             .. "platform question. Where those bytes come from is the storage "
             .. "seam's business and is declared separately below.",
         modules = {
-            "tecs/Audio.lua",
+            "tecs/audio.lua",
             "tecs/assets.lua",
             "tecs/gfx/screenshot.lua",
             "tecs/mcp/tools.lua",

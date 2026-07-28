@@ -79,7 +79,7 @@ MODULES = [
     ("docs/modules/assets.md", [("src/tecs/assets.tl", "tecs.assets")]),
     (
         "docs/modules/audio.md",
-        [("src/tecs/Audio.tl", "tecs.audio.Audio"), ("src/tecs/platform/audio.tl", "tecs.audio")],
+        [("src/tecs/audio.tl", "tecs.audio"), ("src/tecs/platform/audio.tl", "tecs.audio")],
     ),
     ("docs/modules/data.md", [("src/tecs/data.tl", "tecs.data")]),
     ("docs/modules/events.md", [("src/tecs/platform/events.tl", "tecs.events")]),
@@ -101,7 +101,7 @@ MODULES = [
     (
         "docs/modules/input.md",
         [
-            ("src/tecs/platform/Input.tl", "tecs.input.Input"),
+            ("src/tecs/platform/input.tl", "tecs.input"),
             ("src/tecs/platform/Gamepad.tl", "tecs.input.Gamepad"),
             ("src/tecs/platform/sensors.tl", "tecs.input"),
         ],
@@ -151,8 +151,13 @@ def escapeBraces(line: str) -> str:
     return "".join(out)
 
 
-def render(source: str, public: str, scratch: pathlib.Path) -> str:
-    """tealdoc's output for one source file, as one part of a page's section."""
+def render(source: str, public: str, scratch: pathlib.Path) -> list[tuple[str, str]]:
+    """tealdoc's items for one source file, each keyed by the name it documents.
+
+    Keyed rather than concatenated because a page may render a module and the
+    seam it publishes, and the module's record re-exports the seam's names. Two
+    blocks then describe one name, and only one of them is the declaration.
+    """
     raw = scratch / "raw.md"
     subprocess.run(
         [str(TEALDOC), "md", "--no-warn-missing", "-o", str(raw), source],
@@ -180,7 +185,7 @@ def render(source: str, public: str, scratch: pathlib.Path) -> str:
     if current:
         blocks.append((name, current))
 
-    kept: list[str] = []
+    kept: list[tuple[str, str]] = []
     for name, block in blocks:
         if name in (module, "$" + module):
             continue
@@ -189,16 +194,15 @@ def render(source: str, public: str, scratch: pathlib.Path) -> str:
         member = name[len(module) + 1 :] if name.startswith(module + ".") else name
         if any(part.startswith("_") for part in member.split(".")):
             continue
-        kept.extend(block)
-
-    body = "\n".join(kept)
-    body = body.replace(module + ".", public + ".")
-    # One `##` per item floods a page's outline, so items sit under the section
-    # heading rather than beside it. Their parameter and return tables are
-    # already `####`, which lands under them.
-    body = re.sub(r"^## ", "### ", body, flags=re.M)
-    body = "\n".join(escapeBraces(line) for line in body.splitlines())
-    return body.strip("\n")
+        body = "\n".join(block)
+        body = body.replace(module + ".", public + ".")
+        # One `##` per item floods a page's outline, so items sit under the
+        # section heading rather than beside it. Their parameter and return
+        # tables are already `####`, which lands under them.
+        body = re.sub(r"^## ", "### ", body, flags=re.M)
+        body = "\n".join(escapeBraces(line) for line in body.splitlines())
+        kept.append((name.replace(module + ".", public + ".", 1), body.strip("\n")))
+    return kept
 
 
 def sentence(sources: list[str]) -> str:
@@ -215,7 +219,15 @@ def compose(page: pathlib.Path, sources: list[tuple[str, str]], scratch: pathlib
     match = MARKER_PATTERN.search(text)
     prose = text[: match.start()] if match else text
     named = sentence([source for source, _ in sources])
-    body = "\n\n".join(render(source, public, scratch) for source, public in sources)
+    # One block per name, and the last source to document a name wins. A module
+    # that publishes a seam re-exports the seam's names as one-line aliases, and
+    # the seam is listed after it precisely so its own declaration is what the
+    # page carries: an alias says nothing a reader cannot get from the type.
+    items: dict[str, str] = {}
+    for source, public in sources:
+        for name, block in render(source, public, scratch):
+            items[name] = block
+    body = "\n\n".join(items.values())
     return "%s\n%s\n\n%s\n\n%s\n" % (
         prose.rstrip("\n"),
         MARKER.format(sources=", ".join(source for source, _ in sources)),

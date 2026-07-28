@@ -363,6 +363,7 @@ Every function and type this module carries, rendered from `src/tecs/platform/ev
 
 One event, discriminated by `kind`. The record handed to a handler is
 reused, so anything retaining one takes a copy through `events.copy`.
+
 <a id="tecs.events.copy"></a>
 
 ### tecs.events.copy
@@ -462,6 +463,7 @@ Every kind this build recognizes, for tooling that enumerates them.
 
 One ECS event type per kind, to observe at address zero. See
 `KindTypes`.
+
 <a id="tecs.events.push"></a>
 
 ### tecs.events.push

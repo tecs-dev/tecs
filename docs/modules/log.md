@@ -253,6 +253,7 @@ Every function and type this module carries, rendered from `src/tecs/log.tl`.
 </code></pre>
 
 See `TRACE`. The highest, so setting a level to this emits almost nothing.
+
 <a id="tecs.log.DEBUG"></a>
 
 ### tecs.log.DEBUG
@@ -261,6 +262,7 @@ See `TRACE`. The highest, so setting a level to this emits almost nothing.
 </code></pre>
 
 See `TRACE`.
+
 <a id="tecs.log.ERROR"></a>
 
 ### tecs.log.ERROR
@@ -269,6 +271,7 @@ See `TRACE`.
 </code></pre>
 
 See `TRACE`.
+
 <a id="tecs.log.INFO"></a>
 
 ### tecs.log.INFO
@@ -277,6 +280,7 @@ See `TRACE`.
 </code></pre>
 
 See `TRACE`.
+
 <a id="tecs.log.Logger"></a>
 
 ### tecs.log.Logger
@@ -286,6 +290,7 @@ See `TRACE`.
 
 A named category. Holds its SDL category number and nothing else; the
 level lives in SDL.
+
 <a id="tecs.log.Logger.name"></a>
 
 ### tecs.log.Logger.name
@@ -295,6 +300,7 @@ level lives in SDL.
 
 The name it was registered under. The native sink writes this rather than the
 number, so it is what appears in the platform's log.
+
 <a id="tecs.log.Logger.category"></a>
 
 ### tecs.log.Logger.category
@@ -306,6 +312,7 @@ Its SDL category, and the argument `SDL_SetLogPriority` takes. Handed out in
 registration order from `SDL_LOG_CATEGORY_CUSTOM` upwards, so a number is
 stable within a run and is not stable across runs that register in a different
 order. Filter by name.
+
 <a id="tecs.log.Logger.setLevel"></a>
 
 ### tecs.log.Logger.setLevel
@@ -500,6 +507,7 @@ At `CRITICAL`. See `trace` for the formatting rules.
 </code></pre>
 
 Priority values, as SDL numbers them.
+
 <a id="tecs.log.VERBOSE"></a>
 
 ### tecs.log.VERBOSE
@@ -508,6 +516,7 @@ Priority values, as SDL numbers them.
 </code></pre>
 
 See `TRACE`.
+
 <a id="tecs.log.WARN"></a>
 
 ### tecs.log.WARN
@@ -516,6 +525,7 @@ See `TRACE`.
 </code></pre>
 
 See `TRACE`.
+
 <a id="tecs.log.categoryName"></a>
 
 ### tecs.log.categoryName
@@ -548,6 +558,7 @@ Stops writing to the file and restores SDL's own output function.
 
 Does nothing when no file is open, so it is safe to call on a shutdown path that does
 not know whether one was ever asked for.
+
 <a id="tecs.log.filePath"></a>
 
 ### tecs.log.filePath

@@ -409,6 +409,7 @@ to N milliseconds and hand over whatever arrived, which is the whole of
 what a future needs from the work behind it. An asset decode and a child
 process are a worker channel; an HTTP transfer is a curl multi handle,
 whose `curl_multi_poll` is the same shape.
+
 <a id="tecs.Future.Source.poll"></a>
 
 ### tecs.Future.Source.poll
@@ -466,6 +467,7 @@ longer than it is asked to.
 </code></pre>
 
 Milliseconds one `wait` slice blocks for. Optional; 16 by default.
+
 <a id="tecs.Future.Source.defaultWaitMs"></a>
 
 ### tecs.Future.Source.defaultWaitMs
@@ -477,6 +479,7 @@ Milliseconds `wait` spends when the caller names nothing. Optional;
 5000 by default. It lives here rather than on `wait` so a subprocess
 can keep a longer default than a decode without a second
 convention.
+
 <a id="tecs.Future.Source.cancel"></a>
 
 ### tecs.Future.Source.cancel
@@ -609,7 +612,8 @@ answer wins.
 <pre><code v-pre><a href="#tecs.Future.error">tecs.Future.error</a>: string
 </code></pre>
 
-Why it did not. Set on "failed" and on "canceled".
+Why it did not. Set on "failed" and on "cancelled".
+
 <a id="tecs.Future.fail"></a>
 
 ### tecs.Future.fail
@@ -838,7 +842,8 @@ A future already carrying a value.
 <pre><code v-pre><a href="#tecs.Future.status">tecs.Future.status</a>: string
 </code></pre>
 
-"pending", "ready", "failed", or "canceled".
+"pending", "ready", "failed", or "cancelled".
+
 <a id="tecs.Future.track"></a>
 
 ### tecs.Future.track
@@ -897,6 +902,7 @@ contract says a provider that cannot pause its work does not offer it.
 </code></pre>
 
 What settled. Valid only on "ready".
+
 <a id="tecs.Future.wait"></a>
 
 ### tecs.Future.wait

@@ -297,6 +297,7 @@ The window to open, as `Window.Options` describes it. Passed
 through whole rather than copied field by field, so everything a
 window can be created with is reachable from here and a field
 added there needs nothing added here.
+
 <a id="tecs.Application.Config.debug"></a>
 
 ### tecs.Application.Config.debug
@@ -311,6 +312,7 @@ file below is written without being asked for. It is also one of
 the three settings `clearCrash` looks at, beside `mcpPort` and
 `watch`, to decide whether resuming after a gameplay crash is
 something this build does at all.
+
 <a id="tecs.Application.Config.framesInFlight"></a>
 
 ### tecs.Application.Config.framesInFlight
@@ -340,6 +342,7 @@ lights is the first thing anyone builds and it should look like
 what it is: sprites at their own color, with lights adding on top
 of them. A game doing its own lighting turns this down to the
 level it wants the unlit parts of the scene to sit at.
+
 <a id="tecs.Application.Config.audio"></a>
 
 ### tecs.Application.Config.audio
@@ -349,6 +352,7 @@ level it wants the unlit parts of the scene to sit at.
 
 Sound output. Omitted takes the defaults, which open the
 platform's default device.
+
 <a id="tecs.Application.Config.logFile"></a>
 
 ### tecs.Application.Config.logFile
@@ -369,6 +373,7 @@ dispatches to a destination a human can read on every platform;
 see `log`. A shipped game that wants a crash log in the field
 names one here, since where a game writes user data is the game's
 decision and not the engine's.
+
 <a id="tecs.Application.Config.logLevel"></a>
 
 ### tecs.Application.Config.logLevel
@@ -384,6 +389,7 @@ Applies to every category, ours and SDL's, and it is set before
 anything here has had a chance to say something. Separate from
 `logFile` above, which decides durability rather than volume: a
 game wanting everything kept and little of it shown sets both.
+
 <a id="tecs.Application.Config.checkpoint"></a>
 
 ### tecs.Application.Config.checkpoint
@@ -397,6 +403,7 @@ Omitted means no checkpoint, and `stageCheckpoint` says so.
 
 See `Application:stageCheckpoint` for what a game has to do, which
 is the part that matters.
+
 <a id="tecs.Application.Config.mcpPort"></a>
 
 ### tecs.Application.Config.mcpPort
@@ -406,6 +413,7 @@ is the part that matters.
 
 Port for the MCP server. Omitted means no server, since a game
 should not open a socket nobody asked for.
+
 <a id="tecs.Application.Config.watch"></a>
 
 ### tecs.Application.Config.watch
@@ -417,6 +425,7 @@ Watches the content files this run has loaded and reloads them when
 they change. Omitted means no watcher, on the same footing as the
 server above: a poll of the filesystem is not something to start
 because a build happened to be able to. A release refuses it.
+
 <a id="tecs.Application.Config.capacity"></a>
 
 ### tecs.Application.Config.capacity
@@ -436,6 +445,7 @@ Sized independently of `maxEntities` beside it, because the two
 count different things: a world full of entities that carry no
 `Renderable` needs no instances at all, and one text entity needs
 one instance per character.
+
 <a id="tecs.Application.Config.timestep"></a>
 
 ### tecs.Application.Config.timestep
@@ -445,6 +455,7 @@ one instance per character.
 
 Seconds one fixed step covers. Must be greater than zero. Defaults
 to 1/60.
+
 <a id="tecs.Application.Config.fixedMaxSteps"></a>
 
 ### tecs.Application.Config.fixedMaxSteps
@@ -454,6 +465,7 @@ to 1/60.
 
 The most fixed steps one update runs before the overload policy
 applies. Must be a positive integer. Defaults to 10.
+
 <a id="tecs.Application.Config.fixedOverload"></a>
 
 ### tecs.Application.Config.fixedOverload
@@ -464,6 +476,7 @@ applies. Must be a positive integer. Defaults to 10.
 What becomes of the catch-up that did not fit. Defaults to "drop",
 which bounds a frame's work and reports the loss through
 `world:getStats`. "accumulate" keeps every second instead.
+
 <a id="tecs.Application.Config.maxEntities"></a>
 
 ### tecs.Application.Config.maxEntities
@@ -479,6 +492,7 @@ when the entity is despawned and reused by the next one. The arena
 is preallocated for this many, so it is a memory decision as much
 as a limit, and a game that knows its population sets it rather
 than paying for a million slots it will not use.
+
 <a id="tecs.Application.Config.reserveRuns"></a>
 
 ### tecs.Application.Config.reserveRuns
@@ -506,6 +520,7 @@ Not named for debugging, unlike `debugMaxFrames` below, because it
 is not a debugging setting: it is a tuning one, measured at 15.4x
 on a mixed-archetype spawner scene. A name with `debug` in it would
 warn off exactly the shipped games that should turn it on.
+
 <a id="tecs.Application.Config.packImages"></a>
 
 ### tecs.Application.Config.packImages
@@ -517,6 +532,7 @@ Fit many images into each layer of the renderer's image array
 rather than one. Defaults to false, where the ceiling on distinct
 images is the array's layer count and a small image costs a whole
 cell. On, the ceiling is the array's area instead.
+
 <a id="tecs.Application.Config.shadows"></a>
 
 ### tecs.Application.Config.shadows
@@ -529,6 +545,7 @@ default, means an `Occluder` or a `DropShadow` on an entity draws
 the entity and casts nothing, because the targets that would hold a
 shadow are never built. An empty table turns them on with every
 default; see `Deferred.ShadowOptions` for the seven numbers.
+
 <a id="tecs.Application.Config.debugMaxFrames"></a>
 
 ### tecs.Application.Config.debugMaxFrames
@@ -538,6 +555,7 @@ default; see `Deferred.ShadowOptions` for the seven numbers.
 
 Stops after this many iterations. Lets an automated run drive a
 real window to completion without a human closing it.
+
 <a id="tecs.Application.Config.plugin"></a>
 
 ### tecs.Application.Config.plugin
@@ -692,6 +710,7 @@ The gameplay traceback, or nil while the game is healthy.
 
 Seconds of simulated time, advanced by the frame dt so a replay
 reproduces it exactly.
+
 <a id="tecs.Application.frame"></a>
 
 ### tecs.Application.frame
@@ -700,6 +719,7 @@ reproduces it exactly.
 </code></pre>
 
 Iterations completed.
+
 <a id="tecs.Application.input"></a>
 
 ### tecs.Application.input
@@ -715,6 +735,7 @@ Iterations completed.
 </code></pre>
 
 The debug server, when one was asked for.
+
 <a id="tecs.Application.newApplication"></a>
 
 ### tecs.Application.newApplication
@@ -749,6 +770,7 @@ beside the world.
 </code></pre>
 
 Set to true to leave the loop at the end of the current iteration.
+
 <a id="tecs.Application.readCheckpoint"></a>
 
 ### tecs.Application.readCheckpoint
@@ -830,6 +852,7 @@ that will never be written is the one failure a game would not notice.
 
 True while the platform has the application in the background. The
 loop still runs, but simulation and rendering do not.
+
 <a id="tecs.Application.window"></a>
 
 ### tecs.Application.window

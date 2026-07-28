@@ -19,7 +19,8 @@ local shaders <const> = require("tecs.gpu.shaders")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local materials <const> = require("tecs.gpu.materials")
 local Renderer <const> = require("tecs.Renderer")
-local Audio <const> = require("tecs.Audio")
+local audio <const> = require("tecs.audio")
+local Audio <const> = audio.Audio
 local assets <const> = require("tecs.assets")
 local text <const> = require("tecs.gfx.text")
 
@@ -105,7 +106,7 @@ end
 --- The audio installed into the bound world, or an error naming why there is
 --- not one. Found through the world rather than bound separately, because the
 --- audio is what `Audio:install` attached to it and there is no second one.
-local function audio(): Audio
+local function mixer(): audio.Audio
     local found = Audio.of(world())
     if found == nil then
         error("no audio is installed on the bound world", 0)
@@ -452,7 +453,7 @@ mcp.register({
     readOnly = true,
     inputSchema = {type = "object", properties = data.empty_array},
     handler = function(_: {string: any}): {string: any}
-        local sound = audio()
+        local sound = mixer()
         -- What this build linked rather than what it asked for, which is the
         -- first thing a clip that will not load needs ruling out.
         local decoders = Audio.decoders()
@@ -624,7 +625,7 @@ function tools.reloadSound(path: string): boolean
     if path == nil or path == "" then
         error("path is required", 0)
     end
-    local sound = audio()
+    local sound = mixer()
     local reloaded, refused = sound:reload(path)
     if not reloaded then
         error(refused, 0)

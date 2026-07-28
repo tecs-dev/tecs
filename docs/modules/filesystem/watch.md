@@ -232,6 +232,7 @@ Every function and type this module carries, rendered from `src/tecs/platform/wa
 </code></pre>
 
 What a handler is told about.
+
 <a id="tecs.filesystem.watch.Change.path"></a>
 
 ### tecs.filesystem.watch.Change.path
@@ -253,6 +254,7 @@ image, was loaded as one, and reloads as one: its texels are
 replaced under the rect they already occupy and no glyph has to be
 told. The metrics are the half that decides what a glyph is, so they
 are the half with a font's rules over them.
+
 <a id="tecs.filesystem.watch.Config"></a>
 
 ### tecs.filesystem.watch.Config
@@ -268,6 +270,7 @@ are the half with a font's rules over them.
 </code></pre>
 
 Seconds between polls. Defaults to 0.5.
+
 <a id="tecs.filesystem.watch.Config.settle"></a>
 
 ### tecs.filesystem.watch.Config.settle
@@ -279,6 +282,7 @@ Polls a change must repeat before it is dispatched. Defaults to 1,
 so a change is seen twice. Zero dispatches the first time a file
 reads differently, which is what a test that writes whole files
 wants and what an editor that truncates will trip over.
+
 <a id="tecs.filesystem.watch.Config.root"></a>
 
 ### tecs.filesystem.watch.Config.root
@@ -289,6 +293,7 @@ wants and what an editor that truncates will trip over.
 Only paths under this prefix are watched. Defaults to the content
 root, so a file the engine read from somewhere else is not content
 and is left alone.
+
 <a id="tecs.filesystem.watch.Handler"></a>
 
 ### tecs.filesystem.watch.Handler
@@ -447,6 +452,7 @@ Stops watching and forgets every path's state.
 The handlers stay registered. What a kind reloads is a property of the
 build rather than of whether anything is watching right now, and a game
 that turns the watcher off and on again means the second thing.
+
 <a id="tecs.filesystem.watch.unsettled"></a>
 
 ### tecs.filesystem.watch.unsettled

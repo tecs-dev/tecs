@@ -111,6 +111,7 @@ Every function and type this module carries, rendered from `src/tecs/platform/ti
 
 Longest dt handed to the world. A frame that stalls (a breakpoint, a
 window drag) must not integrate as one enormous step.
+
 <a id="tecs.time.nominal"></a>
 
 ### tecs.time.nominal
@@ -120,6 +121,7 @@ window drag) must not integrate as one enormous step.
 
 The loop's nominal frame dt, set at boot from the target frame rate.
 Stepped frames use it so a step advances identically on every machine.
+
 <a id="tecs.time.now"></a>
 
 ### tecs.time.now
@@ -166,6 +168,7 @@ measured dt; returning a number replaces it, nil keeps the measurement.
 
 Resets the baseline so the next `step` measures from now. Called after
 startup so the first frame's dt excludes load time.
+
 <a id="tecs.time.step"></a>
 
 ### tecs.time.step

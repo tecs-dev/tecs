@@ -26,11 +26,12 @@ local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
 local filesystem = require("tecs.platform.filesystem")
 local events = require("tecs.platform.events")
-local Input = require("tecs.platform.Input")
+local newInput = require("tecs.platform.input").newInput
 local system = require("tecs.platform.system")
 local shadercompiler = require("tecs.gpu.shadercompiler")
 local shaderpack = require("tecs.gpu.shaderpack")
-local Audio = require("tecs.Audio")
+local Audio = require("tecs.audio").Audio
+local newAudio = require("tecs.audio").newAudio
 
 local C = sdl.C
 
@@ -391,7 +392,7 @@ describe("platform contract", function()
             { kind = "mouseMotion", x = 120, y = 48, dx = 4, dy = 2 },
         }))
 
-        local input = Input.newInput()
+        local input = newInput()
         local seen = {}
         input:beginFrame()
         events.drain(nil, 0, function(event)
@@ -433,7 +434,7 @@ describe("platform contract", function()
         platform.audio = fakeAudio()
         adapter.install(platform)
 
-        local audio = Audio.newAudio({ frequency = 22050, channels = 1 })
+        local audio = newAudio({ frequency = 22050, channels = 1 })
         assert.is_true(audio.available)
         assert.are.equal(1, platform.audio.opens)
         assert.are.equal(22050, platform.audio.spec.frequency)

@@ -281,6 +281,7 @@ Every function and type this module carries, rendered from `src/tecs/net.tl`.
 </code></pre>
 
 A resolved network address.
+
 <a id="tecs.net.Address.host"></a>
 
 ### tecs.net.Address.host
@@ -290,6 +291,7 @@ A resolved network address.
 
 The hostname passed to `resolve`, or the numeric peer address for
 an address obtained from a socket or packet.
+
 <a id="tecs.net.Address.text"></a>
 
 ### tecs.net.Address.text
@@ -298,6 +300,7 @@ an address obtained from a socket or packet.
 </code></pre>
 
 SDL's printable numeric form of the address.
+
 <a id="tecs.net.Address.isClosed"></a>
 
 ### tecs.net.Address.isClosed
@@ -342,6 +345,7 @@ Releases the address. Safe to call repeatedly.
 </code></pre>
 
 One bound UDP socket.
+
 <a id="tecs.net.DatagramSocket.port"></a>
 
 ### tecs.net.DatagramSocket.port
@@ -351,6 +355,7 @@ One bound UDP socket.
 
 The port passed to `bind`, unchanged. Zero stays zero rather than becoming the port the
 operating system chose, which SDL3_net does not report back.
+
 <a id="tecs.net.DatagramSocket.isClosed"></a>
 
 ### tecs.net.DatagramSocket.isClosed
@@ -471,6 +476,7 @@ Releases the socket. Safe to call repeatedly.
 </code></pre>
 
 One received UDP packet.
+
 <a id="tecs.net.Packet.address"></a>
 
 ### tecs.net.Packet.address
@@ -480,6 +486,7 @@ One received UDP packet.
 
 Source address. Owned by this record; close it when the packet is no
 longer needed.
+
 <a id="tecs.net.Packet.port"></a>
 
 ### tecs.net.Packet.port
@@ -488,6 +495,7 @@ longer needed.
 </code></pre>
 
 The remote port the datagram came from, which is where a reply goes.
+
 <a id="tecs.net.Packet.bytes"></a>
 
 ### tecs.net.Packet.bytes
@@ -497,6 +505,7 @@ The remote port the datagram came from, which is where a reply goes.
 
 One whole datagram, already copied out of SDL's packet. A zero-length datagram reads as an
 empty string rather than nil.
+
 <a id="tecs.net.Packet.close"></a>
 
 ### tecs.net.Packet.close
@@ -520,6 +529,7 @@ Releases the packet's source address. Safe to call repeatedly.
 </code></pre>
 
 A TCP listener.
+
 <a id="tecs.net.Server.port"></a>
 
 ### tecs.net.Server.port
@@ -529,6 +539,7 @@ A TCP listener.
 
 The port passed to `listen`, unchanged. Zero stays zero rather than becoming the port the
 operating system chose, which SDL3_net does not report back.
+
 <a id="tecs.net.Server.isClosed"></a>
 
 ### tecs.net.Server.isClosed
@@ -625,6 +636,7 @@ call repeatedly.
 </code></pre>
 
 One connected TCP byte stream.
+
 <a id="tecs.net.Stream.isClosed"></a>
 
 ### tecs.net.Stream.isClosed
@@ -867,6 +879,7 @@ Begins connecting to a resolved address.
 HTTP and HTTPS, over libcurl. The one protocol namespace here: this
 module is the transport, and framing bytes into messages is what a
 protocol above it does.
+
 <a id="tecs.net.init"></a>
 
 ### tecs.net.init

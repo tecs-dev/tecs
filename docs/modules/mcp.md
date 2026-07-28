@@ -638,6 +638,7 @@ Every function and type this module carries, rendered from `src/tecs/mcp/init.tl
 
 What a tool receives and returns. Arguments arrive decoded; the result
 is encoded as the tool's structured content.
+
 <a id="tecs.mcp.Server"></a>
 
 ### tecs.mcp.Server
@@ -646,6 +647,7 @@ is encoded as the tool's structured content.
 </code></pre>
 
 A listening MCP endpoint. Answers only while something calls `poll`.
+
 <a id="tecs.mcp.Server.port"></a>
 
 ### tecs.mcp.Server.port
@@ -654,6 +656,7 @@ A listening MCP endpoint. Answers only while something calls `poll`.
 </code></pre>
 
 The TCP port bound, which is 7100 when `listen` was given none.
+
 <a id="tecs.mcp.Server.poll"></a>
 
 ### tecs.mcp.Server.poll
@@ -706,6 +709,7 @@ again. The tool registry is module-wide and is left untouched, so a later
 
 One registered tool: what it is called, how it is described to an
 agent, and what runs when the agent calls it.
+
 <a id="tecs.mcp.Tool.name"></a>
 
 ### tecs.mcp.Tool.name
@@ -718,6 +722,7 @@ tool names are spelled the way the protocol's ecosystem spells
 them, `run_lua` and `send_event` among them, so they are
 snake_case where the rest of this tree is camelCase; that is
 deliberate and is not to be renamed. Required.
+
 <a id="tecs.mcp.Tool.description"></a>
 
 ### tecs.mcp.Tool.description
@@ -727,6 +732,7 @@ deliberate and is not to be renamed. Required.
 
 One line shown to the agent alongside the name. Optional: nil is
 sent as an empty string rather than omitted.
+
 <a id="tecs.mcp.Tool.inputSchema"></a>
 
 ### tecs.mcp.Tool.inputSchema
@@ -735,6 +741,7 @@ sent as an empty string rather than omitted.
 </code></pre>
 
 JSON Schema for the arguments, sent verbatim in the tool list.
+
 <a id="tecs.mcp.Tool.handler"></a>
 
 ### tecs.mcp.Tool.handler
@@ -744,6 +751,7 @@ JSON Schema for the arguments, sent verbatim in the tool list.
 
 Runs on the game thread when the tool is called. Required, and its
 absence raises at registration rather than at call time.
+
 <a id="tecs.mcp.Tool.readOnly"></a>
 
 ### tecs.mcp.Tool.readOnly
@@ -752,6 +760,7 @@ absence raises at registration rather than at call time.
 </code></pre>
 
 Declared so an agent can tell what a call will do before making it.
+
 <a id="tecs.mcp.Tool.destructive"></a>
 
 ### tecs.mcp.Tool.destructive
@@ -763,6 +772,7 @@ Whether a call changes state that a caller would not want changed
 without asking. Optional, false when nil. Advisory, like
 `readOnly`: both are reported to the agent and neither is checked
 here, so a tool declared read-only is still free to write.
+
 <a id="tecs.mcp.Tool.whenCrashed"></a>
 
 ### tecs.mcp.Tool.whenCrashed
@@ -773,6 +783,7 @@ here, so a tool declared read-only is still free to write.
 Still callable after the game has crashed. False by default,
 because a crashed world cannot answer anything about itself, and a
 tool that read it would return nonsense rather than an error.
+
 <a id="tecs.mcp.crashed"></a>
 
 ### tecs.mcp.crashed

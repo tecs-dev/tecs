@@ -327,6 +327,7 @@ Every function and type this module carries, rendered from `src/tecs/ecs.tl`.
 </code></pre>
 
 Emitted at entity 0 when a new archetype is created.
+
 <a id="tecs.ecs.ArchetypeEntityObserver"></a>
 
 ### tecs.ecs.ArchetypeEntityObserver
@@ -357,6 +358,7 @@ Emitted at entity 0 when a new archetype is created.
 
 Parent and child. Sparse, so adding one does not split archetypes, and
 cascade-deleting, so despawning a parent takes its children.
+
 <a id="tecs.ecs.Component"></a>
 
 ### tecs.ecs.Component
@@ -392,6 +394,7 @@ cascade-deleting, so despawning a parent takes its children.
 </code></pre>
 
 Default `World.Config.maxEntities` when none is given (2^20).
+
 <a id="tecs.ecs.Disabled"></a>
 
 ### tecs.ecs.Disabled
@@ -400,6 +403,7 @@ Default `World.Config.maxEntities` when none is given (2^20).
 </code></pre>
 
 Excluded from every query that does not ask for it.
+
 <a id="tecs.ecs.DoubleArray"></a>
 
 ### tecs.ecs.DoubleArray
@@ -422,6 +426,7 @@ Spelled `EntityKey` here and registered as `"Key"`, because `Key` on
 this module is the typed `world.resources` key `newKey` hands out, and
 Teal refuses the second declaration outright. The registered name is a
 save format and does not move; this one is the surface.
+
 <a id="tecs.ecs.Event"></a>
 
 ### tecs.ecs.Event
@@ -478,6 +483,7 @@ save format and does not move; this one is the surface.
 
 Emitted at entity 0 once every entity is restored and every data
 callback has run.
+
 <a id="tecs.ecs.FixedOverload"></a>
 
 ### tecs.ecs.FixedOverload
@@ -507,6 +513,7 @@ callback has run.
 
 Absolute ceiling for `World.Config.maxEntities` (2^22 - 1 usable
 slots; slot 0 is reserved by the entity-id format).
+
 <a id="tecs.ecs.MessageBus"></a>
 
 ### tecs.ecs.MessageBus
@@ -523,6 +530,7 @@ slots; slot 0 is reserved by the entity-id format).
 
 A label for an entity, stored as the raw string. Not unique: use
 `EntityKey` where something has to find one entity again.
+
 <a id="tecs.ecs.OnDespawn"></a>
 
 ### tecs.ecs.OnDespawn
@@ -531,6 +539,7 @@ A label for an entity, stored as the raw string. Not unique: use
 </code></pre>
 
 Emitted at the entity when it is despawned.
+
 <a id="tecs.ecs.OnSnapshotSave"></a>
 
 ### tecs.ecs.OnSnapshotSave
@@ -540,6 +549,7 @@ Emitted at the entity when it is despawned.
 
 Emitted at entity 0 before a snapshot's archetypes are written, which
 is where a plugin attaches keyed data or excludes what it re-derives.
+
 <a id="tecs.ecs.OnSpawn"></a>
 
 ### tecs.ecs.OnSpawn
@@ -548,6 +558,7 @@ is where a plugin attaches keyed data or excludes what it re-derives.
 </code></pre>
 
 Emitted at the entity when it is spawned.
+
 <a id="tecs.ecs.Paused"></a>
 
 ### tecs.ecs.Paused
@@ -557,6 +568,7 @@ Emitted at the entity when it is spawned.
 
 Excluded from logic queries and still drawn, which is the difference
 from `Disabled`: a paused world is one that renders and does not think.
+
 <a id="tecs.ecs.Phase"></a>
 
 ### tecs.ecs.Phase
@@ -615,6 +627,7 @@ from `Disabled`: a paused world is one that renders and does not think.
 A transform expressed relative to a `ChildOf` parent. The builtin
 hierarchy system composes it with the parent's `Transform` into the
 child's world-space one, so a game writes this and reads `Transform`.
+
 <a id="tecs.ecs.ScalarComponent"></a>
 
 ### tecs.ecs.ScalarComponent
@@ -693,6 +706,7 @@ child's world-space one, so a game writes this and reads `Transform`.
 Emitted at entity 0 after a snapshot's world is restored and before its
 data section is dispatched, which is where a plugin registers what to
 do with each key it wrote.
+
 <a id="tecs.ecs.StateBlur"></a>
 
 ### tecs.ecs.StateBlur
@@ -701,6 +715,7 @@ do with each key it wrote.
 </code></pre>
 
 Emitted at the state losing focus when another is pushed above it.
+
 <a id="tecs.ecs.StateEnter"></a>
 
 ### tecs.ecs.StateEnter
@@ -709,6 +724,7 @@ Emitted at the state losing focus when another is pushed above it.
 </code></pre>
 
 Emitted when a state is pushed onto the stack.
+
 <a id="tecs.ecs.StateExit"></a>
 
 ### tecs.ecs.StateExit
@@ -717,6 +733,7 @@ Emitted when a state is pushed onto the stack.
 </code></pre>
 
 Emitted when a state is popped off it.
+
 <a id="tecs.ecs.StateFocus"></a>
 
 ### tecs.ecs.StateFocus
@@ -725,6 +742,7 @@ Emitted when a state is popped off it.
 </code></pre>
 
 Emitted at the state regaining focus when the one above it is popped.
+
 <a id="tecs.ecs.StatePolicy"></a>
 
 ### tecs.ecs.StatePolicy
@@ -756,6 +774,7 @@ Emitted at the state regaining focus when the one above it is popped.
 Despawns an entity once its time to live reaches zero, counted down in
 `FixedUpdate` by a query declared `type = "logic"`, so a `Paused`
 entity does not burn through it.
+
 <a id="tecs.ecs.TagComponentOptions"></a>
 
 ### tecs.ecs.TagComponentOptions
@@ -774,6 +793,7 @@ Positions everything a world holds: the hierarchy, physics, the
 sequencer and the renderer all move the same one. Not a drawing
 component, which is why it is here and not on `tecs.gfx`, and why a
 headless world has it.
+
 <a id="tecs.ecs.declaredComponents"></a>
 
 ### tecs.ecs.declaredComponents
@@ -1193,6 +1213,7 @@ Create a new World.
 </code></pre>
 
 The phases a system can be scheduled into.
+
 <a id="tecs.ecs.random"></a>
 
 ### tecs.ecs.random
@@ -1201,6 +1222,7 @@ The phases a system can be scheduled into.
 </code></pre>
 
 Seeded generation, in named streams a snapshot carries.
+
 <a id="tecs.ecs.runif"></a>
 
 ### tecs.ecs.runif

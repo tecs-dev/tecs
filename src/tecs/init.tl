@@ -22,13 +22,12 @@ local ecs <const> = require("tecs.ecs")
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
 local type Future = require("tecs.Future")
+local type audio = require("tecs.audio")
 local type Renderer = require("tecs.Renderer")
-local type Audio = require("tecs.Audio")
 local type Camera = require("tecs.gfx.Camera")
 local type animation = require("tecs.gfx.animation")
 local type Window = require("tecs.platform.Window")
-local type Input = require("tecs.platform.Input")
-local type Gamepad = require("tecs.platform.Gamepad")
+local type input = require("tecs.platform.input")
 local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
 local type net = require("tecs.net")
@@ -46,8 +45,6 @@ local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")
 local type system = require("tecs.platform.system")
-local type sensors = require("tecs.platform.sensors")
-local type platformAudio = require("tecs.platform.audio")
 local type loader = require("tecs.ffi.loader")
 
 -- A record below is written for one reason: a public name that no single module
@@ -73,47 +70,6 @@ local type loader = require("tecs.ffi.loader")
 -- through `within`, and a lowercase field of a record here is one of them only
 -- where the parent has no module of its own.
 
---- Sound, at both levels: a mixer with clips, voices, groups and limits, and
---- the physical devices it opens and records from.
-local record audio
-    Audio: Audio
-    --- Play a clip by putting this on an entity.
-    Sound: Audio.Sound
-    type Config = Audio.Config
-    type Clip = Audio.Clip
-    type LoadOptions = Audio.LoadOptions
-    type PlayOptions = Audio.PlayOptions
-    type Limit = Audio.Limit
-    type VoiceInfo = Audio.VoiceInfo
-
-    type Device = platformAudio.Device
-    type Microphone = platformAudio.Microphone
-    type MicrophoneConfig = platformAudio.MicrophoneConfig
-
-    --- Builds the mixer a game plays sound through.
-    ---
-    --- @param config Omitted opens the platform's default device at its own
-    ---     frequency and channel count. Nothing is opened here: the device is
-    ---     acquired by `install`, so a mixer built by a tool that never
-    ---     installs it touches no hardware.
-    --- @return The mixer, whose device and voices are the caller's to release
-    ---     through `destroy`. One per application; the application builds its
-    ---     own and a second is only for a test.
-    newAudio: function(config?: Audio.Config): Audio
-
-    --- Physical playback devices attached now.
-    playbackDevices: function(): {platformAudio.Device}, string
-
-    --- Physical recording devices attached now.
-    recordingDevices: function(): {platformAudio.Device}, string
-
-    --- Opens a microphone as interleaved native-endian 32-bit float samples.
-    ---
-    --- No callback is installed. SDL's audio thread fills its own stream and
-    --- the game pulls completed bytes from the main thread with `read`.
-    openMicrophone: function(config?: platformAudio.MicrophoneConfig): platformAudio.Microphone, string
-end
-
 --- The window, its size, its display and its mode.
 local record window
     Window: Window
@@ -137,67 +93,6 @@ local record window
     ---     application creates its own from `Config.window` and hands it to
     ---     the entry plugin, so a game rarely calls this.
     newWindow: function(options: Window.Options): Window
-end
-
---- What a player does, and the devices they do it with: gameplay input in
---- three tiers behind a layer stack, the pads attached to it, and the
---- standalone sensors a device carries.
----
---- One module because they are one question asked of three sources, and
---- because the layer stack answers all three: a pad's buttons are gated by the
---- same stack a keyboard's keys are, so `Input` and `Gamepad` cannot be reached
---- from different places without the gate looking like a property of one of
---- them. Platform events stay separate under `tecs.events`, since that stream
---- also carries lifecycle, window, display and device arrival.
-local record input
-    Input: Input
-    Gamepad: Gamepad
-
-    type Layer = Input.Layer
-    type Touch = Input.Touch
-    type TextArea = Input.TextArea
-    type TextOptions = Input.TextOptions
-    type Options = Input.Options
-    type TouchpadFinger = Gamepad.TouchpadFinger
-
-    --- An opened standalone sensor, read by polling.
-    type Sensor = sensors.Sensor
-
-    --- A standalone sensor the platform reports, before it is opened. Named
-    --- for what it is rather than `Device`, which on a module that also holds
-    --- gamepads would name two things.
-    type SensorDevice = sensors.Device
-
-    --- Builds the input state a game reads.
-    ---
-    --- @param options Omitted opens against no window, which is what a
-    ---     headless tool or a spec wants: keys and pads still fold, and
-    ---     anything asking about a window answers as if there is none.
-    --- @return The state. One per application; the application builds its own
-    ---     and a second is only for a test.
-    newInput: function(options?: Input.Options): Input
-
-    --- Standalone sensors attached now, in platform order.
-    ---
-    --- A snapshot rather than a subscription: a sensor unplugged after this
-    --- leaves an id `openSensor` refuses. Gamepad sensors are not here, since
-    --- their identity and event routing live on the pad.
-    ---
-    --- @return The sensors, listed afresh each call and the caller's to keep.
-    ---     Empty rather than nil when the subsystem cannot start, and most
-    ---     desktop machines genuinely have none.
-    --- @return SDL's reason, when something went wrong.
-    sensors: function(): {sensors.Device}, string
-
-    --- Opens an attached standalone sensor by instance id.
-    ---
-    --- @param id An instance id from `sensors`. An id names a device while it
-    ---     stays attached rather than a slot, so one kept across an unplug does
-    ---     not come back to the same sensor.
-    --- @return The open sensor, whose closing is the caller's through
-    ---     `destroy`. Nil on failure, and nothing is left open in that case.
-    --- @return The reason, when the first return is nil.
-    openSensor: function(id: number): sensors.Sensor, string
 end
 
 --- Drawing: what a frame is drawn from, what draws it, and the vocabularies a
@@ -556,7 +451,7 @@ local SURFACE <const>: {string: Namespace} = {
     Future = {module = "tecs.Future"},
     newApplication = {module = "tecs.Application", member = "newApplication"},
     assets = {module = "tecs.assets"},
-    audio = {module = "tecs.Audio", class = "Audio", beside = {"tecs.platform.audio"}},
+    audio = {module = "tecs.audio"},
     box2d = {module = "tecs.box2d"},
     data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
@@ -575,12 +470,7 @@ local SURFACE <const>: {string: Namespace} = {
             particles = {module = "tecs.gfx.particles"},
         },
     },
-    input = {
-        module = "tecs.platform.Input",
-        class = "Input",
-        beside = {"tecs.platform.sensors"},
-        within = {Gamepad = {module = "tecs.platform.Gamepad"}},
-    },
+    input = {module = "tecs.platform.input"},
     log = {module = "tecs.log"},
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net", within = {http = {module = "tecs.net.http"}}},

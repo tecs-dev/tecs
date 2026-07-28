@@ -305,6 +305,7 @@ Every function and type this module carries, rendered from `src/tecs/gpu/materia
 </code></pre>
 
 One material: its name, the id this build gave it, and its source.
+
 <a id="tecs.gfx.materials.Material.name"></a>
 
 ### tecs.gfx.materials.Material.name
@@ -313,6 +314,7 @@ One material: its name, the id this build gave it, and its source.
 </code></pre>
 
 The file's name without its extension, and how a game asks for it.
+
 <a id="tecs.gfx.materials.Material.id"></a>
 
 ### tecs.gfx.materials.Material.id
@@ -323,6 +325,7 @@ The file's name without its extension, and how a game asks for it.
 What an instance carries to select this material. Assigned by
 `install` from sorted order, so it holds only for the set of files
 that were present when the dispatch was built.
+
 <a id="tecs.gfx.materials.Material.source"></a>
 
 ### tecs.gfx.materials.Material.source
@@ -332,6 +335,7 @@ that were present when the dispatch was built.
 
 The material's GLSL, as read. Renamed on the way into the dispatch
 rather than here, so this is still the text the file holds.
+
 <a id="tecs.gfx.materials.addRoot"></a>
 
 ### tecs.gfx.materials.addRoot
@@ -356,6 +360,7 @@ materials are found alongside the engine's.
 </code></pre>
 
 Name of the material an entity with no Material component draws as.
+
 <a id="tecs.gfx.materials.define"></a>
 
 ### tecs.gfx.materials.define
@@ -440,6 +445,7 @@ Called by shader loading rather than by a game, so a fragment shader
 cannot be built before the materials it dispatches to are known. Adding
 a root or defining a material puts this back on, and the next load
 rebuilds.
+
 <a id="tecs.gfx.materials.name"></a>
 
 ### tecs.gfx.materials.name

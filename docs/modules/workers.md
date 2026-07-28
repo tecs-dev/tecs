@@ -178,6 +178,7 @@ Every function and type this module carries, rendered from `src/tecs/workers.tl`
 </code></pre>
 
 A message queue between two states.
+
 <a id="tecs.workers.Worker"></a>
 
 ### tecs.workers.Worker
@@ -186,6 +187,7 @@ A message queue between two states.
 </code></pre>
 
 A worker thread and its channels.
+
 <a id="tecs.workers.current"></a>
 
 ### tecs.workers.current
@@ -212,6 +214,7 @@ pointers as globals before running the source.
 </code></pre>
 
 Absolute path of the loaded native library.
+
 <a id="tecs.workers.spawn"></a>
 
 ### tecs.workers.spawn

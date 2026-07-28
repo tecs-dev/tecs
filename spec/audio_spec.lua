@@ -41,7 +41,8 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local tecs = require("tecs")
-local Audio = require("tecs.Audio")
+local Audio = require("tecs.audio").Audio
+local newAudio = require("tecs.audio").newAudio
 local assets = require("tecs.assets")
 local mcp = require("tecs.mcp")
 local mcpTools = require("tecs.mcp.tools")
@@ -298,7 +299,7 @@ end
 local function loaded(config, path)
     config = config or {}
     config.backend = config.backend or recorder()
-    local audio = Audio.newAudio(config)
+    local audio = newAudio(config)
     local clip = audio:load(path or FIXTURE)
     audio:waitForLoads()
     return audio, clip, config.backend
@@ -341,7 +342,7 @@ describe("audio", function()
 
     describe("clips", function()
         it("returns a clip immediately and resolves it later", function()
-            local audio = Audio.newAudio({ backend = recorder() })
+            local audio = newAudio({ backend = recorder() })
             local clip = audio:load(FIXTURE)
 
             assert.are.equal("loading", clip.status, "loading must not block the caller")
@@ -370,7 +371,7 @@ describe("audio", function()
         end)
 
         it("reports a missing file as failed rather than raising", function()
-            local audio = Audio.newAudio({ backend = recorder() })
+            local audio = newAudio({ backend = recorder() })
             local clip = audio:load("spec/fixtures/does-not-exist.wav")
             audio:waitForLoads()
 
@@ -381,7 +382,7 @@ describe("audio", function()
         end)
 
         it("loads a path once", function()
-            local audio = Audio.newAudio({ backend = recorder() })
+            local audio = newAudio({ backend = recorder() })
             local first = audio:load(FIXTURE)
             local second = audio:load(FIXTURE)
             assert.are.equal(first, second)
@@ -406,7 +407,7 @@ describe("audio", function()
         end)
 
         it("takes an explicit answer over the threshold", function()
-            local audio = Audio.newAudio({
+            local audio = newAudio({
                 backend = recorder(),
                 streamSeconds = 10,
             })
@@ -414,7 +415,7 @@ describe("audio", function()
             audio:waitForLoads()
             assert.is_false(streamed.resident)
 
-            local other = Audio.newAudio({
+            local other = newAudio({
                 backend = recorder(),
                 streamSeconds = 0.05,
             })
@@ -513,7 +514,7 @@ describe("audio", function()
         end)
 
         it("has nothing to replace for a streamed clip", function()
-            local audio = Audio.newAudio({ backend = recorder() })
+            local audio = newAudio({ backend = recorder() })
             local clip = audio:load(temp, { stream = true })
             audio:waitForLoads()
             assert.is_false(clip.resident)
@@ -526,7 +527,7 @@ describe("audio", function()
         end)
 
         it("refuses a path nothing has loaded", function()
-            local audio = Audio.newAudio({ backend = recorder() })
+            local audio = newAudio({ backend = recorder() })
             local ok, reason = audio:reload("spec/fixtures/never-loaded.wav")
             assert.is_false(ok)
             assert.is_truthy(reason:find("never-loaded.wav", 1, true), "unexpected refusal: " .. tostring(reason))
@@ -1178,7 +1179,7 @@ describe("audio", function()
         end)
 
         it("reports a group nothing has paused as running", function()
-            local audio = Audio.newAudio({ backend = recorder() })
+            local audio = newAudio({ backend = recorder() })
             assert.is_false(audio:groupPaused("sfx"))
             audio:destroy()
         end)
@@ -1973,7 +1974,7 @@ describe("audio", function()
     describe("no output", function()
         it("keeps working when no mixer opens", function()
             local backend = recorder({ silent = true })
-            local audio = Audio.newAudio({ backend = backend })
+            local audio = newAudio({ backend = backend })
             local clip = audio:load(FIXTURE)
             audio:waitForLoads()
 

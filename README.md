@@ -268,8 +268,27 @@ resolves, and the shader and material loaders read content through the same
 two. So those live in `platform/content.tl`, below both, and `tecs.filesystem`
 is what a game writes. A namespace assembled from several modules with no
 principal one keeps the table built for the name, and keeps the record with it:
-`tecs.audio`, `tecs.input` and `tecs.gfx` are the three left. The first two are
-a class and its satellites rather than a merge.
+`tecs.gfx` is the one left.
+
+`tecs.audio` and `tecs.input` were two of those until the constructors moved.
+Each was a class file, `Audio.tl` and `Input.tl`, reached through a namespace
+named for it, and a class file cannot be a principal module because the path
+has to end in the public name and the case does not match. Once `Audio.create`
+became `tecs.audio.newAudio` and `Input.create` became `tecs.input.newInput`,
+neither file was a class any more: it was a module that contains one, which
+`STYLE.md` names luacase. So they are `src/tecs/audio.tl` and
+`src/tecs/platform/input.tl`, each returning a module record with the class
+nested inside it, and the two records `init.tl` wrote for them are gone.
+
+Nesting the class inside the module record rather than hanging it off as a
+field is not a style choice. tealdoc documents a module's returned record and
+one level below it, so a class held as a field renders as a single line and its
+methods vanish from the generated reference: the audio page went from ninety
+entries to seventeen when it was written the other way. Nested, the class's
+methods and its option records are the module's own members and all of them
+render. What it costs is that `Audio` is then a type name rather than a field,
+so `record audio` cannot also declare `Audio: Audio`, which is the same
+one-namespace rule that turned the `Key` builtin into `EntityKey`.
 
 `tecs.gfx` is the one that had a choice and declined it, and the reason is the
 laziness above rather than the shape. It answers four things a scene reaches
@@ -1347,8 +1366,9 @@ are one subject at two levels: a game that wants a particular output names a
 device from `tecs.audio.playbackDevices` and passes its id to
 `tecs.audio.newAudio`, and having to know which of two modules each half
 came from bought nothing. `src/tecs/platform/audio.tl` is still its own file
-and still only reaches SDL, so it is what the namespace searches first and a
-game listing devices never loads a mixer.
+and still reaches only SDL, and `tecs.audio` publishes what it holds under its
+own names, the way `tecs.filesystem` publishes `platform/content.tl`. The
+module is the seam and the public name is the surface.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
@@ -3479,7 +3499,7 @@ src/tecs/Renderer.tl      the world-to-GPU bridge, owning both halves below
 src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
 src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
 src/tecs/FramePacket.tl   what crosses between the two
-src/tecs/Audio.tl         clips, voices, groups, and the Sound component
+src/tecs/audio.tl         clips, voices, groups, and the Sound component
 src/tecs/box2d/           Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
 src/tecs/mcp/             the debug server: transport, tools, sandbox

@@ -64,6 +64,7 @@ local loader <const> = require("tecs.ffi.loader")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local adapter <const> = require("tecs.platform.adapter")
 local audiobackend <const> = require("tecs.platform.audiobackend")
+local platformaudio <const> = require("tecs.platform.audio")
 local log <const> = require("tecs.log")
 
 local type Backend = audiobackend.Backend
@@ -363,273 +364,351 @@ local record Bucket
     last: number
 end
 
---- One audio output and the voices sounding on it.
+--- Sound, at both levels: a mixer with clips, voices, groups and limits, and
+--- the physical devices it opens and records from.
 ---
---- Units, in one place, because none of them is in a signature:
----
----   * **Time is seconds** everywhere on this surface: a fade, a seek, a loop
----     point, a cooldown, a clip's duration. Milliseconds appear only below the
----     platform seam. Every fade is a duration to run for, never a moment to
----     finish at, so calling one twice restarts it rather than moving a
----     deadline.
----   * **Gain is linear amplitude, not decibels.** 0 is silence and 1 is the
----     sound as recorded. Above 1 is louder and may clip. The level a voice
----     reaches the hardware at is its own gain times its group's gain times the
----     master gain, and a mute at either level composes as a zero without
----     discarding the gain underneath it.
----   * **Pitch is a playback rate, not an interval.** 1 is unchanged, 2 is an
----     octave up and half as long, 0.5 an octave down and twice as long. It
----     resamples, so it changes duration; there is no time-stretch here.
----   * **Position is the mixer's frame, not the world's.** The listener is
----     fixed at the origin and cannot be moved, x is positive to the right, y
----     is positive **up**, and z is positive behind. World Y runs down, so a
----     caller feeding world coordinates in has to flip Y as well as subtract
----     whatever it decided is listening. See `Sound`.
----
---- A voice handle is a generation and a slot packed into one integer. It stays
---- meaningful for exactly as long as the voice sounds: once the voice ends, or
---- is stopped, or is reaped by `update`, every call taking the handle becomes a
---- no-op, and it never starts naming the next voice to take that slot. Nothing
---- has to be released, and holding a stale handle is not an error.
----
---- Nothing here is thread safe, and nothing here calls back. Everything runs on
---- the thread that calls it.
-local record Audio
-    --- What `newAudio` takes. Every field is optional.
-    record Config
-        --- Frames per second. Defaults to 48000.
-        frequency: integer
-        --- Output channels. Defaults to 2.
-        channels: integer
-        --- Voices that may sound at once. Defaults to 32.
-        maxVoices: integer
-        --- Seconds at which a clip streams instead of being held resident.
-        --- Defaults to 10.
-        streamSeconds: number
-        --- Output backend. Defaults to the installed platform's.
-        backend: Backend
-        --- Physical output device id from `tecs.audio.playbackDevices`.
-        --- Omitted follows the operating-system default as it changes.
-        device: number
-    end
-
-    --- A loaded sound.
+--- One module because the mixer and the device it opens are one subject at two
+--- levels: a game that wants a particular output names a device from
+--- `playbackDevices` and passes its id to `newAudio`, and having to know which
+--- of two modules each half came from bought nothing. The device half is still
+--- its own file and still reaches only SDL; this is the surface it is read
+--- through.
+local record audio
+    --- One audio output and the voices sounding on it.
     ---
-    --- Returned by `load` before the file has been read, so check `status`
-    --- rather than assuming it is playable. The instance is shared: loading the
-    --- same path twice hands back the same table, and its fields are updated in
-    --- place as the load settles, so a caller holding one sees it become ready
-    --- without asking again.
-    record Clip
-        --- The path it was loaded from, exactly as given. This is a clip's
-        --- identity, so two spellings of one file are two clips.
-        path: string
-        --- Index of `path`, which is what a `Sound` component carries.
-        id: integer
-        --- "loading", "ready", "failed", or "released" once the audio object
-        --- it was loaded into has been destroyed.
-        status: string
-        --- Set when loading failed.
-        error: string
-        --- Seconds of audio, or zero when the file cannot say.
-        duration: number
-        --- Whether the decoded audio is held in memory. False for a clip each
-        --- voice reads from the file for itself.
-        resident: boolean
-
-        --- Private. The asset load this clip came from, held so a reload can
-        --- swap it and `destroy` can release it. Nil once released.
-        _handle: assets.Handle
-    end
-
-    --- What `load` takes. The one field is optional.
-    record LoadOptions
-        --- Forces streaming when true and residency when false. Left unset,
-        --- the clip's duration decides against `streamSeconds`.
-        stream: boolean
-    end
-
-    --- What `play` takes. Every field is optional, and the whole table may be
-    --- omitted.
+    --- Units, in one place, because none of them is in a signature:
     ---
-    --- Read once, when the voice starts. Changing the table afterwards reaches
-    --- nothing: use `setGain`, `setPitch`, `setLoop`, `setPosition` and
-    --- `setStereo` on the handle instead. The table is not retained, so one
-    --- table may be filled and reused for every play.
-    record PlayOptions
-        --- 0 to 1, before the group and the master gains. Defaults to 1.
-        gain: number
-        --- Repeats until stopped. Defaults to false.
-        loop: boolean
-        --- Seconds from the start of the clip a repeat returns to, so an
-        --- intro can play once and the rest of it loop. Defaults to 0.
-        loopStart: number
-        --- Seconds into the clip the first pass begins. Defaults to 0.
-        start: number
-        --- Seconds of silence-to-full at the start. Defaults to 0.
-        fadeIn: number
-        --- Playback rate. 1 is unchanged. Defaults to 1.
-        pitch: number
-        --- Fraction of `pitch` to vary by, chosen anew for each voice. 0.1
-        --- spreads voices over plus or minus a tenth. Defaults to 0.
-        pitchVariance: number
-        --- Group this voice joins. Defaults to none.
-        group: string
-        --- Limit bucket this voice counts against. Defaults to none.
-        key: string
-        --- Position, when `spatial`. See `Sound` for what the numbers mean.
-        spatial: boolean
-        --- Positive to the right of the listener. Defaults to 0.
-        x: number
-        --- Positive **above** the listener, which is the opposite sign from
-        --- world Y. Defaults to 0.
-        y: number
-        --- Positive behind the listener. Defaults to 0.
-        z: number
-        --- Pins the voice to the front pair of speakers at `left` and
-        --- `right`, which is a pan rather than a position. Ignored when
-        --- `spatial` is set, because the mixer holds one placement per track.
-        --- Both gains default to 1.
-        stereo: boolean
-        --- Gain out of the left speaker, on the same linear scale as `gain`.
-        --- Negative reads as silence and above 1 is louder. Defaults to 1.
-        left: number
-        --- Gain out of the right speaker, on the same terms as `left`.
-        right: number
+    ---   * **Time is seconds** everywhere on this surface: a fade, a seek, a loop
+    ---     point, a cooldown, a clip's duration. Milliseconds appear only below the
+    ---     platform seam. Every fade is a duration to run for, never a moment to
+    ---     finish at, so calling one twice restarts it rather than moving a
+    ---     deadline.
+    ---   * **Gain is linear amplitude, not decibels.** 0 is silence and 1 is the
+    ---     sound as recorded. Above 1 is louder and may clip. The level a voice
+    ---     reaches the hardware at is its own gain times its group's gain times the
+    ---     master gain, and a mute at either level composes as a zero without
+    ---     discarding the gain underneath it.
+    ---   * **Pitch is a playback rate, not an interval.** 1 is unchanged, 2 is an
+    ---     octave up and half as long, 0.5 an octave down and twice as long. It
+    ---     resamples, so it changes duration; there is no time-stretch here.
+    ---   * **Position is the mixer's frame, not the world's.** The listener is
+    ---     fixed at the origin and cannot be moved, x is positive to the right, y
+    ---     is positive **up**, and z is positive behind. World Y runs down, so a
+    ---     caller feeding world coordinates in has to flip Y as well as subtract
+    ---     whatever it decided is listening. See `Sound`.
+    ---
+    --- A voice handle is a generation and a slot packed into one integer. It stays
+    --- meaningful for exactly as long as the voice sounds: once the voice ends, or
+    --- is stopped, or is reaped by `update`, every call taking the handle becomes a
+    --- no-op, and it never starts naming the next voice to take that slot. Nothing
+    --- has to be released, and holding a stale handle is not an error.
+    ---
+    --- Nothing here is thread safe, and nothing here calls back. Everything runs on
+    --- the thread that calls it.
+    record Audio
+        --- What `newAudio` takes. Every field is optional.
+        record Config
+            --- Frames per second. Defaults to 48000.
+            frequency: integer
+            --- Output channels. Defaults to 2.
+            channels: integer
+            --- Voices that may sound at once. Defaults to 32.
+            maxVoices: integer
+            --- Seconds at which a clip streams instead of being held resident.
+            --- Defaults to 10.
+            streamSeconds: number
+            --- Output backend. Defaults to the installed platform's.
+            backend: Backend
+            --- Physical output device id from `tecs.audio.playbackDevices`.
+            --- Omitted follows the operating-system default as it changes.
+            device: number
+        end
+
+        --- A loaded sound.
+        ---
+        --- Returned by `load` before the file has been read, so check `status`
+        --- rather than assuming it is playable. The instance is shared: loading the
+        --- same path twice hands back the same table, and its fields are updated in
+        --- place as the load settles, so a caller holding one sees it become ready
+        --- without asking again.
+        record Clip
+            --- The path it was loaded from, exactly as given. This is a clip's
+            --- identity, so two spellings of one file are two clips.
+            path: string
+            --- Index of `path`, which is what a `Sound` component carries.
+            id: integer
+            --- "loading", "ready", "failed", or "released" once the audio object
+            --- it was loaded into has been destroyed.
+            status: string
+            --- Set when loading failed.
+            error: string
+            --- Seconds of audio, or zero when the file cannot say.
+            duration: number
+            --- Whether the decoded audio is held in memory. False for a clip each
+            --- voice reads from the file for itself.
+            resident: boolean
+
+            --- Private. The asset load this clip came from, held so a reload can
+            --- swap it and `destroy` can release it. Nil once released.
+            _handle: assets.Handle
+        end
+
+        --- What `load` takes. The one field is optional.
+        record LoadOptions
+            --- Forces streaming when true and residency when false. Left unset,
+            --- the clip's duration decides against `streamSeconds`.
+            stream: boolean
+        end
+
+        --- What `play` takes. Every field is optional, and the whole table may be
+        --- omitted.
+        ---
+        --- Read once, when the voice starts. Changing the table afterwards reaches
+        --- nothing: use `setGain`, `setPitch`, `setLoop`, `setPosition` and
+        --- `setStereo` on the handle instead. The table is not retained, so one
+        --- table may be filled and reused for every play.
+        record PlayOptions
+            --- 0 to 1, before the group and the master gains. Defaults to 1.
+            gain: number
+            --- Repeats until stopped. Defaults to false.
+            loop: boolean
+            --- Seconds from the start of the clip a repeat returns to, so an
+            --- intro can play once and the rest of it loop. Defaults to 0.
+            loopStart: number
+            --- Seconds into the clip the first pass begins. Defaults to 0.
+            start: number
+            --- Seconds of silence-to-full at the start. Defaults to 0.
+            fadeIn: number
+            --- Playback rate. 1 is unchanged. Defaults to 1.
+            pitch: number
+            --- Fraction of `pitch` to vary by, chosen anew for each voice. 0.1
+            --- spreads voices over plus or minus a tenth. Defaults to 0.
+            pitchVariance: number
+            --- Group this voice joins. Defaults to none.
+            group: string
+            --- Limit bucket this voice counts against. Defaults to none.
+            key: string
+            --- Position, when `spatial`. See `Sound` for what the numbers mean.
+            spatial: boolean
+            --- Positive to the right of the listener. Defaults to 0.
+            x: number
+            --- Positive **above** the listener, which is the opposite sign from
+            --- world Y. Defaults to 0.
+            y: number
+            --- Positive behind the listener. Defaults to 0.
+            z: number
+            --- Pins the voice to the front pair of speakers at `left` and
+            --- `right`, which is a pan rather than a position. Ignored when
+            --- `spatial` is set, because the mixer holds one placement per track.
+            --- Both gains default to 1.
+            stereo: boolean
+            --- Gain out of the left speaker, on the same linear scale as `gain`.
+            --- Negative reads as silence and above 1 is louder. Defaults to 1.
+            left: number
+            --- Gain out of the right speaker, on the same terms as `left`.
+            right: number
+        end
+
+        --- What a key allows.
+        record Limit
+            --- Voices this key may hold at once. Zero or absent is no ceiling.
+            voices: integer
+            --- Seconds after one starts before another may. Zero is none.
+            cooldown: number
+        end
+
+        --- One sounding voice, as something looking in reads it.
+        record VoiceInfo
+            --- The handle a game holds, which `playing` and `stop` take.
+            handle: integer
+            --- Path of the clip it is reading, or nil once it has been released.
+            clip: string
+            --- What the voice asked for, before its group and the master.
+            gain: number
+            --- What reached the track, the group's gain and mute included. The
+            --- master gain is not in it: that is the mixer's own number and is not
+            --- multiplied per voice.
+            applied: number
+            --- Playback rate as the track carries it, so the pitch variance a
+            --- `play` drew is already in it rather than the rate that was asked
+            --- for.
+            pitch: number
+            --- Group tag, or nil for a voice in none.
+            group: string
+            --- Limit bucket, or nil for a voice counted against none.
+            key: string
+            --- Whether a pause is holding it, whether its own or its group's.
+            paused: boolean
+            --- Whether a fade-out is running it down.
+            stopping: boolean
+            --- Whether a `Sound` component started this rather than `play`.
+            owned: boolean
+            --- Whether it repeats when it reaches the end.
+            loop: boolean
+            --- Whether it is placed in space. Never true at the same time as
+            --- `stereo`: the mixer holds one placement per track.
+            spatial: boolean
+            --- Last position pushed, in the mixer's frame: positive right.
+            --- Meaningless unless `spatial`.
+            x: number
+            --- Last position pushed, positive up. Meaningless unless `spatial`.
+            y: number
+            --- Last position pushed, positive behind. Meaningless unless
+            --- `spatial`.
+            z: number
+            --- Whether it is pinned to the front pair, and at what gains.
+            stereo: boolean
+            --- Left speaker gain last pushed. Meaningless unless `stereo`.
+            left: number
+            --- Right speaker gain last pushed. Meaningless unless `stereo`.
+            right: number
+        end
+
+        --- The `Sound` component, for a game that wants to query or set it. See
+        --- the record's own documentation for what its fields mean.
+        Sound: Sound
+
+        --- Whether an output opened. False on a machine with no sound, where
+        --- every call here still works and nothing is heard.
+        available: boolean
+
+        --- Private. The platform seam every call below goes through, so nothing
+        --- here names a mixer symbol itself.
+        _backend: Backend
+
+        --- Private. The open output. Nil on a machine that has none and again
+        --- after `destroy`, which is what `available` reports.
+        _mixer: loader.CPtr
+
+        --- Private. The layout the output was opened with.
+        _spec: audiobackend.Spec
+
+        --- Private. One play-options record, refilled per play. Every field is
+        --- written each time, so nothing carries over between voices.
+        _params: audiobackend.PlayParams
+
+        --- Private. Every voice slot, sounding or not, indexed from one. Its
+        --- length is `maxVoices` and never changes after `newAudio`.
+        _voices: {Voice}
+
+        --- Private. Slots not in use, as a stack taken from the end, so the first
+        --- sound of a run gets slot one.
+        _free: {integer}
+
+        --- Private. Slots currently sounding, paused and fading ones included.
+        _sounding: integer
+
+        --- Private. The streaming threshold in milliseconds, which is where
+        --- `streamSeconds` ends up.
+        _streamMs: integer
+
+        --- Private. The master gain as set, which a mute holds down without
+        --- discarding.
+        _masterGain: number
+
+        --- Private. Whether a master mute is holding the output at zero.
+        _muted: boolean
+
+        --- Private. Gain per group name, absent meaning 1. Kept here rather than
+        --- on the mixer's tags, whose per-tag gain would overwrite each voice's
+        --- own.
+        _groupGains: {string: number}
+
+        --- Private. Mute per group name, absent meaning not muted.
+        _groupMuted: {string: boolean}
+
+        --- Private. Pause per group name, absent meaning not paused. A standing
+        --- instruction, so a voice starting into a paused group is held too.
+        _groupPaused: {string: boolean}
+
+        --- Private. The limit each key carries, or absent for no limit.
+        _limits: {string: Audio.Limit}
+
+        --- Private. Live count and last start time per key, created on the first
+        --- voice counted against it.
+        _buckets: {string: Bucket}
+
+        --- Private. Clips this instance has loaded, keyed by interned clip index.
+        _clips: {integer: Clip}
+
+        --- Private. Loads in flight, resolved by `update`.
+        _loads: assets.Batch<Audio.Clip>
+        --- Where pitch variance is drawn from. A mixer of its own until `install`
+        --- points it at the world's `tecs.audio` stream, so a save carries the
+        --- rate the next shot fires at rather than restarting the variance.
+        _random: random.Random
+        --- Seconds `update` has been told about, which is what a cooldown is
+        --- measured against.
+        _now: number
     end
 
-    --- What a key allows.
-    record Limit
-        --- Voices this key may hold at once. Zero or absent is no ceiling.
-        voices: integer
-        --- Seconds after one starts before another may. Zero is none.
-        cooldown: number
-    end
-
-    --- One sounding voice, as something looking in reads it.
-    record VoiceInfo
-        --- The handle a game holds, which `playing` and `stop` take.
-        handle: integer
-        --- Path of the clip it is reading, or nil once it has been released.
-        clip: string
-        --- What the voice asked for, before its group and the master.
-        gain: number
-        --- What reached the track, the group's gain and mute included. The
-        --- master gain is not in it: that is the mixer's own number and is not
-        --- multiplied per voice.
-        applied: number
-        --- Playback rate as the track carries it, so the pitch variance a
-        --- `play` drew is already in it rather than the rate that was asked
-        --- for.
-        pitch: number
-        --- Group tag, or nil for a voice in none.
-        group: string
-        --- Limit bucket, or nil for a voice counted against none.
-        key: string
-        --- Whether a pause is holding it, whether its own or its group's.
-        paused: boolean
-        --- Whether a fade-out is running it down.
-        stopping: boolean
-        --- Whether a `Sound` component started this rather than `play`.
-        owned: boolean
-        --- Whether it repeats when it reaches the end.
-        loop: boolean
-        --- Whether it is placed in space. Never true at the same time as
-        --- `stereo`: the mixer holds one placement per track.
-        spatial: boolean
-        --- Last position pushed, in the mixer's frame: positive right.
-        --- Meaningless unless `spatial`.
-        x: number
-        --- Last position pushed, positive up. Meaningless unless `spatial`.
-        y: number
-        --- Last position pushed, positive behind. Meaningless unless
-        --- `spatial`.
-        z: number
-        --- Whether it is pinned to the front pair, and at what gains.
-        stereo: boolean
-        --- Left speaker gain last pushed. Meaningless unless `stereo`.
-        left: number
-        --- Right speaker gain last pushed. Meaningless unless `stereo`.
-        right: number
-    end
-
-    --- The `Sound` component, for a game that wants to query or set it. See
-    --- the record's own documentation for what its fields mean.
+    --- Play a clip by putting this on an entity.
     Sound: Sound
 
-    --- Whether an output opened. False on a machine with no sound, where
-    --- every call here still works and nothing is heard.
-    available: boolean
+    --- What `newAudio` takes.
+    type Config = Audio.Config
+    --- A loaded clip, or one still loading.
+    type Clip = Audio.Clip
+    --- What `Audio:load` takes.
+    type LoadOptions = Audio.LoadOptions
+    --- What `Audio:play` takes.
+    type PlayOptions = Audio.PlayOptions
+    --- How many voices a key allows at once, and how soon it may repeat.
+    type Limit = Audio.Limit
+    --- What `Audio:voices` reports about one voice.
+    type VoiceInfo = Audio.VoiceInfo
 
-    --- Private. The platform seam every call below goes through, so nothing
-    --- here names a mixer symbol itself.
-    _backend: Backend
+    --- A physical device the platform reports, before it is opened.
+    type Device = platformaudio.Device
+    --- An open recording device, read by polling.
+    type Microphone = platformaudio.Microphone
+    --- What `openMicrophone` takes.
+    type MicrophoneConfig = platformaudio.MicrophoneConfig
 
-    --- Private. The open output. Nil on a machine that has none and again
-    --- after `destroy`, which is what `available` reports.
-    _mixer: loader.CPtr
+    --- Builds the mixer a game plays sound through, opening the platform's
+    --- default output.
+    ---
+    --- Never raises for want of hardware. A machine with no sound card gets an
+    --- object whose calls all succeed and produce nothing, because a game that
+    --- cannot be played without an audio device is rarer than a test machine
+    --- without one.
+    ---
+    --- @param config Omitted takes the defaults. `maxVoices` outside 1 to
+    ---     65535 raises, which is the one field here that does; every other
+    ---     one out of range is the platform's to refuse.
+    --- @return The mixer, which the caller has to `destroy`. Check `available`
+    ---     for whether an output actually opened; it is false on a machine
+    ---     with no sound, and every call still succeeds and is silent.
+    newAudio: function(config?: Audio.Config): Audio
 
-    --- Private. The layout the output was opened with.
-    _spec: audiobackend.Spec
+    --- Physical playback devices attached now.
+    ---
+    --- @return The devices, listed afresh each call and the caller's to keep.
+    ---     Empty rather than nil when the subsystem cannot start.
+    --- @return SDL's reason, when something went wrong.
+    playbackDevices: function(): {platformaudio.Device}, string
 
-    --- Private. One play-options record, refilled per play. Every field is
-    --- written each time, so nothing carries over between voices.
-    _params: audiobackend.PlayParams
+    --- Physical recording devices attached now.
+    ---
+    --- @return The devices, listed afresh each call and the caller's to keep.
+    ---     Empty rather than nil when the subsystem cannot start.
+    --- @return SDL's reason, when something went wrong.
+    recordingDevices: function(): {platformaudio.Device}, string
 
-    --- Private. Every voice slot, sounding or not, indexed from one. Its
-    --- length is `maxVoices` and never changes after `newAudio`.
-    _voices: {Voice}
-
-    --- Private. Slots not in use, as a stack taken from the end, so the first
-    --- sound of a run gets slot one.
-    _free: {integer}
-
-    --- Private. Slots currently sounding, paused and fading ones included.
-    _sounding: integer
-
-    --- Private. The streaming threshold in milliseconds, which is where
-    --- `streamSeconds` ends up.
-    _streamMs: integer
-
-    --- Private. The master gain as set, which a mute holds down without
-    --- discarding.
-    _masterGain: number
-
-    --- Private. Whether a master mute is holding the output at zero.
-    _muted: boolean
-
-    --- Private. Gain per group name, absent meaning 1. Kept here rather than
-    --- on the mixer's tags, whose per-tag gain would overwrite each voice's
-    --- own.
-    _groupGains: {string: number}
-
-    --- Private. Mute per group name, absent meaning not muted.
-    _groupMuted: {string: boolean}
-
-    --- Private. Pause per group name, absent meaning not paused. A standing
-    --- instruction, so a voice starting into a paused group is held too.
-    _groupPaused: {string: boolean}
-
-    --- Private. The limit each key carries, or absent for no limit.
-    _limits: {string: Audio.Limit}
-
-    --- Private. Live count and last start time per key, created on the first
-    --- voice counted against it.
-    _buckets: {string: Bucket}
-
-    --- Private. Clips this instance has loaded, keyed by interned clip index.
-    _clips: {integer: Clip}
-
-    --- Private. Loads in flight, resolved by `update`.
-    _loads: assets.Batch<Audio.Clip>
-    --- Where pitch variance is drawn from. A mixer of its own until `install`
-    --- points it at the world's `tecs.audio` stream, so a save carries the
-    --- rate the next shot fires at rather than restarting the variance.
-    _random: random.Random
-    --- Seconds `update` has been told about, which is what a cooldown is
-    --- measured against.
-    _now: number
+    --- Opens a microphone as interleaved native-endian 32-bit float samples.
+    ---
+    --- No callback is installed. SDL's audio thread fills its own stream and
+    --- the game pulls completed bytes from the main thread with `read`.
+    ---
+    --- @param config Omitted opens the default recording device at its own
+    ---     frequency and channel count.
+    --- @return The open microphone, whose closing is the caller's through
+    ---     `destroy`. Nil on failure, and nothing is left open in that case.
+    --- @return The reason, when the first return is nil.
+    openMicrophone: function(config?: platformaudio.MicrophoneConfig): platformaudio.Microphone, string
 end
+
+local type Audio = audio.Audio
 
 local AudioMT <const>: metatable<Audio> = {__index = Audio}
 
@@ -641,6 +720,15 @@ local AudioMT <const>: metatable<Audio> = {__index = Audio}
 local installed <const>: {types.World: Audio} = setmetatable({}, {__mode = "k"} as metatable<{types.World: Audio}>)
 
 Audio.Sound = Sound
+
+audio.Sound = Sound
+
+-- The device half, under this module's public names. `platform/audio.tl` is
+-- the seam and reaches only SDL; `tecs.audio` is the surface, the way
+-- `tecs.filesystem` publishes what `platform/content.tl` holds.
+audio.playbackDevices = platformaudio.playbackDevices
+audio.recordingDevices = platformaudio.recordingDevices
+audio.openMicrophone = platformaudio.openMicrophone
 
 --- Index of a clip path, assigning one the first time it is seen.
 ---
@@ -716,20 +804,7 @@ end
 -- Lifecycle
 -------------------------------------------------------------------------------
 
---- Opens the platform's default output.
----
---- Never raises for want of hardware. A machine with no sound card gets an
---- object whose calls all succeed and produce nothing, because a game that
---- cannot be played without an audio device is rarer than a test machine
---- without one.
----
---- @param config May be omitted for the defaults. `maxVoices` outside 1 to
----     65535 raises, which is the one thing here that does; every other field
----     out of range is the platform's to refuse.
---- @return An instance the caller owns and has to `destroy`. Check
----     `available` for whether an output actually opened; it is false on a
----     machine with no sound, and every call still succeeds and is silent.
-function Audio.newAudio(config?: Audio.Config): Audio
+function audio.newAudio(config?: Audio.Config): Audio
     local given = config or {} as Audio.Config
     local self = setmetatable({} as Audio, AudioMT)
 
@@ -849,8 +924,8 @@ function Audio:destroy()
     -- mixer that can only report that it is unavailable. Swept rather than
     -- indexed, because `install` takes a world and this holds no reference to
     -- any of them.
-    for world, audio in pairs(installed) do
-        if audio == self then
+    for world, mixer in pairs(installed) do
+        if mixer == self then
             installed[world] = nil
         end
     end
@@ -2279,4 +2354,4 @@ function Audio:install(world: types.World)
     })
 end
 
-return Audio
+return audio

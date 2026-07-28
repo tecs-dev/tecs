@@ -629,6 +629,7 @@ Every function and type this module carries, rendered from `src/tecs/platform/sy
 </code></pre>
 
 What this build of the engine can do on this target.
+
 <a id="tecs.system.DialogFilter"></a>
 
 ### tecs.system.DialogFilter
@@ -637,6 +638,7 @@ What this build of the engine can do on this target.
 </code></pre>
 
 One entry in a dialog's file-type filter.
+
 <a id="tecs.system.DialogOptions"></a>
 
 ### tecs.system.DialogOptions
@@ -645,6 +647,7 @@ One entry in a dialog's file-type filter.
 </code></pre>
 
 What a dialog is opened with.
+
 <a id="tecs.system.DialogResult"></a>
 
 ### tecs.system.DialogResult
@@ -653,6 +656,7 @@ What a dialog is opened with.
 </code></pre>
 
 What the user chose, or that they chose nothing.
+
 <a id="tecs.system.Locale"></a>
 
 ### tecs.system.Locale
@@ -661,6 +665,7 @@ What the user chose, or that they chose nothing.
 </code></pre>
 
 One language the user prefers, in order of preference.
+
 <a id="tecs.system.Power"></a>
 
 ### tecs.system.Power
@@ -669,6 +674,7 @@ One language the user prefers, in order of preference.
 </code></pre>
 
 What the machine is running on, and how much of it is left.
+
 <a id="tecs.system.ProcessOptions"></a>
 
 ### tecs.system.ProcessOptions
@@ -677,6 +683,7 @@ What the machine is running on, and how much of it is left.
 </code></pre>
 
 What to run, and what the child inherits.
+
 <a id="tecs.system.ProcessOptions.args"></a>
 
 ### tecs.system.ProcessOptions.args
@@ -686,6 +693,7 @@ What to run, and what the child inherits.
 
 The program and its arguments; `args[1]` is the program. A name
 without a separator is resolved against `PATH`.
+
 <a id="tecs.system.ProcessOptions.cwd"></a>
 
 ### tecs.system.ProcessOptions.cwd
@@ -694,6 +702,7 @@ without a separator is resolved against `PATH`.
 </code></pre>
 
 Working directory for the child. Omitted inherits this process's.
+
 <a id="tecs.system.ProcessOptions.env"></a>
 
 ### tecs.system.ProcessOptions.env
@@ -704,6 +713,7 @@ Working directory for the child. Omitted inherits this process's.
 Environment variables to set. Applied over this process's
 environment, or over an empty one when `clearEnv` is true.
 Omitted, and with `clearEnv` unset, the child inherits everything.
+
 <a id="tecs.system.ProcessOptions.clearEnv"></a>
 
 ### tecs.system.ProcessOptions.clearEnv
@@ -713,6 +723,7 @@ Omitted, and with `clearEnv` unset, the child inherits everything.
 
 Start the child's environment empty rather than inherited, so
 `env` is the whole of what it sees. Optional.
+
 <a id="tecs.system.ProcessOptions.mergeStderr"></a>
 
 ### tecs.system.ProcessOptions.mergeStderr
@@ -724,6 +735,7 @@ Fold the child's error output into `output` instead of keeping it
 in `errorOutput`. Optional; separate by default, because a tool's
 diagnostics interleaved into its output corrupt anything parsing
 that output, and the diagnostics are what you want when it fails.
+
 <a id="tecs.system.ProcessOptions.input"></a>
 
 ### tecs.system.ProcessOptions.input
@@ -734,6 +746,7 @@ that output, and the diagnostics are what you want when it fails.
 Bytes written to the child's standard input, which is closed once
 they are through. Omitted closes it immediately, so a child reading
 to end of input sees one rather than waiting. Optional.
+
 <a id="tecs.system.ProcessOptions.timeoutMs"></a>
 
 ### tecs.system.ProcessOptions.timeoutMs
@@ -743,6 +756,7 @@ to end of input sees one rather than waiting. Optional.
 
 Kill the child forcibly after this many milliseconds. Omitted lets
 it run as long as it likes. Optional.
+
 <a id="tecs.system.ProcessResult"></a>
 
 ### tecs.system.ProcessResult
@@ -757,6 +771,7 @@ of it is on the future: a run in flight is a `Future<ProcessResult>` reading
 "pending" and a run that ended is the same future carrying one of
 these. The one thing worth knowing in between is the child's process id,
 and `processResult` answers that from the runner's own bookkeeping.
+
 <a id="tecs.system.ProcessResult.args"></a>
 
 ### tecs.system.ProcessResult.args
@@ -765,6 +780,7 @@ and `processResult` answers that from the runner's own bookkeeping.
 </code></pre>
 
 The program and its arguments, as given.
+
 <a id="tecs.system.ProcessResult.pid"></a>
 
 ### tecs.system.ProcessResult.pid
@@ -773,6 +789,7 @@ The program and its arguments, as given.
 </code></pre>
 
 The child's process id.
+
 <a id="tecs.system.ProcessResult.exitCode"></a>
 
 ### tecs.system.ProcessResult.exitCode
@@ -781,6 +798,7 @@ The child's process id.
 </code></pre>
 
 The child's exit code, or the negated signal that ended it.
+
 <a id="tecs.system.ProcessResult.output"></a>
 
 ### tecs.system.ProcessResult.output
@@ -789,6 +807,7 @@ The child's exit code, or the negated signal that ended it.
 </code></pre>
 
 Everything the child wrote to standard output.
+
 <a id="tecs.system.ProcessResult.errorOutput"></a>
 
 ### tecs.system.ProcessResult.errorOutput
@@ -798,6 +817,7 @@ Everything the child wrote to standard output.
 
 Everything it wrote to standard error, or "" when `mergeStderr`
 folded that into `output`.
+
 <a id="tecs.system.ProcessResult.succeeded"></a>
 
 ### tecs.system.ProcessResult.succeeded
@@ -1246,6 +1266,7 @@ Whether the runner worker is running.
 </code></pre>
 
 Forgets the cached answer. A platform change is noticed without this.
+
 <a id="tecs.system.runProcess"></a>
 
 ### tecs.system.runProcess

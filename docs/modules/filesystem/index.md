@@ -476,6 +476,7 @@ Every function and type this module carries, rendered from `src/tecs/platform/fi
 </code></pre>
 
 How a pattern is matched.
+
 <a id="tecs.filesystem.Info"></a>
 
 ### tecs.filesystem.Info
@@ -484,6 +485,7 @@ How a pattern is matched.
 </code></pre>
 
 What the backend answered about one path.
+
 <a id="tecs.filesystem.PathType"></a>
 
 ### tecs.filesystem.PathType
@@ -493,6 +495,7 @@ What the backend answered about one path.
 
 What a path is. Symbolic links are followed, so a link never reports as
 one: "other" is a socket, a fifo or a device.
+
 <a id="tecs.filesystem.Reader"></a>
 
 ### tecs.filesystem.Reader
@@ -501,6 +504,7 @@ one: "other" is a socket, a fifo or a device.
 </code></pre>
 
 A read that hands its bytes over in pieces.
+
 <a id="tecs.filesystem.UserFolder"></a>
 
 ### tecs.filesystem.UserFolder
@@ -509,6 +513,7 @@ A read that hands its bytes over in pieces.
 </code></pre>
 
 Which of the platform's well-known folders to ask for.
+
 <a id="tecs.filesystem.Writer"></a>
 
 ### tecs.filesystem.Writer
@@ -517,6 +522,7 @@ Which of the platform's well-known folders to ask for.
 </code></pre>
 
 A write that takes its bytes in pieces.
+
 <a id="tecs.filesystem.application"></a>
 
 ### tecs.filesystem.application
@@ -912,6 +918,7 @@ assert(writer:close())
 
 Organization and application names, used to name the writable
 directory. Set before anything asks for `preferencePath`.
+
 <a id="tecs.filesystem.preferencePath"></a>
 
 ### tecs.filesystem.preferencePath
@@ -1034,6 +1041,7 @@ Forgets the cached roots.
 A platform change is noticed without this, so this is for a test that moved
 something under the process. Named for what it forgets rather than as a bare
 `reset`, which on this module would read as resetting the filesystem.
+
 <a id="tecs.filesystem.setAssetRoot"></a>
 
 ### tecs.filesystem.setAssetRoot
@@ -1086,6 +1094,7 @@ such place.
 </code></pre>
 
 Polling for changed files, and dispatching what changed.
+
 <a id="tecs.filesystem.writablePath"></a>
 
 ### tecs.filesystem.writablePath

@@ -426,6 +426,7 @@ Every function and type this module carries, rendered from `src/tecs/gfx/particl
 </code></pre>
 
 Samples one compiled curve or gradient holds.
+
 <a id="tecs.gfx.particles.Color"></a>
 
 ### tecs.gfx.particles.Color
@@ -433,7 +434,8 @@ Samples one compiled curve or gradient holds.
 <pre><code v-pre>type <a href="#tecs.gfx.particles.Color">tecs.gfx.particles.Color</a> = Color
 </code></pre>
 
-Accepted wherever a color is asked for.
+Accepted wherever a colour is asked for.
+
 <a id="tecs.gfx.particles.Curve"></a>
 
 ### tecs.gfx.particles.Curve
@@ -442,6 +444,7 @@ Accepted wherever a color is asked for.
 </code></pre>
 
 What `curve` answers with.
+
 <a id="tecs.gfx.particles.EFFECT"></a>
 
 ### tecs.gfx.particles.EFFECT
@@ -455,6 +458,7 @@ Published because the shaders state the same offsets and a
 disagreement between the two is silent: it draws something, just not
 the right thing. `spec/particles_spec.lua` reads both and holds them to
 each other, which is the only reason this is on the surface.
+
 <a id="tecs.gfx.particles.EFFECT_FLOATS"></a>
 
 ### tecs.gfx.particles.EFFECT_FLOATS
@@ -463,6 +467,7 @@ each other, which is the only reason this is on the surface.
 </code></pre>
 
 Floats per effect and per emitter record, which the shaders state again.
+
 <a id="tecs.gfx.particles.EMITTER"></a>
 
 ### tecs.gfx.particles.EMITTER
@@ -472,6 +477,7 @@ Floats per effect and per emitter record, which the shaders state again.
 
 The same for an emitter record. Both are keyed by field name and give a
 float offset from the record's start, counting from zero.
+
 <a id="tecs.gfx.particles.EMITTER_FLOATS"></a>
 
 ### tecs.gfx.particles.EMITTER_FLOATS
@@ -481,6 +487,7 @@ float offset from the record's start, counting from zero.
 
 The second of that pair, and a different number: an emitter record is
 much the smaller of the two.
+
 <a id="tecs.gfx.particles.Effect"></a>
 
 ### tecs.gfx.particles.Effect
@@ -489,6 +496,7 @@ much the smaller of the two.
 </code></pre>
 
 The handle `effect` answers with and a `ParticleEmitter` names.
+
 <a id="tecs.gfx.particles.EffectOptions"></a>
 
 ### tecs.gfx.particles.EffectOptions
@@ -497,6 +505,7 @@ The handle `effect` answers with and a `ParticleEmitter` names.
 </code></pre>
 
 What `effect` takes.
+
 <a id="tecs.gfx.particles.EmitterOptions"></a>
 
 ### tecs.gfx.particles.EmitterOptions
@@ -505,6 +514,7 @@ What `effect` takes.
 </code></pre>
 
 What a `ParticleEmitter` is constructed from.
+
 <a id="tecs.gfx.particles.EmitterState"></a>
 
 ### tecs.gfx.particles.EmitterState
@@ -513,6 +523,7 @@ What a `ParticleEmitter` is constructed from.
 </code></pre>
 
 The three values an emitter's `state` takes.
+
 <a id="tecs.gfx.particles.Gradient"></a>
 
 ### tecs.gfx.particles.Gradient
@@ -521,6 +532,7 @@ The three values an emitter's `state` takes.
 </code></pre>
 
 What `gradient` answers with.
+
 <a id="tecs.gfx.particles.ParticleEmitter"></a>
 
 ### tecs.gfx.particles.ParticleEmitter
@@ -529,6 +541,7 @@ What `gradient` answers with.
 </code></pre>
 
 The emitter component.
+
 <a id="tecs.gfx.particles.Pool"></a>
 
 ### tecs.gfx.particles.Pool
@@ -537,6 +550,7 @@ The emitter component.
 </code></pre>
 
 What `poolOf` answers with.
+
 <a id="tecs.gfx.particles.PoolOptions"></a>
 
 ### tecs.gfx.particles.PoolOptions
@@ -545,6 +559,7 @@ What `poolOf` answers with.
 </code></pre>
 
 What `plugin` takes.
+
 <a id="tecs.gfx.particles.Range"></a>
 
 ### tecs.gfx.particles.Range
@@ -553,6 +568,7 @@ What `plugin` takes.
 </code></pre>
 
 The two-bound form of a `Value`.
+
 <a id="tecs.gfx.particles.STATE_FLOATS"></a>
 
 ### tecs.gfx.particles.STATE_FLOATS
@@ -561,6 +577,7 @@ The two-bound form of a `Value`.
 </code></pre>
 
 Floats of state one particle carries, on the GPU and nowhere else.
+
 <a id="tecs.gfx.particles.Value"></a>
 
 ### tecs.gfx.particles.Value
@@ -569,6 +586,7 @@ Floats of state one particle carries, on the GPU and nowhere else.
 </code></pre>
 
 Accepted wherever a property may vary per particle.
+
 <a id="tecs.gfx.particles.curve"></a>
 
 ### tecs.gfx.particles.curve

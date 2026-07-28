@@ -411,6 +411,7 @@ For startup, shutdown and tests. A frame calls `resolve` instead.
 </code></pre>
 
 One asynchronous load.
+
 <a id="tecs.assets.install"></a>
 
 ### tecs.assets.install
@@ -570,6 +571,7 @@ Stops the loading worker.
 Blocks until the thread has exited. Loads still in flight are dropped and their handles
 stay at "loading" forever, so drain with `waitAll` first if their results are wanted.
 Releasing a handle that is already ready still works afterwards; this frees nothing.
+
 <a id="tecs.assets.update"></a>
 
 ### tecs.assets.update

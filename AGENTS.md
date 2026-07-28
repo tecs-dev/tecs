@@ -72,7 +72,7 @@ tecs/
 │   ├── Extractor.tl       # World-facing: a world to a frame packet
 │   ├── Backend.tl         # Device-facing: a frame packet to a frame
 │   ├── FramePacket.tl     # What crosses between them
-│   ├── Audio.tl           # Clips, voices, groups, limits, the Sound component
+│   ├── audio.tl           # Clips, voices, groups, limits, the Sound component
 │   ├── components.tl      # Engine components
 │   ├── assets.tl
 │   ├── workers.tl

@@ -842,6 +842,7 @@ Every function and type this module carries, rendered from `src/tecs/sequence/in
 </code></pre>
 
 A registered effect. Runs synchronously and may not yield.
+
 <a id="tecs.sequence.ActionContext"></a>
 
 ### tecs.sequence.ActionContext
@@ -851,6 +852,7 @@ A registered effect. Runs synchronously and may not yield.
 
 What a registered action receives. The context and its `args` belong
 to the sequencer and are reused by the next call.
+
 <a id="tecs.sequence.Argument"></a>
 
 ### tecs.sequence.Argument
@@ -859,6 +861,7 @@ to the sequencer and are reused by the next call.
 </code></pre>
 
 Constants a `call` passes to its action.
+
 <a id="tecs.sequence.Awaitable"></a>
 
 ### tecs.sequence.Awaitable
@@ -867,6 +870,7 @@ Constants a `call` passes to its action.
 </code></pre>
 
 What a registered awaitable provider has to answer.
+
 <a id="tecs.sequence.ClockId"></a>
 
 ### tecs.sequence.ClockId
@@ -875,6 +879,7 @@ What a registered awaitable provider has to answer.
 </code></pre>
 
 Which clock a program is scheduled against.
+
 <a id="tecs.sequence.DefineOptions"></a>
 
 ### tecs.sequence.DefineOptions
@@ -883,6 +888,7 @@ Which clock a program is scheduled against.
 </code></pre>
 
 Options for `define`.
+
 <a id="tecs.sequence.DefineOptions.clock"></a>
 
 ### tecs.sequence.DefineOptions.clock
@@ -891,6 +897,7 @@ Options for `define`.
 </code></pre>
 
 Clock the program's waits count. Defaults to `"fixed"`.
+
 <a id="tecs.sequence.EasingFunction"></a>
 
 ### tecs.sequence.EasingFunction
@@ -907,6 +914,7 @@ the target at. A curve that leaves [0, 1] overshoots the destination
 rather than the duration, which is what `backOut` and `elasticOut` are
 for. The window itself is fixed at compile time, so no curve can make a
 timeline longer or shorter or move what follows it.
+
 <a id="tecs.sequence.EasingName"></a>
 
 ### tecs.sequence.EasingName
@@ -915,6 +923,7 @@ timeline longer or shorter or move what follows it.
 </code></pre>
 
 Name of a built-in easing curve, and the shape of any curve.
+
 <a id="tecs.sequence.EntityRef"></a>
 
 ### tecs.sequence.EntityRef
@@ -924,6 +933,7 @@ Name of a built-in easing curve, and the shape of any curve.
 
 A reference to an entity supplied at `play` time, resolved when the
 instruction that uses it runs.
+
 <a id="tecs.sequence.Evaluator"></a>
 
 ### tecs.sequence.Evaluator
@@ -932,6 +942,7 @@ instruction that uses it runs.
 </code></pre>
 
 What an `eval` step runs every tick.
+
 <a id="tecs.sequence.Event"></a>
 
 ### tecs.sequence.Event
@@ -940,6 +951,7 @@ What an `eval` step runs every tick.
 </code></pre>
 
 Emitted by an `emit` step, at address 0.
+
 <a id="tecs.sequence.FaultReason"></a>
 
 ### tecs.sequence.FaultReason
@@ -948,6 +960,7 @@ Emitted by an `emit` step, at address 0.
 </code></pre>
 
 Why a cursor stopped running.
+
 <a id="tecs.sequence.Handle"></a>
 
 ### tecs.sequence.Handle
@@ -957,6 +970,7 @@ Why a cursor stopped running.
 
 A generation-checked reference to one playback, meaningful across a
 snapshot load.
+
 <a id="tecs.sequence.Node"></a>
 
 ### tecs.sequence.Node
@@ -966,6 +980,7 @@ snapshot load.
 
 One authored step, produced by the node constructors below. Treat the
 returned value as opaque and do not reuse a node across programs.
+
 <a id="tecs.sequence.PlayOptions"></a>
 
 ### tecs.sequence.PlayOptions
@@ -974,6 +989,7 @@ returned value as opaque and do not reuse a node across programs.
 </code></pre>
 
 Options for `play`.
+
 <a id="tecs.sequence.PlaybackMode"></a>
 
 ### tecs.sequence.PlaybackMode
@@ -982,6 +998,7 @@ Options for `play`.
 </code></pre>
 
 How a timeline repeats.
+
 <a id="tecs.sequence.PlaybackState"></a>
 
 ### tecs.sequence.PlaybackState
@@ -990,6 +1007,7 @@ How a timeline repeats.
 </code></pre>
 
 The lifecycle state of one playback.
+
 <a id="tecs.sequence.Program"></a>
 
 ### tecs.sequence.Program
@@ -999,6 +1017,7 @@ The lifecycle state of one playback.
 
 A compiled, immutable program, produced by `define` and shared by
 every playback of it. See `internal/types` for the full contract.
+
 <a id="tecs.sequence.QueryCondition"></a>
 
 ### tecs.sequence.QueryCondition
@@ -1007,6 +1026,7 @@ every playback of it. See `internal/types` for the full contract.
 </code></pre>
 
 What a `waitQuery` step is waiting for.
+
 <a id="tecs.sequence.RunOptions"></a>
 
 ### tecs.sequence.RunOptions
@@ -1020,6 +1040,7 @@ Omitting it runs the nested timeline once. A nested `"loop"` or
 `"pingPong"` must set `count`, because a parent has to know how long
 its own window is; only the root timeline of a `sequence.timeline`,
 through `params`, may repeat without one.
+
 <a id="tecs.sequence.Status"></a>
 
 ### tecs.sequence.Status
@@ -1028,6 +1049,7 @@ through `params`, may repeat without one.
 </code></pre>
 
 A playback's current state.
+
 <a id="tecs.sequence.Step"></a>
 
 ### tecs.sequence.Step
@@ -1036,6 +1058,7 @@ A playback's current state.
 </code></pre>
 
 One step a playback will reach without branching.
+
 <a id="tecs.sequence.Target"></a>
 
 ### tecs.sequence.Target
@@ -1052,6 +1075,7 @@ component of your own. Every operation that takes one also accepts a
 `TargetName` naming the same built-in, which is the form that survives
 `defineData`. Safe to share between timelines: a target holds no
 per-playback state.
+
 <a id="tecs.sequence.TargetName"></a>
 
 ### tecs.sequence.TargetName
@@ -1060,6 +1084,7 @@ per-playback state.
 </code></pre>
 
 Name of a built-in component-field target.
+
 <a id="tecs.sequence.TimelineNode"></a>
 
 ### tecs.sequence.TimelineNode
@@ -1068,6 +1093,7 @@ Name of a built-in component-field target.
 </code></pre>
 
 One authored timeline operation.
+
 <a id="tecs.sequence.TimelineOptions"></a>
 
 ### tecs.sequence.TimelineOptions
@@ -1076,6 +1102,7 @@ One authored timeline operation.
 </code></pre>
 
 Options for `timeline`.
+
 <a id="tecs.sequence.TimelineOptions.clock"></a>
 
 ### tecs.sequence.TimelineOptions.clock
@@ -1090,6 +1117,7 @@ the simulation's rate: only `Transform` is interpolated between
 fixed steps, so a fixed-clock tween of anything else visibly
 steps. If the simulation can observe the value, put it on
 `"fixed"`.
+
 <a id="tecs.sequence.TimelineSpec"></a>
 
 ### tecs.sequence.TimelineSpec
@@ -1106,6 +1134,7 @@ start. A nested list is read as a block and behaves the same as one.
 Compiling a spec writes the resolved form into the same table, so a
 spec is consumed by the `timeline` or `tweenRun` that takes it: pass a
 fresh one per timeline rather than holding one and reusing it.
+
 <a id="tecs.sequence.TrackSource"></a>
 
 ### tecs.sequence.TrackSource
@@ -1114,6 +1143,7 @@ fresh one per timeline rather than holding one and reusing it.
 </code></pre>
 
 A live component-field tracking source.
+
 <a id="tecs.sequence.TrackingTarget"></a>
 
 ### tecs.sequence.TrackingTarget
@@ -1122,6 +1152,7 @@ A live component-field tracking source.
 </code></pre>
 
 Component selecting a dynamic tracking source entity.
+
 <a id="tecs.sequence.TweenOutcome"></a>
 
 ### tecs.sequence.TweenOutcome
@@ -1130,6 +1161,7 @@ Component selecting a dynamic tracking source entity.
 </code></pre>
 
 How the tween a `waitTween` step was waiting on ended.
+
 <a id="tecs.sequence.activeCount"></a>
 
 ### tecs.sequence.activeCount
@@ -1418,6 +1450,7 @@ Render a program as readable instructions.
 </code></pre>
 
 The built-in easing curves: `sequence.easing.quadOut`.
+
 <a id="tecs.sequence.emit"></a>
 
 ### tecs.sequence.emit
@@ -1954,6 +1987,7 @@ the ordinary signal rule: waiters wake on the next fixed step.
 
 Where a `tweenTrack` step reads the value it chases:
 `sequence.source.own(Transform, "x")`.
+
 <a id="tecs.sequence.status"></a>
 
 ### tecs.sequence.status
@@ -1985,6 +2019,7 @@ Inspect a playback. Returns nil for a handle this world never issued.
 
 The built-in targets and the constructors for new ones:
 `sequence.target.translateX`, `sequence.target.field(C, "hp")`.
+
 <a id="tecs.sequence.timeline"></a>
 
 ### tecs.sequence.timeline

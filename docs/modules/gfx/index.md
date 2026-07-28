@@ -1210,6 +1210,7 @@ Every function and type this module carries, rendered from `src/tecs/gfx/Camera.
 
 What `newCamera` takes, named here so a game can annotate the table it
 passes without reaching into this file.
+
 <a id="tecs.gfx.Camera.matrix"></a>
 
 ### tecs.gfx.Camera.matrix
@@ -1272,6 +1273,7 @@ moves it.
 added without a second camera type, which is the whole reason there is
 a mode rather than a name. Nothing reads it yet, so setting anything
 else changes what the camera reports about itself and not what it draws.
+
 <a id="tecs.gfx.Camera.rotation"></a>
 
 ### tecs.gfx.Camera.rotation
@@ -1281,7 +1283,8 @@ else changes what the camera reports about itself and not what it draws.
 
 Radians. Positive turns the scene counter-clockwise on screen, which is
 the camera itself turning the other way: at a quarter turn, a point at
-+X from the camera in the world is drawn above the center of the window.
++X from the camera in the world is drawn above the centre of the window.
+
 <a id="tecs.gfx.Camera.toScreen"></a>
 
 ### tecs.gfx.Camera.toScreen
@@ -1376,7 +1379,8 @@ geometry that should have drawn, which is why the error goes this way.
 <pre><code v-pre><a href="#tecs.gfx.Camera.x">tecs.gfx.Camera.x</a>: number
 </code></pre>
 
-Center of the view, in world units.
+Centre of the view, in world units.
+
 <a id="tecs.gfx.Camera.y"></a>
 
 ### tecs.gfx.Camera.y
@@ -1386,6 +1390,7 @@ Center of the view, in world units.
 
 The other half of it, running down: increasing y moves the view towards
 the bottom of the world.
+
 <a id="tecs.gfx.Camera.zoom"></a>
 
 ### tecs.gfx.Camera.zoom
@@ -1407,6 +1412,7 @@ Keeps a renderable's fragments inside one rectangle. `index` names a
 region set with `Renderer:setClipRegion`, and 0, the default, means
 no clipping. A region is a single rectangle, so nesting is the
 caller's job: intersect the two and set that.
+
 <a id="tecs.gfx.DropShadow"></a>
 
 ### tecs.gfx.DropShadow
@@ -1418,6 +1424,7 @@ Darkens the ground away from each of the nearest lights, ambient
 included, and blocks no light. `height` is 0 to 1 and decides how far
 the copy is thrown, under the same reading as `Occluder.height`. An
 entity carrying both is an occluder.
+
 <a id="tecs.gfx.Material"></a>
 
 ### tecs.gfx.Material
@@ -1431,6 +1438,7 @@ entity with neither this nor a Sprite still draws. Take `id` from
 `materials.id(name)` rather than writing a number: ids are positions
 in sorted order and move when a material file is added. `param` is 0
 to 1 and means whatever the material says it does.
+
 <a id="tecs.gfx.Occluder"></a>
 
 ### tecs.gfx.Occluder
@@ -1443,6 +1451,7 @@ Blocks every light with the shape the entity draws. `height` is 0 to
 wall and 0 is something lying flat that blocks nothing. Needs
 `shadows` on the renderer; without it the entity draws and casts
 nothing.
+
 <a id="tecs.gfx.PointLight"></a>
 
 ### tecs.gfx.PointLight
@@ -1455,6 +1464,7 @@ entity's Transform and in the same world units. `height` is above the
 surface plane and at 0 the light contributes nothing at all;
 `radius` is its reach in world units; `r`, `g`, `b` and `intensity`
 default to white at 1.
+
 <a id="tecs.gfx.PreviousTransform"></a>
 
 ### tecs.gfx.PreviousTransform
@@ -1467,6 +1477,7 @@ the opt-in to interpolation: an entity carrying it is drawn between
 this and its current transform, so physics does not step visibly.
 Carries `x`, `y` and `rotation` (radians) only, because scale and
 layer change by assignment rather than by integration.
+
 <a id="tecs.gfx.Renderable"></a>
 
 ### tecs.gfx.Renderable
@@ -1477,6 +1488,7 @@ layer change by assignment rather than by integration.
 Marks an entity as contributing geometry. A tag, so it costs a
 column of nothing; without it a Transform is only a position, which
 is what most entities in a world are.
+
 <a id="tecs.gfx.Sprite"></a>
 
 ### tecs.gfx.Sprite
@@ -1492,6 +1504,7 @@ renderer resolved `image` to, and a negative value means unresolved:
 pointing a live Sprite at another image means writing a negative slot
 along with the new `image`, or the row keeps drawing the old layer.
 Only the image name survives a snapshot.
+
 <a id="tecs.gfx.Tint"></a>
 
 ### tecs.gfx.Tint
@@ -1505,6 +1518,7 @@ through the G-buffer and is lit once for the whole scene, anything
 below 1 goes through the forward pass instead, writes no depth, and
 is dropped when the forward list is full. Say 1 exactly for anything
 meant to be solid.
+
 <a id="tecs.gfx.imageId"></a>
 
 ### tecs.gfx.imageId
@@ -1559,6 +1573,7 @@ Name an image index stands for.
 </code></pre>
 
 Re-exported for whoever names a rectangle for `setClipRegion`.
+
 <a id="tecs.gfx.Renderer.ComputeStage"></a>
 
 ### tecs.gfx.Renderer.ComputeStage
@@ -1568,6 +1583,7 @@ Re-exported for whoever names a rectangle for `setClipRegion`.
 
 Re-exported for whoever implements one and passes it to
 `addComputeStage`.
+
 <a id="tecs.gfx.Renderer.InstanceProducer"></a>
 
 ### tecs.gfx.Renderer.InstanceProducer
@@ -1576,6 +1592,7 @@ Re-exported for whoever implements one and passes it to
 </code></pre>
 
 Re-exported for whoever writes one and passes it to `addProducer`.
+
 <a id="tecs.gfx.Renderer.Options"></a>
 
 ### tecs.gfx.Renderer.Options
@@ -1585,6 +1602,7 @@ Re-exported for whoever writes one and passes it to `addProducer`.
 
 What `newRenderer` takes, named here so a game can annotate the table it
 passes without reaching into this file.
+
 <a id="tecs.gfx.Renderer.addComputeStage"></a>
 
 ### tecs.gfx.Renderer.addComputeStage
@@ -1631,6 +1649,7 @@ Adds a producer, laid out after the archetypes in the order added.
 What the view is looking at. Centerd on the viewport the first time a
 frame is drawn, so a scene that never mentions a camera sees world
 coordinates as screen coordinates.
+
 <a id="tecs.gfx.Renderer.capacity"></a>
 
 ### tecs.gfx.Renderer.capacity
@@ -1640,6 +1659,7 @@ coordinates as screen coordinates.
 
 Instances the buffers were sized for, fixed at creation. Nothing grows,
 so this is what `dropped` counts against.
+
 <a id="tecs.gfx.Renderer.captureTexture"></a>
 
 ### tecs.gfx.Renderer.captureTexture
@@ -1689,6 +1709,7 @@ silently removes content.
 </code></pre>
 
 Instances the last sync left resident.
+
 <a id="tecs.gfx.Renderer.deferred"></a>
 
 ### tecs.gfx.Renderer.deferred
@@ -1698,6 +1719,7 @@ Instances the last sync left resident.
 
 The pipeline the packet is drawn through, so a caller can add targets
 and passes around the three it already has.
+
 <a id="tecs.gfx.Renderer.depthSortCollapse"></a>
 
 ### tecs.gfx.Renderer.depthSortCollapse
@@ -1786,6 +1808,7 @@ a frame to record onto.
 </code></pre>
 
 Instances the last sync could not fit.
+
 <a id="tecs.gfx.Renderer.extractSeconds"></a>
 
 ### tecs.gfx.Renderer.extractSeconds
@@ -1819,6 +1842,7 @@ are one number until something takes them apart.
 </code></pre>
 
 Every image, one binding, so the scene is one draw.
+
 <a id="tecs.gfx.Renderer.install"></a>
 
 ### tecs.gfx.Renderer.install
@@ -1848,6 +1872,7 @@ returns, so a system later in the frame reads this frame's numbers.
 </code></pre>
 
 The instance buffer the scene is drawn from, and the staging behind it.
+
 <a id="tecs.gfx.Renderer.newRenderer"></a>
 
 ### tecs.gfx.Renderer.newRenderer
@@ -2041,6 +2066,7 @@ Whether archetype runs are laid out with room to grow.
 </code></pre>
 
 Instances the last sync actually rewrote. Zero on a still frame.
+
 <a id="tecs.gfx.Renderer.saveScreenshot"></a>
 
 ### tecs.gfx.Renderer.saveScreenshot
@@ -2149,6 +2175,7 @@ they select the whole image. Fails on a name nothing is registered under.
 </code></pre>
 
 What `loadFont` answers with, and what a `Text` names.
+
 <a id="tecs.gfx.FontOptions"></a>
 
 ### tecs.gfx.FontOptions
@@ -2157,6 +2184,7 @@ What `loadFont` answers with, and what a `Text` names.
 </code></pre>
 
 What `loadFont` takes.
+
 <a id="tecs.gfx.GlyphMetrics"></a>
 
 ### tecs.gfx.GlyphMetrics
@@ -2166,6 +2194,7 @@ What `loadFont` takes.
 
 One entry of a font's `glyphs`, in the units the atlas was generated
 at.
+
 <a id="tecs.gfx.Text"></a>
 
 ### tecs.gfx.Text
@@ -2174,6 +2203,7 @@ at.
 </code></pre>
 
 The text component.
+
 <a id="tecs.gfx.TextOptions"></a>
 
 ### tecs.gfx.TextOptions
@@ -2182,6 +2212,7 @@ The text component.
 </code></pre>
 
 What `textPlugin` takes.
+
 <a id="tecs.gfx.defaultFont"></a>
 
 ### tecs.gfx.defaultFont

@@ -1083,6 +1083,7 @@ Every function and type this module carries, rendered from `src/tecs/gfx/animati
 </code></pre>
 
 Playback state for one entity.
+
 <a id="tecs.gfx.animation.AnimationEvents"></a>
 
 ### tecs.gfx.animation.AnimationEvents
@@ -1091,6 +1092,7 @@ Playback state for one entity.
 </code></pre>
 
 Asks for `Completed` and `Looped` on an entity.
+
 <a id="tecs.gfx.animation.AsepriteOptions"></a>
 
 ### tecs.gfx.animation.AsepriteOptions
@@ -1099,6 +1101,7 @@ Asks for `Completed` and `Looped` on an entity.
 </code></pre>
 
 What `fromAseprite` takes.
+
 <a id="tecs.gfx.animation.Builder"></a>
 
 ### tecs.gfx.animation.Builder
@@ -1107,6 +1110,7 @@ What `fromAseprite` takes.
 </code></pre>
 
 What `build` answers with.
+
 <a id="tecs.gfx.animation.Completed"></a>
 
 ### tecs.gfx.animation.Completed
@@ -1115,6 +1119,7 @@ What `build` answers with.
 </code></pre>
 
 Emitted when a tag that does not loop runs past its last frame.
+
 <a id="tecs.gfx.animation.DEFAULT_DURATION"></a>
 
 ### tecs.gfx.animation.DEFAULT_DURATION
@@ -1123,6 +1128,7 @@ Emitted when a tag that does not loop runs past its last frame.
 </code></pre>
 
 Milliseconds a frame is held when nothing says otherwise.
+
 <a id="tecs.gfx.animation.Direction"></a>
 
 ### tecs.gfx.animation.Direction
@@ -1131,6 +1137,7 @@ Milliseconds a frame is held when nothing says otherwise.
 </code></pre>
 
 How a tag walks its span.
+
 <a id="tecs.gfx.animation.GridOptions"></a>
 
 ### tecs.gfx.animation.GridOptions
@@ -1139,6 +1146,7 @@ How a tag walks its span.
 </code></pre>
 
 What `grid` takes.
+
 <a id="tecs.gfx.animation.Looped"></a>
 
 ### tecs.gfx.animation.Looped
@@ -1147,6 +1155,7 @@ What `grid` takes.
 </code></pre>
 
 Emitted when a looping tag passes its last frame and restarts.
+
 <a id="tecs.gfx.animation.Pivot"></a>
 
 ### tecs.gfx.animation.Pivot
@@ -1155,6 +1164,7 @@ Emitted when a looping tag passes its last frame and restarts.
 </code></pre>
 
 Where an entity's quad turns and scales about.
+
 <a id="tecs.gfx.animation.PlayOptions"></a>
 
 ### tecs.gfx.animation.PlayOptions
@@ -1163,6 +1173,7 @@ Where an entity's quad turns and scales about.
 </code></pre>
 
 What `of` and `play` take.
+
 <a id="tecs.gfx.animation.Rect"></a>
 
 ### tecs.gfx.animation.Rect
@@ -1171,6 +1182,7 @@ What `of` and `play` take.
 </code></pre>
 
 One frame, as `rects` and the builder take it.
+
 <a id="tecs.gfx.animation.RectsOptions"></a>
 
 ### tecs.gfx.animation.RectsOptions
@@ -1179,6 +1191,7 @@ One frame, as `rects` and the builder take it.
 </code></pre>
 
 What `rects` takes.
+
 <a id="tecs.gfx.animation.Sheet"></a>
 
 ### tecs.gfx.animation.Sheet
@@ -1187,6 +1200,7 @@ What `rects` takes.
 </code></pre>
 
 An image divided into frames.
+
 <a id="tecs.gfx.animation.Slice"></a>
 
 ### tecs.gfx.animation.Slice
@@ -1195,6 +1209,7 @@ An image divided into frames.
 </code></pre>
 
 A named region that moves across the frames.
+
 <a id="tecs.gfx.animation.SliceKey"></a>
 
 ### tecs.gfx.animation.SliceKey
@@ -1203,6 +1218,7 @@ A named region that moves across the frames.
 </code></pre>
 
 Where a slice sits from one frame on.
+
 <a id="tecs.gfx.animation.Tag"></a>
 
 ### tecs.gfx.animation.Tag
@@ -1211,6 +1227,7 @@ Where a slice sits from one frame on.
 </code></pre>
 
 A named span of frames, as the constructors take it.
+
 <a id="tecs.gfx.animation.build"></a>
 
 ### tecs.gfx.animation.build

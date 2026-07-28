@@ -24,7 +24,7 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local Input = require("tecs.platform.Input")
+local newInput = require("tecs.platform.input").newInput
 local inputbackend = require("tecs.platform.inputbackend")
 
 -- Input consumes the engine's typed events, so the tests build those. The
@@ -180,7 +180,7 @@ end
 --- plugged in before the process started would report.
 local function withPads(backend, ...)
     backend.attach(...)
-    local input = Input.newInput({ backend = backend })
+    local input = newInput({ backend = backend })
     input:refreshDevices()
     return input
 end
@@ -191,7 +191,7 @@ describe("platform.Input", function()
     local F
 
     before_each(function()
-        input = Input.newInput()
+        input = newInput()
         SPACE = input:scancode("space")
         F = input:scancode("f")
     end)
@@ -206,7 +206,7 @@ describe("platform.Input", function()
 
     it("owns and replaces system cursor shapes", function()
         local backend = fakeBackend()
-        local state = Input.newInput({ backend = backend })
+        local state = newInput({ backend = backend })
 
         assert.is_true(state:setCursor("pointer"))
         assert.are.equal("pointer", backend.calls.cursors[1].name)
@@ -748,7 +748,7 @@ describe("platform.Input gamepads", function()
     end)
 
     it("connects and disconnects on the platform's own events", function()
-        local input = Input.newInput({ backend = backend })
+        local input = newInput({ backend = backend })
         assert.are.equal(0, #input:gamepads())
 
         input:handleEvent({ kind = "gamepadAdded", which = 21 })
@@ -905,7 +905,7 @@ describe("platform.Input text", function()
 
     before_each(function()
         backend = fakeBackend()
-        input = Input.newInput({ backend = backend })
+        input = newInput({ backend = backend })
     end)
 
     it("delivers characters only once a session is started", function()

@@ -262,6 +262,7 @@ Every function and type this module carries, rendered from `src/tecs/gfx/layers.
 Everything a layer decides about its contents. A field left out takes
 its default, so this says what a layer is rather than amending what it
 was.
+
 <a id="tecs.gfx.layers.Config.sort"></a>
 
 ### tecs.gfx.layers.Config.sort
@@ -271,6 +272,7 @@ was.
 
 How contents sort within the layer's band. Required: a sort is the
 one thing every layer has an opinion about.
+
 <a id="tecs.gfx.layers.Config.screenSpace"></a>
 
 ### tecs.gfx.layers.Config.screenSpace
@@ -280,6 +282,7 @@ one thing every layer has an opinion about.
 
 Contents are positioned in screen pixels and ignore the camera
 entirely. What a HUD wants. Defaults to false.
+
 <a id="tecs.gfx.layers.Config.ignoreZoom"></a>
 
 ### tecs.gfx.layers.Config.ignoreZoom
@@ -290,6 +293,7 @@ entirely. What a HUD wants. Defaults to false.
 Contents follow the camera's position but not its zoom, so they
 stay a constant size on screen while moving with the world.
 Defaults to false.
+
 <a id="tecs.gfx.layers.Config.virtualCoords"></a>
 
 ### tecs.gfx.layers.Config.virtualCoords
@@ -300,6 +304,7 @@ Defaults to false.
 Contents are positioned in `virtualWidth` by `virtualHeight`, which
 is scaled to fill the target. Defaults to false, and cannot be
 combined with `screenSpace`.
+
 <a id="tecs.gfx.layers.Config.unlit"></a>
 
 ### tecs.gfx.layers.Config.unlit
@@ -310,6 +315,7 @@ combined with `screenSpace`.
 Contents bypass the lighting pass and appear at their own color.
 Defaults to false. A material can ask for the same thing, and a
 fragment is lit only where the material and the layer agree.
+
 <a id="tecs.gfx.layers.Config.parallax"></a>
 
 ### tecs.gfx.layers.Config.parallax
@@ -320,6 +326,7 @@ fragment is lit only where the material and the layer agree.
 How much the camera's position carries the contents. One moves them
 with the world; a half drifts them at half speed, which is what a
 background wants. Defaults to one.
+
 <a id="tecs.gfx.layers.MAX"></a>
 
 ### tecs.gfx.layers.MAX
@@ -334,6 +341,7 @@ vertex shader reads is sized to it, and the shader recovers a layer by
 multiplying a depth by it. `LAYER_BANDS` in
 `assets/shaders/instance.vert.glsl` is the same number, and the two only
 work while they agree. Raising it is not a constant change.
+
 <a id="tecs.gfx.layers.Sort"></a>
 
 ### tecs.gfx.layers.Sort
@@ -347,6 +355,7 @@ work while they agree. Raising it is not a constant change.
 
 X plus Y plus z, for a diamond grid where both axes move an entity
 towards the viewer.
+
 <a id="tecs.gfx.layers.Sort.&quot;topdown&quot;"></a>
 
 ### tecs.gfx.layers.Sort.&quot;topdown&quot;
@@ -354,12 +363,14 @@ towards the viewer.
 Lower on the screen draws in front, with z breaking ties. What a
 top-down or side-on game wants: a character below a crate is in
 front of it.
+
 <a id="tecs.gfx.layers.Sort.&quot;z&quot;"></a>
 
 ### tecs.gfx.layers.Sort.&quot;z&quot;
 
 Only z decides. What a HUD wants, where position means nothing and
 the author has said what covers what.
+
 <a id="tecs.gfx.layers.configure"></a>
 
 ### tecs.gfx.layers.configure
@@ -476,6 +487,7 @@ when `revision` moves rather than every frame.
 Half the world extent a scene is expected to occupy, for normalizing
 position into a band. A scene larger than this still sorts, with
 entities beyond the edge compressed against it.
+
 <a id="tecs.gfx.layers.maxZ"></a>
 
 ### tecs.gfx.layers.maxZ
@@ -487,6 +499,7 @@ Highest z a scene is expected to use, which sets the resolution of
 sorting within a band. A scene reaching past this still draws, with
 entities beyond the edge resting on it and no longer sorting against
 each other.
+
 <a id="tecs.gfx.layers.revision"></a>
 
 ### tecs.gfx.layers.revision
