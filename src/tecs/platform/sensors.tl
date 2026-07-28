@@ -52,9 +52,13 @@ local record Sensor
     destroy: function(self: Sensor)
 end
 
+--- Standalone sensors: listing what is attached, and opening one.
 local record sensors
-    Device: Device
-    Sensor: Sensor
+    --- One sensor the platform reports, before it is opened.
+    type Device = Device
+
+    --- An opened sensor.
+    type Sensor = Sensor
 end
 
 local SensorMT <const>: metatable<Sensor> = {__index = Sensor}
@@ -84,14 +88,14 @@ end
 --- Sensors attached now, in platform order.
 ---
 --- A snapshot, not a subscription: a sensor unplugged after this leaves an id
---- that `open` refuses.
+--- that `openSensor` refuses.
 ---
 --- @return The devices, listed afresh each call and the caller's to keep.
 ---     Empty rather than nil when the sensor subsystem cannot start, so a
 ---     caller that only iterates needs no nil check. Most desktop machines
 ---     genuinely have none, which is an empty list and not a failure.
 --- @return SDL's reason, when something went wrong.
-function sensors.devices(): {Device}, string
+function sensors.sensors(): {Device}, string
     local ok, err = ensureSubsystem()
     if not ok then
         return {}, err
@@ -119,7 +123,7 @@ end
 
 --- Opens an attached sensor by instance id.
 ---
---- @param id An instance id from `devices`. Ids name a device while it stays
+--- @param id An instance id from `sensors`. Ids name a device while it stays
 ---     attached rather than a slot, so one kept across an unplug does not come
 ---     back to the same sensor.
 --- @return The open sensor, whose `name` and `kind` are read from the device
@@ -127,7 +131,7 @@ end
 ---     reason beside it, and nothing is left open in that case. Closing is the
 ---     caller's, through `destroy`.
 --- @return The reason, when the first return is nil.
-function sensors.open(id: number): Sensor, string
+function sensors.openSensor(id: number): Sensor, string
     local ok, err = ensureSubsystem()
     if not ok then
         return nil, err

@@ -121,7 +121,7 @@ end
 ---     answered against.
 --- @param id The platform's instance id, from `Backend.attachedGamepads` or a
 ---     `gamepadAdded` event.
-function Gamepad.open(backend: Backend, gate: Gate, id: number): Gamepad
+function Gamepad.openGamepad(backend: Backend, gate: Gate, id: number): Gamepad
     local handle = backend.openGamepad(id)
     if handle == nil then
         return nil

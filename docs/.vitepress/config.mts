@@ -118,7 +118,6 @@ export default defineConfig({
                     { text: "tecs.events", link: "/modules/events" },
                     { text: "tecs.filesystem", link: "/modules/filesystem" },
                     { text: "tecs.future", link: "/modules/future" },
-                    { text: "tecs.gamepad", link: "/modules/gamepad" },
                     {
                         text: "tecs.gfx",
                         collapsed: false,
@@ -138,7 +137,6 @@ export default defineConfig({
                     { text: "tecs.physics", link: "/modules/physics" },
                     { text: "tecs.proc", link: "/modules/proc" },
                     { text: "tecs.renderer", link: "/modules/renderer" },
-                    { text: "tecs.sensors", link: "/modules/sensors" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.text", link: "/modules/text" },

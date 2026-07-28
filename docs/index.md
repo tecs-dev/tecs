@@ -233,11 +233,10 @@ behind each one.
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
 - [`tecs.filesystem`](/modules/filesystem) - touching the filesystem
 - [`tecs.future`](/modules/future) - a value that settles once
-- [`tecs.gamepad`](/modules/gamepad) - identity, lifetime, metadata and outputs
 - [`tecs.gfx`](/modules/gfx/) - drawing, and the modules a scene is described in
 - [`tecs.gfx.layers`](/modules/gfx/layers) - z-ordering and per-layer behaviour
 - [`tecs.http`](/modules/http) - fetching over HTTP without stopping the frame
-- [`tecs.input`](/modules/input) - three tiers behind a layer stack
+- [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
 - [`tecs.materials`](/modules/materials) - one fragment shader, compiled from the material set
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
@@ -247,7 +246,6 @@ behind each one.
 - [`tecs.physics`](/modules/physics) - Box2D 3, solved across a shared thread pool
 - [`tecs.proc`](/modules/proc) - shelling out
 - [`tecs.renderer`](/modules/renderer) - deferred and GPU-driven, with compute culling and one indirect draw
-- [`tecs.sensors`](/modules/sensors) - standalone accelerometers and gyroscopes
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - URLs, locales, power, messages, and native file and folder dialogs
 - [`tecs.text`](/modules/text) - distance-field glyphs, drawn through an instance producer

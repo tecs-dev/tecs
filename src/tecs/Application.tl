@@ -601,7 +601,7 @@ function Application:_init(): boolean
 
     -- The window is what text input and the cursor modes act on, so input is
     -- created knowing it rather than being told later.
-    self.input = Input.create({window = self.window.handle})
+    self.input = Input.newInput({window = self.window.handle})
     -- Passed through rather than validated here. `pipeline.new` is where a
     -- timestep of zero or a negative step count is refused, so there is one
     -- description of what is legal and it is the one the world enforces.

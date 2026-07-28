@@ -5,7 +5,7 @@ local sensors = require("tecs.platform.sensors")
 
 describe("platform.sensors", function()
     it("enumerates standalone devices without requiring one", function()
-        local devices, err = sensors.devices()
+        local devices, err = sensors.sensors()
         assert.are.equal("table", type(devices))
         if err ~= nil then
             assert.are.equal("string", type(err))
@@ -19,7 +19,7 @@ describe("platform.sensors", function()
     end)
 
     it("reports an invalid sensor id instead of producing a handle", function()
-        local sensor, err = sensors.open(0)
+        local sensor, err = sensors.openSensor(0)
         assert.is_nil(sensor)
         assert.are.equal("string", type(err))
     end)

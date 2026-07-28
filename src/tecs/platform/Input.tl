@@ -240,7 +240,7 @@ local InputMT <const>: metatable<Input> = {__index = Input}
 ---
 --- Holds no devices yet. `refreshDevices` opens the pads that are already
 --- attached, and everything after that arrives as events.
-function Input.create(options?: InputOptions): Input
+function Input.newInput(options?: InputOptions): Input
     local given = options or {} as InputOptions
     local self = setmetatable({} as Input, InputMT)
     self._gate = inputstate.Gate.create()
@@ -402,7 +402,7 @@ local function connect(self: Input, id: number)
     if self._pads[id] ~= nil then
         return
     end
-    local pad = Gamepad.open(self._backend, self._gate, id)
+    local pad = Gamepad.openGamepad(self._backend, self._gate, id)
     if pad == nil then
         return
     end

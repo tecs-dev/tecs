@@ -293,9 +293,7 @@ local function adopt(into: {string: any}, library: {string: any}): data
     end
     into.encodeJSON = library.encode
     into.decodeJSON = library.decode
-    into.newJSON = function(): data
-        return adopt({}, (library.new as function(): {string: any})())
-    end
+    into.newJSON = function(): data return adopt({}, (library.new as function(): {string: any})()) end
     return into as data
 end
 

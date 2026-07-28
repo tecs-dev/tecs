@@ -1256,7 +1256,8 @@ keeps its NULs.
 The smaller operating-system services stay small modules rather than becoming
 an `Application` grab bag. `tecs.system` holds URLs, locale preference, power,
 the simple blocking message box and asynchronous file and folder selection;
-`tecs.sensors` owns standalone sensor handles.
+standalone sensor handles sit under `tecs.input`, beside the pads and the
+keyboard, because a game asking what a device can sense is asking one question.
 Standard cursor shapes stay on `Input`, because cursor choice is an outbound
 input command on the same seam as visibility and relative mode.
 

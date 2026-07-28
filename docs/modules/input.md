@@ -1,9 +1,22 @@
 ---
-description: "Gameplay input in three tiers, behind a layer stack: live state, frame events, and latched events"
-outline: [2, 3]
+description: "Gameplay input in three tiers behind a layer stack, the gamepads attached to it, and the standalone sensors a device carries"
+outline: deep
 ---
 
-# tecs.input.Input
+# tecs.input
+
+`tecs.input` is what a player does and the devices they do it with. `Input` folds the platform event stream
+into per-frame state a system can read; `Gamepad` is one pad, as an object; `sensors` and `openSensor` reach
+the accelerometers and gyroscopes a device carries on its own.
+
+They are one module because they are one question asked of three sources, and because the layer stack answers
+all three. A pad's buttons are gated by the same stack a keyboard's keys are, so reaching `Input` and
+`Gamepad` from different places would make the gate look like a property of one of them.
+
+Platform events stay separate, under [`events`](/modules/events), because that stream also carries lifecycle,
+window, display, clipboard and device-arrival events, none of which is gameplay input.
+
+## Input
 
 `tecs.input.Input` is gameplay input, in three tiers, behind a layer stack. A game does not construct one: the
 [application](/modules/application) does, and hands it over as `app.input`.
@@ -17,7 +30,7 @@ back. It never sees an `SDL_Event`: the conversion happens once, in [`tecs.event
 everything downstream shares that one vocabulary. Every outbound command goes through a backend for the same
 reason, so a platform that is not SDL substitutes one object.
 
-## Three tiers
+### Three tiers
 
 They answer three different questions, and the third is not a variant of the second.
 
@@ -37,7 +50,7 @@ latched tier by hand.
 Latching brackets one step, not one frame. The latched edges clear at the end of each step, so a press is
 delivered to the first step that runs after it and to that one only, whether the frame ran one step or four.
 
-## Layers
+### Layers
 
 Queries are answered relative to a layer.
 
@@ -71,17 +84,17 @@ are states and the platform is still reporting them.
 Popping a layer also stops a text-input session that layer started, so a menu takes its IME and its on-screen
 keyboard with it.
 
-## Focus loss
+### Focus loss
 
 Everything held is released when the window loses focus: keys, mouse buttons, gamepad buttons, the modifier
 mask, the fingers on the touch surface and the pen's pressure. The platform delivers no release for a key held
 as focus goes, so without this a key reads as held until the player presses it again somewhere the application
 can see. Each release is reported as an edge, so `keyReleased` and its relatives fire for it.
 
-A device that is removed releases its held buttons on the same terms; see [`Gamepad`](/modules/gamepad). A pen
+A device that is removed releases its held buttons on the same terms; see [`Gamepad`](#gamepad). A pen
 carried out of range clears `penTouching` and `penPressure`, since nothing reports the lift.
 
-## Keyboard
+### Keyboard
 
 Keys are identified by **physical position**, so a movement binding stays where it is on every layout.
 
@@ -112,7 +125,7 @@ names, and `"leftShift"` asks for one. `modifiers()` is not gated by a layer and
 event: a modifier state that changed while the window was not focused is not seen, which is why focus loss zeroes
 it.
 
-## Mouse
+### Mouse
 
 Positions and accumulated motion are plain fields, read directly:
 
@@ -165,7 +178,7 @@ window — which is what a headless test gets — the commands report failure ra
 rest). Omitting the name restores the default. `Input` releases the prior cursor when it replaces it and releases
 the final one on `destroy`, so callers never own a platform cursor handle.
 
-## Touch and pen
+### Touch and pen
 
 `input:touches(layer?)` answers the fingers currently on the surface. The list and the records in it are reused
 between calls, so anything retaining one has to copy it.
@@ -184,7 +197,7 @@ Pressure, the two tilts and rotation are the axes folded here. A tablet may repo
 barrel slider among them, and those arrive on the raw `penAxis` event carrying the platform's own axis number;
 see [`events`](/modules/events#pen).
 
-## Text input
+### Text input
 
 Off until asked for, because a platform that is composing text is one whose key events a game must not also read
 as bindings, and because on a phone it puts a keyboard over half the screen.
@@ -216,29 +229,450 @@ and its own keyboard against the most recent rectangle it was given, and without
 player is typing. `screenKeyboardSupported` is what a layout has to know: where it is true, starting text input
 covers part of the window.
 
-## Gamepads are not part of it
+## Gamepad
 
-A gamepad has identity, a lifetime, metadata and outputs, so it is not a field on the input state. It is reached
-through the registry and answers for itself.
+A gamepad is not a set of globals the way a keyboard nearly is. It has identity, a lifetime shorter than the
+process, metadata, capabilities that differ between devices, and outputs. Two pads sharing one button set is
+not a simplification, it is a defect: pad A releasing a button releases pad B's. So each device owns its own
+state and is reached through its own object.
 
-| Method                   | What it answers                          |
-| ------------------------ | ---------------------------------------- |
-| `input:gamepads()`       | Every open pad, in connection order      |
-| `input:gamepad(index)`   | The pad at that position                 |
-| `input:gamepadById(id)`  | The pad with that platform instance id   |
-| `input:refreshDevices()` | Opens the pads that are already attached |
+A pad is never constructed by a game. `Input` opens one when the platform reports a device and hands it over
+through `input:gamepads()` and `input:gamepad(index)`; `tecs.input.Gamepad` is the type those answer with, and
+the page below is what one does.
 
-`refreshDevices` runs before the game's plugin, because the platform reports an addition rather than a device
-that was there all along, and waiting for an event would leave every already-plugged-in pad invisible. See
-[`tecs.gamepad.Gamepad`](/modules/gamepad).
+A gamepad is not a set of globals the way a keyboard nearly is. It has identity, a lifetime shorter than the
+process, metadata, capabilities that differ between devices, and outputs. Two pads sharing one button set is not
+a simplification, it is a defect: pad A releasing a button would release pad B's. So each device owns its own
+state and is reached through its own object.
 
-What `Input` holds is what the machine has one of: a keyboard, an aggregate mouse, the touch surface, the pen,
-and the registry the pads live in.
-<!-- @generated by docs/scripts/reference.py from src/tecs/platform/Input.tl. Do not edit below this line. -->
+A retained reference to a device that went away is safe by construction rather than by documented caution. The
+platform handle lives in exactly one field, exactly one function reads it, and disconnection clears it before the
+handle is closed. Every method takes its quiet branch from there: queries answer as if nothing is held, outputs
+report failure, and nothing reaches a freed pointer. A pad is never revived either, so a reference held across a
+reconnect stays disconnected and the reconnected device is a new object.
+
+### Where a pad comes from
+
+Pads are opened, fed the event stream and disconnected by [`Input`](/modules/input), which also owns the layer
+stack every query here is answered against; that module is where a game gets hold of a `Gamepad` object in the
+first place.
+
+Nothing on this page polls the device for state. Buttons, axes, sensor readings and touchpad fingers are all
+folded from the event stream as it arrives, which is what makes a recorded session replay. Only the questions
+about the device itself, the ones under [capabilities](#capabilities-and-identity), read the hardware.
+
+Held buttons are released when the window loses focus and when the device is removed, and each release is
+reported as an edge, so [`buttonReleased`](#buttonreleased) fires for it. The platform delivers no release in
+either case, and a button that stayed held forever is worse than one that never worked. Axes, sensor readings
+and touchpad fingers are cleared on removal too, so a pad that has gone reads as neutral rather than as frozen
+at its last value.
+
+### What a pad says about itself
+
+| Field         | Type      | Description                                                                                                              |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `id`          | `number`  | Platform instance id. Unique among attached devices, and not reused by this object once the device is gone.              |
+| `connected`   | `boolean` | Whether the device is still attached. False for good once it is: a pad is never revived, so this only ever goes one way. |
+| `name`        | `string`  | What the platform calls the device, for showing the player which pad is which. Not stable across platforms or drivers.   |
+| `kind`        | `string`  | Device family. See [device families](#device-families).                                                                  |
+| `guid`        | `string`  | Stable hardware identity, for matching saved bindings. This is what matches, not `name`.                                 |
+| `path`        | `string`  | Where the platform says the device is attached. Empty when it declines to say.                                           |
+| `playerIndex` | `integer` | Player slot the platform assigned, or `-1` for none. See [`setPlayerIndex`](#setplayerindex).                            |
+| `touchpads`   | `integer` | Touchpads the device carries. Zero on most.                                                                              |
+
+#### Device families
+
+`kind` is one of `"standard"`, `"xbox360"`, `"xboxOne"`, `"ps3"`, `"ps4"`, `"ps5"`, `"switchPro"`,
+`"joyconLeft"`, `"joyconRight"`, `"joyconPair"` and `"gamecube"`, or `"unknown"` when the platform does not
+recognise the device.
+
+### Button and axis names
+
+Buttons are named positionally. `south` is the button nearest the player on every pad, where `a` is that button
+on some pads and the one to its right on others. What is printed on the hardware is a separate question, and
+[`label`](#label) answers it, because a prompt has to show the player their own pad.
+
+Every method that takes a button, an axis or a sensor takes either the name or the platform's own integer code.
+A name that is not in the table below raises.
+
+| Kind    | Names                                                                                                                                                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Buttons | `south`, `east`, `west`, `north`, `back`, `guide`, `start`, `leftStick`, `rightStick`, `leftShoulder`, `rightShoulder`, `dpadUp`, `dpadDown`, `dpadLeft`, `dpadRight`, `misc1` to `misc6`, `leftPaddle1`, `leftPaddle2`, `rightPaddle1`, `rightPaddle2`, `touchpad` |
+| Axes    | `leftX`, `leftY`, `rightX`, `rightY`, `leftTrigger`, `rightTrigger`                                                                                                                                                                                                 |
+| Sensors | `gyro`, `accelerometer`, and the per-side `leftGyro`, `rightGyro`, `leftAccelerometer`, `rightAccelerometer` a split device carries                                                                                                                                 |
+
+### Layers and pads
+
+Every query that reads folded state takes an optional `layer`, and answers as if nothing were held when that
+layer cannot read. Omitting it means the base layer, which is the safe default: it goes quiet when anything is
+pushed over it. The stack is shared across every device rather than being one of this pad's own, so a layer
+blocks every device or none. The stack itself lives in [`Input`](/modules/input).
+
+The questions about the device rather than about its state, `hasButton`, `hasAxis`, `hasSensor`,
+`sensorEnabled`, `label` and `power`, take no layer and answer the same way whatever is on top.
+
+### Buttons
+
+#### buttonDown
+
+Whether a button is held.
+
+```teal
+function Gamepad:buttonDown(button: string | integer, layer?: Layer): boolean
+```
+
+**Parameters:**
+
+- `button`: a positional name or a platform code.
+- `layer`: the layer to answer for. Omitted, the base layer.
+
+**Returns:** whether the button is held right now, and `false` when the layer cannot read.
+
+#### buttonPressed
+
+Whether a button went down.
+
+```teal
+function Gamepad:buttonPressed(button: string | integer, layer?: Layer): boolean
+```
+
+Inside a fixed step this reads the latched set, so a press that began and ended between two steps is not lost.
+
+**Returns:** whether the button went down, and `false` when the layer cannot read.
+
+#### buttonReleased
+
+Whether a button came up, on the same tiers as `buttonPressed`.
+
+```teal
+function Gamepad:buttonReleased(button: string | integer, layer?: Layer): boolean
+```
+
+**Example:**
+
+```teal
+if pad:buttonPressed("south") then
+    jump()
+end
+if pad:buttonDown("rightShoulder") then
+    aim()
+end
+```
+
+### Axes
+
+#### axis
+
+An axis in -1..1, or a trigger in 0..1.
+
+```teal
+function Gamepad:axis(axis: string | integer, deadzone?: number, layer?: Layer): number
+```
+
+**Parameters:**
+
+- `axis`: a name or a platform code.
+- `deadzone`: magnitude below which the axis reads as zero. Defaults to `0.15`, because stick drift is a property
+  of the hardware rather than of any one game.
+- `layer`: the layer to answer for. Omitted, the base layer.
+
+**Returns:** the axis value, or zero inside the deadzone and zero when the layer cannot read.
+
+Sticks report Y growing downward, matching the screen rather than a maths convention. Values inside the deadzone
+read as zero and values outside it are not rescaled, so a stick leaving the deadzone steps from zero to the
+deadzone magnitude. A game that wants a continuous ramp rescales what it gets.
+
+**Example:**
+
+```teal
+local moveX <const> = pad:axis("leftX")
+local moveY <const> = pad:axis("leftY")
+local throttle <const> = pad:axis("rightTrigger", 0.05)
+```
+
+### Capabilities and identity
+
+#### hasButton
+
+Whether the device carries a button at all, so a prompt can be omitted rather than shown for something the player
+does not have.
+
+```teal
+function Gamepad:hasButton(button: string | integer): boolean
+```
+
+**Returns:** whether the device has it. A disconnected pad answers `false`, which is the same answer a prompt
+wants.
+
+#### hasAxis
+
+Whether the device carries an axis, on the same terms as `hasButton`.
+
+```teal
+function Gamepad:hasAxis(axis: string | integer): boolean
+```
+
+Worth asking before binding: a pad with no right stick reads zero on it forever, which is indistinguishable from
+one the player is not moving.
+
+#### label
+
+What is printed on a button, for a prompt.
+
+```teal
+function Gamepad:label(button: string | integer): string
+```
+
+**Returns:** one of `"a"`, `"b"`, `"x"`, `"y"`, `"cross"`, `"circle"`, `"square"`, `"triangle"`, or `"unknown"`
+for a button the platform has no label for and for a pad that has gone.
+
+Cached, because a prompt asks every frame it is on screen and the answer only changes when the device is
+remapped, which drops the cache.
+
+**Example:**
+
+```teal
+if pad:hasButton("south") then
+    local hint <const> = ("Press %s to jump"):format(pad:label("south"))
+    drawPrompt(hint)
+end
+```
+
+#### power
+
+Power state name and charge percentage.
+
+```teal
+function Gamepad:power(): string, integer
+```
+
+**Returns:** the state name, then the charge in 0..100 or `-1`.
+
+States are `"onBattery"`, `"charging"`, `"charged"`, `"noBattery"`, `"unknown"` and `"error"`. The percentage is
+`-1` wherever the device declines to report one, which includes every state that is not about a battery. A pad
+that has gone answers `"unknown", -1`.
+
+### Sensors on a pad
+
+A pad's gyro and accelerometer are off until asked for, and that is opt-in on purpose: an enabled sensor delivers
+an event every few milliseconds, and a game that does not read one should not pay for the stream.
+
+#### hasSensor
+
+Whether the device carries a sensor.
+
+```teal
+function Gamepad:hasSensor(sensor: string | integer): boolean
+```
+
+#### enableSensor
+
+Turns a sensor on or off.
+
+```teal
+function Gamepad:enableSensor(sensor: string | integer, enabled?: boolean): boolean
+```
+
+**Parameters:**
+
+- `sensor`: a name or a platform code.
+- `enabled`: whether to turn it on. Defaults to `true`.
+
+**Returns:** whether the platform accepted the request. `false` for a pad that has gone.
+
+#### sensorEnabled
+
+Whether a sensor is currently delivering readings.
+
+```teal
+function Gamepad:sensorEnabled(sensor: string | integer): boolean
+```
+
+Asked of the device, so this reports what is actually streaming rather than what `enableSensor` was last asked
+for: a request the device refused shows up here as `false`.
+
+#### sensor
+
+The most recent reading from a sensor, as three components.
+
+```teal
+function Gamepad:sensor(sensor: string | integer, layer?: Layer): number, number, number
+```
+
+**Returns:** the three components, or three zeros when nothing has been read yet and when the layer cannot read.
+
+Folded from the event stream rather than polled, so a replay reproduces it and a blocked layer cannot read it.
+
+**Example:**
+
+```teal
+if pad:hasSensor("gyro") then
+    pad:enableSensor("gyro")
+end
+
+local pitch, yaw, roll = pad:sensor("gyro")
+```
+
+### Touchpads
+
+#### TouchpadFinger
+
+One finger on one of the device's touchpads, in 0..1 across the pad.
+
+| Field      | Type      | Description                                                                                                                                                                                          |
+| ---------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `touchpad` | `integer` | Which touchpad, zero-based, below `touchpads`.                                                                                                                                                       |
+| `finger`   | `integer` | The finger's slot on that touchpad, zero-based. A position on the device rather than an identity: unlike a touch-surface finger this is not a 64-bit id, so it fits a number and is compared as one. |
+| `x`        | `number`  | Position across the pad from its left edge, in 0..1.                                                                                                                                                 |
+| `y`        | `number`  | Position across the pad from its top edge, in 0..1.                                                                                                                                                  |
+| `pressure` | `number`  | How hard, in 0..1, on a device that measures it. Devices that do not report a constant while the finger is down.                                                                                     |
+| `down`     | `boolean` | Whether the finger is on the pad.                                                                                                                                                                    |
+
+The type is reachable as `tecs.input.TouchpadFinger`.
+
+#### touchpadFingers
+
+Fingers currently on a touchpad.
+
+```teal
+function Gamepad:touchpadFingers(touchpad?: integer, layer?: Layer): {TouchpadFinger}
+```
+
+**Parameters:**
+
+- `touchpad`: which touchpad, zero-based. Defaults to the first, which is the only one on every device that has
+  any.
+- `layer`: the layer to answer for. Omitted, the base layer.
+
+**Returns:** the fingers that are down, and an empty list when the layer cannot read.
+
+::: warning The records are reused
+A returned record is reused between calls, so anything retaining one has to copy it. The list is not reused: a
+fresh one is built per call, which makes this a poor thing to ask every frame from a hot path.
+:::
+
+### Outputs
+
+Every output returns `false` rather than raising when the device is gone or has no such hardware, because rumble
+and lights are garnish and a game should not have to guard them.
+
+#### rumble
+
+Rumbles both motors, at 0..1 each, for `seconds`.
+
+```teal
+function Gamepad:rumble(low: number, high: number, seconds: number): boolean
+```
+
+**Parameters:**
+
+- `low`: the heavier, lower-frequency motor.
+- `high`: the lighter, higher-frequency one.
+- `seconds`: how long, rounded to milliseconds, which is the resolution the platform takes.
+
+**Returns:** whether the platform accepted it.
+
+A second call replaces the first rather than adding to it, so a long effect is cancelled by a short one.
+
+#### rumbleTriggers
+
+Rumbles the triggers, on the devices that have motors in them.
+
+```teal
+function Gamepad:rumbleTriggers(left: number, right: number, seconds: number): boolean
+```
+
+Separate from `rumble` because the motors are separate hardware: a device with trigger motors has the body motors
+too, and asking for one does nothing to the other. `false` on everything else.
+
+#### setLED
+
+Sets the device's light, in 0..1 per channel.
+
+```teal
+function Gamepad:setLED(red: number, green: number, blue: number): boolean
+```
+
+The bar or ring some pads carry, not the numbered player indicator, which `setPlayerIndex` drives. `false` on a
+device with neither.
+
+#### setPlayerIndex
+
+Assigns the player slot, which is what lights the numbered indicator.
+
+```teal
+function Gamepad:setPlayerIndex(index: integer): boolean
+```
+
+**Parameters:**
+
+- `index`: the slot, zero-based, or `-1` for none.
+
+**Returns:** whether the platform accepted the change.
+
+The `playerIndex` field is updated only if the platform accepted it, so the field describes the device rather
+than the last request. Nothing here prevents two pads holding the same slot; that is the caller's to arrange.
+
+**Example:**
+
+```teal
+if pad:setPlayerIndex(0) then
+    pad:setLED(0.0, 0.4, 1.0)
+end
+pad:rumble(0.8, 0.3, 0.2)
+```
+
+## Standalone sensors
+
+`tecs.input.sensors` lists the sensors the platform reports independently. Sensors built into a gamepad stay
+methods and events on [`Gamepad`](#gamepad), where their controller identity belongs.
+
+### sensors
+
+```teal
+function tecs.input.sensors(): {sensors.Device}, string
+```
+
+Returns the sensors attached now, in platform order, plus an error only when the sensor subsystem could not
+start. Each device has:
+
+| Field          | Type      | Meaning                                                                         |
+| -------------- | --------- | ------------------------------------------------------------------------------- |
+| `id`           | `number`  | Instance id, valid while attached                                               |
+| `name`         | `string`  | Platform display name                                                           |
+| `kind`         | `string`  | `accelerometer`, `gyroscope`, a left/right variant, or `unknown`                |
+| `platformType` | `integer` | Platform-specific type number, for hardware the portable vocabulary cannot name |
+
+### openSensor
+
+```teal
+function tecs.input.openSensor(id: number): sensors.Sensor, string
+```
+
+Opens a device from `devices`, returning `(sensor, nil)` or `(nil, error)`. A `Sensor` copies the same metadata
+onto `id`, `name`, `kind`, and `platformType`.
+
+### Sensor:read
+
+```teal
+function Sensor:read(count?: integer): {number}, string
+```
+
+Reads the newest values after updating SDL's sensor state. The default is three values, which is the natural
+vector size for acceleration and angular velocity. A platform-specific sensor may request 1 through 16.
+
+### Sensor:destroy
+
+```teal
+function Sensor:destroy()
+```
+
+Closes the native sensor and is safe to call more than once. Reading afterwards returns an error.
+<!-- @generated by docs/scripts/reference.py from src/tecs/platform/Input.tl, src/tecs/platform/Gamepad.tl, src/tecs/platform/sensors.tl. Do not edit below this line. -->
 
 ## Reference
 
-Every function and type this module carries, rendered from `src/tecs/platform/Input.tl`.
+Every function and type this module carries, rendered from `src/tecs/platform/Input.tl`, `src/tecs/platform/Gamepad.tl` and `src/tecs/platform/sensors.tl`.
 
 <a id="tecs.input.Input.Layer"></a>
 
@@ -374,30 +808,6 @@ this, so the player sees what they are typing before it commits.
 
 Caret offset and selection length within `composition`, in the units
 the platform counts it in. Both zero when nothing is being composed.
-<a id="tecs.input.Input.create"></a>
-
-### tecs.input.Input.create
-
-<pre><code v-pre>function <a href="#tecs.input.Input.create">tecs.input.Input.create</a>(options: InputOptions): Input
-</code></pre>
-
-Creates an input state with a single base layer.
-
-Holds no devices yet. `refreshDevices` opens the pads that are already
-attached, and everything after that arrives as events.
-
-#### Parameters
-
-| Type                            | Name                       | Description |
-| ------------------------------- | -------------------------- | ----------- |
-| <code v-pre>InputOptions</code> | <code v-pre>options</code> |             |
-
-#### Returns
-
-| Type                     | Description |
-| ------------------------ | ----------- |
-| <code v-pre>Input</code> |             |
-
 <a id="tecs.input.Input.cursorVisible"></a>
 
 ### tecs.input.Input.cursorVisible
@@ -840,6 +1250,30 @@ position reported, so it persists across frames that saw no motion.
 
 <pre><code v-pre><a href="#tecs.input.Input.mouseY">tecs.input.Input.mouseY</a>: number
 </code></pre>
+
+<a id="tecs.input.Input.newInput"></a>
+
+### tecs.input.Input.newInput
+
+<pre><code v-pre>function <a href="#tecs.input.Input.newInput">tecs.input.Input.newInput</a>(options: InputOptions): Input
+</code></pre>
+
+Creates an input state with a single base layer.
+
+Holds no devices yet. `refreshDevices` opens the pads that are already
+attached, and everything after that arrives as events.
+
+#### Parameters
+
+| Type                            | Name                       | Description |
+| ------------------------------- | -------------------------- | ----------- |
+| <code v-pre>InputOptions</code> | <code v-pre>options</code> |             |
+
+#### Returns
+
+| Type                     | Description |
+| ------------------------ | ----------- |
+| <code v-pre>Input</code> |             |
 
 <a id="tecs.input.Input.penEraser"></a>
 
@@ -1393,3 +1827,609 @@ against these fields does not invert on somebody else's desk.
 
 <pre><code v-pre><a href="#tecs.input.Input.wheelY">tecs.input.Input.wheelY</a>: number
 </code></pre>
+
+<a id="tecs.input.Gamepad.TouchpadFinger"></a>
+
+### tecs.input.Gamepad.TouchpadFinger
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.TouchpadFinger">tecs.input.Gamepad.TouchpadFinger</a>: TouchpadFinger
+</code></pre>
+
+<a id="tecs.input.Gamepad.axis"></a>
+
+### tecs.input.Gamepad.axis
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.axis">tecs.input.Gamepad.axis</a>(self: Gamepad, axis: string | integer, deadzone: number, layer: Layer): number
+</code></pre>
+
+An axis in -1..1, or a trigger in 0..1, or zero if the layer cannot read.
+
+Names are "leftX", "rightY", "leftTrigger" and so on. Sticks report Y
+growing downward, matching the screen rather than a maths convention.
+
+Values inside the deadzone read as zero and values outside it are not
+rescaled, so a stick leaving the deadzone steps from zero to the deadzone
+magnitude. A game that wants a continuous ramp rescales what it gets.
+
+#### Parameters
+
+| Type                                 | Name                        | Description                                                                                                                                                           |
+| ------------------------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>     |                                                                                                                                                                       |
+| <code v-pre>string \| integer</code> | <code v-pre>axis</code>     |                                                                                                                                                                       |
+| <code v-pre>number</code>            | <code v-pre>deadzone</code> | Magnitude below which the axis reads as zero. Defaults to a value that suits the hardware, since stick drift is a property of the device rather than of any one game. |
+| <code v-pre>Layer</code>             | <code v-pre>layer</code>    |                                                                                                                                                                       |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>number</code> |             |
+
+<a id="tecs.input.Gamepad.buttonDown"></a>
+
+### tecs.input.Gamepad.buttonDown
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.buttonDown">tecs.input.Gamepad.buttonDown</a>(self: Gamepad, button: string | integer, layer: Layer): boolean
+</code></pre>
+
+Whether a button is held. Names are positional: "south", "leftShoulder",
+"dpadUp".
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>button</code> |             |
+| <code v-pre>Layer</code>             | <code v-pre>layer</code>  |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.buttonPressed"></a>
+
+### tecs.input.Gamepad.buttonPressed
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.buttonPressed">tecs.input.Gamepad.buttonPressed</a>(self: Gamepad, button: string | integer, layer: Layer): boolean
+</code></pre>
+
+Whether a button went down. Reads the latched set inside a fixed step, so
+a press that began and ended between two steps is not lost.
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>button</code> |             |
+| <code v-pre>Layer</code>             | <code v-pre>layer</code>  |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.buttonReleased"></a>
+
+### tecs.input.Gamepad.buttonReleased
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.buttonReleased">tecs.input.Gamepad.buttonReleased</a>(self: Gamepad, button: string | integer, layer: Layer): boolean
+</code></pre>
+
+Whether a button came up, on the same tiers as `buttonPressed`.
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>button</code> |             |
+| <code v-pre>Layer</code>             | <code v-pre>layer</code>  |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.connected"></a>
+
+### tecs.input.Gamepad.connected
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.connected">tecs.input.Gamepad.connected</a>: boolean
+</code></pre>
+
+Whether the device is still attached. False for good once it is: a pad
+is never revived, so this only ever goes one way.
+<a id="tecs.input.Gamepad.enableSensor"></a>
+
+### tecs.input.Gamepad.enableSensor
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.enableSensor">tecs.input.Gamepad.enableSensor</a>(self: Gamepad, sensor: string | integer, enabled: boolean): boolean
+</code></pre>
+
+Turns a sensor on or off.
+
+Off by default and opt-in on purpose: an enabled sensor delivers an event
+every few milliseconds, and a game that does not read one should not pay
+for the stream.
+
+#### Parameters
+
+| Type                                 | Name                       | Description |
+| ------------------------------------ | -------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>    |             |
+| <code v-pre>string \| integer</code> | <code v-pre>sensor</code>  |             |
+| <code v-pre>boolean</code>           | <code v-pre>enabled</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.guid"></a>
+
+### tecs.input.Gamepad.guid
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.guid">tecs.input.Gamepad.guid</a>: string
+</code></pre>
+
+Stable hardware identity, for matching saved bindings.
+<a id="tecs.input.Gamepad.hasAxis"></a>
+
+### tecs.input.Gamepad.hasAxis
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.hasAxis">tecs.input.Gamepad.hasAxis</a>(self: Gamepad, axis: string | integer): boolean
+</code></pre>
+
+Whether the device carries an axis, on the same terms as `hasButton`.
+
+Worth asking before binding: a pad with no right stick reads zero on it
+forever, which is indistinguishable from one the player is not moving.
+
+#### Parameters
+
+| Type                                 | Name                    | Description |
+| ------------------------------------ | ----------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code> |             |
+| <code v-pre>string \| integer</code> | <code v-pre>axis</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.hasButton"></a>
+
+### tecs.input.Gamepad.hasButton
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.hasButton">tecs.input.Gamepad.hasButton</a>(self: Gamepad, button: string | integer): boolean
+</code></pre>
+
+Whether the device carries a button at all, so a prompt can be omitted
+rather than shown for something the player does not have.
+
+Asked of the device rather than of the layer stack, so this answers the
+same way whatever is on top. A disconnected pad answers false, which is the
+same answer a prompt wants.
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>button</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.hasSensor"></a>
+
+### tecs.input.Gamepad.hasSensor
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.hasSensor">tecs.input.Gamepad.hasSensor</a>(self: Gamepad, sensor: string | integer): boolean
+</code></pre>
+
+Whether the device carries a sensor: "gyro" or "accelerometer".
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>sensor</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.id"></a>
+
+### tecs.input.Gamepad.id
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.id">tecs.input.Gamepad.id</a>: number
+</code></pre>
+
+Platform instance id. Unique among attached devices, and not reused by
+this object once the device is gone.
+<a id="tecs.input.Gamepad.kind"></a>
+
+### tecs.input.Gamepad.kind
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.kind">tecs.input.Gamepad.kind</a>: string
+</code></pre>
+
+Device family: "xboxOne", "ps5", "switchPro", "standard", "unknown".
+<a id="tecs.input.Gamepad.label"></a>
+
+### tecs.input.Gamepad.label
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.label">tecs.input.Gamepad.label</a>(self: Gamepad, button: string | integer): string
+</code></pre>
+
+What is printed on a button, for a prompt: "a", "cross", "square".
+
+Cached, because a prompt asks every frame it is on screen and the answer
+only changes when the device is remapped, which drops the cache.
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>button</code> |             |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>string</code> |             |
+
+<a id="tecs.input.Gamepad.name"></a>
+
+### tecs.input.Gamepad.name
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.name">tecs.input.Gamepad.name</a>: string
+</code></pre>
+
+What the platform calls the device, for showing the player which pad is
+which. Not stable across platforms or drivers; `guid` is what matches.
+<a id="tecs.input.Gamepad.openGamepad"></a>
+
+### tecs.input.Gamepad.openGamepad
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.openGamepad">tecs.input.Gamepad.openGamepad</a>(backend: Backend, gate: Gate, id: number): Gamepad
+</code></pre>
+
+Opens a device and reads what it says about itself.
+
+Returns nil when the platform will not open it, which happens for a device
+unplugged between enumeration and here.
+
+#### Parameters
+
+| Type                       | Name                       | Description                                                                            |
+| -------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| <code v-pre>Backend</code> | <code v-pre>backend</code> |                                                                                        |
+| <code v-pre>Gate</code>    | <code v-pre>gate</code>    | The shared layer stack, which every query on this pad is answered against.             |
+| <code v-pre>number</code>  | <code v-pre>id</code>      | The platform's instance id, from `Backend.attachedGamepads` or a `gamepadAdded` event. |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>Gamepad</code> |             |
+
+<a id="tecs.input.Gamepad.path"></a>
+
+### tecs.input.Gamepad.path
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.path">tecs.input.Gamepad.path</a>: string
+</code></pre>
+
+Where the platform says the device is attached. Empty when it declines
+to say.
+<a id="tecs.input.Gamepad.playerIndex"></a>
+
+### tecs.input.Gamepad.playerIndex
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.playerIndex">tecs.input.Gamepad.playerIndex</a>: integer
+</code></pre>
+
+Player slot the platform assigned, or -1 for none.
+<a id="tecs.input.Gamepad.power"></a>
+
+### tecs.input.Gamepad.power
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.power">tecs.input.Gamepad.power</a>(self: Gamepad): string, integer
+</code></pre>
+
+Power state name and charge percentage.
+
+States are "onBattery", "charging", "charged", "noBattery", "unknown" and
+"error". The percentage is -1 wherever the device declines to report one,
+which includes every state that is not about a battery.
+
+#### Parameters
+
+| Type                       | Name                    | Description |
+| -------------------------- | ----------------------- | ----------- |
+| <code v-pre>Gamepad</code> | <code v-pre>self</code> |             |
+
+#### Returns
+
+| Type                       | Description                                      |
+| -------------------------- | ------------------------------------------------ |
+| <code v-pre>string</code>  | The state name, then the charge in 0..100 or -1. |
+| <code v-pre>integer</code> |                                                  |
+
+<a id="tecs.input.Gamepad.rumble"></a>
+
+### tecs.input.Gamepad.rumble
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.rumble">tecs.input.Gamepad.rumble</a>(self: Gamepad, low: number, high: number, seconds: number): boolean
+</code></pre>
+
+Rumbles both motors, at 0..1 each, for `seconds`.
+
+Returns false rather than raising when the device is gone or has no motor,
+because rumble is a garnish and a game should not have to guard it.
+
+A second call replaces the first rather than adding to it, so a long effect
+is cancelled by a short one. Seconds are rounded to milliseconds, which is
+the resolution the platform takes.
+
+#### Parameters
+
+| Type                       | Name                       | Description                         |
+| -------------------------- | -------------------------- | ----------------------------------- |
+| <code v-pre>Gamepad</code> | <code v-pre>self</code>    |                                     |
+| <code v-pre>number</code>  | <code v-pre>low</code>     | The heavier, lower-frequency motor. |
+| <code v-pre>number</code>  | <code v-pre>high</code>    | The lighter, higher-frequency one.  |
+| <code v-pre>number</code>  | <code v-pre>seconds</code> |                                     |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.rumbleTriggers"></a>
+
+### tecs.input.Gamepad.rumbleTriggers
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.rumbleTriggers">tecs.input.Gamepad.rumbleTriggers</a>(self: Gamepad, left: number, right: number, seconds: number): boolean
+</code></pre>
+
+Rumbles the triggers, on the devices that have motors in them.
+
+Separate from `rumble` because the motors are separate hardware: a device
+with trigger motors has the body motors too, and asking for one does
+nothing to the other. False on everything else.
+
+#### Parameters
+
+| Type                       | Name                       | Description |
+| -------------------------- | -------------------------- | ----------- |
+| <code v-pre>Gamepad</code> | <code v-pre>self</code>    |             |
+| <code v-pre>number</code>  | <code v-pre>left</code>    |             |
+| <code v-pre>number</code>  | <code v-pre>right</code>   |             |
+| <code v-pre>number</code>  | <code v-pre>seconds</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.sensor"></a>
+
+### tecs.input.Gamepad.sensor
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.sensor">tecs.input.Gamepad.sensor</a>(self: Gamepad, sensor: string | integer, layer: Layer): number, number, number
+</code></pre>
+
+The most recent reading from a sensor, as three components.
+
+Folded from the event stream rather than polled, so a replay reproduces it
+and a blocked layer cannot read it.
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>sensor</code> |             |
+| <code v-pre>Layer</code>             | <code v-pre>layer</code>  |             |
+
+#### Returns
+
+| Type                      | Description |
+| ------------------------- | ----------- |
+| <code v-pre>number</code> |             |
+| <code v-pre>number</code> |             |
+| <code v-pre>number</code> |             |
+
+<a id="tecs.input.Gamepad.sensorEnabled"></a>
+
+### tecs.input.Gamepad.sensorEnabled
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.sensorEnabled">tecs.input.Gamepad.sensorEnabled</a>(self: Gamepad, sensor: string | integer): boolean
+</code></pre>
+
+Whether a sensor is currently delivering readings.
+
+Asked of the device, so this reports what is actually streaming rather than
+what `enableSensor` was last asked for: a request the device refused shows
+up here as false.
+
+#### Parameters
+
+| Type                                 | Name                      | Description |
+| ------------------------------------ | ------------------------- | ----------- |
+| <code v-pre>Gamepad</code>           | <code v-pre>self</code>   |             |
+| <code v-pre>string \| integer</code> | <code v-pre>sensor</code> |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.setLED"></a>
+
+### tecs.input.Gamepad.setLED
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.setLED">tecs.input.Gamepad.setLED</a>(self: Gamepad, red: number, green: number, blue: number): boolean
+</code></pre>
+
+Sets the device's light, in 0..1 per channel.
+
+The bar or ring some pads carry, not the numbered player indicator, which
+`setPlayerIndex` drives. False on a device with neither.
+
+#### Parameters
+
+| Type                       | Name                     | Description |
+| -------------------------- | ------------------------ | ----------- |
+| <code v-pre>Gamepad</code> | <code v-pre>self</code>  |             |
+| <code v-pre>number</code>  | <code v-pre>red</code>   |             |
+| <code v-pre>number</code>  | <code v-pre>green</code> |             |
+| <code v-pre>number</code>  | <code v-pre>blue</code>  |             |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.setPlayerIndex"></a>
+
+### tecs.input.Gamepad.setPlayerIndex
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.setPlayerIndex">tecs.input.Gamepad.setPlayerIndex</a>(self: Gamepad, index: integer): boolean
+</code></pre>
+
+Assigns the player slot, which is what lights the numbered indicator.
+
+`playerIndex` is updated only if the platform accepted the change, so the
+field describes the device rather than the last request. Nothing here
+prevents two pads holding the same slot; that is the caller's to arrange.
+
+#### Parameters
+
+| Type                       | Name                     | Description                           |
+| -------------------------- | ------------------------ | ------------------------------------- |
+| <code v-pre>Gamepad</code> | <code v-pre>self</code>  |                                       |
+| <code v-pre>integer</code> | <code v-pre>index</code> | The slot, zero-based, or -1 for none. |
+
+#### Returns
+
+| Type                       | Description |
+| -------------------------- | ----------- |
+| <code v-pre>boolean</code> |             |
+
+<a id="tecs.input.Gamepad.touchpadFingers"></a>
+
+### tecs.input.Gamepad.touchpadFingers
+
+<pre><code v-pre>function <a href="#tecs.input.Gamepad.touchpadFingers">tecs.input.Gamepad.touchpadFingers</a>(self: Gamepad, touchpad: integer, layer: Layer): {<a href="#tecs.input.Gamepad.TouchpadFinger">TouchpadFinger</a>}
+</code></pre>
+
+Fingers currently on a touchpad, in 0..1 across it.
+
+The records are reused between calls, so anything retaining one has to copy
+it. The list is not: a fresh one is built per call, which makes this a poor
+thing to ask every frame from a hot path.
+
+#### Parameters
+
+| Type                       | Name                        | Description                                                                                            |
+| -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| <code v-pre>Gamepad</code> | <code v-pre>self</code>     |                                                                                                        |
+| <code v-pre>integer</code> | <code v-pre>touchpad</code> | Which touchpad, zero-based. Defaults to the first, which is the only one on every device that has any. |
+| <code v-pre>Layer</code>   | <code v-pre>layer</code>    |                                                                                                        |
+
+#### Returns
+
+| Type                                                                                 | Description |
+| ------------------------------------------------------------------------------------ | ----------- |
+| <code v-pre>{<a href="#tecs.input.Gamepad.TouchpadFinger">TouchpadFinger</a>}</code> |             |
+
+<a id="tecs.input.Gamepad.touchpads"></a>
+
+### tecs.input.Gamepad.touchpads
+
+<pre><code v-pre><a href="#tecs.input.Gamepad.touchpads">tecs.input.Gamepad.touchpads</a>: integer
+</code></pre>
+
+Touchpads the device carries. Zero on most.
+
+<a id="tecs.input.Device"></a>
+
+### tecs.input.Device
+
+<pre><code v-pre>type <a href="#tecs.input.Device">tecs.input.Device</a> = Device
+</code></pre>
+
+One sensor the platform reports, before it is opened.
+<a id="tecs.input.Sensor"></a>
+
+### tecs.input.Sensor
+
+<pre><code v-pre>type <a href="#tecs.input.Sensor">tecs.input.Sensor</a> = Sensor
+</code></pre>
+
+An opened sensor.
+<a id="tecs.input.openSensor"></a>
+
+### tecs.input.openSensor
+
+<pre><code v-pre>function <a href="#tecs.input.openSensor">tecs.input.openSensor</a>(id: number): <a href="#tecs.input.Sensor">Sensor</a>, string
+</code></pre>
+
+Opens an attached sensor by instance id.
+
+#### Parameters
+
+| Type                      | Name                  | Description                                                                                                                                                      |
+| ------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>number</code> | <code v-pre>id</code> | An instance id from `sensors`. Ids name a device while it stays attached rather than a slot, so one kept across an unplug does not come back to the same sensor. |
+
+#### Returns
+
+| Type                                                       | Description                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.input.Sensor">Sensor</a></code> | The open sensor, whose `name` and `kind` are read from the device itself rather than copied from the listing. Nil on failure, with the reason beside it, and nothing is left open in that case. Closing is the caller's, through `destroy`. |
+| <code v-pre>string</code>                                  | The reason, when the first return is nil.                                                                                                                                                                                                   |
+
+<a id="tecs.input.sensors"></a>
+
+### tecs.input.sensors
+
+<pre><code v-pre>function <a href="#tecs.input.sensors">tecs.input.sensors</a>(): {<a href="#tecs.input.Device">Device</a>}, string
+</code></pre>
+
+Sensors attached now, in platform order.
+
+A snapshot, not a subscription: a sensor unplugged after this leaves an id
+that `openSensor` refuses.
+
+#### Returns
+
+| Type                                                         | Description                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>{<a href="#tecs.input.Device">Device</a>}</code> | The devices, listed afresh each call and the caller's to keep. Empty rather than nil when the sensor subsystem cannot start, so a caller that only iterates needs no nil check. Most desktop machines genuinely have none, which is an empty list and not a failure. |
+| <code v-pre>string</code>                                    | SDL's reason, when something went wrong.                                                                                                                                                                                                                             |

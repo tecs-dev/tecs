@@ -392,7 +392,7 @@ describe("platform contract", function()
             { kind = "mouseMotion", x = 120, y = 48, dx = 4, dy = 2 },
         }))
 
-        local input = Input.create()
+        local input = Input.newInput()
         local seen = {}
         input:beginFrame()
         events.drain(nil, 0, function(event)

@@ -142,20 +142,65 @@ local record window
     type Progress = Window.Progress
 end
 
---- Gameplay input in three tiers, behind a layer stack.
+--- What a player does, and the devices they do it with: gameplay input in
+--- three tiers behind a layer stack, the pads attached to it, and the
+--- standalone sensors a device carries.
+---
+--- One module because they are one question asked of three sources, and
+--- because the layer stack answers all three: a pad's buttons are gated by the
+--- same stack a keyboard's keys are, so `Input` and `Gamepad` cannot be reached
+--- from different places without the gate looking like a property of one of
+--- them. Platform events stay separate under `tecs.events`, since that stream
+--- also carries lifecycle, window, display and device arrival.
 local record input
     Input: Input
+    Gamepad: Gamepad
+
     type Layer = Input.Layer
     type Touch = Input.Touch
     type TextArea = Input.TextArea
     type TextOptions = Input.TextOptions
     type Options = Input.Options
-end
-
---- A pad's identity, lifetime, metadata and outputs.
-local record gamepad
-    Gamepad: Gamepad
     type TouchpadFinger = Gamepad.TouchpadFinger
+
+    --- An opened standalone sensor, read by polling.
+    type Sensor = sensors.Sensor
+
+    --- A standalone sensor the platform reports, before it is opened. Named
+    --- for what it is rather than `Device`, which on a module that also holds
+    --- gamepads would name two things.
+    type SensorDevice = sensors.Device
+
+    --- Builds the input state a game reads.
+    ---
+    --- @param options Omitted opens against no window, which is what a
+    ---     headless tool or a spec wants: keys and pads still fold, and
+    ---     anything asking about a window answers as if there is none.
+    --- @return The state. One per application; the application builds its own
+    ---     and a second is only for a test.
+    newInput: function(options?: Input.Options): Input
+
+    --- Standalone sensors attached now, in platform order.
+    ---
+    --- A snapshot rather than a subscription: a sensor unplugged after this
+    --- leaves an id `openSensor` refuses. Gamepad sensors are not here, since
+    --- their identity and event routing live on the pad.
+    ---
+    --- @return The sensors, listed afresh each call and the caller's to keep.
+    ---     Empty rather than nil when the subsystem cannot start, and most
+    ---     desktop machines genuinely have none.
+    --- @return SDL's reason, when something went wrong.
+    sensors: function(): {sensors.Device}, string
+
+    --- Opens an attached standalone sensor by instance id.
+    ---
+    --- @param id An instance id from `sensors`. An id names a device while it
+    ---     stays attached rather than a slot, so one kept across an unplug does
+    ---     not come back to the same sensor.
+    --- @return The open sensor, whose closing is the caller's through
+    ---     `destroy`. Nil on failure, and nothing is left open in that case.
+    --- @return The reason, when the first return is nil.
+    openSensor: function(id: number): sensors.Sensor, string
 end
 
 --- A value that settles once.
@@ -451,7 +496,6 @@ local record tecs
     events: events
     filesystem: filesystem
     future: future
-    gamepad: gamepad
     gfx: gfx
     http: http
     input: input
@@ -464,7 +508,6 @@ local record tecs
     physics: physics
     proc: proc
     renderer: renderer
-    sensors: sensors
     sequence: sequence
     system: system
     text: text
@@ -526,10 +569,14 @@ local SURFACE <const>: {string: Namespace} = {
     events = {module = "tecs.platform.events"},
     filesystem = {module = "tecs.platform.filesystem"},
     future = {module = "tecs.Future", class = "Future"},
-    gamepad = {module = "tecs.platform.Gamepad", class = "Gamepad"},
     gfx = {within = {layers = {module = "tecs.gfx.layers"}}},
     http = {module = "tecs.http"},
-    input = {module = "tecs.platform.Input", class = "Input"},
+    input = {
+        module = "tecs.platform.Input",
+        class = "Input",
+        beside = {"tecs.platform.sensors"},
+        within = {Gamepad = {module = "tecs.platform.Gamepad"}},
+    },
     log = {module = "tecs.log"},
     materials = {module = "tecs.gpu.materials"},
     mcp = {module = "tecs.mcp"},
@@ -539,7 +586,6 @@ local SURFACE <const>: {string: Namespace} = {
     physics = {module = "tecs.physics"},
     proc = {module = "tecs.platform.proc"},
     renderer = {module = "tecs.Renderer", class = "Renderer"},
-    sensors = {module = "tecs.platform.sensors"},
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     text = {module = "tecs.gfx.text"},
