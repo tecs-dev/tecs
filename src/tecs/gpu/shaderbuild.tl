@@ -19,6 +19,11 @@ local sdl <const> = require("tecs.ffi.sdl3")
 
 local C <const> = sdl.C
 
+--- Compiles the registry into a pack, and writes it with a manifest beside it.
+---
+--- Build-time only: `build` and `writeTo` raise without a shader compiler, and
+--- only `manifest` works without one. Reading a pack back is `shaderpack`,
+--- which needs no compiler at all.
 local record shaderbuild
 end
 
@@ -27,6 +32,9 @@ end
 --- Every entry ends up in one format, because a build ships for one backend.
 --- Building a pack for a backend this host cannot compile for is not possible
 --- here and is not pretended to be: cross-compiling MSL needs Metal's tooling.
+--- @return A pack holding every variant, keyed as `shaders.key` produces the
+---     key. Raises without a compiler, and raises again if any variant came
+---     back in a format other than the pack's.
 function shaderbuild.build(): shaderpack.Pack
     if not shadercompiler.available() then
         error("tecs: building a shader pack needs a shader compiler", 2)
@@ -83,6 +91,9 @@ end
 ---
 --- Sorted by key, so two builds of the same tree produce the same text and a
 --- diff between them is the change rather than the ordering.
+--- @param pack Read only, and readable without a compiler, so a pack decoded
+---     from disk lists as well as one just built.
+--- @return Plain text, newline separated, ending in a blank line.
 function shaderbuild.manifest(pack: shaderpack.Pack): string
     local keys: {string} = {}
     for key in pairs(pack.shaders) do

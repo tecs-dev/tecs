@@ -46,7 +46,13 @@ local DEFAULT_FORMAT <const> = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 --- target that clears needs a third answer. Its contents are never read.
 local LOAD <const>: RenderPass.ClearColor = {r = 0, g = 0, b = 0, a = 0}
 
+--- A target the graph allocates, sizes with the frame, and owns.
+---
+--- The spec is kept rather than copied, and `target` fills its defaults in
+--- place, so a caller must not reuse one table for two targets.
 local record TargetSpec
+    --- Names the target for `inputs`, `outputs`, `texture` and `formatOf`.
+    --- Unique within a graph; a second declaration under the same name raises.
     name: string
     --- Defaults to R8G8B8A8_UNORM.
     format: integer
@@ -58,13 +64,23 @@ local record TargetSpec
     clear: RenderPass.ClearColor
 end
 
+--- What a pass body is handed when the graph runs it.
+---
+--- The graph's own object, rewritten before every pass and valid only for the
+--- duration of the `execute` call it arrived in. Nothing may keep one.
 local record PassContext
     --- The begun render pass, with outputs attached and inputs bound.
     pass: RenderPass
+    --- The frame being recorded, for a body that needs the swapchain texture
+    --- or the frame's own size rather than this pass's.
     frame: Frame
+    --- The frame's command buffer, which is where uniform pushes go.
     commandBuffer: loader.CValue
     --- Size of this pass's targets in pixels.
     width: integer
+    --- Height of this pass's targets in pixels. A scaled target makes these
+    --- smaller than the frame's, so a fullscreen draw uses these and not the
+    --- frame's.
     height: integer
 end
 
@@ -108,7 +124,13 @@ local record DepthState
     clear: number
 end
 
+--- One render pass, as it is declared on the graph.
+---
+--- Held rather than copied, so the spec a caller passed in is what the graph
+--- reads every frame; assigning to `enabled` after declaring the pass takes
+--- effect on the next frame.
 local record PassSpec
+    --- Names the pass for `depthOf` and for the errors validation raises.
     name: string
     --- Targets sampled by this pass, bound to fragment slots in this order.
     inputs: {string}
@@ -125,19 +147,34 @@ local record PassSpec
     --- Consulted each frame. Returning false skips the pass entirely,
     --- including beginning it. This is the dirty gate.
     enabled: function(): boolean
+    --- Draws the pass. Called with the pass already begun and finished for it,
+    --- so a body only records draws. Throwing takes the frame with it and
+    --- leaves the pass open for `Frame:abandon` to close.
     execute: function(context: PassContext)
 end
 
+--- A graph of render passes and the targets they share.
+---
+--- Built by declaring targets with `target` and passes with `pass`, both of
+--- which validate as they go, then run once per frame with `execute`. The
+--- graph owns every target it declared and releases them in `destroy`; the
+--- swapchain texture is the frame's and is only ever written, never sampled.
 local record PassGraph
+    --- What `target` takes.
     TargetSpec: TargetSpec
+    --- What `pass` takes.
     PassSpec: PassSpec
+    --- What a pass's `execute` receives.
     PassContext: PassContext
+    --- How one pass uses the shared depth attachment.
     DepthState: DepthState
 
     --- `PassSpec.clear` value meaning "load this target rather than clear it",
     --- whatever the target's own spec says.
     LOAD: RenderPass.ClearColor
 
+    --- The `SDL_GPUDevice` every target and the shared sampler were created
+    --- against, as `create` was given it.
     device: loader.CPtr
     --- Format the swapchain expects, for passes that render to it.
     swapchainFormat: integer
@@ -145,19 +182,41 @@ local record PassGraph
     --- owns one depth attachment in this format, shared by every pass that
     --- declares depth.
     depthFormat: integer
+    --- Declared targets by name, holding the caller's spec with its defaults
+    --- filled in.
     _targets: {string: TargetSpec}
+    --- The texture allocated for each target, empty until the first `execute`
+    --- sizes the graph and replaced whenever the frame size changes.
     _textures: {string: Texture}
+    --- Target names in declaration order, which is the order `resize` walks so
+    --- that reallocation is deterministic.
     _order: {string}
+    --- Declared passes in execution order.
     _passes: {PassSpec}
     --- Per-frame storage for the pass at the same index in `_passes`.
     _prepared: {Prepared}
+    --- The one sampler every pass's inputs are bound through: nearest, clamped,
+    --- since a graph target is read at the resolution it was written.
     _sampler: Sampler
+    --- The shared depth attachment at frame size, or nil while no declared pass
+    --- asks for depth.
     _depth: Texture
+    --- The attachment record handed to `RenderPass.begin`, rewritten per pass
+    --- rather than rebuilt.
     _depthAttachment: RenderPass.DepthAttachment
+    --- True once any declared pass asks for depth, which is what makes `resize`
+    --- allocate the attachment.
     _needsDepth: boolean
+    --- Frame width the targets were last allocated for; zero before the first
+    --- `execute`.
     _width: integer
+    --- Frame height the targets were last allocated for. A change in either
+    --- reallocates every target.
     _height: integer
+    --- Written once by `create` and read nowhere: the graph sizes itself on the
+    --- first `execute` rather than in a build step.
     _built: boolean
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -166,6 +225,14 @@ local PassGraphMT <const>: metatable<PassGraph> = {__index = PassGraph}
 PassGraph.LOAD = LOAD
 
 --- Creates an empty graph.
+---
+--- Allocates the shared sampler and asks the device which depth format it
+--- supports. No target exists yet: the first `execute` is what sizes them, so
+--- the frame's dimensions never have to be guessed here.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
+--- @param swapchainFormat Format a pass with no outputs renders into, from
+---     `Device:getSwapchainFormat`.
 function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGraph
     local self = setmetatable({} as PassGraph, PassGraphMT)
     self.device = device
@@ -189,6 +256,12 @@ function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGr
 end
 
 --- Declares a target the graph owns.
+---
+--- Raises on a name already declared. Nothing is allocated here; the texture
+--- appears on the first `execute`.
+--- @param spec Retained and filled in with its defaults, so it must not be
+---     reused for a second target.
+--- @return The graph, so declarations chain.
 function PassGraph:target(spec: TargetSpec): PassGraph
     if self._targets[spec.name] ~= nil then
         error(("tecs: target '%s' is already declared"):format(spec.name), 2)
@@ -201,6 +274,14 @@ function PassGraph:target(spec: TargetSpec): PassGraph
 end
 
 --- Declares a pass. Passes run in the order they are declared.
+---
+--- Raises when an input is undeclared or is not written by an earlier pass,
+--- when an output is undeclared, or when a pass asking for depth writes a
+--- target at any scale other than one. A pass may be declared after the graph
+--- has already run frames; the depth attachment is allocated when it is next
+--- needed.
+--- @param spec Retained, so later assignment to `enabled` is picked up.
+--- @return The graph, so declarations chain.
 function PassGraph:pass(spec: PassSpec): PassGraph
     -- Validate against what earlier passes have produced, so an ordering
     -- mistake surfaces here rather than as an empty or stale attachment.
@@ -278,6 +359,10 @@ function PassGraph:pass(spec: PassSpec): PassGraph
 end
 
 --- Returns the texture backing a target, or nil before the first execute.
+--- @param name A declared target's name. An undeclared one answers nil rather
+---     than raising, which `formatOf` does not.
+--- @return The graph's texture, replaced whenever the frame size changes, so
+---     nothing may hold it across frames. Nil before the graph has been sized.
 function PassGraph:texture(name: string): Texture
     return self._textures[name]
 end
@@ -286,6 +371,9 @@ end
 ---
 --- Pipelines bake their target formats, so this is how a pass's pipeline stays
 --- in step with the target the graph allocated for it.
+--- @param name A declared target's name. An undeclared one raises.
+--- @return The SDL texture format the target was declared with, defaulted if
+---     the spec left it out.
 function PassGraph:formatOf(name: string): integer
     local spec = self._targets[name]
     if spec == nil then
@@ -305,6 +393,10 @@ end
 ---
 --- The defaults are the pipeline's: an omitted `test`, `write`, or `compare`
 --- means the same here as it does there.
+--- @param passName A declared pass's name. An undeclared one raises; a
+---     declared one with no depth answers nil.
+--- @return A fresh config a pipeline may keep, or nil when the pass attaches
+---     no depth.
 function PassGraph:depthOf(passName: string): GraphicsPipeline.DepthConfig
     for _, spec in ipairs(self._passes) do
         if spec.name == passName then
@@ -390,6 +482,8 @@ end
 --- inside is left open. Nothing here catches that: the pass is on the frame's
 --- open list from the moment it began, and `Frame:abandon` is what ends it, so
 --- recovery happens once where the frame is resolved rather than once per pass.
+--- @param frame The frame to record into. Its width and height are what every
+---     target is sized to, so a change in either reallocates all of them here.
 function PassGraph:execute(frame: Frame)
     local frameWidth = frame.width
     local frameHeight = frame.height

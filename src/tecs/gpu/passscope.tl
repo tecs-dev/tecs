@@ -24,7 +24,14 @@ local record Pass
     finish: function(self: Pass)
 end
 
+--- The open-pass registry, keyed by command buffer.
+---
+--- Process-wide state, not per device or per frame: one list serves every
+--- command buffer, and it holds at most one entry per buffer. `RenderPass` and
+--- `ComputePass` record and remove themselves, so nothing else calls `opened`
+--- or `closed`; a caller recovering a frame calls `endOpen`.
 local record passscope
+    --- What a tracked pass has to be able to do.
     type Pass = Pass
 end
 
@@ -78,7 +85,10 @@ end
 ---
 --- The pass's own `finish` is what runs, so the entry is removed by the same
 --- path that removes it on the ordinary route out.
---- @return Whether there was one to end.
+--- @param commandBuffer The buffer to clear, which need not have a pass open:
+---     one that does not is answered false rather than refused.
+--- @return Whether there was one to end. False is the ordinary answer for a
+---     frame that finished its passes itself.
 function passscope.endOpen(commandBuffer: loader.CValue): boolean
     local index = indexOf(commandBuffer)
     if index == 0 then

@@ -9,9 +9,16 @@
 --- `assets/shaders/instance.vert.glsl`. What is here is what a writer needs to
 --- place them and to size a buffer.
 
+--- The instance and cull-bound layouts, and the two helpers that pack into
+--- them.
+---
+--- Constants and pure functions only: nothing here touches a device or holds
+--- state. What a writer gets from it is the stride to advance by, the sentinel
+--- values for a slot nothing owns, and the packing rule for `origin.z`.
 local record instancelayout
     --- Floats per instance: four vec4s.
     FLOATS: integer
+    --- Bytes per instance, which is the stride a writer advances by.
     BYTES: integer
 
     --- Floats per cull bound: centre xy and half extent xy.
@@ -20,6 +27,7 @@ local record instancelayout
     --- every frame, drawn or not, while the instance is only read for what
     --- survives. Sixteen bytes streamed beats sixty-four bytes gathered.
     BOUND_FLOATS: integer
+    --- Bytes per cull bound, and the stride of the bound buffer.
     BOUND_BYTES: integer
 
     --- Half extent for something on a layer the view rectangle does not
@@ -80,6 +88,11 @@ instancelayout.CLIPS = 256
 ---
 --- Region zero packs to the layer itself, so a writer that never mentions a
 --- clip writes what it always wrote.
+--- @param clip Zero to `CLIPS - 1`, zero being no clipping.
+--- @param layer Zero to `LAYER_SLOTS - 1`. Unchecked: a layer at or above the
+---     stride lands in the next clip region rather than raising.
+--- @return The float to write into `origin.z`, exact in float32 for every
+---     value in range.
 function instancelayout.packSlot(clip: integer, layer: number): number
     return clip * LAYER_SLOTS + layer
 end
@@ -96,6 +109,14 @@ end
 --- entity's position: a pivoted quad hangs off some other point of itself, and
 --- the writer moves the centre with it rather than growing these to cover
 --- where the geometry went.
+--- @param rotation Radians. Exactly zero takes the tight per-axis answer;
+---     anything else, however small, takes the looser rotation-proof one.
+--- @param scaleX Quad width in world units. Negative is mirrored, and the
+---     extent is taken from its magnitude.
+--- @param scaleY Quad height in world units, under the same rule.
+--- @return Half extent along X in world units.
+--- @return Half extent along Y in world units, equal to the first whenever the
+---     quad is rotated at all.
 function instancelayout.extentOf(rotation: number, scaleX: number, scaleY: number): number, number
     local ex: number
     local ey: number

@@ -23,6 +23,12 @@ local record ComputePipelineOptions
     defines: {string: string}
 end
 
+--- An immutable compute pipeline, and the type `load` returns.
+---
+--- The workgroup size and every resource count come out of the SPIR-V, so
+--- nothing here can disagree with the shader it was built from. Bound with
+--- `ComputePass:bindPipeline`, which must happen before the pass's first
+--- dispatch.
 local record ComputePipeline
     --- The `SDL_GPUComputePipeline`. Nil once `destroy` has run.
     handle: loader.CPtr
@@ -33,9 +39,13 @@ local record ComputePipeline
     --- Declared workgroup size, as {x, y, z}. Threads per group, so a dispatch
     --- covering n items asks for n divided by this, rounded up.
     threadCount: {integer}
+    --- The `SDL_GPUDevice` it was created against, and the one `destroy`
+    --- releases it from.
     _device: loader.CPtr
-    -- Retains the buffer SDL read the code from.
+    --- The bytecode buffer SDL read the code from, kept for the pipeline's life
+    --- and dropped by `destroy`.
     _code: loader.CArray
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -81,6 +91,11 @@ end
 ---
 --- The path the engine uses: a name is what a pack is keyed by, so this works
 --- on a build that ships artifacts rather than a compiler.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
+--- @param name A registered shader, without the `.glsl` extension, such as
+---     "deferred.lightbin.comp". A name registered as a graphics stage raises.
+--- @param options Nil is no defines.
 function ComputePipeline.load(device: loader.CPtr, name: string, options: ComputePipelineOptions): ComputePipeline
     options = options or {}
     local entry = shaders.get(name)

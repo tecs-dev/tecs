@@ -34,7 +34,14 @@ local DISPATCH <const> = "materials.glsl"
 --- is what "no material" draws as.
 local DEFAULT <const> = "textured"
 
+--- The material set and the dispatch compiled from it.
+---
+--- Reads `materials/` in every root and publishes one generated include that
+--- the fragment shader selects through. A game names a material and asks `id`
+--- for the number an instance carries; the number itself is a within-a-build
+--- answer and nothing should store one.
 local record materials
+    --- One material: its name, the id this build gave it, and its source.
     record Material
         --- The file's name without its extension, and how a game asks for it.
         name: string
@@ -271,7 +278,8 @@ end
 ---
 --- Materials supplied through `define` are kept as they are: those came from
 --- memory rather than a root, and nothing on disk has an opinion about them.
---- @return Whether the dispatch was rebuilt, then why not.
+--- @return Whether the dispatch was rebuilt.
+--- @return Why not, and nil whenever the first answer is true.
 function materials.reload(): boolean, string
     materials.install()
 
@@ -321,7 +329,6 @@ function materials.reload(): boolean, string
     ):format(table.concat(previousOrder, ", "), found)
 end
 
---- Forgets everything read, so a spec can start from the files again.
 function materials.reset()
     for name in pairs(byName) do
         byName[name] = nil

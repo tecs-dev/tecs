@@ -83,6 +83,12 @@ local record BufferOptions
     name: string
 end
 
+--- One device buffer and its staging slots, and the type `create` returns.
+---
+--- The device buffer is persistent and never cycled, so what it holds survives
+--- every frame that does not overwrite it. Writes go into a slot's mapped
+--- staging and reach the device only when that slot is flushed onto a command
+--- buffer. Size is fixed for the buffer's life.
 local record Buffer
     --- Staging slots every buffer carries, so a caller can loop by index.
     slotCount: integer
@@ -96,13 +102,18 @@ local record Buffer
     --- Bytes marked dirty on slot zero since its last flush. Slot-aware
     --- callers read `slotDirtyBytes` instead.
     dirtyBytes: integer
+    --- The `SDL_GPUDevice` the buffer and its staging were created against, and
+    --- the one `destroy` releases them from.
     _device: loader.CPtr
+    --- The `SDL_GPU_BUFFERUSAGE_*` bits `create` resolved from the usage names.
+    --- Recorded and read nowhere: the buffer is created once and never rebuilt.
     _usage: integer
     --- Staging bytes per slot, and the capacity `mapSlot` reports.
     _transferSize: integer
     --- Indexed one-based, while every method takes a slot zero-based: the
     --- outside numbering matches the frame index a caller alternates with.
     _slots: {Slot}
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -161,6 +172,12 @@ end
 ---
 --- Staging itself is allocated on first use, so a buffer nobody writes to
 --- costs one device allocation and nothing else.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
+--- @param options An unknown usage name raises. `size` is required and fixed;
+---     growing means creating another buffer.
+--- @return A buffer whose device memory is undefined until something writes
+---     it, with no staging allocated and no slot mapped.
 function Buffer.create(device: loader.CPtr, options: BufferOptions): Buffer
     local flags = 0
     for _, name in ipairs(options.usage or {"storage"}) do
@@ -250,7 +267,9 @@ end
 --- @param index Slot to map, zero-based, below `slotCount`.
 --- @param cycle Pass false to keep the driver's existing allocation, which is
 ---     what a writer adding to what a previous frame left in the slot wants.
---- @return The address to write into, and the bytes the slot holds.
+--- @return The address to write into.
+--- @return The bytes the slot holds, which is `stagingSize` or the buffer's
+---     size when none was given.
 function Buffer:mapSlot(index: integer, cycle?: boolean): loader.BytePointer, integer
     local slot = slotAt(self, index)
     return loader.bytePointer(mapSlotRecord(self, slot, cycle)), self._transferSize
@@ -265,6 +284,13 @@ end
 --- again to the same allocation hands back the same object instead of
 --- allocating another. A cycled slot, or one asked for under a different
 --- declaration, is cast afresh.
+--- @param index Slot to map, zero-based, below `slotCount`.
+--- @param declaration A C array declaration such as "Instance*", cast from the
+---     slot's base address. Element indices, not bytes; `markSlotDirty` still
+---     takes bytes.
+--- @param cycle Pass false to keep the driver's existing allocation.
+--- @return An array over the slot's staging, valid until the slot is flushed
+---     or cycled, and shared with anything else that asked for the same view.
 function Buffer:mapSlotAs(index: integer, declaration: string, cycle?: boolean): loader.CArray
     local slot = slotAt(self, index)
     local mapped = mapSlotRecord(self, slot, cycle)
@@ -300,6 +326,9 @@ end
 --- What a frame packet's ranges arrive through: the half that wrote the bytes
 --- recorded them without a buffer to record them on, and this is where they
 --- meet the device buffer they describe.
+--- @param ranges Read and not kept, so the caller may clear it as soon as this
+---     returns. Offsets are bytes into the device buffer, as `markSlotDirty`
+---     takes them.
 function Buffer:markSlotRanges(index: integer, ranges: dirtyranges)
     for entry = 0, ranges.count - 1 do
         local offset, size = ranges:at(entry)
@@ -311,6 +340,11 @@ end
 ---
 --- A convenience for producers that already hold a contiguous block. A
 --- producer that can write in place should map the slot and skip this copy.
+--- @param offset Bytes from the start of the buffer, not an element index.
+--- @param source Read during this call only; the caller's memory is free
+---     immediately afterwards.
+--- @param size Bytes to copy. Maps the slot as a side effect, so the address
+---     any earlier `mapSlot` handed out is still the right one.
 function Buffer:writeSlot(index: integer, offset: integer, source: loader.CValue, size: integer)
     local base = self:mapSlot(index)
     loader.copyTo(base + offset, source, size)
@@ -385,12 +419,16 @@ end
 --- Remaps a flushed slot with cycling and hands back a fresh address.
 ---
 --- Call this once the flush that consumed the slot has been submitted, before
+--- Call this once the flush that consumed the slot has been submitted, before
 --- the slot goes back to whoever writes it. Cycling is what makes the handback
 --- free: the driver gives the writer a different allocation rather than
 --- stalling until the copy pass has finished reading the old one.
 ---
 --- Only the slot that was just flushed is ever cycled. Cycling moves the
 --- address, and the other slot's writer is holding its own.
+--- @return A fresh address to write into, which is not the one the previous
+---     map handed out, so nothing may keep the old one.
+--- @return The bytes the slot holds, which cycling does not change.
 function Buffer:cycleSlot(index: integer): loader.BytePointer, integer
     local slot = slotAt(self, index)
     unmapSlotRecord(self, slot)
@@ -443,6 +481,9 @@ end
 --- Submitted and not waited on, so the copy is ordered only against work
 --- submitted after it. That is enough for content uploaded before the first
 --- frame and is not enough for anything a frame already in flight reads.
+--- @param source Read during this call only.
+--- @param byteCount Bytes to copy, which must fit inside slot zero's staging.
+--- @param offset Bytes from the start of the device buffer. Defaults to zero.
 function Buffer:upload(source: loader.CArray, byteCount: integer, offset?: integer)
     self:write(offset or 0, source as loader.CValue, byteCount)
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)

@@ -127,6 +127,13 @@ local record DeferredOptions
     ambient: {number}
 end
 
+--- The deferred pipeline: its pass graph, the pipelines it binds, and the
+--- lights they shade with.
+---
+--- `create` builds one against a device and a swapchain format, `render` drives
+--- it for one frame, and `destroy` releases the graph's targets, the pipelines
+--- and the light buffers. Everything here is owned rather than borrowed, so a
+--- second pipeline over the same device is a second G-buffer.
 local record Deferred
     --- One light, as `setLights` takes them.
     Light: Light
@@ -143,6 +150,8 @@ local record Deferred
     --- read at the top of every lighting pass, so assigning to it takes effect
     --- on the next frame without rebuilding anything.
     ambient: {number}
+    --- The device every buffer, pipeline and target below was created against,
+    --- and the one `destroy` releases them from.
     _device: loader.CPtr
     --- The lights themselves, as `MAX_LIGHTS` slots of `LIGHT_STRIDE` bytes.
     --- Written through slot zero and flushed by `render`.
@@ -155,13 +164,18 @@ local record Deferred
     --- and sized from a fixed grid so neither is ever reallocated under a
     --- frame that is still reading it.
     _tileCounts: Buffer
+    --- The per-tile slot lists, `TILE_SLOTS` entries of four bytes per tile,
+    --- indexed by the count `_tileCounts` holds for the same tile.
     _tileLights: Buffer
     --- The buffer lists the binning pass and the lighting pass hand the pass
     --- API, one per call site and each of a fixed length. Held rather than
     --- built per frame, and rewritten at every use, since a buffer that grew
     --- has a new handle.
     _binWrites: {loader.CValue}
+    --- What the binning dispatch reads: the light buffer alone.
     _binReads: {loader.CValue}
+    --- What the lighting pass's fragment stage reads, in binding order: the
+    --- light buffer, the tile counts, then the tile slot lists.
     _lightingBuffers: {loader.CValue}
     --- The same three, for the forward pass's fragment stage. A second list
     --- rather than the same one, because both are rewritten at every use and
@@ -170,11 +184,15 @@ local record Deferred
     --- The binning pass, begun again each frame rather than allocated per
     --- frame; see `ComputePass.begin` for what that asks of a caller.
     _binPass: ComputePass
+    --- The compute pipeline that bins lights into the tile grid, rebuilt by
+    --- `rebuildPipelines` along with the three graphics ones.
     _binPipeline: ComputePipeline
     --- Eight floats pushed to the binning dispatch: the world rectangle the
     --- grid covers, then the light count.
     _binUniform: loader.CArray
+    --- Resolves the G-buffer against the binned lights into the `lit` target.
     _lightingPipeline: GraphicsPipeline
+    --- Turns the `lit` target into the frame's image in `scene`.
     _compositePipeline: GraphicsPipeline
     --- Copies the scene target to the swapchain, and so the only pipeline here
     --- built against the swapchain's format.
@@ -188,8 +206,11 @@ local record Deferred
     --- rotation are kept folded into the two components the shader multiplies
     --- by, so the trig is paid once a frame rather than once a fragment.
     _viewX: number
+    --- Centre of the view in world units, with Y running down.
     _viewY: number
+    --- Cosine of the view's rotation, already divided by the zoom.
     _viewCos: number
+    --- Sine of the view's rotation, already divided by the zoom.
     _viewSin: number
     --- Whether anything has set a view. Until something does, the frame
     --- centres one on its own target, so world units are target pixels and a
@@ -202,13 +223,23 @@ local record Deferred
     --- light binned against one rectangle and looked up against another lands
     --- in a tile nothing reads.
     _frameViewX: number
+    --- The frame's view centre in world units, Y running down.
     _frameViewY: number
+    --- The frame's rotation cosine over its zoom, as the shaders multiply by.
     _frameViewCos: number
+    --- The frame's rotation sine over its zoom, as the shaders multiply by.
     _frameViewSin: number
+    --- Least world X the grid covers this frame. The four bounds are the
+    --- axis-aligned bound of what the camera sees, which is wider than the view
+    --- itself once the camera is turned.
     _boundsMinX: number
+    --- Least world Y the grid covers this frame.
     _boundsMinY: number
+    --- Greatest world X the grid covers this frame.
     _boundsMaxX: number
+    --- Greatest world Y the grid covers this frame.
     _boundsMaxY: number
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -269,9 +300,13 @@ end
 --- The fullscreen shaders are loaded and their shader objects released here,
 --- since SDL retains what a pipeline needs. What survives is the pipelines,
 --- the light buffer and the graph's targets, all of which `destroy` releases.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
 --- @param swapchainFormat What present writes to, from
 ---     `Device:getSwapchainFormat`. Every other target's format is the
 ---     graph's; the G-buffer's two come back out of `geometryFormats`.
+--- @return A pipeline that has allocated its light buffers but no targets;
+---     those are sized on the first `render` from the frame it is given.
 function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options: DeferredOptions): Deferred
     options = options or {}
 
@@ -674,7 +709,8 @@ end
 ---
 --- In attachment order, so a pipeline passes them straight through as its
 --- colour formats and cannot get albedo and normal the wrong way round.
---- @return The albedo target's format, then the normal target's.
+--- @return The albedo target's format, which is colour attachment zero.
+--- @return The normal target's format, which is colour attachment one.
 function Deferred:geometryFormats(): integer, integer
     return self.graph:formatOf("albedo"), self.graph:formatOf("normal")
 end

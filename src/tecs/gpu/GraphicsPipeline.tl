@@ -88,12 +88,22 @@ local record PipelineOptions
     name: string
 end
 
+--- An immutable graphics pipeline, and the type `create` returns.
+---
+--- Everything a pipeline decides is fixed when it is made, so a second
+--- combination of blend, depth, cull, primitive or target formats is a second
+--- object. The shaders it was built from are not retained: SDL keeps what it
+--- needs, and the caller may destroy them as soon as `create` returns.
 local record GraphicsPipeline
+    --- Depth state a pipeline bakes, and what `PassGraph:depthOf` answers with.
     DepthConfig: DepthConfig
 
     --- The `SDL_GPUGraphicsPipeline`. Nil once `destroy` has run.
     handle: loader.CPtr
+    --- The `SDL_GPUDevice` it was created against, and the one `destroy`
+    --- releases it from.
     _device: loader.CPtr
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 
     --- Creates a pipeline.

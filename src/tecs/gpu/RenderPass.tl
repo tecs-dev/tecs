@@ -45,16 +45,30 @@ local MAX_COLOR_TARGETS <const> = 8
 local MAX_TEXTURE_BINDINGS <const> = 16
 local MAX_BUFFER_BINDINGS <const> = 8
 
+--- A begun render pass, and everything that records into one.
+---
+--- `begin` opens one on a command buffer and `finish` closes it; between those
+--- two the pass owns the command buffer, since SDL allows no other pass of any
+--- kind on it. Every method here is only legal in that window, and the handle
+--- is nil outside it.
 local record RenderPass
+    --- A colour a pass clears an attachment to before it draws.
     record ClearColor
         --- In 0..1 per channel. A field left out is zero, except `a`, which is
         --- one, so a colour given as rgb alone clears opaque.
         r: number
+        --- Green, in 0..1.
         g: number
+        --- Blue, in 0..1.
         b: number
+        --- Alpha, in 0..1. Omitted means one, unlike the other three.
         a: number
     end
 
+    --- One colour attachment, as `begin` takes them.
+    ---
+    --- Read during the `begin` call and not kept, so the record may be rewritten
+    --- as soon as it returns.
     record Attachment
         --- Texture handle to render into, created with the colour-target usage
         --- bit. Its format has to be the one the bound pipeline baked for this
@@ -67,6 +81,10 @@ local record RenderPass
         clear: RenderPass.ClearColor
     end
 
+    --- The one depth attachment a pass may have, as `begin` takes it.
+    ---
+    --- No stencil is ever attached, so a depth-stencil format's stencil half is
+    --- left undefined by every pass here.
     record DepthAttachment
         --- Depth texture handle the pass tests and writes against. Only a
         --- pipeline that baked a matching depth format can be bound while this
@@ -90,6 +108,8 @@ local record RenderPass
     commandBuffer: loader.CValue
     --- Number of colour attachments this pass was begun with.
     targetCount: integer
+    --- Set by the first `finish`, so a second one ends nothing again and a
+    --- recovery path may close a pass it cannot know the state of.
     _finished: boolean
 
     --- Wraps an already-begun pass handle.

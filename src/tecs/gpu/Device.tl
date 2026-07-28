@@ -21,6 +21,11 @@ local record DeviceOptions
     driver: string
 end
 
+--- The GPU device and its swapchain, and the type `create` returns.
+---
+--- One device presents to one window. Every other wrapper in this directory is
+--- created against `handle` and must be released before `destroy` runs, since
+--- the device outlives nothing it made.
 local record Device
     --- The `SDL_GPUDevice`, and what every other wrapper here is created
     --- against. Nil once `destroy` has run.
@@ -36,12 +41,17 @@ local record Device
     --- Out-parameters `beginFrame` fills, held rather than allocated so
     --- acquiring a frame costs nothing.
     _swapchainOut: loader.CArray
+    --- Swapchain width in pixels, as `SDL_WaitAndAcquireGPUSwapchainTexture`
+    --- writes it.
     _widthOut: loader.CArray
+    --- Swapchain height in pixels, from the same call. Not the window's size on
+    --- a high-density display.
     _heightOut: loader.CArray
     --- The frame object `beginFrame` fills in, for the same reason. One frame
     --- is recorded at a time on this device, so the one object serves all of
     --- them; see `Frame.wrap` for what that asks of a caller.
     _frame: Frame
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -68,6 +78,11 @@ end
 --- The claim is what makes a swapchain exist for that window, and `destroy`
 --- releases it before destroying the device, so the two can be torn down in
 --- either order from the caller's point of view.
+--- @param window Must already have a handle; the claim is what gives it a
+---     swapchain, and there is no way to move the claim to another window.
+--- @param options Nil takes SDL's own backend choice with validation off.
+--- @return A device with `framesInFlight` at SDL's default of two, which
+---     `setFramesInFlight` may lower and cannot raise past `Buffer.slotCount`.
 function Device.create(window: Window, options: DeviceOptions): Device
     options = options or {}
 
@@ -101,6 +116,7 @@ end
 --- Only "vsync" is available everywhere; the other two are the backend's to
 --- offer. An unknown name raises, since that is a typo rather than a
 --- capability.
+--- @param mode "vsync", "immediate" or "mailbox". Anything else raises.
 --- @return Whether the mode was applied. False leaves the previous pacing in
 ---     place, which a benchmark should notice rather than assume away.
 function Device:setPresentMode(mode: string): boolean
@@ -137,6 +153,8 @@ end
 --- false, and the result is a write landing under a copy in progress: geometry
 --- that is wrong only under load, which is why this refuses rather than
 --- clamping.
+--- @param count At least one and no more than `Buffer.slotCount`. Anything
+---     above that raises rather than being clamped.
 function Device:setFramesInFlight(count: integer)
     if count > Buffer.slotCount then
         error(
@@ -167,7 +185,9 @@ end
 --- is minimised. Cancelling is only legal there. Once a texture has come back,
 --- the command buffer's only way out is a submission, which is why the frame
 --- this returns carries that fact rather than leaving it to be worked out.
---- @return A frame to record into, or nil to skip this one.
+--- @return A frame to record into, or nil to skip this one. The device's own
+---     object, filled in again per frame, so nothing may keep it past the
+---     frame it was handed for.
 function Device:beginFrame(): Frame
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self.handle)
     if commandBuffer == nil then

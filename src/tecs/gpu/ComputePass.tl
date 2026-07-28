@@ -27,6 +27,12 @@ local C <const> = sdl.C
 --- the arrays below.
 local MAX_BUFFER_BINDINGS <const> = 8
 
+--- A begun compute pass, and everything that records into one.
+---
+--- `begin` opens one on a command buffer and `finish` closes it; between those
+--- two the pass owns the command buffer, since SDL allows no other pass of any
+--- kind on it. Every method here is only legal in that window, and the handle
+--- is nil outside it.
 local record ComputePass
     --- The `SDL_GPUComputePass`. Nil once `finish` has run, and valid only
     --- between the begin and the end: a pass does not outlive its command
@@ -38,6 +44,8 @@ local record ComputePass
     --- reads it: a compute uniform is pushed onto the buffer the caller
     --- already holds.
     commandBuffer: loader.CValue
+    --- Set by the first `finish`, so a second one ends nothing again and a
+    --- recovery path may close a pass it cannot know the state of.
     _finished: boolean
 
     --- Wraps a begun compute pass handle.

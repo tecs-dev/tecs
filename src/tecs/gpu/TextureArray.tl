@@ -71,8 +71,16 @@ local record TextureArrayOptions
     pack: boolean
 end
 
+--- Many images behind one texture binding, addressed by layer and UV rect.
+---
+--- `add` puts an image in and answers where it went; `replace` writes over one
+--- without moving it. Nothing is ever freed short of `destroy`, so an array is
+--- sized for the images a process will hold rather than the ones it holds now.
 local record TextureArray
     --- Where one image landed, and how to sample it back out.
+    ---
+    --- The caller's to keep: nothing here maps an image back to its region, and
+    --- the values stay true for as long as the array lives, `replace` included.
     record Region
         --- Layer this image occupies, zero-based: the index a shader passes to
         --- the third component of an array sampler's coordinate.
@@ -81,17 +89,22 @@ local record TextureArray
         --- UVs run from the first pair to the second, and an image that does
         --- not fill its cell reaches neither zero nor one.
         u0: number
+        --- Top edge, as a fraction of the cell's height.
         v0: number
+        --- Right edge, as a fraction of the cell's width.
         u1: number
+        --- Bottom edge, as a fraction of the cell's height.
         v1: number
         --- The image's own top-left within its layer, in texels, outside any
         --- gutter. Carried rather than recovered from the UVs, so writing over
         --- an image again lands on the texels it already occupies exactly.
         x: integer
+        --- Top of the image within its layer, in texels, outside any gutter.
         y: integer
         --- Size in pixels as uploaded, for a caller that needs the image's own
         --- dimensions rather than its share of the cell.
         width: integer
+        --- Height in pixels as uploaded, and what `replace` insists on.
         height: integer
     end
 
@@ -99,6 +112,7 @@ local record TextureArray
     handle: loader.CPtr
     --- Cell size in pixels, shared by every layer.
     width: integer
+    --- Cell height in pixels, shared by every layer.
     height: integer
     --- Layers allocated.
     layers: integer
@@ -108,12 +122,16 @@ local record TextureArray
     used: integer
     --- Whether a layer holds many images.
     packed: boolean
+    --- The `SDL_GPUDevice` the texture and its staging were created against.
     _device: loader.CPtr
     --- Upload staging, kept between calls and grown when an image needs more
     --- than the last one did. Never shrunk, since the largest image is the one
     --- that decides the cost either way.
     _transfer: loader.CPtr
+    --- Bytes the staging buffer holds, and the test that decides whether the
+    --- next image needs a larger one. Zero before the first upload.
     _transferSize: integer
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
     --- Open shelves across every layer, oldest first. Packed only.
     _shelves: {Shelf}
@@ -127,7 +145,9 @@ local record TextureArray
     ---
     --- For reporting what packing bought rather than for deciding anything: the
     --- allocator never consults it.
-    --- @return Occupied texels, and the texels the whole array holds.
+    --- @return Texels handed out, gutters counted.
+    --- @return Texels the whole array holds, which is the cell area times the
+    ---     layer count whether a layer is in use or not.
     usage: function(self): integer, integer
 end
 
@@ -137,6 +157,10 @@ local TextureArrayMT <const>: metatable<TextureArray> = {__index = TextureArray}
 ---
 --- RGBA8 and sampler usage, neither of which is an option: the point is one
 --- binding for every image, and a second format would be a second binding.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
+--- @return An empty array whose layers are all allocated. Staging is not: the
+---     first `add` sizes it to the image it is given.
 function TextureArray.create(device: loader.CPtr, options: TextureArrayOptions): TextureArray
     local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
     local settings = info[0] as loader.CStruct
@@ -354,6 +378,13 @@ end
 --- Raises when the array is full or the image is larger than a cell. Both are
 --- authoring mistakes with no useful runtime answer, and a silently dropped
 --- image would surface as a sprite sampling whatever occupies layer zero.
+--- Submits its own command buffer and does not wait on it, so this is a
+--- load-time path rather than something a frame carries.
+--- @param pixels Tightly packed RGBA8 rows read during this call and not kept,
+---     so the caller's memory may be reused as soon as it returns.
+--- @param width Image width in pixels, which must fit inside a cell, and inside
+---     a cell less two texels of gutter on a packed array.
+--- @param height Image height in pixels, under the same limit.
 --- @param pitch The source's row stride in bytes, which is not always
 ---     `width * 4`: a decoder is free to pad rows, and copying as though it
 ---     never does shears the image.

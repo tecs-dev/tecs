@@ -34,6 +34,12 @@ local STAGES <const>: {string: string} = {
 --- Includes may nest this deep. Past it, the graph has a cycle.
 local MAX_INCLUDE_DEPTH <const> = 16
 
+--- The shader source registry: what a name resolves to, and what a pack must
+--- hold.
+---
+--- Reads files, so this is a development and build-time path. A release asks
+--- `shadercompiler` for a name and never reaches here. Everything resolved is
+--- cached, and adding a root or a generated include drops the whole cache.
 local record shaders
     --- One shader source, resolved.
     record Entry
@@ -55,6 +61,7 @@ local record shaders
         key: string
         --- The source's name, shared by every variant of it.
         name: string
+        --- "vertex", "fragment", or "compute", from the name's suffix.
         stage: string
         --- The same expanded source for every variant: what differs between
         --- them is the defines the compiler is given, not the text.
@@ -194,6 +201,12 @@ end
 
 --- Substitutes a source in memory, for a spec probing a pass in isolation.
 --- Pass nil to restore the file.
+---
+--- Only this name's cache entry is dropped, since an override is not an
+--- include and nothing else can have expanded it.
+--- @param name Without the `.glsl` extension, as `get` takes it.
+--- @param source Raw GLSL whose includes are expanded on the next `get`, or
+---     nil to go back to the file.
 function shaders.override(name: string, source: string)
     overrides[name] = source
     cache[name] = nil
@@ -204,6 +217,9 @@ end
 --- Everything cached is dropped, because a shader already resolved may have
 --- included an older version of this one and its hash would no longer describe
 --- what it would compile to.
+--- @param name As an `#include` spells it, extension and all. A file at
+---     `include/<name>` under any root is still found first, so a generated
+---     include is only reached where no such file exists.
 function shaders.provide(name: string, source: string)
     provided[name] = source
     for key in pairs(cache) do
@@ -215,6 +231,9 @@ end
 ---
 --- Defines are sorted so the key does not depend on table order, which in Lua
 --- is not the order they were written in.
+--- @param defines Nil and an empty table are the same thing here.
+--- @return The name alone when there are no defines, so the plain name and the
+---     empty define set are one key and not two.
 function shaders.key(name: string, defines?: {string: string}): string
     if defines == nil then
         return name
@@ -243,6 +262,8 @@ end
 --- would expand to.
 --- @param name Without the `.glsl` extension, and carrying the stage suffix
 ---     that names it: a name with no `.vert`, `.frag` or `.comp` raises.
+--- @return The cached entry, shared with every other caller and dropped by the
+---     next `invalidate`, so nothing may write to it.
 function shaders.get(name: string): shaders.Entry
     local cached = cache[name]
     if cached ~= nil then

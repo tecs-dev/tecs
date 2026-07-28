@@ -43,23 +43,34 @@ local record TextureOptions
     name: string
 end
 
+--- A single-layer, single-mip 2D texture, and the type `create` returns.
+---
+--- Size, format and usage are fixed when it is made, so anything that has to
+--- change one of them is a different texture. The caller owns it and calls
+--- `destroy`; nothing releases it on collection.
 local record Texture
     --- The `SDL_GPUTexture`. Nil once `destroy` has run, and the field every
     --- binding call reads, so a released texture cannot be bound by accident.
     handle: loader.CPtr
     --- Size in pixels, as created.
     width: integer
+    --- Height in pixels, as created.
     height: integer
     --- Format as created. A pipeline drawing into this texture has to be
     --- created against the same value.
     format: integer
     --- The name SDL was given, or nil when none was asked for.
     name: string
+    --- The `SDL_GPUDevice` the texture was created against, and the one
+    --- `destroy` releases it from.
     _device: loader.CPtr
     --- Download staging, created by the first `readback` and kept for the ones
     --- after it. A texture nobody reads back never allocates one.
     _transfer: loader.CPtr
+    --- Bytes that staging holds. Recorded and read nowhere: the size is fixed
+    --- by the texture's own dimensions, which cannot change.
     _transferSize: integer
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -195,6 +206,9 @@ end
 --- layer sorts, so a device that offers only the floor draws a scene in an
 --- order nobody asked for, and `checkDepthSorting` is what stops that being
 --- the one thing about this choice nobody is told.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it. Asked directly, so this is safe before any texture
+---     exists.
 --- @return An `SDL_GPU_TEXTUREFORMAT_*` value to create a depth target with.
 function Texture.depthFormat(device: loader.CPtr): integer
     local usage = USAGE_FLAGS.depthTarget
@@ -212,6 +226,10 @@ end
 --- The caller owns it and calls `destroy`; nothing is tied to the collector.
 --- Size, format and usage are all fixed here, so a texture that has to change
 --- any of them is a new texture.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
+--- @return A texture whose contents are undefined until something writes it,
+---     so a pass that loads rather than clears reads whatever was in memory.
 function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     local flags = 0
     for _, name in ipairs(options.usage or DEFAULT_USAGE) do
@@ -393,6 +411,12 @@ end
 --- `gl_FragCoord` has, so a shader that writes a gradient reads back in the
 --- direction it wrote it. Unchecked: a coordinate outside the texture reads
 --- whatever is at that offset.
+--- @param pixels A buffer `readback` returned for this texture. One from
+---     another texture is indexed by this texture's width, not its own.
+--- @param x Column, zero to `width - 1`.
+--- @param y Row, zero to `height - 1`.
+--- @return A fresh record holding a copy of the four bytes; nothing reads the
+---     buffer again afterwards.
 function Texture:getPixel(pixels: loader.CArray, x: integer, y: integer): Pixel
     local offset = (y * self.width + x) * 4
     return {

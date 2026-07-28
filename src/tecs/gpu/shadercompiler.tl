@@ -131,10 +131,18 @@ local record CompiledShader
     threadCount: {integer}
 end
 
+--- Where a shader comes from: compiled here, or read out of an installed pack.
+---
+--- The compiler is loaded on first use and its absence is a condition rather
+--- than a load failure, so a release that links neither shaderc nor
+--- SPIRV-Cross still requires this module and serves every shader from a pack.
+--- `available` reports which of the two this build is.
 local record shadercompiler
     --- A built pack, re-exported so a caller loading one need not also require
     --- `shaderpack`.
     Pack: shaderpack.Pack
+    --- What a shader binds, re-exported from `shaderpack`, which owns it
+    --- because it is part of the serialized layout.
     ResourceCounts: ResourceCounts
     --- What both `compile` and a pack lookup produce, so a pipeline is built
     --- the same way whichever a shader came from.
@@ -442,7 +450,11 @@ end
 --- happens is decided by the host this runs on, so a pack built here is a pack
 --- for this backend.
 --- @param source GLSL source text, with includes already expanded.
---- @param stage "vertex", "fragment", or "compute".
+--- @param stage "vertex", "fragment", or "compute". Anything else raises.
+--- @param options Nil is no defines and a name derived from the stage. Raises
+---     on a build with no compiler, and on any GLSL that fails to compile.
+--- @return A shader whose `code` buffer must outlive the SDL create call that
+---     reads it, which is why the buffer is carried rather than a string.
 function shadercompiler.compile(source: string, stage: string, options: CompileOptions): CompiledShader
     options = options or {}
     local name = options.name or ("<%s shader>"):format(stage)
@@ -482,6 +494,12 @@ end
 
 --- Compiles GLSL to MSL and returns the translated source.
 --- Exposed for inspection and tests; the pipeline uses `compile`.
+---
+--- Translates on every host, unlike `compile`, which only does so on macOS.
+--- @return The MSL, with bindings already flattened into SDL's Metal order.
+--- @return What the shader binds, reflected out of the SPIR-V.
+--- @return The declared workgroup size for a compute stage, and nil for the
+---     other two.
 function shadercompiler.translate(
     source: string, stage: string, options: CompileOptions
 ): string, ResourceCounts, {integer}
@@ -511,6 +529,8 @@ local loadedPack: shaderpack.Pack = nil
 --- Also decides `format`, and so what a device is created claiming. Install a
 --- pack before creating the device, or the device claims one format and the
 --- pack supplies another.
+--- @param pack Held, not copied, and replacing whatever was installed before.
+---     Nil goes back to compiling, which a build with no compiler cannot do.
 function shadercompiler.usePack(pack: shaderpack.Pack)
     loadedPack = pack
 end
@@ -596,6 +616,11 @@ end
 --- This is how the engine asks for a shader. Going through a name rather than
 --- a source is what lets a build ship artifacts: a name is enumerable ahead of
 --- time and a source assembled at the call site is not.
+--- @param name A registered shader, without the `.glsl` extension.
+--- @param defines Nil is the plain variant, which is what everything but a
+---     material asks for.
+--- @return The same shape `compile` produces, whichever route it took, so a
+---     pipeline is built the same way either way.
 function shadercompiler.load(name: string, defines?: {string: string}): CompiledShader
     -- Materials are compiled into a shader rather than bound to it, so they
     -- have to be read before one is resolved. Done here rather than by each

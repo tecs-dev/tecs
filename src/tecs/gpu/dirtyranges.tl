@@ -16,6 +16,11 @@ local loader <const> = require("tecs.ffi.loader")
 --- Collapsing costs bandwidth; tracking costs nothing until it is exceeded.
 local MAX_RANGES <const> = 64
 
+--- A coalescing list of written byte ranges, and the type `create` returns.
+---
+--- Ranges go in through `mark`, come back out through `at` over `count`
+--- entries, and are forgotten by `clear`. Offsets and sizes are bytes
+--- throughout; nothing here knows which buffer they describe or how long it is.
 local record dirtyranges
     --- Ranges tracked before the list collapses to a single span.
     MAX: integer
@@ -60,7 +65,8 @@ local record dirtyranges
     --- @param index Zero to `count - 1`. Unchecked: between `count` and `MAX`
     ---     this reads spans a previous, longer generation of the list left
     ---     behind, and past `MAX` it reads off the end of the array.
-    --- @return The range's offset in bytes, then its size in bytes.
+    --- @return The range's offset in bytes.
+    --- @return Its size in bytes.
     at: function(self, index: integer): integer, integer
 
     --- Forgets every range. The storage is kept, since the next frame needs it.

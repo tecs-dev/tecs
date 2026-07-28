@@ -19,6 +19,11 @@
 --- after wants a world-space ray: an occluder mask is built with a world
 --- projection and a shadow march is a march through the world.
 
+--- The light and tile-grid layout, in one place.
+---
+--- Constants only: nothing here touches a device or holds state. What a writer
+--- gets from it is the stride to advance by, the ceiling to stop at, and the
+--- grid dimensions the binning dispatch and the lighting pass both work from.
 local record lightlayout
     --- Lights the lighting pass will consider in one frame. Past this the
     --- remainder is dropped rather than reported, because the alternative is a
@@ -33,6 +38,8 @@ local record lightlayout
 
     --- Floats per light: vec4 position and radius, vec4 colour and intensity.
     FLOATS: integer
+    --- Bytes per light, which is the stride a writer advances by and what
+    --- `MAX` multiplies to give the buffer's size.
     BYTES: integer
 
     --- Tiles the view is divided into on each axis, so a fragment consults

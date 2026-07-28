@@ -25,6 +25,11 @@ local record ShaderOptions
     defines: {string: string}
 end
 
+--- One compiled graphics stage on a device, and the type `load` returns.
+---
+--- A shader is only needed while pipelines are being created against it: SDL
+--- retains what a pipeline uses, so `destroy` is safe as soon as the last one
+--- exists.
 local record Shader
     --- The `SDL_GPUShader`. Nil once `destroy` has run.
     handle: loader.CPtr
@@ -33,9 +38,13 @@ local record Shader
     --- What the shader binds, reflected out of the SPIR-V. Carried so a caller
     --- can check a pipeline's bindings against what the shader expects.
     counts: shadercompiler.ResourceCounts
+    --- The `SDL_GPUDevice` it was created against, and the one `destroy`
+    --- releases it from.
     _device: loader.CPtr
-    -- Retains the buffer SDL read the code from.
+    --- The bytecode buffer SDL read the code from, kept for the shader's life
+    --- and dropped by `destroy`.
     _code: loader.CArray
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -90,8 +99,14 @@ end
 ---
 --- The stage comes from the name's suffix rather than from the caller, so a
 --- `.frag` asked for as a vertex shader is not a thing that can be said.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
 --- @param name A registered shader, without the `.glsl` extension, such as
 ---     "deferred.lighting.frag".
+--- @param options Nil is no defines, which is the whole of what a shader with
+---     no variants needs.
+--- @return A shader the caller owns and releases with `destroy`, once every
+---     pipeline built from it exists.
 function Shader.load(device: loader.CPtr, name: string, options: ShaderOptions): Shader
     options = options or {}
     local entry = shaders.get(name)
@@ -107,7 +122,9 @@ end
 --- Includes are not expanded: that happens in `shaders` on the way from a file,
 --- and source handed in directly has already been assembled by whoever holds
 --- it.
+--- @param source Whole GLSL, with every `#include` already resolved.
 --- @param stage "vertex" or "fragment". Compute uses `ComputePipeline`.
+---     Anything else raises.
 function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string, options: ShaderOptions): Shader
     options = options or {}
     return create(

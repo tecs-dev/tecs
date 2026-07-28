@@ -39,7 +39,15 @@ local enum FrameState
     "cancelled"
 end
 
+--- One frame's command buffer and its swapchain target, as `Device:beginFrame`
+--- hands it out.
+---
+--- A frame is a resource with exactly one way out: `submit` for one that
+--- acquired a swapchain texture, `cancel` for one that did not, and `abandon`
+--- for a caller that cannot tell which it is holding. Leaving one unresolved
+--- keeps a slot in the driver's pool and a texture the presenter is waiting for.
 local record Frame
+    --- Where a frame's command buffer has got to.
     type State = FrameState
 
     --- This frame's command buffer. Passed to anything that records work. Nil
@@ -49,6 +57,8 @@ local record Frame
     swapchainTexture: loader.CPtr
     --- Swapchain dimensions in pixels, which may differ from the window size.
     width: integer
+    --- Swapchain height in pixels, which is what a target sized to the frame
+    --- takes rather than the window's height.
     height: integer
     --- Whether a swapchain texture was acquired on this command buffer.
     ---
@@ -57,6 +67,8 @@ local record Frame
     --- after an acquisition is an error, and the texture is only handed back by
     --- a submission.
     acquired: boolean
+    --- Where the command buffer has got to. Only "recording" owns anything;
+    --- the other two are terminal, and every resolving call is a no-op in them.
     state: FrameState
 end
 
@@ -66,6 +78,12 @@ local FrameMT <const>: metatable<Frame> = {__index = Frame}
 ---
 --- A nil `swapchainTexture` is a command buffer that acquired nothing, which is
 --- the only kind that may still be cancelled.
+--- @param commandBuffer An acquired command buffer, which the frame takes
+---     ownership of: resolving the frame is what resolves it.
+--- @param swapchainTexture The texture acquired on that command buffer, or nil
+---     when none was.
+--- @param width Swapchain width in pixels, not the window's.
+--- @param height Swapchain height in pixels, not the window's.
 --- @param reuse A resolved frame whose object is filled in again, or nil for a
 ---     fresh one. One frame is acquired per iteration and the device holds the
 ---     object between them, so reusing it is what keeps acquisition from
@@ -86,6 +104,13 @@ function Frame.wrap(
 end
 
 --- Begins a render pass targeting the swapchain.
+---
+--- One colour attachment and no depth, so a pipeline bound in it must bake the
+--- swapchain's format and declare no depth-stencil target.
+--- @param options Nil loads the swapchain's existing contents, which no frame
+---     has necessarily written.
+--- @return The open pass, which the caller must `finish` before beginning
+---     another or submitting the frame.
 function Frame:beginRenderPass(options: RenderPassOptions): RenderPass
     return RenderPass.begin(
         self.commandBuffer,
@@ -99,11 +124,19 @@ end
 ---
 --- `readWriteBuffers` are the buffers the pass writes; see `ComputePass.begin`
 --- for why they are declared here rather than bound inside the pass.
+--- @param readWriteBuffers Device buffer handles, not `Buffer` objects. Empty
+---     or nil is a pass that only reads.
+--- @return The open pass, which the caller must `finish` before beginning
+---     another or submitting the frame.
 function Frame:beginComputePass(readWriteBuffers: {loader.CValue}): ComputePass
     return ComputePass.begin(self.commandBuffer, readWriteBuffers)
 end
 
 --- Submits the frame's recorded work for execution and presentation.
+---
+--- Does not wait: the work is queued, and only the frames-in-flight limit on
+--- the next acquire holds the CPU back. A frame already submitted or cancelled
+--- does nothing here. Every pass must be finished first.
 function Frame:submit()
     if self.state ~= "recording" then
         return

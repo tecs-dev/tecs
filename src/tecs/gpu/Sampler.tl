@@ -21,10 +21,18 @@ local record SamplerOptions
     address: string
 end
 
+--- An immutable sampler, and the type `create` returns.
+---
+--- Filtering and addressing are fixed when it is made, so a second combination
+--- is a second sampler. One may be paired with any number of textures; a bind
+--- call carries one sampler for every texture it lists.
 local record Sampler
     --- The `SDL_GPUSampler`. Nil once `destroy` has run.
     handle: loader.CPtr
+    --- The `SDL_GPUDevice` it was created against, and the one `destroy`
+    --- releases it from.
     _device: loader.CPtr
+    --- Set by the first `destroy`, so a second one releases nothing again.
     _destroyed: boolean
 end
 
@@ -46,6 +54,10 @@ local ADDRESS_MODES <const>: {string: integer} = {
 --- One mip level, no anisotropy and no comparison: nothing here generates
 --- mips, so a sampler that could filter between them would be describing a
 --- texture that does not exist.
+--- @param device The `SDL_GPUDevice`, which is `Device.handle` and not the
+---     wrapper around it.
+--- @param options Nil takes every default: nearest filtering, clamped edges.
+---     An unknown filter or address mode raises rather than falling back.
 function Sampler.create(device: loader.CPtr, options: SamplerOptions): Sampler
     options = options or {}
 

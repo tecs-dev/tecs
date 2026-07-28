@@ -19,6 +19,11 @@ local buffer <const> = require("string.buffer")
 --- from somewhere inside the deserializer.
 local MAGIC <const> = "TECSSP"
 
+--- The shader pack format, and reading and writing it.
+---
+--- Encoding and decoding only: nothing here compiles, so a build that links no
+--- compiler still loads this module. `shaderbuild` produces a pack and
+--- `shadercompiler` consumes one.
 local record shaderpack
     --- Resources a shader binds, as SDL_GPU counts them.
     ---
@@ -28,12 +33,19 @@ local record shaderpack
         --- Combined image samplers. SDL counts a texture and the sampler bound
         --- with it as one, so this is not textures plus samplers.
         samplers: integer
+        --- Storage textures the shader only reads.
         readOnlyStorageTextures: integer
+        --- Storage buffers the shader only reads, which is every storage buffer
+        --- a graphics stage binds.
         readOnlyStorageBuffers: integer
         --- Zero outside compute: graphics storage bindings are read-only, and
         --- SDL's graphics shader creation has no field to put these in.
         readWriteStorageTextures: integer
+        --- Storage buffers a compute shader writes, and what a caller must
+        --- declare to `ComputePass.begin`. Zero outside compute.
         readWriteStorageBuffers: integer
+        --- Uniform blocks the stage declares, which are pushed rather than
+        --- bound.
         uniformBuffers: integer
     end
 
@@ -54,6 +66,9 @@ local record shaderpack
         --- Hash of the GLSL this was built from, so a pack built before the
         --- source changed is detected rather than trusted.
         sourceHash: string
+        --- What this variant binds, reflected when it was compiled. Carried
+        --- because SDL needs the counts and translated output does not yield
+        --- them.
         counts: ResourceCounts
         --- Declared workgroup size for compute, `{1, 1, 1}` otherwise.
         threadCount: {integer}
@@ -61,6 +76,7 @@ local record shaderpack
         code: string
     end
 
+    --- A whole pack: every variant a build produced, in one format.
     record Pack
         --- Layout this pack was written in. Checked against `VERSION` on read,
         --- so a build refuses a file it would misinterpret.
@@ -118,6 +134,9 @@ function shaderpack.formatName(format: integer): string
 end
 
 --- The SDL shader format a name refers to.
+--- @param name One of "private", "spirv", "dxbc", "dxil", "msl" or
+---     "metallib", as `formatName` spells them. Anything else raises, which is
+---     the difference from `formatName`.
 function shaderpack.formatValue(name: string): integer
     for _, candidate in ipairs(FORMAT_NAMES) do
         if candidate == name then
