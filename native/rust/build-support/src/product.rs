@@ -18,16 +18,20 @@ use crate::{staging, tooling};
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
 pub const CERULEAN_REVISION: &str = "a09b6d734a55d58489e16498bd83387d39c4cafe";
 pub const TEALDOC_REVISION: &str = "a472e7d4a92b782432581ef64b7498c6b2fa5fda";
-pub const SDL3_REVISION: &str = "release-3.4.12";
-pub const SDL3_MIXER_REVISION: &str = "release-3.2.4";
+pub const BUSTED_VERSION: &str = "2.2.0-1";
+pub const SDL3_VERSION: &str = "3.4.12";
+pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";
+pub const SDL3_MIXER_VERSION: &str = "3.2.4";
+pub const SDL3_MIXER_REVISION: &str = "72a81869b45e249e8e67102db4e98dd2441f05a1";
 pub const LUAJIT_REVISION: &str = "871db2c84ecefd70a850e03a6c340214a81739f0";
 pub const LUAJIT_ROLLING: &str = "2.1.1753364724";
-pub const SHADERC_REVISION: &str = "v2026.3";
+pub const SHADERC_VERSION: &str = "2026.3";
+pub const SHADERC_REVISION: &str = "2c8cae778eec0283b44acbe7ed1a386865d78799";
 pub const GLSLANG_REVISION: &str = "168d452a4f460d24b588fed08477a81c44ee27a1";
 pub const SPIRV_TOOLS_REVISION: &str = "b707790a898e44038547df54580022fc1cf89c3d";
 pub const SPIRV_HEADERS_REVISION: &str = "29981f65241605e08b0ede4cfeb999fe3b723c6a";
-pub const SPIRV_CROSS_REVISION: &str = "vulkan-sdk-1.4.313.0";
-pub const ZLIB_REVISION: &str = "v1.3.2";
+pub const SPIRV_CROSS_REVISION: &str = "2275d0efc4f2fa46851035d9d3c67c105bc8b99e";
+pub const ZLIB_REVISION: &str = "da607da739fa6047df13e66a2af6b8bec7c2a498";
 
 const C_WARNINGS: &[&str] = &[
     "-Wall",
@@ -88,7 +92,8 @@ impl Paths {
         }
     }
 
-    fn create(&self) -> Result<()> {
+    fn prepare(&self) -> Result<()> {
+        fs::create_dir_all(&self.out)?;
         for path in [
             &self.lua,
             &self.teal,
@@ -97,11 +102,20 @@ impl Paths {
             &self.objects,
             &self.library,
             &self.binary,
-            &self.cargo,
             &self.notices,
-            &self.dependencies,
         ] {
+            if path.exists() {
+                fs::remove_dir_all(path)?;
+            }
             fs::create_dir_all(path)?;
+        }
+        for path in [&self.cargo, &self.dependencies] {
+            fs::create_dir_all(path)?;
+        }
+        for path in [self.out.join("build-info.txt"), self.out.join("main.lua")] {
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
         }
         Ok(())
     }
@@ -117,8 +131,8 @@ struct Package {
 
 pub fn build(root: &Path, preset: Preset) -> Result<PathBuf> {
     let paths = Paths::new(root, preset);
-    paths.create()?;
     preflight(root, preset)?;
+    paths.prepare()?;
     match preset.dependencies {
         DependencyMode::System => build_system(root, preset, &paths),
         DependencyMode::Packaged | DependencyMode::Single => build_pinned(root, preset, &paths),
@@ -159,13 +173,18 @@ pub fn run_demo(root: &Path, preset: Preset, arguments: &[OsString]) -> Result<(
 }
 
 pub fn test(root: &Path, preset: Preset) -> Result<()> {
+    let mut rust = Command::new("cargo");
+    rust.args(["test", "--locked", "--workspace", "--all-targets"])
+        .current_dir(root);
+    run(&mut rust, "Rust workspace tests")?;
+
     build(root, preset)?;
     let paths = Paths::new(root, preset);
     for arguments in [
         ["--pattern", "headless_spec"],
         ["--exclude-pattern", "headless_spec"],
     ] {
-        let mut command = Command::new("busted");
+        let mut command = Command::new(root.join("vendor/bin/busted"));
         command.args(arguments).current_dir(root);
         apply_development_environment(&mut command, &paths);
         run(&mut command, "Busted spec suite")?;
@@ -253,10 +272,11 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
     crate::package::check(&crate::package::Options {
         prefix: &prefix,
         allow_compiler: false,
+        teal_compiler: &root.join("vendor/bin/tl"),
         teal_types: Some(&root.join("vendor/share/lua/5.1")),
     })?;
 
-    let mut specs = Command::new("busted");
+    let mut specs = Command::new(root.join("vendor/bin/busted"));
     specs
         .args(["--pattern", "headless_spec"])
         .current_dir(root)
@@ -465,6 +485,11 @@ fn pinned_packages(
     let build_root = paths.dependencies.join("build");
     let prefix = paths.dependencies.join("prefix");
     fs::create_dir_all(&source_root)?;
+    for path in [&build_root, &prefix] {
+        if path.exists() {
+            fs::remove_dir_all(path)?;
+        }
+    }
     fs::create_dir_all(&build_root)?;
     fs::create_dir_all(&prefix)?;
 
@@ -714,38 +739,172 @@ fn fetch_source(root: &Path, name: &str, repository: &str, revision: &str) -> Re
 }
 
 fn fetch_source_at(destination: &Path, repository: &str, revision: &str) -> Result<()> {
-    let marker = destination.join(".tecs-revision");
-    if fs::read_to_string(&marker).ok().as_deref() == Some(revision) {
-        return Ok(());
+    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!(
+            "{repository} is pinned to {revision:?}, not an immutable 40-character commit"
+        );
+    }
+    if destination.exists() && !destination.join(".git").exists() {
+        fs::remove_dir_all(destination)?;
     }
     fs::create_dir_all(destination)?;
-    if !destination.join(".git").is_dir() {
+    if !destination.join(".git").exists() {
         command::run("git", ["init"], destination)?;
         command::run("git", ["remote", "add", "origin", repository], destination)?;
+    } else {
+        command::run(
+            "git",
+            ["remote", "set-url", "origin", repository],
+            destination,
+        )?;
     }
-    let mut fetch = Command::new("git");
-    fetch
-        .args(["fetch", "--depth", "1", "origin", revision])
-        .current_dir(destination);
-    run(&mut fetch, &format!("fetching {repository} at {revision}"))?;
-    command::run("git", ["checkout", "--detach", "FETCH_HEAD"], destination)?;
-    fs::write(marker, revision)?;
+
+    if git_output(destination, &["rev-parse", "HEAD"])
+        .ok()
+        .as_deref()
+        != Some(revision)
+    {
+        let mut fetch = Command::new("git");
+        fetch
+            .args(["fetch", "--depth", "1", "origin", revision])
+            .current_dir(destination);
+        run(&mut fetch, &format!("fetching {repository} at {revision}"))?;
+        command::run(
+            "git",
+            ["checkout", "--force", "--detach", "FETCH_HEAD"],
+            destination,
+        )?;
+    }
+    command::run("git", ["reset", "--hard", revision], destination)?;
+    command::run("git", ["clean", "-ffd"], destination)?;
+
+    let head = git_output(destination, &["rev-parse", "HEAD"])?;
+    if head != revision {
+        anyhow::bail!(
+            "{} resolved {revision} to {head}; refusing a mutable or unexpected checkout",
+            destination.display()
+        );
+    }
+    let status = git_output(
+        destination,
+        &[
+            "status",
+            "--ignore-submodules=all",
+            "--porcelain",
+            "--untracked-files=all",
+        ],
+    )?;
+    if !status.is_empty() {
+        anyhow::bail!(
+            "{} is dirty after restoring {revision}:\n{status}",
+            destination.display()
+        );
+    }
     Ok(())
 }
 
 fn update_submodules(source: &Path, submodules: &[&str]) -> Result<()> {
-    let marker = source.join(".tecs-submodules");
-    if fs::read_to_string(&marker).ok().as_deref() == Some("ready") {
+    let fingerprint = submodule_fingerprint(source, submodules)?;
+    let git_directory = git_output(source, &["rev-parse", "--git-dir"])?;
+    let git_directory = if Path::new(&git_directory).is_absolute() {
+        PathBuf::from(git_directory)
+    } else {
+        source.join(git_directory)
+    };
+    let marker = git_directory.join("tecs-submodules");
+    if fs::read_to_string(&marker).ok().as_deref() == Some(fingerprint.as_str())
+        && submodules_are_ready(source, submodules)?
+    {
         return Ok(());
     }
     let mut command = Command::new("git");
     command
-        .args(["submodule", "update", "--init", "--depth", "1", "--"])
+        .args([
+            "submodule",
+            "update",
+            "--init",
+            "--force",
+            "--depth",
+            "1",
+            "--",
+        ])
         .args(submodules)
         .current_dir(source);
     run(&mut command, "fetching SDL_mixer decoder sources")?;
-    fs::write(marker, "ready")?;
+    for submodule in submodules {
+        let directory = source.join(submodule);
+        let expected = git_output(source, &["rev-parse", &format!("HEAD:{submodule}")])?;
+        command::run("git", ["reset", "--hard", &expected], &directory)?;
+        command::run("git", ["clean", "-ffd"], &directory)?;
+    }
+    if !submodules_are_ready(source, submodules)? {
+        anyhow::bail!(
+            "{} has incomplete or mismatched pinned submodules",
+            source.display()
+        );
+    }
+    fs::write(marker, fingerprint)?;
     Ok(())
+}
+
+fn submodule_fingerprint(source: &Path, submodules: &[&str]) -> Result<String> {
+    let mut fingerprint = git_output(source, &["rev-parse", "HEAD"])?;
+    for submodule in submodules {
+        fingerprint.push('\n');
+        fingerprint.push_str(submodule);
+        fingerprint.push('=');
+        fingerprint.push_str(&git_output(
+            source,
+            &["rev-parse", &format!("HEAD:{submodule}")],
+        )?);
+    }
+    Ok(fingerprint)
+}
+
+fn submodules_are_ready(source: &Path, submodules: &[&str]) -> Result<bool> {
+    for submodule in submodules {
+        let directory = source.join(submodule);
+        if !directory.join(".git").exists() {
+            return Ok(false);
+        }
+        let expected = git_output(source, &["rev-parse", &format!("HEAD:{submodule}")])?;
+        if git_output(&directory, &["rev-parse", "HEAD"])
+            .ok()
+            .as_deref()
+            != Some(&expected)
+        {
+            return Ok(false);
+        }
+        if !git_output(
+            &directory,
+            &["status", "--porcelain", "--untracked-files=all"],
+        )?
+        .is_empty()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn git_output(directory: &Path, arguments: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .output()
+        .with_context(|| format!("starting git in {}", directory.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed in {}:\n{}",
+            arguments.join(" "),
+            directory.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8(output.stdout)
+        .context("git emitted non-UTF-8 output")?
+        .trim()
+        .to_owned())
 }
 
 fn configure_cmake(
@@ -877,6 +1036,8 @@ fn install_shaderc(source: &Path, build: &Path, prefix: &Path, shared: bool) -> 
 }
 
 fn build_luajit(preset: Preset, source: &Path, prefix: &Path) -> Result<()> {
+    command::run("git", ["reset", "--hard", LUAJIT_REVISION], source)?;
+    command::run("git", ["clean", "-ffdx"], source)?;
     if preset.rust_target.contains("windows") {
         let mut build = Command::new("cmd");
         build
@@ -951,21 +1112,18 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
 
 fn check_system_versions(preset: Preset) -> Result<()> {
     let mut requirements = vec![
-        ("SDL3", "sdl3", SDL3_REVISION, false),
-        ("SDL3_mixer", "sdl3-mixer", SDL3_MIXER_REVISION, false),
+        ("SDL3", "sdl3", SDL3_VERSION, false),
+        ("SDL3_mixer", "sdl3-mixer", SDL3_MIXER_VERSION, false),
         ("LuaJIT", "luajit", LUAJIT_ROLLING, false),
     ];
     if matches!(preset.shaders, ShaderMode::Runtime) {
-        requirements.push(("shaderc", "shaderc", SHADERC_REVISION, true));
+        requirements.push(("shaderc", "shaderc", SHADERC_VERSION, true));
     }
     let mut drift = Vec::new();
     for (name, package, revision, prefix) in requirements {
         let found = pkg_output(package, &["--modversion"])?;
         let found = found.trim();
-        let expected = revision
-            .strip_prefix("release-")
-            .or_else(|| revision.strip_prefix('v'))
-            .unwrap_or(revision);
+        let expected = revision;
         let matches = if prefix {
             found.starts_with(expected)
         } else {
@@ -2348,10 +2506,15 @@ fn run(command: &mut Command, description: &str) -> Result<()> {
 mod tests {
     use std::fs;
     use std::os::unix::fs::symlink;
+    use std::process::Command;
 
     use tempfile::tempdir;
 
-    use super::copy_dynamic_libraries;
+    use super::{
+        copy_dynamic_libraries, fetch_source_at, Paths, GLSLANG_REVISION, LUAJIT_REVISION,
+        SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION, SPIRV_CROSS_REVISION,
+        SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
+    };
 
     #[test]
     fn packaged_library_aliases_remain_symlinks() {
@@ -2371,5 +2534,133 @@ mod tests {
             fs::read_link(alias).unwrap(),
             std::path::PathBuf::from("libSDL3.0.dylib")
         );
+    }
+
+    #[test]
+    fn preparing_a_build_removes_outputs_but_preserves_caches() {
+        let root = tempdir().unwrap();
+        let preset = "macos-arm64-dev".parse().unwrap();
+        let paths = Paths::new(root.path(), preset);
+        for path in [
+            &paths.lua,
+            &paths.teal,
+            &paths.spec,
+            &paths.generated,
+            &paths.objects,
+            &paths.library,
+            &paths.binary,
+            &paths.notices,
+            &paths.cargo,
+            &paths.dependencies,
+        ] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("stale"), b"stale").unwrap();
+        }
+        fs::write(paths.out.join("build-info.txt"), b"stale").unwrap();
+        fs::write(paths.out.join("main.lua"), b"stale").unwrap();
+
+        paths.prepare().unwrap();
+
+        for path in [
+            &paths.lua,
+            &paths.teal,
+            &paths.spec,
+            &paths.generated,
+            &paths.objects,
+            &paths.library,
+            &paths.binary,
+            &paths.notices,
+        ] {
+            assert!(path.is_dir());
+            assert!(!path.join("stale").exists());
+        }
+        assert!(paths.cargo.join("stale").is_file());
+        assert!(paths.dependencies.join("stale").is_file());
+        assert!(!paths.out.join("build-info.txt").exists());
+        assert!(!paths.out.join("main.lua").exists());
+    }
+
+    #[test]
+    fn native_dependencies_are_pinned_to_commits() {
+        for revision in [
+            SDL3_REVISION,
+            SDL3_MIXER_REVISION,
+            LUAJIT_REVISION,
+            SHADERC_REVISION,
+            GLSLANG_REVISION,
+            SPIRV_TOOLS_REVISION,
+            SPIRV_HEADERS_REVISION,
+            SPIRV_CROSS_REVISION,
+            ZLIB_REVISION,
+        ] {
+            assert_eq!(revision.len(), 40);
+            assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn source_fetch_restores_the_exact_clean_commit() {
+        let origin = tempdir().unwrap();
+        git(origin.path(), &["init"]);
+        fs::write(origin.path().join("tracked"), b"original").unwrap();
+        git(origin.path(), &["add", "tracked"]);
+        let status = Command::new("git")
+            .args(["commit", "-m", "Initial"])
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .current_dir(origin.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let revision = git_output_for_test(origin.path(), &["rev-parse", "HEAD"]);
+
+        let checkout_root = tempdir().unwrap();
+        let checkout = checkout_root.path().join("source");
+        fetch_source_at(&checkout, origin.path().to_str().unwrap(), revision.trim()).unwrap();
+        fs::write(checkout.join("tracked"), b"modified").unwrap();
+        fs::write(checkout.join("untracked"), b"untracked").unwrap();
+
+        fetch_source_at(&checkout, origin.path().to_str().unwrap(), revision.trim()).unwrap();
+
+        assert_eq!(fs::read(checkout.join("tracked")).unwrap(), b"original");
+        assert!(!checkout.join("untracked").exists());
+        assert_eq!(
+            git_output_for_test(&checkout, &["rev-parse", "HEAD"]).trim(),
+            revision.trim()
+        );
+        assert!(git_output_for_test(
+            &checkout,
+            &["status", "--porcelain", "--untracked-files=all"]
+        )
+        .trim()
+        .is_empty());
+    }
+
+    #[test]
+    fn source_fetch_rejects_mutable_references() {
+        let checkout = tempdir().unwrap();
+        let error = fetch_source_at(checkout.path(), "unused", "v1.0").unwrap_err();
+        assert!(error.to_string().contains("not an immutable"));
+    }
+
+    fn git(directory: &std::path::Path, arguments: &[&str]) {
+        assert!(Command::new("git")
+            .args(arguments)
+            .current_dir(directory)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    fn git_output_for_test(directory: &std::path::Path, arguments: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(directory)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
     }
 }

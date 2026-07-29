@@ -31,7 +31,7 @@ enum Task {
     Presets,
     /// Install platform and repository development dependencies.
     Deps,
-    /// Install the pinned Teal, Cerulean, and tealdoc tools locally.
+    /// Install the pinned Teal, Cerulean, tealdoc, and Busted tools locally.
     DevTools,
     /// Build the selected target configuration.
     Build {
@@ -40,7 +40,7 @@ enum Task {
     },
     /// Type-check engine, CLI, benchmark, and demo Teal sources.
     Check,
-    /// Run the complete spec suite against a development build.
+    /// Run the Rust workspace tests and complete spec suite.
     Test {
         #[arg(long)]
         preset: Option<Preset>,
@@ -95,6 +95,8 @@ enum Task {
         prefix: PathBuf,
         #[arg(long)]
         allow_compiler: bool,
+        #[arg(long)]
+        teal_compiler: Option<PathBuf>,
         #[arg(long)]
         teal_types: Option<PathBuf>,
     },
@@ -277,12 +279,18 @@ fn main() -> Result<()> {
         Task::CheckPackage {
             prefix,
             allow_compiler,
+            teal_compiler,
             teal_types,
-        } => package::check(&PackageCheckOptions {
-            prefix: &prefix,
-            allow_compiler,
-            teal_types: teal_types.as_deref(),
-        })?,
+        } => {
+            let teal_compiler = teal_compiler.unwrap_or_else(|| root.join("vendor/bin/tl"));
+            let teal_types = teal_types.unwrap_or_else(|| root.join("vendor/share/lua/5.1"));
+            package::check(&PackageCheckOptions {
+                prefix: &prefix,
+                allow_compiler,
+                teal_compiler: &teal_compiler,
+                teal_types: Some(&teal_types),
+            })?;
+        }
         Task::DocsCheck => docs::check(&root)?,
         Task::DocsDev { port } => docs::serve(&root, port)?,
         Task::DocsBuild => {
@@ -372,6 +380,7 @@ fn install_dev_tools(root: &std::path::Path) -> Result<()> {
         .env("TL_REF", product::TEAL_REVISION)
         .env("CERULEAN_REF", product::CERULEAN_REVISION)
         .env("TEALDOC_REF", product::TEALDOC_REVISION)
+        .env("BUSTED_VERSION", product::BUSTED_VERSION)
         .current_dir(root)
         .status()?;
     if status.success() {

@@ -61,6 +61,7 @@ return tecs.newApplication({
 pub struct Options<'a> {
     pub prefix: &'a Path,
     pub allow_compiler: bool,
+    pub teal_compiler: &'a Path,
     pub teal_types: Option<&'a Path>,
 }
 
@@ -178,7 +179,12 @@ pub fn check(options: &Options<'_>) -> Result<()> {
     }
 
     let mut type_problems = Vec::new();
-    check_teal_types(&prefix, options.teal_types, &mut type_problems)?;
+    check_teal_types(
+        &prefix,
+        options.teal_compiler,
+        options.teal_types,
+        &mut type_problems,
+    )?;
     println!(
         "checked {} binaries under {}",
         binaries.len(),
@@ -279,6 +285,7 @@ fn files_with_suffix(prefix: &Path, extension: &str) -> Result<Vec<PathBuf>> {
 
 fn check_teal_types(
     prefix: &Path,
+    teal_compiler: &Path,
     teal_types: Option<&Path>,
     problems: &mut Vec<String>,
 ) -> Result<()> {
@@ -290,21 +297,23 @@ fn check_teal_types(
         );
         return Ok(());
     }
-    if Command::new("tl").arg("--version").output().is_err() {
-        println!("tl is not installed, so the packaged types were not checked");
-        return Ok(());
-    }
     let Some(teal_types) = teal_types else {
-        println!("no --teal-types given, so the packaged types were not checked");
+        problems.push(
+            "no Teal types directory was given, so the packaged declarations cannot be checked"
+                .to_owned(),
+        );
         return Ok(());
     };
+    let teal_compiler = teal_compiler
+        .canonicalize()
+        .with_context(|| format!("no such Teal compiler: {}", teal_compiler.display()))?;
     let teal_types = teal_types
         .canonicalize()
         .with_context(|| format!("no such Teal types directory: {}", teal_types.display()))?;
     let directory = tempdir()?;
     let usage = directory.path().join("usage.tl");
     fs::write(&usage, GLOBAL_USAGE)?;
-    let result = Command::new("tl")
+    let result = Command::new(&teal_compiler)
         .args(["--global-env-def", "tecs.global", "-I"])
         .arg(&teal_types)
         .arg("-I")
@@ -315,7 +324,7 @@ fn check_teal_types(
         .output()
         .context("running packaged Teal type check")?;
     let stdout = String::from_utf8_lossy(&result.stdout);
-    if !stdout.contains("0 errors detected") {
+    if !result.status.success() || !stdout.contains("0 errors detected") {
         problems
             .push("the packaged Teal types do not check a file using the `tecs` global:".into());
         let detail = format!("{}{}", stdout, String::from_utf8_lossy(&result.stderr));
@@ -430,5 +439,61 @@ mod tests {
         );
         assert_eq!(library_stem("libSDL3.so.0").unwrap(), "SDL3");
         assert_eq!(library_stem("z.dll").unwrap(), "z.dll");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn packaged_type_check_uses_the_explicit_compiler() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        use tempfile::tempdir;
+
+        use super::check_teal_types;
+
+        let directory = tempdir().unwrap();
+        let prefix = directory.path().join("package");
+        let teal = prefix.join("share/tecs/teal/tecs");
+        let types = directory.path().join("types");
+        fs::create_dir_all(&teal).unwrap();
+        fs::create_dir_all(&types).unwrap();
+        fs::write(teal.join("global.d.tl"), b"global tecs: {}\n").unwrap();
+        let compiler = directory.path().join("tl");
+        fs::write(&compiler, b"#!/bin/sh\nprintf '0 errors detected\\n'\n").unwrap();
+        let mut permissions = fs::metadata(&compiler).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&compiler, permissions).unwrap();
+        let mut problems = Vec::new();
+
+        check_teal_types(&prefix, &compiler, Some(&types), &mut problems).unwrap();
+
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn packaged_type_check_requires_a_types_directory() {
+        use std::fs;
+
+        use tempfile::tempdir;
+
+        use super::check_teal_types;
+
+        let directory = tempdir().unwrap();
+        let prefix = directory.path().join("package");
+        let teal = prefix.join("share/tecs/teal/tecs");
+        fs::create_dir_all(&teal).unwrap();
+        fs::write(teal.join("global.d.tl"), b"global tecs: {}\n").unwrap();
+        let mut problems = Vec::new();
+
+        check_teal_types(
+            &prefix,
+            directory.path().join("missing-tl").as_path(),
+            None,
+            &mut problems,
+        )
+        .unwrap();
+
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("no Teal types directory"));
     }
 }

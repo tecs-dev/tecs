@@ -42,7 +42,7 @@ Cargo is the project build and `cargo xtask` owns assembly, generation, tests, p
 
 ```bash
 cargo xtask build  # build the selected preset
-cargo xtask test   # run the spec suite
+cargo xtask test   # run the Rust and Lua/Teal test suites
 cargo xtask check  # type-check Teal sources
 ```
 

@@ -4,7 +4,8 @@ Thanks for your interest in contributing!
 
 ## Mandatory requirements
 
-- `cargo xtask test` must pass.
+- `cargo xtask test` must pass. It runs the Rust workspace tests before the
+  Lua and Teal spec suites, so this one command is the canonical test gate.
 - Add tests for new features, bug fixes, or edge cases when reasonable.
 - **Update `docs/` for any user-facing change.** A change a game can see is not
   done until its page says so. Prose is the one thing no test can check, so the
