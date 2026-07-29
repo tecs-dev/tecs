@@ -21,6 +21,7 @@ local bytesData <const> = C.tecsBytesData as function(loader.CValue): loader.CVa
 local bytesLength <const> = C.tecsBytesLength as function(loader.CValue): any
 local bytesDestroy <const> = C.tecsBytesDestroy as function(loader.CValue)
 local rustError <const> = C.tecsRustError as function(): loader.CValue
+local runMcp <const> = C.tecsCliMcp as function(): integer
 
 local record arguments
     record Invocation
@@ -111,6 +112,15 @@ function arguments.parse(raw: {string}): arguments.Invocation
         }
     end
     error("tecs: Rust returned an unknown command result")
+end
+
+--- Runs the blocking stdio-to-game MCP bridge.
+---
+--- Standard output belongs exclusively to the protocol until this returns.
+--- Diagnostics go to standard error inside Rust, so an agent never mistakes a
+--- discovery message for JSON-RPC.
+function arguments.runMcp(): integer
+    return runMcp()
 end
 
 return arguments

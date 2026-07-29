@@ -110,7 +110,7 @@ their code.
 
 ### SDL
 
-**SDL3**, **SDL3_net** and **SDL3_mixer**, all zlib licensed,
+**SDL3** and **SDL3_mixer**, both zlib licensed,
 copyright Sam Lantinga. The zlib licence binds source distribution rather than
 binary, so strictly it asks nothing of a shipped game; the notice is reproduced
 anyway.
@@ -132,16 +132,14 @@ preserve-this-notice terms, **dlmalloc** by Doug Lea and a public-domain
 `qsort`, and the **Khronos** OpenGL, OpenGL ES and EGL headers (MIT) with the
 Vulkan headers (Apache-2.0).
 
-SDL3_net vendors nothing.
-
 ### Rust native build foundation
 
 The static native archive includes `clap` for CLI parsing, `image` for PNG and
-JPEG decoding and PNG encoding, `reqwest` with Rustls for HTTP, and `rapier2d`
-for physics. It also owns the host lifecycle, worker channels, logging,
-dialogs, Lua module registration, LuaJIT's machine-code arena, and the
-single-file payload loader. SDL still owns the application loop and LuaJIT
-still owns game execution.
+JPEG decoding and PNG encoding, `reqwest` with Rustls for HTTP, `rmcp` for the
+official MCP protocol and Streamable HTTP server, and `rapier2d` for physics.
+It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
+registration, LuaJIT's machine-code arena, and the single-file payload loader.
+SDL still owns the application loop and LuaJIT still owns game execution.
 
 The exact versions and declared SPDX expressions are pinned in
 `native/rust/Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
@@ -197,6 +195,16 @@ release for that target compiles them:
 `windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`,
 `writeable`, `yoke`, `yoke-derive`, `zerofrom`, `zerofrom-derive`, `zeroize`,
 `zerotrie`, `zerovec`, `zerovec-derive`, `zune-core`, and `zune-jpeg`.
+
+The official MCP SDK and Streamable HTTP server add `android_system_properties`,
+`async-trait`, `axum`, `axum-core`, `chacha20`, `chrono`, `cpufeatures`,
+`dyn-clone`, `futures`, `futures-executor`, `httpdate`, `iana-time-zone`,
+`iana-time-zone-haiku`, `matchit`, `mime`, `pastey`, `r-efi`, `rand`,
+`rand_core`, `ref-cast`, `ref-cast-impl`, `rmcp`, `schemars`,
+`schemars_derive`, `serde_derive_internals`, `serde_json`, `sse-stream`,
+`tokio-macros`, `tokio-stream`, `tracing-attributes`, `uuid`, `windows-core`,
+`windows-implement`, `windows-interface`, `windows-result`, `windows-strings`
+and `zmij`.
 
 `unicode-ident` is also under the Unicode License v3, so that notice is required
 in addition to the Apache-2.0 arm elected above:

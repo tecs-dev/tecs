@@ -68,9 +68,11 @@ selects a vertical capsule; the length is the distance between end centers,
 excluding the caps. `offsetX` and `offsetY` move a shape in the body frame.
 
 Material options are `density`, `friction`, and `restitution`. Filtering uses
-32-bit `categoryBits` and `maskBits`. `isSensor = true` reports overlaps
-without collision response. A shared nonzero `groupIndex` overrides those
-bits: a positive value always collides and a negative value never does.
+32-bit `categoryBits` and `maskBits`, and both shapes must allow the pair.
+Give a cohort its own category bit and omit that bit from its mask when its
+members must not collide with each other. Give each cohort a bit and list the
+allowed bits in its mask when only selected cohorts may collide.
+`isSensor = true` reports overlaps without collision response.
 
 Editing `Collider` through `world:getMut` replaces its live shape at the next
 fixed step.
@@ -137,10 +139,14 @@ the secondary collider entity when that shape was hit.
 ## Contacts and sensors
 
 After each fixed step the plugin drains a Rust-owned event buffer and emits
-`ContactBegin`, `ContactEnd`, `ContactHit`, `SensorBegin`, and `SensorEnd` at
-address zero. A hit carries the solved contact point, strongest-force normal,
-and relative approach speed. No callback enters LuaJIT from Rust or from a
-worker thread.
+`ContactBegin`, `ContactEnd`, `SensorBegin`, and `SensorEnd` at address zero.
+No callback enters LuaJIT from Rust or from a worker thread.
+
+Use `ContactBegin` as the impact edge. Read each entity's `Transform` and
+`physics.velocity` there to derive relative speed for gameplay effects.
+Contact points, normals, and impulses are not exposed; code that needs them
+should add a narrow native query instead of inferring them from the begin
+event.
 
 ```teal
 world:observe(0, tecs.physics.SensorBegin, function(event)
@@ -152,7 +158,7 @@ end)
 
 Snapshots include the complete serializable Rapier state: bodies, colliders,
 islands, broad and narrow phases, joints, CCD state, integration parameters,
-and active contact pairs. The snapshot handler keeps its compatibility key
+and active contact pairs. The snapshot handler uses the persistent key
 `"tecs.physics"`.
 
 Restoring installs that state directly and reconnects the transient
@@ -199,13 +205,6 @@ Every function and type this module carries, rendered from `src/tecs/physics/ini
 ### tecs.physics.ContactEnd
 
 <pre><code v-pre><a href="#tecs.physics.ContactEnd">tecs.physics.ContactEnd</a>: ContactEnd
-</code></pre>
-
-<a id="tecs.physics.ContactHit"></a>
-
-### tecs.physics.ContactHit
-
-<pre><code v-pre><a href="#tecs.physics.ContactHit">tecs.physics.ContactHit</a>: ContactHit
 </code></pre>
 
 <a id="tecs.physics.Motion"></a>

@@ -30,8 +30,8 @@ formatter and the documentation generator land in `vendor/`, pinned by revision 
 every checkout formats and type-checks with the same versions rather than whatever a machine happens to have.
 
 Nothing is installed globally, and there is no `tecs` on the path afterwards. A game is built and run through
-`make` from this tree, which is what the rest of this page does. When the CLI exists, installing one file is
-meant to replace all of the above; see [Tecs CLI](/cli/) for the shape that is planned.
+`make` from this tree, which is what the rest of this page does. Installing the single-file CLI replaces that
+toolchain for a game project; see [Tecs CLI](/cli/) for its commands.
 
 ## Building the engine
 

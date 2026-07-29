@@ -5,7 +5,7 @@ outline: deep
 
 # tecs.net
 
-`tecs.net` is the engine's transport layer over SDL3_net. It resolves hostnames, connects and listens with TCP,
+`tecs.net` is the engine's transport layer over Rust's standard networking library. It resolves hostnames, connects and listens with TCP,
 and sends whole UDP datagrams. It does not add a message protocol: a TCP stream is bytes in order, and framing
 those bytes into messages belongs to the game.
 
@@ -20,8 +20,8 @@ The surface follows the game loop rather than hiding one:
 - accept, read, write, send and receive return immediately;
 - `wait` and `drain` are explicit, bounded calls for startup, tools, tests and background work.
 
-There are no Lua callbacks crossing into C. SDL3_net performs DNS and socket work internally, and Lua polls the
-result on the thread that owns the future.
+There are no Lua callbacks crossing the native boundary. Rust workers perform DNS and client connection, and Lua
+polls ordinary results on the thread that owns the future. TCP and UDP sockets stay nonblocking.
 
 ## The loop
 
@@ -83,7 +83,7 @@ A TCP connection that reports an I/O failure is no longer usable. Close it rathe
 `Address`, `Stream`, `Server` and `DatagramSocket` each own a native handle. Call `close()` when finished. Closing
 twice is safe, and operations on a closed value return a failure.
 
-`Packet.address` is also owned. It remains valid after `receive` releases SDL's native packet, and the caller
+`Packet.address` is also owned. It remains valid after `receive` releases Rust's native packet, and the caller
 closes it:
 
 ```teal
@@ -94,7 +94,7 @@ if packet ~= nil then
 end
 ```
 
-`net.quit()` releases this module's SDL3_net initialization. It refuses while an asynchronous operation or owned
+`net.quit()` releases this module's networking state. It refuses while an asynchronous operation or owned
 object remains live, so it cannot invalidate a handle behind its owner. Most games can leave the module
 initialized until process exit; the explicit call is useful to tests and hosts with a restartable runtime.
 
@@ -116,14 +116,14 @@ owned `Address`.
 | Field  | Type     | Description                                                                     |
 | ------ | -------- | ------------------------------------------------------------------------------- |
 | `host` | `string` | The hostname passed to `resolve`, or the numeric source obtained from a socket. |
-| `text` | `string` | SDL3_net's printable numeric representation of the resolved address.            |
+| `text` | `string` | Rust's printable numeric representation of the resolved address.                |
 
 ```teal
 function Address:isClosed(): boolean
 function Address:close()
 ```
 
-An address is deliberately opaque beyond its printable form. IPv4 and IPv6 selection stays with SDL3_net rather
+An address is deliberately opaque beyond its printable form. IPv4 and IPv6 selection stays with Rust rather
 than leaking platform socket structures into a game.
 
 ## TCP clients
@@ -149,7 +149,7 @@ function net.listen(port: integer, address?: Address): Server, string
 ```
 
 Omit `address` to listen on all local interfaces. `port` is from 0 through 65535; zero asks the operating system
-to choose a port, but SDL3_net does not expose that selected port, so a game that advertises its listener should
+to choose a port, but this API does not expose that selected port, so a game that advertises its listener should
 name one.
 
 ### Server
@@ -185,7 +185,8 @@ function Stream:close()
 ```
 
 `read` takes whatever has arrived without waiting, up to `maxBytes`. The default is 16 KiB and the accepted range
-is 1 byte through 64 KiB. A successful result may be shorter than requested.
+is 1 byte through 64 KiB. A successful result may be shorter than requested. Nil with no reason means no input is
+ready; nil with a reason means the peer disconnected or the read failed.
 
 ::: warning A stream has no messages
 One `write("abc")` can arrive as `"a"` then `"bc"`, and `write("a")` followed by `write("bc")` can arrive as
@@ -193,7 +194,7 @@ One `write("abc")` can arrive as `"a"` then `"bc"`, and `write("a")` followed by
 module.
 :::
 
-`write` queues the whole supplied chunk or fails; one call accepts at most 16 MiB. Acceptance means SDL3_net owns
+`write` queues the whole supplied chunk or fails; one call accepts at most 16 MiB. Acceptance means Rust owns
 the bytes for delivery, not that the peer has read them. `pendingWrites` reports what is still queued, and
 `drain` waits up to its timeout for that count to reach zero. `drain` defaults to 5000 milliseconds.
 
@@ -299,7 +300,7 @@ an address obtained from a socket or packet.
 <pre><code v-pre><a href="#tecs.net.Address.text">tecs.net.Address.text</a>: string
 </code></pre>
 
-SDL's printable numeric form of the address.
+Rust's printable numeric form of the address.
 
 <a id="tecs.net.Address.isClosed"></a>
 
@@ -354,7 +355,7 @@ One bound UDP socket.
 </code></pre>
 
 The port passed to `bind`, unchanged. Zero stays zero rather than becoming the port the
-operating system chose, which SDL3_net does not report back.
+operating system chose, which this API does not report back.
 
 <a id="tecs.net.DatagramSocket.isClosed"></a>
 
@@ -397,10 +398,10 @@ Sends one packet without waiting.
 
 #### Returns
 
-| Type                       | Description                                                                                                                                  |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | True when SDL took the datagram. That is handing it to the network rather than delivering it: it may still be lost, duplicated or reordered. |
-| <code v-pre>string</code>  | Why not. Set on every false return.                                                                                                          |
+| Type                       | Description                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | True when Rust handed the datagram to the network rather than delivering it: it may still be lost, duplicated or reordered. |
+| <code v-pre>string</code>  | Why not. Set on every false return.                                                                                         |
 
 <a id="tecs.net.DatagramSocket.receive"></a>
 
@@ -422,10 +423,10 @@ its source address, which the caller closes.
 
 #### Returns
 
-| Type                                                     | Description                                                                                                                                                                                                                |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.net.Packet">Packet</a></code> | One whole datagram, never part of one and never two joined. Its bytes are copied and its address referenced before SDL's own packet is released inside this call, so the result outlives both that packet and this socket. |
-| <code v-pre>string</code>                                | Set only when the socket is closed or the receive failed; nothing having arrived leaves this nil.                                                                                                                          |
+| Type                                                     | Description                                                                                                                                                                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.net.Packet">Packet</a></code> | One whole datagram, never part of one and never two joined. Its bytes are copied and its address retained before Rust's own packet is released inside this call, so the result outlives both that packet and this socket. |
+| <code v-pre>string</code>                                | Set only when the socket is closed or the receive failed; nothing having arrived leaves this nil.                                                                                                                         |
 
 <a id="tecs.net.DatagramSocket.wait"></a>
 
@@ -503,7 +504,7 @@ The remote port the datagram came from, which is where a reply goes.
 <pre><code v-pre><a href="#tecs.net.Packet.bytes">tecs.net.Packet.bytes</a>: string
 </code></pre>
 
-One whole datagram, already copied out of SDL's packet. A zero-length datagram reads as an
+One whole datagram, already copied out of Rust's packet. A zero-length datagram reads as an
 empty string rather than nil.
 
 <a id="tecs.net.Packet.close"></a>
@@ -538,7 +539,7 @@ A TCP listener.
 </code></pre>
 
 The port passed to `listen`, unchanged. Zero stays zero rather than becoming the port the
-operating system chose, which SDL3_net does not report back.
+operating system chose, which this API does not report back.
 
 <a id="tecs.net.Server.isClosed"></a>
 
@@ -654,9 +655,9 @@ Whether this stream has been closed.
 
 #### Returns
 
-| Type                       | Description                                                                                               |
-| -------------------------- | --------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | True once `close` has run. Every other method then answers `"stream is closed"` rather than reaching SDL. |
+| Type                       | Description                                                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | True once `close` has run. Every other method then answers `"stream is closed"` rather than reaching a released Rust allocation. |
 
 <a id="tecs.net.Stream.peer"></a>
 
@@ -677,10 +678,10 @@ The caller closes the returned address.
 
 #### Returns
 
-| Type                                                       | Description                                                                                                                                                                                                         |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.net.Address">Address</a></code> | A reference of its own, separate from the one the stream holds, so it stays valid after the stream is closed. Nil when the stream is closed or SDL could not report the peer, and nil here always carries a reason. |
-| <code v-pre>string</code>                                  | Why there is no address.                                                                                                                                                                                            |
+| Type                                                       | Description                                                                                                                                                                                                          |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.net.Address">Address</a></code> | A reference of its own, separate from the one the stream holds, so it stays valid after the stream is closed. Nil when the stream is closed or Rust could not report the peer, and nil here always carries a reason. |
+| <code v-pre>string</code>                                  | Why there is no address.                                                                                                                                                                                             |
 
 <a id="tecs.net.Stream.read"></a>
 
@@ -730,10 +731,10 @@ use `pendingWrites` or `drain` when that distinction matters.
 
 #### Returns
 
-| Type                       | Description                                                                                                                 |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | True when SDL has taken the whole chunk; there is no partial acceptance. False when the stream is closed or SDL refused it. |
-| <code v-pre>string</code>  | Why not. Set on every false return, unlike `drain` and `wait`, where false is also how a timeout reads.                     |
+| Type                       | Description                                                                                                                                    |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | True when Rust has queued the whole chunk; there is no partial acceptance. False when the stream is closed or the operating system refused it. |
+| <code v-pre>string</code>  | Why not. Set on every false return, unlike `drain` and `wait`, where false is also how a timeout reads.                                        |
 
 <a id="tecs.net.Stream.pendingWrites"></a>
 
@@ -742,7 +743,7 @@ use `pendingWrites` or `drain` when that distinction matters.
 <pre><code v-pre>function <a href="#tecs.net.Stream.pendingWrites">tecs.net.Stream.pendingWrites</a>(self: <a href="#tecs.net.Stream">Stream</a>): integer, string
 </code></pre>
 
-Bytes SDL has accepted but not yet sent.
+Bytes Rust has accepted but not yet sent.
 
 #### Parameters
 
@@ -837,15 +838,15 @@ Binds a UDP socket. A nil address listens on all local interfaces.
 
 | Type                                                       | Name                       | Description                                                                                                                                                                                    |
 | ---------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code>                                 | <code v-pre>port</code>    | From 0 to 65535. Zero asks the operating system to choose one, which suits a socket that only receives replies; SDL3_net does not report the choice back, so `DatagramSocket.port` stays zero. |
+| <code v-pre>integer</code>                                 | <code v-pre>port</code>    | From 0 to 65535. Zero asks the operating system to choose one, which suits a socket that only receives replies; this API does not report the choice back, so `DatagramSocket.port` stays zero. |
 | <code v-pre><a href="#tecs.net.Address">Address</a></code> | <code v-pre>address</code> | A local address to bind to. A closed one returns nil with a reason; anything that is not an address from this module raises.                                                                   |
 
 #### Returns
 
-| Type                                                                     | Description                                                                                                        |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre><a href="#tecs.net.DatagramSocket">DatagramSocket</a></code> | An open socket the caller closes, or nil when the address is closed, SDL3_net could not start, or the bind failed. |
-| <code v-pre>string</code>                                                | Why there is no socket.                                                                                            |
+| Type                                                                     | Description                                                                             |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.net.DatagramSocket">DatagramSocket</a></code> | An open socket the caller closes, or nil when the address is closed or the bind failed. |
+| <code v-pre>string</code>                                                | Why there is no socket.                                                                 |
 
 <a id="tecs.net.connect"></a>
 
@@ -865,9 +866,9 @@ Begins connecting to a resolved address.
 
 #### Returns
 
-| Type                                                                       | Description                                                                                                                                                                                                                                                                     |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>FutureType&lt;<a href="#tecs.net.Stream">Stream</a>&gt;</code> | A future over a stream the caller owns and closes. Already "failed" when the address is closed, SDL3_net could not start, or the connection could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Canceling it destroys the half-open socket. |
+| Type                                                                       | Description                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>FutureType&lt;<a href="#tecs.net.Stream">Stream</a>&gt;</code> | A future over a stream the caller owns and closes. Already "failed" when the address is closed or the connection could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Canceling it destroys the half-open socket. |
 
 <a id="tecs.net.http"></a>
 
@@ -887,17 +888,17 @@ protocol above it does.
 <pre><code v-pre>function <a href="#tecs.net.init">tecs.net.init</a>(): boolean, string
 </code></pre>
 
-Starts SDL3_net for this module. Safe to call repeatedly.
+Starts networking for this module. Safe to call repeatedly.
 
-`resolve`, `connect`, `listen` and `bind` each start it themselves, so a caller reaches for
-this only to learn early whether the library is there.
+`resolve`, `connect`, `listen` and `bind` each start it themselves, so a caller normally does
+not need to call this directly.
 
 #### Returns
 
-| Type                       | Description                                                                       |
-| -------------------------- | --------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | True when SDL3_net is running, including when this module had already started it. |
-| <code v-pre>string</code>  | Why it could not start. Nothing here changed in that case.                        |
+| Type                       | Description                                                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | True when networking is running, including when this module had already started it.                              |
+| <code v-pre>string</code>  | Reserved for a startup failure. The Rust standard-library backend currently has no fallible initialization step. |
 
 <a id="tecs.net.listen"></a>
 
@@ -912,15 +913,15 @@ Binds a TCP listener. A nil address listens on all local interfaces.
 
 | Type                                                       | Name                       | Description                                                                                                                                                               |
 | ---------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>integer</code>                                 | <code v-pre>port</code>    | From 0 to 65535. Zero asks the operating system to choose one, which SDL3_net does not report back, so `Server.port` stays zero and the listener cannot advertise itself. |
+| <code v-pre>integer</code>                                 | <code v-pre>port</code>    | From 0 to 65535. Zero asks the operating system to choose one, which this API does not report back, so `Server.port` stays zero and the listener cannot advertise itself. |
 | <code v-pre><a href="#tecs.net.Address">Address</a></code> | <code v-pre>address</code> | A local address to bind to. A closed one returns nil with a reason; anything that is not an address from this module raises.                                              |
 
 #### Returns
 
-| Type                                                     | Description                                                                                                          |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre><a href="#tecs.net.Server">Server</a></code> | An open listener the caller closes, or nil when the address is closed, SDL3_net could not start, or the bind failed. |
-| <code v-pre>string</code>                                | Why there is no listener.                                                                                            |
+| Type                                                     | Description                                                                               |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| <code v-pre><a href="#tecs.net.Server">Server</a></code> | An open listener the caller closes, or nil when the address is closed or the bind failed. |
+| <code v-pre>string</code>                                | Why there is no listener.                                                                 |
 
 <a id="tecs.net.pending"></a>
 
@@ -960,17 +961,17 @@ waiting. Call once per frame while asynchronous network work exists.
 <pre><code v-pre>function <a href="#tecs.net.quit">tecs.net.quit</a>(): boolean, string
 </code></pre>
 
-Stops this module's SDL3_net instance.
+Stops this module's networking instance.
 
 Refuses while a public object or asynchronous operation is live, so no
 native handle is invalidated behind its owner.
 
 #### Returns
 
-| Type                       | Description                                                                                                                            |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>boolean</code> | True when SDL3_net has been stopped, and also when this module never started it. False releases nothing and leaves the module started. |
-| <code v-pre>string</code>  | Which held it back, a pending operation or an open object, and how many of them.                                                       |
+| Type                       | Description                                                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>boolean</code> | True when networking has been stopped, and also when this module never started it. False releases nothing and leaves the module started. |
+| <code v-pre>string</code>  | Which held it back, a pending operation or an open object, and how many of them.                                                         |
 
 <a id="tecs.net.resolve"></a>
 
@@ -989,6 +990,6 @@ Begins resolving a hostname.
 
 #### Returns
 
-| Type                                                                         | Description                                                                                                                                                                                                                                                                 |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <code v-pre>FutureType&lt;<a href="#tecs.net.Address">Address</a>&gt;</code> | A future over an address the caller owns and closes. Already "failed" when SDL3_net could not start or the lookup could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Canceling it releases the lookup and drops it from `net.pending`. |
+| Type                                                                         | Description                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <code v-pre>FutureType&lt;<a href="#tecs.net.Address">Address</a>&gt;</code> | A future over an address the caller owns and closes. Already "failed" when the lookup could not be begun, and otherwise pending until `net.poll` or `Future:wait` settles it. Canceling it releases the lookup and drops it from `net.pending`. |

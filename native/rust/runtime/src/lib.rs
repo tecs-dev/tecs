@@ -7,12 +7,15 @@ use image::codecs::png::PngEncoder;
 use image::{ImageEncoder, ImageError};
 
 mod cli;
+mod cli_mcp;
 mod dialogs;
 mod host;
 mod http;
 mod logsink;
 mod luamods;
 mod mcodearena;
+mod mcp;
+mod net;
 #[cfg(feature = "payload")]
 mod payload;
 mod physics;

@@ -166,22 +166,13 @@ describe("physics colliders", function()
 
     it("reports contact and sensor buffers as typed events", function()
         local world = newWorld()
-        local contacts, hits, sensors = 0, 0, 0
+        local contacts, sensors = 0, 0
         world:observe(0, physics.ContactBegin, function()
             contacts = contacts + 1
         end)
         world:observe(0, physics.SensorBegin, function()
             sensors = sensors + 1
         end)
-        world:observe(0, physics.ContactHit, function(event)
-            hits = hits + 1
-            assert.is_number(event.x)
-            assert.is_number(event.y)
-            assert.is_number(event.normalX)
-            assert.is_number(event.normalY)
-            assert.is_true(event.approachSpeed >= 0)
-        end)
-
         local solid = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, solid, { type = "static", radius = 10 })
         local visitor = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
@@ -193,7 +184,6 @@ describe("physics colliders", function()
         step(world, 2)
 
         assert.is_true(contacts > 0)
-        assert.is_true(hits > 0)
         assert.is_true(sensors > 0)
     end)
 end)

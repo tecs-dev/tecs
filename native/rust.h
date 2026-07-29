@@ -14,11 +14,20 @@
 
 typedef struct TecsImage TecsImage;
 typedef struct TecsBytes TecsBytes;
+typedef struct TecsMcpServer TecsMcpServer;
+typedef struct TecsMcpRequest TecsMcpRequest;
+typedef struct TecsNetAddress TecsNetAddress;
+typedef struct TecsNetOperation TecsNetOperation;
+typedef struct TecsNetStream TecsNetStream;
+typedef struct TecsNetServer TecsNetServer;
+typedef struct TecsNetDatagram TecsNetDatagram;
+typedef struct TecsNetPacket TecsNetPacket;
 
 const char *tecsRustError(void);
 
 TecsBytes *tecsCliHelp(void);
 TecsBytes *tecsCliParse(size_t count, const char *const *arguments);
+int tecsCliMcp(void);
 
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);
 const uint8_t *tecsImagePixels(const TecsImage *image);
@@ -30,6 +39,56 @@ TecsBytes *tecsImageEncodePngRgbx(const uint8_t *pixels, size_t length, uint32_t
 const uint8_t *tecsBytesData(const TecsBytes *bytes);
 size_t tecsBytesLength(const TecsBytes *bytes);
 void tecsBytesDestroy(TecsBytes *bytes);
+
+/* Streamable HTTP MCP. Rust owns HTTP and the protocol; Lua drains only tool
+ * calls from the SDL thread and submits their completed results. */
+TecsMcpServer *tecsMcpServerCreate(uint16_t port, const uint8_t *tools, size_t tools_length);
+bool tecsMcpServerSetTools(TecsMcpServer *server, const uint8_t *tools, size_t tools_length);
+TecsMcpRequest *tecsMcpServerNext(TecsMcpServer *server);
+const uint8_t *tecsMcpRequestName(const TecsMcpRequest *request, size_t *length);
+const uint8_t *tecsMcpRequestArguments(const TecsMcpRequest *request, size_t *length);
+void tecsMcpRequestRespond(TecsMcpRequest *request, const uint8_t *result, size_t result_length, bool is_error,
+                           bool crashed);
+void tecsMcpRequestDestroy(TecsMcpRequest *request);
+void tecsMcpServerDestroy(TecsMcpServer *server);
+
+/* Nonblocking TCP and UDP. DNS resolution and client connection complete on
+ * Rust-owned workers; Lua polls their opaque operations from the SDL thread. */
+
+TecsNetOperation *tecsNetResolve(const uint8_t *host, size_t length);
+TecsNetOperation *tecsNetConnect(const TecsNetAddress *address, uint16_t port);
+int tecsNetOperationStatus(TecsNetOperation *operation, uint32_t waitMs);
+TecsNetAddress *tecsNetOperationTakeAddress(TecsNetOperation *operation);
+TecsNetStream *tecsNetOperationTakeStream(TecsNetOperation *operation);
+void tecsNetOperationDestroy(TecsNetOperation *operation);
+
+const uint8_t *tecsNetAddressText(const TecsNetAddress *address, size_t *length);
+TecsNetAddress *tecsNetAddressClone(const TecsNetAddress *address);
+void tecsNetAddressDestroy(TecsNetAddress *address);
+
+TecsNetServer *tecsNetListen(const TecsNetAddress *address, uint16_t port);
+TecsNetStream *tecsNetServerAccept(TecsNetServer *server);
+int tecsNetServerWait(TecsNetServer *server, uint32_t timeoutMs);
+void tecsNetServerDestroy(TecsNetServer *server);
+
+TecsNetAddress *tecsNetStreamPeer(const TecsNetStream *stream);
+int64_t tecsNetStreamRead(TecsNetStream *stream, uint8_t *bytes, size_t length);
+int tecsNetStreamWrite(TecsNetStream *stream, const uint8_t *bytes, size_t length);
+int64_t tecsNetStreamPendingWrites(TecsNetStream *stream);
+int tecsNetStreamDrain(TecsNetStream *stream, uint32_t timeoutMs);
+int tecsNetStreamWait(TecsNetStream *stream, uint32_t timeoutMs);
+void tecsNetStreamDestroy(TecsNetStream *stream);
+
+TecsNetDatagram *tecsNetDatagramBind(const TecsNetAddress *address, uint16_t port);
+int tecsNetDatagramSend(TecsNetDatagram *socket, const TecsNetAddress *address, uint16_t port, const uint8_t *bytes,
+                        size_t length);
+TecsNetPacket *tecsNetDatagramReceive(TecsNetDatagram *socket);
+int tecsNetDatagramWait(TecsNetDatagram *socket, uint32_t timeoutMs);
+void tecsNetDatagramDestroy(TecsNetDatagram *socket);
+TecsNetAddress *tecsNetPacketTakeAddress(TecsNetPacket *packet);
+uint16_t tecsNetPacketPort(const TecsNetPacket *packet);
+const uint8_t *tecsNetPacketBytes(const TecsNetPacket *packet, size_t *length);
+void tecsNetPacketDestroy(TecsNetPacket *packet);
 
 /* Rapier 2D. Every arena handle stays paired with its owning opaque world. */
 
@@ -70,7 +129,6 @@ typedef struct TecsPhysicsColliderDef {
     float restitution;
     uint32_t category_bits;
     uint32_t mask_bits;
-    int32_t group_index;
     uint64_t entity;
 } TecsPhysicsColliderDef;
 
@@ -85,15 +143,9 @@ typedef struct TecsPhysicsMove {
 typedef struct TecsPhysicsPairEvent {
     uint64_t entity_a;
     uint64_t entity_b;
-    float x;
-    float y;
-    float normal_x;
-    float normal_y;
-    float approach_speed;
     uint8_t started;
     uint8_t sensor;
-    uint8_t hit;
-    uint8_t _padding[5];
+    uint8_t _padding[6];
 } TecsPhysicsPairEvent;
 
 typedef struct TecsPhysicsRayHit {

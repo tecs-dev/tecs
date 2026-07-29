@@ -7,7 +7,6 @@
 # against this list so the convenience does not quietly become a difference.
 
 set(TECS_SDL3_TAG "release-3.4.12" CACHE STRING "SDL3 revision")
-set(TECS_SDL3_NET_TAG "release-3.2.0" CACHE STRING "SDL3_net revision")
 set(TECS_SDL3_MIXER_TAG "release-3.2.4" CACHE STRING "SDL3_mixer revision")
 # LuaJIT has published no release on v2.1 since 2017 and does not intend to.
 # What it has instead is a rolling version, whose number is the committer

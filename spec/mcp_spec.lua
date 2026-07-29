@@ -11,13 +11,11 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")
-local net = require("tecs.ffi.sdl3net")
-local loader = require("tecs.ffi.loader")
+local net = require("tecs.net")
 local mcp = require("tecs.mcp")
 local sandbox = require("tecs.mcp.sandbox")
 
 local C = sdl.C
-local N = net.C
 local PORT = 7411
 
 local function rpc(method, params, id)
@@ -248,7 +246,7 @@ describe("mcp over a socket", function()
 
     setup(function()
         assert(C.SDL_Init(0))
-        assert(N.NET_Init())
+        assert(net.init())
         server = mcp.listen(PORT)
     end)
 
@@ -256,66 +254,120 @@ describe("mcp over a socket", function()
         if server then
             server:destroy()
         end
-        N.NET_Quit()
+        assert(net.quit())
         C.SDL_Quit()
     end)
 
-    it("serves a real request over a real connection", function()
-        local address = N.NET_ResolveHostname("127.0.0.1")
-        assert.is_not_nil(address)
-        assert.are.equal(1, tonumber(N.NET_WaitUntilResolved(address, 2000)))
+    local function connect()
+        local resolved = net.resolve("127.0.0.1"):wait(2000)
+        assert.are.equal("ready", resolved.status, resolved.error)
+        local address = resolved.value
+        local connected = net.connect(address, PORT):wait(2000)
+        address:close()
+        assert.are.equal("ready", connected.status, connected.error)
+        return connected.value
+    end
 
-        local socket = N.NET_CreateClient(address, PORT, 0)
-        assert.is_not_nil(socket)
-        assert.are.equal(1, tonumber(N.NET_WaitUntilConnected(socket, 2000)))
+    local function request(body, extraHeaders, pollTool)
+        local socket = connect()
+        local headers = table.concat({
+            "POST /mcp HTTP/1.1\r\n",
+            "Host: 127.0.0.1\r\n",
+            "Accept: application/json, text/event-stream\r\n",
+            "Content-Type: application/json\r\n",
+            extraHeaders or "",
+            ("Content-Length: %d\r\n"):format(#body),
+            "Connection: close\r\n\r\n",
+        })
+        assert(socket:write(headers .. body))
+        assert(socket:drain(2000))
 
-        local body = cjson.encode({
+        local text = ""
+        for _ = 1, 400 do
+            if pollTool then
+                server:poll()
+            end
+            local bytes, reason = socket:read(65536)
+            if reason ~= nil then
+                assert.are.equal("connection closed", reason)
+                break
+            elseif bytes ~= nil then
+                text = text .. bytes
+                local headEnd = text:find("\r\n\r\n", 1, true)
+                if headEnd ~= nil then
+                    local length = tonumber(text:sub(1, headEnd):lower():match("content%-length:%s*(%d+)"))
+                    if length ~= nil and #text - headEnd - 3 >= length then
+                        break
+                    end
+                end
+            else
+                socket:wait(5)
+            end
+        end
+        socket:close()
+        return text
+    end
+
+    local function body(text)
+        local headEnd = assert(text:find("\r\n\r\n", 1, true))
+        return text:sub(headEnd + 4)
+    end
+
+    local function dechunk(text)
+        local encoded = body(text)
+        local chunks = {}
+        local at = 1
+        while true do
+            local lineEnd = assert(encoded:find("\r\n", at, true))
+            local length = assert(tonumber(encoded:sub(at, lineEnd - 1), 16))
+            at = lineEnd + 2
+            if length == 0 then
+                break
+            end
+            chunks[#chunks + 1] = encoded:sub(at, at + length - 1)
+            at = at + length
+            assert.are.equal("\r\n", encoded:sub(at, at + 1))
+            at = at + 2
+        end
+        return table.concat(chunks)
+    end
+
+    it("serves official Streamable HTTP and queues the tool on poll", function()
+        local initialized = request(cjson.encode({
+            jsonrpc = "2.0",
+            id = 1,
+            method = "initialize",
+            params = {
+                protocolVersion = "2025-06-18",
+                capabilities = {},
+                clientInfo = { name = "tecs-spec", version = "1" },
+            },
+        }))
+        assert.is_truthy(initialized:find("^HTTP/1.1 200 OK"))
+        local session = assert(initialized:lower():match("mcp%-session%-id:%s*([^\r\n]+)"))
+
+        local common = table.concat({
+            ("Mcp-Session-Id: %s\r\n"):format(session),
+            "MCP-Protocol-Version: 2025-06-18\r\n",
+        })
+        request(
+            cjson.encode({
+                jsonrpc = "2.0",
+                method = "notifications/initialized",
+            }),
+            common
+        )
+        local callBody = cjson.encode({
             jsonrpc = "2.0",
             id = 9,
             method = "tools/call",
             params = { name = "spec_echo", arguments = { value = "over the wire" } },
         })
-        local request = table.concat({
-            "POST /mcp HTTP/1.1\r\n",
-            "Host: 127.0.0.1\r\n",
-            "Content-Type: application/json\r\n",
-            ("Content-Length: %d\r\n\r\n"):format(#body),
-            body,
-        })
-        assert.is_true(N.NET_WriteToStreamSocket(socket, request, #request))
-
-        -- The server only answers when polled, which is the whole design: it
-        -- runs on the game's thread, inside a frame.
-        local answered = false
-        for _ = 1, 200 do
-            if server:poll() then
-                answered = true
-                break
-            end
-            C.SDL_Delay(5)
-        end
-        assert.is_true(answered, "the server never saw the request")
-
-        local buffer = loader.newArray("uint8_t[?]", 65536)
-        local text = ""
-        for _ = 1, 200 do
-            local read = tonumber(N.NET_ReadFromStreamSocket(socket, buffer, 65536))
-            if read > 0 then
-                text = text .. loader.toBytes(buffer, read)
-                if text:find("\r\n\r\n", 1, true) then
-                    break
-                end
-            elseif read < 0 then
-                break
-            end
-            C.SDL_Delay(5)
-        end
-        N.NET_DestroyStreamSocket(socket)
-
+        local text = request(callBody, common, true)
         assert.is_truthy(text:find("^HTTP/1.1 200 OK"))
-        local length = tonumber(text:lower():match("content%-length:%s*(%d+)"))
-        local payload = text:sub(text:find("\r\n\r\n", 1, true) + 4)
-        assert.are.equal(length, #payload, "the declared length must match what was sent")
+        assert.is_truthy(text:lower():find("content%-type: text/event%-stream"))
+        assert.is_truthy(text:lower():find("transfer%-encoding: chunked"))
+        local payload = assert(dechunk(text):match("data: (%b{})"))
 
         local decoded = cjson.decode(payload)
         assert.are.equal(9, decoded.id)

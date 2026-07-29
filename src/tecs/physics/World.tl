@@ -36,7 +36,6 @@ local record ShapeOptions
     offsetY: number
     categoryBits: number
     maskBits: number
-    groupIndex: integer
     isSensor: boolean
     entity: integer
 end
@@ -110,7 +109,6 @@ function World.shapeOptions(
     offsetY: number,
     categoryBits: number,
     maskBits: number,
-    groupIndex: integer,
     isSensor: boolean,
     entity: integer
 ): ShapeOptions
@@ -122,7 +120,6 @@ function World.shapeOptions(
         offsetY = offsetY,
         categoryBits = categoryBits,
         maskBits = maskBits,
-        groupIndex = groupIndex,
         isSensor = isSensor,
         entity = entity,
     }
@@ -232,7 +229,6 @@ local function colliderDefinition(shape: integer, a: number, b: number, options:
     fields.restitution = options.restitution or 0.0
     fields.category_bits = options.categoryBits or 1
     fields.mask_bits = options.maskBits or 0xFFFFFFFF
-    fields.group_index = options.groupIndex or 0
     fields.entity = options.entity or 0
     return definition
 end
@@ -297,12 +293,7 @@ function World:raycast(
         return nil
     end
     local value = hit[0] as loader.CStruct
-    return value.entity as integer,
-        value.x as number,
-        value.y as number,
-        value.normal_x as number,
-        value.normal_y as number,
-        value.fraction as number
+    return value.entity as integer, value.x as number, value.y as number, value.normal_x as number, value.normal_y as number, value.fraction as number
 end
 
 function World.applyForce(body: Handle, x: number, y: number)
@@ -438,18 +429,9 @@ function World:beginPairEvents()
     self._eventCount = tonumber(count[0]) as integer
 end
 
-function World:pairEvent(index: integer): integer, integer, boolean, boolean, boolean, number, number, number, number, number
+function World:pairEvent(index: integer): integer, integer, boolean, boolean
     local event = (self._events as {integer: loader.CStruct})[index]
-    return event.entity_a as integer,
-        event.entity_b as integer,
-        event.started ~= 0,
-        event.sensor ~= 0,
-        event.hit ~= 0,
-        event.x as number,
-        event.y as number,
-        event.normal_x as number,
-        event.normal_y as number,
-        event.approach_speed as number
+    return event.entity_a as integer, event.entity_b as integer, event.started ~= 0, event.sensor ~= 0
 end
 
 function World:pairEventCount(): integer

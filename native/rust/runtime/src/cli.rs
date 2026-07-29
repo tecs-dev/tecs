@@ -64,6 +64,9 @@ pub enum Command {
     /// Print versions, pinned revisions, project details, and targets.
     Info,
 
+    /// Connect an MCP client on stdio to a running game.
+    Mcp,
+
     /// Print the version and exit.
     #[command(hide = true)]
     Version,
@@ -144,6 +147,7 @@ fn run_result(command: Command) -> Vec<u8> {
         Command::Run => push_field(&mut result, b"run"),
         Command::Clean => push_field(&mut result, b"clean"),
         Command::Info => push_field(&mut result, b"info"),
+        Command::Mcp => push_field(&mut result, b"mcp"),
         Command::Version => {
             return exit_result(
                 0,
@@ -264,7 +268,7 @@ mod tests {
     fn public_help_lists_public_commands_but_not_the_internal_one() {
         let help = String::from_utf8(help()).unwrap();
         for command in [
-            "new", "check", "format", "test", "build", "run", "clean", "info",
+            "new", "check", "format", "test", "build", "run", "clean", "info", "mcp",
         ] {
             assert!(help.contains(command), "help does not name {command}");
         }

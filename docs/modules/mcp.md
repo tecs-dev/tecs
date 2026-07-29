@@ -1,18 +1,19 @@
 ---
-description: "The debug server: JSON-RPC over HTTP answered inside the frame, the tools every build exposes, the sandbox and the transport"
+description: "The debug server: official MCP over Streamable HTTP, SDL-thread tool execution, the tools every build exposes and the sandbox"
 outline: deep
 ---
 
 # tecs.mcp
 
-`tecs.mcp` is the debug server. It speaks JSON-RPC over HTTP POST, and everything an agent can do is a tool
-registered on it: a name, a JSON Schema and a function. The tool list is generated from the same table that
-dispatches, so there is no second list to keep in step.
+`tecs.mcp` is the debug server. The official Rust MCP SDK, RMCP, serves Streamable HTTP at `/mcp`; it owns HTTP,
+sessions, protocol negotiation and JSON-RPC. Everything an agent can do is a tool registered in Lua: a name, a
+JSON Schema and a function. The tool list RMCP serves is generated from the same table that dispatches, so
+there is no second list to keep in step.
 
-Requests are answered inside `update`, on the game's own thread, before the world is stepped. A tool therefore
-reads a world that is not mid-update and writes one that has not yet advanced, which is why none of them lock
-and none of them queue anything. The cost is that a tool must not block: it runs during a frame someone is
-watching.
+Protocol-only requests stay on Tokio. A `tools/call` is put on a bounded Rust queue and answered inside
+`update`, on the game's own thread, before the world is stepped. A tool therefore reads a world that is not
+mid-update and writes one that has not yet advanced, without letting a Rust thread enter LuaJIT. The cost is
+that a tool must not block: it runs during a frame someone is watching.
 
 The server also outlives the game. When a system raises, [`Application`](/modules/Application) records the
 traceback here and keeps polling, so an agent that was debugging up to the moment it broke gets the reason
@@ -47,19 +48,20 @@ function mcp.listen(port?: integer): mcp.Server
 another port: a debugger that silently moved would be worse than one that did not start, since whatever
 connects to it has only the port it was told.
 
+The endpoint is `http://127.0.0.1:<port>/mcp`. It is deliberately loopback-only. RMCP validates the `Host`
+header against loopback names to prevent DNS rebinding and accepts browser origins only from the same local
+endpoint. Non-browser clients may omit `Origin`.
+
 ### Server:poll
 
-Answers at most one request. Call once per frame.
+Answers at most one engine-facing tool call. Call once per frame.
 
 ```teal
 function mcp.Server:poll(): boolean
 ```
 
-**Returns:** whether a request was dispatched. Accepting and reading never wait, so a frame with nobody
-connected costs a non-blocking accept.
-
-A request that is not a `POST` is answered `405 Method Not Allowed`. A dispatch that raises is logged and
-answered `500` with a JSON-RPC internal error, so a broken request cannot take the frame with it.
+**Returns:** whether a tool handler ran. Initialize, discovery, tool listing and protocol errors are handled by
+RMCP on Tokio and do not count. An idle frame performs one nonblocking queue check.
 
 ### Server:destroy
 
@@ -71,25 +73,26 @@ function mcp.Server:destroy()
 
 ## The protocol
 
-Three methods are answered.
+RMCP implements the MCP lifecycle and Streamable HTTP transport, including protocol negotiation, legacy
+sessions, current stateless requests, request validation, JSON responses and SSE when the protocol needs a
+stream. Tecs supplies the server identity, the tools capability and these two engine-facing methods:
 
-| Method       | Result                                                                                   |
-| ------------ | ---------------------------------------------------------------------------------------- |
-| `initialize` | `protocolVersion` `2025-06-18`, a `tools` capability, and `serverInfo` naming this build |
-| `tools/list` | every registered tool, in registration order, with its schema and annotations            |
-| `tools/call` | runs the named tool with `params.arguments` and returns its result                       |
+| Method       | Result                                                                        |
+| ------------ | ----------------------------------------------------------------------------- |
+| `tools/list` | every registered tool, in registration order, with its schema and annotations |
+| `tools/call` | runs the named tool with `params.arguments` on the SDL thread                 |
 
 A tool's result comes back as `structuredContent`, the table the handler returned, alongside a `content` array
 carrying the same table encoded as text. A tool that raises is reported as a result with `isError` set and the
 message as its text content, not as a JSON-RPC error: the agent is told, the frame carries on.
 
-Each tool is listed with three annotations. `readOnlyHint` and `destructiveHint` are MCP's own;
-`whenCrashedHint` is this server's, so an agent can tell which tools still answer after a crash without
-calling them.
+Each tool is listed with MCP's `annotations.readOnlyHint` and `annotations.destructiveHint`.
+`_meta.whenCrashedHint` is Tecs' extension, so an agent can tell which tools still answer after a crash without
+calling them. A refused call carries `_meta.crashed: true` with the traceback in its text content. Those two
+fields moved under MCP's standard extension object when RMCP replaced the custom protocol model.
 
-JSON-RPC errors use the specification's codes: `-32700` for a body that is not JSON, `-32600` for a request
-with no method, `-32601` for an unknown method or an unknown tool name, and `-32603` for a dispatch that
-raised.
+RMCP owns JSON-RPC errors and uses the specification's codes. A handler failure remains a tool result with
+`isError`, not a protocol error, so its message is visible to the caller.
 
 ### dispatch
 
@@ -99,13 +102,8 @@ Runs one JSON-RPC request and returns the response text.
 function mcp.dispatch(text: string): string
 ```
 
-Exposed so the protocol can be exercised without a socket, which is most of what there is to get wrong here.
-
-**Example:**
-
-```bash
-curl -s localhost:7100 -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
+Exposed as a socket-free compatibility harness for tool registry tests. The wire server does not call it:
+RMCP parses and dispatches the real protocol.
 
 ### After a crash
 
@@ -596,33 +594,13 @@ it. What is removed are the operations that damage the machine rather than the g
 
 ## The transport
 
-`tecs.mcp.transport` is HTTP framing over SDL3_net, polled rather than blocking, because the thing being
-debugged is a game loop and a transport that blocked on accept would stall the frame it exists to observe.
+`tecs.mcp.transport` is now only the Lua side of the RMCP bridge. Rust owns the listener and every protocol
+byte. The bridge starts the server with an encoded tool list, refreshes that list when a registered tool table
+is mutated, drains one queued call without waiting, and submits the handler's result through a one-shot channel.
 
-```teal
-record Request
-    method: string
-    path: string
-    body: string
-end
-
-function transport.listen(port: integer): transport.Server
-function transport.Server:poll(now: number, handler: function(transport.Request)): boolean
-function transport.Server:respond(status: integer, reason: string, body: string, contentType?: string)
-function transport.Server:close()
-function transport.Server:destroy()
-```
-
-`poll` accepts and reads without waiting and calls `handler` only with a whole request; `now` is the engine
-clock and is used only to time a connection out. `respond` writes the status line, a `Content-Type` that
-defaults to `application/json`, a `Content-Length` and the body, drains the socket and closes, since each
-request gets its own connection.
-
-Only `Content-Length` framing is handled, because MCP posts a JSON body and always declares its length. One
-connection is served at a time: a debugger is one client, and a queue of pending sockets would be state to
-reason about for no benefit. A request arrives over as many reads as it takes, 16 KB at a time, and a
-connection that stops mid-request is dropped after 10 seconds so a half-open peer cannot hold the single client
-slot forever.
+The call queue is bounded at 64. Once full, Tokio applies backpressure to later calls instead of allocating
+without limit. No callback points from Rust into Lua, and no tool runs on a Tokio worker: `Application:poll`
+remains the only place engine state is touched.
 <!-- @generated by docs/scripts/reference.py from src/tecs/mcp/init.tl. Do not edit below this line. -->
 
 ## Reference
@@ -664,10 +642,11 @@ The TCP port bound, which is 7100 when `listen` was given none.
 <pre><code v-pre>function <a href="#tecs.mcp.Server.poll">tecs.mcp.Server.poll</a>(self: <a href="#tecs.mcp.Server">Server</a>): boolean
 </code></pre>
 
-Answers at most one request. Call once per frame.
+Answers at most one engine-facing tool call. Call once per frame.
 
-Reads the clock itself, so no time is passed in. Only POST is accepted;
-anything else is answered 405 without reaching `dispatch`.
+RMCP answers initialize, discovery, tool listing and protocol errors on
+Tokio. Only a call that needs the engine crosses this queue, and its
+handler runs here on the SDL thread.
 
 #### Parameters
 
@@ -677,9 +656,9 @@ anything else is answered 405 without reaching `dispatch`.
 
 #### Returns
 
-| Type                       | Description                                                                                                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code v-pre>boolean</code> | True when a request was answered, which includes one answered with a 405 or a JSON-RPC error. False when nothing was waiting, when a request is still arriving, or when the server has been destroyed. |
+| Type                       | Description                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| <code v-pre>boolean</code> | True when one tool handler ran. Protocol-only traffic does not count. False when no tool call is waiting or after destruction. |
 
 <a id="tecs.mcp.Server.destroy"></a>
 

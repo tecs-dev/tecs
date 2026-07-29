@@ -49,8 +49,10 @@ function TaskPool.acquire(workerCount?: integer): TaskPool
     if shared ~= nil then
         if workerCount ~= nil and workerCount ~= shared._requested then
             error(
-                ("tecs: the physics thread pool is shared and already sized for %d worker(s); "
-                    .. "cannot also size it for %d"):format(shared._requested, workerCount),
+                (
+                    "tecs: the physics thread pool is shared and already sized for %d worker(s); "
+                    .. "cannot also size it for %d"
+                ):format(shared._requested, workerCount),
                 2
             )
         end

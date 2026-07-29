@@ -8,8 +8,7 @@ local loader <const> = require("tecs.ffi.loader")
 
 loader.declare("rust")
 
-local namespace <const>, libraryPath <const> =
-    loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "rust")
+local namespace <const>, libraryPath <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "rust")
 
 local record rust
     --- Functions exported by the Rust static archive.

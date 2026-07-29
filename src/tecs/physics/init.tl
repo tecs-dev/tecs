@@ -112,7 +112,6 @@ local record Collider is Component
     restitution: number
     categoryBits: number
     maskBits: number
-    groupIndex: number
     isSensor: number
 end
 
@@ -184,10 +183,9 @@ ecs.newFFIComponent({
         {"restitution", "float"},
         {"categoryBits", "uint32_t"},
         {"maskBits", "uint32_t"},
-        {"groupIndex", "int32_t"},
         {"isSensor", "uint8_t"},
     },
-    -- The material defaults preserve the previous public surface.
+    -- Geometry, material, filtering, and sensor defaults.
     defaults = {
         COLLIDER_SHAPES.box,
         8.0,
@@ -201,7 +199,6 @@ ecs.newFFIComponent({
         0.0,
         1,
         0xFFFFFFFF,
-        0,
         0,
     },
 })
@@ -326,12 +323,8 @@ local record BodyOptions
     --- shapes touch only when each one's mask names the other's category, so
     --- filtering one direction alone filters both.
     maskBits: number
-    --- Overrides the category and mask between two shapes sharing it: positive
-    --- always collides, negative never does, and zero, the default, defers to
-    --- the bits.
-    groupIndex: integer
     --- Reports overlaps as `SensorBegin` and `SensorEnd` without a collision
-    --- response. Defaults to false. A sensor emits no contact or hit events.
+    --- response. Defaults to false. A sensor emits no contact events.
     isSensor: boolean
     --- The shape's center in the body's own frame, in pixels, so it turns with
     --- the body. Both default to 0, which centers the shape on the body's
@@ -394,15 +387,6 @@ local record ContactEnd is ecs.Event
     entityA: integer
     entityB: integer
 end
-local record ContactHit is ecs.Event
-    entityA: integer
-    entityB: integer
-    x: number
-    y: number
-    normalX: number
-    normalY: number
-    approachSpeed: number
-end
 local record SensorBegin is ecs.Event
     sensor: integer
     visitor: integer
@@ -440,7 +424,6 @@ local record physics
     Motion: Motion
     ContactBegin: ContactBegin
     ContactEnd: ContactEnd
-    ContactHit: ContactHit
     SensorBegin: SensorBegin
     SensorEnd: SensorEnd
     --- Pixels per simulated meter, and the conversion every public number on
@@ -474,21 +457,12 @@ physics.ColliderOf = ColliderOf
 physics.Motion = Motion
 physics.ContactBegin = ContactBegin
 physics.ContactEnd = ContactEnd
-physics.ContactHit = ContactHit
 physics.SensorBegin = SensorBegin
 physics.SensorEnd = SensorEnd
 physics.pixelsPerMeter = PIXELS_PER_METER
 
 ContactBegin.init = function(event: ContactBegin, a: integer, b: integer) event.entityA, event.entityB = a, b end
 ContactEnd.init = function(event: ContactEnd, a: integer, b: integer) event.entityA, event.entityB = a, b end
-ContactHit.init = function(
-    event: ContactHit, a: integer, b: integer, x: number, y: number, nx: number, ny: number, speed: number
-)
-    event.entityA, event.entityB = a, b
-    event.x, event.y = x, y
-    event.normalX, event.normalY = nx, ny
-    event.approachSpeed = speed
-end
 SensorBegin.init = function(event: SensorBegin, sensor: integer, visitor: integer)
     event.sensor, event.visitor = sensor, visitor
 end
@@ -497,7 +471,6 @@ SensorEnd.init = function(event: SensorEnd, sensor: integer, visitor: integer)
 end
 ecs.newEvent(ContactBegin)
 ecs.newEvent(ContactEnd)
-ecs.newEvent(ContactHit)
 ecs.newEvent(SensorBegin)
 ecs.newEvent(SensorEnd)
 
@@ -509,8 +482,7 @@ ecs.newEvent(SensorEnd)
 --- `Context.listKeys` reverse-maps names to ids, so a debug tool can answer
 --- what is installed into a world without every module exporting its key.
 ---
---- That published name is what an agent asks by, so it stays as it is whatever
---- this module is called. See `AGENTS.md` on externally typed strings.
+--- Debug tools and snapshots address the simulation through this stable name.
 local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 
 --- The simulation installed into `world`, or nil when none has been.
@@ -560,7 +532,6 @@ local function colliderFrom(options: BodyOptions): Collider
         options.restitution,
         options.categoryBits or 1,
         options.maskBits or 0xFFFFFFFF,
-        options.groupIndex or 0,
         options.isSensor and 1 or 0
     )
 end
@@ -731,7 +702,9 @@ end
 ---     the impulse becomes spin and the less becomes travel.
 --- @param pointY The same along y. A point at the center of mass makes this
 ---     exactly `applyImpulse`.
-function physics.applyImpulseAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function physics.applyImpulseAt(
+    world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number
+)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -1016,7 +989,6 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                 toMeters(collider.offsetY),
                 collider.categoryBits,
                 collider.maskBits,
-                collider.groupIndex as integer,
                 collider.isSensor ~= 0,
                 entity
             )
@@ -1029,9 +1001,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
             end
         end
 
-        local function createBody(
-            entity: integer, transform: Transform, declared: Body, collider: Collider
-        ): Handle
+        local function createBody(entity: integer, transform: Transform, declared: Body, collider: Collider): Handle
             local body = simulation:createBody({
                 type = BODY_NAMES[declared.kind as integer] or "dynamic",
                 position = {x = toMeters(transform.x), y = toMeters(transform.y)},
@@ -1215,11 +1185,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                     local nativeWorld = wrapped.world as {string: any}
                     world:set(
                         pending.entity,
-                        RigidBody(
-                            (handle.index as number) + 1,
-                            nativeWorld._id as number,
-                            handle.generation as number
-                        )
+                        RigidBody((handle.index as number) + 1, nativeWorld._id as number, handle.generation as number)
                     )
                     world:set(
                         pending.entity,
@@ -1263,9 +1229,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                     world:set(
                         pending.entity,
                         ColliderShape(
-                            (shape.index as number) + 1,
-                            nativeWorld._id as number,
-                            shape.generation as number
+                            (shape.index as number) + 1, nativeWorld._id as number, shape.generation as number
                         )
                     )
                 end
@@ -1420,11 +1384,8 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                 -- no Rust callback ever enters LuaJIT.
                 simulation:beginPairEvents()
                 for index = 0, simulation:pairEventCount() - 1 do
-                    local entityA, entityB, collisionStarted, sensor, hit, x, y, nx, ny, speed =
-                        simulation:pairEvent(index)
-                    if hit then
-                        world:emit(0, ContactHit, entityA, entityB, toPixels(x), toPixels(y), nx, ny, toPixels(speed))
-                    elseif sensor then
+                    local entityA, entityB, collisionStarted, sensor = simulation:pairEvent(index)
+                    if sensor then
                         world:emit(0, collisionStarted and SensorBegin or SensorEnd, entityA, entityB)
                     else
                         world:emit(0, collisionStarted and ContactBegin or ContactEnd, entityA, entityB)
@@ -1472,9 +1433,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         })
 
         world:addSnapshotHandler({
-            -- A save format rather than a module path, so it stays as it is
-            -- whatever this module is called. See `AGENTS.md` on externally
-            -- typed strings.
+            -- This name is part of the persisted snapshot format.
             name = "tecs.physics",
             save = function(_world: types.World): any
                 for archetype, length in snapshotBodies:iter() do
@@ -1510,9 +1469,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                             world:set(
                                 entity,
                                 RigidBody(
-                                    (handle.index as number) + 1,
-                                    simulation._id as number,
-                                    handle.generation as number
+                                    (handle.index as number) + 1, simulation._id as number, handle.generation as number
                                 )
                             )
                         end
@@ -1527,9 +1484,7 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
                             world:set(
                                 entity,
                                 ColliderShape(
-                                    (handle.index as number) + 1,
-                                    simulation._id as number,
-                                    handle.generation as number
+                                    (handle.index as number) + 1, simulation._id as number, handle.generation as number
                                 )
                             )
                         end

@@ -43,12 +43,6 @@ FetchContent_Declare(
     GIT_TAG ${TECS_SDL3_TAG}
     GIT_SHALLOW TRUE
 )
-FetchContent_Declare(
-    SDL3_net
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL_net.git
-    GIT_TAG ${TECS_SDL3_NET_TAG}
-    GIT_SHALLOW TRUE
-)
 
 # SDL_mixer's decoders are separate options, several of them LGPL and on by
 # default. A statically linked game must not import those, so each is named
@@ -132,15 +126,8 @@ message(STATUS "tecs: fetching pinned dependencies")
 set(SDL_SHARED ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 set(SDL_STATIC ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
 set(SDLMIXER_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
-set(SDLNET_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(
-    SDL3
-    SDL3_net
-    SDL3_mixer
-    zlib
-    SPIRV-Cross
-)
+FetchContent_MakeAvailable(SDL3 SDL3_mixer zlib SPIRV-Cross)
 
 # ------------------------------------------------------------------- LuaJIT
 
@@ -349,7 +336,6 @@ endfunction()
 
 tecs_pinned_library(sdl3 SDL3::SDL3 SDL3::SDL3-static)
 tecs_pinned_library(sdl3mixer SDL3_mixer::SDL3_mixer SDL3_mixer::SDL3_mixer-static)
-tecs_pinned_library(sdl3net SDL3_net::SDL3_net SDL3_net::SDL3_net-static)
 tecs_pinned_library(zlib ZLIB::ZLIB zlibstatic)
 tecs_pinned_library(shaderc shaderc_shared shaderc)
 
@@ -359,7 +345,6 @@ tecs_pinned_library(shaderc shaderc_shared shaderc)
 # across the checkout and the build directory wherever one of them is
 # generated, which is why several of these name both.
 set(TECS_SDL3_INCLUDE_DIRS "${sdl3_SOURCE_DIR}/include" "${sdl3_BINARY_DIR}/include")
-set(TECS_SDL3_NET_INCLUDE_DIRS "${sdl3_net_SOURCE_DIR}/include")
 set(TECS_SDL3_MIXER_INCLUDE_DIRS "${sdl3_mixer_SOURCE_DIR}/include")
 set(TECS_SPVC_INCLUDE_DIRS "${spirv-cross_SOURCE_DIR}")
 set(TECS_ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
@@ -385,8 +370,5 @@ set(TECS_ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
 # obligation does not go away with the file: the notices travel in the payload,
 # and `tecs info --licenses` is where they are read.
 if(NOT TECS_SINGLE_FILE)
-    install(
-        TARGETS SDL3-shared SDL3_mixer-shared SDL3_net-shared zlib shaderc_shared
-        LIBRARY DESTINATION lib COMPONENT tecs
-    )
+    install(TARGETS SDL3-shared SDL3_mixer-shared zlib shaderc_shared LIBRARY DESTINATION lib COMPONENT tecs)
 endif()

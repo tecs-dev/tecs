@@ -1,36 +1,54 @@
 ---
-description: "The planned tecs command line tool: its commands, what a project is, and what it will not do"
+description: "The tecs command line tool: project commands and the MCP bridge to a running game"
 outline: deep
 ---
 
 # Tecs CLI
 
-::: warning Not built yet
-The `tecs` command does not exist on this branch. This page records the shape it is planned to take so that
-nothing else in the site has to pretend it is already there. Everything below is a plan, not a reference, and the
-commands cannot be run today.
+The command line tool is the primary way to use Tecs: install one file, run `tecs new`, and never install CMake,
+LuaRocks or a compiler on a player's machine. The executable carries the engine, Teal toolchain, project template
+and its Rust native services inside the same file.
 
-Build and run through `make` in the meantime. See [getting started](/getting-started).
-:::
+## Commands
 
-The command line tool is meant to be the primary way to use Tecs: install one file, run `tecs new`, and never see
-CMake, Make, LuaRocks or a C compiler. It links nothing on a user's machine and needs no toolchain there.
+| Command                         | What it does                                                          |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `tecs new <directory>`          | Scaffold a working project; `--force` permits replacement             |
+| `tecs check [paths]`            | Type-check against the engine's installed Teal types                  |
+| `tecs format [--check] [paths]` | Format, or report files that are not formatted                        |
+| `tecs test`                     | Compile and run the project's specs                                   |
+| `tecs build`                    | Compile sources and stage assets in the project's build directory     |
+| `tecs run`                      | Build, then replace the CLI process with the game                     |
+| `tecs clean`                    | Remove the project's build directory                                  |
+| `tecs info`                     | Print versions, pinned revisions, project details and package targets |
+| `tecs mcp`                      | Connect an MCP client on stdio to a running game's HTTP endpoint      |
 
-## The planned commands
+Clap parses and validates this surface. `tecs help`, `tecs --help` and command-specific `--help` render it, and
+`tecs --version` prints the CLI version.
 
-| Command            | What it does                                                         |
-| ------------------ | -------------------------------------------------------------------- |
-| `tecs new`         | Scaffold a working project from a template carried inside the binary |
-| `tecs build`       | Compile the project's Teal, copy assets, build a shader pack         |
-| `tecs run`         | Build, then run the project's entry through the host                 |
-| `tecs check`       | Type-check the project against the installed Teal tree               |
-| `tecs test`        | Compile and run the project's specs                                  |
-| `tecs dist`        | Package the game for players, for the host platform only             |
-| `tecs mcp`         | Serve the debug server to agent clients over stdio                   |
-| `tecs call`        | Call a tool on a running game                                        |
-| `tecs info`        | Versions, project status, next step, and third-party license notices |
-| `tecs clean`       | Remove build output                                                  |
-| `tecs completions` | Print a bash, zsh or fish completion script                          |
-| `tecs help`        | Command overview, plus `--version` and `--quiet` as global flags     |
+A project is a directory containing `tecs.lua`. Project commands search upward for it, so they work from any
+directory inside the project.
 
-An `api` command that looks up framework and project symbols is planned for a later phase.
+## Connect an agent to a running game
+
+Configure the agent to start the single-file CLI as an MCP stdio server:
+
+```json
+{
+  "mcpServers": {
+    "tecs": {
+      "command": "tecs",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+`tecs mcp` uses the official RMCP implementation at both ends. It keeps stdout exclusively for MCP, discovers a
+running game's Streamable HTTP endpoint at `/mcp`, and proxies the game's current tools to the invoking agent.
+Diagnostics go to stderr.
+
+Discovery checks three loopback ports beginning at `TECS_MCP_PORT`, or `19999` when the variable is absent or
+invalid: `19999`, `20000` and `20001` by default. It retries after one second when the game is still starting. If
+the game restarts or the selected connection fails, the next operation drops the stale session, scans those ports
+again and reconnects.

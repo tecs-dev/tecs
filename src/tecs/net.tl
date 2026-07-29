@@ -1,4 +1,4 @@
---- Nonblocking TCP and UDP networking over SDL3_net, and the protocols above
+--- Nonblocking TCP and UDP networking over Rust's standard library, and the protocols above
 --- it.
 ---
 --- What sits directly here is the transport, not a protocol. A stream is an
@@ -20,8 +20,7 @@
 --- Close it explicitly. Closing is idempotent; using a closed value returns a
 --- failure instead of reaching a stale native handle.
 
-local sdl <const> = require("tecs.ffi.sdl3")
-local binding <const> = require("tecs.ffi.sdl3net")
+local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
 
@@ -62,7 +61,7 @@ local record net
         --- The hostname passed to `resolve`, or the numeric peer address for
         --- an address obtained from a socket or packet.
         host: string
-        --- SDL's printable numeric form of the address.
+        --- Rust's printable numeric form of the address.
         text: string
         _handle: loader.CPtr
         _closed: boolean
@@ -79,18 +78,17 @@ local record net
     record Stream
         _handle: loader.CPtr
         _buffer: loader.CArray
-        _wait: loader.CArray
         _closed: boolean
 
         --- Whether this stream has been closed.
         --- @return True once `close` has run. Every other method then answers `"stream is closed"`
-        ---     rather than reaching SDL.
+        ---     rather than reaching a released Rust allocation.
         isClosed: function(self: Stream): boolean
         --- A newly owned address for the remote peer.
         ---
         --- The caller closes the returned address.
         --- @return A reference of its own, separate from the one the stream holds, so it stays valid
-        ---     after the stream is closed. Nil when the stream is closed or SDL could not report the
+        ---     after the stream is closed. Nil when the stream is closed or Rust could not report the
         ---     peer, and nil here always carries a reason.
         --- @return Why there is no address.
         peer: function(self: Stream): Address, string
@@ -113,12 +111,12 @@ local record net
         --- use `pendingWrites` or `drain` when that distinction matters.
         --- @param bytes At most 16777216 in one call; larger, or not a string, raises. An empty string
         ---     succeeds and queues nothing.
-        --- @return True when SDL has taken the whole chunk; there is no partial acceptance. False when
-        ---     the stream is closed or SDL refused it.
+        --- @return True when Rust has queued the whole chunk; there is no partial acceptance. False
+        ---     when the stream is closed or the operating system refused it.
         --- @return Why not. Set on every false return, unlike `drain` and `wait`, where false is also
         ---     how a timeout reads.
         write: function(self: Stream, bytes: string): boolean, string
-        --- Bytes SDL has accepted but not yet sent.
+        --- Bytes Rust has accepted but not yet sent.
         --- @return Zero once the queue has gone to the operating system, which is what `drain` waits
         ---     for. Nil rather than a count when the stream is closed or the query failed.
         --- @return Why there is no count.
@@ -153,10 +151,9 @@ local record net
     --- A TCP listener.
     record Server
         --- The port passed to `listen`, unchanged. Zero stays zero rather than becoming the port the
-        --- operating system chose, which SDL3_net does not report back.
+        --- operating system chose, which this API does not report back.
         port: integer
         _handle: loader.CPtr
-        _wait: loader.CArray
         _closed: boolean
 
         --- Whether this listener has been closed.
@@ -192,7 +189,7 @@ local record net
         address: Address
         --- The remote port the datagram came from, which is where a reply goes.
         port: integer
-        --- One whole datagram, already copied out of SDL's packet. A zero-length datagram reads as an
+        --- One whole datagram, already copied out of Rust's packet. A zero-length datagram reads as an
         --- empty string rather than nil.
         bytes: string
 
@@ -203,10 +200,9 @@ local record net
     --- One bound UDP socket.
     record DatagramSocket
         --- The port passed to `bind`, unchanged. Zero stays zero rather than becoming the port the
-        --- operating system chose, which SDL3_net does not report back.
+        --- operating system chose, which this API does not report back.
         port: integer
         _handle: loader.CPtr
-        _wait: loader.CArray
         _closed: boolean
 
         --- Whether this socket has been closed.
@@ -219,7 +215,7 @@ local record net
         --- @param port The remote port, from 1 to 65535. Outside that raises, zero included.
         --- @param bytes One datagram, at most 65507 bytes, which is the largest a UDP payload can be.
         ---     Larger, or not a string, raises. An empty string sends a zero-length datagram.
-        --- @return True when SDL took the datagram. That is handing it to the network rather than
+        --- @return True when Rust handed the datagram to the network rather than
         ---     delivering it: it may still be lost, duplicated or reordered.
         --- @return Why not. Set on every false return.
         send: function(self: DatagramSocket, address: Address, port: integer, bytes: string): boolean, string
@@ -228,7 +224,7 @@ local record net
         --- Returns nil with no error when no packet is ready. The packet owns
         --- its source address, which the caller closes.
         --- @return One whole datagram, never part of one and never two joined. Its bytes are copied and
-        ---     its address referenced before SDL's own packet is released inside this call, so the
+        ---     its address retained before Rust's own packet is released inside this call, so the
         ---     result outlives both that packet and this socket.
         --- @return Set only when the socket is closed or the receive failed; nothing having arrived
         ---     leaves this nil.
@@ -247,26 +243,27 @@ local record net
         close: function(self: DatagramSocket)
     end
 
-    --- Starts SDL3_net for this module. Safe to call repeatedly.
+    --- Starts networking for this module. Safe to call repeatedly.
     ---
-    --- `resolve`, `connect`, `listen` and `bind` each start it themselves, so a caller reaches for
-    --- this only to learn early whether the library is there.
-    --- @return True when SDL3_net is running, including when this module had already started it.
-    --- @return Why it could not start. Nothing here changed in that case.
+    --- `resolve`, `connect`, `listen` and `bind` each start it themselves, so a caller normally does
+    --- not need to call this directly.
+    --- @return True when networking is running, including when this module had already started it.
+    --- @return Reserved for a startup failure. The Rust standard-library backend currently has no
+    ---     fallible initialization step.
     init: function(): boolean, string
-    --- Stops this module's SDL3_net instance.
+    --- Stops this module's networking instance.
     ---
     --- Refuses while a public object or asynchronous operation is live, so no
     --- native handle is invalidated behind its owner.
-    --- @return True when SDL3_net has been stopped, and also when this module never started it. False
+    --- @return True when networking has been stopped, and also when this module never started it. False
     ---     releases nothing and leaves the module started.
     --- @return Which held it back, a pending operation or an open object, and how many of them.
     quit: function(): boolean, string
     --- Begins resolving a hostname.
     --- @param host A DNS name or a numeric address such as "127.0.0.1" or "::1". At most 253 bytes;
     ---     empty, not a string, or containing a NUL raises.
-    --- @return A future over an address the caller owns and closes. Already "failed" when SDL3_net
-    ---     could not start or the lookup could not be begun, and otherwise pending until `net.poll` or
+    --- @return A future over an address the caller owns and closes. Already "failed" when the lookup
+    ---     could not be begun, and otherwise pending until `net.poll` or
     ---     `Future:wait` settles it. Canceling it releases the lookup and drops it from `net.pending`.
     resolve: function(host: string): FutureType<Address>
     --- Begins connecting to a resolved address.
@@ -274,27 +271,26 @@ local record net
     ---     anything else raises. A closed one gives an already-failed future instead.
     --- @param port From 1 to 65535. Outside that raises, zero included.
     --- @return A future over a stream the caller owns and closes. Already "failed" when the address is
-    ---     closed, SDL3_net could not start, or the connection could not be begun, and otherwise
+    ---     closed or the connection could not be begun, and otherwise
     ---     pending until `net.poll` or `Future:wait` settles it. Canceling it destroys the half-open
     ---     socket.
     connect: function(address: Address, port: integer): FutureType<Stream>
     --- Binds a TCP listener. A nil address listens on all local interfaces.
-    --- @param port From 0 to 65535. Zero asks the operating system to choose one, which SDL3_net does
+    --- @param port From 0 to 65535. Zero asks the operating system to choose one, which this API does
     ---     not report back, so `Server.port` stays zero and the listener cannot advertise itself.
     --- @param address A local address to bind to. A closed one returns nil with a reason; anything
     ---     that is not an address from this module raises.
-    --- @return An open listener the caller closes, or nil when the address is closed, SDL3_net could
-    ---     not start, or the bind failed.
+    --- @return An open listener the caller closes, or nil when the address is closed or the bind
+    ---     failed.
     --- @return Why there is no listener.
     listen: function(port: integer, address?: Address): Server, string
     --- Binds a UDP socket. A nil address listens on all local interfaces.
     --- @param port From 0 to 65535. Zero asks the operating system to choose one, which suits a socket
-    ---     that only receives replies; SDL3_net does not report the choice back, so
+    ---     that only receives replies; this API does not report the choice back, so
     ---     `DatagramSocket.port` stays zero.
     --- @param address A local address to bind to. A closed one returns nil with a reason; anything
     ---     that is not an address from this module raises.
-    --- @return An open socket the caller closes, or nil when the address is closed, SDL3_net could not
-    ---     start, or the bind failed.
+    --- @return An open socket the caller closes, or nil when the address is closed or the bind failed.
     --- @return Why there is no socket.
     bind: function(port: integer, address?: Address): DatagramSocket, string
     --- Advances every pending resolution and client connection without
@@ -383,9 +379,6 @@ local function ensure(): boolean, string
     if started then
         return true
     end
-    if not C.NET_Init() then
-        return false, sdl.error()
-    end
     started = true
     return true
 end
@@ -403,10 +396,11 @@ local function closed()
 end
 
 local function addressFrom(handle: loader.CPtr, host: string): net.Address
-    local text = C.NET_GetAddressString(handle)
+    local length <const> = loader.newArray("size_t[1]")
+    local text <const> = C.tecsNetAddressText(handle, length)
     local address = setmetatable({} as net.Address, AddressMT)
     address.host = host
-    address.text = text ~= nil and loader.toString(text) or host
+    address.text = text ~= nil and loader.toBytes(text, tonumber(length[0]) as integer) or host
     address._handle = handle
     address._closed = false
     opened()
@@ -422,7 +416,7 @@ function net.Address:close()
         return
     end
     self._closed = true
-    C.NET_UnrefAddress(self._handle)
+    C.tecsNetAddressDestroy(self._handle)
     self._handle = nil
     closed()
 end
@@ -431,8 +425,6 @@ local function streamFrom(handle: loader.CPtr): net.Stream
     local stream = setmetatable({} as net.Stream, StreamMT)
     stream._handle = handle
     stream._buffer = loader.newArray("uint8_t[?]", MAX_READ_BYTES)
-    stream._wait = loader.newArray("void *[1]")
-    stream._wait[0] = handle
     stream._closed = false
     opened()
     return stream
@@ -446,16 +438,13 @@ function net.Stream:peer(): net.Address, string
     if self._closed then
         return nil, "stream is closed"
     end
-    local borrowed = C.NET_GetStreamSocketAddress(self._handle)
-    if borrowed == nil then
-        return nil, sdl.error()
-    end
-    local handle = C.NET_RefAddress(borrowed)
+    local handle = C.tecsNetStreamPeer(self._handle)
     if handle == nil then
-        return nil, sdl.error()
+        return nil, loader.toString(C.tecsRustError())
     end
-    local text = C.NET_GetAddressString(handle)
-    local host <const> = text ~= nil and loader.toString(text) or ""
+    local length <const> = loader.newArray("size_t[1]")
+    local text <const> = C.tecsNetAddressText(handle, length)
+    local host <const> = text ~= nil and loader.toBytes(text, tonumber(length[0]) as integer) or ""
     return addressFrom(handle, host)
 end
 
@@ -467,9 +456,9 @@ function net.Stream:read(maxBytes?: integer): string, string
     if type(count) ~= "number" or count ~= math.floor(count) or count < 1 or count > MAX_READ_BYTES then
         error(("tecs: stream reads from 1 to %d bytes at a time"):format(MAX_READ_BYTES), 2)
     end
-    local read <const> = tonumber(C.NET_ReadFromStreamSocket(self._handle, self._buffer, count)) as integer
+    local read <const> = tonumber(C.tecsNetStreamRead(self._handle, self._buffer, count)) as integer
     if read < 0 then
-        return nil, sdl.error()
+        return nil, loader.toString(C.tecsRustError())
     end
     if read == 0 then
         return nil
@@ -485,8 +474,8 @@ function net.Stream:write(bytes: string): boolean, string
     if #bytes == 0 then
         return true
     end
-    if not C.NET_WriteToStreamSocket(self._handle, bytes, #bytes) then
-        return false, sdl.error()
+    if tonumber(C.tecsNetStreamWrite(self._handle, bytes, #bytes)) == 0 then
+        return false, loader.toString(C.tecsRustError())
     end
     return true
 end
@@ -495,9 +484,9 @@ function net.Stream:pendingWrites(): integer, string
     if self._closed then
         return nil, "stream is closed"
     end
-    local pending <const> = tonumber(C.NET_GetStreamSocketPendingWrites(self._handle)) as integer
+    local pending <const> = tonumber(C.tecsNetStreamPendingWrites(self._handle)) as integer
     if pending < 0 then
-        return nil, sdl.error()
+        return nil, loader.toString(C.tecsRustError())
     end
     return pending
 end
@@ -507,26 +496,22 @@ function net.Stream:drain(timeoutMs?: integer): boolean, string
         return false, "stream is closed"
     end
     local timeout <const> = validTimeout(timeoutMs or DEFAULT_WAIT_MS, 2)
-    local status <const> = tonumber(C.NET_WaitUntilStreamSocketDrained(self._handle, timeout)) as integer
+    local status <const> = tonumber(C.tecsNetStreamDrain(self._handle, timeout)) as integer
     if status < 0 then
-        return false, sdl.error()
+        return false, loader.toString(C.tecsRustError())
     end
-    return status == 0
-end
-
-local function waitFor(handle: loader.CArray, timeoutMs: integer): boolean, string
-    local ready <const> = tonumber(C.NET_WaitUntilInputAvailable(handle, 1, timeoutMs)) as integer
-    if ready < 0 then
-        return false, sdl.error()
-    end
-    return ready > 0
+    return status > 0
 end
 
 function net.Stream:wait(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "stream is closed"
     end
-    return waitFor(self._wait, validTimeout(timeoutMs or 0, 2))
+    local status <const> = tonumber(C.tecsNetStreamWait(self._handle, validTimeout(timeoutMs or 0, 2))) as integer
+    if status < 0 then
+        return false, loader.toString(C.tecsRustError())
+    end
+    return status > 0
 end
 
 function net.Stream:close()
@@ -534,9 +519,8 @@ function net.Stream:close()
         return
     end
     self._closed = true
-    C.NET_DestroyStreamSocket(self._handle)
+    C.tecsNetStreamDestroy(self._handle)
     self._handle = nil
-    self._wait[0] = nil
     closed()
 end
 
@@ -548,21 +532,22 @@ function net.Server:accept(): net.Stream, string
     if self._closed then
         return nil, "server is closed"
     end
-    local out <const> = loader.newArray("NET_StreamSocket *[1]")
-    if not C.NET_AcceptClient(self._handle, out) then
-        return nil, sdl.error()
-    end
-    if out[0] == nil then
+    local handle <const> = C.tecsNetServerAccept(self._handle)
+    if handle == nil then
         return nil
     end
-    return streamFrom(out[0] as loader.CPtr)
+    return streamFrom(handle)
 end
 
 function net.Server:wait(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "server is closed"
     end
-    return waitFor(self._wait, validTimeout(timeoutMs or 0, 2))
+    local status <const> = tonumber(C.tecsNetServerWait(self._handle, validTimeout(timeoutMs or 0, 2))) as integer
+    if status < 0 then
+        return false, loader.toString(C.tecsRustError())
+    end
+    return status > 0
 end
 
 function net.Server:close()
@@ -570,9 +555,8 @@ function net.Server:close()
         return
     end
     self._closed = true
-    C.NET_DestroyServer(self._handle)
+    C.tecsNetServerDestroy(self._handle)
     self._handle = nil
-    self._wait[0] = nil
     closed()
 end
 
@@ -594,8 +578,8 @@ function net.DatagramSocket:send(address: net.Address, port: integer, bytes: str
     end
     validPort(port, false, 2)
     validBytes(bytes, MAX_DATAGRAM_BYTES, "DatagramSocket:send", 2)
-    if not C.NET_SendDatagram(self._handle, address._handle, port, bytes, #bytes) then
-        return false, sdl.error()
+    if tonumber(C.tecsNetDatagramSend(self._handle, address._handle, port, bytes, #bytes)) == 0 then
+        return false, loader.toString(C.tecsRustError())
     end
     return true
 end
@@ -604,29 +588,27 @@ function net.DatagramSocket:receive(): net.Packet, string
     if self._closed then
         return nil, "datagram socket is closed"
     end
-    local out <const> = loader.newArray("NET_Datagram *[1]")
-    if not C.NET_ReceiveDatagram(self._handle, out) then
-        return nil, sdl.error()
-    end
-    local datagram = out[0]
+    local datagram = C.tecsNetDatagramReceive(self._handle)
     if datagram == nil then
         return nil
     end
 
-    local fields = datagram as loader.CStruct
-    local source = C.NET_RefAddress(fields.addr as loader.CPtr)
+    local source = C.tecsNetPacketTakeAddress(datagram)
     if source == nil then
-        C.NET_DestroyDatagram(datagram)
-        return nil, sdl.error()
+        C.tecsNetPacketDestroy(datagram)
+        return nil, loader.toString(C.tecsRustError())
     end
-    local text = C.NET_GetAddressString(source)
-    local host <const> = text ~= nil and loader.toString(text) or ""
+    local addressLength <const> = loader.newArray("size_t[1]")
+    local text <const> = C.tecsNetAddressText(source, addressLength)
+    local host <const> = text ~= nil and loader.toBytes(text, tonumber(addressLength[0]) as integer) or ""
+    local bytesLength <const> = loader.newArray("size_t[1]")
+    local bytes <const> = C.tecsNetPacketBytes(datagram, bytesLength)
     local packet <const> = setmetatable({
         address = addressFrom(source, host),
-        port = tonumber(fields.port) as integer,
-        bytes = loader.toBytes(fields.buf as loader.CValue, tonumber(fields.buflen) as integer),
+        port = tonumber(C.tecsNetPacketPort(datagram)) as integer,
+        bytes = loader.toBytes(bytes, tonumber(bytesLength[0]) as integer),
     } as net.Packet, PacketMT)
-    C.NET_DestroyDatagram(datagram)
+    C.tecsNetPacketDestroy(datagram)
     return packet
 end
 
@@ -634,7 +616,11 @@ function net.DatagramSocket:wait(timeoutMs?: integer): boolean, string
     if self._closed then
         return false, "datagram socket is closed"
     end
-    return waitFor(self._wait, validTimeout(timeoutMs or 0, 2))
+    local status <const> = tonumber(C.tecsNetDatagramWait(self._handle, validTimeout(timeoutMs or 0, 2))) as integer
+    if status < 0 then
+        return false, loader.toString(C.tecsRustError())
+    end
+    return status > 0
 end
 
 function net.DatagramSocket:close()
@@ -642,9 +628,8 @@ function net.DatagramSocket:close()
         return
     end
     self._closed = true
-    C.NET_DestroyDatagramSocket(self._handle)
+    C.tecsNetDatagramDestroy(self._handle)
     self._handle = nil
-    self._wait[0] = nil
     closed()
 end
 
@@ -663,45 +648,30 @@ local function removeOperation(operation: Operation)
     operation.at = 0
 end
 
-local function finish(operation: Operation, waited: boolean): integer
-    local status: integer
-    if operation.kind == "resolve" then
-        if waited then
-            status = tonumber(C.NET_WaitUntilResolved(operation.handle, 0)) as integer
-        else
-            status = tonumber(C.NET_GetAddressStatus(operation.handle)) as integer
-        end
-    else
-        if waited then
-            status = tonumber(C.NET_WaitUntilConnected(operation.handle, 0)) as integer
-        else
-            status = tonumber(C.NET_GetConnectionStatus(operation.handle)) as integer
-        end
-    end
-
+local function finish(operation: Operation, waitMs: integer): integer
+    local status <const> = tonumber(C.tecsNetOperationStatus(operation.handle, waitMs)) as integer
     if status == STATUS_WAITING then
         return 0
     end
 
     removeOperation(operation)
-    local handle <const> = operation.handle
-    operation.handle = nil
     if status == STATUS_FAILURE then
-        local reason <const> = sdl.error()
-        if operation.kind == "resolve" then
-            C.NET_UnrefAddress(handle)
-        else
-            C.NET_DestroyStreamSocket(handle)
-        end
+        local reason <const> = loader.toString(C.tecsRustError())
+        C.tecsNetOperationDestroy(operation.handle)
+        operation.handle = nil
         operation.future:fail(reason)
         return 1
     end
 
     if operation.kind == "resolve" then
+        local handle <const> = C.tecsNetOperationTakeAddress(operation.handle)
         operation.future:complete(addressFrom(handle, operation.host))
     else
+        local handle <const> = C.tecsNetOperationTakeStream(operation.handle)
         operation.future:complete(streamFrom(handle))
     end
+    C.tecsNetOperationDestroy(operation.handle)
+    operation.handle = nil
     return 1
 end
 
@@ -709,24 +679,14 @@ function Operation:poll(): integer
     if self.at == 0 then
         return 0
     end
-    return finish(self, false)
+    return finish(self, 0)
 end
 
 function Operation:advance(ms: number): integer
     if self.at == 0 then
         return 0
     end
-    local timeout <const> = math.floor(ms) as integer
-    local status: integer
-    if self.kind == "resolve" then
-        status = tonumber(C.NET_WaitUntilResolved(self.handle, timeout)) as integer
-    else
-        status = tonumber(C.NET_WaitUntilConnected(self.handle, timeout)) as integer
-    end
-    if status == STATUS_WAITING then
-        return 0
-    end
-    return finish(self, true)
+    return finish(self, math.floor(ms) as integer)
 end
 
 function Operation:cancel(future: FutureType<any>)
@@ -734,11 +694,7 @@ function Operation:cancel(future: FutureType<any>)
         return
     end
     removeOperation(self)
-    if self.kind == "resolve" then
-        C.NET_UnrefAddress(self.handle)
-    else
-        C.NET_DestroyStreamSocket(self.handle)
-    end
+    C.tecsNetOperationDestroy(self.handle)
     self.handle = nil
 end
 
@@ -769,9 +725,9 @@ function net.resolve(host: string): FutureType<net.Address>
     if not ok then
         return Future.failed(reason) as FutureType<net.Address>
     end
-    local handle = C.NET_ResolveHostname(host)
+    local handle = C.tecsNetResolve(host, #host)
     if handle == nil then
-        return Future.failed(sdl.error()) as FutureType<net.Address>
+        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<net.Address>
     end
     return operation("resolve", host, handle).future as FutureType<net.Address>
 end
@@ -786,9 +742,9 @@ function net.connect(address: net.Address, port: integer): FutureType<net.Stream
     if not ok then
         return Future.failed(reason) as FutureType<net.Stream>
     end
-    local handle = C.NET_CreateClient(address._handle, port, 0)
+    local handle = C.tecsNetConnect(address._handle, port)
     if handle == nil then
-        return Future.failed(sdl.error()) as FutureType<net.Stream>
+        return Future.failed(loader.toString(C.tecsRustError())) as FutureType<net.Stream>
     end
     return operation("connect", address.host, handle).future as FutureType<net.Stream>
 end
@@ -803,15 +759,13 @@ function net.listen(port: integer, address?: net.Address): net.Server, string
     if not ok then
         return nil, reason
     end
-    local handle = C.NET_CreateServer(address ~= nil and address._handle or nil, port, 0)
+    local handle = C.tecsNetListen(address ~= nil and address._handle or nil, port)
     if handle == nil then
-        return nil, sdl.error()
+        return nil, loader.toString(C.tecsRustError())
     end
     local server = setmetatable({} as net.Server, ServerMT)
     server.port = port
     server._handle = handle
-    server._wait = loader.newArray("void *[1]")
-    server._wait[0] = handle
     server._closed = false
     opened()
     return server
@@ -827,15 +781,13 @@ function net.bind(port: integer, address?: net.Address): net.DatagramSocket, str
     if not ok then
         return nil, reason
     end
-    local handle = C.NET_CreateDatagramSocket(address ~= nil and address._handle or nil, port, 0)
+    local handle = C.tecsNetDatagramBind(address ~= nil and address._handle or nil, port)
     if handle == nil then
-        return nil, sdl.error()
+        return nil, loader.toString(C.tecsRustError())
     end
     local socket = setmetatable({} as net.DatagramSocket, DatagramSocketMT)
     socket.port = port
     socket._handle = handle
-    socket._wait = loader.newArray("void *[1]")
-    socket._wait[0] = handle
     socket._closed = false
     opened()
     return socket
@@ -868,7 +820,6 @@ function net.quit(): boolean, string
     if liveObjects > 0 then
         return false, ("%d network object(s) are still open"):format(liveObjects)
     end
-    C.NET_Quit()
     started = false
     return true
 end

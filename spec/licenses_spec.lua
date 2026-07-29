@@ -110,7 +110,6 @@ local NEVER_ENABLED = {
 -- rule turns one into the other.
 local NOTICE_NAMES = {
     SDL3 = "SDL3",
-    SDL3_NET = "SDL3_net",
     SDL3_MIXER = "SDL3_mixer",
     LUAJIT = "LuaJIT",
     SHADERC = "shaderc",

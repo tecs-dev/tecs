@@ -12,17 +12,15 @@
 --- during a frame someone is watching.
 
 local data <const> = require("tecs.data")
-local time <const> = require("tecs.platform.time")
 local log <const> = require("tecs.log")
 local transport <const> = require("tecs.mcp.transport")
 
 local LOGGER <const> = log.get("tecs.mcp")
 
---- JSON-RPC error codes, as the specification numbers them.
+--- JSON-RPC error codes used by the socket-free compatibility dispatcher.
 local PARSE_ERROR <const> = -32700
 local INVALID_REQUEST <const> = -32600
 local METHOD_NOT_FOUND <const> = -32601
-local INTERNAL_ERROR <const> = -32603
 
 --- The tool registry, and the JSON-RPC server that dispatches it.
 ---
@@ -73,8 +71,10 @@ local record mcp
     record Server
         --- The TCP port bound, which is 7100 when `listen` was given none.
         port: integer
-        --- Private. The HTTP framing underneath, which owns the socket.
+        --- Private. RMCP plus the SDL-thread tool-call bridge.
         _transport: transport.Server
+        --- Private. Last encoded registry copied into Rust.
+        _toolsJSON: string
         --- Private. Set by `destroy`. Once true, `poll` answers false and the
         --- server cannot be restarted.
         _destroyed: boolean
@@ -277,41 +277,57 @@ end
 function mcp.listen(port?: integer): mcp.Server
     local self = setmetatable({} as mcp.Server, ServerMT)
     self.port = port or 7100
-    self._transport = transport.listen(self.port)
+    self._toolsJSON = data.encodeJSON(describe())
+    self._transport = transport.listen(self.port, self._toolsJSON)
     self._destroyed = false
     return self
 end
 
---- Answers at most one request. Call once per frame.
+--- Answers at most one engine-facing tool call. Call once per frame.
 ---
---- Reads the clock itself, so no time is passed in. Only POST is accepted;
---- anything else is answered 405 without reaching `dispatch`.
+--- RMCP answers initialize, discovery, tool listing and protocol errors on
+--- Tokio. Only a call that needs the engine crosses this queue, and its
+--- handler runs here on the SDL thread.
 ---
---- @return True when a request was answered, which includes one answered with
----     a 405 or a JSON-RPC error. False when nothing was waiting, when a
----     request is still arriving, or when the server has been destroyed.
+--- @return True when one tool handler ran. Protocol-only traffic does not
+---     count. False when no tool call is waiting or after destruction.
 function mcp.Server:poll(): boolean
     if self._destroyed then
         return false
     end
-    return self._transport:poll(
-        time.now(),
-        function(request: transport.Request)
-            if request.method ~= "POST" then
-                self._transport:respond(405, "Method Not Allowed", '{"error":"POST only"}')
-                return
-            end
-            local ok, response = pcall(mcp.dispatch, request.body)
-            if not ok then
-                LOGGER:error("dispatch failed: %s", tostring(response))
-                self._transport:respond(
-                    500, "Internal Server Error", fail(data.null, INTERNAL_ERROR, tostring(response))
-                )
-                return
-            end
-            self._transport:respond(200, "OK", response as string)
+    -- Tool tables are stored by reference, so a caller may mutate one without
+    -- going back through `register`. Comparing the encoded registry preserves
+    -- that contract for the Rust-side list.
+    local toolsJSON <const> = data.encodeJSON(describe())
+    if self._toolsJSON ~= toolsJSON then
+        self._transport:setTools(toolsJSON)
+        self._toolsJSON = toolsJSON
+    end
+    return self._transport:poll(function(request: transport.Request)
+        local tool <const> = tools[request.name]
+        if tool == nil then
+            self._transport:respond(request, "no tool named '" .. request.name .. "'", true, false)
+            return
         end
-    )
+
+        if crashed ~= nil and not tool.whenCrashed then
+            self._transport:respond(request, crashed, true, true)
+            return
+        end
+
+        local decoded, arguments = pcall(data.decodeJSON, request.arguments)
+        if not decoded then
+            self._transport:respond(request, "invalid tool arguments", true, false)
+            return
+        end
+        local called, payload = pcall(tool.handler, arguments as {string: any})
+        if not called then
+            LOGGER:warn("tool %s failed: %s", request.name, tostring(payload))
+            self._transport:respond(request, tostring(payload), true, false)
+            return
+        end
+        self._transport:respond(request, data.encodeJSON(payload or {}), false, false)
+    end)
 end
 
 --- Releases the server. Safe to call more than once.

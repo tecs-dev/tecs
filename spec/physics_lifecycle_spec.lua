@@ -51,26 +51,26 @@ describe("ecs.physics snapshots", function()
             categoryBits = 4,
         })
         first:update(1 / 60)
-        local snapshot = first:saveSnapshot({format = "table"}).snapshot
+        local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
         local second = newWorld()
         second:loadSnapshot(snapshot)
         assert.equal(1, physics.of(second):bodyCount())
         assert.is_true(physics.hasBody(second, body))
-        assert.equal(secondary, physics.raycast(second, 20, 0, 60, 0, {maskBits = 4}).entity)
+        assert.equal(secondary, physics.raycast(second, 20, 0, 60, 0, { maskBits = 4 }).entity)
 
         second:update(1 / 60)
         assert.equal(1, physics.of(second):bodyCount())
-        assert.equal(secondary, physics.raycast(second, 20, 0, 60, 0, {maskBits = 4}).entity)
+        assert.equal(secondary, physics.raycast(second, 20, 0, 60, 0, { maskBits = 4 }).entity)
     end)
 
     it("falls back to declarations for an incompatible native snapshot", function()
         local first = newWorld()
         local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        physics.attach(first, entity, {type = "dynamic", radius = 8, density = 1})
+        physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
         physics.setVelocity(first, entity, 120, -40)
-        local snapshot = first:saveSnapshot({format = "table"}).snapshot
+        local snapshot = first:saveSnapshot({ format = "table" }).snapshot
 
         for _, entry in ipairs(snapshot.data) do
             if entry.key == "tecs.physics" then

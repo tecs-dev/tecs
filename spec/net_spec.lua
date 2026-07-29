@@ -1,7 +1,7 @@
 -- Public networking over loopback only.
 --
 -- These specs never depend on a real host or DNS server. Numeric loopback
--- still exercises SDL3_net's asynchronous resolver, and TCP/UDP packets never
+-- still exercises Rust's asynchronous resolver, and TCP/UDP packets never
 -- leave the machine. A free port is selected from a private range rather than
 -- assuming one fixed port is available on a developer workstation.
 
@@ -195,6 +195,20 @@ describe("tecs.net", function()
         assert.are.same({ false, "stream is closed" }, { client:write("late") })
         client:close()
         peer:close()
+        server:close()
+        address:close()
+    end)
+
+    it("distinguishes peer disconnection from no input", function()
+        local address = resolved()
+        local server, port = listen()
+        local client, peer = connected(address, server, port)
+
+        peer:close()
+        assert.is_true(client:wait(2000))
+        assert.are.same({ nil, "connection closed" }, { client:read() })
+
+        client:close()
         server:close()
         address:close()
     end)

@@ -50,7 +50,6 @@ endfunction()
 
 tecs_check_version("SDL3" "${SDL3_VERSION}" "${TECS_SDL3_TAG}" EXACT)
 tecs_check_version("SDL3_mixer" "${SDL3_MIXER_VERSION}" "${TECS_SDL3_MIXER_TAG}" EXACT)
-tecs_check_version("SDL3_net" "${SDL3_NET_VERSION}" "${TECS_SDL3_NET_TAG}" EXACT)
 # Against the rolling version rather than the commit, because that is the one
 # of the two a build reports about itself. The commit is what the packaged
 # preset fetches, and Revisions.cmake names the pair together.

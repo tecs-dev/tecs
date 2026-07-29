@@ -37,7 +37,7 @@ local filesystem = require("tecs.platform.filesystem")
 -- and types libraries rather than being one, and the engine's own native code
 -- reached through it -- the worker channels, the log sink, the solver pool --
 -- ships with the engine on every target and is not a portability question.
-local BINDINGS = { "rust", "sdl3", "sdl3mixer", "sdl3net", "shaderc", "spvc" }
+local BINDINGS = { "rust", "sdl3", "sdl3mixer", "shaderc", "spvc" }
 
 -- Every SDL entry point that reaches content, and the decoders that take a
 -- path instead of a stream. This is the bug class: the storage seam covers
@@ -191,9 +191,9 @@ local REACH = {
     },
     {
         bucket = "direct",
-        reason = "Rapier and SDL_net are built from source for every target "
-            .. "this engine is built for, so there is no seam to be on the "
-            .. "far side of.",
+        reason = "Rapier, Rust standard networking, and rmcp are pinned Rust "
+            .. "services built for every target this engine covers, so there "
+            .. "is no platform seam to be on the far side of.",
         modules = {
             "tecs/physics/TaskPool.lua",
             "tecs/physics/World.lua",

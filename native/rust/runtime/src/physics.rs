@@ -73,7 +73,6 @@ pub struct TecsPhysicsColliderDef {
     pub restitution: f32,
     pub category_bits: u32,
     pub mask_bits: u32,
-    pub group_index: i32,
     pub entity: u64,
 }
 
@@ -92,15 +91,9 @@ pub struct TecsPhysicsMove {
 pub struct TecsPhysicsPairEvent {
     pub entity_a: u64,
     pub entity_b: u64,
-    pub x: f32,
-    pub y: f32,
-    pub normal_x: f32,
-    pub normal_y: f32,
-    pub approach_speed: f32,
     pub started: u8,
     pub sensor: u8,
-    pub hit: u8,
-    pub _padding: [u8; 5],
+    pub _padding: [u8; 6],
 }
 
 #[repr(C)]
@@ -130,75 +123,15 @@ struct PhysicsSnapshot {
     impulse_joints: ImpulseJointSet,
     multibody_joints: MultibodyJointSet,
     ccd_solver: CCDSolver,
-    collision_hooks: CollisionHooks,
     substeps: u32,
     worker_count: u32,
-}
-
-#[derive(Clone, Copy, Serialize, Deserialize)]
-struct ColliderFilter {
-    category_bits: u32,
-    mask_bits: u32,
-    group_index: i32,
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-struct CollisionHooks {
-    filters: BTreeMap<(u32, u32), ColliderFilter>,
-}
-
-impl CollisionHooks {
-    fn key(handle: ColliderHandle) -> (u32, u32) {
-        handle.into_raw_parts()
-    }
-
-    fn insert(&mut self, handle: ColliderHandle, definition: &TecsPhysicsColliderDef) {
-        self.filters.insert(
-            Self::key(handle),
-            ColliderFilter {
-                category_bits: definition.category_bits,
-                mask_bits: definition.mask_bits,
-                group_index: definition.group_index,
-            },
-        );
-    }
-
-    fn remove(&mut self, handle: ColliderHandle) {
-        self.filters.remove(&Self::key(handle));
-    }
-
-    fn permits(&self, first: ColliderHandle, second: ColliderHandle) -> bool {
-        let Some(first) = self.filters.get(&Self::key(first)) else {
-            return false;
-        };
-        let Some(second) = self.filters.get(&Self::key(second)) else {
-            return false;
-        };
-        if first.group_index != 0 && first.group_index == second.group_index {
-            return first.group_index > 0;
-        }
-        first.category_bits & second.mask_bits != 0 && second.category_bits & first.mask_bits != 0
-    }
-}
-
-impl PhysicsHooks for CollisionHooks {
-    fn filter_contact_pair(&self, context: &PairFilterContext) -> Option<SolverFlags> {
-        self.permits(context.collider1, context.collider2)
-            .then_some(SolverFlags::COMPUTE_IMPULSES)
-    }
-
-    fn filter_intersection_pair(&self, context: &PairFilterContext) -> bool {
-        self.permits(context.collider1, context.collider2)
-    }
 }
 
 pub struct TecsPhysicsWorld {
     world: PhysicsWorld,
-    collision_hooks: CollisionHooks,
     substeps: u32,
     worker_count: u32,
     collision_receiver: Receiver<CollisionEvent>,
-    force_receiver: Receiver<ContactForceEvent>,
     event_handler: ChannelEventCollector,
     moves: Vec<TecsPhysicsMove>,
     events: Vec<TecsPhysicsPairEvent>,
@@ -230,16 +163,19 @@ fn body_type(kind: u8) -> RigidBodyType {
     }
 }
 
-fn make_channels() -> (
-    Receiver<CollisionEvent>,
-    Receiver<ContactForceEvent>,
-    ChannelEventCollector,
-) {
+fn collision_groups(category_bits: u32, mask_bits: u32) -> InteractionGroups {
+    InteractionGroups::new(
+        Group::from_bits_truncate(category_bits),
+        Group::from_bits_truncate(mask_bits),
+        InteractionTestMode::And,
+    )
+}
+
+fn make_channels() -> (Receiver<CollisionEvent>, ChannelEventCollector) {
     let (collision_sender, collision_receiver) = mpsc::channel();
-    let (force_sender, force_receiver) = mpsc::channel();
+    let (force_sender, _force_receiver) = mpsc::channel();
     (
         collision_receiver,
-        force_receiver,
         ChannelEventCollector::new(collision_sender, force_sender),
     )
 }
@@ -250,16 +186,13 @@ fn new_world(gravity_x: f32, gravity_y: f32, substeps: u32, worker_count: u32) -
         gravity: Vector::new(gravity_x, gravity_y),
         ..PhysicsWorld::default()
     };
-    // A zero threshold makes every solved contact available as a hit event.
     world.integration_parameters.max_ccd_substeps = 1;
-    let (collision_receiver, force_receiver, event_handler) = make_channels();
+    let (collision_receiver, event_handler) = make_channels();
     TecsPhysicsWorld {
         world,
-        collision_hooks: CollisionHooks::default(),
         substeps: substeps.max(1),
         worker_count,
         collision_receiver,
-        force_receiver,
         event_handler,
         moves: Vec::new(),
         events: Vec::new(),
@@ -307,48 +240,6 @@ fn drain_events(world: &mut TecsPhysicsWorld) {
             ..TecsPhysicsPairEvent::default()
         });
     }
-    while let Ok(event) = world.force_receiver.try_recv() {
-        let entity_a = entity_of_collider(&world.world, event.collider1);
-        let entity_b = entity_of_collider(&world.world, event.collider2);
-        let Some(pair) = world
-            .world
-            .narrow_phase
-            .contact_pair(event.collider1, event.collider2)
-        else {
-            continue;
-        };
-        let Some(manifold) = pair
-            .manifolds
-            .iter()
-            .find(|manifold| !manifold.data.solver_contacts.is_empty())
-        else {
-            continue;
-        };
-        let point = manifold.data.solver_contacts[0].point;
-        let normal = event.max_force_direction;
-        let velocity = |collider: ColliderHandle| {
-            world
-                .world
-                .colliders
-                .get(collider)
-                .and_then(Collider::parent)
-                .and_then(|body| world.world.bodies.get(body))
-                .map(|body| body.velocity_at_point(point))
-                .unwrap_or(Vector::ZERO)
-        };
-        let relative_velocity = velocity(event.collider2) - velocity(event.collider1);
-        world.events.push(TecsPhysicsPairEvent {
-            entity_a,
-            entity_b,
-            x: point.x,
-            y: point.y,
-            normal_x: normal.x,
-            normal_y: normal.y,
-            approach_speed: relative_velocity.dot(normal).abs(),
-            hit: 1,
-            ..TecsPhysicsPairEvent::default()
-        });
-    }
 }
 
 fn snapshot(world: &TecsPhysicsWorld) -> PhysicsSnapshot {
@@ -363,7 +254,6 @@ fn snapshot(world: &TecsPhysicsWorld) -> PhysicsSnapshot {
         impulse_joints: world.world.impulse_joints.clone(),
         multibody_joints: world.world.multibody_joints.clone(),
         ccd_solver: world.world.ccd_solver.clone(),
-        collision_hooks: world.collision_hooks.clone(),
         substeps: world.substeps,
         worker_count: world.worker_count,
     }
@@ -389,7 +279,6 @@ fn from_snapshot(snapshot: PhysicsSnapshot) -> TecsPhysicsWorld {
         multibody_joints: snapshot.multibody_joints,
         ccd_solver: snapshot.ccd_solver,
     };
-    result.collision_hooks = snapshot.collision_hooks;
     result
 }
 
@@ -463,9 +352,7 @@ pub unsafe extern "C" fn tecsPhysicsWorldStep(world: *mut TecsPhysicsWorld, dt: 
     let substep_dt = dt / world.substeps as f32;
     world.world.integration_parameters.dt = substep_dt;
     for _ in 0..world.substeps {
-        world
-            .world
-            .step_with_events(&world.collision_hooks, &world.event_handler);
+        world.world.step_with_events(&(), &world.event_handler);
     }
 
     world.moves.clear();
@@ -558,16 +445,14 @@ pub unsafe extern "C" fn tecsPhysicsColliderCreate(
     .friction(definition.friction)
     .restitution(definition.restitution)
     .sensor(definition.sensor != 0)
-    // Signed group overrides must run before category/mask filtering, so all
-    // pairs reach the hook and it implements both rules together.
-    .collision_groups(InteractionGroups::all())
-    .active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS | ActiveHooks::FILTER_INTERSECTION_PAIR)
-    .active_events(ActiveEvents::COLLISION_EVENTS | ActiveEvents::CONTACT_FORCE_EVENTS)
-    .contact_force_event_threshold(0.0)
+    .collision_groups(collision_groups(
+        definition.category_bits,
+        definition.mask_bits,
+    ))
+    .active_events(ActiveEvents::COLLISION_EVENTS)
     .user_data(definition.entity as u128);
 
     let handle = world.world.insert_collider(builder, Some(parent));
-    world.collision_hooks.insert(handle, definition);
     public_collider_handle(handle)
 }
 
@@ -610,16 +495,7 @@ pub unsafe extern "C" fn tecsPhysicsBodyDestroy(
 ) {
     if let Some(world) = unsafe { world.as_mut() } {
         let body = body_handle(body);
-        let colliders = world
-            .world
-            .bodies
-            .get(body)
-            .map(|body| body.colliders().to_vec())
-            .unwrap_or_default();
         world.world.remove_body(body);
-        for collider in colliders {
-            world.collision_hooks.remove(collider);
-        }
     }
 }
 
@@ -636,7 +512,6 @@ pub unsafe extern "C" fn tecsPhysicsColliderDestroy(
     if let Some(world) = unsafe { world.as_mut() } {
         let collider = collider_handle(collider);
         world.world.remove_collider(collider);
-        world.collision_hooks.remove(collider);
     }
 }
 
@@ -665,7 +540,6 @@ pub unsafe extern "C" fn tecsPhysicsRemoveColliderByEntity(
         .find(|handle| entity_of_collider(&world.world, *handle) == entity);
     if let Some(handle) = found {
         world.world.remove_collider(handle);
-        world.collision_hooks.remove(handle);
     }
 }
 
@@ -1027,16 +901,7 @@ pub unsafe extern "C" fn tecsPhysicsRaycast(
     };
     let direction = Vector::new(x2 - x1, y2 - y1);
     let ray = Ray::new(Vector::new(x1, y1), direction);
-    let predicate = |handle, _collider: &Collider| {
-        world
-            .collision_hooks
-            .filters
-            .get(&CollisionHooks::key(handle))
-            .is_some_and(|filter| {
-                category_bits & filter.mask_bits != 0 && filter.category_bits & mask_bits != 0
-            })
-    };
-    let filter = QueryFilter::default().predicate(&predicate);
+    let filter = QueryFilter::default().groups(collision_groups(category_bits, mask_bits));
     let Some((handle, intersection)) = world.world.cast_ray_and_get_normal(&ray, 1.0, true, filter)
     else {
         return false;
@@ -1192,87 +1057,12 @@ pub unsafe extern "C" fn tecsPhysicsWorkerCount(world: *const TecsPhysicsWorld) 
 mod tests {
     use super::*;
 
-    fn test_collider(world: &mut TecsPhysicsWorld, filter: ColliderFilter) -> ColliderHandle {
-        let body = world.world.insert_body(RigidBodyBuilder::dynamic());
-        let collider = world.world.insert_collider(
-            ColliderBuilder::ball(1.0)
-                .collision_groups(InteractionGroups::all())
-                .active_hooks(
-                    ActiveHooks::FILTER_CONTACT_PAIRS | ActiveHooks::FILTER_INTERSECTION_PAIR,
-                ),
-            Some(body),
-        );
-        world
-            .collision_hooks
-            .filters
-            .insert(CollisionHooks::key(collider), filter);
-        collider
-    }
-
     #[test]
-    fn signed_groups_override_category_and_mask_filters() {
-        let mut world = new_world(0.0, 0.0, 1, 1);
-        let first = test_collider(
-            &mut world,
-            ColliderFilter {
-                category_bits: 1,
-                mask_bits: 0,
-                group_index: 7,
-            },
-        );
-        let second = test_collider(
-            &mut world,
-            ColliderFilter {
-                category_bits: 2,
-                mask_bits: 0,
-                group_index: 7,
-            },
-        );
-        assert!(world.collision_hooks.permits(first, second));
-
-        world
-            .collision_hooks
-            .filters
-            .get_mut(&CollisionHooks::key(first))
-            .unwrap()
-            .group_index = -7;
-        world
-            .collision_hooks
-            .filters
-            .get_mut(&CollisionHooks::key(second))
-            .unwrap()
-            .group_index = -7;
-        assert!(!world.collision_hooks.permits(first, second));
-    }
-
-    #[test]
-    fn category_and_mask_filters_apply_without_a_signed_group() {
-        let mut world = new_world(0.0, 0.0, 1, 1);
-        let first = test_collider(
-            &mut world,
-            ColliderFilter {
-                category_bits: 1,
-                mask_bits: 2,
-                group_index: 0,
-            },
-        );
-        let second = test_collider(
-            &mut world,
-            ColliderFilter {
-                category_bits: 2,
-                mask_bits: 1,
-                group_index: 0,
-            },
-        );
-        assert!(world.collision_hooks.permits(first, second));
-
-        world
-            .collision_hooks
-            .filters
-            .get_mut(&CollisionHooks::key(second))
-            .unwrap()
-            .mask_bits = 0;
-        assert!(!world.collision_hooks.permits(first, second));
+    fn category_and_mask_filters_require_both_directions() {
+        let first = collision_groups(1, 2);
+        let second = collision_groups(2, 1);
+        assert!(first.test(second));
+        assert!(!first.test(collision_groups(2, 0)));
     }
 
     #[test]

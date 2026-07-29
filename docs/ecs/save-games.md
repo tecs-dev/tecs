@@ -94,7 +94,7 @@ are the worked examples of why:
   leaves the restored text without one, which lays out nothing rather than failing the load.
 - **`tecs.physics.RigidBody`** is a transient Rapier arena handle and serializes to nothing as a component. A
   bare arena index is dense and reused, so carrying one into another simulation would silently name a stranger.
-  The physics snapshot handler instead writes Rapier's complete, versioned state under the compatibility key
+  The physics snapshot handler instead writes Rapier's complete, versioned state under the persistent key
   `"tecs.physics"`. Restore installs that state and reconnects transient body and collider handles by entity,
   retaining sleeping islands and contact state rather than rebuilding only from `Body` and `Collider`.
   `physics.hasBody` reports whether that reconnection produced a live body. See [physics](/modules/physics).

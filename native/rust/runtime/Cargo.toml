@@ -20,7 +20,11 @@ libc = "0.2"
 rapier2d = { version = "0.34.0", default-features = false, features = ["dim2", "enhanced-determinism", "f32", "parallel", "serde-serialize"] }
 rayon = "1.12"
 reqwest = { version = "0.13.4", default-features = false, features = ["deflate", "gzip", "rustls-no-provider", "socks", "stream"] }
+rmcp = { version = "3.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sdl3-sys = { version = "=0.6.7", default-features = false, features = ["no-link"] }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }

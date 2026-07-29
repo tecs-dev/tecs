@@ -63,8 +63,8 @@ Create a game and run it:
 tecs new my-game && cd my-game && tecs run
 ```
 
-The command is not on this branch yet. [Tecs CLI](/cli/) records the shape it is taking, and
-[getting started](/getting-started) is how to build and run through `make` in the meantime.
+The [Tecs CLI](/cli/) carries the project toolchain in one file. Contributors can also build and run this tree
+directly through `make`; [getting started](/getting-started) covers that workflow.
 
 ## Entities are the interface
 

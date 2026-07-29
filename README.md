@@ -41,8 +41,8 @@ announced through `package.preload` rather than found on a search path.
 
 Working today:
 
-- Generated FFI bindings for SDL3, SDL3_mixer, SDL3_net, shaderc,
-  SPIRV-Cross and zlib, plus a checked Rust ABI for engine services
+- Generated FFI bindings for SDL3, SDL3_mixer, shaderc, SPIRV-Cross and zlib,
+  plus a checked Rust ABI for engine services
 - A window, a Metal/Vulkan/D3D12 GPU device, and a swapchain render loop
 - GLSL compiled at runtime to SPIR-V and translated to MSL, with resource
   bindings reflected and remapped for the backend
@@ -962,9 +962,9 @@ back where it left off is something a game can build without either cost.
 
 Rapier is compiled with its parallel solver and enhanced determinism features.
 It uses Rayon's process-global executor and never calls Lua from a solver
-thread, so the old custom callback pool and its C bridge are gone. The first
-physics world sizes Rayon's executor from `workerCount`; later worlds share that
-pool and reject a different size rather than silently ignoring it.
+thread. The first physics world sizes Rayon's executor from `workerCount`;
+later worlds share that pool and reject a different size rather than silently
+ignoring it.
 
 ## A body's lifetime
 
@@ -984,8 +984,7 @@ been destroyed both pass through it safely.
 **A snapshot carries the native physics world.** Rapier's serializable state
 includes bodies, colliders, islands, broad and narrow phases, joints, CCD,
 integration parameters and contact state. Restore then reconnects transient
-entity handles by entity id. The persisted handler key remains
-`"tecs.physics"` so the namespace is an external compatibility surface.
+entity handles by entity id. The persisted handler key is `"tecs.physics"`.
 
 **`Paused` holds a body rather than hiding it.** Rapier steps a world rather than
 a body, and disabling one removes its support from the broad phase. Physics
@@ -1624,7 +1623,7 @@ reading to end of input is waiting for.
 
 ## Networking is a transport, and the loop drives it
 
-[`net.tl`](src/tecs/net.tl) exposes SDL3_net's two transport shapes without
+[`net.tl`](src/tecs/net.tl) exposes Rust's TCP and UDP transport shapes without
 inventing a protocol above either. TCP is an ordered byte stream, so a write is
 not a message boundary and reads are allowed to be short. UDP preserves a
 packet boundary and promises neither delivery nor order. Length prefixes,
@@ -1633,11 +1632,12 @@ putting one guess here would make a game work around the engine to choose
 another.
 
 Resolution and client connection are `Future` sources because both settle once,
-can fail before producing a usable object, and SDL3_net already supplies the
-bounded poll and wait operations a source needs. Servers, streams, addresses
+can fail before producing a usable object. Rust workers perform those two
+operations and the SDL thread polls ordinary results through the checked native
+boundary. Servers, streams, addresses
 and datagram sockets are not futures: they remain useful across many frames and
 own a native lifetime, so each is closed explicitly. A received packet refs its
-source address before SDL's packet is destroyed, which makes the ownership
+source address before Rust's packet is destroyed, which makes the ownership
 visible rather than leaving a borrowed pointer in a Lua record.
 
 The application does not poll networking unconditionally. `net.poll` is one
@@ -3354,9 +3354,9 @@ be taken at build time.
 So the build emits, for each native namespace, a struct of typed function
 pointers and generated linker glue that takes each address. Rust installs
 those tables into every Lua state, including every worker state, before any
-Lua runs. The registry covers SDL, SDL_mixer, SDL_net, shaderc, SPIRV-Cross,
-zlib, and the Rust services for images, HTTP, physics, workers, dialogs,
-logging, CLI parsing, and payloads.
+Lua runs. The registry covers SDL, SDL_mixer, shaderc, SPIRV-Cross, zlib, and
+the Rust services for TCP and UDP, HTTP, the official RMCP debug server,
+images, physics, workers, dialogs, logging, CLI parsing, and payloads.
 
 Signatures come from the generated cdef rather than being parsed again, so the
 pointer table cannot disagree with the bindings. Both are generated with the
@@ -3443,8 +3443,9 @@ selects the Rust target that matches its own preset, asks Cargo for one static
 archive, and owns the final link. That keeps a single-file build single: Cargo,
 the crate graph, and the archive are build inputs, not files a game needs at
 run time. Every Rust archive build first runs `rustfmt --check` and Clippy with
-warnings denied. The same archive owns image decoding, HTTP, physics, and Clap
-parsing while Teal retains the public API and command implementations.
+warnings denied. The same archive owns image decoding, networking, HTTP, the
+RMCP Streamable HTTP server, physics, and Clap parsing while Teal retains the
+public API and command implementations.
 
 ```
 make presets        list the platform matrix
@@ -3505,14 +3506,14 @@ a real window to completion.
 ## Requirements
 
 CMake 3.24+, Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU),
-SDL3_mixer, SDL3_net, shaderc, SPIRV-Cross, zlib, and Teal
+SDL3_mixer, shaderc, SPIRV-Cross, zlib, and Teal
 (`tl`). `rust-toolchain.toml` selects the Rust toolchain. The configure requires
 every one of them. `make deps` installs the ones Homebrew supplies; zlib is not
 among them, because a development preset finds the host's.
 
 A version is a requirement rather than a floor. The spec suite runs against
 whatever a development preset resolved, so a suite run against a different SDL,
-SDL_mixer, SDL_net, LuaJIT or shaderc than `cmake/Revisions.cmake`
+SDL_mixer, LuaJIT or shaderc than `cmake/Revisions.cmake`
 names is not testing what a release ships, and the configure fails on the
 difference rather than leaving it to be found as a spec that passes on one
 machine and not another. `-DTECS_ALLOW_VERSION_DRIFT=ON` proceeds anyway, which
@@ -3547,12 +3548,10 @@ binaries it describes. A package that carried the code and not the notice would
 be the one compliance failure this engine could commit on its own, so
 `make check-package` fails an install that is missing it.
 
-Dependencies are found through pkg-config rather than a package manager's paths,
-which is what lets the same build description cross-compile. SDL3_net is found
-by hand because its `.pc` file reports `/include` and `/lib`,
-which CMake rejects when it builds an imported target out of them. Its `.pc`
-file is still consulted for the version, which is the one thing that answer is
-good for.
+System dependencies are found through pkg-config rather than a package manager's
+paths, which is what lets the same build description cross-compile. TCP, UDP,
+DNS, and client connection are part of the pinned Rust runtime, so there is no
+separate native networking library for a build host or package to supply.
 
 SPIRV-Cross is distributed as static archives only, and the FFI needs a shared
 object, so the build links one. Whole-archive linking is deliberate there: the C

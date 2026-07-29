@@ -2,9 +2,9 @@
 --
 -- **No network.** A spec that reached a real host would fail on a machine
 -- without one and, worse, fail intermittently on a machine with a bad one. So
--- the other end is a listener this process starts: `tecs.mcp.transport` is a
--- non-blocking HTTP server over SDL3_net, so the request and the response both
--- stay inside this test. `file://` is not a shortcut: it bypasses Reqwest and
+-- the other end is a listener this process starts over the public Rust-backed
+-- `tecs.net` TCP surface, so the request and the response both stay inside this
+-- test. `file://` is not a shortcut: it bypasses Reqwest and
 -- cannot prove that work moved to Tokio while futures still settle only when
 -- the SDL thread pumps their event queue.
 --
@@ -16,11 +16,97 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
-local net = require("tecs.ffi.sdl3net")
-local transport = require("tecs.mcp.transport")
 local http = require("tecs.net.http")
+local net = tecs.net
 
 local BODY = "the rust worker drove this without blocking\n"
+local CHUNK = 16384
+
+-- A deliberately small HTTP/1.1 fixture. It is test code rather than an engine
+-- protocol: the production MCP server uses rmcp, while these Reqwest specs
+-- need arbitrary status lines and malformed responses that MCP would reject.
+local TestServer = {}
+TestServer.__index = TestServer
+
+local function parseRequest(text)
+    local headEnd = text:find("\r\n\r\n", 1, true)
+    if headEnd == nil then
+        return nil
+    end
+    local head = text:sub(1, headEnd - 1)
+    local method, path = head:match("^(%u+) (%S+)")
+    if method == nil then
+        return nil
+    end
+    local length = tonumber(head:lower():match("content%-length:%s*(%d+)")) or 0
+    local bodyStart = headEnd + 4
+    if #text - bodyStart + 1 < length then
+        return nil
+    end
+    return {
+        method = method,
+        path = path,
+        body = text:sub(bodyStart, bodyStart + length - 1),
+    }
+end
+
+function TestServer:close()
+    if self.client ~= nil then
+        self.client:close()
+        self.client = nil
+    end
+    self.pending = ""
+end
+
+function TestServer:rawRespond(payload)
+    if self.client == nil then
+        return
+    end
+    assert(self.client:write(payload))
+    assert(self.client:drain(1000))
+    self:close()
+end
+
+function TestServer:respond(status, reason, body, contentType)
+    self:rawRespond(table.concat({
+        ("HTTP/1.1 %d %s\r\n"):format(status, reason),
+        ("Content-Type: %s\r\n"):format(contentType or "application/json"),
+        ("Content-Length: %d\r\n"):format(#body),
+        "Connection: close\r\n\r\n",
+        body,
+    }))
+end
+
+function TestServer:poll(_, handler)
+    if self.client == nil then
+        self.client = self.listener:accept()
+        if self.client == nil then
+            return false
+        end
+    end
+
+    local bytes, reason = self.client:read(CHUNK)
+    if reason ~= nil then
+        self:close()
+        return false
+    end
+    if bytes == nil then
+        return false
+    end
+    self.pending = self.pending .. bytes
+    local request = parseRequest(self.pending)
+    if request == nil then
+        return false
+    end
+    handler(request)
+    self:close()
+    return true
+end
+
+function TestServer:destroy()
+    self:close()
+    self.listener:close()
+end
 
 -- Ports are a shared resource on the machine running the suite, so this takes
 -- the first free one rather than insisting on a number, and never hands the
@@ -32,12 +118,12 @@ local nextPort = 47860
 local function listenSomewhere()
     local failures = {}
     for port = nextPort, nextPort + 20 do
-        local ok, server = pcall(transport.listen, port)
-        if ok then
+        local listener, reason = net.listen(port)
+        if listener ~= nil then
             nextPort = port + 1
-            return server, port
+            return setmetatable({ listener = listener, client = nil, pending = "" }, TestServer), port
         end
-        failures[#failures + 1] = tostring(port)
+        failures[#failures + 1] = ("%d (%s)"):format(port, reason or "unavailable")
     end
     error("no free port in " .. table.concat(failures, ", "))
 end
@@ -89,9 +175,7 @@ describe("http.newClient", function()
 
     --- Writes an exact HTTP response for protocol cases `respond` hides.
     local function rawRespond(payload)
-        net.C.NET_WriteToStreamSocket(server._client, payload, #payload)
-        net.C.NET_WaitUntilStreamSocketDrained(server._client, 1000)
-        server:close()
+        server:rawRespond(payload)
     end
 
     --- Pumps the client and the listener together until `future` settles.

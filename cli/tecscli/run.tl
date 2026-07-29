@@ -296,6 +296,8 @@ function run.main(root: string)
         code = commandClean()
     elseif command == "info" then
         code = commandInfo(paths)
+    elseif command == "mcp" then
+        code = arguments.runMcp()
     else
         complain(("tecs: Rust returned an unknown command: %s"):format(command))
         code = 2

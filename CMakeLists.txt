@@ -85,18 +85,6 @@ else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
     pkg_check_modules(SDL3_MIXER REQUIRED IMPORTED_TARGET sdl3-mixer)
-    # Found by hand rather than through its .pc file: Homebrew's sdl3-net.pc
-    # sets includedir to /include and libdir to /lib, which CMake rejects when
-    # it builds an imported target. The real paths are on the same prefix as
-    # SDL3 itself.
-    find_path(SDL3_NET_INCLUDE_DIR SDL3_net/SDL_net.h)
-    find_library(SDL3_NET_LIBRARY NAMES SDL3_net)
-    if(NOT SDL3_NET_INCLUDE_DIR OR NOT SDL3_NET_LIBRARY)
-        message(FATAL_ERROR "SDL3_net not found. Set SDL3_NET_INCLUDE_DIR and SDL3_NET_LIBRARY.")
-    endif()
-    # Its .pc file still answers what version this is, which is the one thing
-    # the version check needs from it.
-    pkg_check_modules(SDL3_NET QUIET sdl3-net)
     pkg_check_modules(LUAJIT REQUIRED IMPORTED_TARGET luajit)
     pkg_check_modules(SHADERC REQUIRED IMPORTED_TARGET shaderc)
     pkg_check_modules(SPIRV_CROSS REQUIRED spirv-cross-c)
@@ -104,25 +92,17 @@ else()
 
     include(cmake/SystemVersions.cmake)
 
-    # The common names, from what pkg-config and find_library answered. The two
-    # located by hand get a target built around them, so a consumer links a
-    # library the same way whichever way it was found.
+    # The common names, from what pkg-config answered.
     add_library(tecs::sdl3 ALIAS PkgConfig::SDL3)
     add_library(tecs::sdl3mixer ALIAS PkgConfig::SDL3_MIXER)
     add_library(tecs::luajit ALIAS PkgConfig::LUAJIT)
     add_library(tecs::zlib ALIAS PkgConfig::ZLIB)
-
-    add_library(tecs_sdl3net INTERFACE)
-    target_link_libraries(tecs_sdl3net INTERFACE ${SDL3_NET_LIBRARY})
-    target_include_directories(tecs_sdl3net INTERFACE ${SDL3_NET_INCLUDE_DIR})
-    add_library(tecs::sdl3net ALIAS tecs_sdl3net)
 
     if(TECS_RUNTIME_SHADERS)
         add_library(tecs::shaderc ALIAS PkgConfig::SHADERC)
     endif()
 
     set(TECS_SDL3_INCLUDE_DIRS ${SDL3_INCLUDE_DIRS})
-    set(TECS_SDL3_NET_INCLUDE_DIRS ${SDL3_NET_INCLUDE_DIR})
     set(TECS_SDL3_MIXER_INCLUDE_DIRS ${SDL3_MIXER_INCLUDE_DIRS})
     set(TECS_LUAJIT_INCLUDE_DIRS ${LUAJIT_INCLUDE_DIRS})
     set(TECS_SHADERC_INCLUDE_DIRS ${SHADERC_INCLUDE_DIRS})
@@ -574,7 +554,6 @@ if(TECS_BUILD_LUA)
     endfunction()
 
     tecs_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${TECS_SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_ ${TECS_SDL3_NET_INCLUDE_DIRS} ${TECS_SDL3_INCLUDE_DIRS})
     tecs_cdef(
         sdl3mixer
         SDL3_mixer/SDL_mixer.h
@@ -635,7 +614,6 @@ if(TECS_BUILD_LUA)
     endfunction()
 
     tecs_registry(sdl3 TecsSdl3Api SDL_ SDL3/SDL.h)
-    tecs_registry(sdl3net TecsSdl3NetApi NET_ SDL3_net/SDL_net.h)
     tecs_registry(sdl3mixer TecsSdl3MixerApi MIX_ SDL3_mixer/SDL_mixer.h)
     # zlib names its functions after what they do rather than after itself, so
     # there is no prefix to filter on. Nothing else is in its binding, since
@@ -711,7 +689,7 @@ if(TECS_BUILD_LUA)
     tecs_instrument(tecs_registry)
     target_link_libraries(
         tecs_registry
-        PUBLIC tecs::sdl3 tecs::sdl3mixer tecs::sdl3net tecs::luajit tecs::zlib tecs_rust
+        PUBLIC tecs::sdl3 tecs::sdl3mixer tecs::luajit tecs::zlib tecs_rust
     )
 
     # Taking the address of a shader compiler's functions means linking it.
@@ -722,11 +700,7 @@ if(TECS_BUILD_LUA)
     endif()
     target_include_directories(
         tecs_registry
-        PRIVATE
-            ${TECS_SDL3_NET_INCLUDE_DIRS}
-            ${TECS_SHADERC_INCLUDE_DIRS}
-            ${TECS_SPVC_INCLUDE_DIRS}
-            ${TECS_ZLIB_INCLUDE_DIRS}
+        PRIVATE ${TECS_SHADERC_INCLUDE_DIRS} ${TECS_SPVC_INCLUDE_DIRS} ${TECS_ZLIB_INCLUDE_DIRS}
     )
 
     # Linked here rather than where the executables are declared, because the
@@ -761,7 +735,6 @@ if(TECS_BUILD_LUA)
             "${GEN}/httpcdef.lua"
             "${GEN}/rustcdef.lua"
             "${GEN}/sdl3cdef.lua"
-            "${GEN}/sdl3netcdef.lua"
             "${GEN}/sdl3mixercdef.lua"
             "${GEN}/shaderccdef.lua"
             "${GEN}/spvccdef.lua"

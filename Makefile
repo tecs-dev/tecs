@@ -66,7 +66,6 @@ PACKAGE_ENV  = TECS_LUA=$(PACKAGE_LUA) TECS_LIB=$(PACKAGE_LIB) \
                TECS_ASSETS=$(PACKAGE_LUA) TECS_SPEC=$(CURDIR)/$(OUT)/spec \
                TECS_SDL3_PATH=$(PACKAGE_LIB)/libSDL3.dylib \
                TECS_SDL3MIXER_PATH=$(PACKAGE_LIB)/libSDL3_mixer.dylib \
-               TECS_SDL3NET_PATH=$(PACKAGE_LIB)/libSDL3_net.dylib \
                TECS_ZLIB_PATH=$(PACKAGE_LIB)/libz.dylib \
                TECS_SHADERC_PATH=$(PACKAGE_LIB)/libshaderc_shared.dylib \
                TECS_SPVC_PATH=$(PACKAGE_LIB)/libspirvcrossc.dylib
@@ -100,7 +99,7 @@ presets: ## List available CMake presets
 	@cmake --list-presets
 
 deps: ## Install development dependencies (macOS/Homebrew)
-	brew install cmake pkg-config sdl3 sdl3_mixer sdl3_net \
+	brew install cmake pkg-config sdl3 sdl3_mixer \
 	  shaderc spirv-cross luajit \
 	  clang-format stylua ruff gersemi prettier luarocks
 	@$(MAKE) dev-tools
