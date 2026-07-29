@@ -486,10 +486,12 @@ local record sequence
     ---
     --- Converted to whole ticks when the instruction runs, rounded to nearest,
     --- with any non-zero duration waiting at least one tick. A program on the
-    --- frame clock divides the duration by the loop's nominal frame dt; every
-    --- other clock divides by the world's fixed timestep. Programs therefore
-    --- stay independent of any one world's timing. Use `waitSteps` when the
-    --- exact tick count matters more than the wall-clock duration.
+    --- fixed clock divides the duration by the world's fixed timestep; the
+    --- frame and presentation clocks both tick once per frame, so both divide
+    --- by the loop's nominal frame dt. Programs therefore stay independent of
+    --- any one world's timing, and the same duration is the same wall-clock
+    --- wait on all three. Use `waitSteps` when the exact tick count matters
+    --- more than the wall-clock duration.
     ---
     --- @param seconds Non-negative; a negative one is rejected here rather
     ---     than at compile time. Zero still costs a tick: the cursor resumes
