@@ -243,14 +243,15 @@ return tecs.newApplication({
         if not assets.installed() then
             assets.install()
         end
-        local handle <const> = assets.loadImage(filesystem.assetPath(ATLAS))
+        local decoding <const> = assets.loadImage(filesystem.assetPath(ATLAS))
         assets.waitAll()
-        if handle.status ~= "ready" then
-            error(("tecs: cannot load '%s': %s"):format(ATLAS, handle.error or handle.status))
+        if decoding.status ~= "ready" then
+            error(("tecs: cannot load '%s': %s"):format(ATLAS, decoding.error or decoding.status))
         end
-        local imageWidth <const> = handle.width
-        local imageHeight <const> = handle.height
-        resident = renderer:registerImage(handle)
+        local decoded <const> = decoding.value
+        local imageWidth <const> = decoded.width
+        local imageHeight <const> = decoded.height
+        resident = renderer:registerImage(decoded)
 
         playbook = sheet.grid({
             name = "bench.sprites",

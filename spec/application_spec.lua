@@ -66,30 +66,30 @@ describe("Application", function()
         app:_shutdown()
     end)
 
-    it("resolves asset handles without the game pumping them", function()
-        local handle
+    it("settles asset loads without the game pumping them", function()
+        local loading
         local app = build({
             plugin = function()
                 assets.install()
-                handle = assets.loadImage(FIXTURE)
+                loading = assets.loadImage(FIXTURE)
             end,
         })
         assert.is_true(app:_init())
-        assert.are.equal("loading", handle.status)
+        assert.are.equal("pending", loading.status)
 
         -- Nothing in this application draws text or plays a sound, so the two
         -- subsystems with pumps of their own never run. Only the loop's own
-        -- call can move this handle.
+        -- call can settle this.
         for _ = 1, 200 do
-            if handle.status ~= "loading" then
+            if loading.status ~= "pending" then
                 break
             end
             app:_iterate(nil, 0, nil)
         end
 
-        assert.are.equal("ready", handle.status, "the loop never drained the loading worker")
-        assert.is_not_nil(handle.pixels)
-        handle:release()
+        assert.are.equal("ready", loading.status, "the loop never drained the loading worker")
+        assert.is_not_nil(loading.value.pixels)
+        loading.value:release()
 
         app:_shutdown()
     end)
