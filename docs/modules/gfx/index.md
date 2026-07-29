@@ -763,23 +763,24 @@ coordinates as screen coordinates.
 An image is uploaded once and lives in the array for the life of the renderer.
 
 ```teal
-local sprite, region = app.renderer:registerImage(handle)
+local sprite, region = app.renderer:registerImage(image)
 world:spawn(tecs.Transform(100, 100), sprite)
 ```
 
-`registerImage(handle)` takes a decoded [`assets.Handle`](/modules/assets), uploads it, and answers with a
-`Sprite` component and the region it occupies. The image is registered under its path, which is what a `Sprite`
-names it by and what a snapshot stores. Registering a path a second time answers with the layer it already holds
-instead of consuming another, so a name means one image however many times it is asked for. The handle's pixels
-are released here: the array holds them now.
+`registerImage(image)` takes an [`assets.Image`](/modules/assets), which is what a `loadImage` future settles
+to, uploads it, and answers with a `Sprite` component and the region it occupies. The image is registered under
+its path, which is what a `Sprite` names it by and what a snapshot stores. Registering a path a second time
+answers with the layer it already holds instead of consuming another, so a name means one image however many
+times it is asked for. This caller's hold on the pixels is released here: the array holds them now, and an
+image whose pixels have already been given back is refused rather than uploaded from a freed address.
 
 A `Sprite` is returned rather than a bare region because an image smaller than a cell does not reach the cell's
 edge, so the UV range is not 0..1 and a caller guessing it would sample the undefined remainder.
 
 | Method                                  | What it does                                                      |
 | --------------------------------------- | ----------------------------------------------------------------- |
-| `renderer:registerImage(handle)`        | Uploads a decoded image; answers a `Sprite` and its region        |
-| `renderer:replaceImage(handle)`         | Uploads over the image already registered under that path         |
+| `renderer:registerImage(image)`         | Uploads a decoded image; answers a `Sprite` and its region        |
+| `renderer:replaceImage(image)`          | Uploads over the image already registered under that path         |
 | `renderer:regionOf(path)`               | The region a path occupies, or nil if nothing registered it       |
 | `renderer:sprite(name, u0, v0, u1, v1)` | A `Sprite` for a registered image; UVs are fractions of the image |
 
@@ -790,7 +791,7 @@ invalidated. The size has to match — a larger or smaller image needs a differe
 already copied into every instance that uses it, so a mismatch raises rather than silently drawing part of a
 neighbor. It also raises on a path nothing is registered under, since adding one would be `registerImage`.
 
-`regionOf` answers what `registerImage` would without a decoded handle to answer it with. A caller that has lost
+`regionOf` answers what `registerImage` would without a decoded image to answer it with. A caller that has lost
 its derived copy of a region, which a font atlas does when its metrics are re-read, would otherwise have to
 decode the file again only to be handed back the layer it already had and have its pixels released undrawn.
 

@@ -402,7 +402,7 @@ describe("audio", function()
         it("streams one at or over the threshold", function()
             local audio, clip = loaded({ streamSeconds = 0.05 }, VORBIS)
             assert.is_false(clip.resident, "a long clip is not worth a decoded copy")
-            assert.is_nil(clip._handle.audio, "and nothing was loaded to hold one")
+            assert.is_nil(clip._sound.audio, "and nothing was loaded to hold one")
             audio:destroy()
         end)
 
@@ -470,7 +470,7 @@ describe("audio", function()
         it("decodes the file again under the index the clip already had", function()
             local audio, clip = loaded(nil, temp)
             assert.is_true(clip.resident)
-            local id, handle = clip.id, clip._handle
+            local id, previous = clip.id, clip._sound
 
             -- A different file entirely, under the same name. A reload that
             -- answered from a cache would report success and change nothing.
@@ -479,8 +479,8 @@ describe("audio", function()
 
             assert.are.equal(id, clip.id, "a re-read must not move what a Sound carries")
             assert.are.equal(clip, audio:clip(id), "the clip is the same object, so every row still names it")
-            assert.are_not.equal(handle, clip._handle, "the file was not read again")
-            assert.are.equal("released", handle.status, "the clip it replaced was not let go")
+            assert.are_not.equal(previous, clip._sound, "the file was not read again")
+            assert.is_nil(previous.audio, "the clip it replaced was not let go")
             assert.are.equal("ready", clip.status)
             assert.is_true(clip.resident)
             audio:destroy()
@@ -492,7 +492,7 @@ describe("audio", function()
             audio:reload(temp)
 
             audio:play(clip)
-            assert.are.equal(clip._handle.audio, backend.tracks[1].input.clip)
+            assert.are.equal(clip._sound.audio, backend.tracks[1].input.clip)
             audio:destroy()
         end)
 
@@ -518,11 +518,11 @@ describe("audio", function()
             local clip = audio:load(temp, { stream = true })
             audio:waitForLoads()
             assert.is_false(clip.resident)
-            local handle = clip._handle
+            local handle = clip._sound
 
             copyInto(temp, VORBIS)
             assert.is_true(audio:reload(temp), "every voice opens the file itself, so there is nothing held")
-            assert.are.equal(handle, clip._handle, "a streamed clip holds nothing that needed re-reading")
+            assert.are.equal(handle, clip._sound, "a streamed clip holds nothing that needed re-reading")
             audio:destroy()
         end)
 
@@ -536,7 +536,7 @@ describe("audio", function()
 
         it("keeps the clip it had when the new file will not decode", function()
             local audio, clip, backend = loaded(nil, temp)
-            local handle = clip._handle
+            local handle = clip._sound
 
             local broken = assert(io.open(temp, "wb"))
             broken:write("not a sound file")
@@ -549,7 +549,7 @@ describe("audio", function()
             -- Refused means nothing moved, which for a clip means it is still
             -- playable off what it already held.
             assert.are.equal("ready", clip.status)
-            assert.are.equal(handle, clip._handle)
+            assert.are.equal(handle, clip._sound)
             audio:play(clip)
             assert.are.equal(handle.audio, backend.tracks[1].input.clip)
             audio:destroy()

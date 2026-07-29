@@ -344,6 +344,12 @@ local record Future<T>
     --- last input settles the join, so a join over five hundred loads is two
     --- deep rather than five hundred.
     ---
+    --- An input that settles "ready" carrying nil fails the join rather than
+    --- filling its slot, because nil is a legal value and an array cannot hold
+    --- one: the slot would read as absent and every index past it would be
+    --- past a hole. A caller with a value that may be missing recovers to
+    --- something rather than to nil.
+    ---
     --- @param inputs Read once; adding to the list afterwards changes nothing. Empty gives
     ---     an already-ready future over an empty array. Nil raises.
     --- @return A future whose value is a fresh array indexed as `inputs` is, so a hole
@@ -888,7 +894,17 @@ function Future.all<U>(inputs: {Future<U>}): Future<{U}>
                     settle(joined, settledInput.status, nil, settledInput.error)
                     return
                 end
-                values[at] = settledInput.value as U
+                local filling = settledInput.value
+                if filling == nil then
+                    -- The count below is of filled slots and not of
+                    -- settlements, which is what makes the promise above true.
+                    -- Storing nil fills nothing: the slot would read as absent
+                    -- and the array would be short, so the join says so here
+                    -- rather than handing back something with a hole in it.
+                    settle(joined, "failed", nil, ("tecs: input %d settled with no value"):format(at))
+                    return
+                end
+                values[at] = filling as U
                 remaining = remaining - 1
                 if remaining == 0 then
                     settle(joined, "ready", values, nil)

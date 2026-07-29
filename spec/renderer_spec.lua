@@ -85,7 +85,6 @@ describe("ecs.Renderer", function()
         local pixels = loader.newArray("uint8_t[4]")
         pixels[0], pixels[1], pixels[2], pixels[3] = r, g, b, 255
         return {
-            status = "ready",
             path = name,
             pixels = pixels,
             width = 1,
@@ -105,7 +104,6 @@ describe("ecs.Renderer", function()
         pixels[0], pixels[1], pixels[2], pixels[3] = r, g, b, 255
         pixels[4], pixels[5], pixels[6], pixels[7] = r, g, b, 0
         return {
-            status = "ready",
             path = name,
             pixels = pixels,
             width = 2,
@@ -116,9 +114,9 @@ describe("ecs.Renderer", function()
     end
 
     local function readyFixture()
-        local handle = assets.loadImage(FIXTURE)
+        local loading = assets.loadImage(FIXTURE)
         assets.waitAll()
-        return handle
+        return loading.value
     end
 
     local function frameAt(world, renderer, dt)
@@ -296,13 +294,13 @@ describe("ecs.Renderer", function()
 
     it("samples a registered texture through a Sprite", function()
         local world, renderer = newScene()
-        local handle = assets.loadImage(FIXTURE)
+        local loading = assets.loadImage(FIXTURE)
         assets.waitAll()
-        assert.are.equal("ready", handle.status)
+        assert.are.equal("ready", loading.status)
 
         -- registerImage returns a ready Sprite: an image smaller than a cell
         -- does not reach the cell's edge, so the UV range is not 0..1.
-        local sprite = renderer:registerImage(handle)
+        local sprite = renderer:registerImage(loading.value)
         world:spawn(
             Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
@@ -479,7 +477,6 @@ describe("ecs.Renderer", function()
                 pixels[index * 4 + 3] = 255
             end
             return {
-                status = "ready",
                 path = name,
                 pixels = pixels,
                 width = size,
@@ -2861,7 +2858,6 @@ describe("ecs.Renderer", function()
             pixels[0], pixels[1], pixels[2], pixels[3] = 255, 0, 0, 255
             pixels[4], pixels[5], pixels[6], pixels[7] = 0, 255, 0, 255
             local sprite = renderer:registerImage({
-                status = "ready",
                 path = name,
                 pixels = pixels,
                 width = 2,
@@ -2940,7 +2936,6 @@ describe("ecs.Renderer", function()
             pixels[0], pixels[1], pixels[2], pixels[3] = 0, 0, 255, 255
             pixels[4], pixels[5], pixels[6], pixels[7] = 0, 0, 255, 255
             local sprite = renderer:registerImage({
-                status = "ready",
                 path = name,
                 pixels = pixels,
                 width = 2,

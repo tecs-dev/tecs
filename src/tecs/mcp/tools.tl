@@ -598,15 +598,15 @@ function tools.reloadImage(path: string): integer, integer, integer
 
     -- Nothing in `assets` is a cache, so this decodes the file as it is now
     -- rather than answering with what the first load produced.
-    local handle = assets.loadImage(path)
+    local decoding = assets.loadImage(path)
     assets.waitAll()
-    if handle.status ~= "ready" then
-        local reason = handle.error or ("still " .. handle.status)
-        handle:release()
+    if decoding.status ~= "ready" then
+        local reason = decoding.error or ("still " .. decoding.status)
+        decoding:cancel()
         error(("'%s' did not load: %s"):format(path, reason), 0)
     end
 
-    local _, region = target:replaceImage(handle)
+    local _, region = target:replaceImage(decoding.value)
     return region.layer, region.width, region.height
 end
 

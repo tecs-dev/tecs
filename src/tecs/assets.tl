@@ -1,27 +1,32 @@
 --- Asynchronous asset loading.
 ---
---- A load answers with a handle straight away, and the handle moves off
---- "loading" only when something on the main thread takes the worker's answer.
---- A batch is how several loads are waited on together, and it is where the
---- pixels are read and released:
+--- A load answers with a `Future` straight away, and the future settles only
+--- when something on the main thread takes the worker's answer. What it settles
+--- to is a value: an `Image` carrying pixels or a `Sound` carrying a clip. So a
+--- load is transformed, joined and waited on with the combinators every other
+--- asynchronous thing in this tree uses:
 ---
 --- ```teal
---- local batch <const> = tecs.assets.newBatch(function(name: string, handle: tecs.assets.Handle)
----     if handle.status == "ready" then
----         print(name, handle.width, handle.height)
----     end
----     handle:release()
---- end)
----
---- batch:add(tecs.assets.loadImage("sprites/hero.png"), "hero")
---- batch:add(tecs.assets.loadImage("sprites/enemy.png"), "enemy")
----
---- -- Once per frame, until pending reaches zero.
---- batch:resolve()
+--- tecs.assets.loadImage("sprites/hero.png")
+---     :map(function(image: tecs.assets.Image): tecs.Sprite
+---         -- registerImage releases the pixels; the array holds them now.
+---         return (renderer:registerImage(image))
+---     end)
+---     :onSettle(function(sprite: tecs.Future<tecs.Sprite>)
+---         if sprite.status == "ready" then
+---             world:spawn(tecs.Transform(100, 100), sprite.value)
+---         end
+---     end)
 --- ```
 ---
---- `release` is the other half of a load: the pixels and the clip are the
---- handle's, and reading either after it is freed memory.
+--- Waiting on several is `Future.all`, which settles once every one of them
+--- has, and a set of them is joined without anything here knowing about sets.
+---
+--- The split between the two halves of a load is the status line, and it is one
+--- sentence: **before it lands you cancel the future, after it lands you release
+--- the payload.** A cancel gives up this caller's interest in a decode; a
+--- release gives up this caller's hold on the pixels or the clip, and the last
+--- release is the one that frees. Reading either after that is freed memory.
 ---
 --- **The formats an image may be in are PNG and JPEG.** Rust's `image` crate
 --- is built with only those two decoders, because every enabled codec becomes
@@ -33,7 +38,7 @@
 ---
 --- Decoding a PNG is milliseconds of pure CPU work with no GPU involvement,
 --- so it happens on a worker and the main thread only uploads. A load never
---- blocks a frame; a handle reports that it is still loading and callers draw
+--- blocks a frame; the future stays pending and callers draw
 --- something else until it is not. Sound takes the same route for the same
 --- reason: reading a file is a syscall a frame should not wait on.
 ---
@@ -78,8 +83,8 @@ local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
-local time <const> = require("tecs.platform.time")
 local filesystem <const> = require("tecs.platform.filesystem")
+local Future <const> = require("tecs.Future")
 
 local MIX <const> = sdl3mixer.C
 local RUST <const> = rust.C
@@ -191,139 +196,100 @@ while true do
 end
 ]==]
 
---- One asynchronous load, and what it decoded to.
+--- Decoded pixels, and the hold a caller has on them.
 ---
---- Returned the moment a load is asked for, before anything has been decoded, so every
---- field but `kind`, `path` and `status` is nil until `status` reads "ready". Nothing here
---- advances on its own: a handle only changes when `assets.update`, `Batch:resolve`,
---- `Batch:wait` or `assets.waitAll` takes the worker's answer.
----
---- What a ready handle points at is owned by the handle and freed by `release`, so a caller
---- keeping the pixels or the clip past that is reading freed memory.
-local record Handle
-    --- What was asked for: "image" or "sound".
-    kind: string
-    --- "loading", "ready", "failed", or "released". The last is terminal and
-    --- reached only through `release`, so something handed a handle whose
-    --- decode it no longer owns is told that rather than finding nil where the
-    --- pixels were.
-    status: string
-
-    --- The path the load was asked for, unchanged. Not resolved, so it is whatever the
-    --- caller passed.
+--- What a `loadImage` future settles to. The pixels are refcounted rather than
+--- owned outright, because two loads of one path that overlap share a decode:
+--- each caller holds the same `Image` and the last of them to release is the
+--- one that frees. Reading `pixels` after that is reading freed memory, which
+--- is why a released image reads nil there rather than looking uploadable.
+local record Image
+    --- The path the load was asked for, unchanged. Not resolved, so it is
+    --- whatever the caller passed.
     path: string
 
-    --- Decoded RGBA pixels, valid until `release`. Images only.
+    --- Decoded RGBA pixels, valid until the last `release`. Nil afterwards.
     pixels: loader.CValue
 
-    --- Pixels across, not bytes. Images only.
+    --- Pixels across, not bytes.
     width: integer
 
-    --- Pixel rows. Images only.
+    --- Pixel rows.
     height: integer
+
     --- Row stride in bytes, which a decoder may pad beyond width * 4.
     pitch: integer
-    --- The loaded clip, valid until `release`. Sounds only, and nil for one
-    --- that streams, which holds nothing.
-    audio: loader.CValue
-    --- Whether the clip is held in memory. Sounds only.
-    resident: boolean
-    --- Length in milliseconds, or -1 when the file cannot say. Sounds only.
-    durationMs: integer
-    --- Set if loading failed.
-    --- A sentence for a log or a message, not something to match on. Nil in every other
-    --- status, including "released".
-    error: string
 
     --- Private. The Rust image allocation the pixels belong to, owned here and
-    --- destroyed by `release`. Images only.
+    --- destroyed by the last `release`.
     _image: loader.CValue
-    --- Id the worker answers with, so a release can find this in the queue.
-    _id: integer
-    --- Callers sharing this decode. One decode serves every load of a path
-    --- that was already in flight, and the last release of it frees.
-    _shares: integer
+
+    --- Private. Callers holding these pixels. One per load of the path whose
+    --- future actually settled, so a caller that canceled before settlement is
+    --- not counted and one that joined an in-flight decode is.
+    _refs: integer
+
+    --- Gives up this caller's hold on the pixels, and frees at the last.
+    ---
+    --- Called once whatever needed them has taken a copy, which for an image
+    --- means after it has been uploaded. Where several loads shared one decode
+    --- this releases one of them.
+    ---
+    --- Releasing an image already down to nothing does nothing, so a shutdown
+    --- path need not know whether something else got there first.
+    release: function(self: Image)
+end
+
+--- A loaded clip, and the hold a caller has on it.
+---
+--- What a `loadSound` future settles to. Two overlapping loads of one path do
+--- not share, unlike images, so a `Sound` normally has one holder; the count is
+--- here so that releasing twice frees once rather than twice.
+local record Sound
+    --- The path the load was asked for, unchanged.
+    path: string
+
+    --- The loaded clip, valid until the last `release`. Nil for one that
+    --- streams, which holds nothing, and nil once released.
+    audio: loader.CValue
+
+    --- Whether the decoded audio is held in memory. False for a clip each voice
+    --- reads from the file for itself.
+    resident: boolean
+
+    --- Length in milliseconds, or -1 when the container cannot say.
+    durationMs: integer
+
+    --- Private. Callers holding this clip.
+    _refs: integer
+
+    --- Gives up this caller's hold on the clip, and frees at the last.
+    ---
+    --- A voice reads a clip where it lies, so a clip is released when nothing
+    --- will play it again. A track holds its own reference, so releasing one
+    --- that is still sounding is safe: the mixer drops it when the last track
+    --- using it does.
+    ---
+    --- Releasing a clip already down to nothing does nothing.
+    release: function(self: Sound)
 end
 
 --- Asynchronous asset loading.
 ---
 --- Images and sounds decode on one worker thread, which `install` starts and `shutdown`
---- ends; nothing loads before the first or after the second. A load returns a `Handle`
---- straight away and never blocks a frame, and a handle only moves off "loading" when
---- something on the main thread takes the worker's answer, which is what `update` is for.
+--- ends; nothing loads before the first or after the second. A load returns a `Future`
+--- straight away and never blocks a frame, and that future settles only when something on
+--- the main thread takes the worker's answer, which is what `update` is for.
 ---
 --- Nothing here is a cache and nothing here touches the GPU: two loads of a path that do
 --- not overlap decode twice, and what comes back is CPU-side pixels or a mixer clip that a
 --- caller uploads or plays itself.
 local record assets
-    --- One asynchronous load.
-    Handle: Handle
+    --- Decoded pixels, and the hold a caller has on them.
+    Image: Image
 
-    --- A set of loads to wait on, with something of the caller's beside each.
-    ---
-    --- Waiting on several handles at once is not one subsystem's problem. Sound
-    --- holds a clip per handle, text holds an atlas per handle, and a sidecar
-    --- holds whatever it was read for; each of them wants the same three things,
-    --- which are how many are still in flight, a callback per one that
-    --- finished, and a blocking form for startup and tests. That is the whole
-    --- shape, so it is here once rather than written again beside every list of
-    --- handles.
-    ---
-    --- `T` is the caller's and nothing here reads it. Resolving compacts in
-    --- place, so a frame with loads in flight allocates nothing; the price of
-    --- that is that a callback must not add to the batch it is being called
-    --- from.
-    record Batch<T>
-        --- Private. The callback given at construction, called once per load that leaves
-        --- "loading", whether it succeeded or failed.
-        _finished: function(key: T, handle: Handle)
-
-        --- Private. Loads not yet handed to the callback, compacted in place as they
-        --- resolve, so an index is not stable across a `resolve`.
-        _handles: {Handle}
-
-        --- Private. The caller's values, held at the same indexes as `_handles`.
-        _keys: {T}
-
-        --- Adds a load to wait on, with the caller's value beside it.
-        ---
-        --- Adding one handle twice waits on it twice and calls back twice. Adding one
-        --- already finished is allowed; the next `resolve` hands it over.
-        ---
-        --- @param handle Held rather than copied, so the batch sees whatever the
-        ---     worker settles it to. Nothing is started here: the load was already
-        ---     in flight before it arrived.
-        --- @param key The caller's own value, handed back beside the handle at
-        ---     `resolve` so the callback knows which load it is looking at. Not
-        ---     read or compared by the batch, so duplicates are fine.
-        add: function(self, handle: Handle, key: T)
-
-        --- Loads still in flight.
-        ---
-        --- @return How many of the batch's handles read "loading" right now. Counts what is
-        ---     still unresolved, so it drops to zero a `resolve` before the batch empties.
-        pending: function(self): integer
-
-        --- Hands every finished load to the callback and drops it.
-        ---
-        --- Takes whatever the worker has answered first, so a subsystem
-        --- polling only its own batch still sees its loads finish.
-        ---
-        --- The callback gets a failed load as well as a ready one; check `handle.status`
-        --- rather than assuming pixels. It must not add to this batch, which is being
-        --- compacted underneath it.
-        --- @return How many were resolved by this call.
-        resolve: function(self): integer
-
-        --- Blocks until nothing is in flight, then resolves.
-        ---
-        --- For startup, shutdown and tests. A frame calls `resolve` instead.
-        --- @param timeoutMs Milliseconds to wait. Defaults to 5000.
-        --- @return How many were resolved. A timeout is not an error and is not reported:
-        ---     the count is simply short and the rest stay in the batch, so check
-        ---     `pending` after this rather than trusting the return.
-        wait: function(self, timeoutMs?: number): integer
-    end
+    --- A loaded clip, and the hold a caller has on it.
+    Sound: Sound
 
     --- Whether the loading worker is running.
     ---
@@ -336,16 +302,32 @@ local record assets
     installed: function(): boolean
 end
 
-local type Batch = assets.Batch
+local ImageMT <const>: metatable<Image> = {__index = Image}
+local SoundMT <const>: metatable<Sound> = {__index = Sound}
 
-local HandleMT <const>: metatable<Handle> = {__index = Handle}
-local BatchMT <const>: metatable<Batch<any>> = {__index = Batch}
+--- One decode the worker has been given and has not answered for.
+---
+--- The root future is here rather than handed out. Callers get futures derived
+--- from it, which is what lets several of them share one decode without sharing
+--- one object: see `loadImage`.
+local record Entry
+    id: integer
+    --- "image" or "sound", which decides what the answer is built into.
+    kind: string
+    path: string
+    root: Future<any>
+end
 
-local pending: {integer: Handle} = {}
+local pending: {integer: Entry} = {}
+--- The same entries by root future, so the source's cancel hook can start from
+--- the future whose last watcher has gone.
+local byFuture: {Future<any>: Entry} = {}
+--- Counted rather than walked, because `waitAll` reads it in a loop.
+local pendingCount = 0
 --- Image decodes that have been queued and not yet answered, by path. A second
 --- load of a path in this table joins the first rather than queueing a decode
 --- of the same file beside it.
-local inFlight: {string: Handle} = {}
+local inFlight: {string: Future<any>} = {}
 local nextId = 1
 local worker: workers.Worker = nil
 
@@ -373,182 +355,134 @@ function assets.installed(): boolean
     return worker ~= nil
 end
 
---- Registers a handle and returns the id the worker will answer with.
-local function queue(handle: Handle): integer
-    if worker == nil then
-        error("tecs: assets.install must run before loading", 3)
+-------------------------------------------------------------------------------
+-- Settling
+-------------------------------------------------------------------------------
+
+--- Settles when nothing is in flight, so `waitAll` is one `Future:wait` rather
+--- than a wall-clock loop written again here.
+---
+--- Created on demand and dropped once it settles, because a wait that ran out
+--- of time leaves it pending and the next one joins the same drain.
+local idle: Future<integer> = nil
+
+--- Forgets a decode the worker has answered for.
+local function retire(entry: Entry)
+    pending[entry.id] = nil
+    byFuture[entry.root] = nil
+    pendingCount = pendingCount - 1
+
+    -- Dropped at settlement rather than left for the next load of the path.
+    -- `listen` stores a link's closure on the upstream and that closure holds
+    -- the derived future, so a root still reachable through this table would
+    -- keep every future ever derived from it alive for the life of the process.
+    -- Nothing shows that until it is measured, which is why it is said here.
+    if inFlight[entry.path] == entry.root then
+        inFlight[entry.path] = nil
     end
-    local id = nextId
-    nextId = nextId + 1
-    handle._id = id
-    handle._shares = 1
-    pending[id] = handle
-    return id
 end
 
---- Queues an image for loading and returns its handle immediately.
+--- Destroys what the worker sent for a decode nobody is waiting on any more.
 ---
---- Two loads of one path that overlap share a decode and get the same handle,
---- because decoding the same PNG twice at once is work with no result the
---- first decode does not already have. They share the surface with it, so the
---- last of them to release is the one that frees. A load that starts after the
---- first has resolved decodes again: nothing here is a cache, and a handle
---- that has been released is not something to hand out a second time.
----
---- @param path PNG or JPEG; no other format is compiled in, and one that is not either
----     fails the decode rather than being refused here.
---- @return A handle at "loading", never nil. Raises instead when `install` has not run.
----     Failures reach it through `status`, not through this call: a missing file is a
----     handle that turns "failed" once the worker has looked.
-function assets.loadImage(path: string): Handle
-    filesystem.note(path, "image")
-    local shared = inFlight[path]
-    if shared ~= nil then
-        shared._shares = shared._shares + 1
-        return shared
+--- Ownership transfers with the address whether or not anyone still wants it,
+--- so what arrived is freed here rather than leaked to a future that has
+--- already settled "canceled".
+local function discard(result: {string: any})
+    if result.image ~= nil then
+        RUST.tecsImageDestroy(ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue)
     end
-
-    local handle = setmetatable({kind = "image", status = "loading", path = path} as Handle, HandleMT)
-    local id = queue(handle)
-    inFlight[path] = handle
-    worker:send({id = id, kind = "image", path = path})
-    return handle
+    if result.audio ~= nil then
+        MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue)
+    end
 end
 
---- Queues a sound for loading and returns its handle immediately.
----
---- Whatever the mixer's decoders can read loads, so the format is the file's
---- business rather than the caller's.
----
---- `mode` is "resident", "stream", or "auto", and auto keeps anything shorter
---- than `streamMs` resident.
----
---- The library is initialized here rather than on the worker: `MIX_Init` is
---- documented as not thread safe, and doing it before the task is sent puts it
---- in order ahead of every decode without a lock.
----
---- Two overlapping loads of one path do not share, unlike images: each gets its own clip.
----
---- @param mode "resident", "stream" or "auto". Anything else is treated as "stream".
---- @param streamMs The boundary "auto" decides on, in milliseconds. Read only under
----     "auto", and a file whose length the container cannot state streams whatever it says.
---- @return A handle at "loading", or one already at "failed" when the mixer could not be
----     initialized, which is the one failure reported without waiting for the worker.
-function assets.loadSound(path: string, mode: string, streamMs: integer): Handle
-    filesystem.note(path, "sound")
-    if not sdl3mixer.init() then
-        local failed = setmetatable({
-            kind = "sound",
-            status = "failed",
-            path = path,
-            _shares = 1,
-            error = "cannot load " .. path,
-        } as Handle, HandleMT)
-        return failed
-    end
-    local handle = setmetatable({kind = "sound", status = "loading", path = path} as Handle, HandleMT)
-    local id = queue(handle)
-    worker:send({
-        id = id,
-        kind = "sound",
-        path = path,
-        mode = mode,
-        streamMs = streamMs,
-    })
-    return handle
-end
-
---- Resolves one decode result into its handle.
-local function complete(result: {string: any}): boolean
-    local id = result.id as integer
-    local handle = pending[id]
-    pending[id] = nil
-    if handle == nil then
+--- Settles one decode result into the future it was queued for.
+local function settleResult(result: {string: any}): boolean
+    local entry = pending[result.id as integer]
+    if entry == nil then
         return false
     end
-    if inFlight[handle.path] == handle then
-        inFlight[handle.path] = nil
-    end
+    retire(entry)
+    local root = entry.root
 
-    -- Released while the worker was still decoding. Ownership still arrives
-    -- with the address, so what arrived is destroyed here rather than left for
-    -- a handle nobody is holding any more.
-    if handle.status == "released" then
-        if result.image ~= nil then
-            RUST.tecsImageDestroy(ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue)
-        end
-        if result.audio ~= nil then
-            MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue)
-        end
+    -- Canceled while the worker was still decoding: every caller gave up before
+    -- this arrived.
+    if root.status ~= "pending" then
+        discard(result)
         return true
     end
 
     if result.error ~= nil then
-        handle.status = "failed"
-        handle.error = result.error as string
+        root:fail(result.error as string)
         return true
     end
 
-    if handle.kind == "sound" then
-        handle.resident = result.resident as boolean
-        handle.durationMs = result.durationMs as integer
-        if handle.resident then
+    if entry.kind == "sound" then
+        local sound = setmetatable({
+            path = entry.path,
+            resident = result.resident as boolean,
+            durationMs = result.durationMs as integer,
+            -- One holder, because sound does not dedupe: this future has one
+            -- caller and no link of the caller's can add another.
+            _refs = 1,
+        } as Sound, SoundMT)
+        if sound.resident then
             -- Ownership arrived with the address, exactly as it does for a
             -- surface. The mixer allocated this, so the mixer frees it.
-            handle.audio = ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue
+            sound.audio = ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue
         end
-        handle.status = "ready"
+        root:complete(sound)
         return true
     end
 
-    -- Ownership arrived with the address. The image stays alive until the
-    -- handle is released, because the pixels are what the caller came for.
-    local image = ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue
-    handle._image = image
-    handle.pixels = RUST.tecsImagePixels(image) as loader.CValue
-    handle.width = result.width as integer
-    handle.height = result.height as integer
-    handle.pitch = result.pitch as integer
-    handle.status = "ready"
+    -- Ownership arrived with the address. The image stays alive until the last
+    -- caller releases it, because the pixels are what they came for.
+    local allocation = ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue
+    local image = setmetatable({
+        path = entry.path,
+        _image = allocation,
+        pixels = RUST.tecsImagePixels(allocation) as loader.CValue,
+        width = result.width as integer,
+        height = result.height as integer,
+        pitch = result.pitch as integer,
+        -- Zero, and counted up by each surviving caller's own link below. A
+        -- caller that canceled first never runs one, which is what makes this
+        -- exact rather than optimistic.
+        _refs = 0,
+    } as Image, ImageMT)
+    root:complete(image)
     return true
 end
 
---- Frees what was decoded.
+--- Settles one decode result, and ends a process-wide drain that this emptied.
 ---
---- Called once whatever needed it has taken a copy, which for an image means
---- after it has been uploaded. A voice reads a clip where it lies, so a clip is
---- released when nothing will play it again. A track holds its own reference,
---- so releasing one that is still sounding is safe: the mixer drops it when
---- the last track using it does.
+--- The drain is answered after the settlement rather than inside it, because a
+--- listener the settlement runs is free to start another load and a `waitAll`
+--- that returned before it did would have left one outstanding.
 ---
---- The handle ends at "released" whatever it held, so a caller handed one
---- after its decode has gone reads a status that says so rather than finding
---- the pixels nil and no reason for it. Releasing a load still in flight is
---- allowed: what the worker returns is destroyed on arrival.
----
---- Where several loads shared one decode, this releases one of them, and the
---- last one frees.
----
---- Calling it on an already released handle does nothing, so a shutdown path need not know
---- whether something else got there first.
-function Handle:release()
-    if self.status == "released" then
+--- @return Whether a queued decode was answered, which is false for a result
+---     arriving after `shutdown` dropped what it belonged to.
+local function complete(result: {string: any}): boolean
+    local answered = settleResult(result)
+    if pendingCount == 0 and idle ~= nil then
+        -- Cleared before it settles, so a load started from a listener on it
+        -- opens a fresh drain rather than joining one that has already answered.
+        local settling = idle
+        idle = nil
+        settling:complete(0)
+    end
+    return answered
+end
+
+function Image:release()
+    -- Guarded rather than allowed to go negative: a shutdown path that releases
+    -- what something else already released must free once, not twice.
+    if self._refs <= 0 then
         return
     end
-    self._shares = self._shares - 1
-    if self._shares > 0 then
+    self._refs = self._refs - 1
+    if self._refs > 0 then
         return
-    end
-
-    if inFlight[self.path] == self then
-        inFlight[self.path] = nil
-    end
-    self.status = "released"
-
-    if self.audio ~= nil then
-        MIX.MIX_DestroyAudio(self.audio)
-        self.audio = nil
-        self.resident = false
     end
     if self._image == nil then
         return
@@ -558,15 +492,47 @@ function Handle:release()
     self.pixels = nil
 end
 
---- Takes finished decodes and uploads them. Call once per frame.
+function Sound:release()
+    if self._refs <= 0 then
+        return
+    end
+    self._refs = self._refs - 1
+    if self._refs > 0 then
+        return
+    end
+    if self.audio ~= nil then
+        MIX.MIX_DestroyAudio(self.audio)
+        self.audio = nil
+        self.resident = false
+    end
+end
+
+-------------------------------------------------------------------------------
+-- The source
+-------------------------------------------------------------------------------
+
+--- Milliseconds one blocking slice of a wait spends.
+local SLICE_MS <const> = 16
+
+--- Milliseconds a wait spends when the caller names nothing.
+local DEFAULT_WAIT_MS <const> = 5000
+
+--- What drives every future this module hands out.
 ---
---- Polls, never blocks, and drains everything the worker has answered rather than one
---- result. Handles do not change state without this, so a game that stops calling it has
---- loads that stay "loading" forever.
----
---- @return How many handles moved off "loading" this call, which is zero when nothing has
----     finished and also zero when no worker is installed.
-function assets.update(): integer
+--- `poll` and `advance` are the same receive with a different budget, which is
+--- the whole of what a future needs from a worker channel.
+local record Loader
+    sliceMs: number
+    defaultWaitMs: number
+
+    poll: function(self: Loader): integer
+    advance: function(self: Loader, ms: number): integer
+    cancel: function(self: Loader, future: Future<any>)
+end
+
+local LoaderMT <const>: metatable<Loader> = {__index = Loader}
+
+function Loader:poll(): integer
     if worker == nil then
         return 0
     end
@@ -583,148 +549,212 @@ function assets.update(): integer
     return completed
 end
 
---- Handles still waiting on the worker.
----
---- @return Every load in flight in this process, not one caller's. Counted by walking the
----     set, so it is fine per frame and not per entity.
-function assets.pending(): integer
-    local count = 0
-    for _ in pairs(pending) do
-        count = count + 1
-    end
-    return count
-end
-
---- Waits up to `ms` for one decode and takes it. Shared by everything here
---- that blocks, so there is one description of how a wait is spent.
-local function pump(ms: number)
+function Loader:advance(ms: number): integer
     if worker == nil then
-        return
+        return 0
     end
     local result = worker:receive(ms)
-    if result ~= nil then
-        complete(result as {string: any})
+    if result == nil then
+        return 0
+    end
+    return complete(result as {string: any}) and 1 or 0
+end
+
+--- Gives up a decode whose last caller has gone.
+---
+--- The worker takes its tasks off a channel and cannot be told to drop one, so
+--- the decode runs to the end whatever happens here. What this does is release
+--- the path, so a later load of it starts a fresh decode rather than joining
+--- one nobody wants; the entry stays queued, and `complete` destroys the
+--- address when it arrives because ownership transfers with it either way.
+function Loader:cancel(future: Future<any>)
+    local entry = byFuture[future]
+    if entry == nil then
+        return
+    end
+    if inFlight[entry.path] == future then
+        inFlight[entry.path] = nil
     end
 end
 
---- Milliseconds one blocking pump spends when nothing has arrived yet.
-local PUMP_MS <const> = 16
+local pump <const> = setmetatable({
+    -- Both live here rather than in `Future`, which is what lets a decode keep
+    -- a shorter default than a child process without a second convention.
+    sliceMs = SLICE_MS,
+    defaultWaitMs = DEFAULT_WAIT_MS,
+} as Loader, LoaderMT)
 
---- Milliseconds a wait spends when the caller names nothing.
-local DEFAULT_WAIT_MS <const> = 5000
+local source <const> = pump as Future.Source
 
---- Spends up to `ms` of wall clock pumping while `waiting` answers true.
+-------------------------------------------------------------------------------
+-- Loading
+-------------------------------------------------------------------------------
+
+--- A root future the loader owns and never hands out.
 ---
---- Wall clock rather than a count of pumps. `pump` returns as soon as one
---- message arrives, so subtracting its nominal size whatever it cost turns
---- "wait 5000 ms" into "wait for at most 312 messages", and against a worker
---- with a queue of answers ready that is a wait that gives up almost at once.
-local function spend(ms: number, waiting: function(): boolean)
-    local deadline = time.now() * 1000.0 + ms
-    while waiting() do
-        local remaining = deadline - time.now() * 1000.0
-        if remaining <= 0 then
-            break
-        end
-        pump(remaining < PUMP_MS and remaining or PUMP_MS)
+--- `Future.pending` counts whoever created a future as one of its watchers,
+--- which is right for a caller holding what it created and wrong here. The
+--- loader is the producer: the root lives in `inFlight` and every consumer of
+--- it is some caller's own derived future, so a hold of the loader's own would
+--- be a watcher nothing ever gives up and the decode could never reach zero and
+--- be abandoned.
+local function newRoot(): Future<any>
+    local root = Future.pending(source) as Future<any>
+    root._watchers = 0
+    return root
+end
+
+--- Registers a decode, and answers the future it will settle and the id the
+--- worker will answer with.
+local function queue(kind: string, path: string): Future<any>, integer
+    if worker == nil then
+        error("tecs: assets.install must run before loading", 3)
     end
+    local id = nextId
+    nextId = nextId + 1
+    local root = newRoot()
+    local entry: Entry = {id = id, kind = kind, path = path, root = root}
+    pending[id] = entry
+    byFuture[root] = entry
+    pendingCount = pendingCount + 1
+    return root, id
+end
+
+--- Counts one more holder of the decoded pixels, and answers them.
+---
+--- One per surviving caller of a shared decode: it is the transform of that
+--- caller's own link, so it runs exactly when that caller's future settles
+--- "ready" and never when the caller canceled first.
+local function claim(image: Image): Image
+    image._refs = image._refs + 1
+    return image
+end
+
+--- Queues an image for loading and answers a future for it immediately.
+---
+--- Two loads of one path that overlap share a decode, because decoding the same
+--- PNG twice at once is work with no result the first decode does not already
+--- have. They share the `Image` with it, so the last of them to release is the
+--- one that frees, and each of them holds a future of its own, so one canceling
+--- is invisible to the others. A load that starts after the first has settled
+--- decodes again: nothing here is a cache.
+---
+--- @param path PNG or JPEG; no other format is compiled in, and one that is not either
+---     fails the decode rather than being refused here.
+--- @return A pending future, never nil. Raises instead when `install` has not run.
+---     Failures reach it as a failed settlement, not through this call: a missing file
+---     is a future that fails once the worker has looked. Canceling it gives up this
+---     caller's interest in the decode, and the last caller to do so abandons it.
+function assets.loadImage(path: string): Future<Image>
+    filesystem.note(path, "image")
+    local shared = inFlight[path]
+    if shared == nil then
+        local root, id = queue("image", path)
+        inFlight[path] = root
+        worker:send({id = id, kind = "image", path = path})
+        shared = root
+    end
+    -- Derived rather than the root itself. Two callers holding one object would
+    -- make "the future the caller holds" ambiguous as a map key, which three
+    -- subsystems in this tree already use it as, and would leave this module
+    -- with no way to count how many of them survived to settlement.
+    return shared:map(claim) as Future<Image>
+end
+
+--- Queues a sound for loading and answers a future for it immediately.
+---
+--- Whatever the mixer's decoders can read loads, so the format is the file's
+--- business rather than the caller's.
+---
+--- `mode` is "resident", "stream", or "auto", and auto keeps anything shorter
+--- than `streamMs` resident.
+---
+--- The library is initialized here rather than on the worker: `MIX_Init` is
+--- documented as not thread safe, and doing it before the task is sent puts it
+--- in order ahead of every decode without a lock.
+---
+--- Two overlapping loads of one path do not share, unlike images: each gets its
+--- own clip, because that is what `MIX_LoadAudio` produces. So this answers the
+--- root future rather than a link over one, and the `Sound` it settles to has
+--- exactly one holder.
+---
+--- @param mode "resident", "stream" or "auto". Anything else is treated as "stream".
+--- @param streamMs The boundary "auto" decides on, in milliseconds. Read only under
+---     "auto", and a file whose length the container cannot state streams whatever it says.
+--- @return A pending future, or one already failed when the mixer could not be
+---     initialized, which is the one failure reported without waiting for the worker.
+function assets.loadSound(path: string, mode: string, streamMs: integer): Future<Sound>
+    filesystem.note(path, "sound")
+    if not sdl3mixer.init() then
+        return Future.failed("cannot load " .. path)
+    end
+    local root, id = queue("sound", path)
+    -- The one caller is the watcher `Future.pending` counts, so this root is
+    -- handed out as it is: canceling it takes the count to zero and abandons
+    -- the decode, which is what the only caller giving up should do.
+    root._watchers = 1
+    worker:send({
+        id = id,
+        kind = "sound",
+        path = path,
+        mode = mode,
+        streamMs = streamMs,
+    })
+    return root as Future<Sound>
+end
+
+-------------------------------------------------------------------------------
+-- Draining
+-------------------------------------------------------------------------------
+
+--- Takes finished decodes and settles their futures. Call once per frame.
+---
+--- Polls, never blocks, and drains everything the worker has answered rather than one
+--- result. Nothing settles without this, so a game that stops calling it has loads that
+--- stay pending forever.
+---
+--- @return How many decodes settled this call, which is zero when nothing has
+---     finished and also zero when no worker is installed.
+function assets.update(): integer
+    return pump:poll()
+end
+
+--- Loads still waiting on the worker.
+---
+--- @return Every load in flight in this process, not one caller's. A decode every
+---     caller has canceled is still counted until the worker answers for it, because
+---     the address it sends still has to be taken and destroyed.
+function assets.pending(): integer
+    return pendingCount
 end
 
 --- Blocks until every queued load has finished.
 ---
 --- For startup and tests. A frame should poll `update` instead.
 ---
+--- Not a join over futures a caller holds, and no join expresses it: this waits
+--- on every load in this process, including ones a subsystem the caller has
+--- never heard of started, which is what a reload or a startup path wants.
+---
 --- @param timeoutMs Wall-clock milliseconds, defaulting to 5000. Running out is not an
 ---     error and is not reported, so read `assets.pending` afterwards to tell the two
 ---     endings apart.
 function assets.waitAll(timeoutMs?: number)
-    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean return assets.pending() > 0 end)
-end
-
--------------------------------------------------------------------------------
--- Awaiting a set
--------------------------------------------------------------------------------
-
---- A batch that hands each finished load to `finished`.
----
---- The callback is given once rather than at every drain, because what a batch
---- does with a load is a property of who made it and not of the moment it is
---- looked at.
----
---- @param finished Called once per load that leaves "loading", ready or failed alike, on
----     the thread that drains the batch. Required; nil raises.
---- @return An empty batch. Nothing registers it, so a batch nobody resolves simply holds
----     its handles.
-function assets.newBatch<T>(finished: function(key: T, handle: Handle)): Batch<T>
-    if finished == nil then
-        error("tecs: a batch needs something to hand finished loads to", 2)
+    if pendingCount == 0 then
+        return
     end
-    return setmetatable({
-        _finished = finished,
-        _handles = {},
-        _keys = {},
-    } as Batch<T>, BatchMT as metatable<Batch<T>>)
-end
-
-function Batch:add(handle: Handle, key: T)
-    local at = #self._handles + 1
-    self._handles[at] = handle
-    self._keys[at] = key
-end
-
-function Batch:pending(): integer
-    local waiting = 0
-    local handles = self._handles
-    for index = 1, #handles do
-        if handles[index].status == "loading" then
-            waiting = waiting + 1
-        end
+    if idle == nil then
+        idle = Future.pending(source) as Future<integer>
     end
-    return waiting
-end
-
-function Batch:resolve(): integer
-    local waiting = #self._handles
-    if waiting == 0 then
-        return 0
-    end
-    assets.update()
-
-    -- Compacted in place: what is still in flight slides down over what has
-    -- finished, and the tail is cleared once. Rebuilding the list instead
-    -- would allocate a table on every frame with a load outstanding.
-    local handles, keys = self._handles, self._keys
-    local kept = 0
-    local resolved = 0
-    for index = 1, waiting do
-        local handle = handles[index]
-        local key = keys[index]
-        if handle.status == "loading" then
-            kept = kept + 1
-            handles[kept] = handle
-            keys[kept] = key
-        else
-            resolved = resolved + 1
-            self._finished(key, handle)
-        end
-    end
-    for index = kept + 1, waiting do
-        handles[index] = nil
-        keys[index] = nil
-    end
-    return resolved
-end
-
-function Batch:wait(timeoutMs?: number): integer
-    spend(timeoutMs or DEFAULT_WAIT_MS, function(): boolean return self:pending() > 0 end)
-    return self:resolve()
+    idle:wait(timeoutMs)
 end
 
 --- Stops the loading worker.
 ---
---- Blocks until the thread has exited. Loads still in flight are dropped and their handles
---- stay at "loading" forever, so drain with `waitAll` first if their results are wanted.
---- Releasing a handle that is already ready still works afterwards; this frees nothing.
+--- Blocks until the thread has exited. Loads still in flight are dropped and their futures
+--- stay pending forever, so drain with `waitAll` first if their results are wanted.
+--- Releasing an `Image` or a `Sound` that already settled still works afterwards; this
+--- frees nothing.
 function assets.shutdown()
     if worker == nil then
         return
@@ -732,7 +762,16 @@ function assets.shutdown()
     worker:stop()
     worker = nil
     pending = {}
+    byFuture = {}
     inFlight = {}
+    pendingCount = 0
+    if idle ~= nil then
+        -- The drain it was waiting for will not finish, and saying so is more
+        -- truthful than settling it as though it had.
+        local abandoned = idle
+        idle = nil
+        abandoned:abandon("the loading worker was shut down")
+    end
 end
 
 return assets

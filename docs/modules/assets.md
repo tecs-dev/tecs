@@ -1,5 +1,5 @@
 ---
-description: "Asynchronous image and sound loading on a worker thread, with handles, batches and explicit release"
+description: "Asynchronous image and sound loading on a worker thread, answering futures over refcounted payloads"
 outline: deep
 ---
 
@@ -7,9 +7,14 @@ outline: deep
 
 `tecs.assets` decodes images and sounds off the main thread. Decoding a PNG is milliseconds of pure CPU work
 with no GPU involvement, so it happens on a worker and the main thread only uploads. A load never blocks a
-frame: it hands back a handle immediately, the handle reports that it is still loading, and callers draw
+frame: it hands back a [`Future`](/modules/Future) immediately, the future stays `"pending"`, and callers draw
 something else until it is not. Sound takes the same route for the same reason, because reading a file is a
 syscall a frame should not wait on.
+
+What a load settles to is a value. `loadImage` answers `Future<Image>` and `loadSound` answers `Future<Sound>`,
+where an `Image` carries pixels and a `Sound` carries a clip. So a load is transformed, joined and waited on
+with the combinators everything else asynchronous in this tree already uses, and `assets` has no vocabulary of
+its own for "still going", "finished" and "gave up".
 
 Nothing here creates a GPU resource. Decoding and residency are separate decisions: the renderer knows what
 layout its textures need, and an asset that has been decoded is useful before anything has decided where it
@@ -22,6 +27,21 @@ shipped binary carries whether or not it loads one. An atlas in any other format
 not enabled in the runtime. Sound is the other way round: whatever the mixer's decoders can read loads, and
 `Audio.decoders()` reports what the mixer actually linked.
 :::
+
+## Cancel before, release after
+
+The two halves of a load are separated by the status line, and the whole rule is one sentence: **before it
+lands you cancel the future, after it lands you release the payload.**
+
+| While the future is `"pending"`                                                      | Once it settled `"ready"`                                                       |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `loading:cancel()`                                                                   | `loading.value:release()`                                                       |
+| Gives up this caller's interest in the decode. The last caller to do so abandons it. | Gives up this caller's hold on the pixels or the clip. The last one frees them. |
+
+They are not two spellings of one thing. Cancellation is about work that has not happened; release is about
+memory that exists. A future that already settled ignores `cancel`, and an `Image` that was never decoded
+cannot be released, so there is no call that means both and no state where the wrong one silently does nothing
+useful.
 
 ## Worker lifecycle
 
@@ -39,10 +59,10 @@ function assets.install(luaPath?: string)
 
 Installing twice is installing once. Spawning unconditionally would leave the first thread running with both
 its channels and nothing reading them, and every decode already queued would answer into a channel that has
-been dropped, so a load in flight across the second call would never resolve.
+been dropped, so a load in flight across the second call would never settle.
 
 [`Application`](/modules/Application) owns this: it installs the worker, calls `update` once per iteration and
-`shutdown` at teardown, so a game that loads an image and does nothing else still sees its handle resolve and
+`shutdown` at teardown, so a game that loads an image and does nothing else still sees its future settle and
 the decoding thread still stops. A headless tool or a test that loads assets installs it itself.
 
 ### installed
@@ -56,13 +76,16 @@ way of knowing whether the game has started the worker yet.
 
 ### update
 
-Takes finished decodes and resolves their handles. Call once per frame.
+Takes finished decodes and settles their futures. Call once per frame.
 
 ```teal
 function assets.update(): integer
 ```
 
-**Returns:** how many decodes were completed by this call. Zero when no worker is running.
+**Returns:** how many decodes settled on this call. Zero when no worker is running.
+
+This is the loader's `Future.Source` poll under a public name. Listeners run from inside it, in the order the
+worker answered, so a `map` that uploads an image runs on the frame the decode arrived.
 
 ### pending
 
@@ -70,7 +93,8 @@ function assets.update(): integer
 function assets.pending(): integer
 ```
 
-**Returns:** how many handles are still waiting on the worker.
+**Returns:** how many loads are still waiting on the worker. A decode every caller has canceled is still
+counted until the worker answers for it, because the address it sends still has to be taken and destroyed.
 
 ### waitAll
 
@@ -84,8 +108,15 @@ function assets.waitAll(timeoutMs?: number)
 
 - `timeoutMs`: milliseconds to spend. Defaults to 5000.
 
-For startup and tests. A frame polls `update` instead. The budget is wall clock rather than a count of pumps,
-because a pump returns as soon as one message arrives.
+For startup and tests. A frame polls `update` instead. The time is spent inside the source's blocking receive
+through `Future:wait`, and the budget is wall clock rather than a count of pumps, because a pump returns as
+soon as one message arrives.
+
+This is deliberately not a join. `Future.all` over futures a caller holds waits for that caller's loads; this
+waits for every load in the process, including ones started by a subsystem the caller has never heard of,
+which is what a reload or a startup path actually wants. It is also the only wait that does not end early on a
+failure, since `Future.all` fails a join on its first failed input and a missing file fails as fast as the
+worker can look.
 
 ### shutdown
 
@@ -93,42 +124,50 @@ because a pump returns as soon as one message arrives.
 function assets.shutdown()
 ```
 
-Stops the loading worker and drops what was queued. Loading after this needs another `install`.
+Stops the loading worker and drops what was queued. Futures for loads still in flight stay pending forever, so
+drain with `waitAll` first if their results are wanted. Loading after this needs another `install`.
 
 ## Loading
 
 ### loadImage
 
-Queues an image for loading and returns its handle immediately.
+Queues an image for loading and answers a future for it immediately.
 
 ```teal
-function assets.loadImage(path: string): Handle
+function assets.loadImage(path: string): Future<Image>
 ```
 
 **Parameters:**
 
 - `path`: an absolute path, or one [`filesystem`](/modules/filesystem/) has resolved against the content root.
 
-**Returns:** a `Handle` in the `"loading"` state. Calling this before `install` raises.
-
-Two loads of one path that overlap share a decode and get the same handle, because decoding the same PNG twice
-at once is work with no result the first decode does not already have. They share the future with it, so the
-last of them to release is the one that frees. A load that starts after the first has resolved decodes again:
-nothing here is a cache, and a handle that has been released is not something to hand out a second time.
+**Returns:** a pending `Future<Image>`. Calling this before `install` raises; a missing file does not, and
+reaches the caller as a failed settlement once the worker has looked.
 
 ```teal
-local handle <const> = tecs.assets.loadImage(tecs.filesystem.assetPath("sprites/hero.png"))
--- ... frames later, once handle.status == "ready"
-local sprite <const> = renderer:registerImage(handle)
-handle:release()
+tecs.assets.loadImage(tecs.filesystem.assetPath("sprites/hero.png"))
+    :map(function(image: tecs.assets.Image): tecs.Sprite
+        -- registerImage releases this caller's hold; the array holds the pixels now.
+        return (renderer:registerImage(image))
+    end)
+    :onSettle(function(sprite: tecs.Future<tecs.Sprite>)
+        if sprite.status == "ready" then
+            world:spawn(tecs.Transform(100, 100), sprite.value)
+        end
+    end)
 ```
+
+Two loads of one path that overlap share a decode, because decoding the same PNG twice at once is work with no
+result the first decode does not already have. They share the `Image`, so the last of them to release is the
+one that frees, and each of them holds a **distinct future**, so one canceling is invisible to the others. A
+load that starts after the first has settled decodes again: nothing here is a cache.
 
 ### loadSound
 
-Queues a sound for loading and returns its handle immediately.
+Queues a sound for loading and answers a future for it immediately.
 
 ```teal
-function assets.loadSound(path: string, mode: string, streamMs: integer): Handle
+function assets.loadSound(path: string, mode: string, streamMs: integer): Future<Sound>
 ```
 
 **Parameters:**
@@ -148,107 +187,78 @@ The auto case reads the file twice when it turns out to be short: once without d
 and once to decode it. That is a second read of a small file, off the main thread, against holding a decoded
 copy of a piece of music.
 
-A handle whose mixer could not be initialized comes back already `"failed"` rather than raising.
-[`Audio`](/modules/audio) is the normal caller; a game loads clips through it rather than through here.
+Two overlapping loads of one path do **not** share, unlike images: each gets its own clip, because that is what
+`MIX_LoadAudio` produces. A load whose mixer could not be initialized comes back already failed rather than
+raising. [`Audio`](/modules/audio) is the normal caller; a game loads clips through it rather than through here.
 
-## Handle
+## Image
 
-What a load hands back. It is a one-shot future, not a cache: it settles once and release is terminal.
+What a `loadImage` future settles to.
 
-| Field        | Type      | Description                                                                                             |
-| ------------ | --------- | ------------------------------------------------------------------------------------------------------- |
-| `kind`       | `string`  | What was asked for: `"image"` or `"sound"`.                                                             |
-| `status`     | `string`  | `"loading"`, `"ready"`, `"failed"` or `"released"`.                                                     |
-| `path`       | `string`  | The path this load was for.                                                                             |
-| `pixels`     | cdata     | Decoded RGBA pixels, valid until `release`. Images only.                                                |
-| `width`      | `integer` | Image width in pixels.                                                                                  |
-| `height`     | `integer` | Image height in pixels.                                                                                 |
-| `pitch`      | `integer` | Row stride in bytes, which a decoder may pad beyond `width * 4`.                                        |
-| `audio`      | cdata     | The loaded clip, valid until `release`. Sounds only, and nil for one that streams, which holds nothing. |
-| `resident`   | `boolean` | Whether the clip is held in memory. Sounds only.                                                        |
-| `durationMs` | `integer` | Length in milliseconds, or `-1` when the file cannot say. Sounds only.                                  |
-| `error`      | `string`  | Set if loading failed.                                                                                  |
+| Field    | Type      | Description                                                      |
+| -------- | --------- | ---------------------------------------------------------------- |
+| `path`   | `string`  | The path this load was for, unchanged and unresolved.            |
+| `pixels` | cdata     | Decoded RGBA pixels, valid until the last `release`. Nil after.  |
+| `width`  | `integer` | Pixels across, not bytes.                                        |
+| `height` | `integer` | Pixel rows.                                                      |
+| `pitch`  | `integer` | Row stride in bytes, which a decoder may pad beyond `width * 4`. |
 
 Images are decoded to one normalized RGBA layout on the worker, so the upload path handles exactly one layout
 and the conversion cost lands off the main thread with the decode.
 
-`"released"` is terminal and reached only through `release`, so something handed a handle whose decode it no
-longer owns is told that rather than finding nil where the pixels were. That is the difference between a clear
-error at the upload and a null dereference inside it.
-
-### release
-
-Frees what was decoded.
+### Image:release
 
 ```teal
-function Handle:release()
+function Image:release()
 ```
 
-Called once whatever needed it has taken a copy, which for an image means after it has been uploaded. A voice
-reads a clip where it lies, so a clip is released when nothing will play it again; a track holds its own
-reference, so releasing one that is still sounding is safe and the mixer drops it when the last track using it
-does.
+Gives up this caller's hold on the pixels, and frees at the last. Called once whatever needed them has taken a
+copy, which for an image means after it has been uploaded; `registerImage` and `replaceImage` do it for you.
+Where several loads shared one decode, this releases one of them.
 
-Releasing a load still in flight is allowed: what the worker returns is destroyed on arrival. Where several
-loads shared one decode this releases one of them, and the last one frees. Releasing twice does nothing.
+Releasing an image already down to nothing does nothing, so a shutdown path need not know whether something
+else got there first, and `pixels` reads nil afterwards rather than pointing at freed memory.
 
-## Batch
+## Sound
 
-A set of loads to wait on, with something of the caller's beside each.
+What a `loadSound` future settles to.
 
-Waiting on several handles at once is not one subsystem's problem. Sound holds a clip per handle, text holds an
-atlas per handle, and a sidecar holds whatever it was read for; each of them wants the same three things, which
-are how many are still in flight, a callback per one that finished, and a blocking form for startup and tests.
+| Field        | Type      | Description                                                                |
+| ------------ | --------- | -------------------------------------------------------------------------- |
+| `path`       | `string`  | The path this load was for.                                                |
+| `audio`      | cdata     | The loaded clip, valid until the last `release`. Nil for one that streams. |
+| `resident`   | `boolean` | Whether the decoded audio is held in memory.                               |
+| `durationMs` | `integer` | Length in milliseconds, or `-1` when the container cannot say.             |
 
-### newBatch
+### Sound:release
 
 ```teal
-function tecs.assets.newBatch<T>(finished: function(key: T, handle: Handle)): Batch<T>
+function Sound:release()
 ```
 
-**Parameters:**
+Gives up this caller's hold on the clip, and frees at the last. A voice reads a clip where it lies, so a clip
+is released when nothing will play it again; a track holds its own reference, so releasing one that is still
+sounding is safe and the mixer drops it when the last track using it does.
 
-- `finished`: called once per load that leaves the `"loading"` state, with the caller's own value beside it.
-  Required; passing nil raises.
+## Waiting on several
 
-`T` is the caller's and nothing here reads it. The callback is given once rather than at every drain, because
-what a batch does with a load is a property of who made it and not of the moment it is looked at.
-
-### Batch methods
+There is no set type here. Several loads are one `Future.all`, and the join settles when the last of them does:
 
 ```teal
-function Batch:add(handle: Handle, key: T)
-function Batch:pending(): integer
-function Batch:resolve(): integer
-function Batch:wait(timeoutMs?: number): integer
-```
-
-- `add` adds a load to wait on, with the caller's value beside it.
-- `pending` answers how many of its loads are still in flight.
-- `resolve` drains the worker itself, hands every finished load to the callback, drops it, and returns how many
-  were resolved. Taking whatever the worker has answered first is what lets a subsystem polling only its own
-  batch still see its loads finish.
-- `wait` blocks until nothing is in flight, then resolves. `timeoutMs` defaults to 5000. For startup, shutdown
-  and tests; a frame calls `resolve` instead.
-
-::: warning A callback must not add to the batch it is being called from
-Resolving compacts the batch in place, so a frame with loads in flight allocates nothing. The price of that is
-that the compaction is walking the list the callback would be appending to.
-:::
-
-```teal
-local loads <const> = tecs.assets.newBatch(function(name: string, handle: tecs.assets.Handle)
-    if handle.status == "ready" then
-        atlases[name] = renderer:registerImage(handle)
-    end
-    handle:release()
+local sheet <const> = tecs.Future.all({
+    tecs.assets.loadImage(base .. ".png"),
+    tecs.assets.loadImage(base .. "_n.png"),
+}):map(function(images: {tecs.assets.Image}): Sheet
+    -- Argument order rather than arrival order, deliberately: a sheet's maps
+    -- register as a unit, so the unit's internal order is the one written here
+    -- and is the same on every run.
+    return buildSheet(renderer, images)
 end)
-
-loads:add(tecs.assets.loadImage(tecs.filesystem.assetPath("ui.png")), "ui")
-loads:add(tecs.assets.loadImage(tecs.filesystem.assetPath("tiles.png")), "tiles")
--- once per frame
-loads:resolve()
 ```
+
+A join fails on its first failed input, so a map that is allowed to be absent goes through `recover` before it
+reaches the join — and `recover` must produce a value rather than nil, because a join refuses to leave a hole
+in the array it promised.
 
 ## Reading a document
 
@@ -269,10 +279,28 @@ distinguishes an absent document from a malformed one, which the decoder raises 
 read or decoded is recorded, including the ones queued here, and `filesystem.loaded` is what the file watcher
 polls instead of walking the content tree.
 
-## What a load hands back, and what it does not
+## What a load hands back, and why that changed
 
-A `Handle` settles once and is read as a field, and that is deliberately the whole of it. The general
-settle-once value with combinators over it, which a child process or a request returns, is
-[`Future`](/modules/Future); it carries `status`, `value` and `error`, chains with `map`, `flatMap` and
-`recover`, and is what the sequencer's awaitable bridge parks a program on. A load queued here is not one of
-those: it is a handle, and the sequencer waits on it through whatever subsystem owns the decode.
+This page used to say the opposite, and the reasoning is worth keeping rather than quietly replacing. A load
+answered with a `Handle`: a private settle-once cell with four words of its own, `"loading"`, `"ready"`,
+`"failed"` and `"released"`, read as a field and freed with `Handle:release`. The argument was that a handle
+settles once and is read as a field, and that this was deliberately the whole of it, with `Future` reserved for
+the general case a child process or a request returns.
+
+What that got right, and what survives here unchanged: nothing became a cache, two overlapping loads of one
+path still share one decode, and a payload that has been given back must not read as available. That last one
+is the safety property, and it is why `Renderer:registerImage` still refuses an image rather than uploading
+from a freed address — the guard simply moved off a status word and onto the pixels themselves.
+
+What changed is not the shape of a load. It is that the number of subsystems reinventing the wait went from two
+to three, and the third could not be expressed by either of the first two. `Handle` was two counters wearing one
+hat: `_shares` meant "callers who might still want this decode" before settlement and "holders of these pixels"
+after it, and `release` did two unrelated jobs decided entirely by which side of settlement it was called on.
+Those separate cleanly, and once they do, the pending half is exactly a `Future` and the settled half is
+exactly a refcounted value. Nothing is left over, which is why `Handle` was deleted rather than split.
+
+`"released"` was the one real loss, and it was not a loss. It read as a completion state beside `"ready"` and
+`"failed"`, but a released image is a load that **succeeded** and then had its memory given back; erasing the
+success is less truthful than keeping it. So the four words became `Future`'s four, `"released"` became an
+`Image` whose `pixels` are nil, and the sequencer can park on a decode through the same
+[`Future.track`](/modules/Future) bridge it parks on everything else.

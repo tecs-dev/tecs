@@ -708,21 +708,49 @@ the voices that play it read the file for themselves.
 
 The application owns the pump. `assets.update` runs once per iteration and
 `assets.shutdown` runs at teardown, so a game that loads an image and does
-nothing else still sees its handle resolve and the decoding thread still stops.
+nothing else still sees its load settle and the decoding thread still stops.
 Subsystems that load assets of their own drain the same queue when they look at
 their own waiting lists, and that is an optimization rather than the mechanism.
 
-A handle is a one-shot future, not a cache. Two image loads of one path that
-overlap share the decode and the surface, because decoding the same file twice
-at once produces nothing the first decode does not already have; the last of
-them to release is the one that frees. A load that starts after the first has
-resolved decodes again, since handing back a handle whose pixels may already
-have been uploaded and released would be a cache with none of a cache's
-guarantees. Sharing is the image path only: two overlapping sound loads of one
-path each get their own clip. Release is terminal and says so: a released handle
-reports `"released"` rather than reporting `"ready"` over pixels that are gone,
-which is the difference between a clear error at the upload and a null
-dereference inside it.
+A load is not a cache. Two image loads of one path that overlap share the decode
+and the surface, because decoding the same file twice at once produces nothing
+the first decode does not already have; the last of them to release is the one
+that frees. A load that starts after the first has settled decodes again, since
+handing back pixels that may already have been uploaded and released would be a
+cache with none of a cache's guarantees. Sharing is the image path only: two
+overlapping sound loads of one path each get their own clip. And a payload that
+has been given back must not read as available: an `Image` whose last holder
+released it reports nil pixels rather than pointing at a freed allocation, which
+is the difference between a clear error at the upload and a null dereference
+inside it. That guard used to live on a status word and now lives on the pixels,
+which is the same property with one fewer thing to keep true.
+
+A load answers with a `Future`, and it did not always. It used to answer with an
+`assets.Handle`: a settle-once cell with four words of its own, read as a field
+and freed with `Handle:release`. The argument for that was real, and part of it
+survives: a load does settle once, and a subsystem owning its own wait was
+cheaper than a general one at the time. What broke it was that `Handle._shares`
+was two counters wearing one hat. Before settlement it meant "callers who might
+still want this decode"; after settlement it meant "holders of these pixels".
+`release` was likewise two unrelated operations chosen by which side of the
+status line it was called on. Split at that line, the pending half is exactly a
+future and the settled half is exactly a refcounted value, and nothing is left
+over, which is why the handle was deleted rather than extended. So the rule is
+one sentence: before it lands you cancel the future, after it lands you release
+the payload. `"released"` was the one word with nowhere to go, and losing it is a
+gain: a released image is a load that _succeeded_ and then had its memory given
+back, and erasing the success was less truthful than keeping it.
+
+The shared decode is what decides the shape. A path already in flight does not
+hand its future to the second caller; it keeps one root future to itself and
+hands each caller a link derived from it. That buys three things out of
+machinery that already shipped. The pending-side count is the root's watchers,
+which a link increments and a cancel decrements, so the last caller to give up
+is the one that abandons the decode. The settled-side count is incremented once
+per caller _whose link actually ran_, so a caller that canceled first is not
+counted and the number of holders is exact rather than optimistic. And every
+caller holds a distinct object, so a future stays usable as a map key, which
+three subsystems here already rely on.
 
 Files a game interprets itself go through `filesystem.read`, which is the only
 sanctioned way to get bytes out of the content root: on Android content lives
@@ -739,15 +767,28 @@ local level = tecs.data.decodeJSON(bytes)
 `read` answers nil for a path with no file, so an absent document is
 distinguishable from a malformed one, which the decoder raises on.
 
-Waiting on several handles at once is `assets.newBatch`. Sound holds a clip per
-handle and text holds an atlas per handle; each of them had grown the same list
-separately, and each wanted the same three things, which are how many are still
-in flight, one callback per load that finished with the caller's own value
-beside it, and a blocking form for startup and tests. A batch resolves by
-compacting in place, so a frame with loads outstanding allocates nothing, and it
-drains the worker itself, so a subsystem polling only its own batch still sees
-its loads finish. The one rule it imposes is that a callback must not add to the
-batch it is being called from, because the compaction is walking it.
+Waiting on several loads at once is `Future.all`, and there is no set type here.
+There used to be one, `assets.newBatch`, and the observation behind it was
+correct: sound held a clip per load and text held an atlas per load, each had
+grown the same list separately, and each wanted the same three things, which are
+how many are still in flight, one callback per load that finished with the
+caller's own value beside it, and a blocking form for startup and tests. What it
+got wrong is that those are one type. Unbundled they are a listener, a counter
+and a wait, and each has a smaller home: the listener is `onSettle`, attached
+where the work starts rather than added to a list something else drains; the
+counter is three lines the subsystem keeps, which is what `system.pendingProcesses`
+already does; and the wait is `Future.all(...):wait`. The batch's own selling
+point was compacting in place so a frame with loads outstanding allocated
+nothing, and the unified path allocates strictly less, because a batch walked
+every outstanding load on every call where a drain walks only what settled.
+
+`assets.waitAll` survives all of that, and it is the one wait here that is not a
+future. It waits on every load in this process, which is not a set any caller
+holds, so no join expresses it — and a join could not do the job anyway, since
+`Future.all` fails on its first failed input and a missing file fails as fast as
+the worker can look. The reload and startup paths want a process-wide drain, so
+that is what it is; its body is a `Future:wait` on a future the loader settles
+when nothing is outstanding, rather than a third copy of the wall-clock loop.
 
 All three entry points record what they touched, and they record it in one
 place: `filesystem.loaded` answers every path this process has read or decoded

@@ -88,6 +88,8 @@ local audiobackend <const> = require("tecs.platform.audiobackend")
 local platformaudio <const> = require("tecs.platform.audio")
 local log <const> = require("tecs.log")
 
+local type Future = require("tecs.Future")
+
 local type Backend = audiobackend.Backend
 local type Component = ecs.Component
 
@@ -469,9 +471,10 @@ local record audio
             --- voice reads from the file for itself.
             resident: boolean
 
-            --- Private. The asset load this clip came from, held so a reload can
-            --- swap it and `destroy` can release it. Nil once released.
-            _handle: assets.Handle
+            --- Private. The clip the asset load settled to, held so a reload can
+            --- swap it and `destroy` can release it. Nil until the load lands,
+            --- and nil again once released.
+            _sound: assets.Sound
         end
 
         --- What `load` takes. The one field is optional.
@@ -652,8 +655,13 @@ local record audio
         --- Private. Clips this instance has loaded, keyed by interned clip index.
         _clips: {integer: Clip}
 
-        --- Private. Loads in flight, resolved by `update`.
-        _loads: assets.Batch<Audio.Clip>
+        --- Private. Loads in flight, by clip index, so `destroy` can give up
+        --- what the drain ran out of time on.
+        _inFlight: {integer: Future<assets.Sound>}
+
+        --- Private. How many of them there are. A counter rather than a walk of
+        --- the table above, because `loading` is a per-frame read.
+        _loading: integer
         --- Where pitch variance is drawn from. A mixer of its own until `install`
         --- points it at the world's `tecs.audio` stream, so a save carries the
         --- rate the next shot fires at rather than restarting the variance.
@@ -808,17 +816,19 @@ end
 --- Takes one finished load into the clip it was read for.
 ---
 --- Shared rather than closed over an instance: nothing here reads the mixer,
---- so every `Audio` hands its batch the same function.
-local function settleClip(clip: Audio.Clip, handle: assets.Handle)
-    if handle.status == "ready" then
-        clip.resident = handle.resident
-        clip.duration = handle.durationMs >= 0 and handle.durationMs / 1000 or 0.0
+--- so every `Audio` settles its loads through the same function.
+local function settleClip(clip: Audio.Clip, settled: Future<assets.Sound>)
+    if settled.status == "ready" then
+        local sound <const> = settled.value
+        clip._sound = sound
+        clip.resident = sound.resident
+        clip.duration = sound.durationMs >= 0 and sound.durationMs / 1000 or 0.0
         clip.status = "ready"
         return
     end
     clip.status = "failed"
-    clip.error = handle.error
-    LOGGER:error("cannot load '%s': %s", clip.path, handle.error or "unknown")
+    clip.error = settled.error
+    LOGGER:error("cannot load '%s': %s", clip.path, settled.error or "unknown")
 end
 
 -------------------------------------------------------------------------------
@@ -876,7 +886,8 @@ function audio.newAudio(config?: Audio.Config): Audio
     self._limits = {}
     self._buckets = {}
     self._clips = {}
-    self._loads = assets.newBatch(settleClip)
+    self._inFlight = {}
+    self._loading = 0
     self._random = random.new()
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
@@ -901,7 +912,7 @@ end
 function Audio:destroy()
     -- Drained first. A clip that arrived after the mixer had gone would hold a
     -- pointer into a library that has released everything it made.
-    self._loads:wait()
+    assets.waitAll()
 
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
@@ -920,18 +931,22 @@ function Audio:destroy()
     self._buckets = {}
 
     for _, clip in pairs(self._clips) do
-        if clip._handle ~= nil then
-            clip._handle:release()
-            clip._handle = nil
+        if clip._sound ~= nil then
+            clip._sound:release()
+            clip._sound = nil
         end
         clip.resident = false
         clip.status = "released"
     end
     self._clips = {}
-    -- A fresh batch rather than a drained one, so a load the wait above ran out
-    -- of time on is dropped with the clips it was for rather than resolving
-    -- into a mixer that has gone.
-    self._loads = assets.newBatch(settleClip)
+    -- Whatever the wait above ran out of time on is given up rather than left
+    -- to settle into a mixer that has gone. A canceled decode still has its
+    -- address destroyed when the worker answers, so nothing is leaked by it.
+    for _, loading in pairs(self._inFlight) do
+        loading:cancel()
+    end
+    self._inFlight = {}
+    self._loading = 0
 
     if self._mixer ~= nil then
         self._backend.close(self._mixer)
@@ -997,10 +1012,26 @@ function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
         status = "loading",
         duration = 0.0,
         resident = false,
-        _handle = assets.loadSound(path, mode, self._streamMs),
     }
     self._clips[id] = clip
-    self._loads:add(clip._handle, clip)
+
+    -- The listener is attached where the work starts rather than added to a
+    -- list something else drains, so nothing walks the outstanding loads on a
+    -- frame where none of them finished.
+    local loading <const> = assets.loadSound(path, mode, self._streamMs)
+    self._inFlight[id] = loading
+    self._loading = self._loading + 1
+    loading:onSettle(function(settled: Future<assets.Sound>)
+        self._inFlight[id] = nil
+        self._loading = self._loading - 1
+        if settled.status == "canceled" then
+            -- Given up at destroy. There is no mixer left to point a clip at,
+            -- and reporting it as a load that failed would be a line in the log
+            -- about something nobody asked for any more.
+            return
+        end
+        settleClip(clip, settled)
+    end)
     return clip
 end
 
@@ -1023,7 +1054,12 @@ end
 ---     5000 ms default. Running out is not reported, so read `loading`
 ---     afterwards to tell a finished wait from a timed-out one.
 function Audio:waitForLoads(timeoutMs?: number)
-    self._loads:wait(timeoutMs)
+    -- The whole loader rather than a join over this instance's own futures.
+    -- `Future.all` fails a join on its first failed input, and a sound file
+    -- that is missing fails as fast as the worker can look, so a join would
+    -- stop waiting with this instance's other loads still outstanding. Draining
+    -- the loader waits for all of them and settles a superset besides.
+    assets.waitAll(timeoutMs)
 end
 
 --- Clips still being read.
@@ -1032,7 +1068,7 @@ end
 ---     that failed is settled, so this reaching zero means every `load` has an
 ---     answer and not that every answer was a success.
 function Audio:loading(): integer
-    return self._loads:pending()
+    return self._loading
 end
 
 --- Re-reads a clip's file over the clip already loaded from it.
@@ -1077,19 +1113,18 @@ function Audio:reload(path: string): boolean, string
     if not assets.installed() then
         assets.install()
     end
-    local handle = assets.loadSound(path, "resident", self._streamMs)
+    local loading = assets.loadSound(path, "resident", self._streamMs)
     assets.waitAll()
-    if handle.status ~= "ready" then
-        local reason = handle.error or ("still " .. handle.status)
-        handle:release()
+    if loading.status ~= "ready" then
+        local reason = loading.error or ("still " .. loading.status)
+        loading:cancel()
         return false, ("'%s' did not load: %s"):format(path, reason)
     end
 
     -- Swapped before the old one is let go, so the clip is never pointing at a
-    -- handle that has been released.
-    local previous = clip._handle
-    clip._handle = handle
-    settleClip(clip, handle)
+    -- clip that has been released.
+    local previous = clip._sound
+    settleClip(clip, loading)
     if previous ~= nil then
         previous:release()
     end
@@ -1283,7 +1318,7 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions, 
 
     local pointed: boolean
     if clip.resident then
-        pointed = self._backend.setTrackClip(voice.track, clip._handle.audio)
+        pointed = self._backend.setTrackClip(voice.track, clip._sound.audio)
     else
         pointed = self._backend.setTrackFile(voice.track, clip.path)
     end
@@ -2075,7 +2110,10 @@ end
 ---     answers.
 function Audio:update(dt?: number): integer
     self._now = self._now + (dt or 0.0)
-    self._loads:resolve()
+    -- The loader's own drain, which settles this instance's loads along with
+    -- everything else outstanding. An `Audio` outside an `Application` still
+    -- sees its clips arrive because of this call.
+    assets.update()
 
     for slot = 1, #self._voices do
         local voice = self._voices[slot]

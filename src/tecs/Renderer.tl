@@ -239,25 +239,30 @@ end
 --- a caller guessing it would sample the undefined remainder. The second
 --- return is the region, which reports the size that was uploaded.
 ---
---- The handle's pixels are released here: the array holds them now.
+--- This caller's hold on the pixels is released here: the array holds them now.
 ---
---- @param handle Must have loaded: any other status raises, and the pixels are
----     released whether the path was new or already registered.
+--- @param decoded What a `loadImage` future settled to. Its pixels are released
+---     whether the path was new or already registered. One whose pixels have
+---     already been released raises rather than uploading whatever is at a
+---     freed address.
 --- @return A Sprite selecting the whole image, ready to spawn.
 --- @return Where it landed, which reports the size that was uploaded rather
 ---     than the cell's. The renderer's own record, not a copy.
-function Renderer:registerImage(handle: assets.Handle): components.Sprite, TextureArray.Region
-    if handle.status ~= "ready" then
-        error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
+function Renderer:registerImage(decoded: assets.Image): components.Sprite, TextureArray.Region
+    -- The payload's own existence rather than a status word. An `Image` that
+    -- exists is a load that finished, so the only thing left to refuse is one
+    -- whose last holder already gave the pixels back.
+    if decoded.pixels == nil then
+        error(("tecs: the pixels of '%s' have been released"):format(decoded.path), 2)
     end
 
-    local image = components.imageId(handle.path)
+    local image = components.imageId(decoded.path)
     local region = self._extractor:regionOf(image)
     if region == nil then
-        region = self._backend:addImage(handle.pixels, handle.width, handle.height, handle.pitch)
+        region = self._backend:addImage(decoded.pixels, decoded.width, decoded.height, decoded.pitch)
         self._extractor:registerImage(image, region)
     end
-    handle:release()
+    decoded:release()
 
     return components.Sprite(image, region.u0, region.v0, region.u1, region.v1, region.layer), region
 end
@@ -276,37 +281,38 @@ end
 --- Fails on a path nothing is registered under, since there is no rect to write
 --- into and adding one would be `registerImage`.
 ---
---- The handle's pixels are released here: the array holds them now.
+--- This caller's hold on the pixels is released here: the array holds them now.
 ---
---- @param handle Must have loaded, must name a path already registered, and
----     must be the same size it was registered at. Each of the three raises,
----     and the pixels are only released once all three have passed.
+--- @param decoded What a `loadImage` future settled to. It must still hold its
+---     pixels, must name a path already registered, and must be the same size
+---     it was registered at. Each of the three raises, and the pixels are only
+---     released once all three have passed.
 --- @return The same Sprite `registerImage` answered with, since neither the
 ---     layer nor the rect moved.
 --- @return The region, unchanged, and still the renderer's own record.
-function Renderer:replaceImage(handle: assets.Handle): components.Sprite, TextureArray.Region
-    if handle.status ~= "ready" then
-        error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
+function Renderer:replaceImage(decoded: assets.Image): components.Sprite, TextureArray.Region
+    if decoded.pixels == nil then
+        error(("tecs: the pixels of '%s' have been released"):format(decoded.path), 2)
     end
 
-    local image = components.imageId(handle.path)
+    local image = components.imageId(decoded.path)
     local region = self._extractor:regionOf(image)
     if region == nil then
-        error(("tecs: no image is registered as '%s', so there is nothing to " .. "replace"):format(handle.path), 2)
+        error(("tecs: no image is registered as '%s', so there is nothing to " .. "replace"):format(decoded.path), 2)
     end
-    if handle.width ~= region.width or handle.height ~= region.height then
+    if decoded.width ~= region.width or decoded.height ~= region.height then
         error(
             (
                 "tecs: '%s' was registered at %dx%d and is now %dx%d; a "
                 .. "replacement keeps the size, because the sprites drawing it "
                 .. "already hold the old rect"
-            ):format(handle.path, region.width, region.height, handle.width, handle.height),
+            ):format(decoded.path, region.width, region.height, decoded.width, decoded.height),
             2
         )
     end
 
-    self._backend:replaceImage(region, handle.pixels, handle.width, handle.height, handle.pitch)
-    handle:release()
+    self._backend:replaceImage(region, decoded.pixels, decoded.width, decoded.height, decoded.pitch)
+    decoded:release()
 
     return components.Sprite(image, region.u0, region.v0, region.u1, region.v1, region.layer), region
 end
@@ -325,7 +331,7 @@ end
 
 --- The region an image already occupies, or nil if none has registered it.
 ---
---- What `registerImage` answers, without a decoded handle to answer it with.
+--- What `registerImage` answers, without a decoded image to answer it with.
 --- A caller that has lost its derived copy of a region, which a font atlas
 --- does when its metrics are re-read, would otherwise have to decode the file
 --- again only to be handed back the layer it already had and have its pixels
