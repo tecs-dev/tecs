@@ -74,7 +74,7 @@ describe("tecs.regex", function()
 
     it("expands numbered and named capture references", function()
         local name = tecs.regex.compile([[(?<last>[A-Za-z]+),\s+([A-Za-z]+)]])
-        assert.are.equal("Michael Dowling; $$", name:replace("Dowling, Michael; $", "$2 $last; $$$$"))
+        assert.are.equal("Michael Dowling; $$; $", name:replace("Dowling, Michael; $", "$2 $last; $$$$"))
     end)
 
     it("expands an unknown or unmatched capture as empty", function()
