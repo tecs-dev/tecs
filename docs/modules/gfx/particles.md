@@ -11,7 +11,7 @@ shader never sees, and it outlives the frame: a slot is handed out once, at spaw
 particle expires. What crosses back to the host is nothing at all.
 
 Three things share the work. An `Effect` is immutable data describing how particles spawn and evolve,
-registered once and shared by every emitter naming it. A `ParticleEmitter` component names an effect
+registered once under a name and shared by every emitter naming it. A `ParticleEmitter` component names an effect
 and carries playback state and a few per-instance scales. A pool owns one run of the
 [renderer](/modules/gfx/)'s instance buffer, sub-allocates a contiguous slot range to each
 emitter, and records the three compute passes that fill it.
@@ -53,6 +53,7 @@ An effect is registered once, is immutable afterwards, and is shared by every em
 
 | Field      | Default     | What it is                                                                                            |
 | ---------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| `name`     | required    | What this effect is called, and unique across the process                                             |
 | `capacity` | `256`       | Live particles one emitter of this effect can hold. At least one                                      |
 | `overflow` | `"replace"` | `"drop"` or `"replace"`: an emission with no free slot gives way, or takes the oldest live particle's |
 | `schedule` | `{}`        | When particles are emitted                                                                            |
@@ -61,6 +62,11 @@ An effect is registered once, is immutable afterwards, and is shared by every em
 | `update`   | `{}`        | How a particle evolves over its life                                                                  |
 | `render`   | `{}`        | How particles are drawn                                                                               |
 
+`name` is the only required field, and it is the whole of an effect's identity: an emitter's snapshot
+carries it, so an effect without one could not be saved and two under one name could not be told apart
+again. A nil or empty name raises, and so does a name already registered, both before any of the other
+fields are read.
+
 A steady-state emitter needs at least `rate * maxLifetime` slots or emissions are lost, which is
 checked here and warned about by the log rather than discovered as a thin spray.
 
@@ -68,6 +74,7 @@ checked here and warned about by the log rather than discovered as a thin spray.
 
 ```teal
 local sparks <const> = particles.effect({
+    name = "muzzleSparks",
     capacity = 512,
     schedule = { rate = 256, duration = 0.4, bursts = { { time = 0.0, count = 64 } } },
     spawn = { shape = "disc", width = 12.0, spread = math.pi * 2.0, space = "world" },
@@ -188,7 +195,8 @@ band, which is a separate feature.
 
 | Field         | What it is                                                                                |
 | ------------- | ----------------------------------------------------------------------------------------- |
-| `index`       | Index in the registry, counting from one                                                  |
+| `name`        | What it is called, as registered. The only thing about it that outlives the process       |
+| `index`       | Where its record sits in the assembled effect table, counting from one                    |
 | `capacity`    | Live particles one emitter of this effect holds                                           |
 | `maxLifetime` | The longest a particle can live, which decides when a stopped emitter has finished        |
 | `emitFor`     | Seconds from `play` to the last emission, or `-1` for an effect that never stops emitting |
@@ -200,6 +208,28 @@ band, which is a separate feature.
 
 The schedule is kept so `finished` and `estimatedCount` can answer from it without asking the GPU
 anything.
+
+The name is what an effect is, and `index` is only how this process reaches it: a position in
+registration order means nothing outside the process that assigned it, and nothing stores one.
+
+### The registry
+
+```teal
+function particles.find(name: string): Effect
+function particles.names(): {string}
+function particles.reset()
+```
+
+Registration is process-wide, so an effect registered anywhere is reachable from every world.
+
+- `find` answers the effect registered under `name`, or nil when nothing has that name. It is the
+  non-raising lookup, for a caller with somewhere better to put the refusal than an error raised from
+  here; a nil name answers nil rather than raising, so a restore holding no name takes the same path
+  as one holding an unknown name. What comes back is the registered effect itself, not a copy.
+- `names` answers every registered effect's name in registration order, as a fresh table each call
+  that the caller may keep and modify.
+- `reset` forgets every registered effect, so a spec can register a set again. Every handle already
+  handed out goes stale with it.
 
 ## Curves and gradients
 
@@ -336,8 +366,17 @@ is the thing this design refuses.
 
 A snapshot carries the configuration, the seed and the playback state, and not one particle. The
 field lives where a snapshot cannot reach, so a burst effect is gone by the time anybody notices and
-an ambient one comes back empty and refills over a lifetime. Restoring an emitter whose effect this
-process has not registered raises, because the effect is named by its registry index.
+an ambient one comes back empty and refills over a lifetime.
+
+The effect crosses as its name, the way a `Sprite` carries its image and an `Animation` its sheet. An
+index would be a position in registration order, so a saved one would name whichever effect the
+loading process happened to put there, and one conditional registration or one plugin installed
+earlier is enough to play a different effect and say nothing about it. A name means the same thing in
+both processes or means nothing in one of them, and the second is a case that can be caught.
+
+So it is caught. A snapshot naming no effect raises, and so does one naming an effect this build does
+not have, with a message listing the names it does. Neither loads the first effect nor drops the
+component: both of those load without a word and leave the scene playing something nobody asked for.
 
 ## Plugin
 
