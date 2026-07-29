@@ -271,12 +271,6 @@ function Extractor:setStaging(slot: integer, instances: loader.CArray, bounds: l
     self._bounds = bounds
 end
 
---- Texture-array layer the given image name index resolves to.
----
---- Fails on a name nothing was registered under. A sprite naming an image the
---- renderer has never seen has no layer to sample, and every layer that does
---- exist holds some other image, so there is nothing to fall back to that is
---- not a wrong picture on the quad.
 local function missingImageMessage(image: integer): string
     local name = components.imageName(image)
     if name == nil then
@@ -285,6 +279,12 @@ local function missingImageMessage(image: integer): string
     return ("tecs: no image is registered as '%s'"):format(name)
 end
 
+--- Texture-array layer the given image name index resolves to.
+---
+--- Fails on a name nothing was registered under. A sprite naming an image the
+--- renderer has never seen has no layer to sample, and every layer that does
+--- exist holds some other image, so there is nothing to fall back to that is
+--- not a wrong picture on the quad.
 local function slotOf(self: Extractor, image: integer): integer
     local slot = self._slotByImage[image]
     if slot ~= nil then
@@ -293,11 +293,6 @@ local function slotOf(self: Extractor, image: integer): integer
     error(missingImageMessage(image), 2)
 end
 
---- Records the layer and region an image name was uploaded into.
----
---- The upload itself belongs to whoever owns the device. What comes back is
---- the answer this side resolves names with, which is plain numbers and is
---- what a snapshot's name has to be turned into again on the next run.
 --- Whether archetype runs are laid out with room to grow.
 ---
 --- What a caller does with the answer is diagnose a layout: a scene that
@@ -308,6 +303,11 @@ function Extractor:reservesRuns(): boolean
     return self._reserve
 end
 
+--- Records the layer and region an image name was uploaded into.
+---
+--- The upload itself belongs to whoever owns the device. What comes back is
+--- the answer this side resolves names with, which is plain numbers and is
+--- what a snapshot's name has to be turned into again on the next run.
 function Extractor:registerImage(image: integer, region: TextureArray.Region)
     self._slotByImage[image] = region.layer
     self._regionByImage[image] = region

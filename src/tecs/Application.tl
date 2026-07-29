@@ -183,9 +183,10 @@ local record Application
         --- Instances the renderer's buffers are sized for. Defaults to 65536.
         ---
         --- An instance is a row the GPU draws: every renderable entity is one,
-        --- and so is every glyph of every text, since a glyph is an entity
-        --- like any other. This is a ceiling rather than a hint. Rows past it
-        --- are dropped rather than growing a buffer mid-frame, and
+        --- and so is every glyph of every text, which an instance producer
+        --- writes into a run of its own rather than spawning an entity per
+        --- glyph. This is a ceiling rather than a hint. Rows past it are
+        --- dropped rather than growing a buffer mid-frame, and
         --- `renderer.dropped` counts them.
         ---
         --- Sized independently of `maxEntities` beside it, because the two

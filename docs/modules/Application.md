@@ -82,10 +82,13 @@ A game doing its own lighting turns this down to the level it wants unlit parts 
 The arena is preallocated for this many, so it is a memory decision as much as a limit.
 
 `capacity` is a ceiling and not a hint. An instance is a row the GPU draws: every renderable entity is one, and
-so is every glyph of every text, since a glyph is an entity like any other. Rows past the ceiling are dropped
-rather than growing a buffer mid-frame, and `app.renderer.dropped` counts them. It is sized independently of
-`maxEntities` because the two count different things: a world full of entities carrying no `Renderable` needs no
-instances at all, and one text entity needs one per character.
+so is every glyph of every text, which an instance producer writes into a run of its own rather than spawning an
+entity per glyph. A glyph is deliberately not an entity: one per glyph would put every glyph in the world into a
+single archetype, so editing one string would mark that column dirty and rewrite all of them, and spawning or
+despawning glyphs would move the archetype's length and lay the whole scene out again. Rows past the ceiling
+are dropped rather than growing a buffer mid-frame, and `app.renderer.dropped` counts them. It is sized
+independently of `maxEntities` because the two count different things: a world full of entities carrying no
+`Renderable` needs no instances at all, and one text entity needs one per character.
 
 `reserveRuns` is a tuning setting, not a debugging one. Packed, a run cannot grow without shifting every run
 after it, so a spawn anywhere rewrites every instance in the scene. Reserved, a run grows into its own slack and
