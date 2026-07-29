@@ -5,6 +5,10 @@
 --- and LuaJIT can compile their arithmetic into a caller's trace. Every angle
 --- is in radians. A positive quarter turn maps `(1, 0)` to `(0, 1)`, which
 --- appears clockwise in screen coordinates whose y-axis points down.
+---
+--- Operations use direct Lua-number arithmetic for game-coordinate magnitudes.
+--- As with writing the expressions directly, values near the limits of an
+--- IEEE double can overflow when squared or underflow to zero.
 
 local abs <const> = math.abs
 local atan2 <const> = math.atan2
@@ -19,6 +23,10 @@ local TWO_PI <const> = PI * 2.0
 ---
 --- A vector is passed as separate x and y coordinates and returned as two
 --- numbers. The module creates and retains no vector objects.
+---
+--- Named `vectorMath` internally because `math` is Lua's standard library.
+--- Shadowing it makes every project's otherwise-clean type-check warn; the
+--- public name and module path remain `tecs.math`.
 local record vectorMath
     --- Adds two vectors.
     ---
@@ -26,7 +34,8 @@ local record vectorMath
     --- @param ay First vector's y coordinate.
     --- @param bx Second vector's x coordinate.
     --- @param by Second vector's y coordinate.
-    --- @return The sum's x and y coordinates.
+    --- @return The sum's x coordinate.
+    --- @return The sum's y coordinate.
     add: function(ax: number, ay: number, bx: number, by: number): number, number
 
     --- Subtracts the second vector from the first.
@@ -35,7 +44,8 @@ local record vectorMath
     --- @param ay First vector's y coordinate.
     --- @param bx Second vector's x coordinate.
     --- @param by Second vector's y coordinate.
-    --- @return The difference's x and y coordinates.
+    --- @return The difference's x coordinate.
+    --- @return The difference's y coordinate.
     subtract: function(ax: number, ay: number, bx: number, by: number): number, number
 
     --- Multiplies both coordinates by a scalar.
@@ -43,7 +53,8 @@ local record vectorMath
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
     --- @param factor Multiplier applied to both coordinates.
-    --- @return The scaled x and y coordinates.
+    --- @return The scaled x coordinate.
+    --- @return The scaled y coordinate.
     scale: function(x: number, y: number, factor: number): number, number
 
     --- Computes the dot product of two vectors.
@@ -105,8 +116,9 @@ local record vectorMath
     ---
     --- @param x Vector's x coordinate.
     --- @param y Vector's y coordinate.
-    --- @return The normalized x and y coordinates. A zero vector returns
-    ---     `(0, 0)` because it has no direction.
+    --- @return The normalized x coordinate. A zero vector returns zero
+    ---     because it has no direction.
+    --- @return The normalized y coordinate, with the same zero-vector rule.
     normalize: function(x: number, y: number): number, number
 
     --- Interpolates linearly between two points.
@@ -117,7 +129,8 @@ local record vectorMath
     --- @param by Destination point's y coordinate.
     --- @param t Unclamped interpolation amount. Zero returns the start, one
     ---     returns the destination, and values outside that interval extrapolate.
-    --- @return The interpolated x and y coordinates.
+    --- @return The interpolated x coordinate.
+    --- @return The interpolated y coordinate.
     lerp: function(ax: number, ay: number, bx: number, by: number, t: number): number, number
 
     --- Moves a point toward another by at most a given distance.
@@ -128,15 +141,10 @@ local record vectorMath
     --- @param targetY Destination point's y coordinate.
     --- @param maxDistance Greatest distance to travel. A nonpositive value
     ---     leaves the starting point unchanged.
-    --- @return The moved x and y coordinates. Reaching the destination returns
-    ---     it exactly and never overshoots.
-    moveTowards: function(
-        x: number,
-        y: number,
-        targetX: number,
-        targetY: number,
-        maxDistance: number
-    ): number, number
+    --- @return The moved x coordinate. Reaching the destination returns it
+    ---     exactly and never overshoots.
+    --- @return The moved y coordinate, with the same endpoint rule.
+    moveTowards: function(x: number, y: number, targetX: number, targetY: number, maxDistance: number): number, number
 
     --- Rotates a vector around the origin.
     ---
@@ -144,7 +152,8 @@ local record vectorMath
     --- @param y Vector's y coordinate.
     --- @param radians Rotation in radians. A positive quarter turn maps
     ---     `(1, 0)` to `(0, 1)`.
-    --- @return The rotated x and y coordinates.
+    --- @return The rotated x coordinate.
+    --- @return The rotated y coordinate.
     rotate: function(x: number, y: number, radians: number): number, number
 
     --- Computes a vector's direction.
@@ -169,8 +178,9 @@ local record vectorMath
     --- @param ay Starting vector's y coordinate.
     --- @param bx Destination vector's x coordinate.
     --- @param by Destination vector's y coordinate.
-    --- @return Radians in `[-pi, pi]`, positive in the same sense as `rotate`.
-    ---     If either vector is zero, returns zero.
+    --- @return Radians in `[-pi, pi)`, positive in the same sense as `rotate`.
+    ---     If either vector is zero, returns zero; an exact half-turn is
+    ---     negative pi.
     signedAngleBetween: function(ax: number, ay: number, bx: number, by: number): number
 
     --- Wraps an angle to one turn centered on zero.
@@ -194,8 +204,9 @@ local record vectorMath
     --- @param y Vector being projected's y coordinate.
     --- @param ontoX Projection axis's x coordinate.
     --- @param ontoY Projection axis's y coordinate.
-    --- @return The projected x and y coordinates. The axis need not be
-    ---     normalized; a zero axis returns `(0, 0)`.
+    --- @return The projected x coordinate. The axis need not be normalized;
+    ---     a zero axis returns zero.
+    --- @return The projected y coordinate, with the same zero-axis rule.
     project: function(x: number, y: number, ontoX: number, ontoY: number): number, number
 
     --- Reflects a vector across the line perpendicular to a normal.
@@ -204,8 +215,9 @@ local record vectorMath
     --- @param y Vector being reflected's y coordinate.
     --- @param normalX Surface normal's x coordinate.
     --- @param normalY Surface normal's y coordinate.
-    --- @return The reflected x and y coordinates. The normal need not be
-    ---     normalized; a zero normal returns the original vector.
+    --- @return The reflected x coordinate. The normal need not be normalized;
+    ---     a zero normal returns the original x coordinate.
+    --- @return The reflected y coordinate, with the same zero-normal rule.
     reflect: function(x: number, y: number, normalX: number, normalY: number): number, number
 end
 
@@ -268,11 +280,7 @@ function vectorMath.lerp(ax: number, ay: number, bx: number, by: number, t: numb
 end
 
 function vectorMath.moveTowards(
-    x: number,
-    y: number,
-    targetX: number,
-    targetY: number,
-    maxDistance: number
+    x: number, y: number, targetX: number, targetY: number, maxDistance: number
 ): number, number
     if maxDistance <= 0.0 then
         return x, y
@@ -313,7 +321,8 @@ function vectorMath.signedAngleBetween(ax: number, ay: number, bx: number, by: n
     if (ax == 0.0 and ay == 0.0) or (bx == 0.0 and by == 0.0) then
         return 0.0
     end
-    return atan2(ax * by - ay * bx, ax * bx + ay * by)
+    local angle <const> = atan2(ax * by - ay * bx, ax * bx + ay * by)
+    return angle == PI and -PI or angle
 end
 
 function vectorMath.wrapAngle(radians: number): number

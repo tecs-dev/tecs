@@ -6,10 +6,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local vector = require("tecs").math
 
 local function near(actual, expected)
-    assert.is_true(
-        math.abs(actual - expected) <= 1e-12,
-        ("expected %.17g, got %.17g"):format(expected, actual)
-    )
+    assert.is_true(math.abs(actual - expected) <= 1e-12, ("expected %.17g, got %.17g"):format(expected, actual))
 end
 
 local function nearPair(expectedX, expectedY, actualX, actualY)
@@ -67,6 +64,7 @@ describe("tecs.math", function()
 
         near(vector.signedAngleBetween(1, 0, 0, 1), math.pi / 2)
         near(vector.signedAngleBetween(0, 1, 1, 0), -math.pi / 2)
+        near(vector.signedAngleBetween(1, 0, -1, 0), -math.pi)
         assert.are.equal(0, vector.signedAngleBetween(0, 0, 1, 0))
     end)
 

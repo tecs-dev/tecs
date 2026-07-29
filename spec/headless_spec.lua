@@ -113,6 +113,7 @@ describe("tecs headless", function()
                     "tecs.assets", "tecs.physics", "tecs.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.platform.system",
+                    "tecs.math",
                     "tecs.platform.filesystem", "tecs.platform.watch",
                     "tecs.net", "tecs.net.http", "tecs.net.http.client",
                 }

@@ -156,9 +156,9 @@ done < <(grep -rl '^::: warning This page is pending$' --include='*.md' docs/mod
 # Fields of `record tecs` that are not modules: a function, a string, or a type
 # the root carries because it crosses subsystems. The discriminator is the one
 # already used for subordinate modules, and for the same reason: a module is
-# luacase and is declared as the type imported from a module ending in its own
-# name. Usually the alias is the same (`assets: assets`); `math: vectorMath`
-# avoids shadowing Lua's standard `math` table and still imports `tecs.math`.
+# luacase and is declared as a type imported from a module ending in its public
+# name. Usually the alias matches (`assets: assets`), but it may differ to avoid
+# shadowing a standard-library global (`math: vectorMath`).
 # `newApplication: function(...)`, `version: string` and `Transform:
 # ecs.Transform` are none of those things.
 rootnames=$(awk '

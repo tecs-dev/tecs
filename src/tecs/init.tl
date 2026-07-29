@@ -42,6 +42,8 @@ local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
 local type physics = require("tecs.physics")
 local type log = require("tecs.log")
+-- `math` is the standard library global, and shadowing it makes a clean
+-- project type-check warn. The public name and required module are still math.
 local type vectorMath = require("tecs.math")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")

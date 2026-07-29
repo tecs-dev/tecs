@@ -756,6 +756,25 @@ walking the content tree. The two loads call `filesystem.note` rather than
 keeping a list of their own, because the decode they are recording happens on a
 worker and a second list is a second answer to the same question.
 
+## Vector math stays in Lua
+
+`tecs.math` takes vectors as separate numbers and returns them as multiple
+values. A table or cdata vector would make every temporary choose an owner and
+an allocation strategy even though the engine's components already store x and
+y as separate fields. With numbers, a result can go straight into locals or an
+archetype column, and LuaJIT can compile the helper's arithmetic into the
+caller's trace.
+
+That is also why these operations are Teal rather than Rust. A dot product,
+normalization or rotation does too little work to repay an FFI call, and the
+call would be opaque to the trace around it. Native vector math starts making
+sense when one call walks a contiguous array; this API is for one vector in the
+game code already touching it.
+
+Hashes and checksums remain under `tecs.data`. They operate on byte strings,
+their exact algorithms are part of stored formats, and none is numeric geometry
+merely because its implementation contains arithmetic.
+
 ## Encoding, hashing and decompression
 
 Encoding, hashing and decompression are one public module, `tecs.data`, and
