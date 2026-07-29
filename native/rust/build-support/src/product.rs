@@ -188,6 +188,7 @@ pub fn test(root: &Path, preset: Preset) -> Result<()> {
 
     build(root, preset)?;
     let paths = Paths::new(root, preset);
+    check_product_abi(root, preset, &paths)?;
     for arguments in [
         ["--pattern", "headless_spec"],
         ["--exclude-pattern", "headless_spec"],
@@ -214,6 +215,10 @@ pub fn shaders(root: &Path, preset: Preset) -> Result<()> {
 pub fn abi_check(root: &Path, preset: Preset) -> Result<()> {
     build(root, preset)?;
     let paths = Paths::new(root, preset);
+    check_product_abi(root, preset, &paths)
+}
+
+fn check_product_abi(root: &Path, preset: Preset, paths: &Paths) -> Result<()> {
     let include_directories = if matches!(preset.dependencies, DependencyMode::System) {
         system_packages(preset)?
             .into_iter()
@@ -2365,8 +2370,14 @@ fn compile_c(
     if options.warnings {
         if std::env::consts::OS == "windows" {
             command.arg("/W4");
+            if std::env::var_os("TECS_WERROR").is_some() {
+                command.arg("/WX");
+            }
         } else {
             command.args(C_WARNINGS);
+            if std::env::var_os("TECS_WERROR").is_some() {
+                command.arg("-Werror");
+            }
         }
     }
     for include in includes {
@@ -2839,8 +2850,8 @@ mod tests {
 
     use super::{
         copy_dynamic_libraries, fetch_source_at, package_from_flags, Paths, GLSLANG_REVISION,
-        LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION, SPIRV_CROSS_REVISION,
-        SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
+        LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
+        SPIRV_CROSS_REVISION, SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
     };
 
     #[test]
