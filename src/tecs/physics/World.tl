@@ -295,7 +295,12 @@ function World:raycast(
         return nil
     end
     local value = hit[0] as loader.CStruct
-    return value.entity as integer, value.x as number, value.y as number, value.normal_x as number, value.normal_y as number, value.fraction as number
+    return value.entity as integer,
+        value.x as number,
+        value.y as number,
+        value.normal_x as number,
+        value.normal_y as number,
+        value.fraction as number
 end
 
 function World.applyForce(body: Handle, x: number, y: number)

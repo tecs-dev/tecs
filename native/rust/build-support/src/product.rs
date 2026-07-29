@@ -16,7 +16,7 @@ use crate::registry::{self, Options as RegistryOptions};
 use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
-pub const CERULEAN_REVISION: &str = "a77c1138cc738b782543693864ca153d47f55fd6";
+pub const CERULEAN_REVISION: &str = "fdcb7701e69612b15197720147ab9aba350d173b";
 pub const TEALDOC_REVISION: &str = "dfc52832471da8d5e64e4d8bb349aac029324ded";
 // Scintillua is not on LuaRocks and is pure Lua, so it is pinned and copied
 // rather than depended on. The lexers give the documentation site every

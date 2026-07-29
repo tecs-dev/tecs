@@ -1206,16 +1206,18 @@ function sheet.replace(built: Sheet): Sheet, string
     local ok, moved = sameIndices(live._ids, built._ids)
     if not ok then
         sheetsByName[built.name] = live
-        return nil, (
-            "sheet '%s' would renumber its tags at '%s', and an " .. "Animation already holds a tag index"
-        ):format(built.name, moved)
+        return nil,
+            ("sheet '%s' would renumber its tags at '%s', and an " .. "Animation already holds a tag index"):format(
+                built.name, moved
+            )
     end
     ok, moved = sameIndices(live._sliceIds, built._sliceIds)
     if not ok then
         sheetsByName[built.name] = live
-        return nil, (
-            "sheet '%s' would renumber its slices at '%s', and a " .. "Pivot already holds a slice index"
-        ):format(built.name, moved)
+        return nil,
+            ("sheet '%s' would renumber its slices at '%s', and a " .. "Pivot already holds a slice index"):format(
+                built.name, moved
+            )
     end
 
     live.count = built.count

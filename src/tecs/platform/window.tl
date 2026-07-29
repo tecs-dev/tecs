@@ -1117,9 +1117,10 @@ function Window:safeArea(): integer, integer, integer, integer
     if not (C.SDL_GetWindowSafeArea(self.handle, rectOut) as boolean) then
         return 0, 0, 0, 0
     end
-    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer, tonumber(rectOut.w) as integer, tonumber(
-        rectOut.h
-    ) as integer
+    return tonumber(rectOut.x) as integer,
+        tonumber(rectOut.y) as integer,
+        tonumber(rectOut.w) as integer,
+        tonumber(rectOut.h) as integer
 end
 
 function Window:minimumSize(): integer, integer
@@ -1456,9 +1457,10 @@ function Window:mouseRect(): integer, integer, integer, integer
     if rect == nil then
         return 0, 0, 0, 0
     end
-    return tonumber(rect.x) as integer, tonumber(rect.y) as integer, tonumber(rect.w) as integer, tonumber(
-        rect.h
-    ) as integer
+    return tonumber(rect.x) as integer,
+        tonumber(rect.y) as integer,
+        tonumber(rect.w) as integer,
+        tonumber(rect.h) as integer
 end
 
 function Window:setMouseRect(x?: integer, y?: integer, width?: integer, height?: integer): boolean
@@ -1527,9 +1529,10 @@ function Window.displayBounds(displayId?: integer): integer, integer, integer, i
     if not (C.SDL_GetDisplayBounds(display(displayId), rectOut) as boolean) then
         return 0, 0, 0, 0
     end
-    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer, tonumber(rectOut.w) as integer, tonumber(
-        rectOut.h
-    ) as integer
+    return tonumber(rectOut.x) as integer,
+        tonumber(rectOut.y) as integer,
+        tonumber(rectOut.w) as integer,
+        tonumber(rectOut.h) as integer
 end
 
 function Window.usableBounds(displayId?: integer): integer, integer, integer, integer
@@ -1539,9 +1542,10 @@ function Window.usableBounds(displayId?: integer): integer, integer, integer, in
     if not (C.SDL_GetDisplayUsableBounds(display(displayId), rectOut) as boolean) then
         return 0, 0, 0, 0
     end
-    return tonumber(rectOut.x) as integer, tonumber(rectOut.y) as integer, tonumber(rectOut.w) as integer, tonumber(
-        rectOut.h
-    ) as integer
+    return tonumber(rectOut.x) as integer,
+        tonumber(rectOut.y) as integer,
+        tonumber(rectOut.w) as integer,
+        tonumber(rectOut.h) as integer
 end
 
 function Window.contentScale(displayId?: integer): number

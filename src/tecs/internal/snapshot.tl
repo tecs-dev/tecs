@@ -921,7 +921,8 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                     -- FFI but layer-filtered: emit per-entity raw via the
                     -- per-component serializeRaw path. Still no allocation.
                     local typedColumn = column as {Component}
-                    local transforms = arch.columns[builtins.Transform as types.components.Component] as {{string: integer}}
+                    local transforms = arch.columns[builtins.Transform as types.components.Component]
+                        as {{string: integer}}
                     for row = 1, arch.entities[0] do
                         if bit.band(layerMask, bit.lshift(1, transforms[row].layer)) ~= 0 then
                             writer:writeColumnValue(c, typedColumn[row], comp)
@@ -931,7 +932,8 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                     -- Per-entity encoded value (non-FFI, or table writer).
                     local typedColumn = column as {Component}
                     if applyLayerFilter then
-                        local transforms = arch.columns[builtins.Transform as types.components.Component] as {{string: integer}}
+                        local transforms = arch.columns[builtins.Transform as types.components.Component]
+                            as {{string: integer}}
                         for row = 1, arch.entities[0] do
                             if bit.band(layerMask, bit.lshift(1, transforms[row].layer)) ~= 0 then
                                 writer:writeColumnValue(c, typedColumn[row], comp)

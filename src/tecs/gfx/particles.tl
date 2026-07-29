@@ -611,9 +611,10 @@ local function colorOf(value: Color, field: string, level: integer): number, num
     end
     if value is number then
         local packed = floor(value)
-        return floor(packed / 0x1000000) % 256 / 255.0, floor(packed / 0x10000) % 256 / 255.0, floor(
-            packed / 0x100
-        ) % 256 / 255.0, packed % 256 / 255.0
+        return floor(packed / 0x1000000) % 256 / 255.0,
+            floor(packed / 0x10000) % 256 / 255.0,
+            floor(packed / 0x100) % 256 / 255.0,
+            packed % 256 / 255.0
     end
     return value[1] or 1.0, value[2] or 1.0, value[3] or 1.0, value[4] or 1.0
 end

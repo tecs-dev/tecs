@@ -404,11 +404,12 @@ function materials.reload(): boolean, string
     for index, name in ipairs(order) do
         byName[name].id = index - 1
     end
-    return false, (
-        "the material set changed from [%s] to [%s]; ids are "
-        .. "assigned by name order, so reloading would change what every "
-        .. "Material component in the world means"
-    ):format(table.concat(previousOrder, ", "), found)
+    return false,
+        (
+            "the material set changed from [%s] to [%s]; ids are "
+            .. "assigned by name order, so reloading would change what every "
+            .. "Material component in the world means"
+        ):format(table.concat(previousOrder, ", "), found)
 end
 
 function materials.reset()

@@ -70,9 +70,10 @@ end
 function scaffold.write(templates: string, directory: string, name: string, force: boolean): boolean, string
     local existing = project.find(directory)
     if existing ~= nil and not force then
-        return false, ("%s is already inside the project at %s.\n"):format(directory, existing.root)
-            .. "A game is implemented in its src/, not scaffolded a second time inside itself.\n"
-            .. "Pass --force if a nested project is really what you want."
+        return false,
+            ("%s is already inside the project at %s.\n"):format(directory, existing.root)
+                .. "A game is implemented in its src/, not scaffolded a second time inside itself.\n"
+                .. "Pass --force if a nested project is really what you want."
     end
 
     if not files.ensure(directory) then

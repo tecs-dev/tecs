@@ -1085,9 +1085,10 @@ function Application:clearCrash(): boolean, string
         return false, "this build sets none of debug, mcpPort or watch, so it " .. "does not resume after a crash"
     end
     if self._forcedRecovery ~= nil then
-        return false, "recovery was not clean, so the device is not in the "
-            .. "state the engine intended: "
-            .. self._forcedRecovery
+        return false,
+            "recovery was not clean, so the device is not in the "
+                .. "state the engine intended: "
+                .. self._forcedRecovery
     end
 
     self._crashed = nil

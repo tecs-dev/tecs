@@ -135,9 +135,10 @@ end
 ---     Teal or Lua.
 function builder.build(self: project, paths: layout, entry?: string): builder.Result, string
     if self.native ~= nil then
-        return nil, (
-            "%s declares native code, and building it needs a C toolchain this release does not drive yet.\n"
-        ):format(project.manifest) .. "Remove the `native` key to build the Lua and assets alone."
+        return nil,
+            ("%s declares native code, and building it needs a C toolchain this release does not drive yet.\n"):format(
+                project.manifest
+            ) .. "Remove the `native` key to build the Lua and assets alone."
     end
 
     local selected, reason = projectEntry(entry or self.entry)
@@ -146,10 +147,11 @@ function builder.build(self: project, paths: layout, entry?: string): builder.Re
     end
     local override <const> = entry ~= nil
     if not files.hasSuffix(selected, ".tl") and not (override and files.hasSuffix(selected, ".lua")) then
-        return nil, (
-            override and ("entry must be a .tl or .lua file, and %s is not"):format(selected)
-            or ("entry must be a .tl file, and %s is not"):format(selected)
-        )
+        return nil,
+            (
+                override and ("entry must be a .tl or .lua file, and %s is not"):format(selected)
+                or ("entry must be a .tl file, and %s is not"):format(selected)
+            )
     end
     if not tecs.filesystem.isFile(project.path(self, selected)) then
         return nil, ("entry does not exist: %s"):format(selected)
