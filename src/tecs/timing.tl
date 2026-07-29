@@ -1,19 +1,21 @@
---- Per-stage frame timing, for judging a change to the frame's structure.
----
---- Off unless `TECS_TIMING` is set, and one boolean test per stage when it is,
---- so the default path is the path that ships.
----
---- Samples are retained per frame rather than accumulated, because a mean
---- cannot support a claim about a tail and the tail is usually half of what a
---- frame-structure change is argued about. They live in an FFI array sized
---- once, so a measured run allocates nothing per frame.
----
---- Stages are registered rather than enumerated here, so the threaded pipeline
---- adds `packetWait` where it happens rather than in a list somewhere else.
----
---- Event to photon is reported as stages too, through the same table. Frame
---- time cannot see input latency, and a pipeline change moves the two in
---- opposite directions often enough that they have to be read together.
+--[=[
+Per-stage frame timing, for judging a change to the frame's structure.
+
+Off unless `TECS_TIMING` is set, and one boolean test per stage when it is,
+so the default path is the path that ships.
+
+Samples are retained per frame rather than accumulated, because a mean
+cannot support a claim about a tail and the tail is usually half of what a
+frame-structure change is argued about. They live in an FFI array sized
+once, so a measured run allocates nothing per frame.
+
+Stages are registered rather than enumerated here, so the threaded pipeline
+adds `packetWait` where it happens rather than in a list somewhere else.
+
+Event to photon is reported as stages too, through the same table. Frame
+time cannot see input latency, and a pipeline change moves the two in
+opposite directions often enough that they have to be read together.
+]=]
 
 local ffi <const> = require("ffi")
 local time <const> = require("tecs.platform.time")

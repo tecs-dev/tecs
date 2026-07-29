@@ -1,13 +1,15 @@
---- Things outside the sequencer a program can wait for.
----
---- A subsystem registers `{isPending = fn}` under a name, and an `await` step
---- parks a cursor until that name reports the work is done. This is what lets
---- a program wait for a sprite animation without the sequencer knowing what a
---- sprite is: the dependency points inward, and the subsystem requires the
---- sequencer rather than the other way round.
----
---- Registered globally, like evaluators and for the same reason: a provider is
---- code, and a snapshot carries the name it was registered under.
+--[=[
+Things outside the sequencer a program can wait for.
+
+A subsystem registers `{isPending = fn}` under a name, and an `await` step
+parks a cursor until that name reports the work is done. This is what lets
+a program wait for a sprite animation without the sequencer knowing what a
+sprite is: the dependency points inward, and the subsystem requires the
+sequencer rather than the other way round.
+
+Registered globally, like evaluators and for the same reason: a provider is
+code, and a snapshot carries the name it was registered under.
+]=]
 
 local type types = require("tecs.types")
 

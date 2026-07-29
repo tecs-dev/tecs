@@ -1,11 +1,13 @@
---- An immutable compute pipeline.
----
---- Compute is not an optional extra here. It is how the renderer decides what
---- to draw: a compute pass culls instances and writes the draw arguments, and
---- the CPU never learns the resulting count.
----
---- The workgroup size and every resource count are reflected out of the
---- SPIR-V, so the pipeline cannot disagree with the shader it was built from.
+--[=[
+An immutable compute pipeline.
+
+Compute is not an optional extra here. It is how the renderer decides what
+to draw: a compute pass culls instances and writes the draw arguments, and
+the CPU never learns the resulting count.
+
+The workgroup size and every resource count are reflected out of the
+SPIR-V, so the pipeline cannot disagree with the shader it was built from.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

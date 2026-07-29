@@ -1,23 +1,34 @@
---- One gamepad, as an object.
----
---- A gamepad is not a set of globals the way a keyboard nearly is. It has
---- identity, a lifetime shorter than the process, metadata, capabilities that
---- differ between devices, and outputs. Two pads sharing one button set is not
---- a simplification, it is a defect: pad A releasing a button releases pad B's.
---- So each device owns its own state and is reached through its own object.
----
---- A retained reference to a device that went away is safe by construction.
---- The platform handle lives in exactly one field, exactly one function reads
---- it, and `_disconnect` clears it before the handle is closed. Every method
---- takes its quiet branch from there: queries answer as if nothing is held,
---- outputs report failure, and nothing reaches a freed pointer. A pad is never
---- revived either, so a reference held across a reconnect stays disconnected
---- and the reconnected device is a new object.
----
---- Buttons are named positionally: `south` is the button nearest the player on
---- every pad, where `a` is that button on some and the one to its right on
---- others. What is printed on the hardware is a separate question, and
---- `label` answers it, because a prompt has to show the player their own pad.
+--[[
+# Gamepads
+
+Each [`Gamepad`](tealdoc:tecs.input.Gamepad) owns one device's identity, event
+state, capabilities, and outputs. A retained reference remains safe after
+disconnection: queries return neutral values, outputs return false, and
+`connected` stays false. A reconnect creates a new object rather than reviving
+the old one.
+
+Buttons use positional names. `"south"` names the button nearest the player on
+every pad. `label("south")` returns the hardware label, such as `"a"` or
+`"cross"`, for a prompt.
+
+```teal
+local pad <const> = app.input:gamepad(1)
+if pad ~= nil and pad.connected then
+    local moveX <const> = pad:axis("leftX")
+    if pad:buttonPressed("south") then
+        jump()
+    end
+end
+```
+
+Axes use a 0.15 deadzone by default. Output methods return false when the
+device disconnects or lacks the requested hardware, so optional rumble and
+lights need no capability branch.
+
+Gamepad sensors remain off until `enableSensor` starts their event stream.
+Their readings pass through the same layer stack as buttons and replay from
+recorded events.
+]]
 
 local inputstate <const> = require("tecs.platform.inputstate")
 local inputbackend <const> = require("tecs.platform.inputbackend")
@@ -28,52 +39,64 @@ local type Buttons = inputstate.Buttons
 local type Gate = inputstate.Gate
 local type Backend = inputbackend.Backend
 
---- One finger on one of the device's touchpads, in 0..1 across the pad.
+--- `TouchpadFinger` reports one finger from the latest touchpad event.
+---
+--- Gamepad owns and reuses the record. Callers treat every field as read-only.
 local record TouchpadFinger
-    --- Which touchpad, zero-based, below `touchpads`.
+    --- Read-only. Gamepad sets `touchpad` to the zero-based touchpad index when
+    --- it creates the record.
     touchpad: integer
-    --- The finger's slot on that touchpad, zero-based. A position on the
-    --- device rather than an identity: unlike a touch-surface finger this is
-    --- not a 64-bit id, so it fits a number and is compared as one.
+    --- Read-only. Gamepad sets `finger` to the zero-based slot on that
+    --- touchpad. The value identifies a position, not a persistent finger.
     finger: integer
-    --- Position across the pad, from its top-left, in 0..1 on each axis.
+    --- Read-only. Gamepad updates `x` from 0 to 1 across the touchpad.
     x: number
+    --- Read-only. Gamepad updates `y` from 0 to 1 down the touchpad.
     y: number
-    --- How hard, in 0..1, on a device that measures it. Devices that do not
-    --- report a constant while the finger is down.
+    --- Read-only. Gamepad updates `pressure` from 0 to 1 when the device
+    --- reports it.
     pressure: number
-    --- Whether the finger is on the pad. A record for a finger that has lifted
-    --- is kept and marked down false rather than dropped, so the slot is there
-    --- to write into when the finger returns.
+    --- Read-only. Gamepad updates `down` when the finger enters or leaves the
+    --- pad and keeps the record for reuse.
     down: boolean
 end
 
+--- A `Gamepad` owns one attached gamepad and folds its event state.
+---
+--- Input owns the object. Callers use its methods and treat public fields as
+--- read-only snapshots that change on connection and remap events.
 local record Gamepad
+    --- Read-only. Exposes
+    --- [`TouchpadFinger`](tealdoc:tecs.input.TouchpadFinger), whose records
+    --- `touchpadFingers` returns. Ordinary game code does not replace this
+    --- field.
     TouchpadFinger: TouchpadFinger
 
-    --- Platform instance id. Unique among attached devices, and not reused by
-    --- this object once the device is gone.
+    --- Read-only. Input sets `id` to the platform instance id when it opens the
+    --- device and never changes it.
     id: number
-    --- Whether the device is still attached. False for good once it is: a pad
-    --- is never revived, so this only ever goes one way.
+    --- Read-only. Input sets `connected` true at open and false permanently
+    --- when the device disconnects.
     connected: boolean
-    --- What the platform calls the device, for showing the player which pad is
-    --- which. Not stable across platforms or drivers; `guid` is what matches.
+    --- Read-only. Input refreshes `name` at open and on remap. The platform
+    --- chooses it, so saved bindings use `guid` instead.
     name: string
-    --- Device family: "xboxOne", "ps5", "switchPro", "standard", "unknown".
+    --- Read-only. Input refreshes `kind` at open and on remap. It contains a
+    --- platform device family such as `"xboxOne"`, `"ps5"` or `"standard"`.
     kind: string
-    --- Stable hardware identity, for matching saved bindings.
+    --- Read-only. Input refreshes `guid` at open and on remap. Game code uses
+    --- it to match saved bindings.
     guid: string
-    --- Where the platform says the device is attached. Empty when it declines
-    --- to say.
+    --- Read-only. Input refreshes `path` at open and on remap. It contains an
+    --- empty string when the platform declines to report one.
     path: string
-    --- Player slot the platform assigned, or -1 for none.
+    --- Read-only. Input refreshes `playerIndex` on open, remap and a successful
+    --- `setPlayerIndex`. It contains -1 when the device has no slot.
     playerIndex: integer
-    --- Touchpads the device carries. Zero on most.
+    --- Read-only. Input refreshes `touchpads` at open and on remap.
     touchpads: integer
 
-    --- Where every outbound command goes, and the only thing here that knows
-    --- about SDL.
+    --- The backend handles every outbound command and isolates SDL.
     _backend: Backend
     --- The shared layer stack, not one of this pad's own: a layer blocks every
     --- device or none.
@@ -92,6 +115,154 @@ local record Gamepad
     --- Button labels already asked for. Dropped whole on a remap, since that
     --- is the one thing that changes them.
     _labels: {integer: string}
+
+    --- Engine-owned. Opens a device for an Input object.
+    ---
+    --- Ordinary game code gets gamepads from `Input:gamepads` and must not call
+    --- this function.
+    ---
+    --- @param backend Input supplies the platform backend.
+    --- @param gate Input supplies its shared layer gate.
+    --- @param id Input supplies the platform instance id.
+    --- @return Returns the opened gamepad, or nil when the device disappeared.
+    openGamepad: function(backend: Backend, gate: Gate, id: number): Gamepad
+
+    --- Returns whether a button is held.
+    ---
+    --- @param button The caller supplies a positional name or platform number.
+    ---     An unknown name raises.
+    --- @param layer The caller omits this value to read the base layer.
+    --- @return Returns false when the layer cannot read.
+    buttonDown: function(self: Gamepad, button: string | integer, layer?: Layer): boolean
+
+    --- Returns whether a button went down in the active tier.
+    ---
+    --- @param button The caller supplies a positional name or platform number.
+    ---     An unknown name raises.
+    --- @param layer The caller omits this value to read the base layer.
+    --- @return Returns false when the layer cannot read.
+    buttonPressed: function(self: Gamepad, button: string | integer, layer?: Layer): boolean
+
+    --- Returns whether a button came up in the active tier.
+    ---
+    --- @param button The caller supplies a positional name or platform number.
+    ---     An unknown name raises.
+    --- @param layer The caller omits this value to read the base layer.
+    --- @return Returns false when the layer cannot read.
+    buttonReleased: function(self: Gamepad, button: string | integer, layer?: Layer): boolean
+
+    --- Returns an axis value after applying a deadzone.
+    ---
+    --- Sticks return -1 to 1 and triggers return 0 to 1. Values outside the
+    --- deadzone keep their original magnitude.
+    ---
+    --- @param axis The caller supplies a name or platform number. An unknown
+    ---     name raises.
+    --- @param deadzone The caller supplies the zero threshold or omits it for
+    ---     the hardware-oriented default of 0.15.
+    --- @param layer The caller omits this value to read the base layer.
+    --- @return Returns zero when the layer cannot read or no event has set the
+    ---     axis.
+    axis: function(self: Gamepad, axis: string | integer, deadzone?: number, layer?: Layer): number
+
+    --- Returns whether the device carries a button.
+    ---
+    --- @param button The caller supplies a name or platform number.
+    --- @return Returns false after disconnection.
+    hasButton: function(self: Gamepad, button: string | integer): boolean
+
+    --- Returns whether the device carries an axis.
+    ---
+    --- @param axis The caller supplies a name or platform number.
+    --- @return Returns false after disconnection.
+    hasAxis: function(self: Gamepad, axis: string | integer): boolean
+
+    --- Returns the hardware label printed on a button.
+    ---
+    --- @param button The caller supplies a positional name or platform number.
+    --- @return Returns a label such as `"a"` or `"cross"`, or `"unknown"`
+    ---     after disconnection.
+    label: function(self: Gamepad, button: string | integer): string
+
+    --- Returns the power state and charge.
+    ---
+    --- @return Returns `"onBattery"`, `"charging"`, `"charged"`,
+    ---     `"noBattery"`, `"unknown"` or `"error"`.
+    --- @return Returns the percentage from 0 to 100, or -1 when unavailable.
+    power: function(self: Gamepad): string, integer
+
+    --- Returns whether the device carries a sensor.
+    ---
+    --- @param sensor The caller supplies `"gyro"`, `"accelerometer"` or a
+    ---     platform number.
+    --- @return Returns false after disconnection.
+    hasSensor: function(self: Gamepad, sensor: string | integer): boolean
+
+    --- Enables or disables a gamepad sensor event stream.
+    ---
+    --- @param sensor The caller supplies a sensor name or platform number.
+    --- @param enabled The caller passes false to disable the stream; nil and
+    ---     true enable it.
+    --- @return Returns whether the device accepted the change.
+    enableSensor: function(self: Gamepad, sensor: string | integer, enabled?: boolean): boolean
+
+    --- Returns whether a gamepad sensor is streaming.
+    ---
+    --- @param sensor The caller supplies a sensor name or platform number.
+    --- @return Returns live device state and false after disconnection.
+    sensorEnabled: function(self: Gamepad, sensor: string | integer): boolean
+
+    --- Returns the latest event reading from a gamepad sensor.
+    ---
+    --- @param sensor The caller supplies a sensor name or platform number.
+    --- @param layer The caller omits this value to read the base layer.
+    --- @return Returns the x component, or zero when unreadable.
+    --- @return Returns the y component, or zero when unreadable.
+    --- @return Returns the z component, or zero when unreadable.
+    sensor: function(self: Gamepad, sensor: string | integer, layer?: Layer): number, number, number
+
+    --- Returns the fingers currently on a gamepad touchpad.
+    ---
+    --- @param touchpad The caller supplies a zero-based index or omits it for
+    ---     the first touchpad.
+    --- @param layer The caller omits this value to read the base layer.
+    --- @return Returns a new list of Gamepad-owned records. Callers copy values
+    ---     they need to retain.
+    touchpadFingers: function(self: Gamepad, touchpad?: integer, layer?: Layer): {TouchpadFinger}
+
+    --- Rumbles the low- and high-frequency motors.
+    ---
+    --- A new call replaces an active effect.
+    ---
+    --- @param low The caller supplies the low-frequency strength from 0 to 1.
+    --- @param high The caller supplies the high-frequency strength from 0 to 1.
+    --- @param seconds The caller supplies the duration in seconds.
+    --- @return Returns false after disconnection or without rumble hardware.
+    rumble: function(self: Gamepad, low: number, high: number, seconds: number): boolean
+
+    --- Rumbles the left and right trigger motors.
+    ---
+    --- @param left The caller supplies the left strength from 0 to 1.
+    --- @param right The caller supplies the right strength from 0 to 1.
+    --- @param seconds The caller supplies the duration in seconds.
+    --- @return Returns false after disconnection or without trigger motors.
+    rumbleTriggers: function(self: Gamepad, left: number, right: number, seconds: number): boolean
+
+    --- Sets the gamepad light color.
+    ---
+    --- @param red The caller supplies the red channel from 0 to 1.
+    --- @param green The caller supplies the green channel from 0 to 1.
+    --- @param blue The caller supplies the blue channel from 0 to 1.
+    --- @return Returns false after disconnection or without a light.
+    setLED: function(self: Gamepad, red: number, green: number, blue: number): boolean
+
+    --- Assigns the platform player slot.
+    ---
+    --- A successful call updates the read-only `playerIndex` field.
+    ---
+    --- @param index The caller supplies a zero-based slot or -1 for none.
+    --- @return Returns whether the device accepted the slot.
+    setPlayerIndex: function(self: Gamepad, index: integer): boolean
 
     -- Declared here because opening a device calls it, and the definition
     -- reads more naturally beside the rest of the lifetime.
@@ -117,14 +288,6 @@ local function live(self: Gamepad): loader.CPtr
     return self._handle
 end
 
---- Opens a device and reads what it says about itself.
----
---- Returns nil when the platform will not open it, which happens for a device
---- unplugged between enumeration and here.
---- @param gate The shared layer stack, which every query on this pad is
----     answered against.
---- @param id The platform's instance id, from `Backend.attachedGamepads` or a
----     `gamepadAdded` event.
 function Gamepad.openGamepad(backend: Backend, gate: Gate, id: number): Gamepad
     local handle = backend.openGamepad(id)
     if handle == nil then
@@ -158,16 +321,15 @@ function Gamepad:_readInfo()
     self.path = info.path
     self.playerIndex = info.playerIndex
     self.touchpads = info.touchpads
-    -- Labels are per device and per button, and a remap can change them, so
-    -- the cache is dropped rather than refreshed field by field.
+    -- Labels belong to a device and button. A remap can change them, so drop
+    -- the whole cache.
     self._labels = {}
 end
 
 --- Detaches the object from the device and closes it.
 ---
---- Held buttons are released first, because the platform will never deliver
---- the release for a device that is gone and a button held forever is worse
---- than one that never worked.
+--- Releases held buttons first because the platform sends no release after
+--- the device disappears.
 function Gamepad:_disconnect()
     local handle = self._handle
     self.connected = false
@@ -282,8 +444,6 @@ local function resolveSensor(self: Gamepad, sensor: string | integer): integer
     return sensor
 end
 
---- Whether a button is held. Names are positional: "south", "leftShoulder",
---- "dpadUp".
 function Gamepad:buttonDown(button: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -291,8 +451,6 @@ function Gamepad:buttonDown(button: string | integer, layer?: Layer): boolean
     return self._buttons.down[resolveButton(self, button)] == true
 end
 
---- Whether a button went down. Reads the latched set inside a fixed step, so
---- a press that began and ended between two steps is not lost.
 function Gamepad:buttonPressed(button: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -301,7 +459,6 @@ function Gamepad:buttonPressed(button: string | integer, layer?: Layer): boolean
     return edges[resolveButton(self, button)] == true
 end
 
---- Whether a button came up, on the same tiers as `buttonPressed`.
 function Gamepad:buttonReleased(button: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -310,17 +467,6 @@ function Gamepad:buttonReleased(button: string | integer, layer?: Layer): boolea
     return edges[resolveButton(self, button)] == true
 end
 
---- An axis in -1..1, or a trigger in 0..1, or zero if the layer cannot read.
----
---- Names are "leftX", "rightY", "leftTrigger" and so on. Sticks report Y
---- growing downward, matching the screen rather than a maths convention.
----
---- Values inside the deadzone read as zero and values outside it are not
---- rescaled, so a stick leaving the deadzone steps from zero to the deadzone
---- magnitude. A game that wants a continuous ramp rescales what it gets.
---- @param deadzone Magnitude below which the axis reads as zero. Defaults to a
----     value that suits the hardware, since stick drift is a property of the
----     device rather than of any one game.
 function Gamepad:axis(axis: string | integer, deadzone?: number, layer?: Layer): number
     if not self._gate:canRead(layer) then
         return 0.0
@@ -333,12 +479,6 @@ function Gamepad:axis(axis: string | integer, deadzone?: number, layer?: Layer):
     return value
 end
 
---- Whether the device carries a button at all, so a prompt can be omitted
---- rather than shown for something the player does not have.
----
---- Asked of the device rather than of the layer stack, so this answers the
---- same way whatever is on top. A disconnected pad answers false, which is the
---- same answer a prompt wants.
 function Gamepad:hasButton(button: string | integer): boolean
     local handle = live(self)
     if handle == nil then
@@ -347,10 +487,6 @@ function Gamepad:hasButton(button: string | integer): boolean
     return self._backend.gamepadHasButton(handle, resolveButton(self, button))
 end
 
---- Whether the device carries an axis, on the same terms as `hasButton`.
----
---- Worth asking before binding: a pad with no right stick reads zero on it
---- forever, which is indistinguishable from one the player is not moving.
 function Gamepad:hasAxis(axis: string | integer): boolean
     local handle = live(self)
     if handle == nil then
@@ -359,10 +495,6 @@ function Gamepad:hasAxis(axis: string | integer): boolean
     return self._backend.gamepadHasAxis(handle, resolveAxis(self, axis))
 end
 
---- What is printed on a button, for a prompt: "a", "cross", "square".
----
---- Cached, because a prompt asks every frame it is on screen and the answer
---- only changes when the device is remapped, which drops the cache.
 function Gamepad:label(button: string | integer): string
     local handle = live(self)
     if handle == nil then
@@ -378,12 +510,6 @@ function Gamepad:label(button: string | integer): string
     return found
 end
 
---- Power state name and charge percentage.
----
---- States are "onBattery", "charging", "charged", "noBattery", "unknown" and
---- "error". The percentage is -1 wherever the device declines to report one,
---- which includes every state that is not about a battery.
---- @return The state name, then the charge in 0..100 or -1.
 function Gamepad:power(): string, integer
     local handle = live(self)
     if handle == nil then
@@ -396,7 +522,6 @@ end
 -- Sensors
 -------------------------------------------------------------------------------
 
---- Whether the device carries a sensor: "gyro" or "accelerometer".
 function Gamepad:hasSensor(sensor: string | integer): boolean
     local handle = live(self)
     if handle == nil then
@@ -405,11 +530,6 @@ function Gamepad:hasSensor(sensor: string | integer): boolean
     return self._backend.gamepadHasSensor(handle, resolveSensor(self, sensor))
 end
 
---- Turns a sensor on or off.
----
---- Off by default and opt-in on purpose: an enabled sensor delivers an event
---- every few milliseconds, and a game that does not read one should not pay
---- for the stream.
 function Gamepad:enableSensor(sensor: string | integer, enabled?: boolean): boolean
     local handle = live(self)
     if handle == nil then
@@ -418,11 +538,6 @@ function Gamepad:enableSensor(sensor: string | integer, enabled?: boolean): bool
     return self._backend.setGamepadSensor(handle, resolveSensor(self, sensor), enabled ~= false)
 end
 
---- Whether a sensor is currently delivering readings.
----
---- Asked of the device, so this reports what is actually streaming rather than
---- what `enableSensor` was last asked for: a request the device refused shows
---- up here as false.
 function Gamepad:sensorEnabled(sensor: string | integer): boolean
     local handle = live(self)
     if handle == nil then
@@ -431,10 +546,6 @@ function Gamepad:sensorEnabled(sensor: string | integer): boolean
     return self._backend.gamepadSensorEnabled(handle, resolveSensor(self, sensor))
 end
 
---- The most recent reading from a sensor, as three components.
----
---- Folded from the event stream rather than polled, so a replay reproduces it
---- and a blocked layer cannot read it.
 function Gamepad:sensor(sensor: string | integer, layer?: Layer): number, number, number
     if not self._gate:canRead(layer) then
         return 0.0, 0.0, 0.0
@@ -450,13 +561,6 @@ end
 -- Touchpads
 -------------------------------------------------------------------------------
 
---- Fingers currently on a touchpad, in 0..1 across it.
----
---- The records are reused between calls, so anything retaining one has to copy
---- it. The list is not: a fresh one is built per call, which makes this a poor
---- thing to ask every frame from a hot path.
---- @param touchpad Which touchpad, zero-based. Defaults to the first, which is
----     the only one on every device that has any.
 function Gamepad:touchpadFingers(touchpad?: integer, layer?: Layer): {TouchpadFinger}
     local out: {TouchpadFinger} = {}
     if not self._gate:canRead(layer) then
@@ -478,16 +582,6 @@ end
 -- Outputs
 -------------------------------------------------------------------------------
 
---- Rumbles both motors, at 0..1 each, for `seconds`.
----
---- Returns false rather than raising when the device is gone or has no motor,
---- because rumble is a garnish and a game should not have to guard it.
----
---- A second call replaces the first rather than adding to it, so a long effect
---- is canceled by a short one. Seconds are rounded to milliseconds, which is
---- the resolution the platform takes.
---- @param low The heavier, lower-frequency motor.
---- @param high The lighter, higher-frequency one.
 function Gamepad:rumble(low: number, high: number, seconds: number): boolean
     local handle = live(self)
     if handle == nil then
@@ -496,11 +590,6 @@ function Gamepad:rumble(low: number, high: number, seconds: number): boolean
     return self._backend.rumble(handle, low, high, math.floor((seconds or 0.0) * 1000.0 + 0.5))
 end
 
---- Rumbles the triggers, on the devices that have motors in them.
----
---- Separate from `rumble` because the motors are separate hardware: a device
---- with trigger motors has the body motors too, and asking for one does
---- nothing to the other. False on everything else.
 function Gamepad:rumbleTriggers(left: number, right: number, seconds: number): boolean
     local handle = live(self)
     if handle == nil then
@@ -509,10 +598,6 @@ function Gamepad:rumbleTriggers(left: number, right: number, seconds: number): b
     return self._backend.rumbleTriggers(handle, left, right, math.floor((seconds or 0.0) * 1000.0 + 0.5))
 end
 
---- Sets the device's light, in 0..1 per channel.
----
---- The bar or ring some pads carry, not the numbered player indicator, which
---- `setPlayerIndex` drives. False on a device with neither.
 function Gamepad:setLED(red: number, green: number, blue: number): boolean
     local handle = live(self)
     if handle == nil then
@@ -521,12 +606,6 @@ function Gamepad:setLED(red: number, green: number, blue: number): boolean
     return self._backend.setLED(handle, red, green, blue)
 end
 
---- Assigns the player slot, which is what lights the numbered indicator.
----
---- `playerIndex` is updated only if the platform accepted the change, so the
---- field describes the device rather than the last request. Nothing here
---- prevents two pads holding the same slot; that is the caller's to arrange.
---- @param index The slot, zero-based, or -1 for none.
 function Gamepad:setPlayerIndex(index: integer): boolean
     local handle = live(self)
     if handle == nil then

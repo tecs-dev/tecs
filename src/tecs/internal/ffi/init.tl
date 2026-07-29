@@ -1,4 +1,6 @@
---- FFI utilities for array-backed ECS internals.
+--[=[
+FFI utilities for array-backed ECS internals.
+]=]
 
 local C <const> = require("ffi")
 local types <const> = require("tecs.types")

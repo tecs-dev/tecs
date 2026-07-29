@@ -1,19 +1,21 @@
---- The pass currently open on each command buffer.
----
---- SDL forbids beginning any render, compute or copy pass on a command buffer
---- while another is open, so there is at most one entry per buffer and in
---- practice at most one entry at all. What the table exists for is the case the
---- call site cannot cover: a pass body that throws skips the `finish` written
---- after it, and a command buffer with a pass still open can be neither
---- submitted nor canceled. Recovery has the command buffer and nothing else,
---- so this is how it reaches the pass.
----
---- Registration is by command buffer rather than by frame because a pass is
---- begun against a command buffer and nothing else is threaded through to the
---- places that begin one: a compute stage a game installs receives the frame,
---- but the pipeline's own passes are recorded from three modules that only ever
---- see the buffer. Keyed this way, every one of them is covered without being
---- asked to opt in.
+--[=[
+The pass currently open on each command buffer.
+
+SDL forbids beginning any render, compute or copy pass on a command buffer
+while another is open, so there is at most one entry per buffer and in
+practice at most one entry at all. What the table exists for is the case the
+call site cannot cover: a pass body that throws skips the `finish` written
+after it, and a command buffer with a pass still open can be neither
+submitted nor canceled. Recovery has the command buffer and nothing else,
+so this is how it reaches the pass.
+
+Registration is by command buffer rather than by frame because a pass is
+begun against a command buffer and nothing else is threaded through to the
+places that begin one: a compute stage a game installs receives the frame,
+but the pipeline's own passes are recorded from three modules that only ever
+see the buffer. Keyed this way, every one of them is covered without being
+asked to opt in.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

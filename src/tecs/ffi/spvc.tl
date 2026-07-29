@@ -1,7 +1,9 @@
---- SPIRV-Cross binding: SPIR-V to Metal Shading Language.
----
---- The back half of the shader pipeline. Homebrew ships SPIRV-Cross as static
---- archives only, so `make spvc` links the shared object this loads.
+--[=[
+SPIRV-Cross binding: SPIR-V to Metal Shading Language.
+
+The back half of the shader pipeline. Homebrew ships SPIRV-Cross as static
+archives only, so `make spvc` links the shared object this loads.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

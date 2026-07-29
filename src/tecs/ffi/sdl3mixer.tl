@@ -1,18 +1,20 @@
---- SDL3_mixer binding: file bytes to a mix.
----
---- The SDL3 library is `MIX_*` and shares nothing but a name with the SDL2
---- `Mix_*` one. A mixer owns tracks, a track is one voice, and a tag is a name
---- several tracks answer to at once.
----
---- Loading happens on a worker, so this is loaded in the worker's state as well
---- as the main one. `ffi.load` resolves to the same already-mapped library in
---- both, so there is one copy of the decoders in the process, and the library's
---- own initialisation is process-wide rather than per-state.
----
---- `MIX_Init` is documented as not thread safe, so `init` is called from the
---- main thread only, before anything is sent to a worker that will decode.
---- The refcount it keeps is the library's; the flag here only stops this state
---- asking twice.
+--[=[
+SDL3_mixer binding: file bytes to a mix.
+
+The SDL3 library is `MIX_*` and shares nothing but a name with the SDL2
+`Mix_*` one. A mixer owns tracks, a track is one voice, and a tag is a name
+several tracks answer to at once.
+
+Loading happens on a worker, so this is loaded in the worker's state as well
+as the main one. `ffi.load` resolves to the same already-mapped library in
+both, so there is one copy of the decoders in the process, and the library's
+own initialisation is process-wide rather than per-state.
+
+`MIX_Init` is documented as not thread safe, so `init` is called from the
+main thread only, before anything is sent to a worker that will decode.
+The refcount it keeps is the library's; the flag here only stops this state
+asking twice.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

@@ -6,16 +6,16 @@ Thanks for your interest in contributing!
 
 - `cargo xtask test` must pass.
 - Add tests for new features, bug fixes, or edge cases when reasonable.
-- **Update `docs/` for any user-facing change.** A change a game can see is not
-  done until its page says so. Prose is the one thing no test can check, so the
-  only defense is the person making the change. `cargo xtask docs-dev` serves the site
-  with hot reload.
+- **Update the generated reference for any user-facing change.** Module
+  introductions and examples live in long Teal doc comments; declaration
+  docblocks carry symbol contracts. Markdown under `docs/` carries guides that
+  span modules. A change a game can see is not done until the relevant source
+  says so. `cargo xtask docs-dev` serves the site with hot reload.
 - **`cargo xtask docs-check` must pass.** It requires a `description:` on every
   page, then renders the site, which is where the rest of the gate is: the
   `before_build` hook in `tlconfig.lua` holds the pages to `src/tecs/init.tl`,
   and tealdoc resolves every link and anchor over the HTML it just wrote. A
-  page's reference is rendered at build time from the modules the page names,
-  so nothing below the `@generated` marker is written into the tree.
+  page's reference is rendered at build time from the modules the page names.
 - **Public docblocks carry `@param` and `@return`**, and they say what the
   signature cannot: units, coordinate spaces, what nil means, what happens at a
   boundary. A tag that restates the parameter's name is worse than none.
@@ -29,7 +29,8 @@ with it in review.
 
 What it cannot decide is in `STYLE.md`: naming, the file and module split,
 early returns over deep nesting, and comments that say why rather than what.
-Documentation comments start with `---`.
+Module documentation uses long `--[=[ ... ]=]` comments. Declaration
+documentation starts with `---`.
 
 ## Changing the C
 

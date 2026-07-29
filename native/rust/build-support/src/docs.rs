@@ -1,12 +1,11 @@
 //! The documentation site, which tealdoc renders from `tealdoc.site` in
 //! `tlconfig.lua`.
 //!
-//! One program owns both halves of a page: the prose above the page's
-//! `<!-- @generated` marker and the reference rendered from the modules the
-//! page names. The gates that used to hold two programs in step are the
-//! generator's own now, and run inside the build: link and anchor validation
-//! is tealdoc's, and the site's `before_build` hook holds the pages to
-//! `src/tecs/init.tl`.
+//! One program owns a module page: its Markdown title, the module prose from
+//! Teal long doc comments, and the declaration reference. The gates that used
+//! to hold two programs in step are the generator's own now, and run inside
+//! the build: link and anchor validation is tealdoc's, and the site's
+//! `before_build` hook holds the pages to `src/tecs/init.tl`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -195,7 +194,16 @@ fn reply(connection: &mut TcpStream, code: u16, kind: &str, body: &[u8]) -> Resu
     let reason = if code == 200 { "OK" } else { "Error" };
     write!(
         connection,
-        "HTTP/1.1 {code} {reason}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        concat!(
+            "HTTP/1.1 {} {}\r\n",
+            "Content-Type: {}\r\n",
+            "Content-Length: {}\r\n",
+            "Cache-Control: no-store\r\n",
+            "Connection: close\r\n\r\n"
+        ),
+        code,
+        reason,
+        kind,
         body.len()
     )?;
     connection.write_all(body)?;
@@ -214,8 +222,218 @@ fn reply(connection: &mut TcpStream, code: u16, kind: &str, body: &[u8]) -> Resu
 pub fn check(root: &Path) -> Result<()> {
     check_descriptions(root)?;
     let scratch = tempfile::Builder::new().prefix("tecs-docs.").tempdir()?;
-    build(root, &scratch.path().join("site"))?;
+    let site = scratch.path().join("site");
+    build(root, &site)?;
+    check_module_intro(root, &site)?;
+    check_rendered_hierarchy(&site)?;
+    check_rendered_writing(&site)?;
     println!("OK: the site builds, and every link and anchor in it resolves");
+    Ok(())
+}
+
+/// Rejects generated prose that the source-page checks cannot see, including
+/// declaration docs and Tealdoc's marker for an undocumented public item.
+fn check_rendered_writing(site: &Path) -> Result<()> {
+    for entry in WalkDir::new(site) {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type().is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("md")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(path)?;
+        let mut property_heading = None;
+        for (line_number, line) in text.lines().enumerate() {
+            if line.contains('—') {
+                anyhow::bail!("{}:{} uses an em dash", path.display(), line_number + 1);
+            }
+            if line.starts_with('|')
+                && line
+                    .split('|')
+                    .nth(1)
+                    .is_some_and(|cell| cell.trim().is_empty())
+            {
+                anyhow::bail!(
+                    "{}:{} has a generated table row with an empty first cell",
+                    path.display(),
+                    line_number + 1
+                );
+            }
+            if let Some(heading) = property_heading {
+                if !line.trim().is_empty() {
+                    let owned = ["Caller-writable.", "Read-only.", "Engine-owned."]
+                        .iter()
+                        .any(|prefix| line.starts_with(prefix));
+                    if !owned {
+                        anyhow::bail!(
+                            "{}:{} documents a public field without an ownership prefix",
+                            path.display(),
+                            heading
+                        );
+                    }
+                    property_heading = None;
+                }
+            }
+            if line.starts_with('#')
+                && (line.contains("tealdoc-kind-variable") || line.contains("tealdoc-kind-field"))
+            {
+                property_heading = Some(line_number + 1);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Requires module pages to keep one page title and a contiguous heading
+/// hierarchy. Tealdoc rebases headings from module and symbol comments into
+/// their rendered context, so a source `#` can never create a second page
+/// title or skip from the page title to a deeper level.
+fn check_rendered_hierarchy(site: &Path) -> Result<()> {
+    let modules = site.join("modules");
+    for entry in WalkDir::new(&modules) {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type().is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("md")
+        {
+            continue;
+        }
+
+        let text = fs::read_to_string(path)?;
+        let mut in_fence = false;
+        let mut h1_count = 0;
+        let mut previous_level = None;
+        for (line_number, line) in text.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence {
+                continue;
+            }
+
+            let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+            if hashes == 0 || hashes > 6 || trimmed.as_bytes().get(hashes).copied() != Some(b' ') {
+                continue;
+            }
+            if hashes == 1 {
+                h1_count += 1;
+            }
+            if let Some(previous) = previous_level {
+                if hashes > previous + 1 {
+                    anyhow::bail!(
+                        "{}:{} skips from H{} to H{}",
+                        path.display(),
+                        line_number + 1,
+                        previous,
+                        hashes
+                    );
+                }
+            } else if hashes != 1 {
+                anyhow::bail!(
+                    "{}:{} starts its hierarchy at H{}",
+                    path.display(),
+                    line_number + 1,
+                    hashes
+                );
+            }
+            previous_level = Some(hashes);
+        }
+        if h1_count != 1 {
+            anyhow::bail!(
+                "{} has {h1_count} H1 headings; module pages require exactly one",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Holds Tealdoc's three module-documentation handoffs together: the parser
+/// reads the file-leading long comment, the projected public view retains it,
+/// and the site places it ahead of the symbol summary.
+fn check_module_intro(root: &Path, site: &Path) -> Result<()> {
+    let source_path = root.join("src/tecs/platform/filesystem.tl");
+    let source = fs::read_to_string(&source_path)?;
+    let equals = source
+        .strip_prefix("--[")
+        .and_then(|rest| rest.find('[').map(|end| &rest[..end]))
+        .filter(|value| value.chars().all(|character| character == '='))
+        .with_context(|| {
+            format!(
+                "{} does not start with a long module doc comment",
+                source_path.display()
+            )
+        })?;
+    let opening = 4 + equals.len();
+    let closing = format!("]{}]", equals);
+    let end = source[opening..]
+        .find(&closing)
+        .map(|offset| opening + offset)
+        .with_context(|| {
+            format!(
+                "{} has an unterminated module doc comment",
+                source_path.display()
+            )
+        })?;
+    let first_line = source[opening..end]
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .context("the filesystem module doc comment has no prose")?;
+
+    let output_path = site.join("modules/filesystem.md");
+    let output = fs::read_to_string(&output_path)?;
+    let introduction = output.find(first_line).with_context(|| {
+        format!(
+            "{} omits the module prose from {}",
+            output_path.display(),
+            source_path.display()
+        )
+    })?;
+    let contents = output.find("## Module contents").with_context(|| {
+        format!(
+            "{} does not place its API summary in Module contents",
+            output_path.display()
+        )
+    })?;
+    let summary = ["**Types**", "**Functions**", "**Values**"]
+        .into_iter()
+        .filter_map(|heading| output.find(heading))
+        .min()
+        .with_context(|| format!("{} has no API summary", output_path.display()))?;
+    if introduction > contents || contents > summary {
+        anyhow::bail!(
+            "{} does not order module prose, Module contents and its API summary",
+            output_path.display()
+        );
+    }
+    let function_summary = output
+        .find("**Functions**")
+        .with_context(|| format!("{} has no function summary", output_path.display()))?;
+    let type_summary = output
+        .find("**Types**")
+        .with_context(|| format!("{} has no type summary", output_path.display()))?;
+    if function_summary > type_summary {
+        anyhow::bail!(
+            "{} places the type summary before the function summary",
+            output_path.display()
+        );
+    }
+    let functions = output
+        .find("\n## Functions\n")
+        .with_context(|| format!("{} has no function details", output_path.display()))?;
+    let types = output
+        .find("\n## Types\n")
+        .with_context(|| format!("{} has no type details", output_path.display()))?;
+    if functions > types {
+        anyhow::bail!(
+            "{} places type details before function details",
+            output_path.display()
+        );
+    }
     Ok(())
 }
 

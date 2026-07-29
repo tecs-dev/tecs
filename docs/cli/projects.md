@@ -1,12 +1,12 @@
 ---
-description: "What the tecs command treats as a project: the tecs.lua manifest, its fields, and how the entry file is found"
+description: "The tecs.lua project manifest, its fields, and entry-file discovery"
 outline: deep
 ---
 
 # Projects
 
-A directory containing `tecs.lua`, which returns a table. The file is both the marker and the manifest, and the
-tool searches upward from the working directory for it, so it can be run from a subdirectory.
+A project contains a `tecs.lua` manifest. Project commands search upward from the working directory, so they also
+work from a subdirectory.
 
 ```lua
 return {
@@ -18,10 +18,10 @@ return {
 }
 ```
 
-Lua rather than JSON, for three reasons: no parser is needed, it takes comments, and it can be type-checked by the
-same `tl` the tool already runs. Every field except `name` has a default.
+The Lua manifest supports comments and uses the same toolchain as the game. Every field except `name` has a
+default.
 
 `tlconfig.lua` is still written by `tecs new`, because `tl` needs it, but it is not the project marker.
 
-The entry file compiles to `build/main.lua` and runs through the seam the host already has: `tecs --entry
-build/main.lua`. It must return an application. See [getting started](/getting-started#entry-file).
+The entry file compiles to `build/main.lua` and must return an application. See
+[getting started](/getting-started#entry-file).

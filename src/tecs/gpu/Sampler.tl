@@ -1,9 +1,11 @@
---- A texture sampler.
----
---- Deferred passes read the previous pass's output one texel per fragment, so
---- the default is nearest with clamped edges. Filtering a G-buffer bleeds
---- neighboring surfaces together, which shows up as haloed edges in lighting
---- rather than as anything that looks like a sampling problem.
+--[=[
+A texture sampler.
+
+Deferred passes read the previous pass's output one texel per fragment, so
+the default is nearest with clamped edges. Filtering a G-buffer bleeds
+neighboring surfaces together, which shows up as haloed edges in lighting
+rather than as anything that looks like a sampling problem.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

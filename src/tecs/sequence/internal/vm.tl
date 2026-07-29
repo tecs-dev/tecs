@@ -1,10 +1,12 @@
---- The instruction loop, and the per-tick driver that feeds it.
----
---- One cursor runs until it waits, finishes, or faults; the driver decides
---- which cursors run at all. Delivery of the waits that are not times --
---- signals, query conditions, tween endings -- happens at the top of a tick,
---- before anything advances, so a cursor woken by one runs in the same tick
---- rather than a tick later.
+--[=[
+The instruction loop, and the per-tick driver that feeds it.
+
+One cursor runs until it waits, finishes, or faults; the driver decides
+which cursors run at all. Delivery of the waits that are not times --
+signals, query conditions, tween endings -- happens at the top of a tick,
+before anything advances, so a cursor woken by one runs in the same tick
+rather than a tick later.
+]=]
 
 local type types = require("tecs.types")
 local platformtime <const> = require("tecs.platform.time")

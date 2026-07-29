@@ -488,7 +488,7 @@ phase, and remains the way to react to input. A game wanting a reaction in
 phase does what `Input` does, which is fold the event into something a system
 looks at.
 
-### What the shape costs
+### Costs
 
 An application owns one world. A second is possible and can be stepped from a
 system, but only `app.world` is rendered, bound to the debug tools and given
@@ -784,7 +784,7 @@ every outstanding load on every call where a drain walks only what settled.
 
 `assets.waitAll` survives all of that, and it is the one wait here that is not a
 future. It waits on every load in this process, which is not a set any caller
-holds, so no join expresses it — and a join could not do the job anyway, since
+holds, so no join expresses it. A join could not do the job anyway, since
 `Future.all` fails on its first failed input and a missing file fails as fast as
 the worker can look. The reload and startup paths want a process-wide drain, so
 that is what it is; its body is a `Future:wait` on a future the loader settles
@@ -3600,13 +3600,14 @@ became an unclosed tag and broke the build forty lines from where it was
 written. Four scripts, about a thousand lines, existed to hold two programs in
 step.
 
-Tealdoc renders the site now, from `tealdoc.site` in `tlconfig.lua`. It reads a
-page's Markdown, stops at the `<!-- @generated` marker, and appends the
-reference it renders from the modules the page names, which is the page format
-this tree already wrote. So the prose carried over untouched, the four scripts
-are gone, and so are the seventeen thousand lines of reference Markdown they
-committed: a signature cannot drift from its page when there is no second copy
-of it.
+Tealdoc renders the site from `tealdoc.site` in `tlconfig.lua`. A module page
+contains frontmatter and its title, then Tealdoc appends the reference rendered
+from the modules that page names. The module's leading long doc comment carries
+its introduction and examples, and declaration docblocks carry symbol
+contracts. Guides under `docs/` remain Markdown because they span modules. The
+four scripts are gone, along with seventeen thousand lines of committed
+reference Markdown: a signature cannot drift from its page when no second copy
+exists.
 
 What the retired checker held is a `before_build` hook in the same file. Every
 public name in `src/tecs/init.tl` has a page, no page outlives the module it
@@ -3624,9 +3625,10 @@ agree. `tecs.gfx` is assembled from four files, `tecs.input` from three and
 namespace is one module, which is what `AGENTS.md` already asks for.
 
 The cost is paid by the offline reference. `tecs docs` carries the pages, and
-the pages no longer carry their signatures, so it answers about a page rather
-than about a name. Putting those back means staging the rendered site rather
-than its sources, and a site render is twelve seconds every product build.
+the source pages no longer carry their signatures or module prose. Product
+builds therefore stage the composed Markdown from the rendered site. They
+rebuild it only when a Markdown or Teal input is newer than the last render,
+so an unchanged build does not pay the render cost.
 
 Type is sized in `rem`, and the root size is one value at every width. What
 lost was sizing the page against the viewport, which is what tealdoc's hero

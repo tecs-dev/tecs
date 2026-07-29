@@ -1,5 +1,7 @@
---- Tecs, a typed entity component system for Lua, typed with Teal.
---- https://tecs.dev
+--[=[
+Tecs, a typed entity component system for Lua, typed with Teal.
+https://tecs.dev
+]=]
 
 local types <const> = require("tecs.types")
 local ecs <const> = require("tecs.ecs")
@@ -213,8 +215,8 @@ local record gfx
 
     --- What `loadFont` answers with, and what a `Text` names.
     type Font = text.Font
-    --- One entry of a font's `glyphs`, in the units the atlas was generated
-    --- at.
+    --- Describes one entry of a font's `glyphs` in the units used to generate
+    --- the atlas.
     type GlyphMetrics = text.GlyphMetrics
     --- What `loadFont` takes.
     type FontOptions = text.FontOptions
@@ -238,7 +240,7 @@ local record gfx
     ---     inside the file.
     --- @return The font, or nil when nothing has loaded that path. Nil is a
     ---     question about this process rather than about the disk, so a font
-    ---     that exists and has not been loaded answers nil too.
+    ---     that exists but no caller loaded answers nil too.
     findFont: function(name: string): text.Font
 
     --- Re-reads a loaded font's metrics in place, so every `Text` naming it

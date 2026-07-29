@@ -1,58 +1,60 @@
---- World snapshotting.
----
---- Two API layers:
----
---- * Streaming (allocation-lean): `saveSnapshot(world, writer)` walks the
----   world archetype-by-archetype and drives the internal writer. The writer
----   sees:
----
----       writer:writePrelude(version, nextEntityId, counts, componentTable)
----       writer:startArchetype(columnCount, entityCount, columnIndices, mode)
----       writer:writeIds(ids, count)                 -- column-major
----       writer:writeColumnRaw(...) / writeColumnValue(...)
----       writer:writeEntity(id, components, count, cols)   -- row-major
----       writer:endArchetype()
----       -- ...more archetypes...
----       writer:writeData(key, value)
----       writer:writeDataEnd()
----       writer:writeEnd()
----
----   `loadSnapshot(world, reader)` reads the prelude, despawns every existing
----   entity, then pulls archetypes via `reader:nextArchetype()` and issues a
----   single `batchSpawnAt` per archetype (falling back to per-entity spawns
----   when the archetype contains a sparse relationship).
----
---- * Table helpers: `saveSnapshotTable` returns a plain Lua snapshot table
----   (JSON-compatible); `loadSnapshotTable` consumes one.
----
---- SaveOptions can filter by query and Transform layer. Writers are still
---- allowed to drop additional entities or archetypes, but built-in filtering
---- happens before writer calls.
----
---- The table format is:
----
----     {
----         version = 1,
----         nextEntityId = integer,
----         componentTable = {{name = "Position"}, {name = "Health"}},
----         archetypes = {
----             {
----                 columnIndices = {1, 2},
----                 entities = {
----                     {1, {...Position...}, {...Health...}},
----                     {2, {...Position...}, {...Health...}},
----                 },
----             },
----             ...
----         },
----         data = {{key = string, value = any}},
----     }
----
---- Entities are stored as positional arrays: `[id, comp1_data, comp2_data, ...]`
---- where each slot aligns with the archetype header's `columnIndices`.
---- Dropping the per-entity component keys cuts JSON size substantially and
---- eliminates per-component hash lookups on the load path (we resolve
---- `columnIndices` through `componentTable` once per archetype).
+--[=[
+World snapshotting.
+
+Two API layers:
+
+* Streaming (allocation-lean): `saveSnapshot(world, writer)` walks the
+  world archetype-by-archetype and drives the internal writer. The writer
+  sees:
+
+      writer:writePrelude(version, nextEntityId, counts, componentTable)
+      writer:startArchetype(columnCount, entityCount, columnIndices, mode)
+      writer:writeIds(ids, count)                 -- column-major
+      writer:writeColumnRaw(...) / writeColumnValue(...)
+      writer:writeEntity(id, components, count, cols)   -- row-major
+      writer:endArchetype()
+      -- ...more archetypes...
+      writer:writeData(key, value)
+      writer:writeDataEnd()
+      writer:writeEnd()
+
+  `loadSnapshot(world, reader)` reads the prelude, despawns every existing
+  entity, then pulls archetypes via `reader:nextArchetype()` and issues a
+  single `batchSpawnAt` per archetype (falling back to per-entity spawns
+  when the archetype contains a sparse relationship).
+
+* Table helpers: `saveSnapshotTable` returns a plain Lua snapshot table
+  (JSON-compatible); `loadSnapshotTable` consumes one.
+
+SaveOptions can filter by query and Transform layer. Writers are still
+allowed to drop additional entities or archetypes, but built-in filtering
+happens before writer calls.
+
+The table format is:
+
+    {
+        version = 1,
+        nextEntityId = integer,
+        componentTable = {{name = "Position"}, {name = "Health"}},
+        archetypes = {
+            {
+                columnIndices = {1, 2},
+                entities = {
+                    {1, {...Position...}, {...Health...}},
+                    {2, {...Position...}, {...Health...}},
+                },
+            },
+            ...
+        },
+        data = {{key = string, value = any}},
+    }
+
+Entities are stored as positional arrays: `[id, comp1_data, comp2_data, ...]`
+where each slot aligns with the archetype header's `columnIndices`.
+Dropping the per-entity component keys cuts JSON size substantially and
+eliminates per-component hash lookups on the load path (we resolve
+`columnIndices` through `componentTable` once per archetype).
+]=]
 
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")

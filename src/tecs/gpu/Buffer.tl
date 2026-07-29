@@ -1,31 +1,33 @@
---- A GPU buffer with staged, dirty-ranged writes.
----
---- The renderer is SSBO-driven, so this is the primary way data reaches the
---- GPU: instance data, draw arguments, and anything a compute pass produces.
----
---- SDL_GPU has no mappable device buffer. Data reaches one by being written
---- into a mapped transfer buffer and copied across in a copy pass, and the
---- transfer buffer must be unmapped before that copy is encoded. That staged
---- copy is unavoidable. What is avoidable is a second one: `map` hands out the
---- driver's own address, so a producer walking archetype columns copies
---- straight into it rather than filling a staging array that then has to be
---- copied again.
----
---- Writes are tracked as ranges rather than replacing the whole buffer,
---- because most frames change very little of what is resident. Only marked
---- ranges are copied.
----
---- One device buffer, several staging slots. Extraction writes into one slot
---- while a submitted upload is still reading another, so the CPU never
---- overwrites memory the GPU has not finished with and no copy passes between
---- them. The rotation answers GPU concurrency, which one thread does not
---- remove.
---- Slots are addressed by index and all of their bookkeeping is per slot:
---- mapped address, recorded ranges, dirty byte count. A caller that only
---- writes sees an address and a capacity; creating, mapping, unmapping,
---- flushing, cycling and destroying slots belongs to whoever owns the device.
----
---- The device buffer is shared, persistent, and never cycled.
+--[=[
+A GPU buffer with staged, dirty-ranged writes.
+
+The renderer is SSBO-driven, so this is the primary way data reaches the
+GPU: instance data, draw arguments, and anything a compute pass produces.
+
+SDL_GPU has no mappable device buffer. Data reaches one by being written
+into a mapped transfer buffer and copied across in a copy pass, and the
+transfer buffer must be unmapped before that copy is encoded. That staged
+copy is unavoidable. What is avoidable is a second one: `map` hands out the
+driver's own address, so a producer walking archetype columns copies
+straight into it rather than filling a staging array that then has to be
+copied again.
+
+Writes are tracked as ranges rather than replacing the whole buffer,
+because most frames change very little of what is resident. Only marked
+ranges are copied.
+
+One device buffer, several staging slots. Extraction writes into one slot
+while a submitted upload is still reading another, so the CPU never
+overwrites memory the GPU has not finished with and no copy passes between
+them. The rotation answers GPU concurrency, which one thread does not
+remove.
+Slots are addressed by index and all of their bookkeeping is per slot:
+mapped address, recorded ranges, dirty byte count. A caller that only
+writes sees an address and a capacity; creating, mapping, unmapping,
+flushing, cycling and destroying slots belongs to whoever owns the device.
+
+The device buffer is shared, persistent, and never cycled.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

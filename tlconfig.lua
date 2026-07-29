@@ -1,10 +1,10 @@
 -- The Teal compiler's configuration, and the documentation site under
 -- `tealdoc.site`.
 --
--- One program owns both halves of a page. The prose above a page's
--- `<!-- @generated` marker is the page's own, and the reference below it is
--- rendered from the modules `api` names each time the site is built, so there
--- is no second copy of a signature for the first to drift from.
+-- One program owns a module page. Its Markdown source carries metadata and a
+-- title; its Teal modules carry the introduction, examples, and declaration
+-- reference. Tealdoc composes them each time the site is built, so there is no
+-- second copy of a contract to drift from the source.
 --
 -- `cargo xtask docs-build` renders the site, `cargo xtask docs-dev` serves it
 -- and rebuilds on a change, and `cargo xtask docs-check` builds it into a
@@ -198,7 +198,7 @@ local PAGES = {
         title = "Tecs",
         layout = "home",
         hero_title = "Build games with LuaJIT",
-        hero_text = "Typed. GPU-driven. Designed for humans and AI.",
+        hero_text = "Typed. GPU-driven. One data model.",
         hero_image = "/images/tecs.png",
         hero_image_alt = "Tecs",
         hero_actions = {
@@ -208,9 +208,9 @@ local PAGES = {
         },
         features = {
             {
-                title = "Build with AI",
-                details = "A [built-in MCP server](/modules/mcp) lets humans and agents inspect, freeze and edit"
-                    .. " a running game.",
+                title = "Live inspection",
+                details = "Inspect, freeze, and edit a running game through the"
+                    .. " [built-in MCP server](/modules/mcp).",
                 icon = "🤖",
             },
             {
@@ -223,14 +223,14 @@ local PAGES = {
                 title = "Batteries included",
                 details = "[Physics](/modules/physics), [audio](/modules/audio),"
                     .. " [particles](/modules/gfx/particles), [text](/modules/gfx/),"
-                    .. " [sequencing](/modules/sequence), [sprite sheets](/modules/gfx/animation) and hot reload"
-                    .. " ship in the box, sharing one data model.",
+                    .. " [sequences](/modules/sequence), [sprite sheets](/modules/gfx/animation), and hot reload"
+                    .. " share the ECS.",
                 icon = "🔋",
             },
             {
                 title = "Static typing",
-                details = "Catch errors at compile time, not runtime. Tecs is designed from the ground up for"
-                    .. " static typing with [Teal](https://github.com/teal-language/tl).",
+                details = "[Teal](https://github.com/teal-language/tl) checks component, query, system, and"
+                    .. " engine APIs before the game runs.",
                 image = "/images/teal.svg",
             },
         },
@@ -268,7 +268,12 @@ for _, page in ipairs({
     { route = "ecs/queries/", title = "Queries" },
     { route = "ecs/queries/callbacks", title = "Query callbacks" },
     { route = "ecs/queries/grouping", title = "Query grouping" },
-    { route = "ecs/random", title = "tecs.ecs.random" },
+    {
+        route = "ecs/random",
+        title = "tecs.ecs.random",
+        public = "tecs.ecs.random",
+        api = { "tecs.random" },
+    },
     { route = "ecs/relationships/", title = "Relationships" },
     { route = "ecs/relationships/ffi", title = "FFI Relationships" },
     { route = "ecs/save-games", title = "Save games" },
@@ -524,6 +529,95 @@ local function describePages(context)
     end
 end
 
+local BANNED_HEADINGS = {
+    What = true,
+    How = true,
+    Why = true,
+    Where = true,
+    Who = true,
+}
+
+local BANNED_HEADING_TITLES = {
+    ["Basic usage"] = true,
+    ["Core concepts"] = true,
+    ["Example code"] = true,
+    ["Practices worth keeping"] = true,
+    Related = true,
+    Submodule = true,
+    Submodules = true,
+}
+
+-- Public modules normally resolve through `SURFACE`. `tecs.ecs.random` is the
+-- exception: `tecs.ecs` owns it directly because engine modules also require
+-- that same table, so it never passes through the root resolver.
+local DIRECT_PUBLIC_MODULES = {
+    ["tecs.ecs.random"] = true,
+}
+
+--- Rejects writing patterns that have no place in the public documentation.
+local function checkWriting(context)
+    local function checkText(path, text)
+        local lineNumber = 0
+        for line in (text .. "\n"):gmatch("(.-)\n") do
+            lineNumber = lineNumber + 1
+            if line:find("—", 1, true) then
+                error(path .. ":" .. lineNumber .. " uses an em dash", 0)
+            end
+            local heading = line:match("^#+%s+(.+)$")
+            local first = heading and heading:match("^([%a]+)")
+            if first and BANNED_HEADINGS[first] then
+                error(path .. ":" .. lineNumber .. " uses a generic " .. first .. " heading", 0)
+            end
+            if heading and BANNED_HEADING_TITLES[heading] then
+                error(path .. ":" .. lineNumber .. " uses the generic heading " .. heading, 0)
+            end
+        end
+    end
+
+    for _, page in ipairs(context.pages) do
+        local text = read(page.source)
+        checkText(page.source, text)
+
+        if page.api and #page.api > 0 then
+            local body = text
+            if body:sub(1, 4) == "---\n" then
+                local ending = body:find("\n---\n", 5, true)
+                if ending then
+                    body = body:sub(ending + 5)
+                end
+            end
+            body = body:gsub("^%s+", "")
+            local title, remainder = body:match("^# ([^\n]+)\n?(.*)$")
+            if not title or remainder:match("%S") then
+                error(
+                    page.source
+                        .. " is a module page; keep only frontmatter and its H1"
+                        .. " so the generated reference starts at the top",
+                    0
+                )
+            end
+        end
+    end
+
+    for _, path in ipairs({ "README.md", "CONTRIBUTING.md", "STYLE.md" }) do
+        checkText(path, readTree(path))
+    end
+
+    for _, path in ipairs(context.settings.sources) do
+        local source = readTree(path)
+        local equals = source:match("^%-%-%[(=*)%[")
+        if equals == nil then
+            error(path .. " must start with a long module doc comment", 0)
+        end
+        local opening = source:find("\n", 1, true)
+        local closing = source:find("\n]" .. equals .. "]", opening + 1, true)
+        if not closing then
+            error(path .. " has an unterminated long module doc comment", 0)
+        end
+        checkText(path, source:sub(opening + 1, closing - 1))
+    end
+end
+
 --- Holds the site to the API it describes, and fails the build rather than
 --- publishing one that has quietly lost a page.
 ---
@@ -571,6 +665,9 @@ local function checkPages(context)
         for _, name in ipairs(group) do
             known["tecs." .. name] = true
         end
+    end
+    for name in pairs(DIRECT_PUBLIC_MODULES) do
+        known[name] = true
     end
     local orphans = {}
     for name in pairs(documented) do
@@ -752,8 +849,7 @@ return {
                     tag = "link",
                     attributes = {
                         rel = "stylesheet",
-                        href = "https://fonts.googleapis.com/css2"
-                            .. "?family=Jersey+15&display=swap",
+                        href = "https://fonts.googleapis.com/css2" .. "?family=Jersey+15&display=swap",
                     },
                 },
             },
@@ -762,6 +858,7 @@ return {
             sidebar = SIDEBAR,
             before_build = function(context)
                 describePages(context)
+                checkWriting(context)
                 checkPages(context)
             end,
         },

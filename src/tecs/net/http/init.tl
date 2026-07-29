@@ -1,23 +1,31 @@
---- Asynchronous HTTP over Reqwest and rustls.
----
---- ```teal
---- tecs.net.http.newClient({userAgent = "mygame/1.0"})
----     :send({url = "https://example.com/manifest.json"})
----     :map(function(response: tecs.net.http.Response): string
----         local body <const> = response.body:text()
----         return body
----     end)
----     :onSettle(function(manifest: tecs.Future<string>) print(manifest.value) end)
---- ```
----
---- Nothing goes in a frame. An application turns every open client once an
---- iteration, so a request is started and answered without a game asking
---- anything to happen in between.
----
---- One protocol namespace under `tecs.net`, which is the transport below it.
---- `Client`, `ClientOptions`, `Request` and `Response` are the vocabulary of a
---- transfer, `DataStream` is what a body is in either direction, and `plugin`
---- is the same client with a request spawned as an entity instead.
+--[=[
+Asynchronous HTTP and HTTPS.
+
+```teal
+tecs.net.http.newClient({userAgent = "mygame/1.0"})
+    :send({url = "https://example.com/manifest.json"})
+    :map(function(response: tecs.net.http.Response): string
+        local body <const> = response.body:text()
+        return body
+    end)
+    :onSettle(function(manifest: tecs.Future<string>) print(manifest.value) end)
+```
+
+An application turns every open client once per iteration, so requests
+advance without game code pumping them.
+
+An HTTP error status still produces a ready response. A failed future means
+that DNS, connection, TLS, timeout, or streaming produced no response.
+
+Call `Client:close` when you no longer need its connection pool. Losing the
+last Lua reference does not cancel its requests. A headless tool calls
+`pumpClients`; [`Application`](tealdoc:tecs.Application) does this once per
+frame.
+]=]
+
+-- Implementation details:
+-- Reqwest owns connection pools and drives sockets on Tokio. Rustls provides
+-- TLS, and the application loop drains completed transfers into Lua futures.
 
 local client <const> = require("tecs.net.http.client")
 local clients <const> = require("tecs.net.http.clients")
@@ -27,62 +35,48 @@ local DataStream <const> = require("tecs.net.http.DataStream")
 local type Options = client.Options
 
 local record http
-    --- A Reqwest connection pool and the `Future.Source` behind every future
-    --- it hands out. Rust drives sockets on Tokio; the SDL loop drains results.
+    --- `Client` names a connection pool and its request
+    --- futures.
     type Client = client.Client
 
-    --- How a client behaves for every request it sends. Named for the client
-    --- rather than left as `Options`, because a namespace carrying requests,
-    --- responses and a plugin has more than one thing that could be optioned.
+    --- `ClientOptions` configures every request sent
+    --- through a client.
     type ClientOptions = client.Options
 
-    --- One request. Only `url` is required.
+    --- `Request` describes one request and requires only
+    --- `url`.
     type Request = client.Request
 
-    --- What a completed transfer settles to, whatever the status code. A 404
-    --- is one of these rather than a failed future.
+    --- `Response` describes what a completed transfer
+    --- settles to regardless of status code.
     type Response = client.Response
 
-    --- Bytes, wherever they are: a string, a borrowed buffer, a path, or a
-    --- handle the caller opened. A request takes one and a response carries
-    --- one, so neither side has to know which kind it is.
+    --- Read-only. [`DataStream`](/modules/net/http/#tecs.net.http.DataStream) names bytes
+    --- stored in a string, borrowed buffer, path, or caller-opened handle.
     DataStream: DataStream
 
-    --- A request as an entity, for a world that would rather spawn one than
-    --- hold a future.
-    ---
-    --- The one name here that is a namespace of its own, and it stays one
-    --- because its `Request` and `Response` are components rather than the
-    --- records above. Two pairs of that name cannot share a level, and the
-    --- components are registered under strings that do not move.
+    --- Read-only. `plugin` exposes requests and responses as ECS components.
     plugin: plugin
 
     --- Builds a client.
     ---
-    --- @param options Read here rather than kept, so a field changed on the
-    ---     table afterwards is not seen. Omitted takes every default. Each
-    ---     entry of `insecureHosts` logs a warning as the client is built.
-    --- @return An open client, already on the list an application turns once
-    ---     an iteration. It stays there until `close`, which is what ends a
-    ---     client: dropping the last reference to one does not.
+    --- @param options The caller supplies client defaults or omits this record
+    ---     to use every default. Each `insecureHosts` entry logs a warning.
+    --- @return Returns an open client that remains active until `close`.
     newClient: function(options?: Options): client.Client
 
     --- Turns every open client once.
     ---
-    --- What an application calls each iteration. A game calls nothing; this is
-    --- for a headless tool that has no application, and for a test driving a
-    --- transfer a turn at a time.
+    --- An application calls this each iteration. Headless tools and tests call
+    --- it directly.
     ---
-    --- @return How many transfers settled during this turn, across every open
-    ---     client, so a caller that wants to know whether anything happened
-    ---     does not have to ask each future. 0 when none is open.
+    --- @return Returns how many transfers settled across every open client
+    ---     during this turn, or zero without an open client.
     pumpClients: function(): integer
 
-    --- How many clients are open.
+    --- Returns the open-client count.
     ---
-    --- @return Clients built and not yet closed, counted process-wide rather
-    ---     than per world. One nobody closed is still counted, which is what
-    ---     makes this the way to see a client that leaked.
+    --- @return Returns the process-wide count of clients not yet closed.
     openClients: function(): integer
 end
 

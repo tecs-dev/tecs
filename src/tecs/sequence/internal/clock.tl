@@ -1,13 +1,15 @@
---- A clock the sequencer schedules against.
----
---- A clock owns a counter, a monotonic sequence number for breaking ties, and
---- the heap of playbacks waiting on it. What the counter *means* is the
---- clock's business and nothing else's: the heap does not care whether it
---- counts fixed steps or gameplay frames.
----
---- Playbacks parked on a signal, a query, a join, or a tween are not here.
---- They have no wake time and live in their own index until whatever they are
---- waiting on releases them.
+--[=[
+A clock the sequencer schedules against.
+
+A clock owns a counter, a monotonic sequence number for breaking ties, and
+the heap of playbacks waiting on it. What the counter *means* is the
+clock's business and nothing else's: the heap does not care whether it
+counts fixed steps or gameplay frames.
+
+Playbacks parked on a signal, a query, a join, or a tween are not here.
+They have no wake time and live in their own index until whatever they are
+waiting on releases them.
+]=]
 
 local wakeheap <const> = require("tecs.internal.wakeheap")
 

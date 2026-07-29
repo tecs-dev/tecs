@@ -1,5 +1,7 @@
---- Epoch-local FFI arena for managing memory with LuaJIT FFI.
---- Uses page-based allocation and rewind-on-clear semantics.
+--[=[
+Epoch-local FFI arena for managing memory with LuaJIT FFI.
+Uses page-based allocation and rewind-on-clear semantics.
+]=]
 
 local C <const> = require("ffi")
 

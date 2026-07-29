@@ -1,23 +1,25 @@
---- The shape of one light, in one place.
----
---- Two things write this layout: the extractor, collecting light entities into
---- a frame packet, and the deferred pipeline, filling the buffer its lighting
---- pass reads. Both write the same eight floats, so a second statement of the
---- shape is a second thing to keep in step with the shader.
----
---- What the fields mean lives with `Deferred.Light`, which is the record form
---- of exactly these floats. What is here is what a writer needs to place them
---- and to size an array.
----
---- The order is fixed by `assets/shaders/deferred.lighting.frag.glsl`: x, y and
---- z of the position, then the radius, then red, green, blue and the intensity.
---- Position and color are a `vec4` each in the shader's `Light` struct, which
---- is what makes the stride exactly eight floats with nothing padding it out.
---- Position, height and radius are in world units. The lighting pass is handed
---- the view through `Deferred:setView` and takes each fragment back out to the
---- world rather than bringing the lights in, because everything that comes
---- after wants a world-space ray: an occluder mask is built with a world
---- projection and a shadow march is a march through the world.
+--[=[
+The shape of one light, in one place.
+
+Two things write this layout: the extractor, collecting light entities into
+a frame packet, and the deferred pipeline, filling the buffer its lighting
+pass reads. Both write the same eight floats, so a second statement of the
+shape is a second thing to keep in step with the shader.
+
+What the fields mean lives with `Deferred.Light`, which is the record form
+of exactly these floats. What is here is what a writer needs to place them
+and to size an array.
+
+The order is fixed by `assets/shaders/deferred.lighting.frag.glsl`: x, y and
+z of the position, then the radius, then red, green, blue and the intensity.
+Position and color are a `vec4` each in the shader's `Light` struct, which
+is what makes the stride exactly eight floats with nothing padding it out.
+Position, height and radius are in world units. The lighting pass is handed
+the view through `Deferred:setView` and takes each fragment back out to the
+world rather than bringing the lights in, because everything that comes
+after wants a world-space ray: an occluder mask is built with a world
+projection and a shadow march is a march through the world.
+]=]
 
 --- The light and tile-grid layout, in one place.
 ---

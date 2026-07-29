@@ -1,10 +1,12 @@
---- The parts of input state that no single device owns.
----
---- A gamepad has its own buttons and its own axes, so the three-tier button
---- state cannot live inside `Input` where a per-device object could not reach
---- it. It lives here, and so does the layer gate, which every device shares:
---- one gate object answers for the keyboard, the mouse and every pad, so a
---- layer pushed once is answered the same way by all of them.
+--[=[
+The parts of input state that no single device owns.
+
+A gamepad has its own buttons and its own axes, so the three-tier button
+state cannot live inside `Input` where a per-device object could not reach
+it. It lives here, and so does the layer gate, which every device shares:
+one gate object answers for the keyboard, the mouse and every pad, so a
+layer pushed once is answered the same way by all of them.
+]=]
 
 local record Layer
     --- What the layer is for, in diagnostics. Not an identity: two layers may

@@ -1,43 +1,53 @@
---- Logging, which is SDL's with a guard in front of it.
----
---- A logger is a name, and the name is what a developer filters on:
----
---- ```teal
---- local logger <const> = tecs.log.get("game.combat")
----
---- logger:info("wave %d spawned %d enemies", 3, 12)
---- logger:setLevel(tecs.log.DEBUG)
----
---- -- A queryable copy beside the platform destination, not instead of it.
---- tecs.log.openFile(tecs.filesystem.writablePath("game.log"))
---- tecs.log.closeFile()
---- ```
----
---- Arguments are formatted only once the priority has passed, so a filtered
---- call costs a load and a compare rather than a string.
----
---- There is deliberately nothing here to maintain: no sinks, no prefixes, no
---- timestamp cache, no ring buffer, no level configuration of our own. SDL
---- already dispatches to the right destination per platform, which is the
---- whole argument. Writing to stderr from Lua reaches nobody on a phone:
----
----   Windows   OutputDebugString, plus the console where one is attached
----   Android   __android_log_write, so logcat with a tag
----   Apple     NSLog
----   other     stderr
----
---- The guard is on this side because `SDL_LogMessage` is variadic and LuaJIT
---- cannot pass Lua values through C varargs safely: a `%d` handed a double is
---- undefined, not an error. So the message is formatted here and passed as one
---- `%s`. That would throw away SDL's own economy, which checks the priority
---- before it formats and renders into a stack buffer without allocating, so
---- the check happens first and a filtered call costs a load and a compare.
---- `SDL_GetLogPriority` bypasses SDL's mutex for known categories, and the
---- lock guards only the output dispatch, after the filter.
----
---- Because SDL owns the priorities, `SDL_SetLogPriority` works with nothing
---- here mirroring it, and SDL's own diagnostics land in the same stream with
---- no tee.
+--[=[
+Named, leveled logging.
+
+Create one named logger per subsystem. Logger names form the stable filtering
+surface:
+
+```teal
+local logger <const> = tecs.log.get("game.combat")
+
+logger:info("wave %d spawned %d enemies", 3, 12)
+logger:setLevel(tecs.log.DEBUG)
+```
+
+Messages go to the platform log destination, including logcat on Android and
+Console on Apple platforms.
+
+[`Logger`](tealdoc:tecs.log.Logger) methods check priority before formatting. Pass raw arguments rather
+than formatting first. Guard work that exists only to build a message:
+
+```teal
+local snapshot <const> = {frame = 12, player = "Alice"}
+if logger:enabled(tecs.log.DEBUG) then
+    logger:debug("snapshot: %s", tecs.data.encodeJSON(snapshot))
+end
+```
+
+## JSON Lines output
+
+Add a queryable file beside the platform destination:
+
+```teal
+local path <const> = tecs.filesystem.writablePath("game.jsonl")
+if not tecs.log.openFile(path) then
+    logger:error("could not open %s", path)
+end
+```
+
+Each line records time, level, logger, and message. `closeFile` stops file
+output and leaves the platform destination active.
+]=]
+
+-- Implementation details:
+-- Logger names map to SDL categories, and SDL owns process-wide priority
+-- state. Direct SDL configuration and Tecs logger methods therefore affect the
+-- same stream.
+--
+-- The native sink accepts messages from SDL and worker threads without
+-- entering the Lua VM. Lua formats one safe `%s` argument only after SDL's
+-- priority check because LuaJIT cannot safely pass arbitrary Lua values
+-- through C varargs.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
@@ -54,40 +64,32 @@ local sink <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "l
 --- grown reserved slots before.
 local CUSTOM <const> = tonumber(C.SDL_LOG_CATEGORY_CUSTOM) as integer
 
---- Logging, which is SDL's with a guard in front of it.
----
---- Loggers are process-wide and named, and a name is the unit of filtering: `log.get`
---- resolves it to the SDL category number that `SDL_SetLogPriority` takes, and the level
---- itself is held by SDL rather than mirrored here. Nothing in this module has a level of
---- its own, so changing one through SDL changes what these methods emit.
 local record log
-    --- A named category. Holds its SDL category number and nothing else; the
-    --- level lives in SDL.
+    --- Represents a named log category.
     record Logger
-        --- The name it was registered under. The native sink writes this rather than the
-        --- number, so it is what appears in the platform's log.
+        --- Read-only. Contains the registered logger name written to the
+        --- platform log.
         name: string
 
-        --- Its SDL category, and the argument `SDL_SetLogPriority` takes. Handed out in
-        --- registration order from `SDL_LOG_CATEGORY_CUSTOM` upwards, so a number is
-        --- stable within a run and is not stable across runs that register in a different
-        --- order. Filter by name.
+        --- Engine-owned. Contains the category allocated during this run.
+        --- The number may change across runs, so game code should filter by
+        --- `name`.
         category: integer
     end
 
-    --- Priority values, as SDL numbers them.
+    --- Read-only. Contains the trace priority.
     TRACE: integer
-    --- See `TRACE`.
+    --- Read-only. Contains the verbose priority.
     VERBOSE: integer
-    --- See `TRACE`.
+    --- Read-only. Contains the debug priority.
     DEBUG: integer
-    --- See `TRACE`.
+    --- Read-only. Contains the informational priority.
     INFO: integer
-    --- See `TRACE`.
+    --- Read-only. Contains the warning priority.
     WARN: integer
-    --- See `TRACE`.
+    --- Read-only. Contains the error priority.
     ERROR: integer
-    --- See `TRACE`. The highest, so setting a level to this emits almost nothing.
+    --- Read-only. Contains the critical priority.
     CRITICAL: integer
 end
 
@@ -112,8 +114,8 @@ local nextCategory = CUSTOM
 --- is what `SDL_SetLogPriority` takes.
 ---
 --- @param name Compared byte for byte, so two spellings are two categories with two levels.
---- @return The same object on every call for a name, and it lives as long as the process.
----     A new logger starts at whatever SDL's default priority is, not at a level of ours.
+--- @return Returns the same object on every call for a name. A new logger
+---     starts at the platform's default priority.
 function log.get(name: string): log.Logger
     local existing = byName[name]
     if existing ~= nil then
@@ -132,15 +134,15 @@ function log.get(name: string): log.Logger
     return self
 end
 
---- The name a category was registered under, for a sink that wants it.
+--- Returns the name registered for a category.
 ---
---- @return Never nil. A category nothing registered, including SDL's own, comes back as
+--- @return Never returns nil. An unregistered category comes back as
 ---     `"category:<number>"` rather than as an error.
 function log.categoryName(category: integer): string
     return names[category] or ("category:%d"):format(category)
 end
 
---- Every registered logger name, for tooling that enumerates them.
+--- Returns every registered logger name.
 ---
 --- @return A fresh array each call, sorted, holding only names something has already asked
 ---     `get` for. A subsystem that has not run yet is absent.
@@ -155,21 +157,20 @@ end
 
 --- Sets the minimum priority this logger emits.
 ---
---- @param priority One of the constants on `log`. A message at this priority is emitted;
----     anything lower is dropped.
+--- @param priority One of the constants on `log`. The logger emits messages at
+---     this priority and drops anything lower.
 function log.Logger:setLevel(priority: integer)
     C.SDL_SetLogPriority(self.category, priority)
 end
 
---- The minimum priority this logger emits.
+--- Returns the minimum priority this logger emits.
 ---
---- @return SDL's current priority for this category, which is SDL's default until
----     something sets one, so it is not necessarily a value any caller here chose.
+--- @return Returns the platform priority until something sets one.
 function log.Logger:level(): integer
     return tonumber(C.SDL_GetLogPriority(self.category)) as integer
 end
 
---- Whether a message at `priority` would be emitted.
+--- Reports whether the logger would emit a message at `priority`.
 ---
 --- Call this directly to guard work that only exists to build a log message,
 --- such as serializing a table. The level methods already guard themselves.
@@ -177,7 +178,7 @@ function log.Logger:enabled(priority: integer): boolean
     return tonumber(C.SDL_GetLogPriority(self.category)) <= priority
 end
 
---- Sets the minimum priority for every category, ours and SDL's.
+--- Sets the minimum priority for every category.
 ---
 --- @param priority Overrides every per-logger level already set, so this is a reset and
 ---     not a floor.
@@ -185,26 +186,22 @@ function log.setLevel(priority: integer)
     C.SDL_SetLogPriorities(priority)
 end
 
---- The path `openFile` last accepted, or nil while no file has been opened.
+--- The path `openFile` last accepted, or nil until it accepts one.
 local filePath: string = nil
 
---- Also writes every line to `path` as JSON Lines, truncating it.
+--- Writes every accepted line to `path` as JSON Lines and truncates the file.
 ---
 --- The platform destination keeps receiving the human-readable form, so
---- `tail -f`, logcat and Console.app are unaffected. The file is what makes a
+--- The platform still sends its human-readable stream to `tail -f`, logcat,
+--- or Console.app. The file makes a
 --- log queryable after the fact: seek to an offset, read to the end.
 ---
---- Lines are written from whichever thread logged, including threads the VM never created,
---- so ordering follows the calls and not any Lua-side sequence.
----
---- Called while another file is open, this moves to `path`: the previous file is closed and
---- every later line goes to the new one, so the path this accepts is the path being written
---- to and `filePath` never names a file the sink has left behind. The move happens between
---- lines rather than inside one.
+--- Calling this while another file is open closes the previous file and moves
+--- subsequent lines to `path`.
 ---
 --- @param path Truncated if it exists, created if it does not, including when it is the
 ---     file already open, so this is not a way to check one is. Directories are not made.
---- @return False when the file could not be opened, in which case nothing else changed and
+--- @return False when the file cannot open. In that case nothing else changes and
 ---     a file already open keeps receiving lines.
 function log.openFile(path: string): boolean
     local ok = sink.tecsLogSinkOpen(path) as boolean
@@ -214,8 +211,7 @@ function log.openFile(path: string): boolean
     return ok
 end
 
---- Where the file is, or nil if none was opened. What `get_logs` hands back
---- to an agent that shares a filesystem with the game.
+--- Returns the open log file path, or nil when no file is open.
 ---
 --- @return The path as it was given, not resolved against the working directory, so a
 ---     relative one is only meaningful to a reader in the same place the game ran.
@@ -223,7 +219,7 @@ function log.filePath(): string
     return filePath
 end
 
---- Stops writing to the file and restores SDL's own output function.
+--- Stops writing to the file.
 ---
 --- Does nothing when no file is open, so it is safe to call on a shutdown path that does
 --- not know whether one was ever asked for.
@@ -244,9 +240,9 @@ local function emit(self: log.Logger, priority: integer, message: string, ...: a
     C.SDL_LogMessage(self.category, priority, "%s", message)
 end
 
---- Accepts `string.format` specifiers, applied only if the message is emitted.
+--- Logs at `TRACE` and applies `string.format` specifiers only when emitted.
 ---
---- The level is checked before the formatting, so a filtered call costs a load and a
+--- The method checks the level before formatting, so a filtered call costs a load and a
 --- compare and the arguments are never touched. Building those arguments is still the
 --- caller's cost; guard that with `enabled`.
 ---
@@ -258,33 +254,33 @@ function log.Logger:trace(message: string, ...: any)
     emit(self, log.TRACE, message, ...)
 end
 
---- At `VERBOSE`. See `trace` for the formatting rules.
+--- Logs at `VERBOSE`. See `trace` for the formatting rules.
 function log.Logger:verbose(message: string, ...: any)
     emit(self, log.VERBOSE, message, ...)
 end
 
---- At `DEBUG`. See `trace` for the formatting rules.
+--- Logs at `DEBUG`. See `trace` for the formatting rules.
 function log.Logger:debug(message: string, ...: any)
     emit(self, log.DEBUG, message, ...)
 end
 
---- At `INFO`. See `trace` for the formatting rules.
+--- Logs at `INFO`. See `trace` for the formatting rules.
 function log.Logger:info(message: string, ...: any)
     emit(self, log.INFO, message, ...)
 end
 
---- At `WARN`. See `trace` for the formatting rules.
+--- Logs at `WARN`. See `trace` for the formatting rules.
 function log.Logger:warn(message: string, ...: any)
     emit(self, log.WARN, message, ...)
 end
 
---- At `ERROR`. See `trace` for the formatting rules. Logging is all this does; it neither
+--- Logs at `ERROR`. See `trace` for the formatting rules. Logging is all this does; it neither
 --- raises nor returns anything.
 function log.Logger:error(message: string, ...: any)
     emit(self, log.ERROR, message, ...)
 end
 
---- At `CRITICAL`. See `trace` for the formatting rules.
+--- Logs at `CRITICAL`. See `trace` for the formatting rules.
 function log.Logger:critical(message: string, ...: any)
     emit(self, log.CRITICAL, message, ...)
 end

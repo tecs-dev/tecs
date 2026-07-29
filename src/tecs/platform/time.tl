@@ -1,38 +1,49 @@
---- Frame timing, with an injectable source.
----
---- Nondeterminism enters the engine through this module and `events`. Both
---- take their input from a provider that defaults to the real thing, which is
---- what makes recorded replay possible: frames are the coordinate system, dt
---- is data. Reading the performance counter directly from the run loop would
---- make deterministic replay unimplementable rather than merely unimplemented.
----
---- ```teal
---- local recorded <const>: {number} = {}
---- local frame = 0
----
---- tecs.time.provider = function(realDt: number): number
----     frame = frame + 1
----     -- Nil keeps the measurement, so a run past the end of the recording is
----     -- live again.
----     return recorded[frame]
---- end
---- ```
+--[=[
+Frame timing, with an injectable source.
+
+The application calls `step` once per iteration and passes the result to the
+world. `maxDelta` clamps long stalls before simulation sees them. Game code
+may read `now`, but it must not call `step` because that moves the frame
+baseline.
+
+Install a provider to replace measured frame deltas during replay:
+
+```teal
+local recorded <const>: {number} = {1 / 60, 1 / 60, 1 / 30}
+local frame = 0
+
+tecs.time.provider = function(realDt: number): number
+    frame = frame + 1
+    -- Nil keeps the measurement, so a run past the end of the recording is
+    -- live again.
+    return recorded[frame]
+end
+```
+
+Returning nil keeps the measured delta. Pair this provider with
+`tecs.events.source` to replay frame timing and platform events together.
+`now` always reads the monotonic platform clock and ignores the replay
+provider.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 
 local C <const> = sdl.C
 
 local record time
-    --- Installed by a replay driver. Consulted once per frame with the
-    --- measured dt; returning a number replaces it, nil keeps the measurement.
+    --- Caller-writable. Installs a replay hook that receives the measured
+    --- frame delta. Returning a number replaces it; returning nil keeps it.
+    ---
+    --- @param realDt The application supplies the measured frame delta in seconds.
+    --- @return A number replaces the measured delta, while nil keeps it.
     provider: function(realDt: number): number
 
-    --- The loop's nominal frame dt, set at boot from the target frame rate.
-    --- Stepped frames use it so a step advances identically on every machine.
+    --- Caller-writable. Sets the nominal frame delta in seconds. The
+    --- application initializes it from the target frame rate.
     nominal: number
 
-    --- Longest dt handed to the world. A frame that stalls (a breakpoint, a
-    --- window drag) must not integrate as one enormous step.
+    --- Caller-writable. Sets the longest frame delta in seconds that `step`
+    --- returns.
     maxDelta: number
 end
 

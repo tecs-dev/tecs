@@ -4,7 +4,7 @@ layout: home
 
 hero:
   name: "Build games with LuaJIT"
-  text: "Typed. GPU-driven. Designed for humans and AI."
+  text: "Typed. GPU-driven. One data model."
   image:
     src: /images/tecs.png
     alt: Tecs
@@ -20,25 +20,36 @@ hero:
       link: /ecs/
 
 features:
-  - title: Build with AI
-    details: A <a href="/modules/mcp">built-in MCP server</a> lets humans and agents inspect, freeze and edit a running game.
+  - title: Live inspection
+    details: Inspect, freeze, and edit a running game through the <a href="/modules/mcp">built-in MCP server</a>.
     icon: 🤖
   - title: ECS built for LuaJIT
-    details: An <a href="/ecs/archetype">archetype-based ECS</a> with FFI components, contiguous columns, and a dirty model the GPU reads.
+    details: >-
+      An <a href="/ecs/archetype">archetype-based ECS</a> with FFI components,
+      contiguous columns, and a dirty model the GPU reads.
     icon: ⚡
   - title: Batteries included
-    details: <a href="/modules/physics">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/gfx/particles">particles</a>, <a href="/modules/gfx/">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/gfx/animation">sprite sheets</a> and hot reload ship in the box, sharing one data model.
+    details: >-
+      <a href="/modules/physics">Physics</a>,
+      <a href="/modules/audio">audio</a>,
+      <a href="/modules/gfx/particles">particles</a>,
+      <a href="/modules/gfx/">text</a>,
+      <a href="/modules/sequence">sequences</a>,
+      <a href="/modules/gfx/animation">sprite sheets</a>, and hot reload share
+      the ECS.
     icon: 🔋
   - title: Static typing
-    details: Catch errors at compile time, not runtime. Tecs is designed from the ground up for static typing with <a href="https://github.com/teal-language/tl"><u>Teal</u></a>.
+    details: >-
+      <a href="https://github.com/teal-language/tl"><u>Teal</u></a> checks
+      component, query, system, and engine APIs before the game runs.
     icon:
       src: /images/teal.svg
 ---
 
 ## Install
 
-The `tecs` command carries the compiler, the engine, the type definitions and a project template. Nothing else
-has to be on the machine: no Lua, no LuaRocks, no Teal, no C compiler.
+The `tecs` command carries the compiler, engine, type definitions, and project template. It needs no separate Lua,
+LuaRocks, Teal, or C compiler installation.
 
 ::: code-group
 
@@ -63,13 +74,14 @@ Create a game and run it:
 tecs new my-game && cd my-game && tecs run
 ```
 
-The [Tecs CLI](/cli/) carries the project toolchain in one file. Contributors can also build and run this tree
-directly through `make`; [getting started](/getting-started) covers that workflow.
+The [Tecs CLI](/cli/) carries the project toolchain in one file. Contributors can build this repository through
+Cargo; [getting started](/getting-started) covers that workflow.
 
 ## Entities are the interface
 
-Anything that renders or updates per frame is an entity in a world. SDL owns the loop: an entry file returns an
-application and a Rust host drives it, so nothing in a game blocks and nothing drives frames itself.
+Anything that renders or updates per frame is an entity in a world. The host
+owns the loop: an entry file returns an application, so game code registers
+work instead of driving frames itself.
 
 ```teal
 local Transform <const> = tecs.Transform
@@ -96,7 +108,7 @@ return tecs.newApplication({
 })
 ```
 
-## Example code
+## ECS examples
 
 ::: code-group
 
@@ -211,12 +223,9 @@ world:emit(0, DamageEvent, enemyId, 25)
 
 :::
 
-## Modules
+## Reference
 
-Everything a game reaches is a field on `tecs`, which is ambient in a game: it is already loaded by the time an
-entry file runs, so no require line. Alphabetical, ignoring case, because that is how a name is looked up.
-[Modules](/modules/) carries the same list, and [the generated reference](/modules/) carries what is
-behind each one.
+The host loads `tecs` before the entry file. A game can use these names without a `require`:
 
 ::: module-columns
 
@@ -224,11 +233,11 @@ behind each one.
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
-- [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
+- [`tecs.events`](/modules/events) - typed platform events routed through the world
 - [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
-- [`tecs.log`](/modules/log) - SDL's logging, per platform
+- [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams

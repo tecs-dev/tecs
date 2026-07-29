@@ -1,245 +1,87 @@
 ---
-description: "Archetype storage groups with row and column layout, get and getMut column access, set, relationship lookups, dirty tracking, and lifecycle observers"
+description: "Archetype storage, column access, relationship lookups, dirty tracking, and lifecycle observers"
 outline: deep
 ---
 
 # Archetypes
 
-An archetype is a storage group for entities with the same component signature. Each entity belongs to exactly
-one archetype at a time. When an entity gains or loses a component, it moves to another archetype.
+An archetype stores entities with one component signature. Adding or removing
+a component moves an entity to another archetype. Most game code reaches these
+storage groups through a [query](/ecs/queries/).
 
-Most code reaches archetypes through [queries](/ecs/queries/). A query finds the archetypes whose signatures
-match its descriptor, then each loop step gives you an archetype, a row count, and the entity ids for those
-rows.
+## Rows and columns
 
-The layout is not an implementation detail you can ignore, because it is what the frame is built on. The
-engine's render components (`Transform`, `Tint`, `Sprite`, `Material`, `Clip`) are FFI components, so their
-columns are contiguous C memory; extraction walks those columns and writes instances straight into mapped GPU
-staging, with no intermediate array. A loop that reads and writes columns is a loop the renderer is shaped
-around.
-
-## Entities, rows, and columns
-
-Archetypes store entities by row. The same row index addresses the entity id and each of that entity's
-component values:
-
-- **Entity ids** live in `archetype.entities`. Rows are 1-based, and `entities[0]` stores the current length.
-- **Rows** are the current positions inside an archetype. Use rows while iterating; do not cache them as stable
-  identifiers, because despawns and archetype moves reorder rows.
-- **Columns** hold component values for every row in the archetype. Bind columns with
-  `archetype:get(Component)` for reads or `archetype:getMut(Component)` before writes, then index them by row.
-
-This row and column layout is why query loops bind columns once per archetype:
+One row index selects an entity ID and every component value for that entity:
 
 ```teal
-local gfx <const> = tecs.gfx
-
-for archetype, length, entities in query:iter() do
-    local transforms = archetype:get(tecs.Transform)
-    local tints = archetype:get(gfx.Tint)
+for archetype, length, entities in movers:iter() do
+    local transforms <const> = archetype:getMut(tecs.Transform)
+    local velocities <const> = archetype:get(Velocity)
 
     for row = 1, length do
-        local entity = entities[row]
-        local transform = transforms[row]
-        local tint = tints[row]
-        -- ...
+        local transform <const> = transforms[row]
+        local velocity <const> = velocities[row]
+
+        transform.x = transform.x + velocity.x * dt
+        transform.y = transform.y + velocity.y * dt
+        print(entities[row])
     end
 end
 ```
 
-## Archetype properties
+Rows start at 1. `archetype.entities[0]` contains the current length. Treat the
+entity column and `componentList` as read-only.
 
-| Name            | Type          | Description                                                                                                                                                                                                |
-| --------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | `integer`     | Unique identifier of the archetype in the world.                                                                                                                                                           |
-| `entities`      | `DoubleArray` | Entity ids by row. `entities[0]` is the length; valid rows are `1..entities[0]`.                                                                                                                           |
-| `componentList` | `{Component}` | Component types in this archetype's signature, in the order they were passed at construction. Finalized at creation: archetypes never add or remove components. Iterate with `#componentList` or `ipairs`. |
+A row identifies a position in current storage, not an entity. Despawn and
+archetype transitions use swap-pop movement, so never retain a row across
+structural changes. Retain the entity ID instead.
 
-## Archetype methods
+## Read and write intent
 
-### get / getMut
+`archetype:get(Component)` returns a column without marking it dirty.
+`archetype:getMut(Component)` returns the same storage and marks the component
+dirty for that archetype.
 
-Column access by component type. Both return the row-indexed column for a component the archetype carries, or
-`nil` when it does not. The difference is dirty marking.
+Use `getMut` only when the loop will write. A speculative call dirties every
+row in the column and forces dirty-gated consumers to process unchanged data.
+For conditional writes, read through `get`, perform the write only when
+needed, then call `markComponentDirty`.
 
-```teal
-function Archetype:get<T is Component>(component: T): {T}
-function Archetype:getMut<T is Component>(component: T): {T}
-```
+`archetype:set(row, value)` replaces a component already present in the
+signature and marks it dirty. It cannot add a component. Use `world:set` when
+the entity may need an archetype transition.
 
-Use `get` when you only read values. Use `getMut` when you will write through the returned column: it marks
-the component dirty on this archetype, which is what the render extraction and snapshot paths read to decide
-what to re-sync. `get` does not protect the column from writes; it simply does not mark the component dirty.
+## Relationship storage
 
-Never take `getMut` for a column you only read. Doing it in a per-frame loop marks that component dirty on
-every archetype every frame, and the extractor then rewrites the whole scene instead of the rows that changed.
+Dense relationship instances occupy archetype columns. Use
+`forEachRelationship` or `getFirstRelationship` when code already has an
+archetype and row.
 
-```teal
-local Transform <const> = tecs.Transform
-
-for archetype, length in spinning:iter() do
-    -- Rotation is a write, so the column is taken with getMut.
-    local transforms = archetype:getMut(Transform)
-    for row = 1, length do
-        transforms[row].rotation = transforms[row].rotation + dt * 1.5
-    end
-end
-```
-
-### set
-
-Replaces a component value at a row and marks the component dirty on the archetype. No archetype transition
-happens; the row stays where it is. The component **must** already be present on the archetype, and the value
-must carry a `componentType`; both are errors otherwise. Use `world:set` when you need to add a component to an
-entity or move it to another archetype.
-
-```teal
-function Archetype:set<C is Component>(row: integer, value: C)
-```
-
-**Parameters:**
-
-- `row`: The 1-based row position of the entity.
-- `value`: The new component instance.
-
-**Example:**
-
-```teal
-local Tint <const> = tecs.gfx.Tint
-
-for archetype, length in query:iter() do
-    for row = 1, length do
-        -- Replace the component and mark dirty in one call.
-        archetype:set(row, Tint(1, 0, 0, 1))
-    end
-end
-```
-
-For an FFI component the bytes are copied into the existing row rather than the row being repointed, so a
-reference someone else took to that row stays valid.
-
-### forEachRelationship
-
-Iterates the relationship instances of the given relationship container for one row. Only concrete
-relationship instances are visited; the container itself is not included.
-
-```teal
-function Archetype:forEachRelationship<T is Relationship>(
-    relationshipContainer: T,
-    row: integer,
-    callback: function(T)
-)
-```
-
-**Parameters:**
-
-- `relationshipContainer`: The relationship container to iterate.
-- `row`: The 1-based row position of the entity in this archetype.
-- `callback`: Called with each relationship instance of this type.
-
-**Example:**
-
-```teal
-local Likes = tecs.ecs.newRelationship({ name = "Likes", fields = { "weight" } })
-
-archetype:forEachRelationship(Likes, 5, function(likes: Likes)
-    print("Entity likes", likes.target)
-end)
-```
-
-### getFirstRelationship
-
-Gets the first relationship instance of the given container for one row, or `nil` when there is none. For an
-exclusive relationship this is the single instance.
-
-```teal
-function Archetype:getFirstRelationship<T is Relationship>(relationshipContainer: T, row: integer): T
-```
-
-**Parameters:**
-
-- `relationshipContainer`: The relationship container to retrieve a relationship from.
-- `row`: The 1-based row position of the entity in this archetype.
-
-**Returns:** the first relationship of this type for the entity, or `nil` if none exists.
-
-::: info Sparse relationships are not archetype columns
-Both methods above resolve the archetype's own per-target instance columns, which is where **dense**
-relationships live. A sparse relationship (the builtin `ChildOf` is one) keeps its targets in a per-world
-store and leaves only the container marker on the archetype, so ask the world instead:
-`world:getFirstRelationship(entity, ChildOf)`, `world:targets`, `world:traverse`, `world:walkUp`. See
+Sparse relationships, including `ChildOf`, keep targets in a world-owned
+store. Resolve them through `world:getFirstRelationship`, `world:targets`,
+`world:traverse`, or `world:walkUp`. See
 [Relationships](/ecs/relationships/).
-:::
 
-### markComponentDirty / markAllComponentsDirty
+## Dirty consumers
 
-Explicit dirty markers for the case where mutation happens through a path the framework cannot intercept, for
-example a wrapper that holds an entity id and writes through fetched FFI cdata.
+Incremental consumers can test one component, test the whole archetype, or
+iterate its dirty components. The world clears dirty bits after each
+`world:update`, once the pipeline has consumed them.
 
-```teal
-function Archetype:markComponentDirty(component: Component)
-function Archetype:markAllComponentsDirty()
-```
+Spawn placement, archetype movement, swap-pop, `getMut`, and `set` maintain
+dirty state automatically. Call explicit markers only after a write through a
+path Tecs cannot observe, such as direct FFI cdata obtained through `get`.
 
-`getMut`, `world:set`, `archetype:set`, spawn placement, and archetype move-in and swap-pop all mark dirty
-internally. Reach for the explicit markers when none of those applies. `markComponentDirty` is idempotent, and
-a component the archetype does not carry is a no-op.
+[Dirty tracking](/ecs/components/dirty-tracking) covers the complete write
+contract.
 
-### isComponentDirty / anyComponentDirty / dirtyComponents
+## Lifecycle reactions
 
-Read dirty state.
+An archetype observer can react to contiguous additions, removals, row moves,
+activation, deactivation, and destruction. It remains attached for that
+archetype's lifetime and cannot unsubscribe.
 
-```teal
-function Archetype:isComponentDirty(component: Component): boolean
-function Archetype:anyComponentDirty(): boolean
-function Archetype:dirtyComponents(): function(): Component
-```
-
-This is the gate an incremental consumer writes. Render extraction is one: it rewrites an archetype's rows
-only when one of the components it reads is dirty, when the rows moved, or when interpolation moved the drawn
-position.
-
-Bits are cleared at the end of each `world:update`, after the pipeline finishes.
-
-## Observing entity lifecycle
-
-`archetype:addEntityObserver(observer)` is the low-level lifecycle API for one archetype. The observer may
-implement any subset of:
-
-- `onEntitiesAdded(archetype, firstRow, lastRow, count, sourceArchetype?)`, per contiguous row range, where
-  `sourceArchetype` is the archetype the range moved from and is `nil` for spawns;
-- `onEntitiesRemoved(archetype, firstRow, lastRow, count, destArchetype?)`, per contiguous row range, where
-  `destArchetype` is the archetype the range is moving to and is `nil` for despawns;
-- `onEntityMove(archetype, entity, fromRow, toRow)` for swap-pop row moves;
-- `onActivated(archetype)` and `onDeactivated(archetype)` for the empty and non-empty transitions;
-- `onArchetypeDestroyed(archetype)` for permanent destruction during `world:compact()`, after which the
-  observer must drop every reference to the archetype.
-
-The observer remains attached for the archetype's lifetime. Registration applies only to that archetype
-instance: it does not discover other archetypes with the same component signature, and there is no unsubscribe.
-
-```teal
-local observer: tecs.ecs.ArchetypeEntityObserver = {
-    onActivated = function(
-        _self: tecs.ecs.ArchetypeEntityObserver,
-        activated: tecs.ecs.Archetype
-    )
-        print("archetype became active:", activated.id)
-    end,
-    onDeactivated = function(
-        _self: tecs.ecs.ArchetypeEntityObserver,
-        deactivated: tecs.ecs.Archetype
-    )
-        print("archetype became empty:", deactivated.id)
-    end,
-}
-
-archetype:addEntityObserver(observer)
-```
-
-For component-filtered lifecycle callbacks across current and future matching archetypes, attach
-[query callbacks](/ecs/queries/callbacks) (`onEntitiesAdded` / `onEntitiesRemoved`) to `world:query(...)`.
-Queries handle discovery, filtering, and observer registration for you.
-
-To discover new archetypes as they are created, observe the `ArchetypeCreated` event on the world (address 0).
-See [Builtins](/ecs/builtins).
+Prefer [query callbacks](/ecs/queries/callbacks) when the reaction belongs to
+a component filter. Queries discover current and future matching archetypes
+and attach the necessary observers. Use a direct archetype observer only when
+the storage object itself matters.

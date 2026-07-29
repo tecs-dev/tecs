@@ -1,24 +1,27 @@
---- Compiled regular expressions over Lua byte strings.
----
---- Patterns use the Rust `regex` crate's syntax. Compilation builds the
---- automaton once; every method on the returned value reuses it. Inline flags
---- such as `(?i)` and `(?m)` configure a pattern without a second options
---- vocabulary.
----
---- ```teal
---- local trailingDigits <const> = tecs.regex.compile([[(\d+)$]])
----
---- local frame <const> = trailingDigits:find("sprites/hero_04")
---- if frame ~= nil then
----     print(frame.value, frame.first, frame.last)
---- end
----
---- print(trailingDigits:replaceAll("hero_04 orc_11", "N"))
---- ```
----
---- Subjects remain byte strings, including strings that are not valid UTF-8.
---- Match positions therefore follow Lua's string functions: 1-based,
---- inclusive byte indices. An empty match has `last == first - 1`.
+--[=[
+Compiled regular expressions over Lua byte strings.
+
+Patterns use the Rust `regex` crate's syntax. Compilation builds the
+automaton once; every method on the returned
+[`Regex`](tealdoc:tecs.regex.Regex) reuses it. Inline flags
+such as `(?i)` and `(?m)` configure a pattern without a second options
+vocabulary.
+
+```teal
+local trailingDigits <const> = tecs.regex.compile([[(\d+)$]])
+
+local frame <const> = trailingDigits:find("sprites/hero_04")
+if frame ~= nil then
+    print(frame.value, frame.first, frame.last)
+end
+
+print(trailingDigits:replaceAll("hero_04 orc_11", "N"))
+```
+
+Subjects remain byte strings, including strings that are not valid UTF-8.
+Match positions therefore follow Lua's string functions: 1-based,
+inclusive byte indices. An empty match has `last == first - 1`.
+]=]
 
 local ffi <const> = require("ffi")
 local binding <const> = require("tecs.ffi.rust")
@@ -26,83 +29,55 @@ local loader <const> = require("tecs.ffi.loader")
 
 local C <const> = binding.C
 
---- Compiled regular expressions over Lua byte strings.
----
---- ## Compile once
----
---- `compile` builds the automaton once. Keep the returned `Regex` and reuse it
---- for every subject rather than compiling inside a frame loop:
----
---- ```teal
---- local assignment <const> = tecs.regex.compile([[(?<name>[a-z]+)=(\d+)]])
---- local captures <const> = assignment:captures("health=100")
---- if captures ~= nil then
----     print(captures.named.name.value) -- "health"
----     print(captures.groups[2].value)  -- "100"
---- end
---- ```
----
---- Patterns use Rust `regex` syntax. Inline flags such as `(?i)` and `(?m)`
---- configure them; look-around and backreferences are deliberately unsupported
---- so searches remain linear in the pattern and subject sizes.
----
---- ## Byte strings and positions
----
---- Subjects may contain arbitrary bytes, including invalid UTF-8. `first` and
---- `last` are 1-based inclusive byte positions, matching `string.find`; an
---- empty match has `last == first - 1`. Patterns themselves must be UTF-8.
---- Disable Unicode for a pattern fragment that intentionally matches arbitrary
---- bytes, for example `(?-u:.)`.
----
---- ## Replacement
----
---- `replace` changes the first match and `replaceAll` changes every
---- non-overlapping match. Replacement strings expand `$0`, `$1`, `$name`,
---- `${name}`, and `$$`:
----
---- ```teal
---- local name <const> = tecs.regex.compile([[(?<last>[A-Za-z]+),\s+([A-Za-z]+)]])
---- local display <const> = name:replace("Dowling, Michael", "$2 $last")
---- -- display is "Michael Dowling"
---- ```
 local record regex
-    --- One matched byte range.
+    --- Describes one matched byte range.
     record Match
-        --- The bytes inside the range, copied from the subject.
+        --- Read-only. Contains the bytes copied from the matched range.
         value: string
-        --- First byte in the subject, 1-based.
+        --- Read-only. Reports the first matched byte using a 1-based index.
         first: integer
-        --- Last byte in the subject, inclusive. One less than `first` for an empty match.
+        --- Read-only. Reports the inclusive last matched byte. An empty match
+        --- reports `first - 1`.
         last: integer
-        --- Capture-group index, with zero reserved for the whole match.
+        --- Read-only. Reports the capture-group index, with zero for the whole
+        --- match.
         index: integer
-        --- Capture name, or nil for the whole match and an unnamed group.
+        --- Read-only. Contains the capture name, or nil for an unnamed group.
         name: string
     end
 
-    --- A whole match and the capture groups populated by it.
+    --- Contains a whole match and its populated capture groups.
     record Captures
-        --- Group zero: the whole expression's match.
+        --- Read-only. Contains group zero, which covers the whole match.
         whole: Match
-        --- Explicit groups, indexed by their 1-based group number. An unmatched optional group leaves
-        ---     a hole; use `groupCount` rather than `#groups`.
+        --- Read-only. Contains explicit groups by their 1-based index. An
+        --- unmatched optional group leaves a hole.
         groups: {Match}
-        --- Number of explicit groups in the pattern, including groups that did not match this subject.
+        --- Read-only. Reports the number of explicit groups in the pattern,
+        --- including groups that did not match.
         groupCount: integer
-        --- Matched named groups, pointing at the same `Match` values as `groups`.
+        --- Read-only. Maps matched group names to the same values in `groups`.
         named: {string: Match}
     end
 
-    --- A compiled Rust regular expression.
+    --- Represents a compiled Rust regular expression.
     record Regex
-        --- Source pattern, unchanged.
+        --- Read-only. Contains the source pattern unchanged.
         pattern: string
+        --- Engine-owned. Stores the compiled native expression. Ordinary game
+        --- code should ignore this field.
         _handle: loader.CPtr
+        --- Engine-owned. Stores reusable native match spans. Ordinary game
+        --- code should ignore this field.
         _spans: loader.CArray
+        --- Engine-owned. Maps capture indices to names. Ordinary game code
+        --- should ignore this field.
         _captureNames: {integer: string}
+        --- Engine-owned. Stores the allocated capture count. Ordinary game
+        --- code should ignore this field.
         _captureCount: integer
 
-        --- Whether any part of a subject matches.
+        --- Reports whether any part of a subject matches.
         ---
         --- ```teal
         --- local imageName <const> = tecs.regex.compile([[\.(png|jpg)$]])
@@ -127,7 +102,7 @@ local record regex
         ---
         --- @param subject Arbitrary bytes.
         --- @param init First byte considered, under `string.find`'s rules: 1 by default, a negative
-        ---     value counts back from the end, and a value before 1 is clamped to 1.
+        ---     value counts back from the end, and the method clamps a value before 1 to 1.
         --- @return The matched bytes and their range, or nil when nothing matches.
         find: function(self: Regex, subject: string, init?: integer): Match
 
@@ -135,7 +110,7 @@ local record regex
         ---
         --- `groups` may contain holes when optional groups do not participate;
         --- iterate through `groupCount`, not `#groups`. A named entry aliases
-        --- the same `Match` stored at its numbered index.
+        --- the same [`Match`](tealdoc:tecs.regex.Match) stored at its numbered index.
         ---
         --- @param subject Arbitrary bytes.
         --- @param init First byte considered, under the same rules as `find`.
@@ -144,7 +119,7 @@ local record regex
 
         --- Replaces the first match.
         ---
-        --- Capture references in the replacement are expanded: `$0` is the whole match, `$1` is the
+        --- The method expands capture references in the replacement: `$0` is the whole match, `$1` is the
         ---     first group, `$name` and `${name}` select a named group, and `$$` writes one dollar
         ---     sign. A reference the pattern does not declare expands to an empty string.
         ---
@@ -178,15 +153,15 @@ local record regex
     --- Compiles a Rust regular expression.
     ---
     --- Compilation raises on malformed syntax or a pattern that is not UTF-8.
-    --- Rust's Unicode character classes are enabled by default; use inline
+    --- Rust's Unicode character classes work by default; use inline
     --- flags to change the expression, such as `(?i)` for case-insensitive
     --- matching or `(?-u:.)` for one arbitrary byte.
     ---
-    --- Keep the returned object and reuse it. Its native allocation is released
-    --- automatically when Lua collects it.
+    --- Keep the returned object and reuse it. The Lua collector releases its
+    --- native allocation automatically.
     ---
     --- @param pattern Rust regex syntax, with NUL bytes allowed where that syntax allows them.
-    --- @return A compiled expression whose native allocation is released by the Lua collector.
+    --- @return A compiled expression whose native allocation the Lua collector releases.
     compile: function(pattern: string): Regex
 end
 

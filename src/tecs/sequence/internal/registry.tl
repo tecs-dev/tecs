@@ -1,16 +1,18 @@
---- The process-global program registry.
----
---- Programs are keyed by name, and every name can have several versions
---- alive at once: redefining a name compiles a new one, and a playback keeps
---- the version it started with so a hot reload continues rather than resuming
---- into changed instructions.
----
---- A version is held by the playbacks running it and dropped when the last
---- one finishes, is canceled, or is discarded by a snapshot load. The newest
---- version of a name is never dropped: that is the one `play` resolves.
----
---- Global rather than per world, because a program is code: two worlds
---- playing the same name are running the same instructions.
+--[=[
+The process-global program registry.
+
+Programs are keyed by name, and every name can have several versions
+alive at once: redefining a name compiles a new one, and a playback keeps
+the version it started with so a hot reload continues rather than resuming
+into changed instructions.
+
+A version is held by the playbacks running it and dropped when the last
+one finishes, is canceled, or is discarded by a snapshot load. The newest
+version of a name is never dropped: that is the one `play` resolves.
+
+Global rather than per world, because a program is code: two worlds
+playing the same name are running the same instructions.
+]=]
 
 local seqprogram <const> = require("tecs.sequence.internal.program")
 local seqtypes <const> = require("tecs.sequence.internal.types")

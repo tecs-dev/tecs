@@ -1,18 +1,20 @@
---- One frame's command buffer and swapchain target.
----
---- The command buffer is a field on this value, never module state. SDL_GPU
---- allows acquiring a command buffer per thread, and a global would make
---- threaded recording impossible to retrofit once render code is written
---- against it. Everything that records passes the frame explicitly.
----
---- A command buffer is a resource, not a value: it holds a slot in the driver's
---- pool and, once a swapchain texture has been acquired on it, the texture the
---- presenter is waiting for. It leaves that state exactly once, through
---- `submit` or `cancel`, and which of the two is legal is not a preference.
---- SDL documents canceling after a swapchain texture has been acquired as an
---- error, so an acquired frame can only be submitted. `state` and `acquired`
---- are here so that a recovery path with nothing but the frame can work out
---- which it is looking at.
+--[=[
+One frame's command buffer and swapchain target.
+
+The command buffer is a field on this value, never module state. SDL_GPU
+allows acquiring a command buffer per thread, and a global would make
+threaded recording impossible to retrofit once render code is written
+against it. Everything that records passes the frame explicitly.
+
+A command buffer is a resource, not a value: it holds a slot in the driver's
+pool and, once a swapchain texture has been acquired on it, the texture the
+presenter is waiting for. It leaves that state exactly once, through
+`submit` or `cancel`, and which of the two is legal is not a preference.
+SDL documents canceling after a swapchain texture has been acquired as an
+error, so an acquired frame can only be submitted. `state` and `acquired`
+are here so that a recovery path with nothing but the frame can work out
+which it is looking at.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

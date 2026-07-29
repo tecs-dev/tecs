@@ -1,23 +1,25 @@
---- Programs as plain data.
----
---- The node constructors are Lua functions, which an agent on the other end
---- of an MCP connection cannot call. This is the same authoring surface as a
---- list of objects, so a program can be sent over the wire, stored in a file,
---- or written by hand:
----
----     {
----       {op = "call", action = "game.lockControls"},
----       {op = "wait", seconds = 1.5},
----       {op = "parallel", blocks = {
----           {{op = "playTween", preset = "boss.enter", bind = "boss"},
----            {op = "waitTween"}},
----           {{op = "waitQuery", query = "game.adds", condition = "empty"}},
----       }},
----       {op = "emit", event = "boss.ready"},
----     }
----
---- Decoding validates as it goes and reports the path to a bad entry, since
---- the author is usually a tool and the message is all it gets.
+--[=[
+Programs as plain data.
+
+The node constructors are Lua functions, which an agent on the other end
+of an MCP connection cannot call. This is the same authoring surface as a
+list of objects, so a program can be sent over the wire, stored in a file,
+or written by hand:
+
+    {
+      {op = "call", action = "game.lockControls"},
+      {op = "wait", seconds = 1.5},
+      {op = "parallel", blocks = {
+          {{op = "playTween", preset = "boss.enter", bind = "boss"},
+           {op = "waitTween"}},
+          {{op = "waitQuery", query = "game.adds", condition = "empty"}},
+      }},
+      {op = "emit", event = "boss.ready"},
+    }
+
+Decoding validates as it goes and reports the path to a bad entry, since
+the author is usually a tool and the message is all it gets.
+]=]
 
 local seqtypes <const> = require("tecs.sequence.internal.types")
 

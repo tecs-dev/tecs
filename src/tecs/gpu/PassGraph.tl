@@ -1,31 +1,33 @@
---- A declarative graph of render passes over shared targets.
----
---- Passes name the targets they read and write; the graph owns those targets,
---- resizes them with the frame, begins and ends each pass, and binds each
---- pass's inputs as fragment samplers. What a pass body does is draw.
----
---- Execution follows declaration order rather than a topological sort. The
---- order of a deferred pipeline is a design decision, not something worth
---- rediscovering every frame, and a graph that silently reorders passes is
---- harder to reason about than one that refuses to run. Declared inputs are
---- validated against what earlier passes produce, so a missing dependency is
---- an error at build time instead of a black screen.
----
---- One depth attachment is shared by whichever passes ask for it, sized and
---- resized with the frame like every other target. Depth is per pass rather
---- than per graph because a pass that must not have one is as ordinary as a
---- pass that must, and a pipeline bound in either has to agree with it.
----
---- A color clear comes from the target, which is right while one pass writes
---- a target and wrong as soon as two do: the second would clear the first
---- one's result away. A pass may therefore override it, with `PassGraph.LOAD`
---- as the way to say "load, whatever the target asks for". That is what any
---- pass accumulating into a target an earlier pass filled needs, and what a
---- second view's lighting pass needs to leave the first view's pixels alone.
----
---- The graph knows nothing about entities, archetypes, or dirtiness. A pass
---- that should be skipped says so through `enabled`, which is where an
---- ECS-side dirty gate plugs in without the graph learning what dirty means.
+--[=[
+A declarative graph of render passes over shared targets.
+
+Passes name the targets they read and write; the graph owns those targets,
+resizes them with the frame, begins and ends each pass, and binds each
+pass's inputs as fragment samplers. What a pass body does is draw.
+
+Execution follows declaration order rather than a topological sort. The
+order of a deferred pipeline is a design decision, not something worth
+rediscovering every frame, and a graph that silently reorders passes is
+harder to reason about than one that refuses to run. Declared inputs are
+validated against what earlier passes produce, so a missing dependency is
+an error at build time instead of a black screen.
+
+One depth attachment is shared by whichever passes ask for it, sized and
+resized with the frame like every other target. Depth is per pass rather
+than per graph because a pass that must not have one is as ordinary as a
+pass that must, and a pipeline bound in either has to agree with it.
+
+A color clear comes from the target, which is right while one pass writes
+a target and wrong as soon as two do: the second would clear the first
+one's result away. A pass may therefore override it, with `PassGraph.LOAD`
+as the way to say "load, whatever the target asks for". That is what any
+pass accumulating into a target an earlier pass filled needs, and what a
+second view's lighting pass needs to leave the first view's pixels alone.
+
+The graph knows nothing about entities, archetypes, or dirtiness. A pass
+that should be skipped says so through `enabled`, which is where an
+ECS-side dirty gate plugs in without the graph learning what dirty means.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local Texture <const> = require("tecs.gpu.Texture")

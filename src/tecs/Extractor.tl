@@ -1,32 +1,34 @@
---- Turns a world into a frame packet.
----
---- The world-facing half of rendering. It touches queries, archetypes and
---- components, and it never touches a device: the staging it writes into
---- arrives as a pair of mapped pointers, and what it did with them leaves as
---- ranges in a packet. That is what lets a world be extracted with no device
---- at all, and what keeps every dirty bit consumed in one place.
----
---- The sync walks archetype columns and writes instances straight into mapped
---- staging. There is no intermediate array: the column is contiguous C memory
---- and so is the destination, so a row becomes a handful of float stores into
---- driver memory rather than a copy between two buffers.
----
---- Instances pack as four vec4s: a 2x2 basis, an origin, a color, and a UV
---- rect. A precomputed basis costs less on the GPU than a per-vertex sincos.
---- The origin is the quad's middle, which is the entity's position until a
---- `Pivot` says the quad hangs off some other point of itself.
----
---- Which layer an image occupies is the backend's answer, not the image's
---- identity: layers are handed out as images register, so the number depends on
---- load order. A Sprite therefore names its image, and a registry here maps
---- that name to a layer. Resolving happens once, when the Sprite is built or
---- the first time a restored one is written, and the answer is cached in the
---- Sprite so extraction reads a field per row rather than a lookup.
----
---- That dirty gating is the point. Walking every entity every frame is the
---- cost that decides whether a large world is affordable, and most frames
---- change very little. Layer zero is a white pixel, so an entity with no
---- Sprite samples it and textured and untextured geometry share one path.
+--[=[
+Turns a world into a frame packet.
+
+The world-facing half of rendering. It touches queries, archetypes and
+components, and it never touches a device: the staging it writes into
+arrives as a pair of mapped pointers, and what it did with them leaves as
+ranges in a packet. That is what lets a world be extracted with no device
+at all, and what keeps every dirty bit consumed in one place.
+
+The sync walks archetype columns and writes instances straight into mapped
+staging. There is no intermediate array: the column is contiguous C memory
+and so is the destination, so a row becomes a handful of float stores into
+driver memory rather than a copy between two buffers.
+
+Instances pack as four vec4s: a 2x2 basis, an origin, a color, and a UV
+rect. A precomputed basis costs less on the GPU than a per-vertex sincos.
+The origin is the quad's middle, which is the entity's position until a
+`Pivot` says the quad hangs off some other point of itself.
+
+Which layer an image occupies is the backend's answer, not the image's
+identity: layers are handed out as images register, so the number depends on
+load order. A Sprite therefore names its image, and a registry here maps
+that name to a layer. Resolving happens once, when the Sprite is built or
+the first time a restored one is written, and the answer is cached in the
+Sprite so extraction reads a field per row rather than a lookup.
+
+That dirty gating is the point. Walking every entity every frame is the
+cost that decides whether a large world is affordable, and most frames
+change very little. Layer zero is a white pixel, so an entity with no
+Sprite samples it and textured and untextured geometry share one path.
+]=]
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")

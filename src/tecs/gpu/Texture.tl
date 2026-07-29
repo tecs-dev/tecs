@@ -1,11 +1,13 @@
---- A GPU texture.
----
---- Usage is declared rather than assumed. SDL_GPU validates that a texture is
---- only used the ways it was created for, and the flags are not in the order
---- one would guess, so they are taken from the generated constants.
----
---- Readback exists so rendering can be asserted on rather than eyeballed. A
---- pass that silently produces nothing still runs at full frame rate.
+--[=[
+A GPU texture.
+
+Usage is declared rather than assumed. SDL_GPU validates that a texture is
+only used the ways it was created for, and the flags are not in the order
+one would guess, so they are taken from the generated constants.
+
+Readback exists so rendering can be asserted on rather than eyeballed. A
+pass that silently produces nothing still runs at full frame rate.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

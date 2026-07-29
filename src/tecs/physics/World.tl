@@ -1,7 +1,9 @@
---- One Rapier 2D simulation.
----
---- Rapier remains entirely Rust-owned. This wrapper only translates Lua
---- tables into the stable C ABI and keeps the opaque world pointer alive.
+--[=[
+One Rapier 2D simulation.
+
+Rapier remains entirely Rust-owned. This wrapper only translates Lua
+tables into the stable C ABI and keeps the opaque world pointer alive.
+]=]
 
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")

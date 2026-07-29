@@ -1,12 +1,14 @@
---- A built shader pack: what a release ships instead of a compiler.
----
---- SDL_GPU does not compile shaders. It takes bytecode in a backend-specific
---- format and is told, separately, how many resources of each class the shader
---- binds. So a pack has to carry more than code: it carries the reflection
---- too, because that is not recoverable from the translated output.
----
---- This module knows nothing about compiling. That is deliberate: it is loaded
---- by builds that link no compiler at all.
+--[=[
+A built shader pack: what a release ships instead of a compiler.
+
+SDL_GPU does not compile shaders. It takes bytecode in a backend-specific
+format and is told, separately, how many resources of each class the shader
+binds. So a pack has to carry more than code: it carries the reflection
+too, because that is not recoverable from the translated output.
+
+This module knows nothing about compiling. That is deliberate: it is loaded
+by builds that link no compiler at all.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local content <const> = require("tecs.platform.content")

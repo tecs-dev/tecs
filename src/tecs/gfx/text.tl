@@ -1,53 +1,52 @@
---- Text, laid out into instances and drawn from a signed distance field.
----
---- A `Text` names a font and a string. It is one entity, and its glyphs are
---- not entities at all: the plugin registers an instance producer with the
---- renderer and every text owns a span of that producer's run. A glyph is
---- still a textured quad with a UV rect addressing the font atlas and a
---- material selecting the distance-field shader, so culling, depth, layers and
---- the indirect draw all apply to it exactly as they apply to an entity.
----
---- What a span buys is what dirty tracking cannot give an entity here. Dirty
---- is per archetype per component, so glyph entities would share one archetype
---- and editing one string would rewrite every glyph in the world; and spawning
---- or despawning a glyph moves an archetype's length, which relays the whole
---- scene out. A producer reports the sub-ranges it changed, so editing one
---- string rewrites that string.
----
---- Spans come from a size-bucketed free list. Allocating takes an exact-size
---- span off the free list when one is there and extends the high-water mark
---- otherwise, so short strings appearing and disappearing reuse each other's
---- spans exactly and the producer's length stops moving after warmup. The
---- tradeoff is fragmentation: a text that grows past its span leaves a hole
---- that only a text of that exact length reclaims. Compaction is the answer if
---- a measurement ever shows it mattering, and there is none here until one
---- does.
----
---- The producer keeps its own copy of the glyph instances, so writing a text
---- is a write into ordinary memory and the renderer's sync is a bulk copy of
---- the ranges that moved. That decouples when layout happens from when the
---- GPU buffer is filled, and the copy is contiguous.
----
---- Glyph positions are absolute, so a text composes its own transform: its
---- position, rotation and scale are applied to the glyph offsets here. The
---- text entity is ordinary, so a parent has already composed its `Transform`
---- into world space by the time this reads it.
----
---- Layout runs every frame and almost no text changes, so it is gated twice:
---- an archetype whose `Text`, `Tint` and `Transform` columns are all clean is
---- skipped whole, and within a dirty archetype a row whose authored fields and
---- transform match what its glyphs were built from is skipped too.
----
---- A `Font` is metrics and an atlas path, and nothing about a device. Which
---- texture-array layer the atlas occupies is a renderer's answer, so the
---- plugin holds that and a font can be shared by two of them.
----
---- Layout is advances, kerning where the metrics carry it, explicit newlines
---- and an alignment within the block. What it does not do: wrapping to a
---- width, anchoring anywhere but the block's top-left corner, per-glyph
---- styling, right-to-left or complex shaping, and any effect around the
---- outline. Each of those is a decision rather than an omission of effort,
---- and none is needed by anything drawing text today.
+--[=[
+Distance-field text as entities in the rendered world.
+
+A `Text` names a font and string. `Transform` places its top-left corner,
+`Tint` colors every glyph, and `Clip` clips it like any other drawable.
+
+```teal
+world:addPlugin(tecs.gfx.textPlugin({
+    renderer = app.renderer,
+}))
+
+world:spawn(
+    tecs.Transform(24, 24),
+    tecs.gfx.Tint(0.92, 0.96, 1.0, 1.0),
+    tecs.gfx.Text.new({
+        text = "tecs\n1200 entities",
+        font = tecs.gfx.defaultFont(),
+        size = 28,
+        align = "center",
+    })
+)
+```
+
+Write text fields through `world:getMut`. A direct `world:get` write leaves the
+column clean and the displayed glyphs unchanged.
+
+## Fonts and layout
+
+A `Font` holds metrics and an atlas path. `loadFont` loads BMFont-style JSON
+metrics. `defaultFont` loads the bundled font. The metrics path gives each font
+its snapshot identity. Worlds and renderers may share a font.
+
+Layout applies glyph advances, kerning, explicit newlines, line spacing,
+tracking, and left, center, or right alignment within the widest line.
+`measureText` returns the same extent without touching an entity.
+
+Text does not wrap to a width, shape complex scripts, anchor outside the
+top-left corner, or style individual glyphs. The `glyph` material draws text
+unlit.
+]=]
+-- Implementation details:
+-- Glyphs are renderer instances rather than entities. Each text owns a span in
+-- a size-bucketed producer, so changing one string dirties only that span.
+-- Exact-size free lists reuse spans and may fragment when strings change
+-- length.
+--
+-- Layout first skips clean archetypes, then compares each dirty row with the
+-- authored fields and composed transform used for its previous glyphs. The
+-- producer retains host copies and reports only changed contiguous ranges.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -105,171 +104,284 @@ local MINIMUM_SLOTS <const> = 64
 --- one commit.
 local logger <const> = log.get("tecs.text")
 
---- One glyph's metrics, in the units the atlas was generated at.
+--- Describes one glyph in the units used to generate its atlas.
 local record GlyphMetrics
-    --- Rect within the atlas, in atlas pixels.
+    --- Read-only. Reports the glyph rectangle's left edge in atlas pixels.
     x: number
+    --- Read-only. Reports the glyph rectangle's top edge in atlas pixels.
     y: number
+    --- Read-only. Reports the glyph rectangle's width in atlas pixels.
     width: number
+    --- Read-only. Reports the glyph rectangle's height in atlas pixels.
     height: number
-    --- Offset from the pen to the glyph's top-left corner.
+    --- Read-only. Reports the horizontal offset from the pen to the glyph's
+    --- top-left corner.
     xOffset: number
+    --- Read-only. Reports the vertical offset from the pen to the glyph's
+    --- top-left corner.
     yOffset: number
-    --- How far the pen moves after this glyph.
+    --- Read-only. Reports how far the pen moves after this glyph.
     xAdvance: number
 end
 
---- A distance-field font: an atlas image and the metrics describing it.
+--- Represents a distance-field font through its atlas image and metrics.
 ---
 --- Data only. The metrics are read when the font is loaded, which is a few
 --- kilobytes of JSON; the atlas is named rather than held, and a renderer
 --- decodes and uploads it the first frame a text needs it.
 local record Font
-    --- Path the metrics were read from, which is the font's identity and what
+    --- Read-only. Reports the path from which metrics were read. It provides
+    --- the font's identity and the value
     --- a snapshot writes.
     name: string
-    --- Path the atlas image is read from, which is also the name it is
+    --- Read-only. Reports the path from which the atlas image is read. The
+    --- renderer also uses it as the name
     --- registered under.
     atlas: string
-    --- Em size the metrics were generated at. Everything else here is in the
+    --- Read-only. Reports the em size at which the metrics were generated.
+    --- Every other metric uses the
     --- same units and scales by `Text.size / size`.
     size: number
-    --- Distance from one baseline to the next.
+    --- Read-only. Reports the distance from one baseline to the next.
     lineHeight: number
-    --- Baseline offset from the top of a line box.
+    --- Read-only. Reports the baseline offset from the top of a line box.
     base: number
-    --- Atlas dimensions, in pixels.
+    --- Read-only. Reports the atlas width in pixels.
     atlasWidth: number
+    --- Read-only. Reports the atlas height in pixels.
     atlasHeight: number
-    --- Width of the distance field, in atlas pixels.
+    --- Read-only. Reports the width of the distance field in atlas pixels.
     distanceRange: number
-    --- Metrics by codepoint.
+    --- Read-only. Provides glyph metrics by codepoint.
     glyphs: {integer: GlyphMetrics}
-    --- Kerning by leading then trailing codepoint, in font units. Empty when
+    --- Read-only. Provides kerning by leading then trailing codepoint in font
+    --- units. The table remains empty when
     --- the metrics carry none.
     kernings: {integer: {integer: number}}
 
-    --- Advance for a codepoint the font has no metrics for.
+    --- Engine-owned. Stores the fallback advance for codepoints without
+    --- metrics. Ordinary game code should ignore this field.
     _fallbackAdvance: number
 end
 
---- Where a font's atlas sits on one renderer.
+--- Tracks where a font atlas sits on one renderer.
 local record Atlas
-    --- Interned index of the atlas image's name.
+    --- Engine-owned. Stores the interned atlas image index. Ordinary game code
+    --- should ignore this field.
     image: number
-    --- Texture-array layer the atlas occupies.
+    --- Engine-owned. Stores the texture-array layer occupied by the atlas.
+    --- Ordinary game code should ignore this field.
     slot: number
-    --- Fraction of a cell the atlas covers, which glyph UVs are scaled by.
+    --- Engine-owned. Stores the horizontal fraction of a cell covered by the
+    --- atlas. Ordinary game code should ignore this field.
     u: number
+    --- Engine-owned. Stores the vertical fraction of a cell covered by the
+    --- atlas. Ordinary game code should ignore this field.
     v: number
-    --- The field's range as a fraction of a cell, which is what the material
+    --- Engine-owned. Stores the distance-field range as a fraction of a cell,
+    --- which the material
     --- reads from its parameter.
     param: number
-    --- The decode in flight, nil once it has been uploaded.
+    --- Engine-owned. Tracks the atlas decode until upload completes. Ordinary
+    --- game code should ignore this field.
     pending: Future<assets.Image>
-    --- Set once the atlas has failed, so a broken path is reported once
+    --- Engine-owned. Records whether the atlas failed, so a broken path is reported once
     --- rather than every frame.
     failed: boolean
 end
 
---- A string laid out into glyph instances.
+--- Lays a string out into glyph instances.
 ---
 --- The entity's Transform places the top-left corner of the text block and
 --- orients and scales the whole block, and its Tint, if it has one, colors
 --- every glyph. Both are ordinary components on an ordinary entity, so a text
---- is moved, parented, tweened and layered like anything else, and a `Clip`
+--- moves, parents, tweens, and layers like anything else, and a `Clip`
 --- keeps its glyphs inside a rectangle exactly as it would any other quad.
 ---
 --- Write through `world:getMut(entity, Text)`. A write through `world:get`
 --- leaves the column clean and the glyphs stale.
 local record Text is Component
-    --- The string laid out. A newline starts a line; nothing else breaks one.
+    --- Caller-writable. Sets the laid-out string. A newline starts a line;
+    --- nothing else breaks one.
     text: string
-    --- The font the glyphs come from. Without one the text draws nothing.
+    --- Caller-writable. Selects the font that supplies the glyphs. Without one,
+    --- the text draws nothing.
     font: Font
-    --- Em size in world units.
+    --- Caller-writable. Sets the em size in world units.
     size: number
-    --- "left", "center" or "right", within the widest line of the block.
+    --- Caller-writable. Selects `"left"`, `"center"`, or `"right"` alignment
+    --- within the block's widest line.
     align: string
-    --- Multiplies the font's line height.
+    --- Caller-writable. Multiplies the font's line height.
     lineSpacing: number
-    --- Extra advance between glyphs, in world units.
+    --- Caller-writable. Adds advance between glyphs in world units.
     tracking: number
 
-    --- Extent of the last layout, in world units. Written by the layout
-    --- system; assigning it does nothing.
+    --- Engine-owned. Reports the width of the last layout in world units.
+    --- Assigning it has no effect.
     width: number
+    --- Engine-owned. Reports the height of the last layout in world units.
+    --- Assigning it has no effect.
     height: number
 
-    --- First slot of the producer span this text owns, one-based, and how many
-    --- slots it holds. Zero when it holds none.
+    --- Engine-owned. Stores the first producer slot owned by this text.
+    --- Ordinary game code should ignore this field.
     _span: integer
+    --- Engine-owned. Stores how many producer slots this text owns. Ordinary
+    --- game code should ignore this field.
     _spanCount: integer
 
-    --- What the glyphs were last built from. A row whose authored fields and
-    --- transform all match these is already laid out.
+    --- Engine-owned. Stores the last laid-out string. Ordinary game code
+    --- should ignore this field.
     _builtText: string
+    --- Engine-owned. Stores the last laid-out font. Ordinary game code should
+    --- ignore this field.
     _builtFont: Font
+    --- Engine-owned. Stores the last laid-out em size. Ordinary game code
+    --- should ignore this field.
     _builtSize: number
+    --- Engine-owned. Stores the last laid-out alignment. Ordinary game code
+    --- should ignore this field.
     _builtAlign: string
+    --- Engine-owned. Stores the last laid-out line spacing. Ordinary game code
+    --- should ignore this field.
     _builtSpacing: number
+    --- Engine-owned. Stores the last laid-out tracking. Ordinary game code
+    --- should ignore this field.
     _builtTracking: number
+    --- Engine-owned. Stores the last laid-out red channel. Ordinary game code
+    --- should ignore this field.
     _builtR: number
+    --- Engine-owned. Stores the last laid-out green channel. Ordinary game
+    --- code should ignore this field.
     _builtG: number
+    --- Engine-owned. Stores the last laid-out blue channel. Ordinary game code
+    --- should ignore this field.
     _builtB: number
+    --- Engine-owned. Stores the last laid-out alpha channel. Ordinary game
+    --- code should ignore this field.
     _builtA: number
+    --- Engine-owned. Stores the last laid-out horizontal position. Ordinary
+    --- game code should ignore this field.
     _builtX: number
+    --- Engine-owned. Stores the last laid-out vertical position. Ordinary game
+    --- code should ignore this field.
     _builtY: number
+    --- Engine-owned. Stores the last laid-out depth. Ordinary game code should
+    --- ignore this field.
     _builtZ: number
+    --- Engine-owned. Stores the last laid-out layer. Ordinary game code should
+    --- ignore this field.
     _builtLayer: integer
+    --- Engine-owned. Stores the last laid-out rotation. Ordinary game code
+    --- should ignore this field.
     _builtRotation: number
+    --- Engine-owned. Stores the last laid-out horizontal scale. Ordinary game
+    --- code should ignore this field.
     _builtScaleX: number
+    --- Engine-owned. Stores the last laid-out vertical scale. Ordinary game
+    --- code should ignore this field.
     _builtScaleY: number
+    --- Engine-owned. Stores the last laid-out clip index. Ordinary game code
+    --- should ignore this field.
     _builtClip: integer
 end
 
+--- Configures a font loaded from metrics and an atlas.
 local record FontOptions
-    --- Path to the metrics JSON, resolved against the asset root when it is
+    --- Caller-writable. Sets the path to the metrics JSON. Tecs resolves it
+    --- against the asset root when it is
     --- not absolute.
     metrics: string
-    --- Path to the atlas image. Defaults to the page the metrics name,
-    --- resolved beside them.
+    --- Caller-writable. Sets the atlas image path. It defaults to the page
+    --- named in the metrics, resolved beside them.
     atlas: string
 end
 
+--- Configures the text layout plugin.
 local record TextOptions
-    --- The renderer the font atlases upload into and the glyph instances are
-    --- produced for.
+    --- Caller-writable. Selects the renderer that receives font atlases and
+    --- glyph instances.
     renderer: Renderer
 end
 
---- The text surface: the font loader, the `Text` component, and the plugin
---- that lays it out and produces its glyph instances.
----
---- Fonts are loaded per process and are independent of any device, so one is
---- shared by every world and every renderer. Everything else here is per
---- world and needs the plugin installed.
 local record text
-    --- What `loadFont` answers with, and what a `Text` names.
+    --- Represents a loaded font named by `Text`.
     type Font = Font
-    --- One entry of a font's `glyphs`, in the units the atlas was generated
-    --- at.
+    --- Describes one entry of a font's `glyphs` in the units used to generate
+    --- the atlas.
     type GlyphMetrics = GlyphMetrics
-    --- What `loadFont` takes.
+    --- Configures `loadFont`.
     type FontOptions = FontOptions
-    --- What `textPlugin` takes.
+    --- Configures `textPlugin`.
     type TextOptions = TextOptions
 
-    --- The text component.
+    --- Read-only. Exposes the text component.
     Text: Text
 
+    --- Loads a font's metrics and names its atlas.
+    ---
+    --- Returns the font already loaded under the same metrics path instead of
+    --- reading it twice.
+    --- @param options The caller must set `metrics`. `atlas` defaults to the
+    ---     first page in the metrics, resolved beside the metrics file, and
+    ---     applies only on the first load of a path.
+    --- @return The shared [`Font`](tealdoc:tecs.gfx.text.Font) for that path. The
+    ---     renderer loads its atlas when a text first needs it.
     loadFont: function(options: FontOptions): Font
+    --- Returns the bundled default font and loads it on first use.
+    --- @return The same shared [`Font`](tealdoc:tecs.gfx.text.Font) on every
+    ---     call.
     defaultFont: function(): Font
+    --- Returns a loaded font by its metrics path, or nil.
+    --- @param name The path exactly as passed to `loadFont`, before asset-root
+    ---     resolution.
+    --- @return The shared [`Font`](tealdoc:tecs.gfx.text.Font), or nil when no
+    ---     caller has loaded that path.
     findFont: function(name: string): Font
+    --- Reloads a font's metrics while preserving the Font value.
+    ---
+    --- Existing [`Text`](tealdoc:tecs.gfx.text.Text) components keep the same
+    --- table and lay themselves out again. Reloading rejects metrics that
+    --- change the atlas dimensions.
+    --- @param path The metrics path passed to `loadFont`, or its resolved file
+    ---     path.
+    --- @return The same [`Font`](tealdoc:tecs.gfx.text.Font) table with its
+    ---     metrics updated.
     reloadFont: function(path: string): Font
+    --- Returns a text item's width and height in world units.
+    ---
+    --- Uses the same layout as the plugin without adding or changing an
+    --- entity.
+    --- @param item A [`Text`](tealdoc:tecs.gfx.text.Text) value to read. It need
+    ---     not belong to an entity.
+    --- @return Width at `item.size`, before
+    ---     [`Transform`](/ecs/#tecs.ecs.Transform) scale. Returns zero for a missing
+    ---     item, font, or string.
+    --- @return Height on the same terms, counting complete line boxes.
     measureText: function(item: Text): number, number
+    --- Creates the plugin that lays out text for a renderer.
+    --- @param options Requires `renderer`.
+    --- @return A world plugin. Each world gets its own producer run while
+    ---     sharing process-wide fonts.
     textPlugin: function(options: TextOptions): function(World)
+    --- Returns how many texts the world has laid out.
+    --- @param world A world with or without the text plugin.
+    --- @return A count that only increases, or zero before plugin installation.
+    ---     The count measures rows laid out rather than frames.
     textLayouts: function(world: World): integer
+    --- Returns a glyph's world x, y, width, and height.
+    ---
+    --- Reads the instance produced for rendering, so it reports the drawn
+    --- placement.
+    --- @param world The world that contains the text entity.
+    --- @param entity An entity carrying [`Text`](tealdoc:tecs.gfx.text.Text).
+    --- @param index A one-based produced-glyph index. Newlines, spaces, and
+    ---     missing codepoints move the pen without taking an index.
+    --- @return World x of the glyph center, or nil when no glyph exists.
+    --- @return World y of the glyph center, or nil with the first return.
+    --- @return Glyph width in world units, or nil with the first return.
+    --- @return Glyph height in world units, or nil with the first return.
     glyphAt: function(world: World, entity: integer, index: integer): number, number, number, number
 end
 
@@ -380,18 +492,9 @@ local function parseMetrics(document: string, name: string, atlas: string): Font
     return self
 end
 
---- Loads a font's metrics and names its atlas.
----
---- Answers with the font already loaded under the same metrics path rather
---- than reading it twice, so a path means one font for the life of the
---- process however many times it is asked for.
----
---- @param options `metrics` is required. `atlas` defaults to the first page
----     the metrics name, resolved beside them, and is only consulted the first
----     time a path is loaded.
---- @return The one font for that path, shared rather than copied. The atlas is
----     named and not read here: a renderer decodes and uploads it the first
----     frame a text needs it.
+-- A metrics path identifies one process-wide font. Reusing the same path
+-- returns the existing table, and the renderer loads the named atlas only when
+-- text first needs it.
 function text.loadFont(options: FontOptions): Font
     if options == nil or options.metrics == nil then
         error("tecs: a font needs a `metrics` path", 2)
@@ -426,20 +529,10 @@ function text.loadFont(options: FontOptions): Font
     return self
 end
 
---- The font the engine ships, loaded on first use.
----
---- @return The same font every call, since it goes through `loadFont` under a
----     fixed path.
 function text.defaultFont(): Font
     return text.loadFont({metrics = DEFAULT_METRICS})
 end
 
---- A loaded font by the metrics path it was loaded from, or nil.
----
---- @param name The path exactly as it was passed to `loadFont`, not the file
----     it resolves to.
---- @return Nil when nothing has loaded that path, which is the non-raising way
----     to ask; `loadFont` would read it.
 function text.findFont(name: string): Font
     return fontsByName[name]
 end
@@ -1027,18 +1120,8 @@ local function layout(item: Text): integer, number, number
     return count, blockWidth, lines * step
 end
 
---- Extent of `item` in world units, without touching any entity.
----
---- The same layout the system runs, so a caller sizing a panel around a
---- string gets the number the glyphs will occupy.
----
---- @param item Read and not written, and it need not be on an entity: a
----     `Text` assembled to ask this question is enough.
---- @return Width in world units at `item.size`, before any Transform scale the
----     entity drawing it applies. Zero for a nil item, one with no font, or
----     one with no string.
---- @return Height on the same terms, counting whole lines: a one-line text is
----     one line height rather than the ink's extent.
+-- This calls the same layout routine as the plugin, without producing
+-- instances or touching an entity.
 function text.measureText(item: Text): number, number
     if item == nil or item.font == nil or item.text == nil then
         return 0.0, 0.0
@@ -1114,29 +1197,10 @@ local function evict(install: Install, font: Font)
     install.known[font] = nil
 end
 
---- Re-reads a font's metrics over the font already loaded from them.
----
---- Identity is the point, as it is for an image. A `Text` names its font by
---- holding the table, so the metrics are read back into that table rather than
---- into a new one and every text goes on pointing at the font it was given. A
---- replacement would strand each of them on the font that was.
----
---- Which is also why nothing can infer from identity that anything happened. A
---- text is laid out again when what its glyphs were built from differs from what
---- it holds now, and after a read in place none of it differs, so the texts
---- naming this font are told rather than left to notice. Exactly those: a text
---- naming another font is not laid out again, whatever archetype it shares.
----
---- Metrics naming an atlas of another size are refused, on the terms
---- `reloadImage` refuses an image whose size moved. Every glyph already drawn
---- carries UV extents measured against the size the atlas had, and a page of
---- another size makes each of them address something else. The atlas keeps the
---- name it was loaded under either way, since that name may have been given
---- rather than read and a re-read of the metrics is not a change of which image
---- the glyphs come from.
---- @param path The metrics path the font was loaded under, or the file it was
----     read from.
---- @return The font, which is the table it always was.
+-- Reload in place so Text values retain their Font identity. The explicit
+-- reloaded set tells the layout pass which unchanged table contents need
+-- rebuilding. Atlas dimensions remain fixed because existing glyph UVs depend
+-- on them.
 function text.reloadFont(path: string): Font
     if path == nil or path == "" then
         error("tecs: a font re-read needs a metrics path", 2)
@@ -1189,31 +1253,13 @@ function text.reloadFont(path: string): Font
     return font
 end
 
---- How many texts have been laid out in `world` since it was created.
----
---- Laying out a string that did not change is the cost the dirty gates exist
---- to avoid, and this is how that is asserted rather than assumed.
----
---- @return A count that only ever increases, and zero for a world the plugin
----     was never installed on. It counts rows laid out, not frames.
+-- This diagnostic counter verifies that clean text rows skip layout work.
 function text.textLayouts(world: World): integer
     return layoutCounts[world] or 0
 end
 
---- Where the `index`th glyph of `entity` landed, as world x, y, width and
---- height.
----
---- Read back out of the instance the producer wrote, so this is where the
---- glyph is drawn rather than where a layout intended it. Nothing when the
---- text has no such glyph.
----
---- @param index One-based over the glyphs the layout produced, which is not
----     the string's byte index: a newline, a space, and a codepoint the font
----     has no metrics for each move the pen and take no slot.
---- @return World x of the glyph's center, then y, then its width and height in
----     world units. All four are nil together when the plugin is not installed
----     on the world, the entity carries no `Text`, or the index is past what
----     it laid out.
+-- Read from the produced instance rather than recalculating layout so the
+-- answer matches what rendering consumes.
 function text.glyphAt(world: World, entity: integer, index: integer): number, number, number, number
     local install = installs[world]
     if install == nil then
@@ -1227,7 +1273,11 @@ function text.glyphAt(world: World, entity: integer, index: integer): number, nu
 
     local base = (item._span + index - 2) * INSTANCE_FLOATS
     local instances = glyphs.instances
-    return instances[base + 4] as number, instances[base + 5] as number, instances[base + 1] as number, instances[base + 2] as number
+    local x <const> = instances[base + 4] as number
+    local y <const> = instances[base + 5] as number
+    local width <const> = instances[base + 1] as number
+    local height <const> = instances[base + 2] as number
+    return x, y, width, height
 end
 
 --- The material id, resolved on first use: reading the material files needs
@@ -1427,17 +1477,9 @@ local function stale(item: Text, transform: TransformInstance, tint: TintInstanc
     return item._builtR ~= tint.r or item._builtG ~= tint.g or item._builtB ~= tint.b or item._builtA ~= tint.a
 end
 
---- Registers the layout system and the producer on a world.
----
---- The system runs after `RelativeTransform`, which composes a parented text's
---- own world transform in the same phase. Glyph positions are absolute, so a
---- text laid out before that composition would use the transform the previous
---- frame left and never notice the write that changed it.
----
---- @param options `renderer` is required and is the only field.
---- @return The plugin, to be handed to a world. Each world it is installed on
----     gets its own producer run of the one renderer's instance buffer, and
----     the fonts themselves are shared across all of them.
+-- Run after RelativeTransform because glyph instances use absolute positions;
+-- running before parent composition would consume the previous frame's
+-- transform.
 function text.textPlugin(options: TextOptions): function(World)
     if options == nil or options.renderer == nil then
         error("tecs: the text plugin needs a `renderer`", 2)

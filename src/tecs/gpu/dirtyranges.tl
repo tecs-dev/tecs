@@ -1,14 +1,16 @@
---- A list of byte ranges that were written, coalesced as it grows.
----
---- Two things record ranges: a buffer's staging slot, which flushes them, and
---- a frame packet, which carries them from whoever wrote the bytes to whoever
---- owns the device. Both want the same merging and the same ceiling, and a
---- second implementation of either is free to drift into a partial upload,
---- which reads as a producer bug three subsystems later.
----
---- Storage is a C array rather than a Lua table because a range is recorded for
---- every run an extraction touches, and because this list is one of the values
---- that crosses between states once rendering owns its own.
+--[=[
+A list of byte ranges that were written, coalesced as it grows.
+
+Two things record ranges: a buffer's staging slot, which flushes them, and
+a frame packet, which carries them from whoever wrote the bytes to whoever
+owns the device. Both want the same merging and the same ceiling, and a
+second implementation of either is free to drift into a partial upload,
+which reads as a producer bug three subsystems later.
+
+Storage is a C array rather than a Lua table because a range is recorded for
+every run an extraction touches, and because this list is one of the values
+that crosses between states once rendering owns its own.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

@@ -1,89 +1,105 @@
---- What the view is looking at.
----
---- One type with a projection mode rather than a 2D camera and a 3D one. The
---- only thing that differs between them is how the matrix is built; everything
---- reading it, the vertex shader and the cull, does not care.
----
---- Position is the center of the view rather than a corner, so a camera that
---- has never been moved shows the world origin in the middle of the window. A
---- renderer with no camera set centers a default on the first frame it draws,
---- so a scene that never mentions a camera behaves as though world coordinates
---- were screen coordinates.
----
---- The Y flip lives here and only here. World Y runs down from the top-left
---- while clip Y runs up, and the three things that have to agree about it are
---- the matrix, `toScreen` and `toWorld`. They agree by all deriving from the
---- same negated Y scale, written out in each rather than shared, so a change to
---- one of them is visibly a change the other two have not had.
----
---- Every method takes the viewport's width and height rather than storing them,
---- because a camera outlives a window size and the pair a call is answered
---- against has to be the pair the frame is being drawn at. Passing one size to
---- `matrix` and another to `toWorld` produces two mappings that do not invert.
+--[=[
+A camera maps world coordinates to one viewport.
+
+The camera stores the view center in world units, zoom, and rotation. Callers
+write these fields directly:
+
+```teal
+local camera <const> = app.renderer.camera
+camera.x = player.x
+camera.y = player.y
+camera.zoom = 2
+camera.rotation = 0
+```
+
+Position names the center rather than a corner. The default view starts at the
+world origin. World Y and screen Y both increase downward.
+
+## Coordinate conversion
+
+Each conversion takes the viewport dimensions because one camera can serve
+targets of different sizes:
+
+```teal
+local worldX <const>, worldY <const> =
+    camera:toWorld(mouseX, mouseY, width, height)
+
+local screenX <const>, screenY <const> =
+    camera:toScreen(worldX, worldY, width, height)
+```
+
+Use the same dimensions for conversion and rendering. `toWorld`, `toScreen`,
+and `matrix` then share one mapping, and points round-trip. `viewBounds`
+returns a conservative axis-aligned world rectangle when the camera rotates.
+
+`matrix` reuses the camera's sixteen-float array, and `viewBounds` reuses its
+four-element table. Copy either result before retaining it across another call.
+]=]
+-- Implementation details:
+-- The world-to-clip matrix owns the only Y flip. `matrix`, `toScreen`, and
+-- `toWorld` each spell out the same negated scale so a mismatch stays visible
+-- in review. The renderer and cull consume the same camera type regardless of
+-- projection mode.
 
 local loader <const> = require("tecs.ffi.loader")
 
 local sin <const>, cos <const> = math.sin, math.cos
 
---- What a camera is created with. Every field is optional.
+--- Defines optional camera construction values.
 local record CameraOptions
-    --- Center of the view, in world units. Both default to zero.
+    --- Caller-writable. Sets the center of the view in world units. Both
+    --- values default to zero.
     x: number
     y: number
-    --- Defaults to one. Zero or less divides through in every method here and
-    --- is not rejected.
+    --- Caller-writable. Sets the zoom and defaults to one. Zero or less
+    --- divides through in every method here and is not rejected.
     zoom: number
-    --- Defaults to zero.
+    --- Caller-writable. Sets the rotation in radians and defaults to zero.
     rotation: number
-    --- Defaults to "orthographic", and nothing else is implemented. Any string
-    --- is accepted and stored, and `matrix` builds an orthographic projection
-    --- whatever it says.
+    --- Caller-writable. Selects the projection and defaults to
+    --- `"orthographic"`. The camera stores any string, but `matrix` currently
+    --- builds an orthographic projection for every value.
     projection: string
 end
 
---- A view onto the world, as one object.
+--- Represents a view onto the world.
 ---
---- Every field is plain and meant to be assigned to directly, frame by frame;
---- nothing here has to be told a field moved. A renderer copies the values it
---- draws from at extraction, so a camera moved after that moves the next frame
---- and not the one in flight.
+--- Assign every field directly, frame by frame. A renderer copies the values it
+--- draws from during extraction, so moving a camera afterwards affects the next
+--- frame, not the one in flight.
 local record Camera
-    --- What `newCamera` takes, named here so a game can annotate the table it
+    --- Names the options accepted by `newCamera` so a game can annotate the table it
     --- passes without reaching into this file.
     type Options = CameraOptions
 
-    --- Center of the view, in world units.
+    --- Caller-writable. Sets the horizontal center of the view in world units.
     x: number
-    --- The other half of it, running down: increasing y moves the view towards
-    --- the bottom of the world.
+    --- Caller-writable. Sets the vertical center of the view in world units.
+    --- Increasing y moves the view towards the bottom of the world.
     y: number
-    --- Above one magnifies. Applied about the center, so zooming does not move
-    --- what is under the middle of the window.
+    --- Caller-writable. Sets the zoom. Values above one magnify about the
+    --- center without moving the point under the middle of the window.
     zoom: number
-    --- Radians. Positive turns the scene counter-clockwise on screen, which is
-    --- the camera itself turning the other way: at a quarter turn, a point at
-    --- +X from the camera in the world is drawn above the center of the window.
+    --- Caller-writable. Sets the rotation in radians. Positive values turn the
+    --- scene counter-clockwise on screen.
     rotation: number
-    --- "orthographic" today. The field exists so a perspective mode can be
-    --- added without a second camera type, which is the whole reason there is
-    --- a mode rather than a name. Nothing reads it yet, so setting anything
-    --- else changes what the camera reports about itself and not what it draws.
+    --- Caller-writable. Selects `"orthographic"` today. Other values remain
+    --- stored but do not change rendering.
     projection: string
 
-    --- The sixteen floats `matrix` rewrites and hands back. Allocated once,
-    --- because it is written every frame and read straight into a uniform.
+    --- Engine-owned. Stores the sixteen floats that `matrix` rewrites.
+    --- Ordinary game code should ignore this field.
     _matrix: loader.CArray
-    --- The four numbers `viewBounds` rewrites and hands back, on the same
-    --- terms.
+    --- Engine-owned. Stores the four numbers that `viewBounds` rewrites.
+    --- Ordinary game code should ignore this field.
     _view: {number}
 
     --- Creates a camera. Everything defaults to an unrotated, unzoomed view at
     --- the world origin, which a renderer then recenters if the game never
     --- moves it.
-    --- @param options Omit for the default view. No field is validated; the
-    ---     values are taken as given.
-    --- @return A camera whose fields are plain and meant to be assigned to
-    ---     directly, frame by frame.
+    --- @param options Omit for the default view. The constructor stores every
+    ---     value without validation.
+    --- @return Returns a camera whose fields the caller assigns directly.
     newCamera: function(options?: CameraOptions): Camera
 
     --- Writes the world-to-clip matrix for a viewport of `width` by `height`.
@@ -99,11 +115,11 @@ local record Camera
     ---     keep it copies it rather than holding the pointer.
     matrix: function(self, width: number, height: number): loader.CArray
 
-    --- The world-space rectangle this camera can see, as minX, minY, maxX,
-    --- maxY.
+    --- Returns the world-space rectangle this camera can see as minX, minY,
+    --- maxX, and maxY.
     ---
-    --- Conservative when rotated: the corners of the rotated view are bounded
-    --- by an axis-aligned box, so the cull keeps a little more than it must.
+    --- When rotated, an axis-aligned box encloses the view's corners, so culling
+    --- keeps a little more than it must.
     --- Keeping too much costs a few instances; keeping too little drops
     --- geometry that should have drawn, which is why the error goes this way.
     --- @param width Viewport width in pixels.
@@ -137,8 +153,8 @@ local record Camera
     ---     with.
     --- @param height Viewport height in pixels, the same one the matrix was
     ---     built with.
-    --- @return The screen x in pixels from the left, then the screen y in
-    ---     pixels from the top. Neither is clamped to the viewport.
+    --- @return Returns screen x from the left and screen y from the top, in
+    ---     pixels. The function does not clamp either value to the viewport.
     toScreen: function(self, worldX: number, worldY: number, width: number, height: number): number, number
 end
 

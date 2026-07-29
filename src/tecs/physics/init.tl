@@ -1,54 +1,50 @@
---- Rapier 2D as part of the world.
----
---- The name is the subject rather than the implementation: the entity and
---- component surface stays engine-owned while Rapier owns the solve.
----
---- The plugin carries the simulation and `attach` gives an entity a body in
---- it, so a body is an entity that already has a `Transform`:
----
---- ```teal
---- world:addPlugin(tecs.physics.plugin({gravity = {0.0, 980.0}}))
----
---- local ground <const> = world:spawn(tecs.Transform(320, 460))
---- tecs.physics.attach(world, ground, {["type"] = "static", halfWidth = 320, halfHeight = 20})
----
---- local crate <const> = world:spawn(tecs.Transform(320, 100))
---- tecs.physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
----
---- tecs.physics.applyImpulse(world, crate, 400.0, 0.0)
---- ```
----
---- The solver writes each body's `Transform` back, so nothing else has to move
---- the entity, and `detach` takes a body out of the solve without despawning
---- what carried it.
----
---- A body is four components. `Body` and `Collider` are the declaration, what
---- a game asked for; `Motion` is the one piece of simulation state that has to
---- survive a body being taken out of the solve; `RigidBody` is the live
---- Rapier arena handle. The raw index and generation live directly in an
---- archetype column; Rust keeps every allocation and solver structure.
----
---- The description is in columns rather than in a side table keyed by entity,
---- for four reasons that a side table gives up. The snapshot writer already
---- walks columns, so putting a body's shape in one finishes the save side with
---- no code. The MCP world tools read the component registry, so a `Collider`
---- is queryable, describable and editable the moment it is a component, and a
---- body that falls through the floor is exactly the bug an agent should be
---- able to look at. `batchSpawn` has a column path and no side-table path, so
---- a thousand bodies can be one archetype transition. And a module-level table
---- keyed by entity is the defect class the engine is working its way out of,
---- not one to add to.
----
---- Four components rather than one, because body and collider fields have
---- different owners and lifetimes, and one body may carry several shapes.
----
---- Stepping happens in FixedUpdate. A fixed timestep is what makes replay and
---- snapshot continuation deterministic.
----
---- The simulation is per world, reached through `physics.of`. Two worlds each
---- installing the plugin get a Rapier world each and neither sees the other's
---- bodies. The solver's thread pool goes the other way and is shared: threads
---- are the machine, and worlds step serially on the game thread.
+--[=[
+Rapier 2D as part of the world.
+
+Install the plugin, spawn an entity with a
+[`Transform`](/ecs/#tecs.ecs.Transform), and attach a body:
+
+```teal
+world:addPlugin(tecs.physics.plugin({gravity = {0.0, 980.0}}))
+
+local ground <const> = world:spawn(tecs.Transform(320, 460))
+tecs.physics.attach(world, ground, {["type"] = "static", halfWidth = 320, halfHeight = 20})
+
+local crate <const> = world:spawn(tecs.Transform(320, 100))
+tecs.physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
+
+tecs.physics.applyImpulse(world, crate, 400.0, 0.0)
+```
+
+The solver writes each body's [`Transform`](/ecs/#tecs.ecs.Transform) back, so
+nothing else has to move the entity. `detach` takes a body out of the solve
+without despawning its entity.
+
+Public positions, extents, linear velocities, impulses, forces, and gravity
+use pixels. Angles and angular velocities use radians. Rapier solves in
+meters through the `pixelsPerMeter` conversion.
+
+[`Body`](tealdoc:tecs.physics.Body) and
+[`Collider`](tealdoc:tecs.physics.Collider) declare what the game requested.
+[`Motion`](tealdoc:tecs.physics.Motion) preserves simulation state across
+pauses. Engine-owned [`RigidBody`](tealdoc:tecs.physics.RigidBody) keeps the
+attachment visible to tools; ordinary game code should ignore it. A secondary
+collider lives on its own entity and relates back through
+[`ColliderOf`](/modules/physics/#tecs.physics.ColliderOf).
+
+`FixedUpdate` steps each ECS world's simulation from `physics.of`. A fixed
+timestep makes replay and snapshot continuation deterministic, and snapshots
+preserve the complete Rapier state.
+]=]
+
+-- Implementation details:
+-- Body descriptions live in component columns instead of a side table. That
+-- lets snapshots, queries, debug tools, and batch spawning use the same data
+-- model. Body and collider fields use separate components because they have
+-- different owners and lifetimes, and one body may carry several shapes.
+--
+-- Each ECS world owns a Rapier world. The solver thread pool is process-wide,
+-- while worlds step serially on the game thread.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -86,51 +82,77 @@ local BODY_NAMES <const>: {integer: string} = {
     [2] = "dynamic",
 }
 
---- What a game asked a body to be.
----
---- Requiring `Transform` is what makes a body without a pose unrepresentable
---- rather than a nil test. The pose has to come from somewhere, and the sync
---- writes back into `Transform` unconditionally, so a body with no `Transform`
---- would be a body nothing can see. Setting `Body` on an entity without one
---- gains it a default at the origin.
----
---- Requiring `Motion` means every body carries that column from creation,
---- which is the point: filling it at save time must not add a component to
---- four thousand entities in the middle of serializing them.
+-- Implementation details: Body requires Transform so every Rapier body has a
+-- pose, and requires Motion so snapshots never add storage during serialization.
+
+--- `Body` declares a body's simulation behavior.
 local record Body is Component
-    --- 0 static, 1 kinematic, 2 dynamic.
+    --- Caller-writable. The caller sets `kind` to 0 for static, 1 for
+    --- kinematic or 2 for dynamic through `getMut`. Physics applies the change
+    --- during the next fixed update.
     kind: number
+    --- Caller-writable. The caller sets `fixedRotation` to 1 to lock rotation
+    --- or 0 to unlock it. Physics applies the change during the next fixed
+    --- update.
     fixedRotation: number
+    --- Caller-writable. The caller sets `isBullet` to 1 for continuous
+    --- collision or 0 for discrete collision. Physics applies the change
+    --- during the next fixed update.
     isBullet: number
+    --- Caller-writable. The caller sets `sleepEnabled` to 1 to permit sleeping
+    --- or 0 to keep solving. Physics applies the change during the next fixed
+    --- update.
     sleepEnabled: number
+    --- Caller-writable. The caller sets `gravityScale` through `getMut`.
+    --- Physics applies it during the next fixed update.
     gravityScale: number
+    --- Caller-writable. The caller sets `linearDamping` through `getMut`.
+    --- Physics applies it during the next fixed update.
     linearDamping: number
+    --- Caller-writable. The caller sets `angularDamping` through `getMut`.
+    --- Physics applies it during the next fixed update.
     angularDamping: number
 end
 
---- A body's geometry and surface.
----
---- One record with a shape discriminant rather than a record per shape,
---- because a component per shape would make "anything with a collider" a union
---- across three archetypes.
----
---- Rapier collision groups and the component column are both 32 bits wide.
+-- Implementation details: one shape discriminant keeps all colliders in one
+-- component, and its 32-bit filters match Rapier collision groups.
+
+--- `Collider` declares a body's geometry, material and collision filtering.
+--- Write its fields through `getMut`; physics applies changes during the next
+--- fixed update.
 local record Collider is Component
-    --- 0 box, 1 circle, 2 capsule.
+    --- Caller-writable. The caller sets `shape` to 0 for box, 1 for circle or 2
+    --- for capsule through `getMut`. Physics applies the change during the next
+    --- fixed update.
     shape: number
+    --- Caller-writable. The caller sets `halfWidth` in pixels for a box.
     halfWidth: number
+    --- Caller-writable. The caller sets `halfHeight` in pixels for a box.
     halfHeight: number
+    --- Caller-writable. The caller sets `radius` in pixels for a circle or
+    --- capsule.
     radius: number
-    --- Capsule only: the distance between its two end centers.
+    --- Caller-writable. The caller sets `length` to the pixel distance between
+    --- capsule end centers.
     length: number
-    --- The shape's center in the body frame.
+    --- Caller-writable. The caller sets `offsetX` in body-frame pixels.
     offsetX: number
+    --- Caller-writable. The caller sets `offsetY` in body-frame pixels.
     offsetY: number
+    --- Caller-writable. The caller sets `density` as mass per unit area.
     density: number
+    --- Caller-writable. The caller sets `friction` as Coulomb friction.
     friction: number
+    --- Caller-writable. The caller sets `restitution` for bounce.
     restitution: number
+    --- Caller-writable. The caller sets `categoryBits` to the shape's
+    --- collision categories.
     categoryBits: number
+    --- Caller-writable. The caller sets `maskBits` to categories this shape
+    --- may contact.
     maskBits: number
+    --- Caller-writable. The caller sets `isSensor` to 1 for overlap events
+    --- without collision response, or 0 for a solid shape.
     isSensor: number
 end
 
@@ -141,21 +163,20 @@ local COLLIDER_SHAPES <const>: {string: integer} = {
     capsule = 2,
 }
 
---- A body's velocity, in pixels and radians per second.
----
---- A store, not a mirror. It is written at two moments, a pause and a save,
---- and read at two, a resume and a load. Nothing writes it per step, so
---- reading it mid-frame gives whatever the last of those four events left
---- there. `physics.velocity` is the live read and stays the only way to ask
---- what a body is doing right now.
----
---- Mirroring it per step is the one large per-frame cost this design could
---- have taken on. It would be a write over every body every fixed step, and it
---- would dirty the column for consumers gated on that bit even for a world
---- whose bodies have all gone to sleep.
+-- Implementation details: Motion stores pause and snapshot state instead of
+-- mirroring every body each step, which avoids a full-column dirty write.
+
+--- `Motion` preserves a body's saved velocity in pixels and radians per second.
 local record Motion is Component
+    --- Read-only. Physics stores horizontal velocity in pixels per second
+    --- during pause, snapshot and restore operations. Use `velocity` for live
+    --- state.
     vx: number
+    --- Read-only. Physics stores vertical velocity in pixels per second with
+    --- `vx`.
     vy: number
+    --- Read-only. Physics stores angular velocity in radians per second with
+    --- `vx`.
     omega: number
 end
 
@@ -222,12 +243,21 @@ ecs.newFFIComponent({
     },
 })
 
---- A body in the simulation.
+--- A `RigidBody` identifies one live body in a Rapier simulation.
 ---
---- The raw Rapier arena index, owning world id, and arena generation.
+--- Engine-owned and transient. Ordinary game code should use
+--- [`Body`](tealdoc:tecs.physics.Body),
+--- [`Motion`](tealdoc:tecs.physics.Motion), and the functions on
+--- `tecs.physics`.
 local record RigidBody is Component
+    --- Engine-owned. Identifies the body slot; ordinary game code should
+    --- ignore it.
     index1: number
+    --- Engine-owned. Identifies the simulation; ordinary game code should
+    --- ignore it.
     world0: number
+    --- Engine-owned. Rejects stale body slots; ordinary game code should
+    --- ignore it.
     generation: number
 end
 
@@ -243,8 +273,8 @@ ecs.newFFIComponent({
     transient = true,
 })
 
---- Marks a paused body that has been changed to static and had its motion
---- stored. Engine-owned and transient.
+--- Engine-owned and transient. Marks a paused body after the solver changes it
+--- to static and stores its motion.
 local record PhysicsHeld is Component
 end
 ecs.newComponent({name = "PhysicsHeld", container = PhysicsHeld, transient = true})
@@ -282,105 +312,112 @@ local ColliderOf <const> = ecs.newRelationship({
     cascadeDelete = true,
 })
 
---- What `attach` and `attachCollider` are given. Every field is optional, and
---- one left out takes the default named on it rather than keeping whatever a
---- previous call set: this describes a body outright.
+--- `BodyOptions` describes one complete body or secondary collider declaration.
 ---
 --- `attachCollider` reads only the shape, material, filter and offset fields.
---- The body-level ones are ignored there, because a secondary collider is a
---- shape on somebody else's body and has no damping or gravity of its own.
+--- It ignores body-level fields because a secondary collider has no damping
+--- or gravity of its own.
 local record BodyOptions
-    --- "static", "kinematic", or "dynamic". Defaults to dynamic, and an
-    --- unrecognized string raises rather than falling back, so a typo is
-    --- caught at the call rather than found later as a body that will not
-    --- move.
+    --- Caller-writable. The caller sets `type` before `attach` reads it to
+    --- `"static"`, `"kinematic"` or `"dynamic"`. It defaults to dynamic, and an
+    --- unrecognized string raises.
     type: string
-    --- Half-extents in pixels, so a 32-pixel square is 16 by 16 here. Both
-    --- default to 8, and both are ignored unless the shape is a box.
+    --- Caller-writable. The caller sets `halfWidth` in pixels before `attach`
+    --- reads it. A 32-pixel square uses 16. It defaults to 8.
     halfWidth: number
+    --- Caller-writable. The caller sets `halfHeight` in pixels with
+    --- `halfWidth`. It defaults to 8.
     halfHeight: number
-    --- Radius in pixels. Naming it at all selects a circle over the box
-    --- extents, so there is no way to ask for a box and a radius together.
-    --- Required, and positive, when `capsuleLength` is given.
+    --- Caller-writable. The caller sets `radius` in pixels before `attach`
+    --- reads it. Naming it selects a circle over box extents. A capsule
+    --- requires a positive value.
     radius: number
-    --- Mass per unit area. Defaults to Rapier's 1.0. Zero leaves a dynamic body
-    --- with no mass, and Rapier reads no mass as infinite mass: it stops
-    --- falling and stops answering impulses, which looks like a static body
-    --- that was declared dynamic.
+    --- Caller-writable. The caller sets `density` as mass per unit area before
+    --- `attach` reads it. It defaults to Rapier's 1.0. Rapier treats zero mass
+    --- as infinite mass.
     density: number
-    --- Coulomb friction, defaulting to Rapier's 0.6. A contact takes the
+    --- Caller-writable. The caller sets `friction` before `attach` reads it. It
+    --- defaults to Rapier's 0.6. A contact takes the
     --- geometric mean of the two shapes', so zero on either one is a
     --- frictionless slide however rough the other is.
     friction: number
-    --- Bounce, defaulting to Rapier's 0.0. One is a perfectly elastic bounce,
+    --- Caller-writable. The caller sets `restitution` before `attach` reads it.
+    --- It defaults to Rapier's 0.0. One produces a perfectly elastic bounce,
     --- and above one a body gains energy on every contact. A contact takes the
     --- larger of the two shapes', so the bouncier surface decides and a
     --- deadened one cannot damp it.
     restitution: number
-    --- Locks the body's angle, so contacts and torque no longer spin it.
-    --- Defaults to false.
+    --- Caller-writable. The caller sets `fixedRotation` before `attach` reads
+    --- it. True locks the angle; it defaults to false.
     fixedRotation: boolean
-    --- Scales the world's gravity for this body alone. Defaults to 1. Zero
+    --- Caller-writable. The caller sets `gravityScale` before `attach` reads
+    --- it. It defaults to 1. Zero
     --- floats, and negative falls upward.
     gravityScale: number
-    --- Velocity lost per second to drag, defaulting to 0. Not a physical
-    --- quantity: it is the solver's own damping term.
+    --- Caller-writable. The caller sets `linearDamping` before `attach` reads
+    --- it. It defaults to 0 and uses Rapier's damping term.
     linearDamping: number
+    --- Caller-writable. The caller sets `angularDamping` before `attach` reads
+    --- it. It defaults to 0 and uses Rapier's damping term.
     angularDamping: number
-    --- Whether the body may sleep when it comes to rest. Defaults to true, and
-    --- only an explicit `false` disables it. A sleeping body stops being
-    --- solved until something touches it or it is woken.
+    --- Caller-writable. The caller sets `sleepEnabled` before `attach` reads
+    --- it. It defaults to true, and
+    --- only an explicit false disables it. Rapier stops solving a sleeping
+    --- body until contact or an explicit wake.
     sleepEnabled: boolean
-    --- Continuous collision, for a body fast enough to pass through a wall
-    --- between two steps. Defaults to false, because it costs more to solve.
+    --- Caller-writable. The caller sets `isBullet` before `attach` reads it to
+    --- enable continuous collision. It defaults to false.
     isBullet: boolean
-    --- The categories this shape belongs to, defaulting to 1. Thirty-two bits
-    --- here against Rapier's sixty-four: a wider column does not survive the
-    --- table snapshot format, which carries a field as a Lua number.
+    --- Caller-writable. The caller sets `categoryBits` before `attach` reads
+    --- it. It defaults to 1 and uses the low 32 Rapier collision-group bits.
     categoryBits: number
-    --- The categories this shape collides with, defaulting to all of them. Two
-    --- shapes touch only when each one's mask names the other's category, so
-    --- filtering one direction alone filters both.
+    --- Caller-writable. The caller sets `maskBits` before `attach` reads it. It
+    --- defaults to every category. Two shapes touch only when each mask names
+    --- the other category.
     maskBits: number
-    --- Reports overlaps as `SensorBegin` and `SensorEnd` without a collision
-    --- response. Defaults to false. A sensor emits no contact events.
+    --- Caller-writable. The caller sets `isSensor` before `attach` reads it.
+    --- True reports overlap events without collision response. It defaults to
+    --- false.
     isSensor: boolean
-    --- The shape's center in the body's own frame, in pixels, so it turns with
-    --- the body. Both default to 0, which centers the shape on the body's
-    --- origin.
+    --- Caller-writable. The caller sets `offsetX` in body-frame pixels before
+    --- `attach` reads it, so it turns with the body. It defaults to 0.
     offsetX: number
+    --- Caller-writable. The caller sets `offsetY` with `offsetX` before
+    --- `attach` reads it. It defaults to 0.
     offsetY: number
-    --- Selects a vertical capsule, and is the distance between its two end
-    --- centers, excluding the caps, so the full height is this plus twice the
-    --- radius. `radius` stays the cap radius and has to be positive.
+    --- Caller-writable. The caller sets `capsuleLength` before `attach` reads
+    --- it. It selects a vertical capsule and gives the distance between end
+    --- centers, excluding the caps. `radius` supplies the positive cap radius.
     capsuleLength: number
 end
 
---- What a raycast is allowed to hit.
+--- `QueryOptions` filters the shapes a raycast may hit.
 local record QueryOptions
-    --- The ray's own categories, defaulting to all. A shape whose mask
-    --- excludes every one of these is skipped.
+    --- Caller-writable. The caller sets `categoryBits` before `raycast` reads
+    --- it. It defaults to all categories. The ray skips a shape whose mask
+    --- excludes every ray category.
     categoryBits: number
-    --- The categories the ray may hit, defaulting to all.
+    --- Caller-writable. The caller sets `maskBits` before `raycast` reads it.
+    --- It defaults to all categories.
     maskBits: number
 end
 
---- Where a ray first met a collider. A fresh table per hit, and the caller's
---- to keep.
+--- `RaycastHit` reports where a ray first met a collider.
 local record RaycastHit
-    --- The entity owning the shape that was hit, which is the secondary
-    --- collider's own entity when the ray met one of those rather than the
-    --- body's.
+    --- Read-only. `raycast` sets `entity` to the shape owner. A secondary
+    --- collider reports its own entity rather than its body's.
     entity: integer
-    --- The contact point in world pixels.
+    --- Read-only. `raycast` sets `x` to the contact point in world pixels.
     x: number
+    --- Read-only. `raycast` sets `y` with `x`, positive downward.
     y: number
-    --- The surface normal at the point, pointing out of the shape. A unit
-    --- vector, so it is not scaled to pixels.
+    --- Read-only. `raycast` sets `normalX` to the outward unit normal. It does
+    --- not scale this value to pixels.
     normalX: number
+    --- Read-only. `raycast` sets `normalY` with `normalX`.
     normalY: number
-    --- How far along the segment the hit is, from 0 at the start to 1 at the
-    --- end.
+    --- Read-only. `raycast` sets `fraction` from 0 at the segment start to 1 at
+    --- the segment end.
     fraction: number
 end
 
@@ -398,74 +435,92 @@ local record PendingShape
     collider: Collider
 end
 
+--- `ContactBegin` reports the start of contact between two bodies.
 local record ContactBegin is ecs.Event
+    --- Read-only. Physics sets `entityA` to one contact body before emitting
+    --- the event.
     entityA: integer
+    --- Read-only. Physics sets `entityB` to the other contact body.
     entityB: integer
 end
+--- `ContactEnd` reports the end of contact between two bodies.
 local record ContactEnd is ecs.Event
+    --- Read-only. Physics sets `entityA` to one former contact body before
+    --- emitting the event.
     entityA: integer
+    --- Read-only. Physics sets `entityB` to the other former contact body.
     entityB: integer
 end
+--- `SensorBegin` reports a body entering a sensor.
 local record SensorBegin is ecs.Event
+    --- Read-only. Physics sets `sensor` to the sensor entity before emitting
+    --- the event.
     sensor: integer
+    --- Read-only. Physics sets `visitor` to the entering entity.
     visitor: integer
 end
+--- `SensorEnd` reports a body leaving a sensor.
 local record SensorEnd is ecs.Event
+    --- Read-only. Physics sets `sensor` to the sensor entity before emitting
+    --- the event.
     sensor: integer
+    --- Read-only. Physics sets `visitor` to the leaving entity.
     visitor: integer
 end
 
---- What `physics.plugin` is built with. Every field is optional.
+--- `PhysicsOptions` configures a Rapier world before plugin installation.
 local record PhysicsOptions
-    --- Gravity as x then y, in pixels per second squared, matching world
-    --- units. Defaults to 980 downward, which is roughly Earth at this
-    --- module's 32 pixels to the meter. Positive y is down, like `Transform`.
+    --- Caller-writable. The caller sets `gravity` before the plugin reads it.
+    --- It contains x then y in pixels per second squared and defaults to 980
+    --- downward.
     gravity: {number}
-    --- Solver substeps per step, defaulting to Rapier's 4. More costs time
-    --- linearly and buys stability in stacks and fast contacts; fewer makes a
-    --- tall stack sink into itself.
+    --- Caller-writable. The caller sets `subStepCount` before plugin
+    --- installation. It defaults to Rapier's 4.
     subStepCount: integer
-    --- Worker slots the solver runs across, counting the thread that steps
-    --- the world. One is single threaded. Defaults to a count derived from
-    --- the machine.
-    ---
-    --- Process-wide rather than per world, because the threads are the
-    --- machine: the first world to ask sizes the shared pool, and a later one
-    --- naming a different count raises rather than being ignored.
+    --- Caller-writable. The caller sets `workerCount` before the first physics
+    --- world initializes the process-wide Rapier pool. Later worlds must use
+    --- the same value.
     workerCount: integer
 end
 
 local record physics
+    --- Engine-owned. [`RigidBody`](tealdoc:tecs.physics.RigidBody) exposes live
+    --- attachment state for tools.
+    --- Ordinary game code ignores it.
     RigidBody: RigidBody
+    --- Read-only. [`Body`](tealdoc:tecs.physics.Body) names the caller-writable
+    --- body component.
     Body: Body
+    --- Read-only. [`Collider`](tealdoc:tecs.physics.Collider) names the
+    --- caller-writable collider component.
     Collider: Collider
+    --- Read-only. [`ColliderOf`](/modules/physics/#tecs.physics.ColliderOf) relates a
+    --- secondary collider to its owning body.
     ColliderOf: Component
+    --- Read-only. [`Motion`](tealdoc:tecs.physics.Motion) names the
+    --- engine-updated pause and snapshot state.
     Motion: Motion
+    --- Read-only. `ContactBegin` names the contact-start event.
     ContactBegin: ContactBegin
+    --- Read-only. `ContactEnd` names the contact-end event.
     ContactEnd: ContactEnd
+    --- Read-only. `SensorBegin` names the sensor-enter event.
     SensorBegin: SensorBegin
+    --- Read-only. `SensorEnd` names the sensor-exit event.
     SensorEnd: SensorEnd
-    --- Pixels per simulated meter, and the conversion every public number on
-    --- this module has already had applied to it. Multiply meters by it,
-    --- divide pixels by it. Named for the units rather than `scale`, which
-    --- says neither what is being converted nor which way round it goes, and
-    --- a caller guessing wrong is off by a factor of a thousand with nothing
-    --- to raise.
+    --- Read-only. `pixelsPerMeter` reports the fixed conversion between public
+    --- pixels and Rapier meters.
     pixelsPerMeter: number
 
-    --- The same as `applyImpulse`, given a `RigidBody` row already in hand.
+    --- Applies a center-of-mass impulse to a
+    --- [`RigidBody`](tealdoc:tecs.physics.RigidBody) row.
     ---
-    --- For a system walking a column, where going back through the entity
-    --- would cost a lookup per body per frame.
-    ---
-    --- @param row A row read straight off a `RigidBody` column. The null row a
-    ---     snapshot load leaves behind is ignored rather than passed on: Rapier
-    ---     indexes its body array from the slot without checking it, so a null
-    ---     handle reads off the front of that array.
-    --- @param x Pixel-scaled impulse along x. Dividing it by the body's mass in
-    ---     kilograms gives the change in velocity in pixels per second.
-    --- @param y The same along y, positive downward. Applied at the center of
-    ---     mass, so neither component imparts spin.
+    --- @param row The caller supplies a row from a
+    ---     [`RigidBody`](tealdoc:tecs.physics.RigidBody) column. A stale or null
+    ---     row does nothing.
+    --- @param x The caller supplies pixel-scaled impulse along x.
+    --- @param y The caller supplies pixel-scaled impulse along y, positive
+    ---     downward.
     applyImpulseTo: function(row: RigidBody, x: number, y: number)
 end
 
@@ -493,29 +548,16 @@ ecs.newEvent(ContactEnd)
 ecs.newEvent(SensorBegin)
 ecs.newEvent(SensorEnd)
 
---- The simulation installed into a world, or nil when none has been.
----
---- Module-private, because `physics.of` is the door: an accessor reads better
---- than a table index, and one door is what lets this module change how it
---- stores the simulation later. What is published is the name, because
---- `Context.listKeys` reverse-maps names to ids, so a debug tool can answer
---- what is installed into a world without every module exporting its key.
----
---- Debug tools and snapshots address the simulation through this stable name.
+-- Implementation details:
+-- The context key stores a world's simulation. Debug tools and snapshots use
+-- this stable name, while physics.of keeps the storage private.
 local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 
---- The simulation installed into `world`, or nil when none has been.
+--- Returns the Rapier simulation installed in `world`.
 ---
---- What lets something holding only the ECS world reach the Rapier one, which
---- is what the debug tools have and what a game writing its own systems often
---- has too.
----
---- @param world A world with or without the plugin. A world without one is not
----     an error here, which is what makes this the test for whether physics is
----     installed at all.
---- @return The world's own live simulation, not a copy, so stepping or
----     destroying what comes back acts on the one the plugin's systems drive.
----     Nil before the plugin is added and again after `Shutdown` has run.
+--- @param world The caller supplies a world with or without the plugin.
+--- @return Returns the world's live Rapier simulation, or nil before
+---     installation and after shutdown.
 function physics.of(world: types.World): World
     return world.resources[simulationKey]
 end
@@ -557,20 +599,17 @@ end
 
 --- Declares a body on `entity`.
 ---
---- Creation happens at the next fixed step. Keeping it declarative makes the
---- same path work for spawn, batch spawn, snapshots and debug tools, and no
---- raw Rapier handle escapes the module.
+--- Physics creates the Rapier body during the next fixed update.
 ---
---- @param world Raises when `physics.plugin` was never added to it, because a
----     body declared into a world with no simulation is components nothing
----     will ever read.
---- @param entity Gains `Body` and `Collider`, and `Transform` and `Motion`
----     with them when it has neither, since `Body` requires both. The two sets
----     are deferred together, so this is one archetype move rather than two.
---- @param options Read once, here. Later changes go through `world:getMut` on
----     `Body` or `Collider`, which the fixed step reapplies to the live body.
----     An unrecognized `type` raises, and so does a `capsuleLength` without a
----     positive `radius`; both blame the caller's line rather than this one.
+--- @param world The caller supplies a world with `physics.plugin`; otherwise
+---     the call raises.
+--- @param entity The caller supplies the entity that gains
+---     [`Body`](tealdoc:tecs.physics.Body),
+---     [`Collider`](tealdoc:tecs.physics.Collider),
+---     [`Transform`](/ecs/#tecs.ecs.Transform), and
+---     [`Motion`](tealdoc:tecs.physics.Motion) as needed.
+--- @param options The caller supplies the initial body and collider settings.
+---     Unknown body types and invalid capsules raise.
 function physics.attach(world: types.World, entity: integer, options: BodyOptions)
     options = options or {}
 
@@ -602,19 +641,14 @@ end
 --- Adds another collider to a declared body. The collider is its own entity,
 --- which makes each shape independently inspectable and mutable.
 ---
---- @param world Not checked for a simulation, unlike `attach`: the body named
----     below cannot have been declared without one.
---- @param entity The collider's own entity, which gains `Collider` and
----     `ColliderOf`. It is not the body, carries no pose of its own, and is
----     placed by the shape's offset within the body's frame. `ColliderOf` is
----     cascade-deleted, so despawning the body despawns this too.
---- @param body The entity to attach to. Raises when it has no `Body`, which
----     includes the case of a body already detached. Its live shape need not
----     exist yet: a collider declared in the same frame as its body waits and
----     is created after it, in the same fixed step.
---- @param options Only the shape, material, filter and offset fields are read.
----     `type`, damping, gravity and the sleep and bullet flags belong to the
----     body and are ignored here.
+--- @param world The caller supplies the world that owns both entities.
+--- @param entity The caller supplies the secondary collider entity, which
+---     gains [`Collider`](tealdoc:tecs.physics.Collider) and
+---     [`ColliderOf`](/modules/physics/#tecs.physics.ColliderOf).
+--- @param body The caller supplies an entity with
+---     [`Body`](tealdoc:tecs.physics.Body); otherwise the call raises.
+--- @param options The caller supplies shape, material, filter and offset
+---     settings. Body-level fields have no effect.
 function physics.attachCollider(world: types.World, entity: integer, body: integer, options: BodyOptions)
     options = options or {}
     if world:get(body, Body) == nil then
@@ -626,14 +660,13 @@ function physics.attachCollider(world: types.World, entity: integer, body: integ
     world:commit()
 end
 
---- Removes a body's declaration. Its native body is destroyed at the next
---- fixed step.
+--- Removes a body's declaration. Physics destroys its Rapier body during the
+--- next fixed update.
 ---
---- @param world The world holding the entity. Not checked for a simulation:
----     removing a component from a world that never had one is harmless.
---- @param entity Loses `Body` only. `Collider`, `Motion` and `Transform` stay,
----     so what the body was is still readable and `attach` can declare it
----     again. Not an error for an entity that never had a body.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the entity that loses
+---     [`Body`](tealdoc:tecs.physics.Body). Other physics declaration
+---     components remain.
 function physics.detach(world: types.World, entity: integer)
     world:remove(entity, Body)
 end
@@ -650,7 +683,7 @@ local function shapeOf(row: ColliderShape): Handle
     return World.wrapHandle((row.index1 as integer) - 1, row.generation as integer, row.world0 as integer)
 end
 
---- Whether `entity` has a body Rapier is still solving.
+--- Returns whether Rapier is still solving a body for `entity`.
 ---
 --- False for an entity whose RigidBody came out of a snapshot. A load
 --- restores the row as the null handle rather than a body id this run never
@@ -658,13 +691,10 @@ end
 --- from "never had a body", and the two are worth telling apart: nothing
 --- rebuilds a body on load.
 ---
---- @param world The world holding the entity.
---- @param entity Any entity. One with no `RigidBody` at all answers false
----     rather than raising.
---- @return False for the whole window between `attach` and the fixed step that
----     acts on it, so this is not a way to check a declaration landed. False
----     too for a handle whose world has since been destroyed, because the
----     check covers the generation and the world as well as the slot.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies any entity.
+--- @return Returns true only while Rapier holds a valid live body. It returns
+---     false before the first fixed update and after destruction.
 function physics.hasBody(world: types.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -682,15 +712,12 @@ end
 --- the step happened to be. Wakes the body: Rapier lets a resting island sleep,
 --- and pushing a sleeping body without waking it does nothing.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body, which is the answer
----     every control here gives.
---- @param x Pixel-scaled impulse along x. Dividing it by the body's mass in
----     kilograms gives the change in velocity in pixels per second, so the
----     same push moves a light body further than a heavy one.
---- @param y The same along y, positive downward. Applied at the center of
----     mass, so neither component imparts spin; `applyImpulseAt` is the one
----     that does.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param x The caller supplies pixel-scaled impulse along x.
+--- @param y The caller supplies pixel-scaled impulse along y, positive
+---     downward.
 function physics.applyImpulse(world: types.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil then
@@ -712,15 +739,14 @@ end
 --- Applies an impulse at a world-space point, so it spins the body as well as
 --- moving it.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param x Pixel-scaled impulse along x, read as `applyImpulse` reads it.
---- @param y The same along y, positive downward.
---- @param pointX Where the push lands, in world pixels rather than in the
----     body's frame. The further it is from the center of mass, the more of
----     the impulse becomes spin and the less becomes travel.
---- @param pointY The same along y. A point at the center of mass makes this
----     exactly `applyImpulse`.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param x The caller supplies pixel-scaled impulse along x.
+--- @param y The caller supplies pixel-scaled impulse along y, positive
+---     downward.
+--- @param pointX The caller supplies the world-pixel impact position along x.
+--- @param pointY The caller supplies the world-pixel impact position along y.
 function physics.applyImpulseAt(
     world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number
 )
@@ -733,20 +759,19 @@ end
 
 --- Reads a body's velocity, live from Rapier, in pixels per second.
 ---
---- Pixels, like every other number this module takes and returns: the extents
---- and radius `attach` is given, the impulse components, and the plugin's
+--- Pixels match every other linear number this module accepts and returns:
+--- extents, radius, impulse components and plugin
 --- gravity. A caller that wants meters divides by `physics.pixelsPerMeter`.
 ---
---- This rather than the `Motion` column is what a body is doing right now.
---- `Motion` is a store written at a pause and a save, not a mirror.
+--- This reports what a body does now. [`Motion`](tealdoc:tecs.physics.Motion)
+--- stores velocity only at a pause or save; it does not mirror live motion.
 ---
---- @param world The world holding the entity.
---- @param entity An entity with no live body reads as stopped rather than
----     raising, so a caller cannot tell that case from a body genuinely at
----     rest; `hasBody` is what tells them apart.
---- @return X in pixels per second, then y, positive downward. Linear only: a
----     body that is only spinning reads zero on both, and
----     `physics.angularVelocity` is where that shows.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity.
+--- @return Returns horizontal velocity in pixels per second, or zero without a
+---     live body.
+--- @return Returns vertical velocity in pixels per second, positive downward,
+---     or zero without a live body.
 function physics.velocity(world: types.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -758,17 +783,15 @@ end
 
 --- Sets a body's velocity, in pixels per second, and wakes it.
 ---
---- Does nothing for an entity with no live body, which is the same answer
---- `physics.velocity` gives for one: a null handle indexes Rapier's body array
---- without being checked, so it never reaches Rapier.
+--- Does nothing for an entity with no live body, which matches the zero value
+--- returned by `physics.velocity`.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param vx Pixels per second along x, set outright rather than added to.
----     Discarded by Rapier for a static body, which reads back zero.
---- @param vy The same along y, positive downward. Angular velocity is left
----     alone, and the `Motion` column is not written: it is a store for pauses
----     and saves, so it still holds whatever the last of those left.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param vx The caller supplies horizontal velocity in pixels per second.
+--- @param vy The caller supplies vertical velocity in pixels per second,
+---     positive downward.
 function physics.setVelocity(world: types.World, entity: integer, vx: number, vy: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -782,12 +805,11 @@ end
 --- Cleared by Rapier at the end of every step, so holding a body up against
 --- gravity means calling this every fixed step rather than once.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param x Pixel-scaled force along x. Dividing it by the body's mass in
----     kilograms gives the acceleration in pixels per second squared.
---- @param y The same along y, positive downward. Applied at the center of
----     mass, so neither component imparts spin.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param x The caller supplies pixel-scaled force along x.
+--- @param y The caller supplies pixel-scaled force along y, positive downward.
 function physics.applyForce(world: types.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -800,14 +822,13 @@ end
 ---
 --- Cleared at the end of every step, like `applyForce`.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param x Pixel-scaled force along x, read as `applyForce` reads it.
---- @param y The same along y, positive downward.
---- @param pointX Where the force is applied, in world pixels rather than in
----     the body's frame. Off the center of mass it produces torque as well as
----     acceleration.
---- @param pointY The same along y.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param x The caller supplies pixel-scaled force along x.
+--- @param y The caller supplies pixel-scaled force along y, positive downward.
+--- @param pointX The caller supplies the world-pixel application point along x.
+--- @param pointY The caller supplies the world-pixel application point along y.
 function physics.applyForceAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -820,13 +841,11 @@ end
 ---
 --- Cleared at the end of every step, like the two forces above.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param torque Newton-meters, in Rapier's own units. This is the one quantity
----     the module passes through unscaled, because a torque is a force times a
----     distance and so would need `physics.pixelsPerMeter` squared rather than the
----     single factor everything else takes. Positive raises the body's angular
----     velocity, and so the `Transform.rotation` the sync writes.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param torque The caller supplies Newton-meters in Rapier's native torque
+---     units. Positive values raise angular velocity.
 function physics.applyTorque(world: types.World, entity: integer, torque: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -840,11 +859,10 @@ end
 --- Radians need no conversion, so this is the same number Rapier holds, unlike
 --- the linear velocity beside it.
 ---
---- @param world The world holding the entity.
---- @param entity An entity with no live body reads as not spinning rather than
----     raising.
---- @return Radians per second, in the direction a rising `Transform.rotation`
----     turns. Live from Rapier, not the `Motion` column.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity.
+--- @return Returns live Rapier angular velocity in radians per second, or zero
+---     without a live body.
 function physics.angularVelocity(world: types.World, entity: integer): number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -855,12 +873,10 @@ end
 
 --- Sets angular velocity in radians per second and wakes the body.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param omega Radians per second, set outright rather than added to.
----     Discarded by Rapier for a static body and for one declared with
----     `fixedRotation`, so those two read back zero rather than the value just
----     written.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param omega The caller supplies angular velocity in radians per second.
 function physics.setAngularVelocity(world: types.World, entity: integer, omega: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -869,14 +885,12 @@ function physics.setAngularVelocity(world: types.World, entity: integer, omega: 
     World.setAngularVelocity(handleOf(row), omega)
 end
 
---- Whether Rapier currently considers the body awake.
+--- Returns whether Rapier currently considers the body awake.
 ---
---- @param world The world holding the entity.
---- @param entity Any entity. One with no live body answers false rather than
----     raising, so this does not tell asleep from absent.
---- @return Whether the body is still being solved. Bodies sleep as an island
----     rather than one at a time, so a body at rest touching a moving one
----     stays awake.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies any entity.
+--- @return Returns true while Rapier actively solves the body, or false when
+---     it sleeps or does not exist.
 function physics.isAwake(world: types.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     return row ~= nil and row.index1 ~= 0 and World.isAwake(handleOf(row))
@@ -884,11 +898,11 @@ end
 
 --- Wakes or sleeps a body.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing for one with no live body.
---- @param awake True wakes it. False puts it to sleep at once rather than
----     waiting for it to come to rest, so a body still moving stops where it
----     is until something touches it or it is woken again.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op.
+--- @param awake The caller passes true to wake the body or false to sleep it
+---     immediately.
 function physics.setAwake(world: types.World, entity: integer, awake: boolean)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -902,24 +916,23 @@ end
 --- A move rather than a push: velocity is left exactly as it was, so a falling
 --- body carries on falling from wherever it lands.
 ---
---- `PreviousTransform` is not moved with it. That column is snapshotted in
---- `FixedFirst` and the renderer interpolates from it, so a teleport in any
+--- Teleportation leaves
+--- [`PreviousTransform`](tealdoc:tecs.components.PreviousTransform) unchanged.
+--- `FixedFirst` snapshots
+--- that column and the renderer interpolates from it, so a teleport in any
 --- phase after that is drawn as one frame of travel between the two positions
 --- rather than as a jump. Teleporting before `FixedFirst`, or accepting the
 --- one frame, are the two ways round it.
 ---
---- @param world The world holding the entity.
---- @param entity Does nothing at all for one with no live body, `Transform`
----     included, so this is not a way to move an entity physics is not
----     simulating.
---- @param x Where to put the body's origin, in world pixels. This is the pose
----     the shapes are placed relative to, not the center of mass, so an
----     offset collider lands offset.
---- @param y The same along y, positive downward.
---- @param angle Radians. Nil keeps the entity's current `Transform.rotation`,
----     which is what makes this usable as a move that does not turn anything.
----     Nothing sweeps the gap: a body put across a wall is through it, and a
----     bullet body does not catch that.
+--- @param world The caller supplies the world holding the entity.
+--- @param entity The caller supplies the target entity. A missing live body
+---     makes the call a no-op, including
+---     [`Transform`](/ecs/#tecs.ecs.Transform).
+--- @param x The caller supplies the body's origin in world pixels along x.
+--- @param y The caller supplies the body's origin in world pixels along y,
+---     positive downward.
+--- @param angle The caller supplies radians or nil to keep the current
+---     `Transform.rotation`. Teleportation does not sweep the gap.
 function physics.teleport(world: types.World, entity: integer, x: number, y: number, angle: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
@@ -933,20 +946,18 @@ end
 
 --- Casts a segment and returns its nearest collider, in pixels.
 ---
---- A segment rather than a ray: nothing beyond `x2, y2` is tested, so a cast
---- that finds nothing may only have been too short.
+--- The cast tests one segment and ignores everything beyond `x2, y2`, so a
+--- miss may indicate insufficient length.
 ---
---- @param world Answers nil when it has no simulation, which is the same
----     answer a clean miss gives.
---- @param x1 The start of the segment, in world pixels.
---- @param y1 The same along y, positive downward.
---- @param x2 The end of the segment, in world pixels.
---- @param y2 The same along y.
---- @param options May be nil, which tests every shape. Sensors are included:
----     the filter is the only thing that keeps a ray out of one.
---- @return The nearest hit along the segment, or nil when the ray met nothing.
----     A fresh table each call, so it is the caller's to keep, and a cast in a
----     per-frame loop allocates one per call.
+--- @param world The caller supplies a world. A world without physics returns
+---     nil.
+--- @param x1 The caller supplies the segment start in world pixels along x.
+--- @param y1 The caller supplies the segment start in world pixels along y.
+--- @param x2 The caller supplies the segment end in world pixels along x.
+--- @param y2 The caller supplies the segment end in world pixels along y.
+--- @param options The caller supplies collision filters or nil to test every
+---     shape, including sensors.
+--- @return Returns a fresh caller-owned nearest hit, or nil on a miss.
 function physics.raycast(
     world: types.World, x1: number, y1: number, x2: number, y2: number, options: QueryOptions
 ): RaycastHit
@@ -973,14 +984,10 @@ end
 
 --- Installs the simulation and its sync.
 ---
---- @param options May be nil, which takes Earth-like gravity downward and
----     Rapier's own substep count. Read when the plugin is built rather than
----     when it is added, so one plugin added to two worlds sizes both alike.
---- @return A plugin to hand to `world:addPlugin`. Adding it to a second world
----     gives that world a Rapier world of its own, and neither sees the other's
----     bodies; the solver's threads go the other way and are shared, so a
----     second world naming a `workerCount` the first did not raises rather
----     than resizing the pool.
+--- @param options The caller supplies Rapier settings or nil for Earth-like
+---     downward gravity and Rapier's default substep count.
+--- @return Returns a plugin for `world:addPlugin`. Each world receives an
+---     independent Rapier simulation; all worlds share one worker pool.
 function physics.plugin(options: PhysicsOptions): function(types.World)
     options = options or {}
     local gravity = options.gravity or {0.0, 980.0}

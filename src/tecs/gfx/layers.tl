@@ -1,101 +1,135 @@
---- Layer bands, the depth they resolve to, and what a layer does to its
---- contents.
----
---- A layer is a band of the depth range, and everything drawn on it sorts
---- within that band and never against another one. Higher layers are nearer,
---- so a HUD on layer 8 covers a world on layer 1 whatever the two contain.
----
---- ```teal
---- tecs.gfx.layers.configure(1, {sort = "topdown", parallax = 0.4})
---- tecs.gfx.layers.configure(8, {sort = "z", screenSpace = true, unlit = true})
----
---- world:spawn(
----     tecs.Transform(16, 16, 0, 8, 0, 96, 24),
----     tecs.gfx.Tint(1.0, 1.0, 1.0, 1.0),
----     tecs.gfx.Renderable()
---- )
---- ```
----
---- A layer is named by the fourth argument to `tecs.Transform`, so what a layer
---- is configured with reaches an entity through the number it sits on.
----
---- The band formula is fixed rather than configurable. Content is authored
---- against what it produces: change how a layer maps to depth and every scene
---- built on it re-sorts, which is a change nobody can see coming from the diff.
----
---- What a layer does configure is how its contents sort within its own band,
---- where they are positioned, and whether they are lit. Those decide where a
---- game puts a thing, so they are settled before content is authored rather
---- than after: whether a layer is screen-space is the difference between a HUD
---- written in pixels and one written in world units.
+--[=[
+Depth bands, sorting, coordinate spaces, parallax, and lighting.
+
+A layer occupies one of sixteen depth bands. Entities sort inside their band
+and never against another band. Higher layer numbers draw nearer, so a HUD on
+layer 8 covers a world on layer 1.
+
+```teal
+tecs.gfx.layers.configure(1, {sort = "topdown", parallax = 0.4})
+tecs.gfx.layers.configure(8, {sort = "z", screenSpace = true, unlit = true})
+
+world:spawn(
+    tecs.Transform(16, 16, 0, 8, 0, 96, 24),
+    tecs.gfx.Tint(1.0, 1.0, 1.0, 1.0),
+    tecs.gfx.Renderable()
+)
+```
+
+The fourth [`Transform`](/ecs/#tecs.ecs.Transform) argument selects the layer.
+
+## Sort modes
+
+`"topdown"` sorts by Y with Z for height. `"z"` ignores position.
+`"isometric"` combines X, Y, and Z for a diamond grid. Equal depths retain
+instance order.
+
+`maxZ` and `maxY` define the authored extents that each sort maps into its
+band. Values past an extent clamp to its edge. They still draw, but clamped
+entities no longer sort against one another. Reduce an extent when
+`Renderer:depthSortCollapse` reports that the target depth format merges nearby
+values.
+
+## Coordinate spaces
+
+World coordinates form the default. `screenSpace` uses target pixels and
+ignores the camera. `virtualCoords` stretches one
+`virtualWidth` by `virtualHeight` coordinate system to the target.
+`ignoreZoom` follows camera position while preserving drawn size. `parallax`
+scales camera movement.
+
+One layer cannot combine `screenSpace` and `virtualCoords`. Virtual coordinates
+preserve the authored coordinate system but do not letterbox or preserve
+square pixels.
+
+`unlit` bypasses scene lighting for UI, debug overlays, and other content that
+must retain its own color.
+
+`configure` replaces the complete layer configuration. Any omitted option
+returns to its default.
+]=]
+-- Implementation details:
+-- The band formula stays fixed because authored scenes depend on its ordering.
+-- The shader and host share `MAX`, sort identifiers, extents, and the depth
+-- packing formula.
+--
+-- View culling cannot express screen, virtual, parallax, or zoom-independent
+-- placement. Extraction leaves those layers unbounded and retains ordinary
+-- camera culling for world layers. The renderer repacks layer data only when
+-- `configure` increments the revision.
 
 local record layers
-    --- Bands the depth range divides into.
+    --- Read-only. Reports how many bands divide the depth range.
     ---
-    --- Load-bearing at sixteen. A sort mode packs into two bits, the table the
-    --- vertex shader reads is sized to it, and the shader recovers a layer by
-    --- multiplying a depth by it. `LAYER_BANDS` in
+    --- Load-bearing at sixteen. A sort mode packs into two bits, this value
+    --- sizes the vertex shader's table, and the shader recovers a layer by
+    --- multiplying depth by it. `LAYER_BANDS` in
     --- `assets/shaders/instance.vert.glsl` is the same number, and the two only
     --- work while they agree. Raising it is not a constant change.
     MAX: integer
 
-    --- Highest z a scene is expected to use, which sets the resolution of
+    --- Caller-writable. Sets the highest z a scene expects to use and the
+    --- resulting resolution of
     --- sorting within a band. A scene reaching past this still draws, with
     --- entities beyond the edge resting on it and no longer sorting against
     --- each other.
     maxZ: number
 
-    --- Half the world extent a scene is expected to occupy, for normalizing
+    --- Caller-writable. Sets half the expected world extent used to normalize
     --- position into a band. A scene larger than this still sorts, with
     --- entities beyond the edge compressed against it.
     maxY: number
 
-    --- The resolution a virtual-coordinate layer is authored in.
+    --- Caller-writable. Sets the horizontal resolution used to author a
+    --- virtual-coordinate layer.
     ---
-    --- One resolution for every such layer, because it is the design size a
-    --- layout is drawn against and a game has one of those. It is scaled to
-    --- fill the target, so the layout keeps its proportions within itself at
-    --- any window size and stretches with the window's aspect.
+    --- Every such layer shares one resolution because a game has one authored
+    --- layout size. Tecs scales it to fill the target, so the layout keeps its
+    --- internal proportions at any window size and stretches with the window's
+    --- aspect.
     virtualWidth: number
+    --- Caller-writable. Sets the vertical resolution used to author a
+    --- virtual-coordinate layer. Tecs scales it with `virtualWidth` to
+    --- fill the target.
     virtualHeight: number
 
-    --- What decides the order of a layer's contents within its own band.
+    --- Selects how a layer orders its contents within its own band.
     enum Sort
-        --- Lower on the screen draws in front, with z breaking ties. What a
-        --- top-down or side-on game wants: a character below a crate is in
-        --- front of it.
+        --- Read-only. Sorts lower screen positions in front and uses z to
+        --- break ties. Top-down and side-on games use this order.
         "topdown"
-        --- Only z decides. What a HUD wants, where position means nothing and
-        --- the author has said what covers what.
+        --- Read-only. Sorts only by z. A HUD uses this order when position has
+        --- no bearing on coverage.
         "z"
-        --- X plus Y plus z, for a diamond grid where both axes move an entity
-        --- towards the viewer.
+        --- Read-only. Sorts by X plus Y plus z for diamond grids where both
+        --- axes move an entity towards the viewer.
         "isometric"
     end
 
-    --- Everything a layer decides about its contents. A field left out takes
+    --- Defines every decision a layer makes about its contents. A field left
+    --- out takes
     --- its default, so this says what a layer is rather than amending what it
     --- was.
     record Config
-        --- How contents sort within the layer's band. Required: a sort is the
-        --- one thing every layer has an opinion about.
+        --- Caller-writable. Selects how contents sort within the layer's band.
+        --- The caller must set this field.
         sort: Sort
-        --- Contents are positioned in screen pixels and ignore the camera
+        --- Caller-writable. Positions contents in screen pixels and ignores the camera
         --- entirely. What a HUD wants. Defaults to false.
         screenSpace: boolean
-        --- Contents follow the camera's position but not its zoom, so they
+        --- Caller-writable. Makes contents follow the camera's position but not its zoom, so they
         --- stay a constant size on screen while moving with the world.
         --- Defaults to false.
         ignoreZoom: boolean
-        --- Contents are positioned in `virtualWidth` by `virtualHeight`, which
-        --- is scaled to fill the target. Defaults to false, and cannot be
-        --- combined with `screenSpace`.
+        --- Caller-writable. Positions contents in `virtualWidth` by
+        --- `virtualHeight`; Tecs scales that coordinate system to fill the
+        --- target. Defaults to false and cannot combine with `screenSpace`.
         virtualCoords: boolean
-        --- Contents bypass the lighting pass and appear at their own color.
+        --- Caller-writable. Makes contents bypass the lighting pass and appear at their own color.
         --- Defaults to false. A material can ask for the same thing, and a
         --- fragment is lit only where the material and the layer agree.
         unlit: boolean
-        --- How much the camera's position carries the contents. One moves them
+        --- Caller-writable. Sets how much the camera's position carries the contents. One moves them
         --- with the world; a half drifts them at half speed, which is what a
         --- background wants. Defaults to one.
         parallax: number
@@ -103,56 +137,55 @@ local record layers
 
     --- Sets what a layer does with its contents.
     ---
-    --- Replaces the layer's configuration rather than amending it: a `Config`
-    --- is the whole of what a layer is, so a field left out is that field's
-    --- default and not whatever the layer held before.
+    --- Replaces the layer's configuration rather than amending it. A
+    --- [`Config`](tealdoc:tecs.gfx.layers.Config) defines the whole layer, so each omitted field
+    --- takes its default instead of retaining its previous value.
     --- @param layer One to `MAX`. Anything else raises.
     --- @param config Raises on a missing or unknown `sort`, and on asking for
     ---     `screenSpace` and `virtualCoords` together.
     configure: function(layer: integer, config: layers.Config)
 
-    --- How a layer sorts, as the identifier `depthOf` takes.
+    --- Returns a layer's sort as the identifier accepted by `depthOf`.
     --- @param layer One to `MAX`. Outside that this answers topdown rather than
     ---     raising, since it is the default every layer starts on.
     --- @return The sort identifier, which is an internal number and not one of
     ---     the `Sort` strings.
     sortOf: function(layer: integer): integer
 
-    --- How many times the table has been configured.
+    --- Returns the layer table's configuration revision.
     --- @return A count that starts at zero and only rises. A consumer compares
     ---     it against the value it packed at, so the number itself means
     ---     nothing beyond having changed.
     revision: function(): integer
 
-    --- The four floats the vertex shader reads for one layer: its mode, its
+    --- Returns the four floats that position and light one layer: its mode, its
     --- parallax offset factor, whether it ignores zoom, and whether it is lit.
     ---
-    --- Handed over as a group because they are packed as a group, which happens
-    --- when `revision` moves rather than every frame.
+    --- Returns these values together because consumers pack them together when
+    --- `revision` changes, not every frame.
     --- @param layer One to `MAX`. Outside that every return is nil, since only
     ---     that range is ever filled in.
     --- @return The positioning mode, then the camera position's multiplier,
     ---     then one when the layer ignores zoom, then one when it is lit.
     entryOf: function(layer: integer): number, number, number, number
 
-    --- Whether the camera's view rectangle decides if this layer is drawn.
+    --- Returns whether the camera's view rectangle culls this layer.
     ---
     --- False on a layer the camera does not place where its world bound says:
     --- screen-space and virtual-coordinate contents have no world position for
     --- the view to test, and parallax and ignore-zoom draw them somewhere the
-    --- bound does not describe. Extraction reads this per row and writes a
-    --- bound no view can be outside of for those, so the layer is drawn
-    --- whatever the camera is looking at. Culling is given up on a layer that
-    --- asks for one of these, and kept exactly on every layer that does not.
+    --- bound does not describe. Extraction reads this per row and gives those
+    --- contents a bound that every view contains, so they draw regardless of
+    --- camera position. Layers using none of these modes retain exact culling.
     --- @param layer One to `MAX`. Outside that this answers true, which is what
     ---     an unconfigured layer answers too.
     --- @return Whether extraction should write this row's real world bound.
     viewCulled: function(layer: integer): boolean
 
-    --- Depth for one entity, in zero to one with zero nearest.
+    --- Returns one entity's depth from zero to one, with zero nearest.
     ---
-    --- Exact ties carry no tie-breaker. Instances are drawn in index order and
-    --- the depth test lets an equal fragment through, so two entities at the
+    --- Exact ties carry no tie-breaker. The renderer draws instances in index
+    --- order and the depth test lets an equal fragment through, so two entities at the
     --- same depth already resolve the same way every frame: the later one wins.
     --- Nudging depth by identity would resolve them the other way, since a
     --- larger value is farther, and quietly invert the order a scene was built
@@ -165,25 +198,24 @@ local record layers
     --- @param x World x, read only by the isometric sort, against `maxY`.
     --- @param y World y, read by the topdown and isometric sorts, against
     ---     `maxY`. Larger is lower on screen and so nearer.
-    --- @return A depth inside the layer's own band, whatever the arguments
-    ---     were: each of them is normalized and then held to zero and one, so
-    ---     a scene reaching past what the module was told to expect stops
-    ---     sorting rather than spilling into the next layer.
+    --- @return Returns a depth inside the layer's own band. The function
+    ---     normalizes and clamps each argument to zero through one, so a scene
+    ---     beyond the configured extent stops sorting instead of spilling into
+    ---     the next layer.
     depthOf: function(layer: integer, z: number, x: number, y: number): number
 
-    --- The smallest depth difference `depthOf` produces between two entities
+    --- Returns the smallest depth difference `depthOf` produces between two
+    --- entities
     --- one unit apart, taken over every sort mode.
     ---
-    --- What a depth buffer has to hold. A format whose own step is larger than
-    --- this keeps the bands, so layer order is never at risk, and loses the
+    --- A depth buffer must preserve this difference. A format with a larger
+    --- step keeps the bands, so layer order remains safe, but loses the
     --- sort inside them: the two entities land on one depth value and draw in
-    --- the order they were written rather than the order they were sorted
-    --- into.
+    --- write order rather than their sorted order.
     ---
-    --- Every mode is counted rather than the one a scene is using, because
-    --- `configure` may put any layer on any sort at any point after the depth
-    --- target exists. Derived from `MAX`, `maxZ` and `maxY`, so raising an
-    --- extent moves this with it.
+    --- The calculation includes every mode because `configure` may assign any
+    --- sort after the depth target exists. `MAX`, `maxZ`, and `maxY` determine
+    --- the result, so raising an extent changes it.
     --- @return A depth difference, in the input that moves depth least. That
     ---     is the topdown sort's y at the defaults, which spends the smallest
     ---     share of a band on the widest range.

@@ -1,12 +1,14 @@
---- A compiled shader stage on the device.
----
---- The resource counts SDL_GPU needs come from reflection rather than from the
---- caller: a wrong count is not a compile error, it is a silent binding
---- mismatch.
----
---- Prefer `load`, which asks for a registered shader by name and so works on a
---- build that ships packaged artifacts instead of a compiler. `fromGLSL` takes
---- source directly and therefore always needs one.
+--[=[
+A compiled shader stage on the device.
+
+The resource counts SDL_GPU needs come from reflection rather than from the
+caller: a wrong count is not a compile error, it is a silent binding
+mismatch.
+
+Prefer `load`, which asks for a registered shader by name and so works on a
+build that ships packaged artifacts instead of a compiler. `fromGLSL` takes
+source directly and therefore always needs one.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

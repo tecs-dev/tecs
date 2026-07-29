@@ -1,81 +1,82 @@
---- Sound output, rooted at `app.audio`.
----
---- A clip is loaded once, a key caps how often it may start, and `play` hands
---- back the voice handle that stops it:
----
---- ```teal
---- local step <const> = app.audio:load("sfx/step.ogg")
---- app.audio:setLimit("footstep", {voices = 3, cooldown = 0.05})
----
---- local voice <const> = app.audio:play(step, {
----     gain = 0.7,
----     key = "footstep",
----     pitchVariance = 0.1,
----     group = "sfx",
---- })
----
---- app.audio:stop(voice, 0.2)
---- ```
----
---- An entity that should make a noise carries a `Sound` instead, and stops
---- sounding when the component or the entity goes away, so nothing has to
---- remember a handle.
----
---- **The mixer decodes.** A clip is whatever SDL_mixer's decoders can read:
---- WAV, AIFF, VOC, AU, Ogg Vorbis, Opus, FLAC, MP3 and WavPack, depending on
---- what the build linked. `Audio.decoders` reports what this one has, which is
---- the only honest answer: a decoder whose dependency was missing at configure
---- time is dropped without complaint.
----
---- **A voice is a track.** The mixer sums every track on it into the buffer
---- the hardware reads, so playing the same clip three times over is three
---- tracks reading one clip, not three copies added together by this code.
----
---- **Resident or streamed.** A clip under `streamSeconds` is decoded once, up
---- front, and every voice reads the same PCM: that is what a sound effect
---- played forty times a second wants. A clip at or over it holds nothing, and
---- each voice opens the file and decodes as it plays: that is what a piece of
---- music wants, and it is also what a clip whose length the file cannot state
---- gets, because a file that will not say how long it is may be very long.
---- `load` takes `stream` to override the threshold either way.
----
---- **Loading is off the main thread.** A clip is read on the asset worker and
---- handed back as an address, the same route a decoded image takes. A load
---- never blocks a frame; the clip reports that it is still loading and `play`
---- declines until it is not.
----
---- **Nothing runs on an audio thread.** SDL_mixer can call back when a track
---- stops, and that callback fires on a thread the Lua VM did not create. A Lua
---- function invoked from such a thread is the unsafe case that keeps raw thread
---- creation unexposed (see the Rust worker), so no callback is installed and
---- `update` asks each sounding voice whether it is still playing instead. The
---- cost is that a voice is reaped on the frame after it ended rather than the
---- instant it did, which nothing here needs to be sooner.
----
---- **Limits are ours; groups are the mixer's.** A group is a tag, and the
---- mixer pauses, resumes and stops every voice carrying one. A key is a limit
---- bucket counted here, because the mixer has no notion of "at most three of
---- these at once, and not twice inside fifty milliseconds", which is what keeps
---- forty enemies dying together from playing forty identical sounds.
----
---- **A group's settings outlive the voices in it.** A gain, a mute and a pause
---- are recorded against the name and consulted when a voice starts, so a sound
---- that begins after "hold every effect for the menu" is held rather than
---- heard. The mixer cannot answer that on its own: `MIX_PauseTag` reaches what
---- is sounding at the moment it is called and nothing that starts afterwards.
----
---- **The mixer's own state is in the snapshot.** The master gain, the master
---- mute and every group's gain, mute and pause are a game's state as much as
---- an entity is, and none of them is in the world, so `install` adds a
---- snapshot handler that carries them. Pitch variance is drawn from the
---- world's `tecs.audio` stream, so `tecs.ecs.random` carries that part.
----
---- **Position is passed through and nothing else.** See `Sound` for what a
---- caller still has to do by hand. `setStereo` is the other way to place a
---- voice, a plain left and right gain with no listener and no distance model
---- in it, which is usually what a game laid out on a plane wants. The two are
---- exclusive: the mixer holds one placement per track, so the later call
---- replaces the earlier one rather than layering over it.
+--[=[
+Clips, voices, groups, limits, and entity-owned sound.
+
+[`Application`](tealdoc:tecs.Application) exposes one
+[`Audio`](tealdoc:tecs.audio.Audio) as `app.audio`. A platform without an output
+device still provides the object, but `available` reports false and playback
+returns handle zero.
+
+## Playback
+
+`load` returns one shared clip per path. Loading never blocks the frame.
+`play` returns handle zero until the clip becomes ready or when no voice can
+start.
+
+```teal
+local step <const> = app.audio:load("assets/sfx/step.ogg")
+app.audio:setLimit("footstep", {
+    voices = 3,
+    cooldown = 0.05,
+})
+
+local voice <const> = app.audio:play(step, {
+    gain = 0.7,
+    group = "sfx",
+    key = "footstep",
+    pitchVariance = 0.1,
+})
+
+if voice ~= 0 then
+    app.audio:stop(voice, 0.2)
+end
+```
+
+Clips shorter than `streamSeconds` stay resident and share decoded samples.
+Longer clips stream separately for each voice. `LoadOptions.stream` overrides
+that choice. Use `Audio.decoders()` when a game needs to report the formats
+available in the current build.
+
+A stale voice handle never controls a later voice that reuses its slot.
+Commands ignore stale handles and queries return false or nil.
+
+## Groups and limits
+
+A group controls gain, mute, pause, resume, and stop. Its settings also apply
+to voices that join later. A key controls admission through a concurrent voice
+limit and cooldown. One voice may use both.
+
+Snapshots retain master and group settings. Pitch variance uses the world's
+snapshotted `tecs.audio` random stream.
+
+## Placement
+
+`setPosition` uses right-handed coordinates with a listener fixed at the
+origin. The game chooses the listener, subtracts its position, and converts
+world units to an audio scale. `setStereo` assigns explicit left and right
+gains. The latest placement call replaces the earlier mode.
+
+## Entity-owned sound
+
+An entity can carry [`Sound`](tealdoc:tecs.audio.Sound) instead of keeping a voice handle. The audio system
+starts it, follows writable playback fields, and stops it when the component or
+entity disappears. Write through `world:getMut`. A direct FFI write needs
+`world:markComponentDirty`, and `batchSpawn` must initialize every field.
+]=]
+-- Implementation details:
+-- SDL_mixer supplies the decoders and represents each voice as a track.
+-- Resident loads cross the asset worker as owned addresses; streamed voices
+-- open their own decoder.
+-- Voice handles pack a slot with its generation, so recycling a slot
+-- invalidates every older handle to it.
+--
+-- SDL_mixer can report track completion from an audio thread LuaJIT did not
+-- create. Audio installs no Lua callback there. `update` polls sounding tracks
+-- and reaps a completed voice on the following frame.
+--
+-- Mixer tags implement group operations on voices that already sound. Tecs
+-- records group state separately so later voices inherit gain, mute, and pause.
+-- Tecs also owns key counts and cooldowns because the mixer has no admission
+-- model.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -111,7 +112,7 @@ local DEFAULT_MAX_VOICES <const> = 32
 local DEFAULT_STREAM_SECONDS <const> = 10.0
 
 --- Slots a voice handle reserves for its index. The rest of the handle is a
---- generation, so a handle to a voice that has finished and been reused
+--- generation, so a handle whose slot the mixer has finished and reused
 --- refers to nothing rather than to whatever took its place.
 local SLOT_SPAN <const> = 65536
 --- Generations wrap here, which keeps a handle inside a signed 32-bit field
@@ -132,7 +133,7 @@ local LOOP_FOREVER <const> = -1
 -------------------------------------------------------------------------------
 
 --- A clip's path is its identity, for the same reason an image's name is: the
---- integer a component carries is handed out in load order, and load order is
+--- code assigns the integer a component carries in load order, and load order is
 --- not something a snapshot can rely on reproducing.
 local clipIds: {string: integer} = {}
 local clipPaths: {integer: string} = {}
@@ -161,9 +162,8 @@ end
 -------------------------------------------------------------------------------
 
 --- A group's name is its identity, for the same reason a clip's path is: the
---- integer a component carries is handed out in the order names are first
---- asked for, and that order is not something a snapshot can rely on
---- reproducing.
+--- code assigns the integer a component carries in first-use order, which a
+--- snapshot cannot rely on reproducing.
 local groupIds: {string: integer} = {}
 local groupNames: {integer: string} = {}
 local groupCount = 0
@@ -190,7 +190,7 @@ end
 -- The component
 -------------------------------------------------------------------------------
 
---- A sound attached to an entity.
+--- Represents a sound attached to an entity.
 ---
 --- Presence is the instruction: an entity carrying this with a loaded clip
 --- starts sounding on the next audio pass, and stops when the component or
@@ -198,9 +198,9 @@ end
 --- handle a game has to remember to release, and it is why despawning
 --- something mid-sound does the obvious thing.
 ---
---- Position is passed to the mixer and nothing more. `spatial` switches it on,
---- and `x`, `y` and `z` are read as the mixer reads them: a right-handed
---- system whose listener sits at the origin and cannot be moved, with x
+--- The audio pass sends position to the mixer and does nothing else with it.
+--- `spatial` switches it on, and the mixer reads `x`, `y` and `z` in a right-handed
+--- system. The mixer fixes its listener at the origin, with x
 --- positive to the right, y positive up and z positive behind. So a caller with
 --- a camera and a world has three jobs this component does not do for it, and
 --- doing any of them here would fix answers that belong to a game:
@@ -215,16 +215,16 @@ end
 ---    move with the camera has no world position to convert, and the answer is
 ---    to leave `spatial` at zero.
 ---
---- A group is named the way a clip is. An FFI component holds numbers, so what
+--- A name identifies a group, just as a path identifies a clip. An FFI component holds numbers, so what
 --- `group` carries is an interned index from `Audio.groupId` rather than the
 --- mixer's tag itself, and `Audio.groupName` reads it back. The index is this
 --- run's and no other, which is why `serialize` writes the name: an integer in
 --- a save file would name a different group the next time a build interned its
 --- names in a different order.
 ---
---- `playing`, `gain`, `loop`, `pitch` and the position are followed for as
+--- The audio pass follows `playing`, `gain`, `loop`, `pitch` and the position for as
 --- long as the voice sounds, so writing any of them is enough and nothing has
---- to be restarted to make one take. Each of those is a read and a compare per
+--- to restart the voice to apply a change. Each of those costs one read and compare per
 --- sounding row per frame, which is the price of the component being live and
 --- is why `clip` and `group` are not on the list: both take an untag, a
 --- retag and a fresh input to change, neither is something a game writes
@@ -233,32 +233,42 @@ end
 --- `voice`, which is the same thing changing its clip takes.
 ---
 --- Disabling an entity silences its sound and re-enabling starts it again.
---- `Disabled` is excluded from every query that does not name it, so a
+--- Queries exclude [`Disabled`](/ecs/#tecs.ecs.Disabled) unless they name it, so a
 --- disabled row is not followed and its voice is taken back; the audio pass
 --- clears the handle at the same moment, which is what lets the sound return
 --- with the entity rather than reading as a one-shot that had finished.
 local record Sound is Component
-    --- Clip index, from `Audio.clipId`. Zero plays nothing.
+    --- Caller-writable. Selects a clip by its `Audio.clipId` index. Zero plays
+    --- nothing.
     clip: number
-    --- Nonzero sounds, zero does not. The instruction rather than a report:
+    --- Caller-writable. Uses nonzero to request playback and zero to stop. This
+    --- field gives an instruction rather than a report:
     --- clearing it stops the voice and setting it again starts one, including
     --- on a one-shot that has already run out.
     playing: number
-    --- 0 to 1, before the master gain.
+    --- Caller-writable. Sets linear gain from zero to one before group and
+    --- master gain.
     gain: number
-    --- Nonzero repeats. Clearing it part way through lets the voice play out
+    --- Caller-writable. Uses nonzero to repeat. Clearing it part way through lets the voice play out
     --- to its end rather than cutting it.
     loop: number
-    --- Playback rate. 1 is unchanged, 2 is an octave up and half as long.
+    --- Caller-writable. Sets playback rate. One leaves it unchanged, while two
+    --- plays an octave higher in half the time.
     pitch: number
-    --- Nonzero reads `x`, `y` and `z`; zero mixes without a position.
+    --- Caller-writable. Uses nonzero to read `x`, `y`, and `z`; zero mixes
+    --- without a position.
     spatial: number
+    --- Caller-writable. Sets the position right of the listener.
     x: number
+    --- Caller-writable. Sets the position above the listener.
     y: number
+    --- Caller-writable. Sets the position behind the listener.
     z: number
-    --- Group index, from `Audio.groupId`. Zero joins no group.
+    --- Caller-writable. Selects a group by its `Audio.groupId` index. Zero
+    --- joins no group.
     group: number
-    --- Voice the audio pass assigned: zero before it starts, negative once a
+    --- Engine-owned. Reports the voice assigned by the audio pass: zero before
+    --- it starts and negative once a
     --- one-shot has finished. Written by the engine; setting it back to zero
     --- is how a game asks for the sound again.
     voice: number
@@ -371,7 +381,7 @@ local record Voice
     x: number
     y: number
     z: number
-    --- Whether the voice is pinned to the front pair rather than placed, and
+    --- Tracks whether the voice uses the front pair rather than a position, and
     --- the gains last pushed for it. The mixer holds one placement per track,
     --- so at most one of this and `spatial` is ever set.
     stereo: boolean
@@ -387,17 +397,10 @@ local record Bucket
     last: number
 end
 
---- Sound, at both levels: a mixer with clips, voices, groups and limits, and
---- the physical devices it opens and records from.
----
---- One module because the mixer and the device it opens are one subject at two
---- levels: a game that wants a particular output names a device from
---- `playbackDevices` and passes its id to `newAudio`, and having to know which
---- of two modules each half came from bought nothing. The device half is still
---- its own file and still reaches only SDL; this is the surface it is read
---- through.
+-- Implementation details: The mixer and its devices share one public module.
+-- The device implementation remains in the platform layer.
 local record audio
-    --- One audio output and the voices sounding on it.
+    --- Represents one audio output and the voices sounding on it.
     ---
     --- Units, in one place, because none of them is in a signature:
     ---
@@ -411,296 +414,358 @@ local record audio
     ---     reaches the hardware at is its own gain times its group's gain times the
     ---     master gain, and a mute at either level composes as a zero without
     ---     discarding the gain underneath it.
-    ---   * **Pitch is a playback rate, not an interval.** 1 is unchanged, 2 is an
+    ---   * **Pitch is a playback rate, not an interval.** 1 preserves the
+    ---     original rate, 2 is an
     ---     octave up and half as long, 0.5 an octave down and twice as long. It
     ---     resamples, so it changes duration; there is no time-stretch here.
-    ---   * **Position is the mixer's frame, not the world's.** The listener is
-    ---     fixed at the origin and cannot be moved, x is positive to the right, y
+    ---   * **Position is the mixer's frame, not the world's.** The mixer fixes
+    ---     the listener at the origin. x is positive to the right, y
     ---     is positive **up**, and z is positive behind. World Y runs down, so a
     ---     caller feeding world coordinates in has to flip Y as well as subtract
-    ---     whatever it decided is listening. See `Sound`.
+    ---     whatever it decided is listening. See [`Sound`](tealdoc:tecs.audio.Sound).
     ---
     --- A voice handle is a generation and a slot packed into one integer. It stays
-    --- meaningful for exactly as long as the voice sounds: once the voice ends, or
-    --- is stopped, or is reaped by `update`, every call taking the handle becomes a
+    --- meaningful for exactly as long as the voice sounds. When a voice ends
+    --- naturally or either `stop` or `update` ends it, every call taking the handle becomes a
     --- no-op, and it never starts naming the next voice to take that slot. Nothing
-    --- has to be released, and holding a stale handle is not an error.
+    --- requires release, and holding a stale handle is not an error.
     ---
     --- Nothing here is thread safe, and nothing here calls back. Everything runs on
     --- the thread that calls it.
     record Audio
-        --- What `newAudio` takes. Every field is optional.
+        --- Configures `newAudio` through optional fields.
         record Config
-            --- Frames per second. Defaults to 48000.
+            --- Caller-writable. Sets the sample frequency in frames per second
+            --- and defaults to 48000.
             frequency: integer
-            --- Output channels. Defaults to 2.
+            --- Caller-writable. Sets the number of output channels and defaults
+            --- to two.
             channels: integer
-            --- Voices that may sound at once. Defaults to 32.
+            --- Caller-writable. Sets how many voices may sound at once and
+            --- defaults to 32.
             maxVoices: integer
-            --- Seconds at which a clip streams instead of being held resident.
+            --- Caller-writable. Sets the duration in seconds at which a clip
+            --- streams instead of remaining resident.
             --- Defaults to 10.
             streamSeconds: number
-            --- Output backend. Defaults to the installed platform's.
+            --- Caller-writable. Selects the output backend and defaults to the
+            --- installed platform backend.
             backend: Backend
-            --- Physical output device id from `tecs.audio.playbackDevices`.
+            --- Caller-writable. Selects a physical output device by an id from
+            --- `tecs.audio.playbackDevices`.
             --- Omitted follows the operating-system default as it changes.
             device: number
         end
 
-        --- A loaded sound.
+        --- Represents a loaded sound.
         ---
-        --- Returned by `load` before the file has been read, so check `status`
-        --- rather than assuming it is playable. The instance is shared: loading the
-        --- same path twice hands back the same table, and its fields are updated in
+        --- `load` returns this before reading the file, so check `status`
+        --- rather than assuming it is playable. Every load for the same path
+        --- shares one instance, and the loader updates its fields in
         --- place as the load settles, so a caller holding one sees it become ready
         --- without asking again.
         record Clip
-            --- The path it was loaded from, exactly as given. This is a clip's
+            --- Read-only. Reports the path used to load the clip,
+            --- exactly as given. This is a clip's
             --- identity, so two spellings of one file are two clips.
             path: string
-            --- Index of `path`, which is what a `Sound` component carries.
+            --- Read-only. Reports the `path` index carried by a
+            --- [`Sound`](tealdoc:tecs.audio.Sound) component.
             id: integer
-            --- "loading", "ready", "failed", or "released" once the audio object
-            --- it was loaded into has been destroyed.
+            --- Read-only. Reports `"loading"`, `"ready"`, `"failed"`, or
+            --- `"released"` once the caller destroys its audio object.
             status: string
-            --- Set when loading failed.
+            --- Read-only. Reports the error when loading fails.
             error: string
-            --- Seconds of audio, or zero when the file cannot say.
+            --- Read-only. Reports the audio duration in seconds, or zero when
+            --- the file cannot provide one.
             duration: number
-            --- Whether the decoded audio is held in memory. False for a clip each
+            --- Read-only. Reports whether decoded audio remains in memory.
+            --- False identifies a clip each
             --- voice reads from the file for itself.
             resident: boolean
 
-            --- Private. The clip the asset load settled to, held so a reload can
+            --- Engine-owned. Stores the settled asset so reload and destroy can
+            --- manage it. Ordinary game code should ignore this field. The value
             --- swap it and `destroy` can release it. Nil until the load lands,
             --- and nil again once released.
             _sound: assets.Sound
         end
 
-        --- What `load` takes. The one field is optional.
+        --- Configures `load` through one optional field.
         record LoadOptions
-            --- Forces streaming when true and residency when false. Left unset,
+            --- Caller-writable. Forces streaming when true and residency when
+            --- false. Left unset,
             --- the clip's duration decides against `streamSeconds`.
             stream: boolean
         end
 
-        --- What `play` takes. Every field is optional, and the whole table may be
+        --- Configures `play` through optional fields. The whole table may be
         --- omitted.
         ---
         --- Read once, when the voice starts. Changing the table afterwards reaches
         --- nothing: use `setGain`, `setPitch`, `setLoop`, `setPosition` and
         --- `setStereo` on the handle instead. The table is not retained, so one
-        --- table may be filled and reused for every play.
+        --- a caller may fill and reuse one table for every play.
         record PlayOptions
-            --- 0 to 1, before the group and the master gains. Defaults to 1.
+            --- Caller-writable. Sets linear gain from zero to one before group
+            --- and master gains. Defaults to one.
             gain: number
-            --- Repeats until stopped. Defaults to false.
+            --- Caller-writable. Repeats playback until stopped and defaults to
+            --- false.
             loop: boolean
-            --- Seconds from the start of the clip a repeat returns to, so an
+            --- Caller-writable. Sets the position in seconds to which a repeat
+            --- returns, so an
             --- intro can play once and the rest of it loop. Defaults to 0.
             loopStart: number
-            --- Seconds into the clip the first pass begins. Defaults to 0.
+            --- Caller-writable. Sets where the first pass begins in seconds and
+            --- defaults to zero.
             start: number
-            --- Seconds of silence-to-full at the start. Defaults to 0.
+            --- Caller-writable. Sets the fade-in duration in seconds and
+            --- defaults to zero.
             fadeIn: number
-            --- Playback rate. 1 is unchanged. Defaults to 1.
+            --- Caller-writable. Sets playback rate and defaults to one.
             pitch: number
-            --- Fraction of `pitch` to vary by, chosen anew for each voice. 0.1
+            --- Caller-writable. Sets the fraction of `pitch` varied for each
+            --- new voice. A value of 0.1
             --- spreads voices over plus or minus a tenth. Defaults to 0.
             pitchVariance: number
-            --- Group this voice joins. Defaults to none.
+            --- Caller-writable. Selects the group this voice joins and defaults
+            --- to none.
             group: string
-            --- Limit bucket this voice counts against. Defaults to none.
+            --- Caller-writable. Selects the limit bucket counted by this voice
+            --- and defaults to none.
             key: string
-            --- Position, when `spatial`. See `Sound` for what the numbers mean.
+            --- Caller-writable. Enables spatial positioning. See
+            --- [`Sound`](tealdoc:tecs.audio.Sound) for
+            --- the coordinate system.
             spatial: boolean
-            --- Positive to the right of the listener. Defaults to 0.
+            --- Caller-writable. Sets the position right of the listener and
+            --- defaults to zero.
             x: number
-            --- Positive **above** the listener, which is the opposite sign from
+            --- Caller-writable. Sets the position above the listener, which
+            --- uses the opposite sign from
             --- world Y. Defaults to 0.
             y: number
-            --- Positive behind the listener. Defaults to 0.
+            --- Caller-writable. Sets the position behind the listener and
+            --- defaults to zero.
             z: number
-            --- Pins the voice to the front pair of speakers at `left` and
+            --- Caller-writable. Pins the voice to the front pair of speakers at `left` and
             --- `right`, which is a pan rather than a position. Ignored when
             --- `spatial` is set, because the mixer holds one placement per track.
             --- Both gains default to 1.
             stereo: boolean
-            --- Gain out of the left speaker, on the same linear scale as `gain`.
+            --- Caller-writable. Sets left-speaker gain on the same linear scale as `gain`.
             --- Negative reads as silence and above 1 is louder. Defaults to 1.
             left: number
-            --- Gain out of the right speaker, on the same terms as `left`.
+            --- Caller-writable. Sets right-speaker gain on the same terms as
+            --- `left`.
             right: number
         end
 
-        --- What a key allows.
+        --- Defines what a key allows.
         record Limit
-            --- Voices this key may hold at once. Zero or absent is no ceiling.
+            --- Caller-writable. Sets how many voices this key may hold at once.
+            --- Zero or absent removes the ceiling.
             voices: integer
-            --- Seconds after one starts before another may. Zero is none.
+            --- Caller-writable. Sets the cooldown in seconds after a voice
+            --- starts. Zero disables the cooldown.
             cooldown: number
         end
 
-        --- One sounding voice, as something looking in reads it.
+        --- Describes one sounding voice for inspection.
         record VoiceInfo
-            --- The handle a game holds, which `playing` and `stop` take.
+            --- Read-only. Reports the handle accepted by `playing` and `stop`.
             handle: integer
-            --- Path of the clip it is reading, or nil once it has been released.
+            --- Read-only. Reports the clip path, or nil after release.
             clip: string
-            --- What the voice asked for, before its group and the master.
+            --- Read-only. Reports the gain requested by the voice before group
+            --- and master gain.
             gain: number
-            --- What reached the track, the group's gain and mute included. The
+            --- Read-only. Reports the gain applied to the track, including
+            --- group gain and mute. The
             --- master gain is not in it: that is the mixer's own number and is not
             --- multiplied per voice.
             applied: number
-            --- Playback rate as the track carries it, so the pitch variance a
-            --- `play` drew is already in it rather than the rate that was asked
-            --- for.
+            --- Read-only. Reports the playback rate carried by the track, so the pitch variance a
+            --- value already includes any variance that `play` drew rather
+            --- than only the requested rate.
             pitch: number
-            --- Group tag, or nil for a voice in none.
+            --- Read-only. Reports the group tag, or nil for no group.
             group: string
-            --- Limit bucket, or nil for a voice counted against none.
+            --- Read-only. Reports the limit bucket, or nil for no bucket.
             key: string
-            --- Whether a pause is holding it, whether its own or its group's.
+            --- Read-only. Reports whether its own pause or its group holds it.
             paused: boolean
-            --- Whether a fade-out is running it down.
+            --- Read-only. Reports whether a fade-out is stopping the voice.
             stopping: boolean
-            --- Whether a `Sound` component started this rather than `play`.
+            --- Read-only. Reports whether a
+            --- [`Sound`](tealdoc:tecs.audio.Sound) component started the
+            --- voice instead of `play`.
             owned: boolean
-            --- Whether it repeats when it reaches the end.
+            --- Read-only. Reports whether playback repeats at the end.
             loop: boolean
-            --- Whether it is placed in space. Never true at the same time as
+            --- Read-only. Reports whether the voice has a spatial position.
+            --- This remains false when
             --- `stereo`: the mixer holds one placement per track.
             spatial: boolean
-            --- Last position pushed, in the mixer's frame: positive right.
+            --- Read-only. Reports the last horizontal position pushed in the
+            --- mixer's coordinate system, positive right.
             --- Meaningless unless `spatial`.
             x: number
-            --- Last position pushed, positive up. Meaningless unless `spatial`.
+            --- Read-only. Reports the last vertical position pushed, positive
+            --- up. It has no meaning unless `spatial`.
             y: number
-            --- Last position pushed, positive behind. Meaningless unless
+            --- Read-only. Reports the last depth position pushed, positive
+            --- behind. It has no meaning unless
             --- `spatial`.
             z: number
-            --- Whether it is pinned to the front pair, and at what gains.
+            --- Read-only. Reports whether the voice remains pinned to the front
+            --- speaker pair.
             stereo: boolean
-            --- Left speaker gain last pushed. Meaningless unless `stereo`.
+            --- Read-only. Reports the last left-speaker gain pushed. It has no
+            --- meaning unless `stereo`.
             left: number
-            --- Right speaker gain last pushed. Meaningless unless `stereo`.
+            --- Read-only. Reports the last right-speaker gain pushed. It has no
+            --- meaning unless `stereo`.
             right: number
         end
 
-        --- The `Sound` component, for a game that wants to query or set it. See
+        --- Read-only. Exposes the [`Sound`](tealdoc:tecs.audio.Sound)
+        --- component for queries and writes. See
         --- the record's own documentation for what its fields mean.
         Sound: Sound
 
-        --- Whether an output opened. False on a machine with no sound, where
+        --- Read-only. Reports whether an output opened. False identifies a
+        --- machine with no sound, where
         --- every call here still works and nothing is heard.
         available: boolean
 
-        --- Private. The platform seam every call below goes through, so nothing
-        --- here names a mixer symbol itself.
+        --- Engine-owned. Stores the platform audio backend. Ordinary game code
+        --- should ignore this field.
         _backend: Backend
 
-        --- Private. The open output. Nil on a machine that has none and again
+        --- Engine-owned. Stores the open output. Ordinary game code should
+        --- ignore this field. It remains nil on a machine that has none and again
         --- after `destroy`, which is what `available` reports.
         _mixer: loader.CPtr
 
-        --- Private. The layout the output was opened with.
+        --- Engine-owned. Stores the opened output layout. Ordinary game code
+        --- should ignore this field.
         _spec: audiobackend.Spec
 
-        --- Private. One play-options record, refilled per play. Every field is
+        --- Engine-owned. Stores a reusable play-options record. Ordinary game
+        --- code should ignore this field. Every field is
         --- written each time, so nothing carries over between voices.
         _params: audiobackend.PlayParams
 
-        --- Private. Every voice slot, sounding or not, indexed from one. Its
+        --- Engine-owned. Stores every voice slot. Ordinary game code should
+        --- ignore this field. Its
         --- length is `maxVoices` and never changes after `newAudio`.
         _voices: {Voice}
 
-        --- Private. Slots not in use, as a stack taken from the end, so the first
+        --- Engine-owned. Stores unused voice slots. Ordinary game code should
+        --- ignore this field. The stack is taken from the end, so the first
         --- sound of a run gets slot one.
         _free: {integer}
 
-        --- Private. Slots currently sounding, paused and fading ones included.
+        --- Engine-owned. Stores how many slots remain in use. Ordinary game
+        --- code should use `sounding`.
         _sounding: integer
 
-        --- Private. The streaming threshold in milliseconds, which is where
+        --- Engine-owned. Stores the streaming threshold in milliseconds.
+        --- Ordinary game code should ignore this field. This is where
         --- `streamSeconds` ends up.
         _streamMs: integer
 
-        --- Private. The master gain as set, which a mute holds down without
+        --- Engine-owned. Stores master gain while mute holds output down.
+        --- Ordinary game code should use the master-gain methods rather than
+        --- this field.
         --- discarding.
         _masterGain: number
 
-        --- Private. Whether a master mute is holding the output at zero.
+        --- Engine-owned. Stores whether master mute holds output at zero.
+        --- Ordinary game code should use the mute methods.
         _muted: boolean
 
-        --- Private. Gain per group name, absent meaning 1. Kept here rather than
+        --- Engine-owned. Stores gain by group name. Ordinary game code should
+        --- use the group-gain methods. An absent entry means one.
         --- on the mixer's tags, whose per-tag gain would overwrite each voice's
         --- own.
         _groupGains: {string: number}
 
-        --- Private. Mute per group name, absent meaning not muted.
+        --- Engine-owned. Stores mute state by group name. Ordinary game code
+        --- should use the group-mute methods.
         _groupMuted: {string: boolean}
 
-        --- Private. Pause per group name, absent meaning not paused. A standing
+        --- Engine-owned. Stores pause state by group name. Ordinary game code
+        --- should use the group-pause methods. It provides a standing
         --- instruction, so a voice starting into a paused group is held too.
         _groupPaused: {string: boolean}
 
-        --- Private. The limit each key carries, or absent for no limit.
+        --- Engine-owned. Stores limits by key. Ordinary game code should use
+        --- `setLimit` and `limit`.
         _limits: {string: Audio.Limit}
 
-        --- Private. Live count and last start time per key, created on the first
+        --- Engine-owned. Stores the live count and last start time by key.
+        --- Ordinary game code should ignore this field. Entries appear on the first
         --- voice counted against it.
         _buckets: {string: Bucket}
 
-        --- Private. Clips this instance has loaded, keyed by interned clip index.
+        --- Engine-owned. Stores loaded clips by interned index. Ordinary game
+        --- code should use the clip methods.
         _clips: {integer: Clip}
 
-        --- Private. Loads in flight, by clip index, so `destroy` can give up
+        --- Engine-owned. Stores loads in flight by clip index. Ordinary game
+        --- code should ignore this field, which lets `destroy` give up
         --- what the drain ran out of time on.
         _inFlight: {integer: Future<assets.Sound>}
 
-        --- Private. How many of them there are. A counter rather than a walk of
+        --- Engine-owned. Stores how many loads remain in flight. Ordinary game
+        --- code should use `loading`. A counter rather than a walk of
         --- the table above, because `loading` is a per-frame read.
         _loading: integer
-        --- Where pitch variance is drawn from. A mixer of its own until `install`
+        --- Engine-owned. Stores the random stream used for pitch variance.
+        --- Ordinary game code should ignore this field. It remains private until `install`
         --- points it at the world's `tecs.audio` stream, so a save carries the
         --- rate the next shot fires at rather than restarting the variance.
         _random: random.Random
-        --- Seconds `update` has been told about, which is what a cooldown is
+        --- Engine-owned. Stores the seconds passed to `update`, which a cooldown
+        --- uses.
         --- measured against.
         _now: number
     end
 
-    --- Play a clip by putting this on an entity.
+    --- Read-only. Exposes the [`Sound`](tealdoc:tecs.audio.Sound) component
+    --- that plays a clip from an entity.
     Sound: Sound
 
-    --- What `newAudio` takes.
+    --- Configures `newAudio`.
     type Config = Audio.Config
     --- A loaded clip, or one still loading.
     type Clip = Audio.Clip
-    --- What `Audio:load` takes.
+    --- Configures `Audio:load`.
     type LoadOptions = Audio.LoadOptions
-    --- What `Audio:play` takes.
+    --- Configures `Audio:play`.
     type PlayOptions = Audio.PlayOptions
-    --- How many voices a key allows at once, and how soon it may repeat.
+    --- Defines how many voices a key allows and how soon it may repeat.
     type Limit = Audio.Limit
-    --- What `Audio:voices` reports about one voice.
+    --- Describes one voice returned by `Audio:voices`.
     type VoiceInfo = Audio.VoiceInfo
 
-    --- A physical device the platform reports, before it is opened.
+    --- Describes a physical device before the game opens it.
     type Device = platformaudio.Device
     --- An open recording device, read by polling.
     type Microphone = platformaudio.Microphone
-    --- What `openMicrophone` takes.
+    --- Configures `openMicrophone`.
     type MicrophoneConfig = platformaudio.MicrophoneConfig
 
     --- Builds the mixer a game plays sound through, opening the platform's
     --- default output.
     ---
     --- Never raises for want of hardware. A machine with no sound card gets an
-    --- object whose calls all succeed and produce nothing, because a game that
-    --- cannot be played without an audio device is rarer than a test machine
-    --- without one.
+    --- object whose calls all succeed and produce nothing, because few games
+    --- require an audio device while many test machines lack one.
     ---
     --- @param config Omitted takes the defaults. `maxVoices` outside 1 to
     ---     65535 raises, which is the one field here that does; every other
@@ -710,14 +775,14 @@ local record audio
     ---     with no sound, and every call still succeeds and is silent.
     newAudio: function(config?: Audio.Config): Audio
 
-    --- Physical playback devices attached now.
+    --- Returns the physical playback devices attached now.
     ---
     --- @return The devices, listed afresh each call and the caller's to keep.
     ---     Empty rather than nil when the subsystem cannot start.
     --- @return SDL's reason, when something went wrong.
     playbackDevices: function(): {platformaudio.Device}, string
 
-    --- Physical recording devices attached now.
+    --- Returns the physical recording devices attached now.
     ---
     --- @return The devices, listed afresh each call and the caller's to keep.
     ---     Empty rather than nil when the subsystem cannot start.
@@ -726,7 +791,7 @@ local record audio
 
     --- Opens a microphone as interleaved native-endian 32-bit float samples.
     ---
-    --- No callback is installed. SDL's audio thread fills its own stream and
+    --- The API installs no callback. The audio thread fills its own stream and
     --- the game pulls completed bytes from the main thread with `read`.
     ---
     --- @param config Omitted opens the default recording device at its own
@@ -759,18 +824,20 @@ audio.playbackDevices = platformaudio.playbackDevices
 audio.recordingDevices = platformaudio.recordingDevices
 audio.openMicrophone = platformaudio.openMicrophone
 
---- Index of a clip path, assigning one the first time it is seen.
+--- Returns the index of a clip path and assigns one on first use.
 ---
 --- @param path Must be non-empty; an empty one raises. Not checked against the
 ---     filesystem, so this hands out an index for a path that does not exist.
---- @return An index from 1 up, shared by every `Audio` in the process. It is
----     this run's numbering and means nothing in a file, which is why `Sound`
+--- @return An index from 1 up, shared by every
+---     [`Audio`](tealdoc:tecs.audio.Audio) in the process. It belongs only to
+---     this run and means nothing in a file, which is why
+---     [`Sound`](tealdoc:tecs.audio.Sound)
 ---     serializes the path instead.
 function Audio.clipId(path: string): integer
     return clipId(path)
 end
 
---- Path a clip index stands for, or nil when it names nothing.
+--- Returns the path represented by a clip index, or nil.
 ---
 --- @param id Zero is the index of no clip and answers nil, as does any index
 ---     never handed out.
@@ -778,30 +845,33 @@ function Audio.clipPath(id: integer): string
     return clipPaths[id]
 end
 
---- Index of a group name, assigning one the first time it is seen.
+--- Returns the index of a group name and assigns one on first use.
 ---
---- What a `Sound` carries in `group`. The index means nothing outside the run
---- that handed it out, so it belongs in a component and never in a file.
+--- What a [`Sound`](tealdoc:tecs.audio.Sound) carries in `group`. The index
+--- means nothing outside the run that handed it out, so it belongs in a
+--- component and never in a file.
 ---
 --- @param name Must be non-empty; an empty one raises. A group needs no
 ---     declaring: naming one here is all it takes to exist.
---- @return An index from 1 up, shared by every `Audio` in the process.
+--- @return An index from 1 up, shared by every
+---     [`Audio`](tealdoc:tecs.audio.Audio) in the process.
 function Audio.groupId(name: string): integer
     return groupId(name)
 end
 
---- Name a group index stands for, or nil when it names nothing.
+--- Returns the name represented by a group index, or nil.
 ---
 --- @param id Zero is the index of no group and answers nil, which is what a
----     `Sound` in no group carries.
+---     [`Sound`](tealdoc:tecs.audio.Sound) in no group carries.
 function Audio.groupName(id: integer): string
     return groupNames[id]
 end
 
---- The decoders this build linked, in the mixer's own order.
+--- Returns the decoders linked into this build in mixer order.
 ---
 --- What a build asked for and what it got are different questions: a decoder
---- whose dependency was not found is dropped silently. This answers the second.
+--- The mixer silently omits a decoder whose dependency the build could not find.
+--- This function answers the second question.
 ---
 --- @return Decoder names such as `"WAV"` and `"OGG"`, in the mixer's own order
 ---     rather than sorted, and empty when the mixer will not start at all. A
@@ -906,9 +976,9 @@ end
 ---
 --- Blocks until loads in flight have settled, since a clip arriving afterwards
 --- would hold a pointer into a library that has released everything it made.
---- Every voice is stopped without a fade, every clip goes to `"released"`, and
---- every world this was installed into stops answering from `Audio.of`. There
---- is no reopening: make a new instance instead.
+--- This method stops every voice without a fade, moves every clip to
+--- `"released"`, and removes this mixer from every world that installed it.
+--- There is no reopening: make a new instance instead.
 function Audio:destroy()
     -- Drained first. A clip that arrived after the mixer had gone would hold a
     -- pointer into a library that has released everything it made.
@@ -983,8 +1053,8 @@ end
 ---     never raises for a missing file.
 --- @return A clip whose `status` is `"loading"` on the first call for a path
 ---     and whatever it has since become on a later one. Never nil. The
----     instance belongs to this `Audio` and is the same table every call for
----     that path returns, so `options` is honoured only by the first.
+---     instance belongs to this [`Audio`](tealdoc:tecs.audio.Audio) and is the same table every call for
+---     that path returns, so only the first call reads `options`.
 function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     local id = clipId(path)
     local existing = self._clips[id]
@@ -1035,10 +1105,11 @@ function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     return clip
 end
 
---- The clip an index stands for, or nil when this instance has not loaded it.
+--- Returns the clip represented by an index, or nil when this instance has not
+--- loaded it.
 ---
---- @param id From `Audio.clipId`, or off a `Sound.clip` field. Clip indices are
----     shared across the process but clips are not, so an index another
+--- @param id From `Audio.clipId`, or from a `Sound.clip` field. Clip indices are
+---     every instance shares clip indices but not clips, so an index another
 ---     instance loaded answers nil here.
 function Audio:clip(id: integer): Audio.Clip
     return self._clips[id]
@@ -1062,10 +1133,10 @@ function Audio:waitForLoads(timeoutMs?: number)
     assets.waitAll(timeoutMs)
 end
 
---- Clips still being read.
+--- Returns the number of clips still being read.
 ---
 --- @return Loads not yet settled. Counts loads rather than clips, and a clip
----     that failed is settled, so this reaching zero means every `load` has an
+---     a failed clip still counts as settled, so zero means every `load` has an
 ---     answer and not that every answer was a success.
 function Audio:loading(): integer
     return self._loading
@@ -1075,7 +1146,7 @@ end
 ---
 --- The counterpart to `Renderer:replaceImage`, and it keeps identity on the
 --- same terms. A clip's index is its path's, so an edited file comes back under
---- the index every `Sound` row already carries and nothing in the world is
+--- the index every [`Sound`](tealdoc:tecs.audio.Sound) row already carries and nothing in the world is
 --- touched.
 ---
 --- A streamed clip holds nothing to replace. Each voice opens the file for
@@ -1084,7 +1155,7 @@ end
 --- what happens to a file edited under a running voice with or without a
 --- reload.
 ---
---- A resident clip is decoded again and swapped, and it stays resident whatever
+--- The loader decodes a resident clip again and swaps it in. It stays resident whatever
 --- the new file's length would have chosen: rows already pointing at it were
 --- started against held samples, and turning it into a stream under them would
 --- change what a voice is, not what it sounds like. The clip it replaces is
@@ -1095,7 +1166,7 @@ end
 --- Blocking, like every other reload: it is a debug operation, and answering
 --- before the file has been read would report a success that had not happened
 --- yet.
---- @param path The path the clip was loaded from.
+--- @param path The path originally used to load the clip.
 --- @return Whether the clip was re-read, and a reason when it was not.
 function Audio:reload(path: string): boolean, string
     local id = clipIds[path]
@@ -1426,13 +1497,13 @@ end
 --- to explain than one that never started, and the same reasoning is why a
 --- full voice pool declines rather than stealing.
 ---
---- @param clip nil is accepted and returns zero, so a `load` result may be
----     passed straight in without a guard.
---- @param options Read once, here. Nothing in it is followed afterwards.
+--- @param clip Accepts nil and returns zero, so callers may pass a `load`
+---     result directly without a guard.
+--- @param options The method reads this once and follows no later changes.
 --- @return A handle for `stop`, `playing`, `setGain` and the rest, or zero
 ---     when nothing started. It stays valid while the voice sounds and goes
 ---     inert for good once it does not; it is never reissued for a later
----     voice, and nothing has to be released.
+---     voice, and requires no release.
 function Audio:play(clip: Audio.Clip, options?: Audio.PlayOptions): integer
     return start(self, clip, options or {} as Audio.PlayOptions, false)
 end
@@ -1466,10 +1537,11 @@ end
 --- Stops everything, over `fadeOut` seconds if that is given.
 ---
 --- A faded stop leaves each voice sounding until the mixer finishes it, so
---- they are reaped by `update` rather than here. The ramp is the mixer's, on
+--- `update` reaps them instead of this call. The mixer owns the ramp, on
 --- the same terms as `stop` and `stopGroup`.
 ---
---- Reaches every voice, whichever group it is in and whether a `Sound`
+--- Reaches every voice, whichever group it is in and whether a
+--- [`Sound`](tealdoc:tecs.audio.Sound)
 --- component started it or `play` did. A row still asking to sound starts a
 --- fresh voice on the next audio pass, so this silences a world rather than
 --- keeping it silent.
@@ -1496,18 +1568,18 @@ function Audio:stopAll(fadeOut?: number)
     end
 end
 
---- Whether a handle still names a sounding voice. A paused or fading voice
+--- Returns whether a handle still names a sounding voice. A paused or fading voice
 --- still counts: it has not finished.
 ---
 --- @return false for a handle whose voice has ended, for zero, and for one
----     from another `Audio`. A voice that ended on its own reads true until
+---     from another [`Audio`](tealdoc:tecs.audio.Audio). A voice that ended on its own reads true until
 ---     the next `update` reaps it, since nothing here is told the instant it
 ---     finished.
 function Audio:playing(handle: integer): boolean
     return voiceOf(self, handle) ~= nil
 end
 
---- Whether a handle names a voice a pause is holding.
+--- Returns whether a handle names a paused voice.
 ---
 --- @return true whether the hold came from `pause` on this handle or from
 ---     `pauseGroup` on its group; the two are not told apart. false for a
@@ -1581,7 +1653,7 @@ function Audio:setGain(handle: integer, gain: number)
     applyGain(self, voice)
 end
 
---- Sets a voice's playback rate. 1 is unchanged.
+--- Sets a voice's playback rate. A value of 1 preserves the original rate.
 ---
 --- @param ratio A resampling rate, not an interval: 2 is an octave up and half
 ---     as long, 0.5 an octave down and twice as long. It changes how long the
@@ -1596,14 +1668,14 @@ end
 
 --- Changes whether a voice repeats, part way through.
 ---
---- The mixer replaces the count it was started with, so clearing this on a
+--- The mixer replaces its starting repeat count, so clearing this on a
 --- looping piece of music lets it play out to its end rather than cutting it,
 --- and setting it on a one-shot keeps it going. It reaches a sounding voice
 --- only: a stopped one takes its count from the next play.
 ---
 --- @param loop true repeats forever; there is no finite repeat count here.
----     Setting it does not move the loop point, which is fixed by the
----     `loopStart` the voice was played with.
+---     Setting it does not move the loop point. The voice keeps the
+---     `loopStart` from `play`.
 function Audio:setLoop(handle: integer, loop: boolean)
     local voice = voiceOf(self, handle)
     if voice == nil then
@@ -1612,7 +1684,7 @@ function Audio:setLoop(handle: integer, loop: boolean)
     applyLoop(self, voice, loop == true)
 end
 
---- Whether a voice repeats when it reaches the end.
+--- Returns whether a voice repeats at the end.
 ---
 --- @return What this layer last told the mixer, not a reading from it. false
 ---     for a handle that names nothing.
@@ -1624,7 +1696,7 @@ end
 --- Moves a voice's read position, in seconds from the start of its clip.
 ---
 --- False when the handle names nothing, or when the input cannot seek: a
---- decoder is allowed not to be able to, and some can only reach a time
+--- the decoder does not support seeking, or can only reach a time
 --- rather than an exact sample.
 ---
 --- @param seconds From the start of the clip, not from where the voice is now,
@@ -1641,7 +1713,7 @@ function Audio:seek(handle: integer, seconds: number): boolean
     return self._backend.seek(voice.track, math.floor(seconds * 1000))
 end
 
---- Seconds into its clip a voice is reading, or nil.
+--- Returns the voice position in seconds, or nil.
 ---
 --- Nil when the handle names nothing or the mixer cannot say. A paused voice
 --- reports where it stopped, which with `seek` and `fadeIn` is what taking a
@@ -1663,15 +1735,15 @@ function Audio:tell(handle: integer): number
     return ms / 1000
 end
 
---- Places a voice in space. See `Sound` for what the numbers mean.
+--- Places a voice in space. See [`Sound`](tealdoc:tecs.audio.Sound) for what the numbers mean.
 ---
 --- Replaces a pan set by `setStereo` rather than combining with it.
 ---
 --- Puts the voice in the mixer's 3D mode, which folds its input down to mono
 --- before placing it, so a stereo clip loses its stereo image when positioned.
 ---
---- @param x Positive to the right of the listener, which is fixed at the
----     origin and cannot be moved.
+--- @param x Positive to the right of the listener. The mixer fixes the
+---     listener at the origin.
 --- @param y Positive **above** the listener. World Y runs down, so world
 ---     coordinates need their Y negated on the way in.
 --- @param z Positive behind the listener.
@@ -1738,7 +1810,7 @@ function Audio:setMasterGain(gain: number)
     end
 end
 
---- The master gain, whether or not a mute is holding it down.
+--- Returns master gain, whether or not mute holds it down.
 function Audio:masterGain(): number
     return self._masterGain
 end
@@ -1761,12 +1833,13 @@ function Audio:setMuted(muted: boolean)
     end
 end
 
---- Whether a master mute is holding the output down.
+--- Returns whether master mute holds the output down.
 function Audio:muted(): boolean
     return self._muted
 end
 
---- Voices sounding right now, including paused and fading ones.
+--- Returns the number of voices sounding now, including paused and fading
+--- voices.
 ---
 --- @return Slots in use, so it drops only when `update` reaps a voice, not the
 ---     instant one ends. `play` declines once it reaches `maxVoices`.
@@ -1774,7 +1847,7 @@ function Audio:sounding(): integer
     return self._sounding
 end
 
---- Voices that may sound at once, as `maxVoices` configured it.
+--- Returns the configured maximum number of simultaneous voices.
 ---
 --- @return The ceiling `play` refuses at, fixed for the instance's life. Not
 ---     a hardware limit: it is what `newAudio` was given, defaulting to 32.
@@ -1806,7 +1879,7 @@ function Audio:setGroupGain(name: string, gain: number)
     end
 end
 
---- A group's gain. 1 for one nothing has set.
+--- Returns a group's gain, or one when none has been set.
 ---
 --- The level, not what is audible: a muted group still answers with the gain
 --- an unmute would put back.
@@ -1820,7 +1893,7 @@ end
 --- Silences a group without discarding the level it was set to.
 ---
 --- Bookkeeping over the gains that already exist rather than anything the
---- mixer is told about: every voice in the group is composed at zero while
+--- mixer receives: every voice in the group contributes zero while
 --- this holds, and an unmute puts each one back at its own gain times
 --- `groupGain(name)`.
 function Audio:setGroupMuted(name: string, muted: boolean)
@@ -1837,7 +1910,7 @@ function Audio:setGroupMuted(name: string, muted: boolean)
     end
 end
 
---- Whether a group is muted.
+--- Reports whether mute applies to a group.
 function Audio:groupMuted(name: string): boolean
     return self._groupMuted[name] == true
 end
@@ -1845,8 +1918,9 @@ end
 --- Holds every voice in a group where it is, and every voice that joins it
 --- later.
 ---
---- Recorded as well as sent, because the mixer's tag pause reaches what is
---- sounding when it is called: without the record, a sound started into a
+--- The audio object records the pause as well as sending it, because the
+--- mixer's tag pause reaches only voices sounding at that moment. Without the
+--- record, a sound started into a
 --- paused group would be the one thing still heard.
 ---
 --- @param name Not holder counted: one `resumeGroup` undoes any number of
@@ -1881,7 +1955,7 @@ function Audio:resumeGroup(name: string)
     end
 end
 
---- Whether a group is holding its voices, including the ones not started yet.
+--- Returns whether a group holds its current and future voices.
 function Audio:groupPaused(name: string): boolean
     return self._groupPaused[name] == true
 end
@@ -1908,7 +1982,8 @@ local function settledGroups(self: Audio, names: {string}, seen: {string: boolea
     end
 end
 
---- Every group this instance knows of: one whose gain, mute or pause has been
+--- Returns every group known to this instance, including any whose gain, mute,
+--- or pause has been
 --- set, and one a sounding voice is in. Sorted, so a caller reading it twice
 --- reads it the same way.
 ---
@@ -1975,19 +2050,19 @@ end
 ---
 --- Passing nil removes the limit. Voices already sounding are left alone.
 ---
---- When a limit is reached the **new voice is dropped**: `play` returns zero
---- and nothing already sounding is stolen or cut short.
+--- When a key reaches its limit, `play` **drops the new voice**: it returns zero
+--- and leaves every sounding voice alone.
 ---
 --- @param limit nil removes the limit. Lowering `voices` below what the key
 ---     already holds does not stop any of them; it only refuses the next until
----     enough have ended. `cooldown` is measured from when a voice last
----     started, against the time `update` has been told about, so a game that
+---     enough have ended. The audio object measures `cooldown` from when a voice
+---     last started, against the time passed to `update`, so a game that
 ---     never calls `update` never advances a cooldown.
 function Audio:setLimit(key: string, limit: Audio.Limit)
     self._limits[key] = limit
 end
 
---- The limit a key carries, or nil.
+--- Returns the limit assigned to a key, or nil.
 ---
 --- @return The record that was set, not a copy, so writing through it changes
 ---     the limit in force.
@@ -1995,7 +2070,7 @@ function Audio:limit(key: string): Audio.Limit
     return self._limits[key]
 end
 
---- Voices a key is holding right now.
+--- Returns how many voices a key holds now.
 ---
 --- @return Voices counted against the key, paused and fading ones included,
 ---     since a slot is not given back until the voice ends. 0 for a key that
@@ -2005,7 +2080,7 @@ function Audio:keyCount(key: string): integer
     return bucket ~= nil and bucket.count or 0
 end
 
---- Every key with a limit set or a voice counted against it, sorted.
+--- Returns every key with a limit or counted voice, sorted.
 ---
 --- @return A fresh table each call, which the caller owns. A key keeps its
 ---     bucket once one exists, so a key that has played and stopped is still
@@ -2030,7 +2105,7 @@ end
 -- Looking in
 -------------------------------------------------------------------------------
 
---- Every clip this instance has loaded, in the order they were asked for.
+--- Returns every loaded clip in request order.
 ---
 --- For introspection: it builds a list per call, so nothing on a frame's path
 --- should read it.
@@ -2050,10 +2125,10 @@ function Audio:clips(): {Audio.Clip}
     return list
 end
 
---- Every sounding voice, paused and fading ones included.
+--- Returns every sounding voice, including paused and fading voices.
 ---
 --- For introspection, on the same terms as `clips`. The handles it reports are
---- the ones `playing` and `stop` take, so what this shows can be acted on.
+--- the ones `playing` and `stop` take, so callers can act on these results.
 ---
 --- @return A fresh list of fresh records each call, ordered by voice slot,
 ---     which is not the order the voices started in. It is a snapshot: nothing
@@ -2095,15 +2170,16 @@ end
 --- Takes finished loads and reaps the voices the mixer has finished with.
 --- Call once per frame, with the frame's step.
 ---
---- The step is what a cooldown is measured against. Nothing else here needs
+--- The step advances cooldowns. Nothing else here needs
 --- time: a fade is the mixer's to run, and a voice is over when the mixer says
 --- so rather than when a clock here says it should be.
 ---
 --- Not a world system, and `install` deliberately does not add one: reaping has
---- to keep happening while the world is paused, so an application drives this
+--- to continue during a world pause, so an application drives this
 --- from the iteration instead.
 ---
---- @param dt Seconds since the last call, added to the clock cooldowns are
+--- @param dt Seconds since the last call. The audio pass adds it to the clock
+---     that governs cooldowns.
 ---     measured against. Omitting it advances nothing, which is what a test
 ---     stepping voices without time wants.
 --- @return Voices still sounding after the reap, the same number `sounding`
@@ -2134,15 +2210,15 @@ local rowOptions <const>: Audio.PlayOptions = {}
 
 --- Puts the rows of entities something has disabled back to rest.
 ---
---- `Disabled` is excluded from every query that does not name it, so a
---- disabled row is not walked below and the voice it holds is taken by the
---- sweep for looking abandoned. The row is left naming a voice that has gone,
+--- Queries exclude [`Disabled`](/ecs/#tecs.ecs.Disabled) unless they name
+--- it, so the walk below skips disabled rows and the sweep treats their voices
+--- as abandoned. The row still names a voice that has gone,
 --- which reads on re-enabling as a one-shot that finished, and the sound never
 --- comes back. Clearing the handle here is what makes it.
 ---
 --- Archetype-shaped rather than per-row: a disabled entity is in an archetype
 --- of its own, so a world with nothing disabled matches nothing and this walks
---- nothing. Only the frame something is disabled on writes.
+--- nothing. Only the frame that disables something writes.
 local function hush(hushed: types.Query)
     for archetype, length in hushed:iter() do
         local rows = archetype:get(Sound) as {Sound}
@@ -2162,11 +2238,11 @@ end
 
 --- Starts, stops, follows and reaps the voices `Sound` components ask for.
 ---
---- One walk answers all of it. A row asking to sound with no voice starts one;
---- a sounding row has its gain, rate, loop and position followed; a row that
---- has stopped asking, or whose voice has ended, is put back to rest; and a
---- voice nothing referred to during the walk belonged to an entity that has
---- gone or been disabled, so it is stopped. That last case is what makes
+--- One walk answers all of it. The pass starts a voice for a row asking to
+--- sound, follows gain, rate, loop, and position for sounding rows, returns
+--- finished rows to rest, and treats a voice with no reference as belonging
+--- to an entity that has
+--- gone or that the game disabled, so the pass stops it. That last case makes
 --- despawning something mid-sound work without an observer on every archetype
 --- that might hold one.
 ---
@@ -2288,7 +2364,7 @@ end
 --- Keyed limits are not here, and neither is what a bucket holds. A limit is a
 --- rule the build states at startup beside the clip it governs, so restoring
 --- one from a file would let an old save override a rule the build has since
---- changed. A bucket is derived from voices, and a snapshot restores no voices:
+--- changed. Voices determine each bucket, and a snapshot restores no voices:
 --- a `Sound` comes back with its voice cleared and starts again.
 local function saveMixer(self: Audio): {string: any}
     local groups: {string: any} = {}
@@ -2315,7 +2391,7 @@ end
 
 --- Puts saved mixer state back, through the ordinary setters.
 ---
---- Every group this instance knows about is visited, not only the ones the
+--- This function visits every group this instance knows about, not only the ones the
 --- snapshot names, so loading a save made before a group was ever touched puts
 --- that group back to its defaults rather than leaving this run's settings on
 --- it. Going through the setters is what makes the voices already sounding
@@ -2355,27 +2431,29 @@ end
 -- The plugin
 -------------------------------------------------------------------------------
 
---- The audio installed into a world, or nil when none has been.
+--- Returns the audio installed into a world, or nil.
 ---
 --- What lets something holding only the world reach the mixer, which is what
 --- the debug tools have and what a game writing its own systems often has too.
 ---
---- @return nil before `install` and again after the instance is destroyed,
----     since a destroyed one stops answering for every world it was in.
+--- @return nil before `install` and again after `destroy`, which removes the
+---     instance from every world.
 function Audio.of(world: types.World): Audio
     return installed[world]
 end
 
---- Adds the system that plays `Sound` components, and the snapshot handler
+--- Adds the system that plays [`Sound`](tealdoc:tecs.audio.Sound) components,
+--- and the snapshot handler
 --- that carries the mixer.
 ---
 --- `update` is not added here. Reaping voices is not world work: it has to
---- keep happening while the world is paused, and an application drives it from
+--- continue during a world pause, and an application drives it from
 --- the iteration instead.
 ---
 --- @param world Repoints this instance's pitch variance at the world's
 ---     `tecs.audio` random stream, so installing into a second world moves the
----     variance to that one's. One `Audio` per world is the shape this expects.
+---     variance to that one's. This interface expects one
+---     [`Audio`](tealdoc:tecs.audio.Audio) per world.
 function Audio:install(world: types.World)
     installed[world] = self
 

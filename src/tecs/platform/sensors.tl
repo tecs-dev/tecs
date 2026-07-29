@@ -1,7 +1,31 @@
---- Standalone accelerometers, gyroscopes and platform-specific sensors.
----
---- Gamepad sensors stay on `Gamepad`, because their device identity and event
---- routing live there. This module is for sensors SDL exposes independently.
+--[[
+# Standalone sensors
+
+Standalone accelerometers, gyroscopes and platform-specific sensors do not
+belong to a gamepad. Enumerate a snapshot, open the selected instance id, poll
+it, and close it explicitly.
+
+```teal
+for _, device in ipairs(tecs.input.sensors()) do
+    local sensor <const>, reason <const> = tecs.input.openSensor(device.id)
+    if sensor ~= nil then
+        local values <const>, readError <const> = sensor:read()
+        if values ~= nil then
+            print(sensor.name, values[1], values[2], values[3])
+        else
+            print(readError)
+        end
+        sensor:destroy()
+    else
+        print(reason)
+    end
+end
+```
+
+`Sensor:read` returns three values by default and accepts one to sixteen for a
+platform-specific sensor. Acceleration uses meters per second squared and
+rotation uses radians per second.
+]]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
@@ -9,25 +33,37 @@ local loader <const> = require("tecs.ffi.loader")
 local C <const> = sdl.C
 local K <const> = sdl.K
 
+--- `Device` describes a standalone sensor returned by enumeration.
+---
+--- The platform sets every field. Callers treat the snapshot as read-only.
 local record Device
-    --- Instance id, valid while the device is attached.
+    --- Read-only. The platform sets `id` to an instance id that remains valid
+    --- while the device stays attached.
     id: number
+    --- Read-only. The platform sets `name` to the device display name.
     name: string
-    --- `"accelerometer"`, `"gyroscope"`, their left/right variants, or
-    --- `"unknown"`.
+    --- Read-only. The platform sets `kind` to `"accelerometer"`,
+    --- `"gyroscope"`, a left or right variant, or `"unknown"`.
     kind: string
-    --- Platform-specific type number. Zero when there is none.
+    --- Read-only. The platform sets `platformType` to its private type number,
+    --- or zero when none exists. Ordinary game code ignores this field.
     platformType: integer
 end
 
---- An opened sensor, read by polling rather than through events.
+--- A `Sensor` owns one opened standalone sensor and reads it by polling.
+---
+--- The platform sets every public field at open. Callers treat those fields as
+--- read-only and close the object with `destroy`.
 local record Sensor
-    --- Instance id, as `Device.id` reported it.
+    --- Read-only. The platform sets `id` from the opened device.
     id: number
+    --- Read-only. The platform sets `name` from the opened device.
     name: string
-    --- The same set of names `Device.kind` uses.
+    --- Read-only. The platform sets `kind` from the same vocabulary as
+    --- `Device.kind`.
     kind: string
-    --- Platform-specific type number. Zero when there is none.
+    --- Read-only. The platform sets `platformType` to its private type number,
+    --- or zero when none exists. Ordinary game code ignores this field.
     platformType: integer
     _handle: loader.CPtr
     _destroyed: boolean
@@ -37,28 +73,40 @@ local record Sensor
     --- Three values is the natural size for accelerometers and gyroscopes. A
     --- platform-specific sensor can request up to sixteen.
     ---
-    --- @param count How many values to take, defaulting to three. An integer
-    ---     from 1 to 16; anything else is reported rather than raised. Asking
-    ---     for fewer than the sensor produces takes the first few rather than
-    ---     failing.
-    --- @return The values, a fresh list the caller owns and indexed from one.
-    ---     Units are the sensor's own: SDL reports acceleration in meters per
-    ---     second squared and rotation in radians per second. Nil on failure,
-    ---     which includes reading a destroyed sensor.
-    --- @return The reason, when the first return is nil.
+    --- @param count The caller requests one to sixteen values or omits the
+    ---     count for three. Invalid counts return an error instead of raising.
+    --- @return Returns a fresh caller-owned list. Acceleration uses meters per
+    ---     second squared and rotation uses radians per second. The method
+    ---     returns nil after failure or destruction.
+    --- @return Returns the reason when the first return is nil.
     read: function(self: Sensor, count?: integer): {number}, string
 
     --- Closes the sensor. Safe to call more than once.
     destroy: function(self: Sensor)
 end
 
---- Standalone sensors: listing what is attached, and opening one.
 local record sensors
-    --- One sensor the platform reports, before it is opened.
+    --- Describes one enumerated sensor before open.
     type Device = Device
 
-    --- An opened sensor.
+    --- Describes one opened sensor.
     type Sensor = Sensor
+
+    --- Returns the standalone sensors attached now.
+    ---
+    --- @return Returns a fresh caller-owned list in platform order. It returns
+    ---     an empty list when no sensors exist or initialization fails.
+    --- @return Returns SDL's reason when initialization or enumeration fails.
+    sensors: function(): {Device}, string
+
+    --- Opens an attached standalone sensor.
+    ---
+    --- @param id The caller supplies an instance id from `sensors`. An id stops
+    ---     naming the device after unplug.
+    --- @return Returns the opened sensor, or nil on failure. The caller owns
+    ---     the sensor and closes it with `destroy`.
+    --- @return Returns the reason when the first return is nil.
+    openSensor: function(id: number): Sensor, string
 end
 
 local SensorMT <const>: metatable<Sensor> = {__index = Sensor}
@@ -85,16 +133,6 @@ local function ensureSubsystem(): boolean, string
     return true, nil
 end
 
---- Sensors attached now, in platform order.
----
---- A snapshot, not a subscription: a sensor unplugged after this leaves an id
---- that `openSensor` refuses.
----
---- @return The devices, listed afresh each call and the caller's to keep.
----     Empty rather than nil when the sensor subsystem cannot start, so a
----     caller that only iterates needs no nil check. Most desktop machines
----     genuinely have none, which is an empty list and not a failure.
---- @return SDL's reason, when something went wrong.
 function sensors.sensors(): {Device}, string
     local ok, err = ensureSubsystem()
     if not ok then
@@ -121,16 +159,6 @@ function sensors.sensors(): {Device}, string
     return out, nil
 end
 
---- Opens an attached sensor by instance id.
----
---- @param id An instance id from `sensors`. Ids name a device while it stays
----     attached rather than a slot, so one kept across an unplug does not come
----     back to the same sensor.
---- @return The open sensor, whose `name` and `kind` are read from the device
----     itself rather than copied from the listing. Nil on failure, with the
----     reason beside it, and nothing is left open in that case. Closing is the
----     caller's, through `destroy`.
---- @return The reason, when the first return is nil.
 function sensors.openSensor(id: number): Sensor, string
     local ok, err = ensureSubsystem()
     if not ok then

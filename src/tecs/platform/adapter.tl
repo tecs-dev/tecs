@@ -1,57 +1,59 @@
---- What a platform has to supply, and nothing else.
----
---- SDL covers every platform this engine can be built for openly. It does not
---- cover the ones whose SDKs are licensed, and those cannot be added here even
---- by someone who holds a license: their headers may not be redistributed. So
---- the engine names its platform seams instead, and a licensed port supplies a
---- platform through this module without touching anything above it.
----
---- There are seven seams, and the reason each is a seam rather than a fork is
---- that everything else in the engine is already indifferent to the answer:
----
----   lifecycle   SDL owns the loop and calls the application's `_init`,
----               `_receive`, `_iterate`, and `_shutdown`. A console SDK owns
----               its own loop and calls the same four. That is why the
----               application is an object the host drives rather than a
----               function that runs until done, and why nothing in it assumes
----               control will ever come back.
----
----   events      One typed stream, discriminated by `kind`. A platform that
----               is not SDL produces those values directly instead of
----               translating an `SDL_Event`, which is what `events.source`
----               already exists for.
----
----   input       The other direction. Rumble, an LED, a cursor mode and a text
----               input session are commands a game issues, and no event
----               vocabulary can express one. Device enumeration belongs here
----               too, since a pad has to be opened before it reports anything.
----
----   audio       Outbound in the same sense: opening a mixer, pointing a voice
----               at a clip, setting a gain, stopping a voice. The one thing
----               that comes back is whether a voice is still sounding, and
----               nothing about sound arrives as an event.
----
----   static FFI  A target that forbids `dlopen` cannot reach a library by
----               name, so function pointers are taken at build time and
----               installed as a table. Nothing calls `ffi.load` when one is
----               present.
----
----   storage     Where content is read from and state is written to, and how
----               it is reached once it is found. Never the working directory,
----               which on a console does not exist in any useful sense. Both
----               halves are the seam and neither is useful alone: a platform
----               that says its content lives at a root it invented is not
----               served by the engine then reading that root with the host's
----               own file calls, which is why `storage` carries operations
----               and not just paths.
----
----   shaders     A pack of compiled shaders plus the reflection SDL_GPU wants,
----               keyed by name. A platform with its own bytecode format
----               declares that format; the pack layout does not change.
----
---- Only storage, the shader format and the device backends need to be *asked
---- for*, which is what this module does. The rest are already substitutable
---- where they live, and installing a platform wires them up.
+--[=[
+What a platform has to supply, and nothing else.
+
+SDL covers every platform this engine can be built for openly. It does not
+cover the ones whose SDKs are licensed, and those cannot be added here even
+by someone who holds a license: their headers may not be redistributed. So
+the engine names its platform seams instead, and a licensed port supplies a
+platform through this module without touching anything above it.
+
+There are seven seams, and the reason each is a seam rather than a fork is
+that everything else in the engine is already indifferent to the answer:
+
+  lifecycle   SDL owns the loop and calls the application's `_init`,
+              `_receive`, `_iterate`, and `_shutdown`. A console SDK owns
+              its own loop and calls the same four. That is why the
+              application is an object the host drives rather than a
+              function that runs until done, and why nothing in it assumes
+              control will ever come back.
+
+  events      One typed stream, discriminated by `kind`. A platform that
+              is not SDL produces those values directly instead of
+              translating an `SDL_Event`, which is what `events.source`
+              already exists for.
+
+  input       The other direction. Rumble, an LED, a cursor mode and a text
+              input session are commands a game issues, and no event
+              vocabulary can express one. Device enumeration belongs here
+              too, since a pad has to be opened before it reports anything.
+
+  audio       Outbound in the same sense: opening a mixer, pointing a voice
+              at a clip, setting a gain, stopping a voice. The one thing
+              that comes back is whether a voice is still sounding, and
+              nothing about sound arrives as an event.
+
+  static FFI  A target that forbids `dlopen` cannot reach a library by
+              name, so function pointers are taken at build time and
+              installed as a table. Nothing calls `ffi.load` when one is
+              present.
+
+  storage     Where content is read from and state is written to, and how
+              it is reached once it is found. Never the working directory,
+              which on a console does not exist in any useful sense. Both
+              halves are the seam and neither is useful alone: a platform
+              that says its content lives at a root it invented is not
+              served by the engine then reading that root with the host's
+              own file calls, which is why `storage` carries operations
+              and not just paths.
+
+  shaders     A pack of compiled shaders plus the reflection SDL_GPU wants,
+              keyed by name. A platform with its own bytecode format
+              declares that format; the pack layout does not change.
+
+Only storage, the shader format and the device backends need to be *asked
+for*, which is what this module does. The rest are already substitutable
+where they live, and installing a platform wires them up.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

@@ -1,36 +1,38 @@
---- A request as an entity, for a world that would rather spawn one.
----
---- `Client:send` answers a future, which is the right shape for a loading
---- screen and the wrong one for a game that wants the request to be a thing in
---- the world: something the debug server can list, something a system can
---- react to, something that dies when the entity that asked for it does.
----
----     world:addPlugin(tecs.net.http.plugin.install)
----
----     world:spawn(http.plugin.Request, {url = "https://example.com/scores"})
----
---- Some frames later the entity carries a `Response` instead, and a system
---- with `include = {http.Response}` sees it. Nothing polls a future, and the
---- request is inspectable the whole way through because it is a component.
----
---- ## What it does not do
----
---- It does not pump. The application already turns every open client once an
---- iteration, this plugin's included, so a system that pumped would be a
---- second turn of the same handle for nothing. What its system does is send
---- what has been spawned and settle what has answered.
----
---- ## Where the client comes from
----
---- One per world, built with the options given to `plugin.install` or with
---- defaults, and kept in the world's resources so a game can reach it:
---- `plugin.clientOf(world)`. A game that wants two clients, one for a chatty
---- API and one for downloads, builds the second itself; nothing about this
---- plugin is in the way of `tecs.net.http.newClient` beside it.
----
---- Despawning the world does not close the client. `plugin.close(world)` does,
---- and a program that ends is a process that ends, which is the same answer
---- every other pooled resource here gives.
+--[=[
+A request as an entity, for a world that would rather spawn one.
+
+`Client:send` answers a future, which is the right shape for a loading
+screen and the wrong one for a game that wants the request to be a thing in
+the world: something the debug server can list, something a system can
+react to, something that dies when the entity that asked for it does.
+
+    world:addPlugin(tecs.net.http.plugin.install)
+
+    world:spawn(http.plugin.Request, {url = "https://example.com/scores"})
+
+Some frames later the entity carries a `Response` instead, and a system
+with `include = {http.Response}` sees it. Nothing polls a future, and the
+request is inspectable the whole way through because it is a component.
+
+## Boundaries
+
+It does not pump. The application already turns every open client once an
+iteration, this plugin's included, so a system that pumped would be a
+second turn of the same handle for nothing. What its system does is send
+what has been spawned and settle what has answered.
+
+## Per-world client
+
+One per world, built with the options given to `plugin.install` or with
+defaults, and kept in the world's resources so a game can reach it:
+`plugin.clientOf(world)`. A game that wants two clients, one for a chatty
+API and one for downloads, builds the second itself; nothing about this
+plugin is in the way of `tecs.net.http.newClient` beside it.
+
+Despawning the world does not close the client. `plugin.close(world)` does,
+and a program that ends is a process that ends, which is the same answer
+every other pooled resource here gives.
+]=]
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")

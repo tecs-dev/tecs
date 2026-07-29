@@ -1,10 +1,12 @@
---- Encoding a rendered texture as PNG bytes.
----
---- Readback is synchronous: a screenshot asks for the frame that has already
---- been submitted, so the CPU waits for those pixels before libpng can read
---- them. The Rust encoder returns an owned byte allocation, which is copied
---- into Lua before Rust releases it. The resulting bytes go through
---- `filesystem`, keeping writes behind the platform storage seam.
+--[=[
+Encoding a rendered texture as PNG bytes.
+
+Readback is synchronous: a screenshot asks for the frame that has already
+been submitted, so the CPU waits for those pixels before libpng can read
+them. The Rust encoder returns an owned byte allocation, which is copied
+into Lua before Rust releases it. The resulting bytes go through
+`filesystem`, keeping writes behind the platform storage seam.
+]=]
 
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")

@@ -1,9 +1,11 @@
---- Internal fixed-iteration mutation tracking.
----
---- Consumers opt specific component columns into tracking. Disabled worlds
---- pay one raw table lookup from mutable archetype access; enabled worlds
---- record a monotonically increasing mutation version and the fixed
---- iteration in which a tracked column was touched.
+--[=[
+Internal fixed-iteration mutation tracking.
+
+Consumers opt specific component columns into tracking. Disabled worlds
+pay one raw table lookup from mutable archetype access; enabled worlds
+record a monotonically increasing mutation version and the fixed
+iteration in which a tracked column was touched.
+]=]
 
 local types <const> = require("tecs.types")
 

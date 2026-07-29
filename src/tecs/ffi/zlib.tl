@@ -1,16 +1,18 @@
---- zlib binding.
----
---- zlib is a dependency this tree names, pins and builds rather than one it
---- inherits from whatever the machine had. The engine exposes it as a public
---- DEFLATE service.
----
---- The surface is the whole library, because zlib is small enough that
---- selecting from it would be more description than the thing described. What
---- the engine uses today is `adler32`, through `tecs.data`.
----
---- zlib names its functions after what they do rather than after itself, so
---- `C.inflate` and `C.compress` are zlib's, not something generic. That is the
---- library's own convention and is kept verbatim, as generated bindings are.
+--[=[
+zlib binding.
+
+zlib is a dependency this tree names, pins and builds rather than one it
+inherits from whatever the machine had. The engine exposes it as a public
+DEFLATE service.
+
+The surface is the whole library, because zlib is small enough that
+selecting from it would be more description than the thing described. What
+the engine uses today is `adler32`, through `tecs.data`.
+
+zlib names its functions after what they do rather than after itself, so
+`C.inflate` and `C.compress` are zlib's, not something generic. That is the
+library's own convention and is kept verbatim, as generated bindings are.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

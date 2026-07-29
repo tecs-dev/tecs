@@ -1,129 +1,128 @@
 ---
-description: "Snapshot save and load with saveSnapshot, loadSnapshot, transient components, snapshot handlers, filtering, and the binary format spec"
+description: "Snapshot saving, loading, transient components, handlers, filtering, and binary format"
 outline: deep
 ---
 
 # Save games
 
-A snapshot captures a world and puts it back. It is the mechanism behind save games, checkpoints, replay
-buffers, and hot reload. Game code and engine subsystems can attach arbitrary keyed metadata alongside the ECS
-data, so a snapshot stays self-contained: a player profile, an RNG seed, and a mixer setting travel in the same
-file as the entities.
+Snapshots carry durable world state between processes. Use them for save
+games, checkpoints, replay buffers, and hot reload.
 
 ```teal
--- Save the world into a LuaJIT string.buffer.
-local buf = world:saveSnapshot().buffer
-
--- Put it back.
-world:loadSnapshot(buf)
+local save = world:saveSnapshot().buffer
+world:loadSnapshot(save)
 ```
 
-## Save formats
+## Binary and table formats
 
-Two formats ship in the box.
+`saveSnapshot` writes binary data by default. The binary format uses a LuaJIT
+[`string.buffer`](https://luajit.org/ext_buffer.html#serialize) and copies dense
+FFI columns in bulk. Use it for shipped saves.
 
-| Format | API                                                                 | Description                                                                                                                                                    |
-| ------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Binary | `world:saveSnapshot()`, `world:loadSnapshot(...)`                   | [LuaJIT `string.buffer`](https://luajit.org/ext_buffer.html#serialize) serialization with bulk FFI memcpy for dense columns. The default, and the one to ship. |
-| Table  | `world:saveSnapshot({format = "table"})`, `world:loadSnapshot(...)` | A plain Lua table for programmatic inspection, in-memory round-trips, and custom tooling such as JSON through `tecs.data`.                                     |
+The table format returns plain Lua data. Use it for inspection, migrations, and
+tools:
 
-## What is and isn't saved by default
+```teal
+local snapshot = world:saveSnapshot({format = "table"}).snapshot
+snapshot.data[#snapshot.data + 1] = {
+    key = "mygame.migrated",
+    value = true,
+}
+world:loadSnapshot(snapshot)
+```
 
-A snapshot captures durable ECS state plus the framework's own runtime bookkeeping. It does not capture
-anything living outside the world. Everything else is yours to carry through
-[`customData`](#customdata) or a [snapshot handler](#snapshot-handlers).
+Table saves accept the same selection options as binary saves. They reject
+`buffer` and `path`. Encoding a table as JSON through `tecs.data` costs more
+allocations and per-component work than the binary format.
 
-### Saved automatically
+## Snapshot contents
 
-- **Entities**, at their original ids. `batchSpawnAt` restores each entity at its saved packed id, so both slot
-  and generation round-trip and handles taken before a same-world load still resolve afterwards.
-- **Components.** FFI components memcpy their raw column bytes in one block per column; table components
-  round-trip through a default serializer that copies every string-keyed field holding a number, string,
-  boolean, or table, skipping the ECS metadata fields. A component may replace that with a
-  [custom `serialize`](#per-component-serialization).
-- **Relationships**, including their targets. A dense relationship instance column is recorded as
-  `"<container>-><target>"` and rebuilt from the container on load.
-- **The [state stack](/ecs/states)**: the active state and everything pushed beneath it. Loading a snapshot whose
-  stack names a state this world has not registered raises, so call `world:createState(name)` for each state
-  before loading.
-- **Pipeline runtime state**: the fixed-timestep accumulator and the per-phase enable flags.
-- **The [`EntityKey`](/ecs/builtins#entitykey) index**, rebuilt from the restored entities after the archetypes
-  are in place.
-- **Custom data** attached through [`customData`](#customdata) or a [snapshot handler](#snapshot-handlers).
+### Durable world state
 
-### Not saved
+A snapshot records:
 
-- Components marked [`transient`](#transient-components), and entities removed with
-  [`ev:exclude(...)`](#excluding-derived-entities).
-- **Non-exclusive sparse relationships.** Their stores hold several targets per source, which does not fit the
-  one-value-per-component row format; saving a world that uses one raises unless the relationship is
-  `transient`.
-- **`world.resources`.** Managers, RNGs, config objects, and anything else kept there is outside the ECS. See
-  [World resources](#world-resources).
-- **Process-local runtime objects**: GPU buffers, device handles, physics bodies, audio voices, open files, and
-  worker threads.
-- **Work in flight.** A [`Future`](/modules/Future) holds listeners, a source and, through it, a native handle,
-  so no save carries one. A sequence cursor parked on a future is saved, as a provider name, an entity and a
-  key: after a load nothing is tracked, `isPending` answers false, and the parked cursor resumes on the next
-  fixed step. A game that wants the wait to still mean something re-issues the work and re-tracks it under the
-  same key.
-- **Lua locals, closures, and callbacks.** A variable holding an entity id, and an observer registered on an
-  entity address, do not survive a load. Rebind them from a [`Key`](#runtime-handles-after-load), or reinstall
-  them from ECS data.
+- entity IDs, including their slot and generation
+- components and relationship targets
+- the complete [state stack](/ecs/states)
+- the fixed-step accumulator and per-phase enable flags
+- custom data
 
-The practical rule: snapshot the data you would write into a save file, and rebuild the objects you would create
-during startup. Keep the durable source of truth in components, mark process-local backing components
-`transient`, and recreate derived objects during the [load lifecycle](#snapshot-handlers).
+Load rebuilds the [`EntityKey`](/ecs/builtins#entitykey) index after it restores
+the entities. A same-world load therefore preserves entity handles whose saved
+IDs still exist.
 
-### Per-component serialization
+Create every named state before loading a snapshot that uses it:
 
-Most components serialize with no work. A component whose fields are this process's numbering rather than
-durable data opts out of the bulk path with `serialize` / `deserialize` hooks, and the engine's own components
-are the worked examples of why:
+```teal
+world:createState("menu")
+world:createState("playing")
+world:loadSnapshot(save)
+```
 
-- **`tecs.gfx.Sprite`** holds an image's intern index, handed out in the order images were registered.
-  A number that depends on load order cannot survive a save, so `serialize` writes the image's _name_ and
-  `deserialize` interns it again. What a saved sprite refers to is decided by the name on both sides.
-- **`tecs.gfx.animation.Animation`** holds a sheet id and a tag id, both decided by the order sheets were built in,
-  and saves the pair of names instead. The frame index is deliberately dropped to zero, so the first step after
-  a load rewrites the Sprite's region rather than trusting the region it was saved holding.
-- **`tecs.audio.Sound`** crosses as the clip path and the group name it interned from. The voice is not
-  restored: a snapshot records that an entity has a sound, not how far through it the mixer had got, so it
-  starts.
-- **`tecs.gfx.Text`** saves the authored fields and the font by name. A font never loaded in this process
-  leaves the restored text without one, which lays out nothing rather than failing the load.
-- **`tecs.physics.RigidBody`** is a transient Rapier arena handle and serializes to nothing as a component. A
-  bare arena index is dense and reused, so carrying one into another simulation would silently name a stranger.
-  The physics snapshot handler instead writes Rapier's complete, versioned state under the persistent key
-  `"tecs.physics"`. Restore installs that state and reconnects transient body and collider handles by entity,
-  retaining sleeping islands and contact state rather than rebuilding only from `Body` and `Collider`.
-  `physics.hasBody` reports whether that reconnection produced a live body. See [physics](/modules/physics).
+Load raises when the snapshot names an unregistered state. Save also raises
+when the world contains a non-exclusive sparse relationship unless its
+component declares `transient = true`. A non-exclusive sparse store can hold
+several targets for one source, while a snapshot component row holds one
+value.
 
-The pattern behind all five: a name is durable and a bare process-local index is not. Physics preserves the
-versioned state that gives its indices meaning rather than persisting the indices on their own.
+### Runtime state
 
-Snapshots also survive component changes across game updates. Every FFI component carries a canonical
-fingerprint of the form `field1:type1,field2:type2,...|sizeBytes`. Save embeds it and load compares it against
-the current registration: on a match, the column is one bulk memcpy; on a mismatch, load cdefs a struct matching
-the saved layout, reads each entity's bytes into it, and copies same-named fields into a current-schema
-instance. Fields added since the save get their zero default, removed fields are dropped, and type changes ride
-LuaJIT's implicit numeric conversion. A rename reads as a removal plus an addition, so the old value is lost.
+Snapshots omit:
 
-> See [Component serialization](/ecs/components/serialization) for the full reference.
+- `world.resources`
+- GPU buffers and device handles
+- audio voices and playback positions
+- open files and worker threads
+- futures and native work in flight
+- Lua locals, closures, and entity-address observers
+
+A sequence cursor waiting on a future saves the provider name, entity, and key.
+Load restores the cursor without restoring the future. `isPending` then returns
+false, and the cursor resumes on the next fixed step. Reissue and retrack the
+work when the wait must continue.
+
+Keep durable input in components. Recreate process-local objects from that
+input after load.
+
+## Component durability
+
+Dense FFI components normally cross the binary format as raw columns. Table
+components use their default serializer. A component can instead provide
+`serialize` and `deserialize` callbacks. See
+[Component serialization](/ecs/components/serialization) for the registration
+API.
+
+Custom codecs must turn process-local numbers into durable names:
+
+- `tecs.gfx.Sprite` saves the image name instead of its intern index.
+- `tecs.gfx.animation.Animation` saves sheet and tag names. Load resets the
+  frame index so the next update writes the sprite region.
+- `tecs.audio.Sound` saves the clip path and group name. Load starts a new
+  voice instead of restoring playback progress.
+- `tecs.gfx.Text` saves authored fields and the font name. A missing font
+  produces no layout.
+- `tecs.physics.RigidBody` saves no component value. The physics snapshot
+  handler stores Rapier's complete versioned state under `"tecs.physics"` and
+  reconnects body and collider handles by entity.
+
+An FFI component also stores a schema fingerprint. When the saved and current
+fingerprints match, load copies the column in bulk. Otherwise load maps fields
+by name into the current schema. New fields start at zero, removed fields
+disappear, and LuaJIT converts numeric types. Renaming a field loses its old
+value.
 
 ### Transient components
 
-Use `transient = true` when the entity is durable but one component on it is nothing but this run's bookkeeping.
-The entity is still saved; the transient column is left out of the saved archetype. On load, normal spawn
-behavior applies, including `requires` defaults for transient components.
+Declare process-local backing data as transient when the entity itself belongs
+in the save:
 
 ```teal
 local record PathCache is tecs.ecs.Component
-    nodeCount: number
-    cursor: number
+    nodeCount: integer
+    cursor: integer
 end
 
-tecs.ecs.newFFIComponent({
+local PathCacheComponent = tecs.ecs.newFFIComponent({
     name = "PathCache",
     container = PathCache,
     fields = {
@@ -134,454 +133,225 @@ tecs.ecs.newFFIComponent({
 })
 ```
 
-`transient = true` cannot be combined with a custom `serialize`: registration raises. Declare the component
-runtime-only, or give it durable serialization, not both. The engine's own non-portable components take the
-second route, because each of them has something durable to say: see
-[per-component serialization](#per-component-serialization) above.
+Save omits the transient column. Load applies normal spawn behavior, including
+`requires` defaults. Component registration rejects the combination of
+`transient = true` and a custom serializer.
 
-### Excluding derived entities
+### Derived entities
 
-Game code that owns _derived_ entities, a projection of smaller durable input, skips them at save time with
-[`ev:exclude(component)`](#onsnapshotsave). Every entity carrying an excluded component is omitted, and the
-plugin that owns them re-derives them from the saved source of truth on load. A tilemap that spawns one entity
-per visible tile from a much smaller authored grid is the shape this exists for:
+A subsystem can exclude fully derived entities during
+[`OnSnapshotSave`](/ecs/builtins#snapshot-events):
 
 ```teal
-world:observe(0, tecs.ecs.OnSnapshotSave, function(ev: tecs.ecs.OnSnapshotSave)
-    ev:exclude(TileInstance)
-end)
+world:observe(0, tecs.ecs.OnSnapshotSave,
+    function(ev: tecs.ecs.OnSnapshotSave)
+        ev:exclude(TileInstance)
+    end
+)
 ```
 
-The contract is symmetric: whatever a subsystem omits, that subsystem re-creates. Excludes are merged into a
-cloned filter descriptor before the archetype walk, so an `opts` table reused across saves never accumulates
-them.
+The snapshot omits every entity that carries `TileInstance`. The owning
+subsystem must recreate those entities from durable input after load.
 
-### Handled by the engine
+## Save selection and custom data
 
-Three engine subsystems already carry their own state across a snapshot, so these need no work from you:
-
-- **Seeded randomness.** `tecs.ecs.random` installs a `"tecs.random"` handler that saves the world seed and the
-  state of every named stream. It is installed lazily, on the first `random.stream` or `random.seed` call for
-  that world, so a world that loads a snapshot before anything has asked for a stream drops the saved seed.
-  Seeding during setup, which a game that cares does anyway, is enough to avoid that.
-- **Audio.** Installing the mixer adds a `"tecs.audio"` handler covering the master gain and mute, plus the
-  gain, mute, and pause of every group that has one set. Loading routes through the ordinary setters, so voices
-  already sounding follow. Keyed limits are deliberately not carried: a limit is a rule the build states at
-  startup beside the clip it governs, and restoring one from a file would let an old save override a rule the
-  build has since changed. Set your limits during setup, as you would anyway.
-- **Text.** The text plugin observes `FinishSnapshotLoad` and gives up its glyph run whole, because a load
-  replaces the world in place rather than despawning what was in it.
-
-### World resources
-
-A snapshot does not capture `world.resources`. Anything stored there is runtime state outside the ECS and is
-lost on load unless you persist it yourself. Register a [snapshot handler](#snapshot-handlers) per resource that
-holds durable state:
-
-```teal
-world:addSnapshotHandler({
-    name = "mygame.rng",
-    save = function(_world: tecs.World): any
-        return rng:save()
-    end,
-    load = function(_world: tecs.World, value: any)
-        rng:load(value)
-    end,
-})
-```
-
-## World:saveSnapshot
-
-Snapshots the world and lets subsystems inject custom data.
-
-```teal
-function world:saveSnapshot(opts?: tecs.ecs.SnapshotOptions): tecs.ecs.SnapshotOutput
-```
-
-**Parameters:**
-
-- `opts`: [save options](#snapshotoptions), optional. Omitted, every entity is captured into a fresh buffer with
-  no custom data.
-
-**Returns:** a tagged `SnapshotOutput`.
-
-- Binary: `{format = "binary", buffer = <string.buffer>, snapshot = nil}`
-- Table: `{format = "table", buffer = nil, snapshot = <Snapshot>}`
-
-### SnapshotOptions
-
-All fields are optional.
-
-| Field         | Type                               | Purpose                                                                                                                                                    |
-| ------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `format`      | `"binary" \| "table"`              | Output format. Defaults to `"binary"`.                                                                                                                     |
-| `buffer`      | `string.buffer`                    | Reuse an existing buffer instead of allocating one. It is `:reset()` first. Binary only; passing it with `format = "table"` raises. See [buffer](#buffer). |
-| `path`        | `string`                           | Write the bytes to this path and still return the tagged result. Binary only; passing it with `format = "table"` raises.                                   |
-| `filterQuery` | [`QueryDescriptor`](/ecs/queries/) | Save only entities matching this query. Composes freely with `layers`. See [filterQuery](#filterquery).                                                    |
-| `layers`      | `{integer}`                        | Allow-list of `Transform.layer` values, each in 0..31. See [layers](#layers).                                                                              |
-| `customData`  | `{string: any}`                    | Keyed metadata attached to the snapshot's data section. Values must be `string.buffer`-encodable. See [customData](#customdata).                           |
-
-#### buffer
-
-For high-frequency saves, replay buffers and autosave loops, pass `opts.buffer` to reuse one allocation:
+`saveSnapshot` accepts a reusable binary buffer, a destination path, a query,
+layer selection, and custom data:
 
 ```teal
 local buffer = require("string.buffer")
-local sharedBuf = buffer.new()
+local replayBuffer = buffer.new()
 
-for _ = 1, 1000 do
-    world:saveSnapshot({buffer = sharedBuf})
-    -- The buffer is :reset() before each save. Compress it, send it,
-    -- write it, then go around again.
-end
-```
-
-#### filterQuery
-
-Restrict the capture to a subset of entities with a `filterQuery`. Any
-[query descriptor](/ecs/queries/) works, so `include`, `includeAny`, and `exclude` are all available; only
-matching archetypes are walked. The descriptor you pass is cloned, never mutated.
-
-```teal
-world:saveSnapshot({
-    filterQuery = {include = {Persist}},
-})
-```
-
-#### layers
-
-Games laid out by layer can serialize a subset by passing `layers`, an array of `Transform.layer` values. A
-value outside 0..31 raises. Entities carrying a `Transform` whose layer is not in the allow-list are skipped;
-entities without a `Transform` pass through unchanged, because there is nothing to filter on.
-
-```teal
--- Only Transform-bearing entities on layer 2 or 3. Entities with no
--- Transform, such as singletons and config entities, still flow through.
-world:saveSnapshot({layers = {2, 3}})
-
--- Combined: Persist entities; if one has a Transform, it must be on 2 or 3.
-world:saveSnapshot({
+local result = world:saveSnapshot({
+    buffer = replayBuffer,
+    path = tecs.filesystem.writablePath("checkpoint.bin"),
     filterQuery = {include = {Persist}},
     layers = {2, 3},
-})
-```
-
-#### customData
-
-Attach keyed metadata such as a build version, a player profile, or a checkpoint. Each entry becomes one pair in
-the snapshot's data section. Values must be `string.buffer`-encodable: numbers, strings, booleans, and plain
-tables. See [Snapshot handlers](#snapshot-handlers) for reading it back.
-
-```teal
-world:saveSnapshot({
     customData = {
-        build      = "v0.1.2-alpha",
-        player     = "Alice",
+        build = "v12",
         checkpoint = {level = "intro", elapsed = 42.5},
     },
 })
+
+local bytes = result.buffer
 ```
 
-Keys beginning `__tecs.` are reserved: the framework writes the state stack and pipeline state under them and
-consumes them during load before any handler is dispatched.
+The world resets a supplied buffer before writing. A path writes the same
+binary bytes and still returns the tagged result. The world clones
+`filterQuery`, so repeated saves never mutate the caller's descriptor.
 
-### Table snapshots
+`layers` accepts values from 0 through 31. It rejects an entity with
+`Transform` when the component's `layer` falls outside the allowlist. It keeps
+an entity without `Transform`.
 
-Ask for table format to capture the world into a plain Lua table. Reach for it when you need to inspect, mutate,
-or transform a snapshot programmatically, or feed it to another serializer:
+Custom-data values must support `string.buffer` encoding. Prefix your keys with
+the game or subsystem name. Tecs reserves keys that begin with `__tecs.` for
+the state stack and pipeline state.
 
-```teal
-local snap = world:saveSnapshot({format = "table"}).snapshot
--- snap is a plain Lua table: mutate it, walk it, print it.
+## Load lifecycle
 
-world:loadSnapshot(snap)
-```
+`loadSnapshot` accepts a Lua string, `string.buffer`, snapshot table, or tagged
+save result. It clears and repopulates the world in place. It does not emit
+`OnDespawn` for the replaced entities. A format-version mismatch raises.
 
-It accepts the same [options](#snapshotoptions) as a binary save minus `buffer` and `path`. The table is
-JSON-friendly, so `tecs.data` gives you a human-readable save:
-
-```teal
-tecs.filesystem.write(tecs.filesystem.writablePath("save.json"), tecs.data.encodeJSON(snap))
-
-local payload = tecs.filesystem.read(tecs.filesystem.writablePath("save.json"))
-world:loadSnapshot(tecs.data.decodeJSON(payload))
-```
-
-::: tip Table snapshots are slower
-The table format decodes per entity and allocates a Lua table per component. Prefer binary for production
-saves, and reach for table format when debugging, migrating, or peeking at a snapshot before applying it.
-:::
-
-## World:loadSnapshot
-
-Restores a snapshot into `world`, replacing the current world state. See
-[Snapshot handlers](#snapshot-handlers) for hooking the load lifecycle and reading custom data back.
+Use `EntityKey` to rediscover important entities:
 
 ```teal
-function world:loadSnapshot(source: any): tecs.ecs.SnapshotPrelude
-```
-
-**Parameters:**
-
-- `source`: a Lua string, a `string.buffer` produced by `saveSnapshot`, a snapshot table, or a tagged
-  `SnapshotOutput`. Strings are copied once into an internal buffer; buffers are read directly, with no
-  intermediate Lua string.
-
-**Returns:** a `SnapshotPrelude` with `version`, `nextEntityId`, `entityCount`, `archetypeCount`, and
-`componentTable`.
-
-A load clears the world in place rather than despawning entity by entity, so no per-entity `OnDespawn` fan-out
-fires. A snapshot whose `version` does not match this build's raises.
-
-### Runtime handles after load
-
-Snapshots restore durable ECS state, not the application handles pointing into it. If a runtime variable holds
-an entity that must survive save and load, give that entity an [`EntityKey`](/ecs/builtins#entitykey) and rebind
-afterwards:
-
-```teal
-local playerId = world:spawn(
+local player = world:spawn(
     tecs.ecs.EntityKey("player"),
     Player()
 )
 
--- Later:
-world:loadSnapshot(saveBuffer)
-playerId = world:requireKey("player")
+local save = world:saveSnapshot().buffer
+world:loadSnapshot(save)
+player = world:requireKey("player")
 ```
 
-The lifecycle is designed for this. `StartSnapshotLoad` lets a subsystem register per-key data callbacks, and
-`FinishSnapshotLoad` is where to refresh runtime handles that need the fully restored world. For state kept in
-`world.resources` rather than on an entity, see [World resources](#world-resources).
+Global observers registered at address `0` survive a same-world load because
+the world keeps its systems and event bus. A fresh process must register those
+observers during setup. Load clears entity-address observers with the old
+entity set.
 
-### Observers and runtime callbacks
-
-Snapshots do not serialize Lua callbacks or closures. Global observers registered at address `0` survive a
-same-world `loadSnapshot`, because the world, its systems, and its message bus stay installed. Load a save into
-a fresh world in a new process and those observers have to be registered again during normal setup.
-Entity-address observers survive neither case: a load replaces the entity set, and the world's entity observers
-are cleared with it.
-
-When an entity needs durable behavior, save the intent as ECS data and let a query install the runtime callback.
-Rather than hand-registering a one-off `OnDespawn` callback per entity, store a component:
-
-```teal
-local record DespawnEffect is tecs.ecs.Component
-    name: string
-    metamethod __call: function(self, name: string): DespawnEffect
-end
-
-tecs.ecs.newComponent({
-    name = "DespawnEffect",
-    container = DespawnEffect,
-    fields = {"name"},
-})
-```
-
-Then let setup react to matching entities and install the entity observer:
-
-```teal
-local despawnEffectQuery = world:query({
-    include = {DespawnEffect, tecs.Transform},
-    onEntitiesAdded = function(archetype: tecs.ecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
-        local entities = archetype.entities
-        for row = firstRow, lastRow do
-            local entity = entities[row]
-            world:observe(entity, tecs.ecs.OnDespawn, function(_ev: tecs.ecs.OnDespawn)
-                -- spawn the effect here
-            end, "despawn-effect")
-        end
-    end,
-})
-```
-
-The dynamic part stays dynamic: gameplay adds or removes `DespawnEffect("poof")` whenever it likes. The durable
-part is no longer a closure; it is component data that snapshots cleanly. After a load, the query sees the
-restored entities and installs fresh entity-address observers from the restored component state.
-
-## Saving and loading from files
-
-Binary saves give you a LuaJIT [`string.buffer`](https://luajit.org/ext_buffer.html), and how its bytes reach
-disk is yours to choose.
-
-### Let saveSnapshot write it
-
-The shortest path. `opts.path` writes the bytes and still returns the tagged result:
-
-```teal
-world:saveSnapshot({path = tecs.filesystem.writablePath("save.bin")})
-```
-
-### Through the platform filesystem
-
-`tecs.filesystem.writablePath` resolves against the only directory a build may write to, and `tecs.filesystem` reads and
-writes bytes through the platform rather than stdio, which is what reaches content on targets where stdio does
-not.
-
-```teal
-local path = tecs.filesystem.writablePath("save.bin")
-
--- Save
-local buf = world:saveSnapshot().buffer
-tecs.filesystem.write(path, tostring(buf))
-
--- Load
-world:loadSnapshot(tecs.filesystem.read(path))
-```
-
-### Plain Lua files
-
-Fine for a tool or a test, at the cost of an intermediate string on each side:
-
-```teal
-local buf = world:saveSnapshot().buffer
-local f = io.open("save.bin", "wb")
-f:write(tostring(buf))
-f:close()
-
-local g = io.open("save.bin", "rb")
-local data = g:read("*a")
-g:close()
-world:loadSnapshot(data)
-```
+Store durable per-entity behavior as component data. Let a query or global
+observer interpret that data and install any runtime callbacks.
 
 ## Snapshot handlers
 
-For state living outside components, register a named handler:
+Register a named handler for durable state that lives outside components:
 
 ```teal
+local player: tecs.ecs.Entity = 0
+
 world:addSnapshotHandler({
-    name = "mygame.rng",
+    name = "mygame.session",
     save = function(_world: tecs.World): any
-        return rng:save()
+        return {
+            difficulty = session.difficulty,
+            rng = rng:save(),
+        }
     end,
     load = function(_world: tecs.World, value: any)
-        rng:load(value)
+        session.difficulty = value.difficulty
+        rng:load(value.rng)
     end,
-    finish = function(world: tecs.World, _prelude: tecs.ecs.SnapshotPrelude)
-        playerId = world:requireKey("player")
+    finish = function(loadedWorld: tecs.World,
+        _prelude: tecs.ecs.SnapshotPrelude)
+        player = loadedWorld:requireKey("player")
     end,
 })
 ```
 
-`save` writes one value into the data section under `name` when it returns non-nil; returning nil writes
-nothing. `load` receives that value after the ECS world has been restored. `finish` runs after every data
-callback has completed, which makes it the place to rebind `Key` handles and rebuild indexes that need the final
-restored world. All three are optional; `name` is required and must be non-empty.
+The caller supplies any combination of `save`, `load`, and `finish`, plus a
+nonempty `name`. `save` returns one encodable value for that name. A nil result
+writes no value. Load restores the ECS first, then calls matching `load`
+callbacks, then calls every `finish` callback.
 
-Values must be `string.buffer`-encodable. Use namespaced keys, as the engine's own `"tecs.random"` and
-`"tecs.audio"` do, so two subsystems cannot collide.
+`addSnapshotHandler` builds on three global events:
 
-## Snapshot events
+- `OnSnapshotSave` fires before the archetype walk. Tecs owns `addData` and
+  `exclude`; an observer may call these functions but must not replace them.
+- `StartSnapshotLoad` fires after ECS restoration and before data dispatch.
+  Tecs owns `onData`; an observer may call it to register callbacks by key.
+- `FinishSnapshotLoad` fires after every data callback. Tecs owns its
+  `prelude`; observers may read it but must not replace it.
 
-`addSnapshotHandler` is built from three events emitted at address `0` during save and load. Register with
-`world:observe(0, event, callback)` when you need the lower-level access; otherwise prefer the handler.
+The prelude reports the format version and entity, archetype, and component
+table information. Use handlers unless a subsystem needs the lower-level event
+ordering.
 
-| Event                | Fires                                                                          | For                                            |
-| -------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
-| `OnSnapshotSave`     | At the start of `saveSnapshot`, before archetypes are walked.                  | Attaching data and excluding derived entities. |
-| `StartSnapshotLoad`  | During `loadSnapshot`, after the world is restored, before data is dispatched. | Registering per-key data callbacks.            |
-| `FinishSnapshotLoad` | During `loadSnapshot`, after every data callback has run.                      | Finalizing the loaded world.                   |
+## Engine subsystem state
 
-### OnSnapshotSave
+Engine plugins register their own snapshot behavior:
 
-| Member       | Signature                   | Purpose                                                                                                                                                   |
-| ------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ev:addData` | `(key: string, value: any)` | Attach a keyed value to the data section. Values must be `string.buffer`-encodable. Calls are queued and flushed after the archetype data, in call order. |
-| `ev:exclude` | `(component: Component)`    | Omit every entity carrying `component` from the save.                                                                                                     |
+- `tecs.ecs.random` stores the world seed and every named stream under
+  `"tecs.random"`. The first `random.stream` or `random.seed` call installs the
+  handler. Seed during world setup so a load cannot encounter the saved value
+  before the handler exists.
+- Audio stores master and group gain, mute, and pause settings under
+  `"tecs.audio"`. It does not store keyed limits or voice progress. Configure
+  limits during setup.
+- The sequence plugin stores its runtime under `"tecs.sequence"`.
+- The text plugin discards cached glyph runs after load and derives them again.
+- Physics stores Rapier's complete state under `"tecs.physics"` and reconnects
+  transient handles. `physics.hasBody` reports whether an entity has a live
+  body after reconnection.
 
-Both can be used from the same listener.
+## Saving files
 
-### StartSnapshotLoad
+`path` provides the shortest binary save:
 
-| Member      | Signature                                       | Purpose                                                                                                                                             |
-| ----------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ev:onData` | `(key: string, callback: function(value: any))` | Register a callback fired once per matching data entry. Keys with no callback are skipped; several callbacks on one key fire in registration order. |
-
-### FinishSnapshotLoad
-
-| Member       | Type              | Purpose                                                     |
-| ------------ | ----------------- | ----------------------------------------------------------- |
-| `ev.prelude` | `SnapshotPrelude` | Version and entity/archetype counts of the loaded snapshot. |
-
-## Subsystem checklist
-
-For each subsystem that takes part in saves:
-
-- Save the durable source of truth as components, relationships, and custom data.
-- Use `world:addSnapshotHandler(...)` for ordinary non-component data and for load finalization.
-- Persist any durable state kept in `world.resources` through a handler; resources are not saved.
-- Mark process-local backing components `transient = true` when the entity itself is durable.
-- Use `ev:exclude(component)` for fully derived entities that should not appear in saves.
-- Rebuild derived entities, resources, and caches in ordinary systems or in `FinishSnapshotLoad`.
-- Store durable per-entity behavior as components interpreted by queries or global observers, never as
-  entity-address callback registrations.
-- Use `Key` only for stable anchors the application has to rediscover, such as `"player"`.
-- Prefer a query or a rebuilt index over assigning a key to every entity in a group.
-- Keep device handles, physics bodies, audio voices, open files, worker threads, and caches out of the snapshot
-  unless they are converted into portable durable data.
-
-## What makes the binary format fast
-
-- **Pre-pass component table.** Every unique component in the save appears once in the prelude; archetype frames
-  reference it by 1-based integer index instead of repeating name and schema strings.
-- **Column-major layout.** Each eligible FFI column writes and reads as one `structSize × entityCount` memcpy.
-  No per-entity loop, no intermediate Lua tables.
-- **Bulk entity ids.** The id array writes with one `putcdata` per archetype and loads with one `ffi.copy` into
-  a freshly allocated `double[count]`. Doubles let a packed `(slot, generation)` id survive the round trip
-  without truncation; the packed format uses 22 bits of slot and 31 of generation.
-- **Schema fingerprint per component**, compared once per component on load, so a matching schema is a bulk
-  memcpy and only a drifted one pays the per-entity migration path.
-
-A component with a custom `serialize` / `deserialize` opts out of the bulk path automatically and round-trips
-per entity through its own codec. So does an archetype carrying a serializable sparse relationship, which is
-written row-major with a presence mask instead.
-
-## Snapshot format spec
-
-### Binary (LuaJIT `string.buffer`)
-
-The wire format is a sequence of LuaJIT-encoded values and raw byte runs:
-
+```teal
+local path = tecs.filesystem.writablePath("save.bin")
+world:saveSnapshot({path = path})
+world:loadSnapshot(tecs.filesystem.read(path))
 ```
+
+To transform the bytes first, write the returned buffer:
+
+```teal
+local path = tecs.filesystem.writablePath("save.bin")
+local bytes = tostring(world:saveSnapshot().buffer)
+tecs.filesystem.write(path, bytes)
+```
+
+`tecs.filesystem.writablePath` resolves a path inside the application's
+writable directory and works on targets where stdio cannot reach platform
+storage.
+
+## Binary snapshot layout
+
+The binary format uses one component table and column-major storage:
+
+- Archetypes refer to component names and schemas by table index.
+- Dense FFI columns use one raw copy per column.
+- Entity IDs use raw doubles, which retain the packed 22-bit slot and 31-bit
+  generation.
+- Custom codecs encode one value per row.
+- Archetypes with a serializable sparse relationship use row-major data and a
+  presence mask.
+
+The wire format follows this sequence:
+
+```text
 prelude:
     encode(version)
     encode(nextEntityId)
     encode(entityCount)
     encode(archetypeCount)
     encode(componentCount)
-    per i in 1..componentCount:
-        encode(name)             -- string
-        encode(fingerprint)      -- "" for non-FFI components
+    per component:
+        encode(name)
+        encode(fingerprint)       # empty for non-FFI components
 
 per archetype:
     encode(columnCount)
     encode(entityCount)
-    per c: encode(columnIndex)   -- 1-based into componentTable
-    encode(mode)                 -- 0 = column-major, 1 = row-major (sparse)
+    per column: encode(componentTableIndex)
+    encode(mode)                  # 0 column-major, 1 row-major
 
-    mode == 0 (column-major):
-        putcdata(idsArray, entityCount * 8)            -- raw double[]
+    mode 0:
+        putcdata(entityIds, entityCount * 8)
         per column:
-            putcdata(column, structSize * entityCount) -- FFI bulk
-            OR per k: encode(serialized value)         -- non-FFI / custom
+            putcdata(column, structSize * entityCount)
+            OR per row: encode(serializedValue)
 
-    mode == 1 (row-major, sparse-bearing archetype, <= 52 columns):
-        per entity:
-            encode(id)
-            encode(presenceMask)         -- bit (i-1) set = column i present
-            per present column i: serializeRaw OR encode(serialize(value))
+    mode 1:
+        per row:
+            encode(entityId)
+            encode(presenceMask)
+            per present column: encode(serializedValue)
 
-data section (sentinel-terminated):
+data:
     repeat: encode(true); encode(key); encode(value)
-    encode(false)                    -- terminator
+    encode(false)
 ```
 
-Row-major presence masks use exact double arithmetic, which caps that path at 52 columns.
+Row-major presence masks use exact double arithmetic and support at most 52
+columns.
 
-### Table (Lua / JSON)
+## Table snapshot layout
 
-`world:saveSnapshot({format = "table"}).snapshot` returns:
+The table writer produces this general shape:
 
 ```teal
 {
@@ -593,21 +363,19 @@ Row-major presence masks use exact double arithmetic, which caps that path at 52
     },
     archetypes = {
         {
-            columnIndices = {1, 2},               -- references componentTable
+            columnIndices = {1, 2},
             entities = {
                 {1, {x = 10, y = 20}, {hp = 100}},
                 {2, {x = 30, y = 40}, {hp = 50}},
             },
         },
     },
-    data = {                                      -- ordered (key, value) pairs
-        {key = "build",  value = "v0.1.2-alpha"},
-        {key = "player", value = "Alice"},
+    data = {
+        {key = "build", value = "v12"},
     },
 }
 ```
 
-Each entity row is a positional array, `{id, comp1Data, comp2Data, ...}`, aligned with that archetype's
-`columnIndices`; each element is whatever the component's `serialize` returned. The table writer strips
-fingerprints, because a table load always goes through per-component `deserialize` and handles schema drift
-intrinsically.
+Each entity row aligns its component values with the archetype's
+`columnIndices`. Table load always calls each component's deserializer, so the
+table writer omits schema fingerprints.

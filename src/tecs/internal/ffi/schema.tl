@@ -1,4 +1,6 @@
---- FFI schema utilities for components and events.
+--[=[
+FFI schema utilities for components and events.
+]=]
 local record schema
     --- Field definition tuple: {name, type}
     type FieldDef = {string, string}

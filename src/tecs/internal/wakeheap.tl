@@ -1,13 +1,15 @@
---- A deterministic min-heap for things scheduled at an integer time.
----
---- Entries are ordered by `(key, seq)`: the key is whatever clock the caller
---- counts in, and `seq` breaks ties in insertion order, so two things due at
---- the same moment always run in the order they were queued. The heap does
---- not care whether the key means fixed steps or gameplay frames.
----
---- Held as parallel arrays rather than entry tables, and sifted by moving the
---- hole rather than swapping pairs: scheduling allocates nothing, which
---- matters for a population that reschedules every time it runs.
+--[=[
+A deterministic min-heap for things scheduled at an integer time.
+
+Entries are ordered by `(key, seq)`: the key is whatever clock the caller
+counts in, and `seq` breaks ties in insertion order, so two things due at
+the same moment always run in the order they were queued. The heap does
+not care whether the key means fixed steps or gameplay frames.
+
+Held as parallel arrays rather than entry tables, and sifted by moving the
+hole rather than swapping pairs: scheduling allocates nothing, which
+matters for a population that reschedules every time it runs.
+]=]
 
 local floor <const> = math.floor
 

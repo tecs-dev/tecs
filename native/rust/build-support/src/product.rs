@@ -17,7 +17,7 @@ use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
 pub const CERULEAN_REVISION: &str = "a09b6d734a55d58489e16498bd83387d39c4cafe";
-pub const TEALDOC_REVISION: &str = "a472e7d4a92b782432581ef64b7498c6b2fa5fda";
+pub const TEALDOC_REVISION: &str = "198a81c9ebf81b79cebd671e16aec9da8649e9e4";
 pub const SDL3_REVISION: &str = "release-3.4.12";
 pub const SDL3_MIXER_REVISION: &str = "release-3.2.4";
 pub const LUAJIT_REVISION: &str = "871db2c84ecefd70a850e03a6c340214a81739f0";
@@ -1169,11 +1169,11 @@ fn copy_tree(source: &Path, destination: &Path, clean: bool) -> Result<()> {
 
 /// Stages the documentation `tecs docs` reads offline.
 ///
-/// The pages under `docs/` carry prose and no reference: the generator renders
-/// every `### tecs.*` entry at build time, so a page on disk holds none of the
-/// 1,000-odd symbols the command looks up. What it needs is the composed
-/// Markdown a site build writes beside each page, which is prose and reference
-/// together.
+/// Module pages under `docs/` carry only metadata and a title. The generator
+/// renders module prose and every `### tecs.*` entry from Teal at build time,
+/// so a page on disk holds none of the text or symbols the command looks up.
+/// What it needs is the composed Markdown a site build writes beside each
+/// page.
 ///
 /// A site build takes about thirteen seconds, which is not a price every
 /// `build` and `test` should pay, so it runs only when a page or a source file

@@ -1,74 +1,90 @@
---- The application the entry chunk returns.
----
---- SDL drives the loop, so this is not a function that runs until done. It is
---- an object the host calls back into: once to initialize, once per iteration,
---- once to shut down. An entry file returns one instead of blocking, because
---- on iOS there is no loop for it to block in.
----
---- A whole entry file, which ends where a `run()` would have started:
----
---- ```teal
---- return tecs.newApplication({
----     window = {title = "Game", width = 1280, height = 720},
----     plugin = function(world: tecs.World, app: tecs.Application)
----         world:spawn(tecs.Transform(640, 360), tecs.gfx.Renderable())
----
----         world:addSystem({
----             name = "game.Spin",
----             phase = tecs.ecs.phases.Update,
----             run = function(delta: number)
----                 app.renderer.camera.rotation = app.renderer.camera.rotation + delta
----             end,
----         })
----     end,
---- })
---- ```
----
---- The underscored methods are the host's contract, not the game's.
----
---- A game's own code runs in systems and observers, and there is one way in:
---- `config.plugin`. It is handed the world and this application, and registers
---- what it wants to happen, which the world then runs. Nothing here calls back
---- into a game per frame or per event, because the world already does both and
---- does them better: a system's order is declared by its phase, both are
---- visible to the debug server, and both run inside a guard that keeps the
---- process alive and inspectable after the game throws.
----
---- So the four lifecycle points a game used to be handed map onto what the ECS
---- already had:
----
----   startup    `PreStartup`, `Startup`, `PostStartup`, run once by
----              `world:startup` at the end of initialization
----   per frame  the ordinary phases, run by `world:update`
----   per event  `world:observe(0, events.on.<kind>, handler)`
----   teardown   `PreShutdown`, `Shutdown`, `PostShutdown`, run once by
----              `world:shutdown` before anything is destroyed
----
---- A plugin needs to reach the objects that are not world state, and it is
---- handed them rather than asked to look them up: the window, the device, the
---- input, the renderer, the audio and `quitRequested` all hang off the
---- application it is passed beside the world.
----
---- Six of the underscored methods are not per frame at all. SDL dispatches
---- the platform lifecycle from its event watcher rather than queueing it, and
---- the host calls one method per event at the instant it arrives, because on
---- Android the process blocks as soon as backgrounding has been sent and the
---- next iteration is after the resume. `_lowMemory`, `_willEnterBackground`,
---- `_didEnterBackground`, `_willEnterForeground`, `_didEnterForeground` and
---- `_terminating` are those six, and five of them are answered here.
----
---- `_willEnterForeground` is deliberately not. It says the application is
---- about to be visible again and nothing in the engine has anything to do
---- with that yet: the clock and the suspension belong to `_didEnterForeground`
---- beside them, which is when the platform is actually drawing again. A game
---- that wants the earlier moment observes `events.on.appWillEnterForeground`,
---- because every lifecycle event is queued as well as dispatched.
----
---- Which is the rule for the other five too. The hook is where the engine
---- meets a deadline the event stream cannot; a game reads the transitions off
---- the bus like any other event. The one thing a game cannot do that way is
---- save state on being backgrounded, because there may be no later drain to
---- do it in, and `stageCheckpoint` is the surface for exactly that.
+--[=[
+The application that an entry chunk returns.
+
+The host owns the loop and calls the application to initialize, process
+events, iterate, and shut down. Game code registers systems and observers
+instead of calling a blocking `run` function:
+
+```teal
+return tecs.newApplication({
+    window = {
+        title = "Game",
+        width = 1280,
+        height = 720,
+    },
+    plugin = function(world: tecs.World, app: tecs.Application)
+        local transforms <const> = world:query({
+            include = {tecs.Transform},
+        })
+
+        world:addSystem({
+            name = "game.Move",
+            phase = tecs.ecs.phases.Update,
+            run = function(dt: number)
+                for archetype, length in transforms:iter() do
+                    local column <const> =
+                        archetype:getMut(tecs.Transform)
+                    for row = 1, length do
+                        column[row].x = column[row].x + 120 * dt
+                    end
+                end
+            end,
+        })
+
+        world:spawn(tecs.Transform(100, 100))
+    end,
+})
+```
+
+## Lifecycle
+
+The entry plugin receives the world and application after engine subsystem
+installation and before startup phases. It registers the game. The world then
+owns the scheduled lifecycle:
+
+| Stage | Game API |
+| --- | --- |
+| Startup | `PreStartup`, `Startup`, and `PostStartup` |
+| Event | `world:observe(0, tecs.events.on.<kind>, handler)` |
+| Frame | The phases driven by `world:update(dt)` |
+| Shutdown | `PreShutdown`, `Shutdown`, and `PostShutdown` |
+
+Each frame drains platform events, advances asynchronous services, updates the
+world, submits rendering, and updates audio. Event observers run before the
+world update and outside every phase. They see input state after the
+application folds in the event. Store event state in a component or resource
+when a scheduled system must react to it.
+
+The application skips world and rendering work while suspended but continues
+to service platform transitions.
+
+## Checkpoints and crashes
+
+Mobile platforms may suspend a process before another frame runs. Prepare a
+snapshot during an ordinary frame and stage its bytes before that deadline:
+
+```teal
+local save <const> = world:saveSnapshot().buffer
+app:stageCheckpoint(tostring(save))
+```
+
+The application writes the latest staged bytes when the platform backgrounds
+or terminates it. The next entry plugin can call `readCheckpoint` and load the
+result.
+
+The application catches errors from game systems, observers, plugins, and
+startup phases. It records the first traceback while the host continues to
+serve platform events and the debug connection. The guard restores
+engine-owned scopes, not partially changed game state. Use `clearCrash` only
+as a development reload aid.
+
+Methods whose names begin with an underscore belong to the host contract.
+]=]
+
+-- Implementation details:
+-- SDL drives the host through SDL_AppInit, SDL_AppEvent, SDL_AppIterate, and
+-- SDL_AppQuit. The Rust host forwards those callbacks to the underscore
+-- methods on Application.
 
 local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")
@@ -114,23 +130,30 @@ local RECORD <const> = timing.stage("record")
 local SUBMIT <const> = timing.stage("submit")
 
 local record Application
+    --- Configures the world owned by an application.
+    type EntryPlugin = function(world: types.World, app: Application)
+
     record Config
-        --- The window to open, as `Window.Options` describes it. Passed
-        --- through whole rather than copied field by field, so everything a
-        --- window can be created with is reachable from here and a field
-        --- added there needs nothing added here.
+        --- Caller-writable. Sets the window to open, as
+        --- [`Options`](tealdoc:tecs.platform.window.Options) describes it. The
+        --- application passes the table through whole.
         window: Window.Options
-        --- Marks this run as a development one, which two things read.
+        --- Caller-writable. Marks this run as a development run.
         ---
-        --- The device is created with its validation layers on, and the log
-        --- file below is written without being asked for. It is also one of
+        --- Tecs creates the device with validation layers enabled and writes
+        --- the log file below by default. This setting also joins
         --- the three settings `clearCrash` looks at, beside `mcpPort` and
         --- `watch`, to decide whether resuming after a gameplay crash is
         --- something this build does at all.
         debug: boolean
+        --- Caller-writable. Sets how many frames the CPU may run ahead of the
+        --- GPU. The device defaults to two.
         framesInFlight: integer
+        --- Caller-writable. Selects `"vsync"`, `"immediate"` or `"mailbox"`
+        --- presentation. The device defaults to `"vsync"`.
         presentMode: string
-        --- Light every surface receives before any light entity contributes,
+        --- Caller-writable. Sets the light every surface receives before any
+        --- light entity contributes,
         --- as red, green and blue. Defaults to white.
         ---
         --- White rather than a dim gray, because a scene that has placed no
@@ -139,48 +162,37 @@ local record Application
         --- of them. A game doing its own lighting turns this down to the
         --- level it wants the unlit parts of the scene to sit at.
         ambientLight: {number}
-        --- Sound output. Omitted takes the defaults, which open the
+        --- Caller-writable. Configures sound output. Omitted takes the defaults, which open the
         --- platform's default device.
         audio: Audio.Config
-        --- Log file name, under the writable root, written as JSON Lines
-        --- beside the platform's own destination rather than instead of it.
-        ---
-        --- Omitted, one is written when `mcpPort` or `debug` is set and not
-        --- otherwise. The file exists for the debug server, which is what
-        --- makes `get_logs` a seek and a read rather than a ring buffer kept
-        --- in the process, so it follows the thing that reads it: a game
-        --- should no more write a file nobody asked for than open a socket
-        --- nobody asked for. Nothing is lost by that, because SDL already
-        --- dispatches to a destination a human can read on every platform;
-        --- see `log`. A shipped game that wants a crash log in the field
-        --- names one here, since where a game writes user data is the game's
-        --- decision and not the engine's.
+        --- Caller-writable. Sets a JSON Lines log file under the writable root.
+        --- Omitted creates one when `mcpPort` or `debug` is set and otherwise
+        --- keeps logging at the platform destination.
         logFile: string
-        --- Lowest priority that reaches the log at all, as one of
+        --- Caller-writable. Sets the lowest priority that reaches the log, as one of
         --- `log.TRACE`, `log.VERBOSE`, `log.DEBUG`, `log.INFO`, `log.WARN`,
-        --- `log.ERROR` or `log.CRITICAL`. Omitted leaves SDL's own default.
-        ---
-        --- Applies to every category, ours and SDL's, and it is set before
-        --- anything here has had a chance to say something. Separate from
-        --- `logFile` above, which decides durability rather than volume: a
-        --- game wanting everything kept and little of it shown sets both.
+        --- `log.ERROR` or `log.CRITICAL`. Omitted leaves the platform default.
+        --- The level applies to every category and does not change whether
+        --- `logFile` stores the accepted messages.
         logLevel: integer
-        --- File name, under the writable root, that a checkpoint is written
-        --- to when the platform backgrounds or terminates the application.
+        --- Caller-writable. Sets the file name under the writable root that
+        --- receives a checkpoint when the platform backgrounds or terminates
+        --- the application.
         --- Omitted means no checkpoint, and `stageCheckpoint` says so.
         ---
         --- See `Application:stageCheckpoint` for what a game has to do, which
         --- is the part that matters.
         checkpoint: string
-        --- Port for the MCP server. Omitted means no server, since a game
+        --- Caller-writable. Sets the MCP server port. Omitted means no server, since a game
         --- should not open a socket nobody asked for.
         mcpPort: integer
-        --- Watches the content files this run has loaded and reloads them when
+        --- Caller-writable. Watches loaded content files and reloads them when
         --- they change. Omitted means no watcher, on the same footing as the
         --- server above: a poll of the filesystem is not something to start
         --- because a build happened to be able to. A release refuses it.
         watch: watch.Config
-        --- Instances the renderer's buffers are sized for. Defaults to 65536.
+        --- Caller-writable. Sets the renderer buffer capacity in instances.
+        --- Defaults to 65536.
         ---
         --- An instance is a row the GPU draws: every renderable entity is one,
         --- and so is every glyph of every text, which an instance producer
@@ -191,35 +203,36 @@ local record Application
         ---
         --- Sized independently of `maxEntities` beside it, because the two
         --- count different things: a world full of entities that carry no
-        --- `Renderable` needs no instances at all, and one text entity needs
+        --- [`Renderable`](tealdoc:tecs.components.Renderable) needs no instances at all,
+        --- and one text entity needs
         --- one instance per character.
         capacity: integer
-        --- Seconds one fixed step covers. Must be greater than zero. Defaults
+        --- Caller-writable. Sets the seconds one fixed step covers. Must be greater than zero. Defaults
         --- to 1/60.
         timestep: number
-        --- The most fixed steps one update runs before the overload policy
+        --- Caller-writable. Sets the most fixed steps one update runs before the overload policy
         --- applies. Must be a positive integer. Defaults to 10.
         fixedMaxSteps: integer
-        --- What becomes of the catch-up that did not fit. Defaults to "drop",
+        --- Caller-writable. Selects what becomes of catch-up that did not fit. Defaults to "drop",
         --- which bounds a frame's work and reports the loss through
         --- `world:getStats`. "accumulate" keeps every second instead.
         fixedOverload: ecs.FixedOverload
-        --- Entity slots the world is sized for. Defaults to 2^20, and 2^22 - 1
+        --- Caller-writable. Sets the world's entity slot capacity. Defaults to 2^20, and 2^22 - 1
         --- is the ceiling the packed id format allows.
         ---
         --- Concurrent slots rather than lifetime spawns: a slot is given back
-        --- when the entity is despawned and reused by the next one. The arena
-        --- is preallocated for this many, so it is a memory decision as much
+        --- when the world despawns the entity, then the next entity reuses it.
+        --- The world preallocates this many slots, so it is a memory decision as much
         --- as a limit, and a game that knows its population sets it rather
         --- than paying for a million slots it will not use.
         maxEntities: integer
-        --- Give each archetype a run with room to grow rather than packing the
+        --- Caller-writable. Gives each archetype a run with room to grow rather than packing the
         --- runs end to end. Defaults to false, which packs.
         ---
         --- Packed, a run cannot grow without shifting every run after it, so a
         --- spawn anywhere rewrites every instance in the scene. Reserved, it
         --- grows into its own slack and the archetypes around it are left
-        --- alone. What it costs is that the cull is dispatched over the slack
+        --- alone. The cull also dispatches over the slack
         --- as well as over the rows, and that reserving needs headroom: a
         --- `capacity` sized to exactly the population leaves nothing to
         --- reserve out of and the setting does nothing.
@@ -234,22 +247,24 @@ local record Application
         --- on a mixed-archetype spawner scene. A name with `debug` in it would
         --- warn off exactly the shipped games that should turn it on.
         reserveRuns: boolean
-        --- Fit many images into each layer of the renderer's image array
+        --- Caller-writable. Fits many images into each layer of the renderer's image array
         --- rather than one. Defaults to false, where the ceiling on distinct
         --- images is the array's layer count and a small image costs a whole
         --- cell. On, the ceiling is the array's area instead.
         packImages: boolean
-        --- Let entities cast shadows, and tune what they cost. Nil, the
-        --- default, means an `Occluder` or a `DropShadow` on an entity draws
+        --- Caller-writable. Enables entity shadows and configures their cost. Nil, the
+        --- default, means an [`Occluder`](tealdoc:tecs.components.Occluder) or a
+        --- [`DropShadow`](tealdoc:tecs.components.DropShadow) on an entity draws
         --- the entity and casts nothing, because the targets that would hold a
         --- shadow are never built. An empty table turns them on with every
         --- default; see `Deferred.ShadowOptions` for the seven numbers.
         shadows: Deferred.ShadowOptions
-        --- Stops after this many iterations. Lets an automated run drive a
+        --- Caller-writable. Stops after this many iterations. This lets an automated run drive a
         --- real window to completion without a human closing it.
         debugMaxFrames: integer
 
-        --- The game, as one function handed the world and this application.
+        --- Caller-writable. Sets the game plugin that receives the world and
+        --- this application.
         ---
         --- Called at the end of initialization, after every engine subsystem is
         --- installed and before the startup phases run, so it can register a
@@ -265,72 +280,49 @@ local record Application
         --- `function(world)`, so this reads as that shape with one more thing
         --- and code moves between here and a delegated plugin without a silent
         --- argument swap.
-        plugin: function(world: types.World, app: Application)
+        plugin: EntryPlugin
     end
 
+    --- Read-only. Exposes the application window.
     window: Window
+    --- Read-only. Exposes the GPU device.
     device: Device
+    --- Read-only. Exposes the world driven by this application.
     world: types.World
+    --- Read-only. Exposes the renderer that extracts this world.
     renderer: Renderer
+    --- Read-only. Exposes current input state.
     input: Input
+    --- Read-only. Exposes the audio mixer.
     audio: Audio
-    --- The debug server, when one was asked for.
+    --- Read-only. Exposes the debug server when configuration requested one.
     mcp: mcp.Server
 
-    --- Set to true to leave the loop at the end of the current iteration.
+    --- Caller-writable. Set to true to leave the loop at the end of the
+    --- current iteration.
     quitRequested: boolean
-    --- True while the platform has the application in the background. The
-    --- loop still runs, but simulation and rendering do not.
+    --- Engine-owned. Reports true while the platform has the application in
+    --- the background. The loop still runs, but simulation and rendering do
+    --- not.
     suspended: boolean
-    --- Seconds of simulated time, advanced by the frame dt so a replay
-    --- reproduces it exactly.
+    --- Engine-owned. Reports seconds of simulated time. The frame delta
+    --- advances it so a replay reproduces the value exactly.
     elapsed: number
-    --- Iterations completed.
+    --- Engine-owned. Reports completed application iterations.
     frame: integer
 
     -- Declared here because `_init` wires the debug server and the file
     -- watcher to it before it is defined.
 
-    --- Another frame to look at and a chance to reload; the world may be
-    --- inconsistent, reload before trusting it.
+    --- Clears a recoverable gameplay crash so development can render another
+    --- frame. Reload the world before trusting it.
     ---
-    --- That sentence is the whole contract, and the name is deliberately not
-    --- `recover` or `retry`: this is a debugging affordance, not fault
-    --- tolerance. What the guard put back are the engine's invariants, which
-    --- are the ones it can name: the command buffer is resolved, the passes
-    --- are ended, the world is applying mutations again. A game's invariants
-    --- are not restored and cannot be, because a system that threw halfway
-    --- through its query left some entities updated and some not, and nothing
-    --- here knows which half or what either half meant. So the frame after
-    --- this is a frame to read, and the way to get back to a world worth
-    --- trusting is to reload the scene.
+    --- The method works only when `debug`, `mcpPort` or `watch` marks the run
+    --- for development. It refuses to continue after incomplete graphics
+    --- recovery.
     ---
-    --- Two gates, and they are different kinds of thing.
-    ---
-    --- The first is whether this build is a development one at all, which is
-    --- `debug`, `mcpPort` or `watch` in the config. A watcher counts because
-    --- it is the configuration that most wants this: a game running one is
-    --- being edited, and reloading the file that threw is exactly the way
-    --- back. A shipped build has none of the three, latches on the first crash
-    --- and stays latched, which is the right shipped behavior: there is nobody
-    --- there to read the frame, and carrying on with a world that is provably
-    --- inconsistent is how one bug becomes a corrupted save.
-    ---
-    --- The second is severity, and it is narrower rather than a judgment about
-    --- how bad the throw looked. Recovery reports whether it had to force-end
-    --- a pass or cancel a frame instead of submitting it, and in either case
-    --- the device is not in the state the engine intended. Those do not
-    --- resume, at any setting, because the next frame would be recorded
-    --- against a device nobody can describe.
-    ---
-    --- The callers are the debug server's `clear_crash` tool and the file
-    --- watcher's reloads. Both mean the same thing: something about the run
-    --- has changed, try it again.
-    ---
-    --- Physics resumability is a separate and open question: a solver stepped
-    --- out of is not obviously a solver that can be stepped again.
-    ---
-    --- @return Whether the loop resumed, and why it did not.
+    --- @return Returns whether the loop resumed.
+    --- @return Returns the reason when the loop could not resume.
     clearCrash: function(self: Application): boolean, string
 
     _config: Application.Config
@@ -391,8 +383,8 @@ end
 ---
 --- This is also the only finally the language offers. A throw leaves whatever
 --- it was inside half done: a render or compute pass open, a command buffer
---- holding a swapchain texture the presenter is waiting for, a world stuck in
---- deferred mutation because the pop that ends a query loop was skipped.
+--- holding a swapchain texture the presenter is waiting for, or a world stuck
+--- in deferred mutation because a throw skipped the pop that ends a query loop.
 --- Recovery runs here rather than at each of the five call sites, because a
 --- call site that forgot it would be a leak nobody could see.
 local function guard(self: Application, what: string, body: function): boolean
@@ -428,16 +420,16 @@ end
 --- slot in a finite pool and possibly the swapchain texture the display is
 --- waiting on; then the world, whose staged mutations every later read would
 --- otherwise miss; then the latency sample, which is measuring against a frame
---- that will never be submitted.
+--- whose submission will never happen.
 ---
---- Every step is protected on its own, so a step that fails does not stop the
+--- An individual guard protects each step, so a failure does not stop the
 --- ones after it and none of them can throw out of the guard that called this.
---- What they report is logged beside the crash, never in place of it.
+--- The log places their reports beside the crash, never in place of it.
 ---
 --- It also records how clean the recovery was, which is what `clearCrash`
 --- reads. Putting a command buffer back is not the same as putting the device
 --- back: a pass that had to be force-ended recorded half of what it meant to,
---- and a frame that was canceled rather than submitted never reached the GPU
+--- and canceling a frame instead of submitting it keeps it from the GPU
 --- at all. Either way the device is in a state the engine did not intend, and
 --- resuming on top of that is guessing.
 function Application:_recover()
@@ -497,11 +489,11 @@ end
 ---
 --- Reached as `tecs.newApplication`, at the root rather than under a module,
 --- because an application is not a subsystem: it owns the window, the device,
---- the input, the renderer and the audio, and is handed to the entry plugin
+--- the input, the renderer and the audio. Tecs hands it to the entry plugin
 --- beside the world.
 ---
---- @param config Read here, so a field changed on the table afterwards is not
----     seen. Nothing is opened yet.
+--- @param config Tecs reads this table here and ignores later changes. This
+---     call opens nothing.
 --- @return The application, at rest until the host's first callback.
 function Application.newApplication(config: Application.Config): Application
     local self = setmetatable({} as Application, ApplicationMT)
@@ -526,7 +518,7 @@ end
 --- fussiness: this runs when the platform is about to stop the process, and
 --- the write that gets interrupted is the one nobody was watching.
 ---
---- Reports rather than raises. It is called from a platform callback, where
+--- Reports rather than raises. A platform callback calls it, where
 --- there is nobody left to catch anything and a failed save must not also cost
 --- the game its orderly shutdown.
 local function flushCheckpoint(self: Application, occasion: string): boolean
@@ -565,19 +557,19 @@ end
 --- that is the whole design rather than an inconvenience. iOS allows roughly
 --- five seconds from the backgrounding callback returning and Android rather
 --- less, and at this project's scale a world is not serializable inside any of
---- it: a callback that walked four million entities would be killed part way
+--- it: the platform could kill a callback part way through four million entities
 --- through and leave nothing behind. A function would let a game postpone the
 --- serializing into exactly that callback while looking like it had prepared
 --- something. A string cannot: by the time it exists, the expensive half has
 --- already happened on a frame that could afford it. The host times the hook
 --- and says so past 250 ms, which is the check on the rest.
 ---
---- Staging again replaces what was staged; there is one checkpoint, not a
+--- Staging again replaces the previous bytes; there is one checkpoint, not a
 --- queue. Staging and then backgrounding twice writes once, because a write
---- nothing has changed since is a second chance to be interrupted for nothing.
+--- no changes only gives the platform another chance to interrupt the write for nothing.
 ---
 --- The counterpart is `readCheckpoint`, which is how the next run gets it back.
---- Raises when no `checkpoint` was configured, because silently holding bytes
+--- Raises when the config names no `checkpoint`, because silently holding bytes
 --- that will never be written is the one failure a game would not notice.
 function Application:stageCheckpoint(bytes: string)
     if self._checkpointPath == nil then
@@ -595,7 +587,7 @@ function Application:stageCheckpoint(bytes: string)
     self._checkpointStaged = true
 end
 
---- The bytes the last run left, or nil when there are none.
+--- Reads the bytes the last run left, or returns nil when there are none.
 ---
 --- Read it while building the world, which is what the plugin and the startup
 --- phases are for. Nil covers every reason there is nothing to resume from: a
@@ -609,7 +601,7 @@ function Application:readCheckpoint(): string
     return filesystem.read(path, "checkpoint")
 end
 
---- Where the checkpoint is written, or nil when none was configured.
+--- Returns the checkpoint path, or nil when the config names none.
 function Application:checkpointPath(): string
     return self._checkpointPath
 end
@@ -841,21 +833,21 @@ end
 --- that consumed events would leave a game unable to tell the difference
 --- between an event it never received and one it mishandled.
 ---
---- Input is folded first, so an observer reading `app.input` inside its handler
+--- The application folds input first, so an observer reading `app.input` inside its handler
 --- sees the press it is being told about rather than the state before it.
 ---
 --- Where this sits in the frame is worth being plain about, because an observer
 --- is not a system. The drain runs before `world:update`, so an observer fires
 --- ahead of every system in the frame the event belongs to, outside every
---- phase: no fixed step, no pause or state gating, and mutations are applied at
+--- phase: no fixed step, no pause or state gating, and the world applies mutations at
 --- once rather than deferred to a phase boundary. A game wanting a reaction in
 --- phase does what `Input` does, which is fold the event into something a
 --- system reads.
 ---
---- Nothing is emitted for a kind nobody asked for, which is what makes a
+--- The application emits nothing for a kind nobody requested, which makes a
 --- device-rate stream of motion cost a table lookup rather than a dispatch. The
---- record is emitted as it stands rather than copied into an event instance,
---- so an observer is handed the same reused record every other consumer sees
+--- application emits the record as it stands instead of copying it into an
+--- event instance, so an observer receives the same reused record every other consumer sees
 --- and the same borrow rule applies to it.
 function Application:_receive(event: events.Event)
     -- Before anything acts on the event, so what is measured is the wait from
@@ -1070,7 +1062,7 @@ function Application:_simulate(dt: number)
     guard(self, "gameplay", step)
 end
 
---- The gameplay traceback, or nil while the game is healthy.
+--- Returns the gameplay traceback, or nil while the game is healthy.
 function Application:crashed(): string
     return self._crashed
 end
@@ -1105,9 +1097,9 @@ end
 
 --- Memory is short and the platform is asking for whatever can be given back.
 ---
---- A full collection rather than a step: what is being asked for is the low
+--- A full collection rather than a step: the platform asks for the low
 --- water mark, and the pause it costs is cheaper than the alternative, which
---- on iOS is being killed. Everything else belongs to the game, and a game
+--- on iOS is process termination. Everything else belongs to the game, and a game
 --- with caches of its own answers `events.on.lowMemory` on the bus, where it
 --- is one observer among the rest and has a whole frame to do it in.
 function Application:_lowMemory()
@@ -1124,8 +1116,8 @@ end
 --- what happens here is a write of bytes the game already had: see
 --- `stageCheckpoint` for why the surface takes bytes rather than a callback.
 ---
---- Suspension is set here rather than when the queued event is drained,
---- because on Android the process blocks as soon as this has been dispatched
+--- This callback sets suspension rather than waiting for the queued event,
+--- because Android blocks the process as soon as the platform dispatches it
 --- and there may be no drain until the resume.
 function Application:_willEnterBackground()
     self.suspended = true
@@ -1140,11 +1132,12 @@ end
 --- What is deliberately not here is releasing the graphics device, which is
 --- where an engine that has ported to Android ends up. Three things have to be
 --- true before it can be, and none of them is today. Every GPU handle in the
---- process would have to be reachable from one place to be released and
+--- one owner would need to reach and release every GPU handle in the process,
 --- recreated: they are not, they belong to the backend, the deferred pipeline,
 --- the image array and every buffer, and a recreation that missed one is a
 --- use-after-free rather than a black frame. The image array would have to be
---- refillable: the pixels behind it are released at `Renderer:registerImage`,
+--- the image array would need to support refilling, but `Renderer:registerImage`
+--- releases the source pixels,
 --- because the array holds them, so there is nothing on the CPU to upload
 --- again. And it would have to be testable: none of these events fires on the
 --- platforms the suite runs on, so a recovery path written now is a path whose
@@ -1163,7 +1156,7 @@ end
 --- The application is in the foreground again.
 ---
 --- The clock restarts rather than integrating the gap. Whatever the platform
---- did while we were suspended is not elapsed game time, and a dt of however
+--- did during suspension is not elapsed game time, and a dt of however
 --- long the player was reading their mail would put every fixed step of it
 --- through in one frame.
 ---
@@ -1174,12 +1167,12 @@ function Application:_didEnterForeground()
     time.reset()
 end
 
---- The process is being ended by the platform.
+--- Handles the platform ending the process.
 ---
 --- The last call in. SDL ends the loop as soon as it has dispatched this, so
---- there is no iteration after it and nothing here is deferred or retried.
+--- no iteration follows it, and this method defers or retries nothing.
 ---
---- The checkpoint is offered again because a termination out of the foreground
+--- This method offers the checkpoint again because termination from the foreground
 --- never went through a backgrounding, and one already written costs a boolean
 --- to skip.
 function Application:_terminating()

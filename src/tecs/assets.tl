@@ -1,82 +1,57 @@
---- Asynchronous asset loading.
----
---- A load answers with a `Future` straight away, and the future settles only
---- when something on the main thread takes the worker's answer. What it settles
---- to is a value: an `Image` carrying pixels or a `Sound` carrying a clip. So a
---- load is transformed, joined and waited on with the combinators every other
---- asynchronous thing in this tree uses:
----
---- ```teal
---- tecs.assets.loadImage("sprites/hero.png")
----     :map(function(image: tecs.assets.Image): tecs.Sprite
----         -- registerImage releases the pixels; the array holds them now.
----         return (renderer:registerImage(image))
----     end)
----     :onSettle(function(sprite: tecs.Future<tecs.Sprite>)
----         if sprite.status == "ready" then
----             world:spawn(tecs.Transform(100, 100), sprite.value)
----         end
----     end)
---- ```
----
---- Waiting on several is `Future.all`, which settles once every one of them
---- has, and a set of them is joined without anything here knowing about sets.
----
---- The split between the two halves of a load is the status line, and it is one
---- sentence: **before it lands you cancel the future, after it lands you release
---- the payload.** A cancel gives up this caller's interest in a decode; a
---- release gives up this caller's hold on the pixels or the clip, and the last
---- release is the one that frees. Reading either after that is freed memory.
----
---- **The formats an image may be in are PNG and JPEG.** Rust's `image` crate
---- is built with only those two decoders, because every enabled codec becomes
---- code a shipped binary carries. That is a decision the engine makes on a
---- game's behalf, so it is stated here rather than met as a failed load: an
---- atlas in any other format is converted at build time, not enabled at
---- compile time. Sound is the other way round, and
---- `Audio.decoders()` reports what the mixer actually linked.
----
---- Decoding a PNG is milliseconds of pure CPU work with no GPU involvement,
---- so it happens on a worker and the main thread only uploads. A load never
---- blocks a frame; the future stays pending and callers draw
---- something else until it is not. Sound takes the same route for the same
---- reason: reading a file is a syscall a frame should not wait on.
----
---- The worker hands back the address of a Rust-owned image rather than copying
---- its pixels through a serialized message only to copy them again into
---- staging. Ownership transfers with it: whoever receives the address destroys
---- the image through the Rust ABI. A loaded sound crosses the same way, as the
---- address of its `MIX_Audio`.
----
---- Nothing here creates a GPU resource. Decoding and residency are separate
---- decisions: the renderer knows what layout its textures need, and an asset
---- that has been decoded is useful before anything has decided where it will
---- live.
----
---- A file whose contents something else knows how to interpret is not loaded
---- here at all. It goes through `filesystem.read`, which is synchronous and is
---- the only sanctioned way to get bytes out of the content root, because
---- content lives inside the package on Android and `io.open` does not reach
---- it. It answers bytes and never text: a Lua string carries a length, so an
---- image, an archive or a binary sidecar comes back whole, and a format that
---- is text is a decoder's opinion rather than that function's.
----
---- Reading a document is therefore two halves with nothing between them:
----
---- ```teal
---- local bytes <const> = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
---- local level <const> = tecs.data.decodeJSON(bytes)
---- ```
----
---- `filesystem.assetPath` resolves against the content root and `read` answers nil for
---- a path with no file, so a game distinguishes an absent document from a
---- malformed one, which the decoder raises on. A parser for a binary format
---- sits in exactly that second position, over the same bytes.
----
---- What the two loads below do share with it is the record of what this
---- process has opened: each calls `filesystem.note` so the file watcher polls
---- one list rather than two, since the decode being recorded finishes on a
---- worker and a second list would be a second answer to the same question.
+--[=[
+Decodes images and sounds on a worker.
+
+Each load returns a [`Future`](tealdoc:tecs.Future) immediately:
+
+```teal
+return tecs.newApplication({
+    plugin = function(world: tecs.World, app: tecs.Application)
+        tecs.assets.loadImage(
+            tecs.filesystem.assetPath("sprites/hero.png")
+        )
+            :map(function(image: tecs.assets.Image): tecs.gfx.Sprite
+                return app.renderer:registerImage(image)
+            end)
+            :onSettle(function(sprite: tecs.Future<tecs.gfx.Sprite>)
+                if sprite.status == "ready" then
+                    world:spawn(
+                        tecs.Transform(100, 100),
+                        sprite.value,
+                        tecs.gfx.Renderable()
+                    )
+                end
+            end)
+    end,
+})
+```
+
+The loader decodes pixels but creates no GPU resource. The renderer decides
+texture residency. Audio follows the same split between decoded clips and
+voices.
+
+## Lifetime
+
+[`Application`](tealdoc:tecs.Application) installs, updates, and shuts down the process-wide worker.
+Headless code must call `install`, pump with `update` or `waitAll`, then call
+`shutdown`. Drain wanted results before shutdown because in-flight futures
+otherwise remain pending.
+
+Cancel a pending future to release one caller's interest. Release a ready
+payload when its consumer takes ownership. The final release frees the decoded
+memory.
+
+Overlapping image loads for one path share a decode. Each caller receives its
+own future and a hold on the same image. A later load after settlement decodes
+again. Sound loads never share.
+
+Image loads accept PNG and JPEG. `tecs.audio.decoders()` reports the sound
+formats linked into the current build. Sound mode `"resident"` decodes the
+complete clip, `"stream"` opens a source for each voice, and `"auto"` chooses
+from the duration threshold.
+
+Use `Future.all` to join independent loads. Release each ready payload after
+its consumer takes ownership.
+]=]
 
 local ffi <const> = require("ffi")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
@@ -196,35 +171,38 @@ while true do
 end
 ]==]
 
---- Decoded pixels, and the hold a caller has on them.
+--- Represents decoded pixels and the caller's hold on them.
 ---
---- What a `loadImage` future settles to. The pixels are refcounted rather than
+--- What a `loadImage` future settles to. Reference counts govern the pixels rather than
 --- owned outright, because two loads of one path that overlap share a decode:
---- each caller holds the same `Image` and the last of them to release is the
+--- each caller holds the same [`Image`](tealdoc:tecs.assets.Image), and the last caller to release it
 --- one that frees. Reading `pixels` after that is reading freed memory, which
 --- is why a released image reads nil there rather than looking uploadable.
 local record Image
-    --- The path the load was asked for, unchanged. Not resolved, so it is
+    --- Read-only. Contains the requested path unchanged. The loader does not resolve it, so it is
     --- whatever the caller passed.
     path: string
 
-    --- Decoded RGBA pixels, valid until the last `release`. Nil afterwards.
+    --- Read-only. Contains decoded RGBA pixels until the last `release`, then
+    --- becomes nil.
     pixels: loader.CValue
 
-    --- Pixels across, not bytes.
+    --- Read-only. Reports the width in pixels.
     width: integer
 
-    --- Pixel rows.
+    --- Read-only. Reports the height in pixel rows.
     height: integer
 
-    --- Row stride in bytes, which a decoder may pad beyond width * 4.
+    --- Read-only. Reports the row stride in bytes, which a decoder may pad
+    --- beyond `width * 4`.
     pitch: integer
 
-    --- Private. The Rust image allocation the pixels belong to, owned here and
-    --- destroyed by the last `release`.
+    --- Engine-owned. Stores the decoded image allocation until the last
+    --- `release`. Ordinary game code should ignore this field.
     _image: loader.CValue
 
-    --- Private. Callers holding these pixels. One per load of the path whose
+    --- Engine-owned. Counts callers holding these pixels. Ordinary game code
+    --- should ignore this field. The count includes one per load of the path whose
     --- future actually settled, so a caller that canceled before settlement is
     --- not counted and one that joined an in-flight decode is.
     _refs: integer
@@ -232,7 +210,7 @@ local record Image
     --- Gives up this caller's hold on the pixels, and frees at the last.
     ---
     --- Called once whatever needed them has taken a copy, which for an image
-    --- means after it has been uploaded. Where several loads shared one decode
+    --- means after the caller uploads it. Where several loads shared one decode,
     --- this releases one of them.
     ---
     --- Releasing an image already down to nothing does nothing, so a shutdown
@@ -240,32 +218,35 @@ local record Image
     release: function(self: Image)
 end
 
---- A loaded clip, and the hold a caller has on it.
+--- Represents a loaded clip and the caller's hold on it.
 ---
 --- What a `loadSound` future settles to. Two overlapping loads of one path do
---- not share, unlike images, so a `Sound` normally has one holder; the count is
+--- not share, unlike images, so a [`Sound`](tealdoc:tecs.assets.Sound)
+--- normally has one holder; the count is
 --- here so that releasing twice frees once rather than twice.
 local record Sound
-    --- The path the load was asked for, unchanged.
+    --- Read-only. Contains the requested path unchanged.
     path: string
 
-    --- The loaded clip, valid until the last `release`. Nil for one that
+    --- Read-only. Contains the loaded clip until the last `release`. It is nil for one that
     --- streams, which holds nothing, and nil once released.
     audio: loader.CValue
 
-    --- Whether the decoded audio is held in memory. False for a clip each voice
+    --- Read-only. Reports whether memory holds the decoded audio. It is false for a clip each voice
     --- reads from the file for itself.
     resident: boolean
 
-    --- Length in milliseconds, or -1 when the container cannot say.
+    --- Read-only. Reports the length in milliseconds, or -1 when the container
+    --- cannot say.
     durationMs: integer
 
-    --- Private. Callers holding this clip.
+    --- Engine-owned. Counts callers holding this clip. Ordinary game code
+    --- should ignore this field.
     _refs: integer
 
     --- Gives up this caller's hold on the clip, and frees at the last.
     ---
-    --- A voice reads a clip where it lies, so a clip is released when nothing
+    --- A voice reads a clip where it lies, so release a clip when nothing
     --- will play it again. A track holds its own reference, so releasing one
     --- that is still sounding is safe: the mixer drops it when the last track
     --- using it does.
@@ -274,24 +255,14 @@ local record Sound
     release: function(self: Sound)
 end
 
---- Asynchronous asset loading.
----
---- Images and sounds decode on one worker thread, which `install` starts and `shutdown`
---- ends; nothing loads before the first or after the second. A load returns a `Future`
---- straight away and never blocks a frame, and that future settles only when something on
---- the main thread takes the worker's answer, which is what `update` is for.
----
---- Nothing here is a cache and nothing here touches the GPU: two loads of a path that do
---- not overlap decode twice, and what comes back is CPU-side pixels or a mixer clip that a
---- caller uploads or plays itself.
 local record assets
-    --- Decoded pixels, and the hold a caller has on them.
+    --- Read-only. Exposes the decoded image type.
     Image: Image
 
-    --- A loaded clip, and the hold a caller has on it.
+    --- Read-only. Exposes the loaded sound type.
     Sound: Sound
 
-    --- Whether the loading worker is running.
+    --- Reports whether the loading worker is running.
     ---
     --- For a subsystem that loads an asset of its own and has no way of knowing whether the
     --- game has started the worker yet.
@@ -324,7 +295,7 @@ local pending: {integer: Entry} = {}
 local byFuture: {Future<any>: Entry} = {}
 --- Counted rather than walked, because `waitAll` reads it in a loop.
 local pendingCount = 0
---- Image decodes that have been queued and not yet answered, by path. A second
+--- Tracks queued image decodes that have not answered yet, by path. A second
 --- load of a path in this table joins the first rather than queueing a decode
 --- of the same file beside it.
 local inFlight: {string: Future<any>} = {}
@@ -335,8 +306,8 @@ local worker: workers.Worker = nil
 ---
 --- Installing twice is installing once. Spawning unconditionally would leave
 --- the first thread running with both its channels and nothing reading them,
---- and every decode already queued would answer into a channel that has been
---- dropped, so a load in flight across the second call would never resolve.
+--- and every queued decode would answer into an abandoned channel, so a load
+--- in flight across the second call would never resolve.
 ---
 --- @param luaPath `package.path` for the worker's own state, which shares no loaded modules
 ---     with this one. Defaults to this state's, which is what makes the worker resolve the
@@ -385,7 +356,7 @@ end
 --- Destroys what the worker sent for a decode nobody is waiting on any more.
 ---
 --- Ownership transfers with the address whether or not anyone still wants it,
---- so what arrived is freed here rather than leaked to a future that has
+--- so this function frees the result instead of leaking it to a future that has
 --- already settled "canceled".
 local function discard(result: {string: any})
     if result.image ~= nil then
@@ -396,7 +367,7 @@ local function discard(result: {string: any})
     end
 end
 
---- Settles one decode result into the future it was queued for.
+--- Settles one decode result into its associated future.
 local function settleResult(result: {string: any}): boolean
     local entry = pending[result.id as integer]
     if entry == nil then
@@ -456,11 +427,11 @@ end
 
 --- Settles one decode result, and ends a process-wide drain that this emptied.
 ---
---- The drain is answered after the settlement rather than inside it, because a
+--- The function settles the drain after the result rather than inside it, because a
 --- listener the settlement runs is free to start another load and a `waitAll`
 --- that returned before it did would have left one outstanding.
 ---
---- @return Whether a queued decode was answered, which is false for a result
+--- @return Whether the function matched the result to a queued decode. False for a result
 ---     arriving after `shutdown` dropped what it belonged to.
 local function complete(result: {string: any}): boolean
     local answered = settleResult(result)
@@ -595,9 +566,9 @@ local source <const> = pump as Future.Source
 --- `Future.pending` counts whoever created a future as one of its watchers,
 --- which is right for a caller holding what it created and wrong here. The
 --- loader is the producer: the root lives in `inFlight` and every consumer of
---- it is some caller's own derived future, so a hold of the loader's own would
---- be a watcher nothing ever gives up and the decode could never reach zero and
---- be abandoned.
+--- it is some caller's own derived future. A hold of the loader's own would
+--- create a watcher nothing ever gives up, so the count could never reach zero
+--- and let the source abandon the decode.
 local function newRoot(): Future<any>
     local root = Future.pending(source) as Future<any>
     root._watchers = 0
@@ -633,14 +604,14 @@ end
 --- Queues an image for loading and answers a future for it immediately.
 ---
 --- Two loads of one path that overlap share a decode, because decoding the same
---- PNG twice at once is work with no result the first decode does not already
---- have. They share the `Image` with it, so the last of them to release is the
+--- PNG twice at once duplicates work without producing another result.
+--- They share the [`Image`](tealdoc:tecs.assets.Image), so the last caller to release it
 --- one that frees, and each of them holds a future of its own, so one canceling
 --- is invisible to the others. A load that starts after the first has settled
 --- decodes again: nothing here is a cache.
 ---
---- @param path PNG or JPEG; no other format is compiled in, and one that is not either
----     fails the decode rather than being refused here.
+--- @param path PNG or JPEG. The build contains no other decoder, and another
+---     format fails during decoding.
 --- @return A pending future, never nil. Raises instead when `install` has not run.
 ---     Failures reach it as a failed settlement, not through this call: a missing file
 ---     is a future that fails once the worker has looked. Canceling it gives up this
@@ -669,20 +640,21 @@ end
 --- `mode` is "resident", "stream", or "auto", and auto keeps anything shorter
 --- than `streamMs` resident.
 ---
---- The library is initialized here rather than on the worker: `MIX_Init` is
---- documented as not thread safe, and doing it before the task is sent puts it
+--- This call initializes the library instead of the worker because `MIX_Init`
+--- does not support concurrent calls. Initialization before sending the task puts it
 --- in order ahead of every decode without a lock.
 ---
 --- Two overlapping loads of one path do not share, unlike images: each gets its
 --- own clip, because that is what `MIX_LoadAudio` produces. So this answers the
---- root future rather than a link over one, and the `Sound` it settles to has
+--- root future rather than a link over one, and the
+--- [`Sound`](tealdoc:tecs.assets.Sound) it settles to has
 --- exactly one holder.
 ---
---- @param mode "resident", "stream" or "auto". Anything else is treated as "stream".
+--- @param mode "resident", "stream" or "auto". Any other value selects "stream".
 --- @param streamMs The boundary "auto" decides on, in milliseconds. Read only under
 ---     "auto", and a file whose length the container cannot state streams whatever it says.
---- @return A pending future, or one already failed when the mixer could not be
----     initialized, which is the one failure reported without waiting for the worker.
+--- @return A pending future, or a failed future when mixer initialization
+---     fails. This is the only failure reported without waiting for the worker.
 function assets.loadSound(path: string, mode: string, streamMs: integer): Future<Sound>
     filesystem.note(path, "sound")
     if not sdl3mixer.init() then
@@ -714,12 +686,12 @@ end
 --- stay pending forever.
 ---
 --- @return How many decodes settled this call, which is zero when nothing has
----     finished and also zero when no worker is installed.
+---     finished and also zero when no worker exists.
 function assets.update(): integer
     return pump:poll()
 end
 
---- Loads still waiting on the worker.
+--- Returns the number of loads still waiting on the worker.
 ---
 --- @return Every load in flight in this process, not one caller's. A decode every
 ---     caller has canceled is still counted until the worker answers for it, because
@@ -751,9 +723,10 @@ end
 
 --- Stops the loading worker.
 ---
---- Blocks until the thread has exited. Loads still in flight are dropped and their futures
---- stay pending forever, so drain with `waitAll` first if their results are wanted.
---- Releasing an `Image` or a `Sound` that already settled still works afterwards; this
+--- Blocks until the thread exits. This call drops loads still in flight and leaves their
+--- futures pending forever, so drain with `waitAll` first when their results matter.
+--- Releasing an [`Image`](tealdoc:tecs.assets.Image) or a
+--- [`Sound`](tealdoc:tecs.assets.Sound) that already settled still works afterwards; this
 --- frees nothing.
 function assets.shutdown()
     if worker == nil then

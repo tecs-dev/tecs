@@ -3,215 +3,124 @@ description: "Shared component construction model covering __call, new, fields, 
 outline: deep
 ---
 
-# Component Construction
+# Component construction
 
-All component kinds in Tecs share the same high-level construction model:
+Structured components share one construction model:
 
-- Positional `__call(...)` is the hot path.
-- `.new(data)` is the named/table form.
-- `fields` define positional order.
-- `defaults` fill omitted positional values in field order.
-- `init(instance, ...)` runs after the base instance has been allocated and populated.
-- optional config `__call(instance, ...)` replaces the default positional field-mapping path.
+- `Component(...)` maps positional arguments to declared fields.
+- `Component.new({...})` provides the named form.
+- `defaults` fill omitted positional values.
+- `init` validates or derives values after field mapping.
+- A custom configuration `__call` replaces positional mapping.
 
-The storage backend changes how the instance is stored; it does not change the basic construction rules.
+Storage changes the allocated value, not these rules.
 
-This page documents the shared component model. For backend and category-specific details, see
-[Table Components](/ecs/components/table-components),
-[FFI Components](/ecs/components/ffi),
-[Scalar Components](/ecs/components/scalar-components),
-[Tag Components](/ecs/components/tag-components),
-[Relationships](/ecs/relationships/), and
-[FFI Relationships](/ecs/relationships/ffi).
+## Positional fields
 
-## Positional construction
-
-Call the component container directly to construct an instance:
+Table components list field names. FFI components list name and C type pairs:
 
 ```teal
 local record Health is tecs.ecs.Component
     current: integer
     maximum: integer
-    metamethod __call: function(self, current?: integer, maximum?: integer): Health
+
+    metamethod __call: function(
+        self,
+        current?: integer,
+        maximum?: integer
+    ): Health
 end
 
-tecs.ecs.newComponent({
+tecs.ecs.newFFIComponent({
     name = "Health",
     container = Health,
-    fields = {"current", "maximum"},
+    fields = {
+        {"current", "int32_t"},
+        {"maximum", "int32_t"},
+    },
     defaults = {100, 100},
 })
 
-local a: Health = Health()
-local b: Health = Health(80, 120)
+local full <const> = Health()
+local damaged <const> = Health(80, 120)
 ```
 
-When `fields` are present, positional arguments map to those fields in order. The constructor is generated
-with `load` so LuaJIT sees literal field assignments rather than a loop.
+Defaults line up with fields. A nil slot means no declared default, while
+false remains a valid default. FFI allocation supplies zero values for fields
+that positional arguments and defaults omit.
 
-For the concrete table-backed and FFI-backed forms of this pattern, see
-[Table Components](/ecs/components/table-components) and [FFI Components](/ecs/components/ffi).
+Relationship targets always occupy the first positional argument and do not
+appear in the public field list.
 
-## Table construction
+## Named construction {#table-construction}
 
-Every component also exposes `.new(data)`:
+The named form routes fields through the positional constructor:
 
 ```teal
-local h: Health = Health.new({
+local damaged <const> = Health.new({
     current = 80,
     maximum = 120,
 })
 ```
 
-When `fields` are present, Tecs generates `.new(data)` automatically: it reads the named fields in declared
-order, unpacks them into positional arguments, and routes through `__call`. A hook never sees the data table
-in its first slot.
+Tecs reads declared fields in order and calls `Health(80, 120)`. The
+initializer receives positional values, not the input table.
 
-Use an explicit `new = function(data) ... end` only when the table form should not map directly to the
+Provide a custom `new` only when named construction cannot map to the
 positional form.
 
-This named construction path matters most for [table components](/ecs/components/table-components),
-[FFI components](/ecs/components/ffi), and default
-[component serialization](/ecs/components/serialization).
+## Validation and derived values
 
-## `fields`
-
-`fields` define the positional argument order and the generated base shape.
-
-Table components use:
+`init(instance, ...)` runs after allocation, field assignment, and defaults:
 
 ```teal
-fields = {"x", "y", "z"}
-```
-
-FFI components use `{name, type}` tuples:
-
-```teal
-fields = {
-    {"x", "float"},
-    {"y", "float"},
-    {"z", "float"},
-}
-```
-
-Relationships follow the same rule, except the relationship target is always the first positional argument and
-is not included in the public `fields` list. For relationship-specific construction and target semantics, see
-[Relationships](/ecs/relationships/) and [FFI Relationships](/ecs/relationships/ffi).
-
-## `defaults`
-
-`defaults` are positional and line up with `fields`. Declaring `defaults` without `fields` errors at
-registration.
-
-```teal
-defaults = {0, 0, 1}
-```
-
-That means:
-
-- field 1 defaults to `0`
-- field 2 defaults to `0`
-- field 3 defaults to `1`
-
-Use `nil` for "no default".
-
-```teal
-defaults = {nil, nil, 1}
-```
-
-A `false` default is honoured: the generated constructor applies defaults with an `if arg == nil` statement,
-not an `and`/`or` expression that would collapse `false` back to nil.
-
-For FFI-backed components and relationships, omitted fields that still have no default remain zero-initialized
-by the allocator.
-
-For examples of defaults on plain Lua payloads versus FFI-backed payloads, see
-[Table Components](/ecs/components/table-components),
-[FFI Components](/ecs/components/ffi), and
-[Relationships](/ecs/relationships/) plus
-[FFI Relationships](/ecs/relationships/ffi).
-
-## `init(instance, ...)`
-
-`init` is a post-allocation hook.
-
-The split is:
-
-- generated/base construction owns allocation, field mapping, and defaults
-- `init` owns validation, normalization, and derived state
-
-The builtin `Transform` uses it for exactly that: `defaults` put the entity on layer 1, and `init` refuses a
-layer below it.
-
-```teal
-ecs.newFFIComponent({
-    name = "Transform",
-    container = Transform,
+tecs.ecs.newFFIComponent({
+    name = "Health",
+    container = Health,
     fields = {
-        {"x", "float"},
-        {"y", "float"},
-        {"z", "float"},
-        {"layer", "int32_t"},
-        {"rotation", "float"},
-        {"scaleX", "float"},
-        {"scaleY", "float"}
+        {"current", "int32_t"},
+        {"maximum", "int32_t"},
     },
-    defaults = {0, 0, 0, 1, 0, 1, 1},
-    init = function(instance: Transform)
-        if instance.layer < 1 then
-            error("Transform layer must be greater than 0, got: " .. tostring(instance.layer))
+    defaults = {100, 100},
+    init = function(instance: Health)
+        if instance.current < 0 then
+            error("Health.current must not be negative")
         end
-    end
+        if instance.maximum < instance.current then
+            error("Health.maximum must cover current health")
+        end
+    end,
 })
 ```
 
-By the time `init` runs, `instance.layer` already reflects the positional args plus any defaults.
+Use defaults for static values. Use `init` for validation, normalization, and
+derived state. An initializer requires declared fields or a custom `new`, so
+the named path stays defined.
 
-If you provide `init`, you must also provide `fields` or `new`. Otherwise Tecs would have no clear way to
-implement `.new(data)`, and registration errors immediately rather than forwarding the whole data table as
-argument #1.
+## Custom call shapes
 
-`init` is most relevant for structured payload components and relationships. For concrete usage patterns,
-compare [Table Components](/ecs/components/table-components),
-[FFI Components](/ecs/components/ffi),
-[Relationships](/ecs/relationships/), and
-[FFI Relationships](/ecs/relationships/ffi). Scalar and tag components have narrower creation APIs; see
-[Scalar Components](/ecs/components/scalar-components) and
-[Tag Components](/ecs/components/tag-components).
-
-## Custom constructor `__call(instance, ...)`
-
-Supply config `__call` when the public constructor arguments are **not** the same as the stored fields.
-
-On this path, Tecs:
-
-- allocates the base instance
-- applies declarative `defaults`
-- calls your custom `__call(instance, ...)`
-- does **not** auto-run `init`
-
-That last point is intentional: if you want to share logic, call `Component.init(instance, ...)` explicitly
-from the custom `__call`.
-
-`ParticleEmitter` is declared this way. Most of its fields are scale factors a caller almost never sets and
-the one that matters is the effect, so it takes a single named options table instead of a positional list, and
-`new` reuses the same initializer for the table form:
+Supply configuration `__call(instance, ...)` when public constructor arguments
+do not match stored fields:
 
 ```teal
-ecs.newComponent({
+tecs.ecs.newComponent({
     name = "ParticleEmitter",
     container = ParticleEmitter,
-    requires = { Transform },
-    __call = function(item: ParticleEmitter, options: EmitterOptions)
-        initEmitter(item, options)
+    requires = {tecs.Transform},
+    __call = function(
+        instance: ParticleEmitter,
+        options: EmitterOptions
+    )
+        initEmitter(instance, options)
     end,
     new = function(data: {string: any}): ParticleEmitter
-        local item <const> = {} as ParticleEmitter
-        initEmitter(item, data as EmitterOptions)
-        return item
+        local instance <const> = {} as ParticleEmitter
+        initEmitter(instance, data as EmitterOptions)
+        return instance
     end,
 })
 ```
 
-Use this only when the default positional field mapping is the wrong model. If your constructor arguments
-already line up with `fields`, prefer the normal generated path and `init`.
+Tecs allocates the base value and applies defaults before the custom call. It
+does not invoke `init` afterwards. Call shared initialization explicitly when
+both paths need it.

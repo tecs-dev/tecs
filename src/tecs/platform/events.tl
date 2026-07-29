@@ -1,43 +1,63 @@
---- One typed event stream, derived from SDL.
----
---- Every platform delivers the same vocabulary: desktop, mobile, replay, and
---- tests. Game code never sees an `SDL_Event`, both because the union is a
---- poor thing to program against and because its pointer is only valid inside
---- the callback that produced it.
----
---- `Event` is one wide record discriminated by `kind` rather than a union of
---- per-kind records. Teal can express the union, but not a union that pools,
---- and an event stream that allocates per event is not one this engine can
---- use. The kind determines which fields are meaningful; the rest are stale.
---- Records handed to a handler are reused, so anything retaining one must
---- take a copy.
----
---- Events reach a game through the world's message bus, one ECS event type per
---- kind at address zero, so `world:observe(0, events.on.dropFile, handler)` is
---- how a drop is handled. See `KindTypes` for why the vocabulary is a type per
---- kind rather than one type carrying the kind.
----
---- ```teal
---- world:observe(0, tecs.events.on.dropFile, function(event: tecs.events.Event)
----     print(event.text, event.x, event.y)
---- end)
----
---- local pending <const>: {tecs.events.Event} = {}
---- world:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
----     pending[#pending + 1] = tecs.events.copy(event)
---- end)
---- ```
----
---- Unrecognized SDL events arrive as `unknown` with their numeric type rather
---- than being dropped, so upgrading SDL surfaces new input instead of silently
---- losing it.
----
---- A recognized kind means usable fields. An event whose kind is named here
---- and whose payload was left unread would be worse than an unknown one: the
---- caller has every reason to trust it. Text, composition, drops and the
---- clipboard carry pointers, and SDL recycles what they point at as soon as
---- the callback returns, so the host copies those bytes into the queue it owns
---- and the conversion reads them from there.
+--[=[
+One typed platform event stream.
+
+Every platform delivers the same vocabulary through the world's event bus.
+Each kind has one ECS event type at address zero:
+
+```teal
+world:observe(0, tecs.events.on.dropFile, function(event: tecs.events.Event)
+    loadFile(event.text)
+end)
+
+local pending <const>: {tecs.events.Event} = {}
+world:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
+    pending[#pending + 1] = tecs.events.copy(event)
+end)
+```
+
+The application drains platform events before `world:update`. Observers run
+outside every phase and fixed step. The application updates input state before
+it emits an event, so an observer sees the new state.
+
+## Borrowed records
+
+The converter reuses one wide [`Event`](tealdoc:tecs.events.Event) record. `kind` determines which payload
+fields carry meaning. Read the record during the observer call, or retain an
+independent value through `events.copy`.
+
+Mouse and converted touch positions use logical window coordinates.
+`timestamp` uses the platform event clock. `arrival` uses the monotonic seconds
+returned by `tecs.time.now`, which makes it suitable for input-latency
+measurement.
+
+Unrecognized platform events arrive as `unknown` with their numeric type.
+Finger and touch-device identities remain opaque strings.
+
+## Synthetic and replayed input
+
+Tests can push an engine event through the host queue:
+
+```teal
+tecs.events.push("mouseDown", {
+    button = 1,
+    x = 120,
+    y = 64,
+})
+```
+
+Install `events.source` to replace the host queue during replay. Pair it with
+`tecs.time.provider` to replay event order and frame deltas together. Set the
+source to nil to resume the host queue.
+]=]
+
+-- Implementation details:
+-- SDL supplies the host event queue and nanosecond timestamps. The converter
+-- reuses one wide Event record and stamps its ECS event id immediately before
+-- emission, so the message bus can route it without copying.
+--
+-- Finger and touch-device ids become strings because SDL supplies 64-bit
+-- values that a Lua number cannot represent exactly. `events.push` converts a
+-- Tecs event back into an SDL event before adding it to the queue.
 
 local ffi <const> = require("ffi")
 local ecs <const> = require("tecs.ecs")
@@ -46,106 +66,110 @@ local loader <const> = require("tecs.ffi.loader")
 
 local C <const> = sdl.C
 
---- An event is also an ECS event, so the record a handler receives is the
---- record the message bus routes. `eventId` is the only field the bus reads,
---- and it is stamped just before an emit, which is what makes delivery to an
---- observer copy nothing.
+--- Represents a borrowed platform event routed through the ECS event bus.
 local record Event is ecs.Event
-    --- What happened. Determines which other fields mean anything.
+    --- Read-only. Reports what happened and determines which other fields
+    --- carry meaning.
     kind: string
-    --- Nanoseconds since SDL started, as SDL reported it. That is the
-    --- `SDL_GetTicksNS` epoch, which is not the clock `time.now` reads, so it
-    --- orders events against each other and against nothing else.
+    --- Read-only. Reports nanoseconds on the platform event clock. This clock
+    --- orders events against each other, not against `time.now`.
     timestamp: number
-    --- Monotonic seconds on the clock `time.now` reads, converted by the host
-    --- from the stamp SDL put on the event when it produced it. Nil for an
-    --- event that did not come through the host's queue, such as a replayed
-    --- one.
-    ---
-    --- Not where the host was handed the event, which is a different and much
-    --- kinder number: SDL only hands events over while the main thread is
-    --- pumping, and most of what a player waits through is time the thread was
-    --- doing something else. Dating an event from delivery would leave the
-    --- measurement least trustworthy in exactly the frames worth catching.
+    --- Read-only. Reports monotonic seconds on the clock `time.now` reads,
+    --- converted by the host from the event's platform timestamp. Nil for an
+    --- event that did not come through the host queue, such as a replayed one.
     arrival: number
 
-    --- Physical key position, which is what a movement binding wants: WASD
+    --- Read-only. Reports the physical key position, which is what a movement binding wants: WASD
     --- stays in the same place on every layout.
     scancode: integer
-    --- The key the layout produces, which is what a text binding and a prompt
-    --- want. Both are carried, because neither answers the other's question.
+    --- Read-only. Reports the key the layout produces, which is what a text binding and a prompt
+    --- want. The event carries both because neither answers the other's question.
     keycode: integer
-    --- Modifier keys held when the key event was produced, as a mask.
+    --- Read-only. Reports modifier keys held when the event occurred as a mask.
     modifiers: integer
-    --- True when the platform is repeating a held key rather than reporting a
+    --- Read-only. Reports true when the platform repeats a held key rather than reporting a
     --- new press.
     repeated: boolean
-    --- Whether the button or key this event describes went down.
+    --- Read-only. Reports whether the button or key went down.
     down: boolean
 
-    --- Text committed by an input method, or being composed by one, or dropped
+    --- Read-only. Contains text committed or composed by an input method, or dropped
     --- onto the window.
     text: string
-    --- Cursor position and selection length within composing text.
+    --- Read-only. Reports the cursor position within composing text.
     start: integer
+    --- Read-only. Reports the selection length within composing text.
     length: integer
-    --- Candidates an input method is offering, and which is selected. Nil when
+    --- Read-only. Contains candidates an input method offers. It is nil when
     --- the platform offers none.
     candidates: {string}
+    --- Read-only. Reports the selected candidate index.
     selected: integer
-    --- Whether the platform lays its candidates out horizontally.
+    --- Read-only. Reports whether the platform lays its candidates out
+    --- horizontally.
     horizontal: boolean
 
-    --- Pointer position, in window coordinates.
+    --- Read-only. Reports the pointer's x position in window coordinates.
     x: number
+    --- Read-only. Reports the pointer's y position in window coordinates.
     y: number
-    --- Movement since the previous event of this kind.
+    --- Read-only. Reports horizontal movement since the previous event of this kind.
     dx: number
+    --- Read-only. Reports vertical movement since the previous event of this kind.
     dy: number
-    --- Pointer position as the platform reported it, in 0..1 across the
-    --- window. Touch is normalized at source, so it is carried through
+    --- Read-only. Reports horizontal pointer position as the platform reported
+    --- it, in 0..1 across the
+    --- window. The platform normalizes touch at source, so the event carries it
     --- unscaled as well as converted: a normalized position survives a resize
     --- and a window coordinate does not.
     normalX: number
+    --- Read-only. Reports vertical pointer position from 0 to 1 down the
+    --- window.
     normalY: number
-    --- Mouse, gamepad or pen button.
+    --- Read-only. Reports the mouse, gamepad or pen button.
     button: integer
-    --- How many times this button was pressed in quick succession, as the
-    --- platform counts it against its own double-click interval. One for a
+    --- Read-only. Reports the platform's count of quick successive presses for
+    --- this button under its own double-click interval. One for a
     --- single click, two for a double, and up from there.
     clicks: integer
-    --- Wheel movement, with one meaning whatever the platform is set to:
+    --- Read-only. Reports horizontal wheel movement, with one meaning whatever the platform is set to:
     --- positive `wheelY` is a scroll away from the player and positive
     --- `wheelX` is a scroll to the right. A platform reporting natural
     --- scrolling sends the opposite pair and flags it, and the conversion
     --- undoes that, so nothing above binds a sign twice.
     wheelX: number
+    --- Read-only. Reports vertical wheel movement under the same sign
+    --- convention as `wheelX`.
     wheelY: number
-    --- The same movement accumulated to whole notches by the platform, on the
+    --- Read-only. Reports horizontal wheel movement accumulated to whole notches by the platform, on the
     --- same sign convention. What a menu stepping one item per notch reads,
     --- rather than deciding for itself where a fraction of a notch becomes a
     --- step.
     wheelTicksX: integer
+    --- Read-only. Reports vertical whole-notch wheel movement under the same
+    --- sign convention as `wheelTicksX`.
     wheelTicksY: integer
-    --- Whether the wheel event being handed to `push` is one a platform with
+    --- Read-only. Reports whether an event passed to `push` uses natural
+    --- scrolling. This is one a platform with
     --- natural scrolling would send, which is what SDL's direction flag says
     --- and what the conversion undoes. Read only there: an event coming out
     --- of the conversion has had that applied already, so nothing above it
     --- has a flag to check.
     flipped: boolean
-    --- Zoom factor a pinch gesture reports since the previous event in it.
+    --- Read-only. Reports the zoom factor since the previous pinch event.
     --- Below one is a pinch closed, above one is a pinch opened.
     scale: number
-    --- Gamepad or pen axis, and its value in -1..1.
+    --- Read-only. Reports the gamepad or pen axis.
     axis: integer
+    --- Read-only. Reports the axis value in -1..1.
     value: number
-    --- How hard a finger is pressing, in 0..1, on a touch surface or a gamepad
+    --- Read-only. Reports finger pressure from 0 to 1 on a touch surface or gamepad
     --- touchpad. A pen reports its pressure as an axis instead, so a pen event
     --- leaves this holding whatever the last touch put there.
     pressure: number
-    --- Whether the pen's eraser end is in use.
+    --- Read-only. Reports whether the pen's eraser end is in use.
     eraser: boolean
-    --- Everything the pen was doing at the instant of the event, as a mask:
+    --- Read-only. Reports pen state at the instant of the event as a mask:
     --- the tip down, the eraser end in use, whether it is in proximity, and
     --- each barrel button. `eraser` and `down` answer for one stroke; this
     --- answers which barrel button is held right now. The bits are the
@@ -153,71 +177,81 @@ local record Event is ecs.Event
     --- events, which report no state.
     penState: integer
 
-    --- Device that produced the event: a gamepad, a keyboard, a mouse, a pen,
+    --- Read-only. Reports the device that produced the event: a gamepad, a keyboard, a mouse, a pen,
     --- a sensor, a display, or a window. These identifiers are 32 bits and fit
     --- a Lua number exactly.
     which: number
-    --- True when the platform produced this mouse event from a touch or a pen
+    --- Read-only. Reports true when the platform produced this mouse event from a touch or a pen
     --- rather than from a mouse. A game that also handles touch would
     --- otherwise act on the same gesture twice.
     synthetic: boolean
-    --- Touch finger identity, and the device it belongs to. Both are 64 bits
-    --- and do not fit a double, so they are carried as opaque strings rather
+    --- Read-only. Reports the touch finger identity as an opaque string. The
+    --- 64-bit value does not fit a double, so the event carries a string rather
     --- than numbers that might silently round.
     finger: string
+    --- Read-only. Reports the touch device identity as an opaque string.
     touchDevice: string
-    --- Gamepad touchpad index and the finger's slot on it. A touchpad finger
-    --- is identified by position on the device, not by a 64-bit id.
+    --- Read-only. Reports the gamepad touchpad index. Position on the device
+    --- identifies a touchpad finger, not a 64-bit id.
     touchpad: integer
+    --- Read-only. Reports the finger's slot on the gamepad touchpad.
     fingerIndex: integer
 
-    --- Sensor identity and its most recent reading. A gamepad sensor reports
-    --- three components; a standalone sensor reports up to six, and the rest
-    --- arrive in `sensorData`.
+    --- Read-only. Reports the sensor identity.
     sensor: integer
+    --- Read-only. Reports the first component of the latest sensor reading.
     sensorX: number
+    --- Read-only. Reports the second component of the latest sensor reading.
     sensorY: number
+    --- Read-only. Reports the third component of the latest sensor reading.
     sensorZ: number
+    --- Read-only. Contains the latest sensor reading. A gamepad sensor reports
+    --- three components; a standalone sensor reports up to six.
     sensorData: {number}
-    --- When the hardware took the reading, in nanoseconds on the sensor's own
+    --- Read-only. Reports when the hardware took the reading, in nanoseconds on the sensor's own
     --- clock. Like `timestamp` it orders readings against each other and
     --- against nothing else, which is what integrating a rotation over them
     --- needs and is all it is for.
     sensorTimestamp: number
 
-    --- Where a dropped file or text came from, when the platform says.
+    --- Read-only. Reports where a dropped file or text came from when the
+    --- platform supplies a source.
     source: string
-    --- Clipboard formats on offer.
+    --- Read-only. Lists the clipboard formats on offer.
     mimeTypes: {string}
-    --- Whether the clipboard's new contents are this application's own.
+    --- Read-only. Reports whether the clipboard's new contents belong to this
+    --- application.
     owner: boolean
-    --- Whether an audio device is a recording device.
+    --- Read-only. Reports whether an audio device records input.
     recording: boolean
 
-    --- Window, display and user payloads, as SDL reports them. A user event's
+    --- Read-only. Reports the first window, display or user payload integer. A user event's
     --- code arrives in `data1`; the two data pointers beside it do not cross,
     --- since a pointer is not a value this vocabulary can carry.
     data1: integer
+    --- Read-only. Reports the second window, display or user payload integer.
     data2: integer
 
-    --- Numeric SDL type, set on every event and the only useful field on
+    --- Engine-owned. Stores the numeric platform event type and is the only
+    --- useful field on
     --- `unknown`.
+    --- Ordinary game code should ignore this field for known events.
     sdlType: integer
 end
 
---- One ECS event type per kind, to observe at address zero.
+--- Maps each event kind to an ECS event type observed at address zero.
 ---
 --- A game asks for the kinds it wants rather than for the stream:
---- `world:observe(0, events.on.dropFile, handler)` is called for dropped files
+--- `world:observe(0, events.on.dropFile, handler)` runs `handler` for dropped files
 --- and for nothing else. That is what a type per kind buys over one type
---- carrying the kind, where every subscriber is handed every kind and filters
+--- carrying the kind, where every subscriber receives every kind and filters
 --- it back out again.
 ---
 --- Written as a record rather than looked up by name, so a misspelled kind is
 --- a compile error on the key instead of an observer that is never called.
 --- `events.typeOf` is the same table for code holding a kind as a string.
 ---
---- The record an observer receives is the reused one, so the borrow rule is
+--- The converter reuses the record an observer receives, so the borrow rule is
 --- the one this module states everywhere: read it, or copy it with
 --- `events.copy`, but do not keep it.
 local record KindTypes
@@ -310,23 +344,26 @@ local record KindTypes
     audioDeviceFormatChanged: Event
     sensorUpdate: Event
     user: Event
-    --- An SDL event this build has no name for. Carries `sdlType` and nothing
-    --- else worth reading.
+    --- Read-only. Selects an event kind this build has no name for. Such an
+    --- event carries `sdlType` and nothing else worth reading.
     unknown: Event
 end
 
 local record events
-    --- One event, discriminated by `kind`. The record handed to a handler is
-    --- reused, so anything retaining one takes a copy through `events.copy`.
+    --- Read-only. Exposes the [`Event`](tealdoc:tecs.events.Event) type,
+    --- discriminated by `kind`. The converter reuses the record passed to a
+    --- handler, so anything retaining one takes a copy
+    --- through `events.copy`.
     Event: Event
-    --- Installed by a replay driver. Called instead of draining the host
-    --- queue, and expected to invoke the handler for each recorded event.
+    --- Caller-writable. Installs a replay driver in place of the host queue.
+    --- The driver invokes the handler for each recorded event.
+    --- @param handler Receives each event the replay source supplies.
     source: function(handler: function(Event))
 
-    --- One ECS event type per kind, to observe at address zero. See
-    --- `KindTypes`.
+    --- Read-only. Exposes one ECS event type per kind, to observe at address
+    --- zero. See `events.on`.
     on: KindTypes
-    --- The event type for a kind, or nil for a name this build does not know.
+    --- Returns the event type for a kind, or nil for an unknown name.
     ---
     --- What `on` is for code holding a kind it cannot spell in source, which
     --- is the conversion itself and the debug tools.
@@ -350,8 +387,7 @@ local StampCast <const> = "uint64_t *"
 --- wrong kind.
 local KINDS <const>: {integer: string} = {}
 
---- Kind name to the ECS event type it is observed through. The same tables
---- `events.on` names, reachable by a name that is only known at run time.
+-- Maps each kind name to the ECS event type that `events.on` exposes.
 local TYPES <const>: {string: Event} = {}
 
 --- Registers the event type for a kind.
@@ -486,7 +522,7 @@ function events.typeOf(kind: string): Event
     return TYPES[kind]
 end
 
---- Axis values arrive as signed 16-bit and are reported as -1..1.
+-- Converts signed 16-bit axis values to -1..1.
 local AXIS_SCALE <const> = 1.0 / 32767.0
 
 --- The direction a wheel event carries when the platform has natural
@@ -527,7 +563,7 @@ local INPUT <const>: {string: boolean} = {
     gamepadTouchpadMotion = true,
 }
 
---- Whether a kind carries player input rather than describing the platform.
+--- Reports whether a kind carries player input rather than platform state.
 function events.isInput(kind: string): boolean
     return INPUT[kind] == true
 end
@@ -549,8 +585,8 @@ local scratch: Event = {} as Event
 local touchWidth = 1.0
 local touchHeight = 1.0
 
---- Ticks per second on the counter the host stamps arrivals with. Read once,
---- since it is fixed for the life of the process.
+-- Ticks per second on the host's arrival counter. It remains fixed for the
+-- life of the process.
 local counterFrequency = 0.0
 
 --- Mouse identifiers the platform uses for events it generated from something
@@ -578,13 +614,9 @@ local function strings(array: loader.CValue, count: integer): {string}
     return out
 end
 
---- Fields the reused record must not carry over.
----
---- The kind decides which fields mean anything, and a stale number is only
---- read by code that ignored that. A stale string, table or flag is different:
---- it reads as present, and a handler that checks `event.text ~= nil` or
---- `event.eraser` would act on the previous event's payload. So the fields
---- that answer a question by existing are cleared every time.
+-- Clear presence-sensitive fields on the reused record. Stale numbers matter
+-- only to code that ignores `kind`, but stale strings, tables, and flags look
+-- present to otherwise-correct handlers.
 local function reset(event: Event)
     event.repeated = false
     event.synthetic = false
@@ -844,6 +876,9 @@ end
 --- boolean except the three lists, and those are freshly built per event
 --- rather than reused. Allocates, so this is for the events a recorder or a
 --- tool keeps and not for the stream.
+---
+--- @param event The borrowed event to copy.
+--- @return A new event record that the caller can retain.
 function events.copy(event: Event): Event
     local out: Event = {}
     for key, value in pairs(event as {string: any}) do
@@ -859,13 +894,18 @@ end
 --- Converts and dispatches a queue of SDL events, in arrival order.
 ---
 --- The host owns the queue and clears it; this only reads. A replay driver
---- installs `source` instead, which is handed the same handler and calls it
+--- installs `source` instead. The drain passes it the same handler, which it calls
 --- with recorded events.
 ---
 --- `arrivals` is the host's parallel array of performance counter readings,
 --- one per event, converted there from the stamp SDL put on each event as it
---- was produced. Given it, every converted event carries `arrival` in the
+--- entered the queue. Given it, every converted event carries `arrival` in the
 --- units `time.now` reports.
+---
+--- @param queue The host's contiguous SDL event array.
+--- @param count The number of events in `queue`.
+--- @param handler Receives each converted or replayed event.
+--- @param arrivals The optional performance counter reading for each queued event.
 function events.drain(queue: loader.CValue, count: integer, handler: function(Event), arrivals?: loader.CValue)
     local replay = events.source
     if replay ~= nil then
@@ -901,17 +941,17 @@ end
 --- can inject input without knowing SDL's layout. Only the fields a kind uses
 --- are read.
 ---
---- Payloads are filled for the key, mouse, wheel, pen, gamepad, device, pinch,
---- window and display kinds. Any other recognized kind is pushed carrying its
+--- This function fills payloads for the key, mouse, wheel, pen, gamepad, device, pinch,
+--- window and display kinds. It pushes any other recognized kind with its
 --- type and nothing else, which is what a kind whose payload nobody injects
 --- needs and is not what a caller expecting a full event would assume.
 ---
---- A wheel payload is written the way the platform writes one, so `flipped`
+--- The function writes a wheel payload the way the platform does, so `flipped`
 --- sets the direction and the axes beside it are left as given. The conversion
 --- then negates them, which is what a caller asking for a flipped scroll is
 --- asking to see: the round trip is the normalization, not the identity.
 ---
---- SDL stamps the timestamp, so a pushed event arrives ordered against real
+--- The platform stamps the timestamp, so a pushed event arrives ordered against real
 --- ones rather than ahead of them.
 --- @param kind One of `events.kinds()`. An unrecognized name raises.
 function events.push(kind: string, fields: Event)
@@ -1040,7 +1080,7 @@ function events.push(kind: string, fields: Event)
     sdl.check(C.SDL_PushEvent(holder[0]) as boolean, "SDL_PushEvent")
 end
 
---- Every kind this build recognizes, for tooling that enumerates them.
+--- Returns every kind this build recognizes.
 function events.kinds(): {string}
     local out: {string} = {}
     for _, name in pairs(KINDS) do

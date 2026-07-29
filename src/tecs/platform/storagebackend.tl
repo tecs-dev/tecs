@@ -1,64 +1,66 @@
---- The storage half of the platform seam: reaching a file, not finding one.
----
---- `adapter` names storage as a seam because a console's content is not a
---- directory tree. Half of that seam was already here, as `basePath` and
---- `prefPath`, which answer *where*. This is the other half, which answers
---- *how*, and without it the first half is a promise the engine cannot keep: a
---- platform can say its content lives at `/host0/title/` and every read of a
---- path under it still goes through `SDL_LoadFile`.
----
---- `filesystem` holds one of these and never reaches the FFI itself. A port
---- supplies one and touches nothing above it; the SDL implementation below is
---- the worked example, and the only thing in the storage layer that names an
---- SDL symbol.
----
---- ## Why a path is enough
----
---- SDL's own answer for a target whose content is not a filesystem is
---- `SDL_Storage`, and the objection to putting it behind a path-taking API is
---- that its paths are a different space: relative to a storage root, always
---- `/`-separated, never absolute. That objection dissolves once the roots are
---- the platform's, which they already are. Every path that reaches a backend
---- was built by resolving against `basePath` or `prefPath`, which the same
---- platform minted, so a port that answers `""` for its base and hands out
---- storage-relative paths receives exactly those paths back. The engine
---- concatenates and never interprets, which is why there is no virtual
---- filesystem here and no mount table.
----
---- A path the platform did not mint, one a user typed or one from an
---- absolute location, is passed through unchanged and the backend decides what
---- it means. On SDL that is the operating system's answer; on a port with no
---- filesystem it is a failure, which is the correct answer and not one this
---- layer should invent.
----
---- ## Why SDL's own implementation is not `SDL_Storage`
----
---- The SDL backend below calls `SDL_LoadFile`, `SDL_GlobDirectory` and their
---- neighbors directly, not `SDL_OpenFileStorage`. Storage has a readiness
---- model a path call does not: it opens immediately and is unusable until
---- `SDL_StorageReady` says so, which on a console can be after a mount or a
---- download completes. On a machine where every backing it can have is the
---- plain filesystem, a spec would only ever exercise the ready-immediately path
---- and would prove nothing about the model that is the reason to have it.
----
---- So `SDL_Storage` belongs to whichever backend needs it, which is the point
---- of the seam. A port whose content is a title storage writes those calls, its
---- readiness wait included, in a module the engine never sees.
----
---- ## What a port implements
----
---- Eight functions that take a path, two that open one for streaming, and two
---- that ask about the host. The eight are required and are called without
---- checking. `currentDirectory` and `userFolder` are optional and answer nil
---- with a reason when the platform has no such notion, which is already what
---- SDL answers for a folder a desktop does not have, so a caller that handled
---- SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
---- different sense: `filesystem` builds both out of `write` and `read` when a
---- backend leaves them out, so every caller has them and only the memory a
---- large file costs differs.
----
---- Nothing here validates its arguments. `filesystem` does that before it
---- delegates, so a port inherits it rather than repeating it.
+--[=[
+The storage half of the platform seam: reaching a file, not finding one.
+
+`adapter` names storage as a seam because a console's content is not a
+directory tree. Half of that seam was already here, as `basePath` and
+`prefPath`, which answer *where*. This is the other half, which answers
+*how*, and without it the first half is a promise the engine cannot keep: a
+platform can say its content lives at `/host0/title/` and every read of a
+path under it still goes through `SDL_LoadFile`.
+
+`filesystem` holds one of these and never reaches the FFI itself. A port
+supplies one and touches nothing above it; the SDL implementation below is
+the worked example, and the only thing in the storage layer that names an
+SDL symbol.
+
+## Path interface
+
+SDL's own answer for a target whose content is not a filesystem is
+`SDL_Storage`, and the objection to putting it behind a path-taking API is
+that its paths are a different space: relative to a storage root, always
+`/`-separated, never absolute. That objection dissolves once the roots are
+the platform's, which they already are. Every path that reaches a backend
+was built by resolving against `basePath` or `prefPath`, which the same
+platform minted, so a port that answers `""` for its base and hands out
+storage-relative paths receives exactly those paths back. The engine
+concatenates and never interprets, which is why there is no virtual
+filesystem here and no mount table.
+
+A path the platform did not mint, one a user typed or one from an
+absolute location, is passed through unchanged and the backend decides what
+it means. On SDL that is the operating system's answer; on a port with no
+filesystem it is a failure, which is the correct answer and not one this
+layer should invent.
+
+## SDL filesystem backend
+
+The SDL backend below calls `SDL_LoadFile`, `SDL_GlobDirectory` and their
+neighbors directly, not `SDL_OpenFileStorage`. Storage has a readiness
+model a path call does not: it opens immediately and is unusable until
+`SDL_StorageReady` says so, which on a console can be after a mount or a
+download completes. On a machine where every backing it can have is the
+plain filesystem, a spec would only ever exercise the ready-immediately path
+and would prove nothing about the model that is the reason to have it.
+
+So `SDL_Storage` belongs to whichever backend needs it, which is the point
+of the seam. A port whose content is a title storage writes those calls, its
+readiness wait included, in a module the engine never sees.
+
+## Port contract
+
+Eight functions that take a path, two that open one for streaming, and two
+that ask about the host. The eight are required and are called without
+checking. `currentDirectory` and `userFolder` are optional and answer nil
+with a reason when the platform has no such notion, which is already what
+SDL answers for a folder a desktop does not have, so a caller that handled
+SDL's nil handles a port's. `openWrite` and `openRead` are optional in a
+different sense: `filesystem` builds both out of `write` and `read` when a
+backend leaves them out, so every caller has them and only the memory a
+large file costs differs.
+
+Nothing here validates its arguments. `filesystem` does that before it
+delegates, so a port inherits it rather than repeating it.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

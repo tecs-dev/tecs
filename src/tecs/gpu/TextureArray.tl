@@ -1,24 +1,26 @@
---- A 2D array texture: many images, one binding.
----
---- This exists to collapse draws. Binding samplers per pipeline means one
---- texture is one draw, so a scene with fifty images would be fifty draws and
---- the instance buffer would have to be sorted by texture to make them
---- contiguous. An array turns the texture into a per-instance integer, which
---- gives back both the single draw and the freedom to lay instances out in
---- whatever order suits the producer.
----
---- Every layer shares one size and format, which is the constraint arrays
---- carry. What a caller sees is a sub-rect of a layer rather than a layer, so
---- where inside one an image landed is this module's business alone. `replace`
---- is what that indirection buys: new pixels can be written over an image at
---- the texels it already occupies, and every instance sampling it goes on
---- naming the right ones.
----
---- Packing is what makes that indirection worth having. A layer holds one image
---- by default, which costs a whole cell for a sixteen-pixel icon and puts a
---- hard ceiling on how many distinct images a process can hold. With `pack` on,
---- a shelf allocator fits many images into each layer and the ceiling becomes
---- the array's area rather than its layer count.
+--[=[
+A 2D array texture: many images, one binding.
+
+This exists to collapse draws. Binding samplers per pipeline means one
+texture is one draw, so a scene with fifty images would be fifty draws and
+the instance buffer would have to be sorted by texture to make them
+contiguous. An array turns the texture into a per-instance integer, which
+gives back both the single draw and the freedom to lay instances out in
+whatever order suits the producer.
+
+Every layer shares one size and format, which is the constraint arrays
+carry. What a caller sees is a sub-rect of a layer rather than a layer, so
+where inside one an image landed is this module's business alone. `replace`
+is what that indirection buys: new pixels can be written over an image at
+the texels it already occupies, and every instance sampling it goes on
+naming the right ones.
+
+Packing is what makes that indirection worth having. A layer holds one image
+by default, which costs a whole cell for a sixteen-pixel icon and puts a
+hard ceiling on how many distinct images a process can hold. With `pack` on,
+a shelf allocator fits many images into each layer and the ceiling becomes
+the array's area rather than its layer count.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

@@ -1,8 +1,10 @@
---- The tools every build exposes.
----
---- Deliberately few. A game registers what its own world needs; these are the
---- ones that are true of any build and that an agent reaches for before it
---- knows anything else: is it alive, what is it, and what has it been saying.
+--[=[
+The tools every build exposes.
+
+Deliberately few. A game registers what its own world needs; these are the
+ones that are true of any build and that an agent reaches for before it
+knows anything else: is it alive, what is it, and what has it been saying.
+]=]
 
 local data <const> = require("tecs.data")
 local sdl <const> = require("tecs.ffi.sdl3")

@@ -1,37 +1,84 @@
---- Materials: what a fragment is, decided per instance.
----
---- A material is a `.glsl` file under `materials/` implementing the contract in
---- `shaders/include/material.glsl`. Every material found is compiled into the
---- same fragment shader, its `material` function renamed, and a generated
---- dispatch selects between them by an id carried on the instance.
----
---- ```teal
---- tecs.gfx.materials.addRoot("game/materials/")
----
---- world:spawn(
----     tecs.Transform(120, 80, 0, 1, 0, 64, 64),
----     tecs.gfx.Material(tecs.gfx.materials.id("rounded"), 0.25),
----     tecs.gfx.Tint(0.2, 0.6, 1.0, 1.0),
----     tecs.gfx.Renderable()
---- )
---- ```
----
---- A game's own root is added before anything asks for an id, since the search
---- happens once and the id is what the instance carries.
----
---- One shader rather than one per material, because the alternative is a
---- pipeline and a draw call per material, and the whole point of the unified
---- batch is that the scene is one draw. What it costs is fragment divergence
---- where adjacent instances differ, which archetype-contiguous layout already
---- keeps small: entities of a kind cluster.
----
---- The default material always takes id zero, because an entity with no
---- Material component writes a zero and has to mean something specific. The
---- rest are numbered by sorted name, so the same files always produce the same
---- numbering. Adding a material renumbers the ones after it alphabetically,
---- which is why an id is a within-a-build answer and nothing stores one: a
---- name is what a material is identified by anywhere the number has to
---- outlive the set of files it was assigned from.
+--[=[
+Material selection, shader authoring, built-ins, and reload rules.
+
+A material decides a fragment's color, coverage, surface normal, and lighting
+response. Resolve its id by name when creating a
+[`Material`](tealdoc:tecs.components.Material) component:
+
+```teal
+tecs.gfx.materials.addRoot("game/materials/")
+
+world:spawn(
+    tecs.Transform(120, 80, 0, 1, 0, 64, 64),
+    tecs.gfx.Material(tecs.gfx.materials.id("rounded"), 0.25),
+    tecs.gfx.Tint(0.2, 0.6, 1.0, 1.0),
+    tecs.gfx.Renderable()
+)
+```
+
+Add game roots before loading shaders or resolving ids. An entity without a
+[`Material`](tealdoc:tecs.components.Material) uses `textured` at id zero. Remaining ids follow
+sorted material names. Adding or removing a file may renumber them, so
+persisted state stores a name and resolves it again.
+
+`Material.param` supplies one scalar from zero to one. Built-ins use it as
+follows:
+
+- `ellipse` uses the height fraction.
+- `ring` uses the inner-radius fraction.
+- `rounded` uses the corner-radius fraction.
+- `frame` and `line` use a thickness fraction.
+- `capsule` uses a height fraction.
+- `pie` uses a full-turn sweep fraction.
+- `star` uses valley depth.
+- `glyph` uses the distance-field range.
+- `textured`, `circle`, and `triangle` ignore it.
+
+## Shader contract
+
+A `.glsl` file under a material root defines one `material` function:
+
+```glsl
+MaterialOutput material(MaterialInput frag) {
+    MaterialOutput result = materialDefaults();
+    float radius = mix(0.02, 0.20, frag.param);
+
+    result.albedo = texture(images, frag.uv) * frag.color;
+    result.coverage = -sdRoundedBox(
+        frag.local,
+        vec2(0.5),
+        radius
+    );
+    result.lit = 1.0;
+    return result;
+}
+```
+
+`frag.local` runs from -0.5 to 0.5 inside the quad. `frag.uv`, `frag.color`,
+and `frag.param` carry the image coordinates, tint, and instance parameter.
+Start from `materialDefaults`, then set `albedo`, `normal`, `lit`, and
+`coverage`.
+
+Coverage above zero keeps a fragment; zero or below discards it. The deferred
+lane does not blend partial coverage. A tint alpha below one routes the
+instance to the blended lane instead.
+
+## Reloads
+
+`reload` accepts edits to existing material bodies. It refuses additions,
+removals, and renames because those changes can renumber live components. A
+refusal restores the previous set. Packaged builds cannot compile changed
+material source at runtime.
+]=]
+-- Implementation details:
+-- Every material function is renamed and folded into one generated fragment
+-- shader dispatch. One dispatch preserves the renderer's single indirect draw
+-- but may diverge when adjacent fragments select different materials.
+-- Archetype-contiguous instance layout keeps similar entities clustered.
+--
+-- Shader-pack construction installs the same sorted material set before
+-- compiling release shaders. Development reload rebuilds the dispatch and
+-- renderer pipelines together.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local content <const> = require("tecs.platform.content")
@@ -47,36 +94,32 @@ local DISPATCH <const> = "materials.glsl"
 --- is what "no material" draws as.
 local DEFAULT <const> = "textured"
 
---- The material set and the dispatch compiled from it.
----
---- Reads `materials/` in every root and publishes one generated include that
---- the fragment shader selects through. A game names a material and asks `id`
---- for the number an instance carries; the number itself is a within-a-build
---- answer and nothing should store one.
 local record materials
-    --- One material: its name, the id this build gave it, and its source.
+    --- Describes one material by name, build-local id, and source.
     record Material
-        --- The file's name without its extension, and how a game asks for it.
+        --- Read-only. Reports the file name without its extension, which a
+        --- game uses to request the material.
         name: string
-        --- What an instance carries to select this material. Assigned by
+        --- Read-only. Reports the id an instance carries to select this material. Assigned by
         --- `install` from sorted order, so it holds only for the set of files
         --- that were present when the dispatch was built.
         id: integer
-        --- The material's GLSL, as read. Renamed on the way into the dispatch
+        --- Read-only. Contains the material's GLSL as read. Renamed on the way into the dispatch
         --- rather than here, so this is still the text the file holds.
         source: string
     end
 
-    --- Name of the material an entity with no Material component draws as.
+    --- Read-only. Reports the material name used by entities without a
+    --- Material component.
     defaultName: string
 
     --- Adds a directory to search before the ones already known, so a game's
     --- materials are found alongside the engine's.
     ---
-    --- @param path Searched ahead of every root already added, so a game's file
-    ---     of a given name beats the engine's. A trailing slash is added when
-    ---     it is missing. The directory is not read here: this only puts the
-    ---     next `install` back on.
+    --- @param path The function searches this directory before every existing
+    ---     root, so a game's file of a given name beats the engine's. It adds a
+    ---     trailing slash when needed. This call does not read the directory;
+    ---     it schedules the next `install`.
     addRoot: function(path: string)
 
     --- Supplies a material from memory rather than a file.
@@ -85,8 +128,7 @@ local record materials
     --- file of the same name in any root, and renumbers the set on the next
     --- `install` as adding a file would.
     ---
-    --- @param name The name a game asks for, and what a file would have been
-    ---     called without its extension.
+    --- @param name The name a game asks for, matching a file stem.
     --- @param source The material's GLSL, taken as given and renamed only on
     ---     the way into the dispatch.
     define: function(name: string, source: string)
@@ -101,47 +143,45 @@ local record materials
 
     --- Re-reads every material and republishes the dispatch.
     ---
-    --- Refused when the set of materials has changed, and this is the whole
-    --- reason there is a rule rather than a re-read. Ids come from sorted name
-    --- order, so a file appearing or disappearing renumbers every material
-    --- after it alphabetically, and a `Material` component in a live world
-    --- holds a number that was resolved before the change. Editing a body
-    --- reloads; adding or removing one is a restart.
+    --- This function refuses a changed material set. Ids come from sorted name
+    --- order, so a file appearing or disappearing renumbers every later
+    --- material. A live [`Material`](tealdoc:tecs.components.Material) component still holds
+    --- the number resolved before that change. Editing a body reloads; adding
+    --- or removing one requires a restart.
     ---
-    --- Materials supplied through `define` are kept as they are: those came
-    --- from memory rather than a root, and nothing on disk has an opinion about
-    --- them.
+    --- The module retains materials supplied through `define` because they came
+    --- from memory rather than a root.
     ---
-    --- @return Whether the dispatch was rebuilt.
-    --- @return Why not, and nil whenever the first answer is true.
+    --- @return Returns true when the function rebuilds the dispatch.
+    --- @return Returns the refusal reason, or nil after a rebuild.
     reload: function(): boolean, string
 
-    --- The id a material is dispatched by, or an error naming what was found.
+    --- Returns a material id or raises an error that names the available
+    --- materials.
     ---
-    --- Resolved by name so a game never writes a number: the numbering depends
-    --- on which files exist, and hard-coding one would break the moment a
-    --- material was added ahead of it alphabetically.
+    --- Resolve by name because the file set determines numbering. Adding an
+    --- earlier material may change later ids.
     ---
     --- @param name The material's file name without its extension.
     --- @return The id an instance carries to select it. Raises on a name
-    ---     nothing has, listing what there was, because a misspelled material
-    ---     is a build mistake rather than a runtime condition.
+    ---     nothing has. The error lists available names because a misspelled
+    ---     material indicates a build mistake, not a runtime condition.
     id: function(name: string): integer
 
-    --- The id a material is dispatched by, or nil when nothing has that name.
+    --- Returns a material id, or nil when no material has that name.
     ---
     --- What `id` is built on, for a caller with somewhere better to put the
-    --- refusal than an error raised from here. Reading a `Material` back out of
-    --- a snapshot is that caller: the name it holds is a fact about the file
+    --- refusal than an error raised from here. Reading a
+    --- [`Material`](tealdoc:tecs.components.Material) back out of a snapshot is that
+    --- caller: the name it holds is a fact about the file
     --- rather than about the call site, and the message says so.
     ---
     --- @param name The material's file name without its extension.
-    --- @return The id, or nil for a name nothing has. Installs first, so a name
-    ---     is resolved against the materials on disk rather than against
-    ---     whatever had been read so far.
+    --- @return Returns the id, or nil for an unknown name. The function
+    ---     installs first and resolves against the complete on-disk set.
     find: function(name: string): integer
 
-    --- The material an id dispatches to, or nil when nothing has that id.
+    --- Returns the material name represented by an id, or nil.
     ---
     --- The reverse of `id`, and what a snapshot writes in place of the number.
     --- Nothing is kept in step to answer it: `order` already holds the names at
@@ -153,11 +193,11 @@ local record materials
     --- @return The material's name, or nil when nothing has that id.
     name: function(id: integer): string
 
-    --- Every material name, in id order.
+    --- Returns every material name in id order.
     ---
-    --- The default first at id zero, then the rest alphabetically. Not sorted
-    --- as a whole: the default's place is fixed by what a zero on an instance
-    --- has to mean, wherever its own name would otherwise fall.
+    --- The default occupies id zero, followed by the other names
+    --- alphabetically. The module fixes the default's position because zero on
+    --- an instance must select it.
     ---
     --- @return A fresh list the caller owns, indexed from one while the ids it
     ---     describes count from zero.

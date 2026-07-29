@@ -1,187 +1,59 @@
---- The operating system, asked directly: what this build can do here, the
---- clipboard, another program, and the services a desktop offers.
----
---- One module because none of these is a subsystem a game builds on. Each is a
---- few calls a game makes when a player asks for something, and each was too
---- small to be a name of its own: a game copying a path to the clipboard and
---- then opening a folder in the file manager was naming three modules to do one
---- thing. There is deliberately no `tecs.platform`, since that is where this
---- tree keeps an implementation category rather than a task a game performs.
----
---- Names are qualified by what they act on, because one module makes a bare
---- `text`, `data`, `clear`, `run` or `update` mean nothing on its own.
----
---- ```teal
---- local run <const> = tecs.system.runProcess({args = {"git", "rev-parse", "HEAD"}})
----
---- -- Once a frame, until the child answers.
---- tecs.system.updateProcesses()
---- if run.status == "ready" and run.value:succeeded() then
----     tecs.system.setClipboardText(run.value.output)
---- end
---- ```
----
---- ## Capabilities
----
---- Read rather than inferred. Selecting behavior from `ffi.os` guesses: it
---- cannot tell a build that linked a shader compiler from one that did not, or
---- an interpreter-only LuaJIT from a jitting one, and both distinctions change
---- what the engine is allowed to attempt.
----
---- ## Clipboard
---- `events.clipboardUpdate` reports that the clipboard changed and lists the
---- mime types now on offer. This is the other half: what those bytes are, and
---- how to put text there.
----
---- Nothing here is cached. The clipboard belongs to the desktop rather than to
---- this process, so a value read a frame ago may already be wrong, and
---- `clipboardUpdate` is the only invalidation there is.
----
---- ## Ownership of what SDL returns
----
---- Every read hands back an allocation the caller frees, and a failed read
---- hands back an empty string rather than nothing, so the free is owed on that
---- case too. `loader.toString` copies and does not free, which is the right
---- converter and only half the job; the pairing lives in `take` here rather
---- than at each call site, because a read that forgot would leak once per
---- paste and nothing would point at the clipboard as the cause.
----
---- ## Offering bytes that are not text
----
---- `setText` is the whole write surface, and SDL copies the string it is
---- given, so the value's lifetime is SDL's from the moment the call returns.
----
---- Offering an arbitrary mime type is the one clipboard entry point that works
---- the other way round. `SDL_SetClipboardData` takes no copy: it retains a
---- callback and calls it when some other application asks for the bytes, which
---- may be long after the call returned and is a moment this process does not
---- choose. In Lua that is an FFI callback pinned for the lifetime of the offer
---- and entered from wherever SDL fulfils the request, and `physics.TaskPool`
---- already records why this engine keeps its callbacks native rather than
---- taking that bet. Reading an arbitrary mime type carries none of it, so
---- `mimeTypes`, `hasData` and `data` are here and the offer side is not.
----
---- ## Primary selection
----
---- A second, independent clipboard: X11 and Wayland fill it with whatever was
---- last selected and paste it on a middle click, with no copy step at all. It
---- is not a flavour of the clipboard and does not track it.
----
---- Elsewhere there is no such concept. SDL does not fail there; it keeps the
---- value in the video device, so `setPrimary` succeeds, `primary` reads back
---- what this process wrote, and nothing outside the process ever sees it. Read
---- it as a hint that may be answered locally rather than as a shared surface.
----
---- ## With no video
----
---- The clipboard is part of SDL's video subsystem and every entry point fails
---- with "Video subsystem has not been initialized" without it. This module
---- answers the same shape without calling SDL at all: `available` is false,
---- reads are empty, writes fail. A headless tool gets an answer rather than a
---- crash, and SDL's error string is left holding whatever last set it instead
---- of being overwritten by a question that was never going to be answered.
----
---- ## Encoding
----
---- Clipboard text is UTF-8 and passes through byte for byte. Line endings are
---- not normalized, so text copied on Windows arrives as CRLF and stays CRLF,
---- and nothing is trimmed from either end. Text stops at the first NUL,
---- because that is what terminates the C string SDL returns and what every
---- producer of clipboard text intends; `data` uses the length SDL reports
---- instead, so a blob keeps its NULs.
----
---- ## Child processes
----
---- A command line tool, a resource pipeline or an asset build wants to shell
---- out, and a game wants to do it between two frames rather than instead of
---- them. `SDL_ReadProcess` and a blocking `SDL_WaitProcess` both hold the
---- calling thread for as long as the child runs, so neither is called on the
---- main thread. A run goes out to a worker, the loop pumps, and a handle
---- resolves; that is the same shape `tecs.assets` uses for a decode, for the
---- same reason.
----
---- ## One shape: run to completion
----
---- `proc.runProcess` serves the child whose output you want when it finishes:
---- `git rev-parse`, `sips`, a shader translator, a packer. The result arrives
---- whole, once, with the exit status beside it.
----
---- It deliberately does not serve the long-running child whose output you want
---- as it appears. That is a different API, not a flag on this one: it has to
---- answer what a chunk is (bytes, or lines, with a partial line held back),
---- what happens when a chatty child outruns the reader, and how two streams
---- interleave once they are delivered separately over time. Every one of those
---- is a guess here and a requirement there. The worker below already reads
---- incrementally, because that is what keeps it interruptible and what keeps a
---- child from filling a pipe and stopping, so a streaming variant grows from
---- that seam rather than replacing it. Until it exists, bound what you run:
---- output is accumulated whole, so a child that prints forever is a child that
---- allocates forever, and `timeoutMs` is the answer.
----
---- ## What crosses the worker boundary
----
---- Nothing but the request and the answer. The child is created, fed, polled,
---- read, killed and destroyed entirely on the worker; what comes back is
---- bytes, an exit code and a pid.
----
---- An `SDL_Process` could cross the way a decoded surface does, as an address
---- with ownership attached, and it must not. SDL documents `SDL_WaitProcess`,
---- `SDL_KillProcess`, `SDL_ReadProcess` and `SDL_DestroyProcess` as *not*
---- thread safe, and unlike a surface a process is not a block of memory whose
---- ownership can simply move: it is a pid that may be reaped exactly once and
---- a set of pipe descriptors. Two states holding it means two states able to
---- reap it, and the second reap lands on whatever pid the kernel has since
---- handed out. The one reason to move it would be to call something from the
---- main thread, and every call worth making there is one of the four above.
----
---- So the address stays on the worker and the caller gets a copy of the
---- output. That copy is the price, and it is the right one at this size: a
---- decoded 4K texture is sixty-four megabytes and copying it twice is the
---- frame, while `git rev-parse` answers forty-one bytes and a translator's
---- diagnostics are kilobytes.
----
---- ## Killing, and shutdown
----
---- Because every process call belongs to the worker, the main thread asks
---- rather than acts: `Proc:kill` queues a request the worker picks up on its
---- next poll. That only works if the worker is never parked in C, which is why
---- it polls `SDL_WaitProcess` with `block` false and reads the child's pipes
---- through the non-blocking streams SDL hands out, instead of calling
---- `SDL_ReadProcess` and disappearing for the child's lifetime.
----
---- `proc.shutdownProcesses` therefore kills rather than detaching or reaping. Reaping
---- alone has no bound, and a child that never exits parks teardown; detaching
---- leaves a thread running inside a library the process is about to unmap,
---- which is the failure `loader`'s `RTLD_NODELETE` already exists for. Killing
---- is gentle first and forced after a grace period, and a forced kill is not
---- refusable, so the join that follows is bounded by the kernel reaping the
---- child.
----
---- ## Failure is a status
----
---- A program that cannot be started settles its future at `"failed"` with
---- `error` set, rather than raising. A caller that shells out is already
---- branching on the exit code, and a spawn that failed is one more branch on
---- the same value; a raise would be the only path in the module that has to be
---- wrapped.
----
---- An exit code is not a failure. A child that ran and exited 1 settles
---- `"ready"`, because the run did what it was asked to and the code is the
---- answer rather than an error; `Result:succeeded` is the separate question.
---- Reading that the other way would make every non-zero exit propagate as a
---- failure through `map`, which is wrong for everything that shells out to a
---- tool whose exit code is data. `"failed"` means the child never started and
---- `"canceled"` means this process ended it, through `kill`, a timeout, or
---- shutdown.
----
---- ## Headless
----
---- SDL's process API needs no subsystem initialized, and nothing here
---- initializes one. No process call is made on this side: the whole binding is
---- inside the worker's source, so a state that only ever queues runs starts no
---- child of its own. That is the point, since this is one of the few
---- subsystems more useful without a window than with one; it works under a
---- plain interpreter with no video, no device and no host.
+--[=[
+Runtime capabilities, clipboard access, child processes, and desktop services.
+
+## Capabilities
+
+Ask the installed build instead of inferring support from a target name.
+`capabilities` distinguishes targets that share an operating system but differ
+in JIT, worker, shader, storage, or device support.
+
+## Clipboard
+
+The clipboard belongs to the desktop and can change between frames.
+`events.clipboardUpdate` reports a change; read the current value when the
+event arrives or when the user requests paste. Text stays UTF-8, keeps its line
+endings, and stops at the first NUL. `clipboardData` preserves NULs.
+
+Headless builds report the clipboard as unavailable. Primary selection remains
+independent of the clipboard. On platforms without a shared primary selection,
+reads may return only the value this process wrote.
+
+## Child processes
+
+`runProcess` runs the child on a worker and returns immediately. Pump
+`updateProcesses` once per frame until the future settles:
+
+```teal
+local run <const> = tecs.system.runProcess({
+    args = {"git", "rev-parse", "HEAD"},
+    timeoutMs = 2000,
+})
+
+tecs.system.updateProcesses()
+if run.status == "ready" and run.value:succeeded() then
+    tecs.system.setClipboardText(run.value.output)
+elseif run.status == "failed" then
+    print(run.error)
+end
+```
+
+A child that exits nonzero still settles `"ready"`; `succeeded` checks its exit
+code. `"failed"` means the child never started. A timeout, explicit kill, or
+shutdown settles `"canceled"`.
+
+The result contains complete output, not a stream. Set `timeoutMs` for a
+command that may run or print without bound.
+]=]
+-- Implementation details:
+-- Clipboard reads copy SDL allocations before freeing them. Arbitrary MIME
+-- writes stay out of the public surface because SDL retains a producer
+-- callback and may invoke it from a thread LuaJIT did not create. Headless
+-- checks avoid calling clipboard entry points before SDL video starts.
+--
+-- The worker owns every SDL process handle because SDL does not make process
+-- operations thread-safe. It polls waits and pipes without blocking so kill
+-- requests remain prompt. Shutdown asks children to exit, forces them after
+-- the grace period, and copies only output, pid, and exit code back to Lua.
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -201,171 +73,186 @@ local K <const> = sdl.K
 local D <const> = loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "dialogs")
 local VIDEO <const> = sdl.K.SDL_INIT_VIDEO
 
+--- Describes one preferred language and country.
 local record Locale
-    --- ISO 639 language code, such as `"en"`.
+    --- Read-only. Contains an ISO 639 language code, such as `"en"`.
     language: string
-    --- ISO 3166 country code, such as `"US"`, or an empty string when the
+    --- Read-only. Contains an ISO 3166 country code, such as `"US"`, or an empty string when the
     --- platform names only a language.
     country: string
 end
 
+--- Describes the current power source and remaining battery.
 local record Power
-    --- `"unknown"`, `"onBattery"`, `"noBattery"`, `"charging"`,
+    --- Read-only. Reports `"unknown"`, `"onBattery"`, `"noBattery"`, `"charging"`,
     --- `"charged"` or `"error"`.
     state: string
-    --- Seconds of battery life remaining, or -1 when unavailable.
+    --- Read-only. Reports seconds of battery life remaining, or -1 when
+    --- unavailable.
     seconds: integer
-    --- Charge percentage in 0..100, or -1 when unavailable.
+    --- Read-only. Reports charge percentage in 0..100, or -1 when unavailable.
     percent: integer
 end
 
+--- Describes one file-type filter in a native dialog.
 local record DialogFilter
-    --- Label shown beside the filter, such as `"Images"`.
+    --- Caller-writable. Sets the label shown beside the filter, such as
+    --- `"Images"`.
     name: string
-    --- Semicolon-separated extensions, such as `"png;jpg;jpeg"`.
+    --- Caller-writable. Sets semicolon-separated extensions, such as
+    --- `"png;jpg;jpeg"`.
     pattern: string
 end
 
+--- Configures a native file or folder dialog.
 local record DialogOptions
+    --- Caller-writable. Sets the window that owns the dialog.
     window: Window
+    --- Caller-writable. Sets the available file-type filters.
     filters: {DialogFilter}
+    --- Caller-writable. Sets the initial file or folder. Omit it to let the
+    --- platform choose.
     defaultLocation: string
+    --- Caller-writable. Allows the user to select more than one path.
     multiple: boolean
 end
 
+--- Contains the result of a completed native dialog.
 local record DialogResult
-    --- Selected paths. Empty when the user canceled.
+    --- Read-only. Contains selected paths. It is empty when the user canceled.
     paths: {string}
-    --- One-based selected filter, or zero when no filter applies.
+    --- Read-only. Reports the one-based selected filter, or zero when no
+    --- filter applies.
     filter: integer
+    --- Read-only. Reports whether the user canceled the dialog.
     canceled: boolean
 end
 
---- What this build of the engine can do on this target.
+--- Describes what this build can do on the current target.
 local record Capabilities
-    --- Platform name as SDL reports it, such as "macOS" or "Android". A
+    --- Read-only. This is the platform name, such as "macOS" or "Android". A
     --- licensed port answers with its own name instead, since everything here
     --- describes the platform actually installed.
     target: string
-    --- CPU architecture LuaJIT was built for.
+    --- Read-only. This is the CPU architecture this build targets.
     architecture: string
 
-    --- Whether machine code is being generated. False on a target that
-    --- forbids it, where the interpreter runs instead. Independent of `ffi`,
-    --- which is required everywhere.
+    --- Read-only. This reports whether the runtime generates machine code.
+    --- False on a target that requires interpretation.
     jit: boolean
-    --- Always true. The engine has no path that does not use the FFI, so a
-    --- build without it does not run at all rather than running degraded.
+    --- Read-only. This is always true because every supported build requires
+    --- the FFI.
     ffi: boolean
 
-    --- Whether a library can be loaded by name at run time. False where every
-    --- library is linked into the executable.
+    --- Read-only. Reports whether a library can load by name at run time. It is false where every
+    --- build links every library into the executable.
     dynamicLibraries: boolean
-    --- Whether development-time content reload is present in this build.
+    --- Read-only. Reports whether this build supports development-time content reload.
     --- Named independently of any one kind the watcher reloads.
     hotReload: boolean
-    --- Whether shaders can be compiled from source at run time.
+    --- Read-only. Reports whether this build can compile shaders from source
+    --- at run time.
     runtimeShaders: boolean
-    --- Whether shaders are being read from a packaged artifact. Independent of
+    --- Read-only. Reports whether the engine reads shaders from a packaged artifact. Independent of
     --- `runtimeShaders`: a development build may have both, and a release has
     --- only this.
     packagedShaders: boolean
-    --- Shader formats this target consumes. One entry, since a build supplies
+    --- Read-only. Lists the shader formats this target consumes. It contains one entry, since a build supplies
     --- one format.
     shaderFormats: {string}
 
-    --- Whether a touch device is attached right now. A property of the machine
+    --- Read-only. Reports whether the machine currently has a touch device. This describes the machine
     --- rather than of the target: a desktop with a touchscreen has one.
     touch: boolean
-    --- Always true. Every target reaches gamepads through the same subsystem,
-    --- so what varies is whether one is plugged in, which `Input:gamepads`
-    --- answers.
+    --- Read-only. Reports true because every target reaches gamepads through the same subsystem,
+    --- so only the connected devices vary, which the `gamepads`
+    --- method on [`Input`](tealdoc:tecs.input.Input) answers.
     gamepad: boolean
-    --- Whether the device itself carries a gyroscope or an accelerometer. Says
-    --- nothing about a gamepad's sensors, which `Gamepad:hasSensor` answers
-    --- per device.
+    --- Read-only. Reports whether the device carries a gyroscope or an accelerometer. This says
+    --- nothing about a gamepad's sensors, which `hasSensor` on
+    --- [`Gamepad`](tealdoc:tecs.input.Gamepad) answers per device.
     sensors: boolean
-    --- Whether work can be run off the main thread.
+    --- Read-only. Reports whether work can run off the main thread.
     workers: boolean
-    --- Logical cores, for sizing a worker pool.
+    --- Read-only. Reports the number of logical cores for sizing a worker pool.
     cores: integer
 
-    --- Always true. Every target has somewhere to write, and
+    --- Read-only. Reports true because every target has somewhere to write, and
     --- `filesystem.preferencePath` is where: the field exists so a caller can
     --- ask rather than assume, not because a target answers no.
     writableStorage: boolean
 end
 
---- What a game reaches through `tecs.system`: capabilities, the clipboard,
---- child processes, URLs, locales, power, message boxes and native file and
---- folder dialogs.
 local record system
-    --- What this build of the engine can do on this target.
+    --- Describes what this build can do on this target.
     type Capabilities = Capabilities
 
-    --- One language the user prefers, in order of preference.
+    --- Describes one language the user prefers.
     type Locale = Locale
 
-    --- What the machine is running on, and how much of it is left.
+    --- Describes the machine's power source and remaining charge.
     type Power = Power
 
-    --- One entry in a dialog's file-type filter.
+    --- Describes one file-type filter.
     type DialogFilter = DialogFilter
 
-    --- What a dialog is opened with.
+    --- Describes dialog configuration.
     type DialogOptions = DialogOptions
 
-    --- What the user chose, or that they chose nothing.
+    --- Describes a completed dialog.
     type DialogResult = DialogResult
-    --- What to run, and what the child inherits.
+    --- Configures a child process and what it inherits.
     record ProcessOptions
-        --- The program and its arguments; `args[1]` is the program. A name
-        --- without a separator is resolved against `PATH`.
+        --- Caller-writable. Sets the program and its arguments; `args[1]` is the program. A name
+        --- without a separator resolves against `PATH`.
         args: {string}
-        --- Working directory for the child. Omitted inherits this process's.
+        --- Caller-writable. Sets the child's working directory. Omitted
+        --- inherits this process's directory.
         cwd: string
-        --- Environment variables to set. Applied over this process's
+        --- Caller-writable. Sets environment variables over this process's
         --- environment, or over an empty one when `clearEnv` is true.
         --- Omitted, and with `clearEnv` unset, the child inherits everything.
         env: {string: string}
-        --- Start the child's environment empty rather than inherited, so
+        --- Caller-writable. Starts the child's environment empty rather than inherited, so
         --- `env` is the whole of what it sees. Optional.
         clearEnv: boolean
-        --- Fold the child's error output into `output` instead of keeping it
+        --- Caller-writable. Folds the child's error output into `output` instead of keeping it
         --- in `errorOutput`. Optional; separate by default, because a tool's
         --- diagnostics interleaved into its output corrupt anything parsing
         --- that output, and the diagnostics are what you want when it fails.
         mergeStderr: boolean
-        --- Bytes written to the child's standard input, which is closed once
+        --- Caller-writable. Sets bytes written to the child's standard input, which closes once
         --- they are through. Omitted closes it immediately, so a child reading
         --- to end of input sees one rather than waiting. Optional.
         input: string
-        --- Kill the child forcibly after this many milliseconds. Omitted lets
+        --- Caller-writable. Kills the child forcibly after this many milliseconds. Omitted lets
         --- it run as long as it likes. Optional.
         timeoutMs: integer
     end
 
-    --- What a child that ran leaves behind.
+    --- Contains the result of a completed child process.
     ---
     --- Everything here is meaningless before the child ends, which is why none
-    --- of it is on the future: a run in flight is a `Future<ProcessResult>` reading
+    --- of it is on the future: a run in flight is a
+    --- [`Future`](tealdoc:tecs.Future)`<`[`ProcessResult`](tealdoc:tecs.system.ProcessResult)`>` reading
     --- "pending" and a run that ended is the same future carrying one of
     --- these. The one thing worth knowing in between is the child's process id,
     --- and `processResult` answers that from the runner's own bookkeeping.
     record ProcessResult
-        --- The program and its arguments, as given.
+        --- Read-only. Contains the program and its arguments as given.
         args: {string}
-        --- The child's process id.
+        --- Read-only. Reports the child's process id.
         pid: integer
-        --- The child's exit code, or the negated signal that ended it.
+        --- Read-only. Reports the child's exit code, or the negated signal that
+        --- ended it.
         exitCode: integer
-        --- Everything the child wrote to standard output.
+        --- Read-only. Contains everything the child wrote to standard output.
         output: string
-        --- Everything it wrote to standard error, or "" when `mergeStderr`
+        --- Read-only. Contains everything the child wrote to standard error, or "" when `mergeStderr`
         --- folded that into `output`.
         errorOutput: string
 
-        --- Whether the child reported success.
+        --- Reports whether the child returned exit code zero.
         ---
         --- A question about the answer rather than about whether there is one,
         --- which is why it is here and not a status: a result exists exactly
@@ -379,99 +266,86 @@ local record system
 
     --- Runs a program and answers a future for it, immediately.
     ---
-    --- Nothing here blocks. The future reads "pending" until `updateProcesses`, or
-    --- a `wait` on it, takes the worker's answer.
+    --- Nothing here blocks. The future reads "pending" until
+    --- `updateProcesses`, or a `wait` on it, takes the answer.
     ---
-    --- @param options Read here and sent to the worker, so a later edit to the
-    ---     same table does not reach the child. Starting the runner is part of
-    ---     this call when nothing has yet.
+    --- @param options Copied by this call, so later edits to the same table do
+    ---     not reach the child. The first call also starts the process runner.
     --- @return A future that settles "ready" with the result when the child
     ---     ends, however it ended: a non-zero exit is still "ready", and
     ---     `succeeded` is what distinguishes them. It settles "failed" only
-    ---     when the child could not be started, and "canceled" when it was
-    ---     killed.
+    ---     when the operating system cannot start the child, and "canceled"
+    ---     when Tecs kills it.
     runProcess: function(options: ProcessOptions): Future<ProcessResult>
 
-    --- The record a run fills in, whatever became of it.
+    --- Returns the record a run fills in.
     ---
     --- The same object the future carries on "ready", reachable in the two
     --- cases where the future does not carry it. Before the child ends, so
     --- `pid` can be read as soon as it has started, which is the one thing
     --- about a run that means anything before there is an answer. And after a
-    --- child was killed, which settles "canceled" with no value but does not
+    --- Tecs killed the child, which settles "canceled" with no value but does not
     --- throw away what the child managed to say first.
-    ---
-    --- The runner's bookkeeping rather than the caller's, which is why it is a
-    --- function here rather than a field on the future: a future carries no
-    --- fields of any subsystem's own.
     ---
     --- Nil for a run that never started, which has nothing to report, and for
     --- anything that is not a run from here.
     ---
-    --- @param run A future `runProcess` handed out. Any other future answers nil
+    --- @param run A [`Future`](tealdoc:tecs.Future) from `runProcess`. Any other future answers nil
     ---     rather than raising.
     --- @return The runner's own record, not a copy, so it fills in as the child
     ---     runs and the same table is what the future carries when it settles.
     processResult: function(run: Future<ProcessResult>): Result
 
-    --- Asks the worker to end a child.
+    --- Asks a child to end.
     ---
-    --- Queued rather than immediate: every process call belongs to the worker,
-    --- so this is picked up on its next pass. Gentle by default, which a child
-    --- may ignore; `force` cannot be refused but leaves whatever it was writing
-    --- half written. The future settles "canceled" when the child goes.
+    --- The request completes asynchronously. Gentle by default, which a child
+    --- may ignore. The child cannot refuse `force`, but it leaves whatever it was
+    --- writing half written. The future settles "canceled" when the child
+    --- goes.
     ---
     --- `run:cancel()` is the other spelling, and it counts holders: it ends the
     --- child only when the last consumer of the future has given it up. This
     --- one ends the child whoever else is watching.
     ---
-    --- @param run A future `runProcess` handed out. One that has already settled
-    ---     is ignored, so this is safe to call on a race it lost.
+    --- @param run A [`Future`](tealdoc:tecs.Future) from `runProcess`. The call
+    ---     ignores one that has already settled, so a lost race remains safe.
     --- @param force Sends the signal a child cannot handle. Defaults to false,
-    ---     which asks and may be refused.
+    ---     which asks and the child may refuse.
     killProcess: function(run: Future<ProcessResult>, force?: boolean)
 
-    --- Takes whatever the worker has answered. Call once per frame.
+    --- Settles completed process runs. Call once per frame.
     --- @return How many runs finished.
     updateProcesses: function(): integer
 
-    --- Runs that have not answered yet.
+    --- Returns the number of runs that have not answered yet.
     ---
     --- @return Every run in flight in this process, not one caller's, and
-    ---     counting a child that has been asked to die but has not yet.
+    ---     counting a child that received a termination request but has not yet ended.
     pendingProcesses: function(): integer
 
-    --- Starts the runner worker.
+    --- Starts the process runner.
     ---
-    --- Called for you by the first `run`, so a process that never shells out
-    --- never starts a thread. Call it directly to pay that cost up front, or to
-    --- give the worker a module path other than this state's.
+    --- Called for you by the first `run`. Call it directly to pay that cost up
+    --- front or to give the runner a module path other than this state's.
     ---
-    --- @param luaPath Where the worker finds its modules. Defaults to this
+    --- @param luaPath Where the runner finds its modules. Defaults to this
     ---     state's own, which is right whenever the two run from the same
-    ---     tree. Only read on the call that actually starts the worker, so
+    ---     tree. Only read on the call that actually starts the runner, so
     ---     passing it to a second call changes nothing.
     installProcessRunner: function(luaPath?: string)
 
-    --- Whether the runner worker is running.
+    --- Reports whether the process runner is running.
     ---
     --- @return A fact about the process rather than about any world. False
     ---     costs nothing to act on: `run` starts the worker itself.
     processRunnerInstalled: function(): boolean
 
-    --- Ends every child still running and stops the worker.
+    --- Ends every child still running and stops the process runner.
     ---
-    --- Gentle first, then forced, because a child that is mid-write deserves
-    --- the chance to finish the line and a teardown that waits forever deserves
-    --- nothing. What it does not do is walk away: a detached child outlives the
-    --- process that started it, and the worker still blocked on it would be a
-    --- thread running inside a library about to be unmapped, which this
-    --- codebase has already paid for once.
+    --- Each child gets a gentle request first, then a forced kill after
+    --- `graceMs`.
     ---
-    --- Every future still in flight ends at "canceled", including one whose
-    --- child the kernel never reaped. Leaving those pending would be a handle
-    --- that reads "still running" for the rest of the process against a runner
-    --- that no longer exists.
+    --- Every future still in flight ends at "canceled".
     --- @param graceMs How long a child gets to end gently. Defaults to 250.
     shutdownProcesses: function(graceMs?: number)
 end
@@ -737,7 +611,7 @@ function system.openURL(url: string): boolean, string
     return true, nil
 end
 
---- Preferred locales in the user's priority order.
+--- Returns the user's preferred locales in priority order.
 function system.preferredLocales(): {Locale}
     local out: {Locale} = {}
     local locales = C.SDL_GetPreferredLocales(countOut)
@@ -758,7 +632,7 @@ function system.preferredLocales(): {Locale}
     return out
 end
 
---- Current battery or external-power state.
+--- Returns the current battery or external-power state.
 function system.power(): Power
     secondsOut[0], percentOut[0] = -1, -1
     local state = tonumber(C.SDL_GetPowerInfo(secondsOut, percentOut)) as integer
@@ -895,7 +769,7 @@ function system.openFile(options?: DialogOptions): Future<DialogResult>
     )
 end
 
---- Opens a native save-file picker. At most one path is returned.
+--- Opens a native save-file picker. Returns at most one path.
 function system.saveFile(options?: DialogOptions): Future<DialogResult>
     local given = options or {} as DialogOptions
     local names, patterns, count = filterArrays(given)
@@ -910,9 +784,9 @@ function system.openFolder(options?: DialogOptions): Future<DialogResult>
     return trackDialog(D.tecsDialogOpenFolder(window, given.defaultLocation, given.multiple == true))
 end
 
---- Settles file and folder dialogs whose native callback has answered.
+--- Settles file and folder dialogs that have answered.
 ---
---- `Application` calls this every frame. It is public for a headless tool that
+--- [`Application`](tealdoc:tecs.Application) calls this every frame. It is public for a headless tool that
 --- creates dialogs without an application.
 function system.updateDialogs(): integer
     return dialogSource:poll()
@@ -935,10 +809,8 @@ local function hasTouch(): boolean
     return tonumber(count[0]) > 0
 end
 
---- Whether LuaJIT is compiling rather than interpreting.
----
---- Reached dynamically so a build whose `jit` module was stripped reports
---- honestly instead of failing to load.
+-- Query the optional `jit` module dynamically so a stripped build reports
+-- interpretation instead of failing to load.
 local function jitEnabled(): boolean
     local ok, module = pcall(require, "jit")
     if not ok then
@@ -952,15 +824,16 @@ local function jitEnabled(): boolean
     return running == true
 end
 
---- Forgets the cached answer. A platform change is noticed without this.
+--- Forgets the cached answer. Capability lookup notices a platform change without this.
 function system.resetCapabilities()
     resolved = nil
 end
 
 --- Reads the capabilities of the running build.
 ---
---- Cached, since none of these change while a platform is installed. The cache
---- is keyed on the platform generation, so installing one drops it without
+--- The function caches its answer because these values do not change while a
+--- platform remains installed. The platform generation keys the cache, so
+--- installing a platform drops the value without
 --- anybody calling `resetCapabilities`.
 --- @return The same table on every call until the platform changes. Shared,
 ---     so a caller that means to keep it does not also mean to edit it.
@@ -1021,11 +894,8 @@ end
 -- there is nothing here for a second use to overlap with.
 local sizeOut <const> = loader.newArray("size_t[1]")
 
---- Converts a string SDL allocated and frees it.
----
---- Nil is not expected from any of these calls, since SDL answers a failed
---- read with an allocated empty string, and is handled because a null
---- dereference is a worse way to learn otherwise.
+-- Copies and frees a platform string. The nil guard avoids turning an
+-- unexpected null into a dereference.
 local function take(pointer: loader.CValue): string
     if pointer == nil then
         return ""
@@ -1046,7 +916,7 @@ local function required(value: string, what: string)
     end
 end
 
---- Whether there is a clipboard to read at all.
+--- Reports whether a clipboard is available.
 ---
 --- False in a process that never brought up video, where every other function
 --- here answers empty or false. Distinguishes that from a clipboard that is
@@ -1055,7 +925,7 @@ function system.clipboardAvailable(): boolean
     return tonumber(C.SDL_WasInit(VIDEO)) ~= 0
 end
 
---- The clipboard's text, or an empty string when it holds none.
+--- Returns the clipboard text, or an empty string when it holds none.
 ---
 --- Empty is also the answer when the clipboard holds something that is not
 --- text, and when there is no video. Ask `hasClipboardText` to tell those from text
@@ -1069,8 +939,8 @@ end
 
 --- Puts `text` on the clipboard, replacing whatever was there.
 ---
---- SDL copies it, so the string is not retained here. Returns false when the
---- platform refused, which includes having no video.
+--- The platform copies the string before this call returns. Returns false
+--- when the platform refused, which includes having no video.
 function system.setClipboardText(text: string): boolean
     required(text, "setClipboardText")
     if not system.clipboardAvailable() then
@@ -1079,7 +949,7 @@ function system.setClipboardText(text: string): boolean
     return C.SDL_SetClipboardText(text) as boolean
 end
 
---- Whether the clipboard holds text.
+--- Reports whether the clipboard holds text.
 ---
 --- Cheaper than reading it: no allocation crosses the boundary, and on a
 --- platform where a read negotiates with the owning application, no
@@ -1102,7 +972,7 @@ function system.clearClipboard(): boolean
     return C.SDL_ClearClipboardData() as boolean
 end
 
---- Mime types the clipboard currently offers, in the order SDL reports them.
+--- Returns the clipboard MIME types in platform order.
 ---
 --- The same list `clipboardUpdate` carries, for a caller that wants to ask
 --- rather than wait to be told. Empty when the clipboard is empty.
@@ -1127,7 +997,7 @@ function system.clipboardMimeTypes(): {string}
     return found
 end
 
---- Whether the clipboard offers `mimeType`.
+--- Reports whether the clipboard offers `mimeType`.
 function system.hasClipboardData(mimeType: string): boolean
     required(mimeType, "hasClipboardData")
     if not system.clipboardAvailable() then
@@ -1136,10 +1006,10 @@ function system.hasClipboardData(mimeType: string): boolean
     return C.SDL_HasClipboardData(mimeType) as boolean
 end
 
---- The clipboard's bytes for `mimeType`, or nil when it offers none.
+--- Returns the clipboard bytes for `mimeType`, or nil when it offers none.
 ---
---- Nil rather than an empty string, because a mime type can be offered with no
---- bytes behind it and that is not the same as not being offered.
+--- Returns nil rather than an empty string because the clipboard can offer a
+--- MIME type with no bytes, which differs from not offering that type.
 function system.clipboardData(mimeType: string): string
     required(mimeType, "clipboardData")
     if not system.clipboardAvailable() then
@@ -1155,7 +1025,7 @@ function system.clipboardData(mimeType: string): string
     return blob
 end
 
---- The primary selection's text, or an empty string when it holds none.
+--- Returns the primary selection text, or an empty string when it holds none.
 function system.primarySelection(): string
     if not system.clipboardAvailable() then
         return ""
@@ -1165,8 +1035,8 @@ end
 
 --- Puts `text` in the primary selection.
 ---
---- Succeeds on a platform that has no primary selection, where SDL keeps the
---- value for this process and nothing else can read it.
+--- Succeeds on a platform that has no shared primary selection, where the
+--- value remains visible only to this process.
 function system.setPrimarySelection(text: string): boolean
     required(text, "setPrimarySelection")
     if not system.clipboardAvailable() then
@@ -1175,7 +1045,7 @@ function system.setPrimarySelection(text: string): boolean
     return C.SDL_SetPrimarySelectionText(text) as boolean
 end
 
---- Whether the primary selection holds text.
+--- Reports whether the primary selection holds text.
 function system.hasPrimarySelection(): boolean
     if not system.clipboardAvailable() then
         return false
@@ -1198,7 +1068,7 @@ local DEFAULT_WAIT_MS <const> = 30000
 --- How long `shutdown` gives a child to end gently before forcing it.
 local DEFAULT_GRACE_MS <const> = 250
 
---- How long `shutdown` waits for a forced kill to be reaped.
+-- How long `shutdown` waits after forcing a child to exit.
 local FORCED_WAIT_MS <const> = 5000
 
 --- Milliseconds one blocking slice of a wait spends.
@@ -1220,9 +1090,9 @@ local pending: {integer: Entry} = {}
 --- Cleared at settlement, so it is only ever as large as the number of children
 --- in flight.
 local byFuture: {Future<Result>: Entry} = {}
---- Every run's result by its future, which outlives the entry because a child
---- that was killed settles with no value and what it wrote is still worth
---- having. Weak in its keys, so it holds nothing the caller has let go of.
+-- Every run's result by its future. This outlives the entry because killing a
+-- child settles with no value while its output may still matter. Weak keys
+-- retain nothing after the caller releases the future.
 local results <const>: {Future<Result>: Result} = setmetatable({} as {Future<Result>: Result}, {__mode = "k"})
 local pendingCount = 0
 local nextId = 1

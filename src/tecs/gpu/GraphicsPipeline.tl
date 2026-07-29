@@ -1,27 +1,29 @@
---- An immutable graphics pipeline.
----
---- Blend, depth, cull, primitive type, and target formats are baked in at
---- creation. This is the structural difference from an immediate-mode API:
---- there is no global state to flip mid-frame, so every distinct combination
---- is a separate object, created once and reused.
----
---- No vertex input state is declared. The renderer is SSBO-driven: vertex data
---- is read from storage buffers indexed by vertex ID, so there are no vertex
---- buffers to describe.
----
---- What a pipeline bakes has to agree with the pass it is bound in and with the
---- shaders it was built from, and neither agreement is checked here:
----
---- - Color formats must match the pass's attachments in count and in order.
----   `RenderPass.begin` takes the attachments and this takes the formats, and
----   nothing joins the two up before SDL rejects the bind.
---- - A pipeline with `depth` set can only be bound in a pass begun with a depth
----   attachment, and one without it only in a pass begun without one.
---- - Resource bindings follow the set numbering SDL fixes for SPIR-V: the
----   vertex stage reads sampled textures then storage textures then storage
----   buffers from set 0 and its uniforms from set 1, and the fragment stage
----   reads the same sequence from set 2 and its uniforms from set 3. A shader
----   that numbers its sets otherwise binds nothing where the pass puts it.
+--[=[
+An immutable graphics pipeline.
+
+Blend, depth, cull, primitive type, and target formats are baked in at
+creation. This is the structural difference from an immediate-mode API:
+there is no global state to flip mid-frame, so every distinct combination
+is a separate object, created once and reused.
+
+No vertex input state is declared. The renderer is SSBO-driven: vertex data
+is read from storage buffers indexed by vertex ID, so there are no vertex
+buffers to describe.
+
+What a pipeline bakes has to agree with the pass it is bound in and with the
+shaders it was built from, and neither agreement is checked here:
+
+- Color formats must match the pass's attachments in count and in order.
+  `RenderPass.begin` takes the attachments and this takes the formats, and
+  nothing joins the two up before SDL rejects the bind.
+- A pipeline with `depth` set can only be bound in a pass begun with a depth
+  attachment, and one without it only in a pass begun without one.
+- Resource bindings follow the set numbering SDL fixes for SPIR-V: the
+  vertex stage reads sampled textures then storage textures then storage
+  buffers from set 0 and its uniforms from set 1, and the fragment stage
+  reads the same sequence from set 2 and its uniforms from set 3. A shader
+  that numbers its sets otherwise binds nothing where the pass puts it.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

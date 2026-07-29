@@ -1,6 +1,8 @@
---- Stable-address FFI storage with chunked allocation.
---- Chunks are never moved while the array is alive, so element addresses stay
---- stable even when ids are recycled.
+--[=[
+Stable-address FFI storage with chunked allocation.
+Chunks are never moved while the array is alive, so element addresses stay
+stable even when ids are recycled.
+]=]
 
 local ffi <const> = require("ffi")
 local floor <const> = math.floor

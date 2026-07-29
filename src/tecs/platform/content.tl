@@ -1,24 +1,26 @@
---- Where content is, reading it, and remembering what was read.
----
---- The half of `tecs.filesystem` that sits below the rest of the engine rather
---- than beside it, and the reason it is a module of its own is a direction in
---- the graph. Three things read content: the shader loader, the material
---- loader, and the watcher that polls what this process has opened. The
---- watcher also sits under `tecs.filesystem` as a name a game writes, so the
---- public module has to name the watcher's type, and Teal refuses a require
---- cycle even when one side of it is erased at codegen. So the names those
---- three need are here, below both, and the public module is what a game
---- writes.
----
---- Nothing here is public and nothing here is a second API. Every name below
---- appears on `tecs.filesystem`, documented there, and this file is the seam
---- rather than the surface.
----
---- Content is resolved through `adapter`, never through the process working
---- directory. On desktop that happens to work when launched from a project root
---- and breaks the moment someone double-clicks; on a device there is no
---- meaningful working directory and writing next to the executable is not
---- permitted.
+--[=[
+Where content is, reading it, and remembering what was read.
+
+The half of `tecs.filesystem` that sits below the rest of the engine rather
+than beside it, and the reason it is a module of its own is a direction in
+the graph. Three things read content: the shader loader, the material
+loader, and the watcher that polls what this process has opened. The
+watcher also sits under `tecs.filesystem` as a name a game writes, so the
+public module has to name the watcher's type, and Teal refuses a require
+cycle even when one side of it is erased at codegen. So the names those
+three need are here, below both, and the public module is what a game
+writes.
+
+Nothing here is public and nothing here is a second API. Every name below
+appears on `tecs.filesystem`, documented there, and this file is the seam
+rather than the surface.
+
+Content is resolved through `adapter`, never through the process working
+directory. On desktop that happens to work when launched from a project root
+and breaks the moment someone double-clicks; on a device there is no
+meaningful working directory and writing next to the executable is not
+permitted.
+]=]
 
 local adapter <const> = require("tecs.platform.adapter")
 

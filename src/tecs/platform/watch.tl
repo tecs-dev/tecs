@@ -1,67 +1,44 @@
---- Noticing that a content file changed, so a reload can be driven by the edit
---- rather than by an agent that remembers to ask.
----
---- **SDL has no change notification.** Not in 3.4, and not behind a hint or a
---- property: `SDL_AddEventWatch` watches the event queue and nothing in
---- `SDL_filesystem.h` or `SDL_storage.h` reports a change. What is there is
---- a storage backend's `info`, which answers a type, a size and three
---- timestamps, and
---- `SDL_EnumerateDirectory` and `SDL_GlobDirectory` to find paths to ask it
---- about. So a portable watcher is a poll, and going native for one would mean
---- three implementations (inotify, FSEvents, ReadDirectoryChangesW) plus a
---- fourth for every platform whose SDK is licensed, to save work measured
---- below in microseconds.
----
---- ```teal
---- local watch <const> = tecs.filesystem.watch
----
---- if watch.available() then
----     watch.on("document", function(change: watch.Change)
----         print("reload " .. change.path)
----     end)
----     watch.install({interval = 0.25})
---- end
----
---- -- Once an iteration. An application with `watch` in its config does this and
---- -- the install above for you.
---- watch.poll()
---- ```
----
---- **It polls what was loaded, not the content tree.** `assets` records every
---- path this process has read or decoded, which is a far smaller set than the
---- tree and is exactly the set where a change has something to act on: a file
---- nothing opened has no reloader to route to. That also makes enumeration
---- unnecessary, so `SDL_EnumerateDirectory` is not called at all.
----
---- **It runs between frames, on the main thread, synchronously.** Not on a
---- worker and not through async IO. A backend's path-info operation is
---- synchronous, so asking what a file's size and modification time are is a
---- blocking query however it is reached.
----
---- What makes that fine is the cost. The default SDL backend's path query was
---- measured at 0.86 microseconds a path on this machine: a hundred files at two
---- polls a second is 172 microseconds a second, under a fiftieth of one percent
---- of one core, and it lands between frames rather than inside one. Frames the
---- interval has not elapsed on cost a monotonic clock read and a compare. A
---- worker would have to be told the watched set every time something loaded,
---- and every reload it could trigger has to happen on the main thread anyway,
---- so it would move the one part that is already free and put a message
---- boundary in front of the part that is not.
----
---- **A half-written file is the case that bites.** An editor saving commonly
---- truncates and rewrites, so a poll can land on a file of zero length or of
---- half its eventual size. Two rules cover it. A file must report the same size
---- and modification time on `settle` consecutive polls before it is dispatched,
---- so a rewrite in progress is seen changing and is not acted on until it stops
---- changing; and a file of zero length is never dispatched at all, since that
---- is a truncation whatever else it is. Underneath both, a handler runs guarded
---- and a raise is logged rather than propagated, and the reloads themselves
---- already refuse safely: a truncated PNG does not decode and a broken shader
---- does not compile, and neither replaces what the process is drawing.
----
---- **Development only.** A release polls nothing. `hotReload` is the capability
---- for that distinction, so the watcher does not infer its own availability
---- from one of the kinds it happens to reload.
+--[=[
+Polls loaded content and dispatches changes to reload handlers.
+
+```teal
+local watch <const> = tecs.filesystem.watch
+
+if watch.available() then
+    watch.on("document", function(change: watch.Change)
+        print("reload " .. change.path)
+    end)
+    watch.install({interval = 0.25})
+end
+
+-- Once an iteration. An application with `watch` in its config does this and
+-- the install above for you.
+watch.poll()
+```
+
+The watcher scans only paths recorded by `filesystem.read`, `filesystem.note`,
+and the asset loaders. It waits for a changed file's size and modification
+time to settle before dispatching it. Empty, missing, and directory paths do
+not dispatch.
+
+Handlers run between frames. A handler error reaches the log and does not
+replace the current resource. Release builds report `available() == false`
+and do not poll.
+]=]
+
+-- Implementation details:
+-- SDL exposes path metadata but no portable change notification. Native
+-- notification would require an implementation per platform, while polling
+-- the loaded set avoids walking the content tree.
+--
+-- Polling runs synchronously on the main thread. The default backend measured
+-- 0.86 microseconds per path on the machine used when this module was written.
+-- A hundred files at two polls per second costs about 172 microseconds per
+-- second. Moving that work to a worker would add a message boundary before
+-- reload work that must return to the main thread.
+--
+-- Editors commonly truncate and rewrite a file. Stable size and modification
+-- time across several polls prevent a half-written file from dispatching.
 
 local adapter <const> = require("tecs.platform.adapter")
 local content <const> = require("tecs.platform.content")
@@ -108,43 +85,38 @@ local record Entry
 end
 
 local record watch
+    --- `Config` controls polling frequency, settling and path scope.
     record Config
-        --- Seconds between polls. Defaults to 0.5.
+        --- Caller-writable. The caller sets `interval` in seconds before
+        --- `install` reads it. It defaults to 0.5.
         interval: number
-        --- Polls a change must repeat before it is dispatched. Defaults to 1,
-        --- so a change is seen twice. Zero dispatches the first time a file
-        --- reads differently, which is what a test that writes whole files
-        --- wants and what an editor that truncates will trip over.
+        --- Caller-writable. The caller sets `settle` before `install` reads it.
+        --- It defaults to 1, so two matching polls dispatch a change. Zero
+        --- dispatches the first changed poll.
         settle: integer
-        --- Only paths under this prefix are watched. Defaults to the content
-        --- root, so a file the engine read from somewhere else is not content
-        --- and is left alone.
+        --- Caller-writable. The caller sets `root` before `install` reads it.
+        --- It defaults to the content root.
         root: string
     end
 
-    --- What a handler is told about.
+    --- `Change` describes one settled content change.
     record Change
+        --- Read-only. The watcher sets `path` to the changed loaded path before
+        --- it calls the handler.
         path: string
-        --- "image", "sound", "font", "shader" or "document".
-        ---
-        --- A font is its metrics and not the atlas beside them. The atlas is an
-        --- image, was loaded as one, and reloads as one: its texels are
-        --- replaced under the rect they already occupy and no glyph has to be
-        --- told. The metrics are the half that decides what a glyph is, so they
-        --- are the half with a font's rules over them.
+        --- Read-only. The watcher sets `kind` to `"image"`, `"sound"`,
+        --- `"font"`, `"shader"` or `"document"` from the original load.
         kind: string
     end
 
+    --- `Handler` receives one settled change.
     type Handler = function(change: Change)
 
     --- Looks at every watched path once, whatever the interval says.
     ---
-    --- What `poll` calls when the interval has elapsed, and what a test drives
-    --- directly: settling is counted in polls, so stepping it by hand is how a
-    --- half-written file is asserted on without sleeping.
+    --- Call this directly when a headless tool or test controls poll timing.
     ---
-    --- @return How many changes were dispatched, which is handlers run rather
-    ---     than paths looked at. Zero while nothing is being watched.
+    --- @return Returns how many handlers ran, or zero when no watcher runs.
     scan: function(): integer
 end
 
@@ -184,19 +156,20 @@ local function kindOf(path: string, loadedAs: string): string
     return DOCUMENT_KINDS[suffix:lower()] or "document"
 end
 
---- Whether the watcher can run on this build.
+--- Returns whether this build supports hot reload.
 ---
---- Named independently of any one reloader: images, sounds, fonts and
---- documents do not acquire a shader dependency merely because the build can
---- also reload shaders.
+--- @return Returns true when this build can install the watcher.
 function watch.available(): boolean
     return system.capabilities().hotReload
 end
 
---- Starts watching, and refuses on a build that should not.
+--- Starts watching loaded content.
 ---
---- Every path already loaded is taken as it reads now, so nothing is dispatched
---- for a file that has not changed since the process opened it.
+--- The watcher records the current state of loaded paths and dispatches only
+--- later changes. It raises when the build lacks hot-reload support.
+---
+--- @param config The caller supplies polling options or omits them for the
+---     documented defaults.
 function watch.install(config?: watch.Config)
     if not watch.available() then
         error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
@@ -216,27 +189,28 @@ function watch.install(config?: watch.Config)
     watch.scan()
 end
 
---- Whether the watcher is running.
+--- Returns whether the watcher is running.
+---
+--- @return Returns true after `install` and before `uninstall`.
 function watch.installed(): boolean
     return running
 end
 
 --- Stops watching and forgets every path's state.
 ---
---- The handlers stay registered. What a kind reloads is a property of the
---- build rather than of whether anything is watching right now, and a game
---- that turns the watcher off and on again means the second thing.
+--- Registered handlers remain available for a later installation.
 function watch.uninstall()
     running = false
     entries = {}
 end
 
---- Registers what reloads a kind. Re-registering a kind replaces it, and nil
---- removes it.
+--- Registers the handler for a content kind.
 ---
---- Mechanism and policy are split here on purpose. Nothing in this module knows
---- what an image or a clip is; the application registers the reloader that owns
---- each kind, the way it already hands the shader tool its pipeline rebuild.
+--- Re-registering a kind replaces its handler. Nil removes it.
+---
+--- @param kind The caller supplies the content kind to register.
+--- @param handler The caller supplies the replacement handler or nil to remove
+---     the current one.
 function watch.on(kind: string, handler: watch.Handler)
     if kind == nil or kind == "" then
         error("tecs: a handler needs a kind to be registered under", 2)
@@ -244,7 +218,9 @@ function watch.on(kind: string, handler: watch.Handler)
     handlers[kind] = handler
 end
 
---- Kinds something is registered to reload, sorted.
+--- Returns registered content kinds in sorted order.
+---
+--- @return Returns a fresh caller-owned list.
 function watch.kinds(): {string}
     local names: {string} = {}
     for kind, handler in pairs(handlers) do
@@ -256,7 +232,9 @@ function watch.kinds(): {string}
     return names
 end
 
---- Every path being watched, sorted.
+--- Returns watched paths in sorted order.
+---
+--- @return Returns a fresh caller-owned list.
 function watch.watching(): {string}
     local list: {string} = {}
     for path in pairs(entries) do
@@ -266,10 +244,9 @@ function watch.watching(): {string}
     return list
 end
 
---- Paths that have changed and have not settled yet, sorted.
+--- Returns unsettled changed paths in sorted order.
 ---
---- What a file mid-save looks like from here, and what a test asserts on to
---- show that a truncated write was seen and not acted on.
+--- @return Returns a fresh caller-owned list.
 function watch.unsettled(): {string}
     local list: {string} = {}
     for path, entry in pairs(entries) do
@@ -281,7 +258,9 @@ function watch.unsettled(): {string}
     return list
 end
 
---- Changes dispatched since `install`.
+--- Returns the changes dispatched since `install`.
+---
+--- @return Returns the cumulative handler count.
 function watch.dispatched(): integer
     return dispatched
 end
@@ -396,11 +375,11 @@ function watch.scan(): integer
     return fired
 end
 
---- Scans if the interval has elapsed. Call once per iteration.
+--- Scans when the configured interval has elapsed.
 ---
---- A frame that is not due costs one clock read and a compare, which is why
---- this can sit in the loop unconditionally.
---- @return How many changes were dispatched.
+--- Call once per iteration.
+---
+--- @return Returns how many handlers ran during this call.
 function watch.poll(): integer
     if not running then
         return 0

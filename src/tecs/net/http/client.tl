@@ -1,17 +1,19 @@
---- An asynchronous HTTP client driven from the SDL loop.
----
---- Reqwest and Tokio own the sockets and background threads. `send` copies a
---- request into Rust and returns a `Future` immediately. `pump` drains response
---- chunks and completions back on the Lua thread, which means a foreign thread
---- never enters LuaJIT and future listeners always run from the SDL loop.
----
---- A response status is still an answer rather than a transfer failure: 404
---- settles a ready future whose `Response:ok()` is false. DNS, TLS, connection,
---- timeout, and body-limit errors settle a failed future.
----
---- Bodies headed for a file or handle remain streamed. Rust places bounded
---- chunks on the client's event queue, and each pump writes those chunks before
---- asking for more. A request body is copied at `send`, as it was before.
+--[=[
+An asynchronous HTTP client driven from the SDL loop.
+
+Reqwest and Tokio own the sockets and background threads. `send` copies a
+request into Rust and returns a `Future` immediately. `pump` drains response
+chunks and completions back on the Lua thread, which means a foreign thread
+never enters LuaJIT and future listeners always run from the SDL loop.
+
+A response status is still an answer rather than a transfer failure: 404
+settles a ready future whose `Response:ok()` is false. DNS, TLS, connection,
+timeout, and body-limit errors settle a failed future.
+
+Bodies headed for a file or handle remain streamed. Rust places bounded
+chunks on the client's event queue, and each pump writes those chunks before
+asking for more. A request body is copied at `send`, as it was before.
+]=]
 
 local ffi <const> = require("ffi")
 local loader <const> = require("tecs.ffi.loader")

@@ -1,48 +1,75 @@
---- Gameplay input, in three tiers, behind a layer stack.
----
---- SDL owns device mechanics; this owns gameplay semantics. That split is why
---- there is no `tecs.keyboard` beside it and no supported way to reach raw
---- SDL: a query answered by polling the device would bypass replay, layers,
---- edge detection and latching, all of which live here.
----
---- Live state answers "is it held". Frame events answer "did it change this
---- frame". Latched events answer the same question for fixed-step systems,
---- which is not the same question: a key pressed and released between two
---- fixed steps is invisible to frame events, and dropping it produces input
---- loss that is nondeterministic and so effectively unreproducible. Latched
---- sets accumulate across every frame since the last fixed step and clear when
---- it ends.
----
---- Queries are answered relative to a layer. A layer that blocks hides input
---- from everything beneath it, so a menu suppresses gameplay without gameplay
---- code knowing a menu exists. Code that names no layer reads the base layer,
---- which is the safe default: it goes quiet when anything is pushed over it.
----
---- ```teal
---- local input <const> = app.input
---- local pause <const> = input:pushLayer("pause")
----
---- if input:keyPressed("Escape", pause) then
----     input:popLayer()
---- end
----
---- -- Naming no layer reads the base layer, which is silent while `pause` is up,
---- -- so gameplay needs to know nothing about the menu over it.
---- if input:keyDown("W") and input:mousePressed("left") then
----     print(input.mouseX, input.mouseY)
---- end
---- ```
----
---- A gamepad is not part of this object. It has identity, a lifetime, metadata
---- and outputs, so it is reached through `gamepads()` and answers for itself.
---- What is here is what the machine has one of: a keyboard, an aggregate
---- mouse, the touch surface, the pen, and the registry the pads live in.
----
---- The state is fed typed events and holds no globals, so a recorded session
---- replays by feeding the same events back. It never sees an `SDL_Event`: the
---- conversion happens once, in `events`, and everything downstream shares that
---- one vocabulary. Every outbound command goes through a backend for the same
---- reason, so a platform that is not SDL substitutes one object.
+--[[
+# Gameplay input
+
+`tecs.input` folds typed platform events into gameplay input. The application
+creates one [`Input`](tealdoc:tecs.input.Input) as `app.input`; ordinary game
+code does not construct or feed it. The module owns replay, layers, edge
+detection and fixed-step latching.
+
+## Three input tiers
+
+Live state answers whether a key or button remains held. Frame edges answer
+whether it changed this frame. Latched edges answer that question for the next
+fixed step. The same `keyPressed`, `mousePressed` and
+`Gamepad:buttonPressed` methods select frame or latched edges from the phase.
+The engine consumes a latched edge in the first fixed step after it arrived.
+
+## Layer capture
+
+A blocking layer hides every device from lower layers. Calls that omit a layer
+read the base layer, so gameplay becomes quiet while a menu owns capture.
+Moving capture clears pending edges, text, wheel movement and mouse deltas.
+
+```teal
+local pause <const> = app.input:pushLayer("pause")
+
+if app.input:keyPressed("Escape", pause) then
+    app.input:popLayer()
+end
+
+-- The base layer cannot read while pause owns capture.
+if app.input:keyDown("W") then
+    movePlayer()
+end
+```
+
+Pass false to `pushLayer` for an observing overlay. Because capture does not
+move, the overlay does not clear edges.
+
+## Focus and text input
+
+Focus loss releases held keys, mouse buttons, gamepad buttons, fingers,
+modifiers and pen pressure. The resulting release edges let a game finish the
+active action.
+
+Bind text input to the layer that owns the field. Popping the layer stops the
+input method and clears composition.
+
+```teal
+local field <const> = app.input:pushLayer("playerName")
+app.input:startTextInput(field, {
+    area = {x = 40, y = 200, width = 320, height = 24, cursor = 80},
+})
+```
+
+Append `input.text` once per frame. Draw `input.composition` until the input
+method commits it. Update the text area when the field scrolls or its caret
+moves.
+
+## Gamepads and sensors
+
+`Input:gamepads` returns a live connection-order list. Hold a
+[`Gamepad`](tealdoc:tecs.input.Gamepad) object or match its `guid` to follow
+hardware because list positions move and instance ids do not survive a
+reconnect. Gamepad queries use the same layers and fixed-step tiers as keyboard
+and mouse queries.
+
+Standalone sensors do not belong to a gamepad. Enumerate them with
+`tecs.input.sensors`, open one by instance id, poll it, and close it explicitly.
+]]
+
+-- Implementation details: SDL owns device mechanics. Input folds its events
+-- into replay state, layer gates and fixed-step latches.
 
 local bit <const> = require("bit")
 local eventStream <const> = require("tecs.platform.events")
@@ -58,149 +85,153 @@ local type Buttons = inputstate.Buttons
 local type Gate = inputstate.Gate
 local type Backend = inputbackend.Backend
 
---- One finger on the touch surface. Positions are the platform's own 0..1
---- across the window, plus the window coordinates they convert to.
+--- `Touch` reports one finger from the most recent touch event.
+---
+--- Input owns and reuses every field. Callers treat the record as read-only
+--- and copy values they need to retain.
 local record Touch
-    --- Touch device the finger belongs to, as an opaque identity.
+    --- Read-only. Input sets `device` to the touch device's opaque identity
+    --- when the finger first appears.
     device: string
-    --- Finger identity, as an opaque identity. A finger id is 64 bits and does
-    --- not fit a double.
+    --- Read-only. Input sets `finger` to the finger's opaque 64-bit identity
+    --- when the finger first appears.
     finger: string
-    --- Position in window coordinates, converted from the normalized pair by
-    --- the window size `events.setTouchScale` was last told about. Stale by
-    --- one frame if the window resized without that being updated.
+    --- Read-only. Input updates `x` in window coordinates on every touch event.
+    --- It may lag a resize until `events.setTouchScale` receives the new size.
     x: number
+    --- Read-only. Input updates `y` in window coordinates with `x`.
     y: number
-    --- Position as the platform reported it, in 0..1 across the window. This
-    --- is the pair that survives a resize.
+    --- Read-only. Input updates `normalX` from the platform's 0 to 1 position
+    --- on every touch event.
     normalX: number
+    --- Read-only. Input updates `normalY` with `normalX`.
     normalY: number
-    --- How hard, in 0..1, on a surface that measures it.
+    --- Read-only. Input updates `pressure` from 0 to 1 when the surface reports
+    --- pressure.
     pressure: number
 end
 
---- Where the text being edited sits, so the platform can place its candidate
---- window and its on-screen keyboard clear of it.
+--- Callers write `TextArea` before passing it to a text-input method.
+---
+--- Input reads the record immediately and does not retain it.
 local record TextArea
-    --- The rectangle's top-left, in window coordinates.
+    --- Caller-writable. The caller sets `x` to the rectangle's left edge in
+    --- window coordinates.
     x: integer
+    --- Caller-writable. The caller sets `y` to the rectangle's top edge.
     y: integer
-    --- Its extent, which the platform reads as the run of text to keep clear
-    --- of rather than as the whole field.
+    --- Caller-writable. The caller sets `width` to the text run the platform
+    --- should keep clear.
     width: integer
+    --- Caller-writable. The caller sets `height` with `width`.
     height: integer
-    --- Caret offset from the left of the rectangle. Zero when omitted.
+    --- Caller-writable. The caller sets `cursor` to the caret offset from the
+    --- left edge. It defaults to zero.
     cursor: integer
 end
 
 local record TextOptions
-    --- Where the edited text sits. Optional, and worth giving whenever there
-    --- is one: without it the platform places its candidate window and its own
-    --- keyboard wherever it likes, which is often over what is being typed.
+    --- Caller-writable. The caller sets `area` so the platform can keep its
+    --- candidate window and on-screen keyboard clear of the edited text.
     area: TextArea
 end
 
 local record InputOptions
-    --- Platform window handle, which text input and the cursor modes act on.
-    --- Omitting it leaves those commands reporting failure, which is what a
-    --- headless test wants.
+    --- Engine-owned. The application supplies `window` for text input and
+    --- cursor modes. Ordinary game code ignores this field; omitting it makes
+    --- window commands report failure for a headless test.
     window: loader.CPtr
-    --- Backend to issue commands through. Defaults to the installed platform's.
+    --- Engine-owned. The application or a platform test supplies `backend`.
+    --- Ordinary game code ignores it. Input uses the installed backend when
+    --- the field is nil.
     backend: Backend
 end
 
---- What a player does, and the devices they do it with: gameplay input in
---- three tiers behind a layer stack, the pads attached to it, and the
---- standalone sensors a device carries.
----
---- One module because they are one question asked of three sources, and
---- because the layer stack answers all three: a pad's buttons are gated by the
---- same stack a keyboard's keys are, so `Input` and `Gamepad` cannot be reached
---- from different places without the gate looking like a property of one of
---- them. Platform events stay separate under `tecs.events`, since that stream
---- also carries lifecycle, window, display and device arrival.
 local record input
-    --- Gameplay input, folded once a frame and read in three tiers: live
-    --- state, frame events and the latched sets a fixed step reads.
+    --- An `Input` folds platform events once a frame and exposes live state,
+    --- frame edges and fixed-step latched edges.
     record Input
-        --- A position in the layer stack, from `pushLayer`.
+        --- Read-only. [`Layer`](tealdoc:tecs.input.Layer) names a position
+        --- returned by `pushLayer`.
         Layer: Layer
-        --- One finger on the touch surface, as `touches` reports it.
+        --- Read-only. [`Touch`](tealdoc:tecs.input.Touch) names a finger record
+        --- returned by `touches`.
         Touch: Touch
-        --- Where edited text sits, for `setTextInputArea`.
+        --- Read-only. Exposes [`TextArea`](tealdoc:tecs.input.TextArea), whose
+        --- records callers pass to text-input methods.
         TextArea: TextArea
-        --- What `startTextInput` takes besides a layer.
+        --- Read-only. Exposes
+        --- [`TextOptions`](tealdoc:tecs.input.TextOptions), whose records
+        --- callers pass to `startTextInput`.
         TextOptions: TextOptions
-        --- What `newInput` takes.
+        --- Engine-owned. Exposes the framework construction options. Ordinary
+        --- game code uses the Input that the application creates and ignores
+        --- this field.
         Options: InputOptions
 
-        --- Mouse position in window coordinates, from the top-left. The last
-        --- position reported, so it persists across frames that saw no motion.
+        --- Read-only. Input updates `mouseX` from the most recent mouse event
+        --- and retains it across frames without motion.
         mouseX: number
+        --- Read-only. Input updates `mouseY` with `mouseX`.
         mouseY: number
-        --- Mouse motion accumulated this frame, summed over every motion event and
-        --- cleared by `beginFrame`. Under relative mouse mode this is the whole of
-        --- what the mouse said, since the position stops moving.
+        --- Read-only. Input accumulates `mouseDeltaX` during a frame and clears
+        --- it in `beginFrame`.
         mouseDeltaX: number
+        --- Read-only. Input accumulates `mouseDeltaY` and clears it with
+        --- `mouseDeltaX`.
         mouseDeltaY: number
-        --- Wheel movement accumulated this frame, in the platform's own notches
-        --- rather than pixels. Cleared by `beginFrame`.
-        ---
-        --- One sign whatever the machine is set to: positive `wheelY` is a scroll
-        --- away from the player, positive `wheelX` a scroll to the right. A
-        --- platform with natural scrolling on reports the opposite pair and says
-        --- so, and the conversion in `events` puts it back, so a binding written
-        --- against these fields does not invert on somebody else's desk.
+        --- Read-only. Input accumulates horizontal wheel motion during a frame
+        --- and clears it in `beginFrame`. Positive `wheelX` scrolls right.
         wheelX: number
+        --- Read-only. Input accumulates vertical wheel motion under the sign
+        --- convention above and clears it in `beginFrame`.
         wheelY: number
-        --- The same movement accumulated to whole notches by the platform, on the
-        --- same sign convention and cleared by `beginFrame` alongside the pair
-        --- above. What a menu stepping one item per notch reads, rather than
-        --- picking its own threshold on the fractional pair.
+        --- Read-only. Input accumulates horizontal whole-notch wheel motion
+        --- during a frame and clears it in `beginFrame`.
         wheelTicksX: integer
+        --- Read-only. Input accumulates vertical whole-notch wheel motion and
+        --- clears it with `wheelTicksX`.
         wheelTicksY: integer
-        --- Device that produced the most recent mouse button, motion or wheel
-        --- event.
+        --- Read-only. Input sets `mouseWhich` to the device from the most recent
+        --- mouse button, motion or wheel event.
         mouseWhich: number
-        --- Whether that event was the platform's own translation of a touch or a
-        --- pen. A game that handles touch itself reads this and ignores the
-        --- duplicate rather than acting on one gesture twice.
+        --- Read-only. Input sets `mouseSynthetic` when that mouse event came
+        --- from the platform's touch or pen translation.
         mouseSynthetic: boolean
 
-        --- Text committed this frame, from the text input events. Empty when
-        --- nothing was typed, so it can be appended without a nil check.
+        --- Read-only. Input appends committed text during a frame and clears it
+        --- in `beginFrame`.
         text: string
-        --- Text an input method is composing and has not committed. Empty when
-        --- nothing is being composed. A field is drawn as its own content plus
-        --- this, so the player sees what they are typing before it commits.
+        --- Read-only. Input replaces `composition` when the input method edits
+        --- uncommitted text and clears it on commit or session stop.
         composition: string
-        --- Caret offset and selection length within `composition`, in the units
-        --- the platform counts it in. Both zero when nothing is being composed.
+        --- Read-only. Input sets `compositionStart` to the caret offset within
+        --- `composition`.
         compositionStart: integer
+        --- Read-only. Input sets `compositionLength` to the selected length
+        --- within `composition`.
         compositionLength: integer
 
-        --- Pen position in window coordinates, from the top-left.
+        --- Read-only. Input updates `penX` from the most recent pen event.
         penX: number
+        --- Read-only. Input updates `penY` with `penX`.
         penY: number
-        --- How hard the pen is pressed, in 0..1. Zero until the pen reports it,
-        --- and on a pen that measures no pressure it stays there.
+        --- Read-only. Input updates `penPressure` from 0 to 1 and clears it when
+        --- the pen leaves proximity.
         penPressure: number
-        --- How far the pen leans from upright, in degrees, negative towards the
-        --- left and towards the top of the surface. Both zero on a pen that does
-        --- not report tilt.
+        --- Read-only. Input updates `penTiltX` in degrees from upright.
         penTiltX: number
+        --- Read-only. Input updates `penTiltY` with `penTiltX`.
         penTiltY: number
-        --- Barrel rotation in degrees clockwise, for a pen with a chisel nib. Zero
-        --- on a pen that does not report it.
+        --- Read-only. Input updates `penRotation` in clockwise degrees.
         penRotation: number
-        --- Whether the pen is touching the surface. Cleared when the pen leaves
-        --- proximity, since a pen carried away never reports lifting.
+        --- Read-only. Input updates `penTouching` on contact and clears it when
+        --- the pen leaves proximity.
         penTouching: boolean
-        --- Whether the end in use is the eraser. Read at the moment the pen went
-        --- down, so it describes the current stroke.
+        --- Read-only. Input sets `penEraser` when a stroke begins.
         penEraser: boolean
-        --- Pen the state describes, or nil when no pen has been seen. One pen's
-        --- state is kept, not one per device: a second pen overwrites the first.
+        --- Read-only. Input sets `penWhich` to the most recent pen identity. A
+        --- second pen replaces the first pen's state.
         penWhich: number
 
         _gate: Gate
@@ -238,55 +269,304 @@ local record input
         --- Popping that layer stops the session, so a menu takes its IME and its
         --- on-screen keyboard with it.
         _textLayer: Layer
-        --- Whether this state started a session, which is separate from whether it
-        --- named a layer: a session started without one runs until it is stopped
-        --- by hand.
+        --- Whether this state started a session, which is separate from whether
+        --- it named a layer. A caller must stop a session that names no layer.
         _textStarted: boolean
 
-        --- Stops text input and clears whatever was being composed.
+        --- Stops text input and clears the current composition.
         ---
-        --- Declared here because the layer stack and the shutdown path both stop a
-        --- session, and both read better above where text input is defined.
+        --- The layer stack and shutdown path both call this method, so its
+        --- declaration sits beside the rest of the text-input contract.
         ---
-        --- @return False when no session was running, in which case the composition
-        ---     state is cleared anyway, so this is safe to call unconditionally on
-        ---     a teardown path.
+        --- @return Returns false when no session was running. The method still
+        ---     clears composition state, so a teardown may call it
+        ---     unconditionally.
         stopTextInput: function(self: Input): boolean
 
-        --- Moves the area a running text session reports, for a field that scrolls
-        --- or a caret that moved since `startTextInput` was given one.
+        --- Moves the area a running text session reports after its field scrolls
+        --- or its caret moves.
         ---
-        --- @param area Read here and not retained, so a later edit to the same
-        ---     table has no effect until this is called again.
-        --- @return Whatever the platform answered. False is not worth acting on:
-        ---     the area is a hint, and text input keeps working without it.
+        --- @param area Input reads this record immediately and does not retain
+        ---     it. A later edit has no effect until another call.
+        --- @return Returns whether the platform accepted the hint. Text input
+        ---     continues when it returns false.
         setTextInputArea: function(self: Input, area: TextArea): boolean
+
+        --- Pushes a layer and returns it.
+        ---
+        --- A blocking layer moves capture and clears pending edges. A
+        --- nonblocking layer observes input without hiding lower layers.
+        ---
+        --- @param name The caller supplies a diagnostic layer name.
+        --- @param blocking The caller passes false for a nonblocking overlay;
+        ---     nil and true create a blocking layer.
+        --- @return Returns the new layer, which remains caller-owned until
+        ---     `popLayer` removes it.
+        pushLayer: function(self: Input, name: string, blocking?: boolean): Layer
+
+        --- Removes and returns the top layer.
+        ---
+        --- The base layer remains in place. Popping the owner of a text-input
+        --- session stops that session.
+        ---
+        --- @return Returns the removed layer, or nil at the base layer.
+        popLayer: function(self: Input): Layer
+
+        --- Returns the layer currently on top.
+        ---
+        --- @return Returns the live layer object. Callers treat its fields as
+        ---     read-only.
+        topLayer: function(self: Input): Layer
+
+        --- Returns whether a layer may read input.
+        ---
+        --- @param layer The caller omits this value to test the base layer.
+        --- @return Returns false when a blocking layer sits above it.
+        canRead: function(self: Input, layer?: Layer): boolean
+
+        --- Engine-owned. Starts a new frame and clears frame-local values.
+        ---
+        --- The application calls this before it folds events. Ordinary game
+        --- code must not call it.
+        beginFrame: function(self: Input)
+
+        --- Engine-owned. Selects latched edges for a fixed step.
+        ---
+        --- The fixed-phase bracket calls this method. Ordinary game code must
+        --- not call it.
+        enterFixedPhase: function(self: Input)
+
+        --- Engine-owned. Clears latched edges after a fixed step.
+        ---
+        --- The fixed-phase bracket calls this method. Ordinary game code must
+        --- not call it.
+        exitFixedPhase: function(self: Input)
+
+        --- Engine-owned. Opens gamepads present at startup.
+        ---
+        --- The application calls this once before event intake. Ordinary game
+        --- code observes the resulting `gamepads` list.
+        refreshDevices: function(self: Input)
+
+        --- Returns the live list of connected gamepads.
+        ---
+        --- @return Returns Input-owned storage. Callers may retain a
+        ---     [`Gamepad`](tealdoc:tecs.input.Gamepad) from it but must not edit
+        ---     the list.
+        gamepads: function(self: Input): {Gamepad}
+
+        --- Returns a connected gamepad by connection order.
+        ---
+        --- @param index The caller supplies a one-based position, or nil for
+        ---     the first gamepad.
+        --- @return Returns the gamepad, or nil when the position is empty.
+        gamepad: function(self: Input, index: integer): Gamepad
+
+        --- Returns a connected gamepad by platform instance id.
+        ---
+        --- @param id The caller supplies an id from a platform event.
+        --- @return Returns the gamepad, or nil after it disconnects.
+        gamepadById: function(self: Input, id: number): Gamepad
+
+        --- Engine-owned. Closes devices and platform input resources.
+        ---
+        --- The application calls this during shutdown. Ordinary game code must
+        --- not call it.
+        destroy: function(self: Input)
+
+        --- Engine-owned. Folds one typed platform event into input state.
+        ---
+        --- The application passes every event here. Input copies every value
+        --- it retains. Ordinary game code must not call this method.
+        ---
+        --- @param event The engine supplies a borrowed event record.
+        handleEvent: function(self: Input, event: eventStream.Event)
+
+        --- Resolves and caches a physical key name.
+        ---
+        --- @param name The caller supplies the platform key name without
+        ---     regard to case. An unknown name raises.
+        --- @return Returns the platform scancode.
+        scancode: function(self: Input, name: string): integer
+
+        --- Returns the platform name for a physical key.
+        ---
+        --- @param scancode The caller supplies a platform scancode.
+        --- @return Returns the display name for a binding prompt.
+        keyName: function(self: Input, scancode: integer): string
+
+        --- Returns whether a physical key is held.
+        ---
+        --- @param key The caller supplies a key name or scancode. An unknown
+        ---     name raises.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        keyDown: function(self: Input, key: string | integer, layer?: Layer): boolean
+
+        --- Returns whether a physical key went down in the active tier.
+        ---
+        --- Fixed phases read latched edges; other phases read frame edges.
+        ---
+        --- @param key The caller supplies a key name or scancode. An unknown
+        ---     name raises.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        keyPressed: function(self: Input, key: string | integer, layer?: Layer): boolean
+
+        --- Returns whether a physical key came up in the active tier.
+        ---
+        --- @param key The caller supplies a key name or scancode. An unknown
+        ---     name raises.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        keyReleased: function(self: Input, key: string | integer, layer?: Layer): boolean
+
+        --- Returns the modifier mask from the most recent key event.
+        ---
+        --- The value ignores layers and resets on focus loss.
+        ---
+        --- @return Returns the platform modifier bits.
+        modifiers: function(self: Input): integer
+
+        --- Returns whether a named modifier is held.
+        ---
+        --- @param name The caller supplies `"shift"`, `"ctrl"`, `"alt"`,
+        ---     `"gui"`, `"capsLock"` or a sided variant. An unknown name
+        ---     raises.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        modifierDown: function(self: Input, name: string, layer?: Layer): boolean
+
+        --- Returns whether a mouse button is held.
+        ---
+        --- @param button The caller supplies a platform number or `"left"`,
+        ---     `"middle"`, `"right"`, `"x1"` or `"x2"`.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        mouseDown: function(self: Input, button: string | integer, layer?: Layer): boolean
+
+        --- Returns whether a mouse button went down in the active tier.
+        ---
+        --- @param button The caller supplies a button name or number.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        mousePressed: function(self: Input, button: string | integer, layer?: Layer): boolean
+
+        --- Returns whether a mouse button came up in the active tier.
+        ---
+        --- @param button The caller supplies a button name or number.
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns false when the layer cannot read.
+        mouseReleased: function(self: Input, button: string | integer, layer?: Layer): boolean
+
+        --- Enables or disables relative mouse mode.
+        ---
+        --- Relative mode hides the cursor, freezes its position and reports
+        --- movement through the delta fields.
+        ---
+        --- @param enabled The caller passes false to disable the mode; nil and
+        ---     true enable it.
+        --- @return Returns whether the platform accepted the change.
+        setRelativeMouseMode: function(self: Input, enabled: boolean): boolean
+
+        --- Returns whether relative mouse mode is active.
+        ---
+        --- @return Returns live platform state rather than the last request.
+        relativeMouseMode: function(self: Input): boolean
+
+        --- Moves the cursor within the window.
+        ---
+        --- The platform emits a motion event for the warp.
+        ---
+        --- @param x The caller supplies the window-coordinate x position.
+        --- @param y The caller supplies the window-coordinate y position.
+        warpMouse: function(self: Input, x: number, y: number)
+
+        --- Enables or disables mouse capture outside the window.
+        ---
+        --- @param enabled The caller passes false to release capture; nil and
+        ---     true enable it.
+        --- @return Returns whether the platform accepted the change.
+        captureMouse: function(self: Input, enabled: boolean): boolean
+
+        --- Shows or hides the application cursor.
+        ---
+        --- @param visible The caller passes false to hide the cursor; nil and
+        ---     true show it.
+        --- @return Returns whether the platform accepted the change.
+        showCursor: function(self: Input, visible: boolean): boolean
+
+        --- Returns whether the platform shows the cursor.
+        ---
+        --- @return Returns live platform state.
+        cursorVisible: function(self: Input): boolean
+
+        --- Selects a standard platform cursor.
+        ---
+        --- Input owns the created cursor and releases it on replacement or
+        --- `destroy`.
+        ---
+        --- @param name The caller omits this value or passes `"default"` to
+        ---     restore the platform cursor. An unknown name raises.
+        --- @return Returns whether the platform accepted the cursor.
+        setCursor: function(self: Input, name?: string): boolean
+
+        --- Returns the fingers currently on the touch surface.
+        ---
+        --- @param layer The caller omits this value to read the base layer.
+        --- @return Returns Input-owned list and records that the next call may
+        ---     reuse. Callers copy values they need to retain.
+        touches: function(self: Input, layer?: Layer): {Touch}
+
+        --- Starts text input and optionally binds it to a layer.
+        ---
+        --- Popping the owner layer stops the session.
+        ---
+        --- @param layer The caller omits this value for a session it will stop
+        ---     explicitly.
+        --- @param options The caller may supply the edited text area. Input
+        ---     reads the record immediately and does not retain it.
+        --- @return Returns whether the platform started the session.
+        startTextInput: function(self: Input, layer?: Layer, options?: TextOptions): boolean
+
+        --- Returns whether this Input started a text-input session.
+        ---
+        --- @return Returns false for sessions started outside this object.
+        textInputActive: function(self: Input): boolean
+
+        --- Returns the layer that owns the current text-input session.
+        ---
+        --- @return Returns nil when no layer owns the session.
+        textInputLayer: function(self: Input): Layer
+
+        --- Returns whether the platform supplies an on-screen keyboard.
+        ---
+        --- @return Returns live platform capability state.
+        screenKeyboardSupported: function(self: Input): boolean
     end
 
-    --- One attached gamepad, which answers for itself: it has identity, a
-    --- lifetime, metadata and outputs, so it is a class rather than a reading
-    --- off the state above.
+    --- Read-only. [`Gamepad`](tealdoc:tecs.input.Gamepad) names one attached
+    --- device. Ordinary game code gets objects from `Input:gamepads` and does
+    --- not replace this module field.
     Gamepad: Gamepad
 
-    --- A position in the layer stack, from `pushLayer`.
+    --- Identifies a position from `pushLayer`.
     type Layer = Layer
-    --- One finger on the touch surface, as `touches` reports it.
+    --- Describes a finger from `touches`.
     type Touch = Touch
-    --- Where edited text sits, for `setTextInputArea`.
+    --- Describes a caller-writable text rectangle.
     type TextArea = TextArea
-    --- What `startTextInput` takes besides a layer.
+    --- Describes caller-writable text-input options.
     type TextOptions = TextOptions
-    --- What `newInput` takes.
+    --- Describes framework construction options for `Input`.
     type Options = InputOptions
-    --- One finger on a pad's touchpad.
+    --- Describes a gamepad touch.
     type TouchpadFinger = Gamepad.TouchpadFinger
 
-    --- An opened standalone sensor, read by polling.
+    --- Describes an opened standalone sensor.
     type Sensor = sensors.Sensor
 
-    --- A standalone sensor the platform reports, before it is opened. Named
-    --- for what it is rather than `Device`, which on a module that also holds
-    --- gamepads would name two things.
+    --- Describes an enumerated standalone sensor before open.
     type SensorDevice = sensors.Device
 
     --- Builds the input state a game reads, with a single base layer.
@@ -294,33 +574,30 @@ local record input
     --- Holds no devices yet. `refreshDevices` opens the pads already attached,
     --- and everything after that arrives as events.
     ---
-    --- @param options Omitted opens against no window, which is what a
-    ---     headless tool or a spec wants: keys and pads still fold, and
-    ---     anything asking about a window answers as if there is none.
-    --- @return The state. One per application; the application builds its own
-    ---     and a second is only for a test.
+    --- @param options The engine omits this record for a headless state. Keys
+    ---     and pads still fold while window commands report failure.
+    --- @return Returns the state. The application owns one; a test may build
+    ---     another.
     newInput: function(options?: InputOptions): Input
 
-    --- Standalone sensors attached now, in platform order.
+    --- Returns the standalone sensors attached now in platform order.
     ---
     --- A snapshot rather than a subscription: a sensor unplugged after this
     --- leaves an id `openSensor` refuses. Gamepad sensors are not here, since
     --- their identity and event routing live on the pad.
     ---
-    --- @return The sensors, listed afresh each call and the caller's to keep.
-    ---     Empty rather than nil when the subsystem cannot start, and most
-    ---     desktop machines genuinely have none.
-    --- @return SDL's reason, when something went wrong.
+    --- @return Returns a fresh caller-owned list. It returns an empty list when
+    ---     no sensors exist or the subsystem cannot start.
+    --- @return Returns the platform's reason when enumeration fails.
     sensors: function(): {sensors.Device}, string
 
     --- Opens an attached standalone sensor by instance id.
     ---
-    --- @param id An instance id from `sensors`. An id names a device while it
-    ---     stays attached rather than a slot, so one kept across an unplug does
-    ---     not come back to the same sensor.
-    --- @return The open sensor, whose closing is the caller's through
-    ---     `destroy`. Nil on failure, and nothing is left open in that case.
-    --- @return The reason, when the first return is nil.
+    --- @param id The caller supplies an instance id from `sensors`. It stops
+    ---     naming the device after unplug.
+    --- @return Returns the open sensor, or nil on failure. The caller closes it
+    ---     with `destroy`.
+    --- @return Returns the reason when the first return is nil.
     openSensor: function(id: number): sensors.Sensor, string
 end
 
@@ -370,8 +647,8 @@ end
 
 --- Drops every pending edge, on every device, in both tiers.
 ---
---- What a capture boundary needs. An edge belongs to whoever could read input
---- at the moment it happened, and a layer on the far side of a boundary has no
+--- An edge belongs to whoever could read input at the moment it happened. A
+--- layer on the far side of a capture boundary has no
 --- claim on it: an `f` typed into a debug overlay must not toggle the game's
 --- fullscreen the instant the overlay closes, and a menu opening mid-frame
 --- must not act on a key pressed before it existed.
@@ -394,14 +671,6 @@ local function clearEdges(self: Input)
     self.wheelTicksX, self.wheelTicksY = 0, 0
 end
 
---- Pushes a layer and returns it.
----
---- A blocking layer hides input from everything beneath. Pass
---- `blocking = false` for an overlay that observes without consuming.
----
---- A layer that blocks moves capture, so the pending edges are dropped: what
---- was pressed before the layer existed is not the layer's to act on. An
---- overlay that consumes nothing moves no capture and drops nothing.
 function Input:pushLayer(name: string, blocking?: boolean): Layer
     local layer, captureMoved = self._gate:push(name, blocking)
     if captureMoved then
@@ -410,12 +679,6 @@ function Input:pushLayer(name: string, blocking?: boolean): Layer
     return layer
 end
 
---- Removes the topmost layer. The base layer is never removed.
----
---- A text-input session started by that layer stops with it, because a menu
---- that closed and left the on-screen keyboard up is a bug the game would have
---- to remember to avoid. The pending edges go the same way when the layer was
---- blocking, so what was typed into it stays in it.
 function Input:popLayer(): Layer
     local layer, captureMoved = self._gate:pop()
     if layer ~= nil and layer == self._textLayer then
@@ -427,12 +690,10 @@ function Input:popLayer(): Layer
     return layer
 end
 
---- The layer currently on top.
 function Input:topLayer(): Layer
     return self._gate:top()
 end
 
---- Whether `layer` may read input. Omitting a layer means the base layer.
 function Input:canRead(layer?: Layer): boolean
     return self._gate:canRead(layer)
 end
@@ -441,12 +702,6 @@ end
 -- Frame lifecycle
 -------------------------------------------------------------------------------
 
---- Clears per-frame state. Call once before polling events for a frame.
----
---- Drops the frame edges, the accumulated motion and wheel, and the committed
---- text. Held keys and buttons, the pointer positions and the latched edges
---- all survive: holding is not an edge, and a latched edge belongs to the
---- fixed step rather than to the frame.
 function Input:beginFrame()
     self._keys:beginFrame()
     self._mouse:beginFrame()
@@ -459,19 +714,10 @@ function Input:beginFrame()
     self.text = ""
 end
 
---- Switches queries to the latched sets for the duration of a fixed step.
----
---- Every device answers from the latched sets while this is on, since the gate
---- is shared. Nested steps are not tracked: the flag is set, not counted.
 function Input:enterFixedPhase()
     self._gate.fixed = true
 end
 
---- Ends the fixed phase and clears what it consumed.
----
---- Brackets one step, not one frame. The latched edges are cleared here, so a
---- press is delivered to the first step that runs after it and to that one
---- only, whether the frame ran one step or four.
 function Input:exitFixedPhase()
     self._gate.fixed = false
     self._keys:exitFixed()
@@ -513,11 +759,6 @@ local function disconnect(self: Input, id: number)
     pad:_disconnect()
 end
 
---- Opens every gamepad already attached.
----
---- Run before a game's own load, so a pad that was plugged in when the process
---- started is there when the game asks. Safe to call again: a device already
---- open is left alone, and one that went away without an event is closed.
 function Input:refreshDevices()
     local attached = self._backend.attachedGamepads()
     local present: {number: boolean} = {}
@@ -526,7 +767,7 @@ function Input:refreshDevices()
         connect(self, attached[index])
     end
 
-    -- Copied first, since disconnecting rewrites the list being walked.
+    -- Copy first because disconnecting rewrites the list under iteration.
     local known: {number} = {}
     for index = 1, #self._padList do
         known[index] = self._padList[index].id
@@ -538,36 +779,18 @@ function Input:refreshDevices()
     end
 end
 
---- Every connected gamepad, in the order the platform reported them.
----
---- The list is the live one, so a pad that disconnects leaves it. A reference
---- taken out of it stays valid and answers as disconnected.
 function Input:gamepads(): {Gamepad}
     return self._padList
 end
 
---- The nth connected gamepad, or nil.
----
---- Position in the list, not a player slot: a pad's index moves when one
---- before it disconnects. Match on `guid` or hold the object to follow a
---- particular device.
 function Input:gamepad(index: integer): Gamepad
     return self._padList[index or 1]
 end
 
---- A gamepad by platform instance id, or nil when it is not connected.
----
---- Ids are not reused while a device is attached and say nothing once it is
---- gone, so this is for routing an event that carries one rather than for
---- remembering a pad across a reconnect.
 function Input:gamepadById(id: number): Gamepad
     return self._pads[id]
 end
 
---- Closes every open device. Called when the application shuts down.
----
---- Stops a running text-input session too, since the platform would otherwise
---- be left composing for a window that is about to go away.
 function Input:destroy()
     local pads = self._padList
     self._padList = {}
@@ -591,8 +814,8 @@ end
 
 --- Releases everything held.
 ---
---- What focus loss needs. The platform delivers no release for a key held as
---- the window loses focus, so without this the key reads as held until the
+--- The platform sends no release for a key held as the window loses focus.
+--- Release it here so it does not read as held until the
 --- player presses it again somewhere the application can see.
 local function releaseHeld(self: Input)
     self._keys:releaseAll()
@@ -612,12 +835,6 @@ local function touchKey(event: eventStream.Event): string
     return (event.touchDevice or "") .. ":" .. (event.finger or "")
 end
 
---- Folds one typed event into the state.
----
---- Unrecognized kinds are ignored, so this can be handed the whole stream.
----
---- Nothing is retained: every field the state keeps is copied out here, so the
---- caller is free to reuse the record, which the converter does.
 function Input:handleEvent(event: eventStream.Event)
     local kind = event.kind
 
@@ -654,7 +871,7 @@ function Input:handleEvent(event: eventStream.Event)
         self.mouseSynthetic = event.synthetic == true
         self.wheelX = self.wheelX + event.wheelX
         self.wheelY = self.wheelY + event.wheelY
-        -- A replayed event carries only what was recorded, so a stream from
+        -- A replay event carries only the recorded values, so a stream from
         -- before the whole-notch pair existed adds nothing rather than
         -- failing.
         self.wheelTicksX = self.wheelTicksX + (event.wheelTicksX or 0)
@@ -701,7 +918,7 @@ function Input:handleEvent(event: eventStream.Event)
         self.penPressure = 0.0
     elseif kind == "textInput" then
         self.text = self.text .. (event.text or "")
-        -- Committing ends whatever was being composed, so a field does not
+        -- Committing ends the current composition, so a field does not
         -- draw the composition twice.
         self.composition = ""
         self.compositionStart = 0
@@ -755,10 +972,6 @@ end
 -- Keyboard
 -------------------------------------------------------------------------------
 
---- Resolves a key name to a scancode, caching the lookup.
----
---- Names are the platform's ("Space", "Left Shift"), matched case-insensitively
---- so "space" and "left shift" work too.
 function Input:scancode(name: string): integer
     local cached = self._scancodes[name]
     if cached ~= nil then
@@ -779,11 +992,6 @@ function Input:scancode(name: string): integer
     return code
 end
 
---- The name of a physical key, for showing a binding back to the player.
----
---- The platform's own name for the position, which is not the character the
---- player's layout produces there: the key `scancode("Q")` names is labeled Q
---- whatever a French keyboard prints on it.
 function Input:keyName(scancode: integer): string
     return self._backend.scancodeName(scancode)
 end
@@ -795,8 +1003,6 @@ local function resolveKey(self: Input, key: string | integer): integer
     return key
 end
 
---- Whether a key is held. Keys are identified by physical position, so a
---- movement binding stays where it is on every layout.
 function Input:keyDown(key: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -804,7 +1010,6 @@ function Input:keyDown(key: string | integer, layer?: Layer): boolean
     return self._keys.down[resolveKey(self, key)] == true
 end
 
---- Whether a key went down. Reads the latched set inside a fixed step.
 function Input:keyPressed(key: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -812,7 +1017,6 @@ function Input:keyPressed(key: string | integer, layer?: Layer): boolean
     return self._keys:edges(self._gate.fixed, false)[resolveKey(self, key)] == true
 end
 
---- Whether a key came up, on the same tiers as `keyPressed`.
 function Input:keyReleased(key: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -820,19 +1024,10 @@ function Input:keyReleased(key: string | integer, layer?: Layer): boolean
     return self._keys:edges(self._gate.fixed, true)[resolveKey(self, key)] == true
 end
 
---- The modifier mask reported with the most recent key event.
----
---- Not gated by a layer, and only as fresh as the last key event: a modifier
---- pressed on its own does produce one, but a modifier state that changed
---- while the window was not focused is not seen. Focus loss zeroes it for that
---- reason. `modifierDown` is the gated form and reads the same mask.
 function Input:modifiers(): integer
     return self._modifiers
 end
 
---- Whether a modifier is held: "shift", "ctrl", "alt", "gui", "capsLock".
----
---- Either side counts for the unsided names, and "leftShift" asks for one.
 function Input:modifierDown(name: string, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -859,8 +1054,6 @@ local function resolveMouse(self: Input, button: string | integer): integer
     return button
 end
 
---- Whether a mouse button is held. Names are "left", "middle", "right", "x1",
---- "x2".
 function Input:mouseDown(button: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -868,8 +1061,6 @@ function Input:mouseDown(button: string | integer, layer?: Layer): boolean
     return self._mouse.down[resolveMouse(self, button)] == true
 end
 
---- Whether a mouse button went down. Reads the latched set inside a fixed
---- step, on the same tiers as `keyPressed`.
 function Input:mousePressed(button: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -877,7 +1068,6 @@ function Input:mousePressed(button: string | integer, layer?: Layer): boolean
     return self._mouse:edges(self._gate.fixed, false)[resolveMouse(self, button)] == true
 end
 
---- Whether a mouse button came up, on the same tiers as `mousePressed`.
 function Input:mouseReleased(button: string | integer, layer?: Layer): boolean
     if not self._gate:canRead(layer) then
         return false
@@ -885,65 +1075,30 @@ function Input:mouseReleased(button: string | integer, layer?: Layer): boolean
     return self._mouse:edges(self._gate.fixed, true)[resolveMouse(self, button)] == true
 end
 
---- Hides the cursor and delivers motion as deltas only, for a game that turns
---- the view with the mouse.
----
---- `mouseX` and `mouseY` stop moving while this is on, since there is no
---- cursor to report a position for; `mouseDeltaX` and `mouseDeltaY` carry the
---- whole of what the mouse said. False without a window, which is what a
---- headless test gets.
---- @param enabled Anything but false turns it on, so calling with nothing on
----     is enabling it.
 function Input:setRelativeMouseMode(enabled: boolean): boolean
     return self._backend.setRelativeMouseMode(self._window, enabled ~= false)
 end
 
---- Whether relative mouse mode is on, asked of the platform rather than
---- remembered, so a mode the window lost reports honestly.
 function Input:relativeMouseMode(): boolean
     return self._backend.relativeMouseMode(self._window)
 end
 
---- Moves the cursor within the window, in window coordinates.
----
---- Produces a motion event like any other, so `mouseDeltaX` and `mouseDeltaY`
---- pick the jump up. A game recentring the cursor every frame reads its own
---- warp as input unless it accounts for it.
 function Input:warpMouse(x: number, y: number)
     self._backend.warpMouse(self._window, x, y)
 end
 
---- Keeps delivering mouse events while a button is held outside the window,
---- which is what a drag that leaves the window needs.
----
---- Applies to the application rather than to a window, so this is the one
---- cursor command that works without one.
 function Input:captureMouse(enabled: boolean): boolean
     return self._backend.captureMouse(enabled ~= false)
 end
 
---- Shows or hides the cursor, for the application rather than one window.
----
---- Independent of relative mouse mode, which hides the cursor for the duration
---- on its own: leaving this alone is the usual thing.
 function Input:showCursor(visible: boolean): boolean
     return self._backend.showCursor(visible ~= false)
 end
 
---- Whether the cursor is being shown, asked of the platform.
 function Input:cursorVisible(): boolean
     return self._backend.cursorVisible()
 end
 
---- Selects one of the platform's standard cursor shapes.
----
---- Pass nil or `"default"` to restore the platform default. The other names
---- are `"text"`, `"wait"`, `"crosshair"`, `"progress"`, `"pointer"`,
---- `"move"`, `"notAllowed"` and the eight compass resize cursors such as
---- `"ewResize"` and `"nwseResize"`.
----
---- The cursor is owned by this input state and released when it is replaced or
---- when `destroy` runs.
 function Input:setCursor(name?: string): boolean
     local previous = self._cursor
     if name == nil or name == "default" then
@@ -976,10 +1131,6 @@ end
 -- Touch
 -------------------------------------------------------------------------------
 
---- Fingers currently on the touch surface.
----
---- The list and the records in it are reused between calls, so anything
---- retaining one has to copy it.
 function Input:touches(layer?: Layer): {Touch}
     local out = self._touchList
     for index = #out, 1, -1 do
@@ -998,17 +1149,6 @@ end
 -- Text input
 -------------------------------------------------------------------------------
 
---- Starts text input, bound to a layer.
----
---- Off until asked for, because a platform that is composing text is one whose
---- key events a game must not also read as bindings, and because on a phone it
---- puts a keyboard over half the screen. Binding the session to a layer is
---- what makes stopping it reliable: popping the layer stops the session, so
---- the case nobody remembers to handle is handled.
----
---- Pass an area whenever there is one. The platform places its candidate
---- window and its own keyboard clear of the rectangle, and without one they
---- land over what the player is typing.
 function Input:startTextInput(layer?: Layer, options?: TextOptions): boolean
     if not self._backend.startTextInput(self._window) then
         return false
@@ -1034,18 +1174,10 @@ function Input:stopTextInput(): boolean
     return self._backend.stopTextInput(self._window)
 end
 
---- Whether a text-input session is running.
----
---- What this state started, not what the platform is doing: a session started
---- outside the engine is not visible here.
 function Input:textInputActive(): boolean
     return self._textStarted
 end
 
---- The layer the running session belongs to, or nil.
----
---- Nil both when no session is running and when one was started without naming
---- a layer, which is a session nothing will stop on its own.
 function Input:textInputLayer(): Layer
     return self._textLayer
 end
@@ -1054,11 +1186,6 @@ function Input:setTextInputArea(area: TextArea): boolean
     return self._backend.setTextInputArea(self._window, area.x, area.y, area.width, area.height, area.cursor or 0)
 end
 
---- Whether the platform puts a keyboard on the screen for text input.
----
---- What a layout has to know: where this is true, starting text input covers
---- part of the window, and the area given to `startTextInput` is what keeps
---- the field out from under it.
 function Input:screenKeyboardSupported(): boolean
     return self._backend.screenKeyboardSupported()
 end

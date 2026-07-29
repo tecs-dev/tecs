@@ -1,8 +1,10 @@
---- Rust-owned native services.
----
---- Cargo builds these functions into the host's static native archive. They
---- are reached through the registry rather than a shared library, which keeps
---- the same path working in worker Lua states and single-file releases.
+--[=[
+Rust-owned native services.
+
+Cargo builds these functions into the host's static native archive. They
+are reached through the registry rather than a shared library, which keeps
+the same path working in worker Lua states and single-file releases.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

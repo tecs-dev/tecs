@@ -1,55 +1,57 @@
---- Animation frame tables, in the shape a shader reads them.
----
---- Playback on the GPU means the instance stops carrying a resolved region and
---- starts carrying enough to compute one: which animation is playing, when it
---- started, and how fast it runs. The regions themselves move here, once,
---- shared by every entity playing the same thing.
----
---- What a playback is: one sheet, one tag and one slice, registered together
---- and given an index. A thousand entities walking the same cycle share one,
---- for the reason they already share one sheet. Speed is deliberately not part
---- of the key: it rides the instance, so two entities playing one tag at two
---- speeds are one registration and not two tables.
----
---- The slice is part of the key because a pivot follows the slice it names and
---- a slice moves from frame to frame. What the entry carries is the offset from
---- the middle of where the slice goes over the cycle, so two playbacks of one
---- tag bound to two slices want different offsets for the same frame. A slice
---- with a single key, and no slice at all, both give an offset of zero on every
---- frame, which is the overwhelming majority and costs the same as before.
----
---- The table is a header and three regions of one buffer, all floats:
----
----   header      one float, how many playbacks the directory holds
----   directory   four per playback: where its entries and ticks are, how many
----               ticks its cycle runs for, and how many steps it visits
----   ticks       one per millisecond of the cycle, holding the offset of the
----               entry in force at that millisecond
----   entries     eight per step of the cycle: the region, the array layer, and
----               the pivot offset that step is drawn at
----
---- The count is in the buffer rather than in a uniform because the shader needs
---- it to bound an identifier before it indexes anything, and every pass that
---- resolves a playback already binds this buffer while none of them has a spare
---- uniform component: the geometry pass's layer block and the shadow pass's
---- caster block are both fully assigned. Putting it here also keeps the shared
---- include's signature as it is, which a second parameter would not.
----
---- A millisecond is the resolution because a millisecond is the unit the model
---- is authored in: `Builder:frame` takes milliseconds and `sheet.fromAseprite`
---- passes the export's own durations through. Every boundary an artist can
---- write therefore lands on a tick boundary, so the table reproduces
---- `Sheet:frameAt` exactly rather than approximately, and `frametable.frameAt`
---- is here so a spec can hold the two to that.
----
---- A lookup is then constant time whatever the tag holds: one directory read,
---- one tick read, one entry read. A scan of cumulative durations would cost the
---- length of the tag, and it would cost it in the vertex shader, once per
---- vertex, for every pass that draws the sprite.
----
---- Everything here is floats, including the offsets and counts, so nothing on
---- either side bit-casts. A float32 carries integers exactly to 16,777,216 and
---- every value written here is far below that.
+--[=[
+Animation frame tables, in the shape a shader reads them.
+
+Playback on the GPU means the instance stops carrying a resolved region and
+starts carrying enough to compute one: which animation is playing, when it
+started, and how fast it runs. The regions themselves move here, once,
+shared by every entity playing the same thing.
+
+What a playback is: one sheet, one tag and one slice, registered together
+and given an index. A thousand entities walking the same cycle share one,
+for the reason they already share one sheet. Speed is deliberately not part
+of the key: it rides the instance, so two entities playing one tag at two
+speeds are one registration and not two tables.
+
+The slice is part of the key because a pivot follows the slice it names and
+a slice moves from frame to frame. What the entry carries is the offset from
+the middle of where the slice goes over the cycle, so two playbacks of one
+tag bound to two slices want different offsets for the same frame. A slice
+with a single key, and no slice at all, both give an offset of zero on every
+frame, which is the overwhelming majority and costs the same as before.
+
+The table is a header and three regions of one buffer, all floats:
+
+  header      one float, how many playbacks the directory holds
+  directory   four per playback: where its entries and ticks are, how many
+              ticks its cycle runs for, and how many steps it visits
+  ticks       one per millisecond of the cycle, holding the offset of the
+              entry in force at that millisecond
+  entries     eight per step of the cycle: the region, the array layer, and
+              the pivot offset that step is drawn at
+
+The count is in the buffer rather than in a uniform because the shader needs
+it to bound an identifier before it indexes anything, and every pass that
+resolves a playback already binds this buffer while none of them has a spare
+uniform component: the geometry pass's layer block and the shadow pass's
+caster block are both fully assigned. Putting it here also keeps the shared
+include's signature as it is, which a second parameter would not.
+
+A millisecond is the resolution because a millisecond is the unit the model
+is authored in: `Builder:frame` takes milliseconds and `sheet.fromAseprite`
+passes the export's own durations through. Every boundary an artist can
+write therefore lands on a tick boundary, so the table reproduces
+`Sheet:frameAt` exactly rather than approximately, and `frametable.frameAt`
+is here so a spec can hold the two to that.
+
+A lookup is then constant time whatever the tag holds: one directory read,
+one tick read, one entry read. A scan of cumulative durations would cost the
+length of the tag, and it would cost it in the vertex shader, once per
+vertex, for every pass that draws the sprite.
+
+Everything here is floats, including the offsets and counts, so nothing on
+either side bit-casts. A float32 carries integers exactly to 16,777,216 and
+every value written here is far below that.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local components <const> = require("tecs.components")

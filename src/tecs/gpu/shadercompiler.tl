@@ -1,31 +1,33 @@
---- GLSL to backend bytecode, with the reflection SDL_GPU requires.
----
---- SDL_GPU consumes compiled shaders and is told, separately, how many
---- resources of each class the shader binds. Getting those counts wrong is not
---- a compile error; it is a binding mismatch that surfaces as wrong pixels. So
---- they are reflected out of the SPIR-V rather than declared by hand.
----
---- SDL_GPU fixes the descriptor layout shaders must be authored against, and
---- it differs by stage:
----
----   vertex    set 0  sampled textures, storage textures, storage buffers
----             set 1  uniform buffers
----   fragment  set 2  sampled textures, storage textures, storage buffers
----             set 3  uniform buffers
----   compute   set 0  sampled textures, read-only storage textures and buffers
----             set 1  read-write storage textures and buffers
----             set 2  uniform buffers
----
---- Only compute distinguishes read-only from read-write storage, and it does
---- so by set, which is what SDL mandates and simpler than recovering the
---- distinction from NonWritable decorations. Graphics storage resources are
---- always read-only.
----
---- Metal has no descriptor sets, so bindings are flattened to the order
---- SDL_GPU's Metal backend expects:
----
----   [[buffer]]   uniform, then read-only storage, then read-write storage
----   [[texture]]  sampled, then read-only storage, then read-write storage
+--[=[
+GLSL to backend bytecode, with the reflection SDL_GPU requires.
+
+SDL_GPU consumes compiled shaders and is told, separately, how many
+resources of each class the shader binds. Getting those counts wrong is not
+a compile error; it is a binding mismatch that surfaces as wrong pixels. So
+they are reflected out of the SPIR-V rather than declared by hand.
+
+SDL_GPU fixes the descriptor layout shaders must be authored against, and
+it differs by stage:
+
+  vertex    set 0  sampled textures, storage textures, storage buffers
+            set 1  uniform buffers
+  fragment  set 2  sampled textures, storage textures, storage buffers
+            set 3  uniform buffers
+  compute   set 0  sampled textures, read-only storage textures and buffers
+            set 1  read-write storage textures and buffers
+            set 2  uniform buffers
+
+Only compute distinguishes read-only from read-write storage, and it does
+so by set, which is what SDL mandates and simpler than recovering the
+distinction from NonWritable decorations. Graphics storage resources are
+always read-only.
+
+Metal has no descriptor sets, so bindings are flattened to the order
+SDL_GPU's Metal backend expects:
+
+  [[buffer]]   uniform, then read-only storage, then read-write storage
+  [[texture]]  sampled, then read-only storage, then read-write storage
+]=]
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs.ffi.sdl3")

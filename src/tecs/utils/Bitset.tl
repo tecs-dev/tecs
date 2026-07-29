@@ -1,4 +1,6 @@
---- FFI-backed bitset with zero-based indexes.
+--[=[
+FFI-backed bitset with zero-based indexes.
+]=]
 
 local cffi <const> = require("ffi")
 local bit <const> = require("bit")

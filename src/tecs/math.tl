@@ -1,99 +1,79 @@
---- Allocation-free two-dimensional vector and angle math.
----
---- Every function here is arithmetic a caller could have written inline, and
---- that is the argument for the module rather than against it. The expressions
---- are short and the mistakes in them are the same ones every time: a
---- normalize that divides by the length of a zero vector, an angle difference
---- that jumps by a whole turn as it crosses pi, a chase step that overshoots
---- its target on a long frame. Each of those has one right answer, that answer
---- does not vary by caller, and settling it once means the boundary cases are
---- settled once. Naming is the other half of it. A call to `moveTowards` says
---- what the line is for, where the same arithmetic spelled out says only what
---- it computes.
----
---- **Coordinates, not vectors.** A vector is passed as separate `x` and `y`
---- numbers and returned as two of them. A vector type is the obvious
---- alternative and it loses on the one axis that decides something called this
---- often: every operation would allocate its result, or every caller would
---- keep a pool of them alive. Two numbers in and two numbers out allocate
---- nothing, and LuaJIT compiles the arithmetic into the caller's own trace, so
---- the call costs what the expression it replaced would have cost.
----
---- A game writes this shape, moving an entity toward what it is chasing and
---- turning it to face the way it went:
----
---- ```teal
---- local record Homing is tecs.ecs.Component
----     targetX: number
----     targetY: number
----     speed: number
---- end
----
---- tecs.ecs.newFFIComponent({
----     name = "Homing",
----     container = Homing,
----     fields = {{"targetX", "float"}, {"targetY", "float"}, {"speed", "float"}},
---- })
----
---- local homing <const> = world:query({include = {tecs.Transform, Homing}})
----
---- world:addSystem({
----     name = "game.Homing",
----     phase = tecs.ecs.phases.Update,
----     run = function(dt: number)
----         for archetype, length in homing:iter() do
----             local transforms = archetype:getMut(tecs.Transform)
----             local targets = archetype:get(Homing)
----             for row = 1, length do
----                 local transform = transforms[row]
----                 local target = targets[row]
----                 transform.x, transform.y = tecs.math.moveTowards(
----                     transform.x, transform.y,
----                     target.targetX, target.targetY,
----                     target.speed * dt
----                 )
----                 transform.rotation = tecs.math.angle(
----                     target.targetX - transform.x,
----                     target.targetY - transform.y
----                 )
----             end
----         end
----     end,
---- })
---- ```
----
---- Nothing in that loop allocates, which is what lets it run over every row of
---- every matching archetype each frame. The two writes go to a column taken
---- with `getMut`; the component read beside it uses `get`, because taking
---- `getMut` to read would mark it dirty every frame and defeat the consumers
---- that skip clean columns.
----
---- Every angle is in radians. A positive quarter turn maps `(1, 0)` to
---- `(0, 1)`, which appears clockwise in screen coordinates whose y-axis points
---- down. An operation with no unique geometric answer returns a stable value
---- rather than a NaN, and each one says which value on its own entry.
----
---- Turning toward a point and stepping along the new facing, which is two
---- values in and two values out at every line:
----
---- ```teal
---- local x, y = 100.0, 100.0
---- local facing = 0.0
----
---- local toTargetX, toTargetY = tecs.math.subtract(320, 240, x, y)
---- local heading <const> = tecs.math.angle(toTargetX, toTargetY)
---- facing = facing + tecs.math.deltaAngle(facing, heading) * 4 * dt
----
---- local stepX, stepY = tecs.math.rotate(90 * dt, 0, facing)
---- x, y = tecs.math.add(x, y, stepX, stepY)
---- ```
----
---- `deltaAngle` takes the short way round, so a turn across the wrap does not
---- go the long way.
----
---- Operations use direct Lua-number arithmetic for game-coordinate magnitudes.
---- As with writing the expressions directly, values near the limits of an
---- IEEE double can overflow when squared or underflow to zero.
+--[=[
+Allocation-free two-dimensional vector and angle math.
+
+The module takes separate coordinates and returns multiple values, so a system
+can update an archetype column without allocating vector objects:
+
+```teal
+local record Homing is tecs.ecs.Component
+    targetX: number
+    targetY: number
+    speed: number
+end
+
+tecs.ecs.newFFIComponent({
+    name = "Homing",
+    container = Homing,
+    fields = {
+        {"targetX", "float"},
+        {"targetY", "float"},
+        {"speed", "float"},
+    },
+})
+
+return tecs.newApplication({
+    plugin = function(world: tecs.World)
+        local homing <const> = world:query({
+            include = {tecs.Transform, Homing},
+        })
+
+        world:addSystem({
+            name = "game.Homing",
+            phase = tecs.ecs.phases.Update,
+            run = function(dt: number)
+                for archetype, length in homing:iter() do
+                    local transforms <const> =
+                        archetype:getMut(tecs.Transform)
+                    local targets <const> = archetype:get(Homing)
+
+                    for row = 1, length do
+                        local transform <const> = transforms[row]
+                        local target <const> = targets[row]
+
+                        transform.x, transform.y = tecs.math.moveTowards(
+                            transform.x,
+                            transform.y,
+                            target.targetX,
+                            target.targetY,
+                            target.speed * dt
+                        )
+                        transform.rotation = tecs.math.angle(
+                            target.targetX - transform.x,
+                            target.targetY - transform.y
+                        )
+                    end
+                end
+            end
+        })
+    end,
+})
+```
+
+The writable [`Transform`](/ecs/#tecs.ecs.Transform) column comes from `getMut`; the read-only target
+column comes from `get`. Taking both through `getMut` would dirty `Homing`
+every frame and defeat consumers that skip clean columns.
+
+## Coordinates and boundaries
+
+Every angle uses radians. A positive quarter turn maps `(1, 0)` to `(0, 1)`,
+which appears clockwise when screen y grows downward.
+
+Operations without a unique geometric answer return stable values.
+`normalize(0, 0)`, either angle-between function with a zero vector, and
+`project` onto a zero axis return zero. `reflect` with a zero normal returns
+the original vector. `lerp` does not clamp, and `moveTowards` never
+overshoots.
+]=]
 
 local abs <const> = math.abs
 local atan2 <const> = math.atan2
@@ -104,51 +84,8 @@ local sqrt <const> = math.sqrt
 local PI <const> = math.pi
 local TWO_PI <const> = PI * 2.0
 
---- Allocation-free two-dimensional vector and angle math.
----
---- ## Calling convention
----
---- A vector is passed as separate x and y coordinates and returned as two
---- numbers. Assign both results directly; the module creates and retains no
---- vector objects:
----
---- ```teal
---- local dx, dy = tecs.math.normalize(targetX - x, targetY - y)
---- local nextX, nextY = tecs.math.moveTowards(x, y, targetX, targetY, speed * dt)
---- ```
----
---- Squared length and distance avoid a square root when only a comparison is
---- needed:
----
---- ```teal
---- local inRange <const> = tecs.math.distanceSquared(x, y, targetX, targetY) <= range * range
---- ```
----
---- ## Angles and screen coordinates
----
---- Every angle is in radians. A positive quarter turn maps `(1, 0)` to
---- `(0, 1)`, which appears clockwise when screen y coordinates grow downward.
---- `angleBetween` discards direction; `signedAngleBetween` and `deltaAngle`
---- use the same sign convention as `rotate`.
----
---- ## Degenerate inputs
----
---- Operations with no unique geometric answer return stable values:
---- `normalize(0, 0)`, either angle-between form with a zero vector, and
---- `project` onto a zero axis return zero; `reflect` with a zero normal returns
---- the original vector. `lerp` is unclamped, and `moveTowards` never
---- overshoots.
----
---- ## Numeric range
----
---- Operations use direct Lua-number arithmetic for ordinary game-coordinate
---- magnitudes. Values near the limits of an IEEE double may overflow when
---- squared or underflow to zero, just as the equivalent inline expression
---- would.
----
---- Named `vectorMath` internally because `math` is Lua's standard library.
---- Shadowing it makes every project's otherwise-clean type-check warn; the
---- public name and module path remain `tecs.math`.
+-- Implementation details: The internal name avoids shadowing Lua's `math`
+-- standard library and triggering type-check warnings in callers.
 local record vectorMath
     --- Adds two vectors.
     ---
@@ -401,34 +338,34 @@ local record vectorMath
 
     --- Projects a vector onto another vector.
     ---
-    --- The projection axis does not need to be normalized:
+    --- The projection axis may have any length:
     ---
     --- ```teal
     --- local alongX, alongY = tecs.math.project(velocityX, velocityY, axisX, axisY)
     --- ```
     ---
-    --- @param x Vector being projected's x coordinate.
-    --- @param y Vector being projected's y coordinate.
+    --- @param x The vector's x coordinate.
+    --- @param y The vector's y coordinate.
     --- @param ontoX Projection axis's x coordinate.
     --- @param ontoY Projection axis's y coordinate.
-    --- @return The projected x coordinate. The axis need not be normalized;
+    --- @return The projected x coordinate. The axis may have any length;
     ---     a zero axis returns zero.
     --- @return The projected y coordinate, with the same zero-axis rule.
     project: function(x: number, y: number, ontoX: number, ontoY: number): number, number
 
     --- Reflects a vector across the line perpendicular to a normal.
     ---
-    --- The normal does not need to be normalized:
+    --- The normal may have any length:
     ---
     --- ```teal
     --- velocityX, velocityY = tecs.math.reflect(velocityX, velocityY, normalX, normalY)
     --- ```
     ---
-    --- @param x Vector being reflected's x coordinate.
-    --- @param y Vector being reflected's y coordinate.
+    --- @param x The vector's x coordinate.
+    --- @param y The vector's y coordinate.
     --- @param normalX Surface normal's x coordinate.
     --- @param normalY Surface normal's y coordinate.
-    --- @return The reflected x coordinate. The normal need not be normalized;
+    --- @return The reflected x coordinate. The normal may have any length;
     ---     a zero normal returns the original x coordinate.
     --- @return The reflected y coordinate, with the same zero-normal rule.
     reflect: function(x: number, y: number, normalX: number, normalY: number): number, number

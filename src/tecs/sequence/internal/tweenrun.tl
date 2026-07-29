@@ -1,13 +1,15 @@
---- Timelines as programs: the evaluator a compiled timeline runs under.
----
---- A tween playback is a cursor that never sleeps. It joins its clock's
---- active set at the `eval` step and is walked from there every tick, holding
---- a direct reference to its timeline and one contiguous state buffer.
----
---- That is the whole point of the merge. The shipping tween runtime reached a
---- playback through a query, an archetype, a component, a cursor list, and a
---- registry lookup before it could touch a number, and paid that per playback
---- per frame. Here the walk is the dense array and the timeline is a field.
+--[=[
+Timelines as programs: the evaluator a compiled timeline runs under.
+
+A tween playback is a cursor that never sleeps. It joins its clock's
+active set at the `eval` step and is walked from there every tick, holding
+a direct reference to its timeline and one contiguous state buffer.
+
+That is the whole point of the merge. The shipping tween runtime reached a
+playback through a query, an archetype, a component, a cursor list, and a
+registry lookup before it could touch a number, and paid that per playback
+per frame. Here the walk is the dense array and the timeline is a field.
+]=]
 
 local type types = require("tecs.types")
 local seqcursors <const> = require("tecs.sequence.internal.cursors")

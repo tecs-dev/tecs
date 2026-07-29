@@ -40,6 +40,7 @@ PATH="$vendor/bin:$PATH" make --directory="$scratch/cerulean" compile
 
 git clone --quiet https://github.com/teal-language/tealdoc.git "$scratch/tealdoc"
 git -C "$scratch/tealdoc" checkout --quiet --detach "$TEALDOC_REF"
+PATH="$vendor/bin:$PATH" make --directory="$scratch/tealdoc" build
 install -d "$licenses/tealdoc"
 install -m 0644 "$scratch/tealdoc/LICENSE" "$licenses/tealdoc/LICENSE"
 (

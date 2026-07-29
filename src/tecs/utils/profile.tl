@@ -1,22 +1,24 @@
---- Profiling tools for Tecs.
----
---- Two independent channels share the LuaJIT zone stack for attribution:
----
----   * `profile.sample` -- statistical (timer-based) sampler. Emits collapsed-stack
----     text consumed by speedscope.app, FlameGraph.pl, inferno, etc. Tells you
----     where time is spent.
----   * `profile.trace` -- JIT trace event hook. Aggregates trace aborts so you
----     can spot blacklisted hot code, repeated NYI bailouts, and trace size
----     cliffs that silently demote work to the interpreter. Tells you whether
----     the JIT is actually compiling your hot code.
----
---- Each call returns a session handle. `:stop()` returns the report and ends
---- the session; calling `:stop()` twice errors. Only one sample session and
---- one trace session may be active at a time.
----
---- Both channels rely on `jit.zone` push/pop for attribution. `jit.zone` is
---- a no-op (`__call` is a no-op) until a session enables it; multiple live
---- sessions refcount, so the zone stack is on whenever any channel needs it.
+--[=[
+Profiling tools for Tecs.
+
+Two independent channels share the LuaJIT zone stack for attribution:
+
+  * `profile.sample` -- statistical (timer-based) sampler. Emits collapsed-stack
+    text consumed by speedscope.app, FlameGraph.pl, inferno, etc. Tells you
+    where time is spent.
+  * `profile.trace` -- JIT trace event hook. Aggregates trace aborts so you
+    can spot blacklisted hot code, repeated NYI bailouts, and trace size
+    cliffs that silently demote work to the interpreter. Tells you whether
+    the JIT is actually compiling your hot code.
+
+Each call returns a session handle. `:stop()` returns the report and ends
+the session; calling `:stop()` twice errors. Only one sample session and
+one trace session may be active at a time.
+
+Both channels rely on `jit.zone` push/pop for attribution. `jit.zone` is
+a no-op (`__call` is a no-op) until a session enables it; multiple live
+sessions refcount, so the zone stack is on whenever any channel needs it.
+]=]
 
 local string_format <const> = string.format
 local table_concat <const> = table.concat

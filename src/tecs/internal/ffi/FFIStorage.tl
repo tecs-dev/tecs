@@ -1,5 +1,7 @@
---- FFI-backed component storage. Columns are contiguous cdata arrays, which
---- enables bulk copies, raw snapshot IO, and optional GPU-uploadable backing.
+--[=[
+FFI-backed component storage. Columns are contiguous cdata arrays, which
+enables bulk copies, raw snapshot IO, and optional GPU-uploadable backing.
+]=]
 
 local types <const> = require("tecs.types")
 local storage <const> = require("tecs.internal.storage")

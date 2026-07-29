@@ -1,34 +1,36 @@
---- Every open HTTP client in this process, and the one call that turns them.
----
---- Reqwest moves sockets on Rust's Tokio threads, but a future may settle only
---- when the SDL thread drains its client's event queue. `assets` and `proc`
---- are module singletons, so the loop names them and calls them. A client is
---- not: a game constructs it, may construct several, and may keep none of them
---- anywhere the loop could reach. So the clients come to the loop instead.
---- Building one registers it here, closing one takes it off, and
---- `tecs.Application` turns whatever is on the list once a frame.
----
---- ## Why this is a module of its own
----
---- The loop has to reach the list without starting the HTTP runtime.
---- `tecs.net.http` resolves the native boundary when it is required, so an
---- `Application` that required it would make every game start HTTP machinery,
---- including ones that never make a request. This module names no library and
---- costs a table.
----
---- It is also why the list is of a small record rather than of `Client`:
---- naming that type here would be a require in the wrong direction, and Teal
---- rejects the cycle even through a type-only one.
----
---- ## A client that is dropped is still pumped
----
---- The list holds its clients, so a game that sends a request and keeps only
---- the future still gets an answer. The cost is that a client nobody closes is
---- never collected and its sockets stay open: `close` is what ends a client,
---- not losing the last reference to it. That is the same bargain `proc` makes
---- with a child nobody waits for, and the alternative -- a weak list -- is a
---- fire-and-forget request that stops moving whenever a collection happens to
---- run, which is a bug nobody could reproduce.
+--[=[
+Every open HTTP client in this process, and the one call that turns them.
+
+Reqwest moves sockets on Rust's Tokio threads, but a future may settle only
+when the SDL thread drains its client's event queue. `assets` and `proc`
+are module singletons, so the loop names them and calls them. A client is
+not: a game constructs it, may construct several, and may keep none of them
+anywhere the loop could reach. So the clients come to the loop instead.
+Building one registers it here, closing one takes it off, and
+`tecs.Application` turns whatever is on the list once a frame.
+
+## Process-wide client registry
+
+The loop has to reach the list without starting the HTTP runtime.
+`tecs.net.http` resolves the native boundary when it is required, so an
+`Application` that required it would make every game start HTTP machinery,
+including ones that never make a request. This module names no library and
+costs a table.
+
+It is also why the list is of a small record rather than of `Client`:
+naming that type here would be a require in the wrong direction, and Teal
+rejects the cycle even through a type-only one.
+
+## A client that is dropped is still pumped
+
+The list holds its clients, so a game that sends a request and keeps only
+the future still gets an answer. The cost is that a client nobody closes is
+never collected and its sockets stay open: `close` is what ends a client,
+not losing the last reference to it. That is the same bargain `proc` makes
+with a child nobody waits for, and the alternative -- a weak list -- is a
+fire-and-forget request that stops moving whenever a collection happens to
+run, which is a bug nobody could reproduce.
+]=]
 
 local record clients
     --- What the loop turns. `Client` is one.

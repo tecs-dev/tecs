@@ -1,12 +1,14 @@
---- Internal type definitions for breaking circular dependencies.
----
---- Declares `WorldImpl` as a concrete record with all fields + every
---- method signature (public API + `_`-prefixed internal staging/drain
---- methods). Implementations live in `world.tl` and `world/*.tl`; each
---- file aliases `internal.WorldImpl` and attaches methods via
---- `function WorldImpl:foo(...)`. This is the only way Teal's type
---- checker accepts cross-file method extension -- the concrete record
---- declaration must exist in a module with no cyclic imports.
+--[=[
+Internal type definitions for breaking circular dependencies.
+
+Declares `WorldImpl` as a concrete record with all fields + every
+method signature (public API + `_`-prefixed internal staging/drain
+methods). Implementations live in `world.tl` and `world/*.tl`; each
+file aliases `internal.WorldImpl` and attaches methods via
+`function WorldImpl:foo(...)`. This is the only way Teal's type
+checker accepts cross-file method extension -- the concrete record
+declaration must exist in a module with no cyclic imports.
+]=]
 
 local types <const> = require("tecs.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")

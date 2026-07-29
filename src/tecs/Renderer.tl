@@ -1,24 +1,22 @@
---- Feeds the deferred pipeline from a world.
----
---- Two halves and the seam between them. `Extractor` is world-facing: queries,
---- archetype runs, relayout detection, dirty gating, producers and the
---- interpolation alpha, writing instances straight into mapped staging.
---- `Backend` is device-facing: the buffers, the flush, the cull, the deferred
---- pass graph and the image array. A `FramePacket` is everything that crosses,
---- and neither half holds a reference to the other.
----
---- The line is a dependency rule, not a thread boundary. Both halves run on
---- the main thread, one after the other: the extractor inside `world:update`,
---- in RenderFirst, and the backend afterwards against a frame. What the rule
---- buys is that extraction needs no command buffer and rendering needs no
---- world, so a world extracts with no device behind it and the backend is
---- exercised with no world in front of it. This object is what still sees
---- both: it owns the packet, rotates the staging slot, and hands the backend's
---- mapped addresses to the extractor.
----
---- What a game holds is this. `renderer.camera` is the extractor's camera and
---- `renderer.images` is the backend's array, named here so neither half has to
---- be reached for by name.
+--[=[
+Feeds the deferred pipeline from a world.
+
+An application owns one renderer. Install it on a world, then call `render`
+with each frame. Use `camera` to control the view, `images` to inspect image
+residency, and `deferred` to add targets or passes. Call `destroy` when the
+device shuts down.
+]=]
+
+-- Implementation details:
+-- Renderer joins two independent halves. Extractor reads the world, applies
+-- dirty gating and interpolation, and writes instances into mapped staging.
+-- Backend owns buffers, culling, the pass graph, and the image array.
+-- FramePacket is the only data that crosses between them.
+--
+-- This is a dependency boundary rather than a thread boundary. Extraction
+-- runs during RenderFirst, and Backend consumes the packet afterwards on the
+-- main thread. Renderer owns the packet and mapped staging addresses because
+-- it is the only object that sees both halves.
 
 local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
@@ -39,8 +37,8 @@ local type InstanceProducer = Extractor.InstanceProducer
 local type ClipRegion = Backend.ClipRegion
 local type ComputeStage = Backend.ComputeStage
 
---- Instances the buffers are sized for. This is a ceiling, not a hint: rows
---- beyond it are dropped rather than growing the buffer mid-frame.
+--- Sets the instance capacity for renderer buffers. The renderer drops rows
+--- beyond this ceiling instead of growing a buffer mid-frame.
 local DEFAULT_CAPACITY <const> = 65536
 
 --- Ambient light when none was asked for.
@@ -51,79 +49,77 @@ local DEFAULT_CAPACITY <const> = 65536
 --- lights add on top of a scene that is already legible.
 local DEFAULT_AMBIENT <const>: {number} = {1.0, 1.0, 1.0}
 
+--- `RendererOptions` configures fixed renderer resources at creation.
 local record RendererOptions
-    --- Light every surface receives before any light entity contributes, as
-    --- red, green and blue. Defaults to white.
+    --- Caller-writable. The caller sets `ambient` before `newRenderer` reads it.
+    --- It contains red, green and blue and defaults to white.
     ambient: {number}
-    --- Instances the buffer is sized for.
+    --- Caller-writable. The caller sets `capacity` before creation to fix the
+    --- maximum resident instance count.
     capacity: integer
-    --- Cell size of the image array.
+    --- Caller-writable. The caller sets `cell` before creation to choose the
+    --- image-array cell size in pixels.
     cell: integer
-    --- Layers the image array holds.
+    --- Caller-writable. The caller sets `layers` before creation to choose the
+    --- image-array layer count.
     layers: integer
-    --- Give each archetype a run with room to grow rather than packing the
-    --- runs end to end. Defaults to false, which packs.
+    --- Caller-writable. The caller sets `reserveRuns` before creation. It
+    --- defaults to false, which packs archetype runs end to end.
     ---
-    --- Packed, one spawn anywhere shifts every run after it and the whole
-    --- scene is rewritten and re-uploaded. Reserved, an archetype grows into
-    --- its own slack and the rest of the scene stays resident, and the cull is
-    --- dispatched over the slack as well as over the rows.
+    --- With packed runs, one spawn shifts every later run and makes the
+    --- renderer rewrite and upload the whole scene. Reserved runs let an
+    --- archetype grow into its own slack and keep the rest of the scene
+    --- resident. Culling also covers that slack.
     reserveRuns: boolean
-    --- Fit many images into each layer of the image array rather than one.
-    --- Defaults to false. On, the ceiling on distinct images is the array's
-    --- area rather than its layer count, and a small image costs its own size
-    --- rather than a whole cell.
+    --- Caller-writable. The caller sets `packImages` before creation to fit
+    --- many images into each array layer. It defaults to false.
     packImages: boolean
-    --- Let entities cast shadows, and tune what they cost. Nil, the default,
-    --- means an `Occluder` or a `DropShadow` on an entity draws the entity and
-    --- casts nothing, because the targets that would hold a shadow are never
-    --- built. An empty table turns them on with every default.
+    --- Caller-writable. The caller sets `shadows` before creation to enable and
+    --- configure shadows. Nil disables them; an empty record uses defaults.
     shadows: Deferred.ShadowOptions
 end
 
---- The renderer a game holds, and the only object that sees both halves.
+--- A `Renderer` feeds the deferred pipeline from one world.
 ---
---- One is created per device and installed on a world, after which it does its
---- work from the system it registered and from `render`. It owns the packet,
---- the extractor and the backend, and `destroy` takes all three with it.
+--- Create one per device and install it on a world. `destroy` releases every
+--- resource it owns.
 local record Renderer
-    --- What `newRenderer` takes, named here so a game can annotate the table it
-    --- passes without reaching into this file.
+    --- `Options` names the configuration that
+    --- `newRenderer` reads.
     type Options = RendererOptions
-    --- Re-exported for whoever writes one and passes it to `addProducer`.
+    --- `InstanceProducer` names a custom instance source.
     type InstanceProducer = InstanceProducer
-    --- Re-exported for whoever names a rectangle for `setClipRegion`.
+    --- `ClipRegion` names a target-pixel clipping
+    --- rectangle.
     type ClipRegion = ClipRegion
-    --- Re-exported for whoever implements one and passes it to
-    --- `addComputeStage`.
+    --- `ComputeStage` names a custom compute stage.
     type ComputeStage = ComputeStage
 
-    --- What the view is looking at. Centerd on the viewport the first time a
-    --- frame is drawn, so a scene that never mentions a camera sees world
-    --- coordinates as screen coordinates.
+    --- Caller-writable. The caller changes `camera` to control the current
+    --- view. The first frame centers it on the viewport.
     camera: Camera
-    --- Instances the buffers were sized for, fixed at creation. Nothing grows,
-    --- so this is what `dropped` counts against.
+    --- Read-only. Reports the instance capacity fixed at creation.
     capacity: integer
-    --- Instances the last sync left resident.
+    --- Read-only. Reports the instances resident after the last sync.
     count: integer
-    --- Instances the last sync could not fit.
+    --- Read-only. Reports the instances the last sync could not fit.
     dropped: integer
-    --- Instances the last sync actually rewrote. Zero on a still frame.
+    --- Read-only. Reports the instances rewritten by the last sync.
     rewritten: integer
-    --- Every image, one binding, so the scene is one draw.
+    --- Read-only. Provides access to the renderer's image array.
     images: TextureArray
-    --- The instance buffer the scene is drawn from, and the staging behind it.
+    --- Engine-owned. Exposes the instance buffer to custom compute stages;
+    --- ordinary game code should ignore it.
     instances: Buffer
-    --- The pipeline the packet is drawn through, so a caller can add targets
-    --- and passes around the three it already has.
+    --- Read-only. Provides access to the pass graph for custom targets and
+    --- passes.
     deferred: Deferred
 
-    --- The world-facing half. `camera` above is its camera, named here so
-    --- neither half has to be reached for.
+    --- Engine-owned. Stores the world-facing half; ordinary game code should
+    --- ignore it.
     _extractor: Extractor
-    --- The device-facing half. `images`, `instances` and `deferred` above are
-    --- its, on the same terms.
+    --- Engine-owned. Stores the device-facing half; ordinary game code should
+    --- ignore it.
     _backend: Backend
     --- The one packet, refilled each extraction rather than allocated per
     --- frame, so what `render` draws is always the last extraction's.
@@ -138,7 +134,7 @@ local record Renderer
     _slot: integer
     --- Whether the camera has been put in the middle of the viewport yet. It
     --- happens on the first frame that has something to draw, once and never
-    --- again, so a game that moves the camera itself is not moved back.
+    --- again, so later game movement keeps control.
     _centerd: boolean
 end
 
@@ -146,9 +142,12 @@ local RendererMT <const>: metatable<Renderer> = {__index = Renderer}
 
 --- Builds a renderer for `device`.
 ---
---- @param swapchainFormat The `SDL_GPUTextureFormat` present copies into.
---- @param options Every field has a default, and nil is accepted at runtime
----     even though the signature does not mark it optional.
+--- @param device The engine supplies the GPU device that owns renderer
+---     resources.
+--- @param swapchainFormat The engine supplies the texture format used for
+---     presentation copies.
+--- @param options The caller supplies creation options or nil for defaults.
+--- @return Returns a caller-owned renderer that `destroy` releases.
 function Renderer.newRenderer(device: loader.CPtr, swapchainFormat: integer, options: RendererOptions): Renderer
     options = options or {}
 
@@ -203,14 +202,9 @@ end
 
 --- Registers the sync system and queries on `world`.
 ---
---- Two systems, not one: the transform snapshot the interpolation reads runs
---- in FixedFirst, before anything in the step has moved, and the extraction
---- itself runs in RenderFirst. The counts above are published as the second
---- returns, so a system later in the frame reads this frame's numbers.
+--- An uninstalled renderer draws an empty scene.
 ---
---- @param world The queries and both systems are added here and nowhere else,
----     so a renderer that was created and never installed draws an empty
----     packet rather than failing.
+--- @param world The caller supplies the world this renderer reads.
 function Renderer:install(world: types.World)
     self._extractor:install(
         world,
@@ -226,28 +220,13 @@ end
 
 --- Uploads a decoded image into the array and returns a Sprite for it.
 ---
---- The image is registered under its path, which is what a Sprite names it by
---- and what a snapshot stores. Registering a path a second time answers with
---- the layer it already holds instead of consuming another, so a name means
---- one image for the life of the renderer however many times it is asked for.
---- The path is what identifies it rather than the spelling of the path: two
---- ways of writing one path are one image, since the array's layers are few
---- and none of them is ever given back.
+--- The path identifies the image for the renderer's lifetime. Re-registering
+--- it returns the existing region. The call releases the decoded pixels and
+--- raises when they no longer exist.
 ---
---- A Sprite is returned rather than a bare region because an image smaller
---- than a cell does not reach the cell's edge, so the UV range is not 0..1 and
---- a caller guessing it would sample the undefined remainder. The second
---- return is the region, which reports the size that was uploaded.
----
---- This caller's hold on the pixels is released here: the array holds them now.
----
---- @param decoded What a `loadImage` future settled to. Its pixels are released
----     whether the path was new or already registered. One whose pixels have
----     already been released raises rather than uploading whatever is at a
----     freed address.
---- @return A Sprite selecting the whole image, ready to spawn.
---- @return Where it landed, which reports the size that was uploaded rather
----     than the cell's. The renderer's own record, not a copy.
+--- @param decoded The caller supplies a ready image that still owns its pixels.
+--- @return Returns a fresh Sprite that selects the whole image.
+--- @return Returns the renderer-owned live region that contains the image.
 function Renderer:registerImage(decoded: assets.Image): components.Sprite, TextureArray.Region
     -- The payload's own existence rather than a status word. An `Image` that
     -- exists is a load that finished, so the only thing left to refuse is one
@@ -269,27 +248,14 @@ end
 
 --- Uploads a decoded image over the one already registered under its path.
 ---
---- Identity is the point. The image keeps the layer and the rect it was given
---- at registration, so every `Sprite`, `Sheet` and glyph already spawned from
---- it goes on naming the right texels and the next frame simply draws the new
---- pixels. Nothing in the world is touched and nothing has to be invalidated.
+--- The replacement keeps the registered layer and rectangle, so existing
+--- Sprites keep their identity. The call raises for missing pixels, an
+--- unregistered path or a size change and releases valid decoded pixels.
 ---
---- The size has to match. A larger or smaller image needs a different rect, and
---- the UVs of the old one are already copied into every instance that uses it,
---- so this refuses rather than silently drawing part of a neighbor.
----
---- Fails on a path nothing is registered under, since there is no rect to write
---- into and adding one would be `registerImage`.
----
---- This caller's hold on the pixels is released here: the array holds them now.
----
---- @param decoded What a `loadImage` future settled to. It must still hold its
----     pixels, must name a path already registered, and must be the same size
----     it was registered at. Each of the three raises, and the pixels are only
----     released once all three have passed.
---- @return The same Sprite `registerImage` answered with, since neither the
----     layer nor the rect moved.
---- @return The region, unchanged, and still the renderer's own record.
+--- @param decoded The caller supplies a ready image that matches a registered
+---     path and size.
+--- @return Returns a fresh Sprite that selects the unchanged region.
+--- @return Returns the renderer-owned live region.
 function Renderer:replaceImage(decoded: assets.Image): components.Sprite, TextureArray.Region
     if decoded.pixels == nil then
         error(("tecs: the pixels of '%s' have been released"):format(decoded.path), 2)
@@ -319,76 +285,51 @@ end
 
 --- Rebuilds every pipeline from the shader sources as they read now.
 ---
---- The device's half of a shader reload: whoever asked for one has already
---- re-read the sources, and this is what makes the next frame draw from them.
---- A source that no longer compiles raises and changes nothing.
----
---- Not to be called from inside a pass. It waits for the device to go idle and
---- releases the handles a recorded pass would still be reading.
+--- A source that no longer compiles raises and leaves the current pipelines
+--- intact. Call this only between passes.
 function Renderer:rebuildPipelines()
     self._backend:rebuildPipelines()
 end
 
---- The region an image already occupies, or nil if none has registered it.
+--- Returns the region that a registered image occupies.
 ---
---- What `registerImage` answers, without a decoded image to answer it with.
---- A caller that has lost its derived copy of a region, which a font atlas
---- does when its metrics are re-read, would otherwise have to decode the file
---- again only to be handed back the layer it already had and have its pixels
---- released undrawn.
----
---- @param path The path the image was registered under, spelled the same way.
---- @return The renderer's own record of where the image landed, not a copy.
----     Nil says nothing is registered under that path, which is the one answer
----     `registerImage` and `replaceImage` differ on.
+--- @param path The caller supplies the path used during registration.
+--- @return Returns the renderer-owned live region, or nil when no image uses
+---     that path.
 function Renderer:regionOf(path: string): TextureArray.Region
     return self._extractor:regionOf(components.imageId(path))
 end
 
---- World units that collapse onto one depth value on this device.
+--- Returns the world units that collapse onto one depth value.
 ---
---- Zero on a device whose depth target holds everything the layer sort
---- produces, which is what a device offering `D32_FLOAT` or `D24_UNORM`
---- answers at any extents a scene is likely to use. Above zero, the target is
---- the floor SDL guarantees and its step is coarser than the sort's own: the
---- bands still hold, so a HUD still covers a world, and entities closer
---- together than this share a depth value and draw in the order they were
---- written rather than the order they were sorted into.
----
---- Reachable rather than only logged, because there is something to do about
---- it. Dividing `layers.maxY` and `layers.maxZ` by what this answers raises
---- the sort's own resolution by the same factor, after which this answers
---- zero and the scene sorts again inside a world that much smaller. A game
---- that would rather keep its extents can drop to the `z` sort on the layers
---- that matter, which resolves in the floor format with room to spare.
----
---- A startup question, asked once. It walks the format table and re-derives
---- what the sort resolves to, so it is not for a frame loop, and it reads the
---- extents as they are now rather than as they were when the target was
---- created, which is what makes asking again after narrowing them meaningful.
---- @return Zero, or world units, which is also the factor `layers.maxY` and
----     `layers.maxZ` divide by to resolve the sort again.
+--- Zero means the depth target preserves the full layer sort. A positive value
+--- means entities closer than that value share depth and retain write order.
+--- Query this during setup or after changing layer extents, not per frame.
+--- @return Returns zero when the depth format preserves the layer sort, or the
+---     collapse width otherwise.
 function Renderer:depthSortCollapse(): number
     return Texture.depthSortCollapse(self.deferred.graph.depthFormat)
 end
 
---- Whether archetype runs are laid out with room to grow.
+--- Returns whether archetype runs have room to grow.
+---
+--- @return Returns the fixed creation setting.
 function Renderer:reservesRuns(): boolean
     return self._extractor:reservesRuns()
 end
 
---- A resolved Sprite for a registered image, ready to spawn.
+--- Returns a Sprite for a registered image.
 ---
 --- UVs are fractions of the image rather than of the cell it sits in. Omitted,
---- they select the whole image. Fails on a name nothing is registered under.
+--- they select the whole image. The call fails when no registration matches
+--- the name.
 ---
---- @param name The path the image was registered under.
---- @param u0 Zero at the image's left edge and one at its right, not the
----     cell's. Defaults to zero, as `v0` does.
---- @param u1 Defaults to one, as `v1` does, so omitting all four is the whole
----     image.
---- @return A fresh Sprite, with the fractions already mapped into the rect the
----     image occupies within its cell.
+--- @param name The caller supplies the registered image path.
+--- @param u0 The caller supplies the left image fraction or omits it for zero.
+--- @param v0 The caller supplies the top image fraction or omits it for zero.
+--- @param u1 The caller supplies the right image fraction or omits it for one.
+--- @param v1 The caller supplies the bottom image fraction or omits it for one.
+--- @return Returns a fresh Sprite mapped into the image's array region.
 function Renderer:sprite(name: string, u0?: number, v0?: number, u1?: number, v1?: number): components.Sprite
     return self._extractor:sprite(name, u0, v0, u1, v1)
 end
@@ -400,10 +341,10 @@ end
 --- a region and cannot be set: it is what an instance says when it wants no
 --- clipping at all.
 ---
---- @param index 1 through 255. Zero, a fraction, or anything outside that
----     raises.
---- @param region Nil raises rather than clearing; `clearClipRegion` is what
----     stops a region clipping.
+--- @param index The caller supplies an integer from 1 through 255. Other values
+---     raise.
+--- @param region The caller supplies the target-pixel rectangle. Nil raises;
+---     `clearClipRegion` removes one.
 function Renderer:setClipRegion(index: integer, region: ClipRegion)
     self._backend:setClipRegion(index, region)
 end
@@ -414,58 +355,53 @@ end
 --- adapter handing indices out and taking them back leaves nothing behind that
 --- silently removes content.
 ---
---- @param index The same range `setClipRegion` takes. Clearing one nobody set
----     is not an error.
+--- @param index The caller supplies an integer from 1 through 255. Clearing an
+---     unused index succeeds.
 function Renderer:clearClipRegion(index: integer)
     self._backend:clearClipRegion(index)
 end
 
---- Adds a producer, laid out after the archetypes in the order added.
+--- Adds a producer after archetype instances in registration order.
 ---
---- @param producer Held for the life of the renderer; there is no way to take
----     one back out.
+--- @param producer The caller supplies a producer that the renderer retains
+---     until `destroy`.
 function Renderer:addProducer(producer: InstanceProducer)
     self._extractor:addProducer(producer)
 end
 
---- Adds a stage recorded between the staging flush and the cull.
+--- Adds a compute stage between staging flush and culling.
 ---
---- What a producer whose instances are written on the GPU needs beyond the
---- run a producer already gets: the run reserves the slots, and this is where
---- something is put in them.
----
---- @param stage Held until `destroy`, which calls its own. There is no way to
----     take one back out.
+--- @param stage The caller supplies a stage that the renderer retains and
+---     destroys.
 function Renderer:addComputeStage(stage: ComputeStage)
     self._backend:addComputeStage(stage)
 end
 
---- The GPU device this renderer draws through.
+--- Returns the GPU device this renderer uses.
 ---
 --- For a stage that has to build its own pipelines and buffers before there is
 --- a frame to record onto.
 ---
---- @return The `SDL_GPUDevice` handed to `create`. Not owned here: `destroy`
----     releases what was built on it and never the device itself.
+--- @return Returns the engine-owned device. `destroy` does not release it.
 function Renderer:device(): loader.CPtr
     return self._backend:device()
 end
 
---- Seconds the last extraction took, or zero when nothing is being measured.
+--- Returns the seconds consumed by the last extraction.
 ---
 --- Read by the frame loop, which subtracts it from the update to leave
 --- simulation on its own. Extraction runs inside `world:update`, so the two
 --- are one number until something takes them apart.
+---
+--- @return Returns elapsed seconds, or zero when measurement is inactive.
 function Renderer:extractSeconds(): number
     return self._extractor:extractSeconds()
 end
 
---- Draws the packet the last extraction produced.
+--- Draws the last extracted world state into `frame`.
 ---
---- @param frame Recorded onto and not submitted, so a caller with passes of
----     its own records them after this and submits once. Its width and height
----     are what the camera's matrix and the view bounds are resolved against,
----     which is why they are not stored on the camera.
+--- @param frame The engine supplies an open frame. The method records commands
+---     without submitting it, so callers may add later passes.
 function Renderer:render(frame: Frame)
     local packet = self._packet
 
@@ -498,25 +434,29 @@ function Renderer:render(frame: Frame)
     self._backend:consume(packet, frame)
 end
 
---- The composited image the last frame produced.
+--- Returns the composited image from the last frame.
 ---
---- @return The scene target rather than the swapchain, so it can be read at any
----     point between frames. The renderer goes on drawing into it, so the next
----     frame overwrites what a caller has not already copied out.
+--- @return Returns the renderer-owned scene target. The next frame overwrites
+---     its contents.
 function Renderer:captureTexture(): Texture
     return self._backend:captureTexture()
 end
 
 --- Encodes the composited image from the last frame as PNG bytes.
 ---
---- Synchronous: texture readback waits for the GPU work producing that frame.
+--- Texture readback waits for the GPU work that produced the frame.
+---
+--- @return Returns PNG bytes, or nil when readback or encoding fails.
+--- @return Returns the failure reason when the first return is nil.
 function Renderer:screenshot(): string, string
     return screenshot.encode(self:captureTexture())
 end
 
 --- Writes the composited image from the last frame as a PNG.
 ---
---- The path is passed through the installed storage backend unchanged.
+--- @param path The caller supplies the destination path.
+--- @return Returns whether capture, encoding and writing succeeded.
+--- @return Returns the failure reason when the first return is false.
 function Renderer:saveScreenshot(path: string): boolean, string
     if path == nil or path == "" then
         error("tecs: a screenshot path is required", 2)

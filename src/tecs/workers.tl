@@ -1,42 +1,60 @@
---- Worker threads and channels.
----
---- A worker is source text and two queues. It shares nothing with the state
---- that spawned it, so it reaches its own ends through `workers.current`, and
---- `spawn` pairs with `stop`:
----
---- ```teal
---- local worker <const> = tecs.workers.spawn({source = [[
----     local tecs <const> = require("tecs")
----     local self <const> = tecs.workers.current()
----     while true do
----         local job = self:receive()
----         if job == nil then break end
----         self:send({name = job.name, hash = tecs.data.fnv1a64(job.bytes)})
----     end
---- ]]})
----
---- worker:send({name = "level1", bytes = "..."})
---- local answer <const> = worker:receive(1000)
---- worker:stop()
---- ```
----
---- The worker's source writes a require line because it is a separate state
---- with a separate global table, which is the one place in a game that does.
----
---- This is the only sanctioned way to run work off the main thread. Raw
---- thread creation is deliberately not exposed: a LuaJIT FFI callback invoked
---- from a thread the VM did not create is unsafe, and a thread entry point
---- written in Lua is exactly that mistake. The native side does nothing but
---- start a thread with a fresh `lua_State` and move bytes between queues.
----
---- LuaJIT has no shared mutable heap across threads, so a worker cannot see
---- the spawning state's objects at all. Values cross as serialized bytes,
---- encoded here with `string.buffer` rather than in C, which keeps the native
---- side ignorant of what a message contains.
----
---- What can cross is therefore what `string.buffer` can encode: numbers,
---- strings, booleans, and tables of those. Not functions, not userdata, and
---- not cdata pointers into another state's heap.
+--[=[
+Worker threads and channels.
+
+A worker is source text and two queues. It shares nothing with the state
+that spawned it, so it reaches its own ends through `workers.current`, and
+`spawn` pairs with `stop`:
+
+```teal
+local worker <const> = tecs.workers.spawn({source = [[
+    local tecs <const> = require("tecs")
+    local self <const> = tecs.workers.current()
+    while true do
+        local job = self:receive()
+        if job == nil then break end
+        self:send({name = job.name, hash = tecs.data.fnv1a64(job.bytes)})
+    end
+]]})
+
+worker:send({name = "level1", bytes = "..."})
+local answer <const> = worker:receive(1000)
+worker:stop()
+```
+
+The worker's source writes a require line because it is a separate state
+with a separate global table, which is the one place in a game that does.
+
+This is the only sanctioned way to run work off the main thread. Raw
+thread creation is deliberately not exposed: a LuaJIT FFI callback invoked
+from a thread the VM did not create is unsafe, and a thread entry point
+written in Lua is exactly that mistake.
+
+LuaJIT has no shared mutable heap across threads, so a worker cannot see
+the spawning state's objects at all. Values cross as serialized bytes,
+encoded here with `string.buffer`.
+
+What can cross is therefore what `string.buffer` can encode: numbers,
+strings, booleans, and tables of those. Not functions, not userdata, and
+not cdata pointers into another state's heap.
+
+## Polling and shutdown
+
+The spawner's `receive` polls by default, which suits a frame. Inside the
+worker it waits by default, so an idle worker does not spin. Closing the inbox
+wakes the worker and returns nil after queued messages drain.
+
+`stop` closes the inbox, joins the thread, and releases both channels. Worker
+source must leave its receive loop when the inbox closes or shutdown can wait
+indefinitely.
+
+Set `TECS_TRACEPROF` to print a worker's trace aborts when its inbox closes.
+Repeated `failed to allocate mcode memory` messages identify LuaJIT
+machine-code allocation failures.
+]=]
+
+-- Implementation details: The native bridge starts a thread with a fresh
+-- `lua_State` and moves opaque byte blocks between queues. Lua serializes and
+-- validates values on both sides, so the bridge never inspects a message.
 
 local ffi <const> = require("ffi")
 local buffer <const> = require("string.buffer")
@@ -49,58 +67,99 @@ local C <const>, libraryPath <const> = loader.library("tecsworker", "tecs", "TEC
 --- Waits indefinitely in `receive`.
 local FOREVER <const> = -1
 
---- A queue of serialized messages, shared between two states.
+--- Carries serialized messages between two states.
 ---
---- Values are copied across, never shared, so what comes out on the far side is a separate
+--- The channel copies every value across and never shares it, so the receiver gets a separate
 --- object and mutating either one is invisible to the other. A `nil` is encodable and does
 --- cross, but `receive` also answers nil for "nothing here", so nil is not usable as a
 --- message a reader can recognize.
 local record Channel
-    --- The native queue this wraps. Nil once `destroy` has run.
+    --- Engine-owned. Stores the native queue pointer until `destroy` runs.
+    --- Ordinary game code should ignore this field.
     handle: loader.CPtr
 
-    --- Private. True when the native queue has been released, and also true from the start
-    --- for a channel obtained through `wrap`, which does not own what it points at.
+    --- Engine-owned. Reports whether this wrapper owns a live native queue.
+    --- Ordinary game code should ignore this field.
     _destroyed: boolean
+
+    --- Wraps a channel pointer handed over by the native side.
+    ---
+    --- @param handle The native side keeps this pointer alive for the wrapper's lifetime.
+    --- @return A borrowing handle. `destroy` does nothing, so the state that
+    ---     created the queue remains responsible for releasing it.
+    wrap: function(handle: loader.CPtr): Channel
+
+    --- Serializes `value` and queues it without blocking.
+    ---
+    --- The queue has no bound, so a reader that stops taking messages grows it
+    --- instead of pushing back on the writer.
+    ---
+    --- @param value The channel copies this value before returning. A function,
+    ---     userdata, cdata, a table nested past 32 levels, or a table with a key
+    ---     of any of those raises and names the path to it.
+    send: function(self: Channel, value: any)
+
+    --- Takes the next value, or nil if none arrived.
+    ---
+    --- A zero timeout polls, a negative timeout waits indefinitely, and any
+    --- other value waits that many milliseconds.
+    ---
+    --- @param timeoutMs The timeout uses milliseconds. Omit it to poll, which
+    ---     is the opposite of the worker-side `receive`, where omission waits.
+    --- @return The next value, or nil. Nil covers an empty queue, a timeout,
+    ---     and a closed and drained channel. A sent nil also decodes to nil, so
+    ---     callers cannot distinguish those cases and should not send nil.
+    receive: function(self: Channel, timeoutMs?: number): any
 end
 
---- A thread with a Lua state of its own, and the two channels reaching it.
+--- Represents a thread with its own Lua state and two message channels.
 ---
---- Nothing is shared with the spawning state: no globals, no upvalues, no loaded modules.
+--- The worker shares no globals, upvalues or loaded modules with the spawning state.
 --- The worker reruns its own requires against `luaPath`.
 local record Worker
-    --- Messages the worker has not taken yet.
-    --- Sampled during `send` and not refreshed afterwards, so between sends it is the count
-    --- as of the last one and not what the queue holds now.
+    --- Read-only. Reports the messages the worker had not taken after the last
+    --- `send`. The value does not refresh between sends.
     pending: integer
 
-    --- Private. The native thread handle. Nil once `stop` has joined it.
+    --- Engine-owned. Stores the native thread handle until `stop` joins it.
+    --- Ordinary game code should ignore this field.
     _handle: loader.CPtr
 
-    --- Private. Spawner to worker.
+    --- Engine-owned. Stores the spawner-to-worker channel. Ordinary game code
+    --- should ignore this field.
     _toWorker: Channel
 
-    --- Private. Worker to spawner.
+    --- Engine-owned. Stores the worker-to-spawner channel. Ordinary game code
+    --- should ignore this field.
     _fromWorker: Channel
 
-    --- Private. True once `stop` has run, which makes a second `stop` a no-op.
+    --- Engine-owned. Reports whether `stop` has joined the worker. Ordinary
+    --- game code should ignore this field.
     _joined: boolean
+
+    --- Queues a value for the worker and refreshes `pending`.
+    ---
+    --- @param value The worker applies the same limits and errors as `Channel:send`.
+    send: function(self: Worker, value: any)
+
+    --- Takes a result, or nil if none is ready.
+    ---
+    --- @param timeoutMs The timeout uses milliseconds. Omit it to poll and
+    ---     return immediately; a negative value blocks until something
+    ---     arrives and stalls the frame when called from the main thread.
+    --- @return Nil means the queue is empty or the worker has exited. Call
+    ---     `stop` to learn whether the worker still runs.
+    receive: function(self: Worker, timeoutMs?: number): any
 end
 
---- Worker threads and channels.
----
---- What crosses a channel is what `string.buffer` encodes: numbers, strings, booleans and
---- tables of those, nested no deeper than 32 levels. Anything else is refused at `send`
---- with a message naming the path to the offending value, rather than being handed to the
---- encoder to fail on.
 local record workers
-    --- A worker thread and its channels.
+    --- Read-only. Exposes the [`Worker`](tealdoc:tecs.workers.Worker) type.
     Worker: Worker
 
-    --- A message queue between two states.
+    --- Read-only. Exposes the [`Channel`](tealdoc:tecs.workers.Channel) type.
     Channel: Channel
 
-    --- Absolute path of the loaded native library.
+    --- Read-only. Contains the absolute path of the loaded native library.
     path: string
 end
 
@@ -133,11 +192,6 @@ function Channel.create(): Channel
     return self
 end
 
---- Wraps a channel pointer handed over by the native side.
----
---- @param handle Must outlive the wrapper; nothing here keeps it alive.
---- @return A borrowing handle. `destroy` on it does nothing, so the state that created the
----     queue stays the one that releases it.
 function Channel.wrap(handle: loader.CPtr): Channel
     local self = setmetatable({} as Channel, ChannelMT)
     self.handle = handle
@@ -186,14 +240,6 @@ local function unsendable(value: any, path: string, depth: integer): string
     return nil
 end
 
---- Serializes `value` and queues it.
----
---- Does not block: the queue has no bound, so a reader that has stopped taking messages
---- grows it rather than pushing back on the writer.
----
---- @param value Copied at this point, so mutating it afterwards does not change what the
----     reader gets. A function, userdata, cdata, a table nested past 32 levels or a table
----     with a key of any of those raises, naming the path to it.
 function Channel:send(value: any)
     local rejected = unsendable(value, "value", 0)
     if rejected ~= nil then
@@ -208,16 +254,6 @@ function Channel:send(value: any)
     end
 end
 
---- Takes the next value, or nil if none arrived.
----
---- `timeoutMs` of zero polls, a negative value waits indefinitely, and any
---- other value waits that long.
----
---- @param timeoutMs Milliseconds. Omitted polls, which is the opposite of the worker-side
----     `receive`, where omitting it waits.
---- @return The next value, or nil. Nil covers an empty queue, a timeout, and a closed and
----     drained channel alike; it is also what a sent nil decodes to, so the three are not
----     distinguishable and nil should not be used as a message.
 function Channel:receive(timeoutMs?: number): any
     local size = tonumber(C.tecsChannelPop(self.handle, messageOut, timeoutMs or 0)) as integer
     if size == 0 then
@@ -251,8 +287,8 @@ end
 
 --- Releases the channel. Safe to call more than once.
 ---
---- Undelivered messages are dropped. A channel from `wrap` is not owned here, so this does
---- nothing to it. Every other method is unsafe afterwards, since `handle` is gone.
+--- This method drops undelivered messages. It does nothing to a channel from `wrap`, which
+--- owns no queue. Every other method is unsafe afterwards, since `handle` is gone.
 function Channel:destroy()
     if self._destroyed then
         return
@@ -268,23 +304,23 @@ end
 
 --- Options for `workers.spawn`.
 local record SpawnOptions
-    --- Lua source the worker runs. It reaches its channels through
+    --- Caller-writable. Sets the Lua source the worker runs. It reaches its channels through
     --- `workers.current()`.
     --- Required; nil raises. Source text, not a path, and it runs in a state that shares
     --- nothing with this one, so it cannot close over anything here.
     source: string
-    --- `package.path` for the worker's state. Defaults to this state's, so a
+    --- Caller-writable. Sets `package.path` for the worker's state. Defaults to this state's, so a
     --- worker resolves the same modules the spawner does.
     luaPath: string
 end
 
 --- Starts a worker running `options.source` on its own thread and state.
 ---
---- Returns as soon as the thread is started, not when the source has run, so a failure
+--- Returns as soon as the thread starts, not when the source has run, so a failure
 --- inside the source surfaces as `stop`'s status rather than here.
 ---
---- @return A worker that must be stopped: nothing joins the thread or releases its channels
----     on collection.
+--- @return A worker the caller must stop. Collection does not join the thread or release
+---     its channels.
 function workers.spawn(options: SpawnOptions): Worker
     if options.source == nil then
         error("tecs: a worker needs source", 2)
@@ -311,23 +347,11 @@ function workers.spawn(options: SpawnOptions): Worker
     return self
 end
 
---- Queues a value for the worker.
----
---- Refreshes `pending` as a side effect, which is the only thing that does.
----
---- @param value Subject to the same limits as `Channel:send`, and raises the same way.
 function Worker:send(value: any)
     self._toWorker:send(value)
     self.pending = self._toWorker:count()
 end
 
---- Takes a result, or nil if none is ready.
----
---- @param timeoutMs Milliseconds. Omitted polls and returns at once; a negative value
----     blocks the calling thread until something arrives, which on the main thread stalls
----     the frame.
---- @return Nil for an empty queue and for a worker that has already exited alike. Whether
----     the worker is still alive is answered by `stop`, not by this.
 function Worker:receive(timeoutMs?: number): any
     return self._fromWorker:receive(timeoutMs)
 end
@@ -342,12 +366,12 @@ end
 
 --- Closes the worker's inbox and waits for it to finish.
 ---
---- A worker is expected to leave its loop when `receive` returns nil on a
---- closed channel, so closing is how it is asked to stop.
+--- The worker should leave its loop when `receive` returns nil on a closed
+--- channel. Closing the inbox asks it to stop.
 ---
 --- Blocks until the thread exits, with no timeout: a worker that never leaves its loop
---- hangs the caller. Both channels are released afterwards, so results the worker sent and
---- nothing took are dropped; drain them before calling this.
+--- hangs the caller. This method releases both channels afterwards and drops unread results;
+--- drain them before calling this.
 ---
 --- @return The thread's exit status. Zero for a worker that ran to the end of its source,
 ---     one for a worker whose source raised, and also zero for a second call on a worker
@@ -369,7 +393,7 @@ end
 -- Worker side
 -------------------------------------------------------------------------------
 
---- The worker's own two ends of its channels, as `workers.current` returns them.
+--- Contains the worker's two channel endpoints returned by `workers.current`.
 local record Self
     --- Takes the next task, or nil when the inbox closes.
     ---
@@ -419,7 +443,7 @@ local function watchTraces(): function()
     end
 end
 
---- The channels of the worker this code is running inside.
+--- Returns the channels for the current worker.
 ---
 --- Only valid in a worker's state, where the native entry point installed the
 --- pointers as globals before running the source.

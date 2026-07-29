@@ -1,9 +1,11 @@
---- The SDL-thread bridge to Rust's official RMCP Streamable HTTP server.
----
---- Rust owns the listener, HTTP, sessions, protocol negotiation and JSON-RPC.
---- A bounded queue carries only engine-facing tool calls here. `poll` drains
---- one on the SDL thread, and `respond` completes the Rust task waiting for
---- it. No Rust thread ever enters LuaJIT.
+--[=[
+The SDL-thread bridge to Rust's official RMCP Streamable HTTP server.
+
+Rust owns the listener, HTTP, sessions, protocol negotiation and JSON-RPC.
+A bounded queue carries only engine-facing tool calls here. `poll` drains
+one on the SDL thread, and `respond` completes the Rust task waiting for
+it. No Rust thread ever enters LuaJIT.
+]=]
 
 local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")

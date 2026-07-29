@@ -1,66 +1,93 @@
---- Particle emitters, simulated on the GPU and drawn as ordinary instances.
----
---- An entity is an emitter, not a particle. Per-particle state lives in a
---- buffer the CPU never reads and the vertex shader never sees, and it outlives
---- the frame: a slot is handed out once, at spawn, and held until the particle
---- expires. What crosses back is nothing at all.
----
---- ```teal
---- local sparks <const> = tecs.gfx.particles.effect({
----     name = "sparks",
----     capacity = 256,
----     schedule = {rate = 120, duration = 0.3},
----     spawn = {shape = "disc", width = 4, outward = true},
----     initial = {lifetime = {min = 0.2, max = 0.5}, speed = {min = 40, max = 120}, size = 3},
----     update = {drag = 2.0, size = tecs.gfx.particles.curve({{0.0, 1.0}, {1.0, 0.0}})},
---- })
----
---- world:addPlugin(tecs.gfx.particles.plugin({renderer = app.renderer, capacity = 4096}))
---- world:spawn(
----     tecs.Transform(120, 80, 0, 1, 0, 1, 1),
----     tecs.gfx.particles.ParticleEmitter({effect = sparks})
---- )
---- ```
----
---- Three things share the work. An `Effect` is immutable data describing how
---- particles spawn and evolve, registered once under a name and shared by every
---- emitter naming it. A `ParticleEmitter` component names an effect and carries
---- playback state and a few per-instance scales. A pool owns one run of the
---- instance buffer, sub-allocates a contiguous slot range to each emitter, and
---- records the three compute passes that fill it.
----
---- The name is what an effect is, and its position in the registry is only how
---- this process reaches it. A snapshot therefore carries the name: an index
---- means whichever effect the loading process happened to register in that
---- place, and a plugin installed in a different order is enough to make it a
---- different one with nothing said about it.
----
---- Drawing is not new. A particle written into the instance buffer is an
---- instance: the same sixteen floats, the same four bound floats, the same
---- mark, scan and compact, and the same one indirect draw. The pool is an
---- `InstanceProducer` whose `takeDirty` is always empty, which is what gives it
---- a region of those buffers the host flush never covers, and a
---- `Backend.ComputeStage`, which is what lets it write that region before the
---- cull reads it.
----
---- **Particles are opaque.** The forward blended lane exists and nothing
---- particle-shaped reaches it: a row is routed forward by extraction negating
---- the first half extent of its cull bound, and the simulate pass writes every
---- particle's bound with both extents positive. So a particle goes to the
---- G-buffer, which is written with replace, and a color's alpha channel
---- reaches the swapchain having blended against nothing. A gradient ending at
---- transparent black writes opaque black over whatever was behind it, which is
---- worse than not fading at all. Alpha is carried, and it is inert. What works
---- today is debris, chunks, gibs, snow, rain, confetti and hard-edged sparks;
---- the only fade available is the size curve going to zero. Fire, smoke, glow
---- and soft dust want the blended lane and do not yet reach it.
----
---- What is deliberately unavailable, and structurally rather than because
---- nobody wrote it: no particle can be inspected, moved, killed or counted
---- individually, and no save can round-trip a field. `finished` and
---- `estimatedCount` answer from the schedule instead, exactly and as a
---- prediction respectively. That is the price of four thousand particles
---- costing three dispatches and no per-frame host writes.
+--[=[
+GPU particle effects, emitter playback, pool sizing, and rendering limits.
+
+An entity represents an emitter. The GPU owns individual particles, so game
+code controls an effect and its emitter rather than inspecting particles one
+at a time.
+
+```teal
+local sparks <const> = tecs.gfx.particles.effect({
+    name = "game.sparks",
+    capacity = 256,
+    schedule = {rate = 120, duration = 0.3},
+    spawn = {shape = "disc", width = 4, outward = true},
+    initial = {
+        lifetime = {min = 0.2, max = 0.5},
+        speed = {min = 40, max = 120},
+        size = 3,
+    },
+    update = {
+        drag = 2.0,
+        size = tecs.gfx.particles.curve({
+            {0.0, 1.0},
+            {1.0, 0.0},
+        }),
+    },
+})
+
+world:addPlugin(tecs.gfx.particles.plugin({
+    renderer = app.renderer,
+    capacity = 4096,
+}))
+
+world:spawn(
+    tecs.Transform(120, 80, 0, 1, 0, 1, 1),
+    tecs.gfx.particles.ParticleEmitter({effect = sparks})
+)
+```
+
+An immutable [`Effect`](tealdoc:tecs.gfx.particles.Effect) describes schedule,
+spawn, initial state, updates, and rendering. A
+[`ParticleEmitter`](tealdoc:tecs.gfx.particles.ParticleEmitter) names the
+effect and carries playback state. Effect names form a snapshot compatibility
+surface.
+
+## Emission and motion
+
+Schedules combine rate, delay, duration, looping, and timed bursts.
+`duration = 0` keeps a cycle open. An emission that finds no free effect slot
+either drops the new particle or replaces the oldest, according to `overflow`.
+
+Spawn shapes include point, line, rectangle, rectangle edge, disc, ring, and
+cone. World-space particles detach from later emitter movement. Local-space
+particles follow the emitter for their full life. `inheritVelocity` applies
+only in world space.
+
+Curves and gradients sample normalized age from zero to one. Numeric properties
+accept a constant or a `{min, max}` range.
+
+## Playback
+
+`play` starts or resumes emission. `stop` resets the schedule while live
+particles drain. `pause` holds the schedule and live field. `clear` kills the
+field without changing emission. `restart` resets schedule and randomness.
+`burst` queues a count for the next step.
+
+`finished` derives its answer from the schedule and maximum lifetime.
+`estimatedCount` predicts a count and may differ after overflow or a truncated
+burst. Game code cannot inspect, move, kill, or count individual particles.
+
+## Pool and snapshots
+
+The plugin fixes world capacity and maximum emitters at installation. Each
+emitter reserves its effect capacity. An emitter that cannot fit draws nothing
+and logs the refusal.
+
+Snapshots store effect name, seed, configuration, and playback state. They do
+not store individual particles, so a restored emitter starts empty and refills.
+
+Particles currently use the opaque lane. Color alpha does not blend. Use a size
+curve that reaches zero for disappearance. Debris, rain, snow, confetti, and
+hard-edged sparks fit this system; smoke, glow, fire, and soft dust do not.
+]=]
+-- Implementation details:
+-- The pool sub-allocates one contiguous particle and renderer-instance range
+-- per emitter. Three compute passes simulate, spawn, and write instances before
+-- culling. No per-particle state crosses back to the CPU.
+--
+-- Particle bounds always select the deferred lane. The pool implements both
+-- `InstanceProducer` and `Backend.ComputeStage`, so host instance uploads never
+-- overwrite the ranges that compute owns.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -239,9 +266,11 @@ local DEFAULT_CAPACITY <const> = 16384
 -- Authoring
 -------------------------------------------------------------------------------
 
---- A uniform distribution between two bounds.
+--- Defines a uniform distribution between two bounds.
 local record Range
+    --- Caller-writable. Sets the inclusive lower bound.
     min: number
+    --- Caller-writable. Sets the inclusive upper bound.
     max: number
 end
 
@@ -251,18 +280,19 @@ end
 --- equal bounds are a constant.
 local type Value = number | Range
 
---- A curve over normalized age, compiled to a lookup table.
+--- Stores a curve over normalized age as a compiled lookup table.
 local record Curve
-    --- Evenly spaced samples over zero to one.
+    --- Read-only. Provides evenly spaced samples over normalized age from zero
+    --- to one.
     samples: {number}
 end
 
---- A color gradient over normalized age, compiled to a lookup table.
+--- Stores a color gradient over normalized age as a compiled lookup table.
 ---
---- The alpha channel is carried and is inert until a particle can be routed
---- into the forward blended lane.
+--- The table retains alpha, but the opaque particle lane cannot use it yet.
 local record Gradient
-    --- Evenly spaced RGBA samples over zero to one, four floats each.
+    --- Read-only. Provides evenly spaced RGBA samples over normalized age,
+    --- with four floats per sample.
     samples: {number}
 end
 
@@ -276,184 +306,226 @@ local type Color = string | number | {number}
 --- a missing one.
 local type CurveKey = {any}
 
---- How particles are placed as they spawn.
+--- Configures where particles spawn.
 local record SpawnOptions
-    --- "point", "line", "rectangle", "rectangleEdge", "disc", "ring" or
+    --- Caller-writable. Selects `"point"`, `"line"`, `"rectangle"`,
+    --- `"rectangleEdge"`, `"disc"`, `"ring"`, or
     --- "cone". Defaults to "point".
     shape: string
-    --- Width for a line or rectangle, radius for a disc, ring or cone.
+    --- Caller-writable. Sets width for a line or rectangle and radius for a
+    --- disc, ring, or cone.
     width: number
-    --- Height for a rectangle. Ignored by every other shape.
+    --- Caller-writable. Sets height for a rectangle. Every other shape ignores
+    --- it.
     height: number
-    --- Sector a disc, ring or cone samples, in radians. Defaults to a full
+    --- Caller-writable. Sets the sampled sector of a disc, ring, or cone in
+    --- radians. It defaults to a full
     --- turn.
     arc: number
-    --- Turns the sampled area, independently of where particles are launched.
+    --- Caller-writable. Rotates the sampled area independently of launch
+    --- direction.
     rotation: number
-    --- "uniform" or "normal". A gaussian spread is what makes a column read as
+    --- Caller-writable. Selects `"uniform"` or `"normal"` sampling. A gaussian spread makes a column read as
     --- a column rather than as a slab. Defaults to "uniform".
     distribution: string
-    --- Launch direction in radians, and the **full** cone centerd on it, so a
+    --- Caller-writable. Sets the launch direction in radians and centers the
+    --- full cone on it, so a
     --- particle leaves within plus or minus half of `spread`. Half-angle is the
     --- other plausible reading of `spread` and a mismatch is silent, so it is
     --- said here.
     direction: number
+    --- Caller-writable. Sets the full cone width in radians.
     spread: number
-    --- Launch along the shape's outward normal rather than along `direction`.
+    --- Caller-writable. Launches along the shape's outward normal rather than along `direction`.
     --- Meaningful for the shapes that have one: disc, ring, cone and a
     --- rectangle's edge.
     outward: boolean
-    --- "local" or "world". Local particles follow the emitter's transform for
+    --- Caller-writable. Selects `"local"` or `"world"` space. Local particles follow the emitter's transform for
     --- their whole life; world particles read it once, at spawn, and then move
     --- independently. Neither is a good universal default, so it is explicit
     --- and defaults to "world".
     space: string
-    --- How much of the emitter's own velocity a particle leaves with, in world
-    --- space only. Zero to one.
+    --- Caller-writable. Sets how much emitter velocity a particle inherits in
+    --- world space, from zero to one.
     inheritVelocity: number
 end
 
---- When particles are emitted.
+--- Configures when particles emit.
 local record ScheduleOptions
-    --- Particles per second, emitted continuously.
+    --- Caller-writable. Sets the continuous emission rate in particles per
+    --- second.
     rate: number
-    --- Seconds one emission cycle runs for. Zero means unbounded.
+    --- Caller-writable. Sets the emission cycle duration in seconds. Zero
+    --- means unbounded.
     duration: number
-    --- Whether the cycle repeats.
+    --- Caller-writable. Controls whether the emission cycle repeats.
     looping: boolean
-    --- Seconds before emission starts.
+    --- Caller-writable. Sets the delay before emission starts in seconds.
     delay: number
-    --- Timed counts, at most four, each `{ time = , count = }` measured from
+    --- Caller-writable. Defines at most four timed burst counts measured from
     --- the start of the cycle. A muzzle flash is one burst at time zero.
     bursts: {ScheduleBurst}
 end
 
---- One scheduled burst.
+--- Defines one scheduled burst.
 local record ScheduleBurst
+    --- Caller-writable. Sets the burst time in seconds from the cycle start.
     time: number
+    --- Caller-writable. Sets how many particles the burst emits.
     count: number
 end
 
---- What a particle starts with.
+--- Configures a particle's initial properties.
 local record InitialOptions
+    --- Caller-writable. Sets particle lifetime in seconds.
     lifetime: Value
+    --- Caller-writable. Sets initial speed in world units per second.
     speed: Value
+    --- Caller-writable. Sets initial size in world units.
     size: Value
+    --- Caller-writable. Sets initial rotation in radians.
     rotation: Value
+    --- Caller-writable. Sets initial angular velocity in radians per second.
     angularVelocity: Value
-    --- Constant acceleration, randomized per axis. Independent axes are what
+    --- Caller-writable. Sets constant horizontal acceleration. Independent axes
     --- make a plume drift apart instead of translating as a block.
     accelerationX: Value
+    --- Caller-writable. Sets constant vertical acceleration.
     accelerationY: Value
-    --- Color every particle starts with, multiplied by the gradient and by
+    --- Caller-writable. Sets the color every particle starts with, multiplied by the gradient and by
     --- the emitter's tint.
     color: Color
 end
 
---- How a particle evolves over its life, against normalized age.
+--- Configures how a particle changes over its normalized lifetime.
 local record UpdateOptions
-    --- Damping in units of one over seconds, applied as
+    --- Caller-writable. Sets damping in units of one over seconds, applied as
     --- `velocity = velocity / (1 + drag * dt)`, so it composes with any step.
     drag: number
-    --- Acceleration away from the emitter, and at right angles to that. These
+    --- Caller-writable. Sets acceleration away from the emitter.
     --- are the difference between a fountain and a vortex.
     radialAcceleration: Value
+    --- Caller-writable. Sets acceleration at right angles to the emitter.
     tangentialAcceleration: Value
-    --- Multiplies the particle's own size over its life.
+    --- Caller-writable. Multiplies each particle's size over its life.
     size: Curve
-    --- Multiplies the particle's own color over its life. Its alpha channel
-    --- is inert until a particle can be routed into the forward blended lane.
+    --- Caller-writable. Multiplies each particle's color over its life. The
+    --- opaque particle lane ignores alpha.
     color: Gradient
 end
 
---- How particles are drawn.
+--- Configures how particles draw.
 local record RenderOptions
-    --- The material shading the quad, by name. Absent samples the image array
+    --- Caller-writable. Selects the material that shades the quad by name. An
+    --- absent value samples the image array
     --- and covers the whole quad.
     material: string
-    --- Passed to the material, zero to one.
+    --- Caller-writable. Passes a value from zero to one to the material.
     materialParam: number
-    --- A registered image, from `Renderer:sprite`. Absent draws a white quad.
+    --- Caller-writable. Selects a registered image from `Renderer:sprite`. An
+    --- absent value draws a white quad.
     sprite: Sprite
-    --- A sheet and a tag to animate, instead of a still region. The cycle is
+    --- Caller-writable. Selects a sheet to animate instead of a still region.
+    --- The cycle is
     --- played exactly once over each particle's own life and clamps at the
     --- end, so a randomized lifetime randomizes the playback speed.
     ---
     --- Uses the same frame table an animated entity does, so per-frame
     --- durations, reverse and pingpong all arrive already spent.
     sheet: Sheet
+    --- Caller-writable. Selects the sheet tag to animate.
     tag: string
-    --- Which render layer the particles land on, one to `layers.MAX`.
+    --- Caller-writable. Selects the render layer from one to `layers.MAX`.
     layer: integer
-    --- Where the quad hangs off the particle's position, as a fraction of the
+    --- Caller-writable. Sets the horizontal pivot as a fraction of the
     --- frame from its top left. Defaults to the middle.
     pivotX: number
+    --- Caller-writable. Sets the vertical pivot as a fraction of the frame
+    --- from its top edge. It defaults to the middle.
     pivotY: number
-    --- "fixed" or "velocity". Aligned to velocity, the path's angle is added
-    --- to the particle's own rotation rather than replacing it, so a spinning
-    --- spark aligned to its path still spins.
+    --- Caller-writable. Selects `"fixed"` or `"velocity"` alignment. Velocity
+    --- alignment adds the path's angle to the particle's own rotation, so a
+    --- spinning spark aligned to its path still spins.
     alignment: string
-    --- Multiplies the along-path axis when aligned to velocity.
+    --- Caller-writable. Multiplies the along-path axis when aligned to
+    --- velocity.
     stretch: number
-    --- Accepted, logged once, and ignored. Nothing particle-shaped reaches the
+    --- Caller-writable. Selects a blend mode. Tecs currently accepts, logs
+    --- once, and ignores it because no particle reaches the
     --- forward blended lane, so an effect authored with one today draws opaque
     --- and will draw as written once the simulate pass can pick that lane.
     blend: string
-    --- Which clip region the fragments are kept inside. Zero is no clipping.
+    --- Caller-writable. Selects the clip region that contains the fragments.
+    --- Zero disables clipping.
     clip: integer
 end
 
---- Everything an effect is.
+--- Defines a complete effect.
 local record EffectOptions
-    --- What this effect is called. Required, and unique across the process:
-    --- it is what an emitter's snapshot names, so an effect without one could
-    --- not be saved and two under one name could not be told apart again.
+    --- Caller-writable. Sets the required process-wide unique effect name.
+    --- Snapshots use this name to identify the effect.
     name: string
-    --- Live particles one emitter of this effect can hold. A steady-state
-    --- emitter needs at least `rate * maxLifetime` of them or emissions are
-    --- lost, which is checked and warned about here rather than discovered as
-    --- a thin spray.
+    --- Caller-writable. Sets how many live particles one emitter can hold. A
+    --- steady-state emitter needs at least `rate * maxLifetime`; otherwise Tecs
+    --- drops emissions and logs a warning.
     capacity: integer
-    --- "drop" or "replace". What happens to an emission that arrives with no
+    --- Caller-writable. Selects `"drop"` or `"replace"` when an emission
+    --- arrives with no
     --- free slot: give way, or take the oldest live particle's. Defaults to
     --- "replace".
     overflow: string
+    --- Caller-writable. Configures when the effect emits particles.
     schedule: ScheduleOptions
+    --- Caller-writable. Configures where the effect spawns particles.
     spawn: SpawnOptions
+    --- Caller-writable. Configures each particle's initial properties.
     initial: InitialOptions
+    --- Caller-writable. Configures how particles change over their lifetime.
     update: UpdateOptions
+    --- Caller-writable. Configures how particles draw.
     render: RenderOptions
 end
 
---- A registered effect. Immutable, and shared by every emitter naming it.
+--- Represents an immutable registered effect shared by its emitters.
 local record Effect
-    --- What it is called, and the only thing about it that outlives the
+    --- Read-only. Reports the effect name and the only property that outlives the
     --- process. Everything a save, a tool or a person identifies an effect by
     --- is this.
     name: string
-    --- Where its record sits in the assembled effect table, counting from one.
+    --- Read-only. Reports where its record sits in the assembled effect table, counting from one.
     --- A position in registration order, so it means nothing outside the
     --- process that assigned it and nothing stores one.
     index: integer
-    --- Live particles one emitter of this effect holds.
+    --- Read-only. Reports how many live particles one emitter can hold.
     capacity: integer
-    --- The longest a particle can live, which is what decides when an emitter
+    --- Read-only. Reports the longest particle lifetime, which decides when an emitter
     --- that has stopped emitting has finished.
     maxLifetime: number
-    --- Seconds from `play` to the last emission, or -1 for an effect that
+    --- Read-only. Reports seconds from `play` to the last emission, or -1 for an effect that
     --- never stops emitting.
     emitFor: number
-    --- The schedule, kept so `finished` and `estimatedCount` can answer from
-    --- it without asking the GPU anything.
+    --- Read-only. Reports the continuous emission rate used by `finished` and
+    --- `estimatedCount`.
     rate: number
+    --- Read-only. Reports the emission delay in seconds.
     delay: number
+    --- Read-only. Reports the emission duration in seconds.
     duration: number
+    --- Read-only. Reports whether the emission cycle repeats.
     looping: boolean
+    --- Read-only. Provides the compiled burst schedule.
     bursts: {number}
+    --- Engine-owned. Stores the compiled effect record. Ordinary game code
+    --- should ignore this field.
     _record: {number}
-    --- Curve and gradient samples, laid out after every effect record.
+    --- Engine-owned. Stores curve and gradient samples. Ordinary game code
+    --- should ignore this field.
     _extra: {number}
+    --- Engine-owned. Stores the size-curve offset. Ordinary game code should
+    --- ignore this field.
     _sizeCurveAt: integer
+    --- Engine-owned. Stores the color-gradient offset. Ordinary game code
+    --- should ignore this field.
     _colorGradientAt: integer
 end
 
@@ -970,59 +1042,79 @@ end
 -- The emitter component
 -------------------------------------------------------------------------------
 
---- What an emitter is doing. Three states rather than one boolean, because a
+--- Selects what an emitter does. Three states replace one boolean because a
 --- game that cannot tell a paused emitter from a stopped one cannot resume the
 --- right ones.
 local enum EmitterState
+    --- Read-only. Emits particles according to the effect schedule.
     "playing"
+    --- Read-only. Holds the emitter clock and its live particles.
     "paused"
+    --- Read-only. Stops emission and resets the cycle.
     "stopped"
 end
 
---- An emitter: an effect, its playback state, and a few per-instance scales.
+--- Controls an effect's playback state and per-instance scales.
 ---
 --- Deliberately small. If an instance could override every effect field then
---- effects would stop being reusable GPU data and every emitter would grow to
---- hold a copy of one. What it does not carry at all is a capacity: that
---- belongs to the effect, because it decides a slot range in the pool and the
---- range has to be fixed when the emitter is created.
+--- effects would stop being reusable GPU data and every emitter would grow
+--- to hold a copy. The effect owns capacity because it determines the pool
+--- slot range when the emitter starts.
 local record ParticleEmitter is ecs.Component
-    --- The effect this plays. Cannot change after the emitter is spawned: the
+    --- Caller-writable. Selects the effect before spawning the emitter. It
+    --- cannot change after spawn because the
     --- slot range is the effect's capacity, and changing it would mean
     --- reallocating. Despawn and spawn again, which is cheap.
     effect: Effect
-    --- Whether it is emitting, holding, or reset and idle.
+    --- Caller-writable. Controls whether the emitter plays, pauses, or stops.
     state: EmitterState
-    --- The random sequence. Two emitters with one seed produce one field.
+    --- Caller-writable. Selects the random sequence. Two emitters with one seed
+    --- produce one field.
     seed: number
-    --- Multiplies the effect's rate, its sizes, and how fast it runs.
+    --- Caller-writable. Multiplies the effect's emission rate.
     rateScale: number
+    --- Caller-writable. Multiplies every particle's size.
     sizeScale: number
+    --- Caller-writable. Multiplies the speed of the effect clock.
     timeScale: number
-    --- Multiplies every particle's color. Its alpha is inert until a particle
-    --- can be routed into the forward blended lane.
+    --- Caller-writable. Multiplies every particle's color. The opaque particle
+    --- lane ignores alpha.
     tint: Color
 
-    --- The pool's answer for this emitter, and this process's answer only.
+    --- Engine-owned. Stores the emitter's pool index. Ordinary game code
+    --- should ignore this field.
     _index: integer
+    --- Engine-owned. Stores the emitter's first particle slot. Ordinary game
+    --- code should ignore this field.
     _slotBase: integer
+    --- Engine-owned. Stores how many particle slots the emitter owns. Ordinary
+    --- game code should ignore this field.
     _slotCount: integer
-    --- Fixed steps this emitter has run for, which stands still while it is
-    --- paused, held or stopped. Every age is measured from it.
+    --- Engine-owned. Tracks fixed steps this emitter has run. Ordinary game
+    --- code should ignore this field. The clock stands still while paused,
+    --- held, or stopped. The simulation measures every age from it.
     _clock: number
-    --- The step this emitter's clock stood at when the cycle began, the step a
-    --- clear was asked for, and which random sequence is in force.
+    --- Engine-owned. Stores the step at which the current cycle began.
+    --- Ordinary game code should ignore this field.
     _startStep: number
+    --- Engine-owned. Stores the step that requested a clear. Ordinary game code
+    --- should ignore this field.
     _clearStep: number
+    --- Engine-owned. Selects the current random sequence generation. Ordinary
+    --- game code should ignore this field.
     _generation: number
-    --- Particles the host has asked for outside the schedule, taken by the
+    --- Engine-owned. Stores particles requested outside the schedule. Ordinary
+    --- game code should use `burst`. Tecs consumes the count at the
     --- next step boundary that passes.
     _burst: number
-    --- The world's own step count when the pool last saw this emitter, so a
+    --- Engine-owned. Stores the world step when the pool last saw this emitter.
+    --- Ordinary game code should ignore this field.
     --- question asked between frames answers against the frame it saw, and the
     --- fixed step in seconds as it stood then, so `finished` can convert its
     --- own clock without holding a world.
     _worldStep: number
+    --- Engine-owned. Stores the fixed-step duration last seen by the emitter.
+    --- Ordinary game code should ignore this field.
     _stepSeconds: number
 end
 
@@ -1066,8 +1158,8 @@ end
 
 --- Kills every live particle immediately.
 ---
---- For teardown and state transitions. Emission is untouched, so a playing
---- emitter starts filling again on the next step.
+--- Use this for teardown and state transitions. It leaves emission unchanged,
+--- so a playing emitter starts filling again on the next step.
 function ParticleEmitter:clear()
     self._clearStep = self._clock + 1
 end
@@ -1085,8 +1177,8 @@ end
 
 --- Emits `count` particles at the next step boundary.
 ---
---- A no-op on a stopped emitter. More than the emitter's own free capacity is
---- truncated to what fits rather than refused.
+--- A stopped emitter ignores the call. The emitter truncates a count beyond
+--- its free capacity to the number that fits.
 function ParticleEmitter:burst(count: number)
     if self.state ~= "playing" then
         return
@@ -1094,7 +1186,8 @@ function ParticleEmitter:burst(count: number)
     self._burst = (self._burst or 0.0) + (count or 0.0)
 end
 
---- Whether this emitter has stopped emitting and its last particle has died.
+--- Returns whether this emitter has stopped emitting and its last particle has
+--- died.
 ---
 --- Exact, and it costs nothing: it is the schedule plus the longest lifetime
 --- against the emitter's own clock, all of which the host holds. This is what
@@ -1146,14 +1239,11 @@ local function emittedBy(item: ParticleEmitter, effect: Effect, at: number): num
     return total
 end
 
---- About how many particles are alive.
+--- Returns an estimate of how many particles remain alive.
 ---
---- A prediction rather than a measurement, and the name carries the caveat: it
---- integrates the schedule over the last lifetime's worth of steps and
---- subtracts what has expired. Exact whenever no burst was truncated and no
---- overflow fired, which is the case a caller checking against the cap is
---- checking for. Reading the real number would mean a pipeline stall, which is
---- the thing this whole design refuses.
+--- Integrates the schedule over the latest lifetime and subtracts expired
+--- emissions. The result is exact when no burst truncates and no overflow
+--- occurs. Reading the exact GPU count would stall the pipeline.
 function ParticleEmitter:estimatedCount(): integer
     local effect <const> = self.effect
     if effect == nil then
@@ -1199,14 +1289,23 @@ local record Draining
     releaseAt: number
 end
 
---- What a `ParticleEmitter` is constructed from. Only `effect` is required.
+--- Configures a
+--- [`ParticleEmitter`](tealdoc:tecs.gfx.particles.ParticleEmitter). Requires
+--- only `effect`.
 local record EmitterOptions
+    --- Caller-writable. Selects the required effect.
     effect: Effect
+    --- Caller-writable. Sets the initial playback state.
     state: EmitterState
+    --- Caller-writable. Sets the random seed.
     seed: number
+    --- Caller-writable. Multiplies the effect's emission rate.
     rateScale: number
+    --- Caller-writable. Multiplies every particle's size.
     sizeScale: number
+    --- Caller-writable. Multiplies the speed of the effect clock.
     timeScale: number
+    --- Caller-writable. Multiplies every particle's color.
     tint: Color
 end
 
@@ -1239,57 +1338,111 @@ local function initEmitter(item: ParticleEmitter, options: EmitterOptions)
     item._stepSeconds = 0.0
 end
 
---- Every emitter's particles in one world, as one run of the renderer's
+--- Manages every emitter's particles in one world as one renderer run and
 --- instance buffer plus the three compute passes that fill it.
 local record Pool
+    --- Read-only. Reports how many live particles the pool can hold.
     capacity: integer
+    --- Engine-owned. Stores the renderer used by the pool. Ordinary game code
+    --- should ignore this field.
     _renderer: Renderer
+    --- Engine-owned. Stores the graphics device. Ordinary game code should
+    --- ignore this field.
     _device: loader.CPtr
+    --- Engine-owned. Stores the emitter limit. Ordinary game code should
+    --- ignore this field.
     _maxEmitters: integer
 
-    --- Instance index the run begins at. Learned from the extractor, which
-    --- hands it over whenever the layout moved, and negative until it has.
+    --- Engine-owned. Stores the first instance index used by the pool.
+    --- Ordinary game code should ignore this field. The extractor updates it
+    --- when layout changes. It remains negative until the first update.
     _base: integer
 
-    --- Slots handed out so far, and the ranges handed back.
+    --- Engine-owned. Stores the highest particle slot handed out. Ordinary game
+    --- code should ignore this field.
     _high: integer
+    --- Engine-owned. Stores free particle ranges. Ordinary game code should
+    --- ignore this field.
     _free: {integer: {integer}}
+    --- Engine-owned. Stores particle ranges waiting for release. Ordinary game
+    --- code should ignore this field.
     _draining: {Draining}
+    --- Engine-owned. Stores live emitter allocations. Ordinary game code
+    --- should ignore this field.
     _holdings: {ParticleEmitter: Holding}
     --- Emitters this frame's walk reached, reused across frames so the walk
     --- allocates nothing.
     _seen: {ParticleEmitter: boolean}
+    --- Engine-owned. Stores reusable emitter indices. Ordinary game code
+    --- should ignore this field.
     _indexFree: {integer}
+    --- Engine-owned. Stores the highest emitter index handed out. Ordinary game
+    --- code should ignore this field.
     _indexHigh: integer
+    --- Engine-owned. Stores the number of live emitters. Ordinary game code
+    --- should ignore this field.
     _live: integer
 
-    --- Frames still worth dispatching over. Positive while an emitter is
+    --- Engine-owned. Tracks frames that still require a dispatch. Ordinary
+    --- game code should ignore this field. It remains positive while an emitter is
     --- running, and held one frame past the last of them so the pass that
     --- hides their slots actually runs.
     _settle: integer
 
-    --- What the passes are told about the frame, read from the world once per
-    --- update rather than per emitter.
+    --- Engine-owned. Stores the current world step. Ordinary game code should
+    --- ignore this field.
     _step: number
+    --- Engine-owned. Stores the current fixed-step duration. Ordinary game
+    --- code should ignore this field.
     _timestep: number
+    --- Engine-owned. Stores frame interpolation alpha. Ordinary game code
+    --- should ignore this field.
     _alpha: number
 
+    --- Engine-owned. Stores compiled effect data. Ordinary game code should
+    --- ignore this field.
     _effects: Buffer
+    --- Engine-owned. Stores emitter data. Ordinary game code should ignore
+    --- this field.
     _emitters: Buffer
+    --- Engine-owned. Stores emitter runtime data. Ordinary game code should
+    --- ignore this field.
     _runtime: Buffer
+    --- Engine-owned. Stores particle owners. Ordinary game code should ignore
+    --- this field.
     _owners: Buffer
+    --- Engine-owned. Stores particle state. Ordinary game code should ignore
+    --- this field.
     _states: Buffer
+    --- Engine-owned. Stores the emission pipeline. Ordinary game code should
+    --- ignore this field.
     _emit: ComputePipeline
+    --- Engine-owned. Stores the spawn pipeline. Ordinary game code should
+    --- ignore this field.
     _spawn: ComputePipeline
+    --- Engine-owned. Stores the simulation pipeline. Ordinary game code should
+    --- ignore this field.
     _simulate: ComputePipeline
+    --- Engine-owned. Stores emitter staging data. Ordinary game code should
+    --- ignore this field.
     _emitterData: loader.CArray
     --- Staging slot the next frame's emitter records go into, rotated after
     --- each flush so a write never lands in memory a frame is still copying.
     _emitterSlot: integer
+    --- Engine-owned. Stores particle-owner staging data. Ordinary game code
+    --- should ignore this field.
     _ownerData: loader.CArray
+    --- Engine-owned. Tracks whether particle owners need uploading. Ordinary
+    --- game code should ignore this field.
     _ownersDirty: boolean
+    --- Engine-owned. Stores pass uniforms. Ordinary game code should ignore
+    --- this field.
     _uniform: loader.CArray
+    --- Engine-owned. Stores the installed effect revision. Ordinary game code
+    --- should ignore this field.
     _effectsAt: integer
+    --- Engine-owned. Records whether `destroy` has released the pool. Ordinary
+    --- game code should ignore this field.
     _destroyed: boolean
 end
 
@@ -1755,15 +1908,18 @@ end
 -- The plugin
 -------------------------------------------------------------------------------
 
+--- Configures the particle pool installed by `plugin`.
 local record PoolOptions
-    --- The renderer whose instance buffer the pool takes a run of, and whose
+    --- Caller-writable. Selects the renderer whose instance buffer the pool
+    --- uses and whose
     --- device its buffers and pipelines are built on.
     renderer: Renderer
-    --- Live particles the pool holds, over every emitter in the world. Fixed
+    --- Caller-writable. Sets how many live particles the pool holds across the
+    --- world. The value remains fixed
     --- at install: changing it would move the run, and moving the run lays out
     --- the whole scene again.
     capacity: integer
-    --- Emitters the pool holds at once.
+    --- Caller-writable. Sets how many emitters the pool holds at once.
     maxEmitters: integer
 end
 
@@ -1928,71 +2084,68 @@ end
 -- The surface
 -------------------------------------------------------------------------------
 
---- The particle surface: the registry, the authoring helpers, the emitter
---- component and the plugin that installs a pool.
----
---- Registration is process-wide rather than per world, so an effect registered
---- once is reachable from every world; a pool, by contrast, is per world and
---- has to be installed.
 local record particles
-    --- The handle `effect` answers with and a `ParticleEmitter` names.
+    --- The handle `effect` returns and a
+    --- [`ParticleEmitter`](tealdoc:tecs.gfx.particles.ParticleEmitter) names.
     type Effect = Effect
-    --- What `effect` takes.
+    --- Configures `effect`.
     type EffectOptions = EffectOptions
-    --- What `curve` answers with.
+    --- Stores a compiled scalar curve.
     type Curve = Curve
-    --- What `gradient` answers with.
+    --- Stores a compiled color gradient.
     type Gradient = Gradient
     --- The two-bound form of a `Value`.
     type Range = Range
     --- Accepted wherever a property may vary per particle.
     type Value = Value
-    --- Accepted wherever a color is asked for.
+    --- Represents a color accepted by particle authoring fields.
     type Color = Color
-    --- What `poolOf` answers with.
+    --- Represents a world's installed particle pool.
     type Pool = Pool
-    --- What `plugin` takes.
+    --- Configures `plugin`.
     type PoolOptions = PoolOptions
-    --- What a `ParticleEmitter` is constructed from.
+    --- Configures a
+    --- [`ParticleEmitter`](tealdoc:tecs.gfx.particles.ParticleEmitter).
     type EmitterOptions = EmitterOptions
     --- The three values an emitter's `state` takes.
     type EmitterState = EmitterState
 
-    --- Samples one compiled curve or gradient holds.
+    --- Read-only. Reports how many samples one compiled curve or gradient
+    --- holds.
     CURVE_SAMPLES: integer
-    --- Floats per effect and per emitter record, which the shaders state again.
+    --- Read-only. Reports how many floats each effect record contains.
     EFFECT_FLOATS: integer
-    --- The second of that pair, and a different number: an emitter record is
+    --- Read-only. Reports how many floats each emitter record contains. An
+    --- emitter record is
     --- much the smaller of the two.
     EMITTER_FLOATS: integer
-    --- Floats of state one particle carries, on the GPU and nowhere else.
+    --- Read-only. Reports how many GPU state floats one particle carries.
     STATE_FLOATS: integer
 
-    --- Where each field sits within an effect and an emitter record.
+    --- Read-only. Reports each field's offset within an effect record.
     ---
     --- Published because the shaders state the same offsets and a
     --- disagreement between the two is silent: it draws something, just not
     --- the right thing. `spec/particles_spec.lua` reads both and holds them to
     --- each other, which is the only reason this is on the surface.
     EFFECT: {string: integer}
-    --- The same for an emitter record. Both are keyed by field name and give a
-    --- float offset from the record's start, counting from zero.
+    --- Read-only. Reports each field's float offset within an emitter record,
+    --- counting from zero.
     EMITTER: {string: integer}
 
-    --- The emitter component.
+    --- Read-only. Exposes the particle-emitter component.
     ParticleEmitter: ParticleEmitter
 
-    --- Registers an effect under `options.name`. Immutable once registered,
-    --- and shared by every emitter naming it. A name is required and a name
-    --- already taken is refused.
+    --- Registers an immutable effect under `options.name` and shares it among
+    --- every emitter using that name. The function requires a unique name.
     ---
     --- @param options Every section but `name` is optional and defaults to
     ---     something drawable.
-    --- @return A handle that stays valid until `reset`. Registration is
-    ---     process-wide, so this is reachable from every world.
+    --- @return Returns a handle that stays valid until `reset`. The process-wide
+    ---     registry makes it reachable from every world.
     effect: function(options: EffectOptions): Effect
 
-    --- The effect registered under `name`, or nil when nothing has that name.
+    --- Returns the effect registered under `name`, or nil when none exists.
     ---
     --- @param name Nil answers nil rather than raising, so a restore holding no
     ---     name takes the same path as one holding an unknown name.
@@ -2000,7 +2153,7 @@ local record particles
     ---     one name share it. Nil when nothing has that name.
     find: function(name: string): Effect
 
-    --- Every registered effect's name, in registration order.
+    --- Returns every registered effect name in registration order.
     ---
     --- @return A fresh table each call, the caller's to keep and to modify.
     names: function(): {string}
@@ -2011,39 +2164,36 @@ local record particles
 
     --- Compiles keyframes into a curve over normalized age.
     ---
-    --- @param keys `{age, value}` pairs with age in zero to one. They may sit
-    ---     anywhere in that span and need not be sorted; what comes out is the
-    ---     piecewise-linear curve through them at a fixed resolution. Empty or
-    ---     nil raises, and one key is a constant.
-    --- @return A resampled curve at `CURVE_SAMPLES` points, so the keys are not
-    ---     kept and the shape between two distant ones is straight. Ages
-    ---     outside zero to one read as the nearest end.
+    --- @param keys Supplies `{age, value}` pairs with age from zero through one,
+    ---     in any order. Empty or nil raises, and one key defines a constant.
+    --- @return Returns the piecewise-linear curve resampled at `CURVE_SAMPLES`
+    ---     points. Ages outside zero through one read as the nearest endpoint.
     curve: function(keys: {CurveKey}): Curve
 
     --- Compiles keyframes into a color gradient over normalized age.
     ---
-    --- @param keys `{age, color}` pairs, on the same terms as `curve` takes
-    ---     its values. The alpha channel is carried and is inert.
+    --- @param keys Supplies `{age, color}` pairs under the same rules as
+    ---     `curve`. The table retains alpha, but the opaque lane ignores it.
     --- @return A gradient resampled like a curve, interpolating each channel
     ---     separately, so two colors blend through whatever lies between them
     ---     componentwise rather than around a color wheel.
     gradient: function(keys: {CurveKey}): Gradient
 
-    --- Installs the pool on a world. Nothing is allocated or dispatched
-    --- without it.
+    --- Installs the pool on a world. Without it, Tecs allocates and dispatches
+    --- no particle work.
     ---
-    --- @param options `renderer` is required; the two capacities default.
-    --- @return The plugin, to be handed to a world. Installing it on a world
+    --- @param options Requires `renderer`; both capacities have defaults.
+    --- @return Returns the plugin to install on a world. Installing it on a world
     ---     that already has a pool does nothing, and installing it on two
     ---     worlds gives each its own run of the one renderer's buffer.
     plugin: function(options: PoolOptions): function(World)
 
-    --- The pool installed on a world, or nil. For tests and tooling.
+    --- Returns the pool installed on a world, or nil. Tests and tooling use
+    --- this function.
     ---
-    --- @param world Any world, with or without the plugin, so this doubles as
-    ---     the test for whether particles are installed on one.
-    --- @return Nil when the plugin was never installed on that world. The
-    ---     pool itself, not a copy, so writing through it writes the world's.
+    --- @param world Accepts a world with or without the plugin.
+    --- @return Returns the world's live pool, or nil when the plugin was never
+    ---     installed. The function does not copy the pool.
     poolOf: function(world: World): Pool
 end
 

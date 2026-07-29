@@ -1,28 +1,30 @@
---- A render pass recorded into a command buffer.
----
---- Held as a value rather than reached through module state, so a pass can
---- never outlive the frame that opened it without that being visible at the
---- call site, and two passes recorded from different command buffers keep their
---- own handles.
----
---- One pass at a time, per command buffer and in practice per thread: SDL
---- forbids beginning any render, compute or copy pass on a command buffer
---- before the open render pass is finished, and `begin` fills a module-level
---- staging struct that a concurrent `begin` would overwrite. `finish` is what
---- releases both.
----
---- The same goes for every `bind`: each fills a module-level array that SDL
---- copies out of during the call and never reads again, so two threads binding
---- at once would overwrite each other's arguments. That is what buys a bind
---- that allocates nothing, on a path that runs several times a frame.
----
---- A begun pass is also recorded in `passscope` against its command buffer and
---- taken off there by `finish`. That is the one thing the call site cannot do
---- for itself: a body that throws skips the `finish` written after it, and the
---- command buffer is all a recovery path has to find the pass by.
----
---- Supports multiple color attachments, which is what makes a deferred
---- G-buffer one pass rather than one pass per channel.
+--[=[
+A render pass recorded into a command buffer.
+
+Held as a value rather than reached through module state, so a pass can
+never outlive the frame that opened it without that being visible at the
+call site, and two passes recorded from different command buffers keep their
+own handles.
+
+One pass at a time, per command buffer and in practice per thread: SDL
+forbids beginning any render, compute or copy pass on a command buffer
+before the open render pass is finished, and `begin` fills a module-level
+staging struct that a concurrent `begin` would overwrite. `finish` is what
+releases both.
+
+The same goes for every `bind`: each fills a module-level array that SDL
+copies out of during the call and never reads again, so two threads binding
+at once would overwrite each other's arguments. That is what buys a bind
+that allocates nothing, on a path that runs several times a frame.
+
+A begun pass is also recorded in `passscope` against its command buffer and
+taken off there by `finish`. That is the one thing the call site cannot do
+for itself: a body that throws skips the `finish` written after it, and the
+command buffer is all a recovery path has to find the pass by.
+
+Supports multiple color attachments, which is what makes a deferred
+G-buffer one pass rather than one pass per channel.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

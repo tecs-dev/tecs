@@ -5,44 +5,21 @@ outline: deep
 
 # Events
 
-Tecs has a typed event system with centralized, address-based routing. Events let systems and plugins that do
-not know about each other communicate: one side emits at an address, the other observes at the same address.
+An observer subscribes to one event type at one integer address. Address `0`
+belongs to the world; an entity ID addresses that entity.
 
-This page covers the ECS event system, which is what `world:emit` and `world:observe` route. The engine's
-platform events, the window, keyboard, mouse, gamepad and file-drop stream, are a separate module that delivers
-one ECS event type per kind onto the same bus at address `0`; see [`events`](/modules/events).
-
-## Core concepts
-
-The system centers on three ideas:
-
-- **Events**: typed records or FFI structs that carry information, registered once with `tecs.ecs.newEvent` or
-  `tecs.ecs.newFFIEvent`.
-- **Addresses**: integer routing destinations. `0` is world level; an entity ID addresses that entity.
-- **Observers**: callbacks registered at an address for one event type.
-
-## Address types
-
-| Address | Description                                  | Example                                 |
-| ------- | -------------------------------------------- | --------------------------------------- |
-| `0`     | World-level events, for global communication | `world:observe(0, GamePaused, handler)` |
-| `> 0`   | Events for one entity, by ID                 | `world:observe(id, OnDespawn, handler)` |
-
-## Example: react when an entity despawns
-
-Tecs emits a builtin event, [`OnDespawn`](/ecs/builtins#ondespawn-event), when an entity is despawned. Observe it
-to clean up references, spawn an effect, or play a sound. Observers are registered from a game's entry plugin,
-next to its systems, so both are on the world and both run inside the crash guard:
+The entry plugin below watches every despawn at the world address:
 
 ```teal
-local tecs <const> = require("tecs")
 local Transform <const> = tecs.Transform
 
 return tecs.newApplication({
-    plugin = function(world: tecs.World, app: tecs.Application)
-        world:observe(0, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
-            -- Still readable: the row is removed at commit, not here.
-            local transform <const> = world:get(e.entity, Transform)
+    plugin = function(world: tecs.World)
+        world:observe(0, tecs.ecs.OnDespawn, function(
+            event: tecs.ecs.OnDespawn
+        )
+            -- OnDespawn runs before commit removes the row.
+            local transform <const> = world:get(event.entity, Transform)
             if transform then
                 spawnDebrisAt(world, transform.x, transform.y)
             end
@@ -51,316 +28,157 @@ return tecs.newApplication({
 })
 ```
 
-## An observer is not a system
+The platform event stream uses the same bus. The host emits each platform kind
+at address `0`; [`tecs.events`](/modules/events) defines those event types.
 
-An observer runs at the moment of the emit, inside whatever the emitter was doing, rather than at a point in
-the frame it chose. That has consequences worth knowing before reaching for one:
+## World and entity addresses
 
-- A `world:emit` from a system runs its observers before that `emit` call returns, in the emitting system's
-  phase, inside whatever [deferred scope](/ecs/queries/#mutations-during-iteration) the emitter holds.
-- Platform events at address `0` are delivered as they arrive from the host, which is ahead of `world:update`.
-  So a platform observer fires before every system in the frame the event belongs to, outside every phase: no
-  fixed step, and none of the pause or state gating a system gets from its phase and its `runIf`.
-
-A reaction that needs phase order, the fixed step or state gating folds the event into something a system reads
-instead. That is what [`Input`](/modules/input) does with the whole platform stream: it consumes it into state,
-and systems read that state in phase.
-
-## World-level events
-
-Use address `0` for events that are not tied to a specific entity.
+Use address `0` for messages that belong to the world:
 
 ```teal
-world:observe(0, MyEvent, function(e: MyEvent)
-    print("Got MyEvent")
+world:observe(0, GamePaused, onGamePaused)
+world:emit(0, GamePaused)
+```
+
+Use an entity ID for a subscription tied to that entity:
+
+```teal
+world:observe(player, DamageReceived, function(event: DamageReceived)
+    applyDamage(player, event.amount)
 end)
 
-world:emit(0, MyEvent, "hi")
+world:emit(player, DamageReceived, 15)
 ```
 
-## Entity-level events
+When an entity despawns, the world clears every observer at that address before
+the slot can belong to another entity. World-address observers remain.
 
-Use the entity ID as the address for entity-specific events. When the entity despawns, every observer registered
-at its address is removed, so a per-entity subscription does not leak into the next entity that recycles the
-slot.
+## Observer timing
+
+`world:emit` invokes matching observers before it returns. The observer runs in
+the emitter's phase and deferred scope.
+
+Platform events arrive before `world:update`, so their observers run outside
+the phase tree. They do not receive fixed-step timing, phase order, or state
+gating. Fold an event into state when a reaction needs those properties.
+[`Input`](/modules/input) follows that pattern for keyboard, pointer, and
+gamepad events.
+
+Observers suit immediate notification. Systems suit ordered frame work.
+
+## Subscription lifetime
+
+`world:observe` accepts an optional string ID. Remove a subscription with its
+callback or ID:
 
 ```teal
-local entityId <const>: integer = world:spawn()
+world:observe(0, GamePaused, onGamePaused, "pause-ui")
 
-world:observe(entityId, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
-    print("Entity " .. e.entity .. " was despawned")
-end)
+world:stopObserving(0, GamePaused, onGamePaused)
+world:stopObserving(0, GamePaused, "pause-ui")
 ```
 
-## World methods
+Passing a function removes every matching registration of that function.
+Passing an ID removes the first matching registration. When an observer
+unsubscribes during dispatch, the bus waits until the current dispatch unwinds
+before changing its list.
 
-These methods are available on every `World`.
+`world:clearObservers(address)` clears an address that game code manages.
+Entity despawn handles entity addresses automatically.
 
-| Method                                           | Description                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------ |
-| [`world:observe`](#world-observe)                | Subscribe to an event at a world or entity address.          |
-| [`world:emit`](#world-emit)                      | Emit an event instance, or construct and emit an event type. |
-| [`world:hasObservers`](#world-has-observers)     | Whether any observer exists for an address and event type.   |
-| [`world:stopObserving`](#world-stop-observing)   | Remove a callback or a named observer.                       |
-| [`world:clearObservers`](#world-clear-observers) | Remove every observer at one address.                        |
-
-### world:observe {#world-observe}
-
-Registers an observer for an event type at an address.
+`world:hasObservers` matters when building the payload itself costs work:
 
 ```teal
-function World:observe<T is Event>(
-    address: integer,
-    event: T,
-    callback: function(event: T),
-    id?: string
-)
-```
-
-**Parameters:**
-
-- `address`: address to observe. `0` for world-level events, an entity ID for entity events.
-- `event`: the event type to observe.
-- `callback`: called when a matching event is emitted at that address.
-- `id`: optional string ID, so the observer can be removed by name later.
-
-**Example:**
-
-```teal
-world:observe(0, MyCustomEvent, function(e: MyCustomEvent)
-    print("Got MyCustomEvent")
-end)
-
-world:observe(entityId, tecs.ecs.OnDespawn, function(e: tecs.ecs.OnDespawn)
-    print("Entity despawned: " .. e.entity)
-end)
-```
-
-### world:emit {#world-emit}
-
-Emits an event to every observer at an address.
-
-```teal
-function World:emit(address: integer, eventOrType: Event, ...: any)
-```
-
-**Parameters:**
-
-- `address`: address to emit to. `0` for world-level events, an entity ID for entity events.
-- `eventOrType`: an event instance to dispatch as-is, or an event type followed by constructor arguments.
-- `...`: constructor arguments, when `eventOrType` is an event type.
-
-**Example:**
-
-```teal
-world:emit(0, MyCustomEvent)
-
--- Passing the type plus constructor args lets the world skip construction
--- entirely when no observer is registered.
-world:emit(entityId, DamageReceived, 15)
-```
-
-### world:hasObservers {#world-has-observers}
-
-Whether any observer exists for an event type at an address. Reach for it when computing the payload is
-expensive; you do not need it merely to avoid constructing the event, because
-`world:emit(address, EventType, ...)` already checks first.
-
-```teal
-function World:hasObservers<T is Event>(address: integer, event: T): boolean
-```
-
-**Example:**
-
-```teal
-if world:hasObservers(entityId, DamageReceived) then
-    world:emit(entityId, DamageReceived, expensiveDamagePayload())
+if world:hasObservers(enemy, PathChanged) then
+    world:emit(enemy, PathChanged, buildPathSnapshot(enemy))
 end
 ```
 
-### world:stopObserving {#world-stop-observing}
+For ordinary constructor arguments, call
+`world:emit(address, EventType, ...)` directly. The world checks for observers
+before it constructs an event.
 
-Stops observing an event type at an address.
+## Table events
 
-```teal
-function World:stopObserving<T is Event>(
-    address: integer,
-    event: T,
-    observer: function(T) | string
-)
-```
-
-**Parameters:**
-
-- `address`: address to stop observing.
-- `event`: the event type.
-- `observer`: the callback function, or the string `id` passed to `world:observe`.
-
-Passing a function removes every registration of that function for the type at that address; passing an `id`
-removes the first observer registered under it. A removal requested while the bus is dispatching is deferred
-until the dispatch unwinds, so an observer can unsubscribe itself from inside its own callback.
-
-**Example:**
-
-```teal
-world:stopObserving(0, MyEvent, myCallback)
-world:stopObserving(entityId, tecs.ecs.OnDespawn, "cleanup-handler")
-```
-
-### world:clearObservers {#world-clear-observers}
-
-Clears every observer at an address. Entity addresses are cleared automatically when the entity despawns, so
-this is for addresses you manage yourself.
-
-```teal
-function World:clearObservers(address: integer)
-```
-
-## Event functions
-
-Event registration functions live directly on the `tecs` module. An event type must be registered exactly once;
-registering the same type twice raises an error.
-
-### tecs.ecs.newEvent
-
-Configures an event record so it has a `__call`-based constructor and a unique `eventId`.
-
-```teal
-function tecs.ecs.newEvent<E is Event>(event: E)
-```
-
-**Parameters:**
-
-- `event`: the event type to configure.
-- `event.init`: an optional function that populates an instance in place. Assign it before calling `newEvent`.
-  When absent, the constructor allocates an instance and sets no fields.
-
-**Example:**
+Define a record, give it an in-place initializer, then register it:
 
 ```teal
 local record PlayerDamaged is tecs.ecs.Event
-    damage: number
+    amount: number
     source: string
 
-    --- Create a new PlayerDamaged event.
-    metamethod __call: function(self, damage: number, source: string): self
+    metamethod __call: function(
+        self,
+        amount: number,
+        source: string
+    ): PlayerDamaged
 end
 
--- `init` receives a pre-allocated instance and mutates it in place.
-PlayerDamaged.init = function(e: PlayerDamaged, damage: number, source: string)
-    e.damage = damage
-    e.source = source
+PlayerDamaged.init = function(
+    event: PlayerDamaged,
+    amount: number,
+    source: string
+)
+    event.amount = amount
+    event.source = source
 end
+
 tecs.ecs.newEvent(PlayerDamaged)
 
--- A direct constructor always allocates a fresh instance.
-local damageEvent <const>: PlayerDamaged = PlayerDamaged(10, "fire")
-
--- For the optimized emission path, let the world construct lazily.
-world:emit(0, PlayerDamaged, 10, "fire")
+world:emit(player, PlayerDamaged, 10, "fire")
 ```
 
-### Constructor versus emit
+Registration assigns the event type its ID. Register each type once.
 
-The two construction paths differ in allocation:
+`PlayerDamaged(10, "fire")` allocates an independent instance. Use that form
+when code must retain the value or send it through a standalone `MessageBus`.
 
-- **Direct constructor**, `PlayerDamaged(10, "fire")`: always allocates a fresh, independent instance. Use it
-  when you need to hold the event past the current emit, or when you are dispatching through a standalone
-  `MessageBus`.
-- **`world:emit(address, EventType, ...)`**: the fast path. It checks for observers before constructing
-  anything, then builds the instance from the world's own pooled backing storage, so a hot emission loop
-  allocates nothing.
+`world:emit(player, PlayerDamaged, 10, "fire")` leases pooled backing storage
+and returns it after dispatch. Do not retain the instance passed to an
+observer. The emitter owns the payload during dispatch, so observers should
+treat its fields as read-only and copy any values that must outlive the
+callback.
 
-::: warning
-Do not retain a reference to the instance an observer receives from `world:emit`. The world returns that backing
-storage to its pool as soon as the emit completes, and the next emit of the same type reuses it. Copy the fields
-you need.
-:::
+## FFI events
 
-### tecs.ecs.newFFIEvent
-
-Configures an event backed by a C struct, allocated from the emitting world's leased FFI slice on the
-`world:emit` path.
-
-```teal
-function tecs.ecs.newFFIEvent<E is Event>(
-    event: E,
-    fields: {{string, string}},
-    structName?: string
-)
-```
-
-**Parameters:**
-
-- `event`: the event type to configure.
-- `fields`: field definitions as `{ {"name", "type"}, ... }`, where the type is a C type name.
-- `structName`: optional struct name. One is generated when it is omitted.
-
-Field names must be valid C identifiers and must be unique. `eventId` and `typeId` are reserved: Tecs writes
-them itself and rejects a definition that names either. The field type string is emitted into the generated
-struct declaration; the types used across this repository are `float`, `double`, `int32_t`, `uint32_t`,
-`uint8_t`, `uint16_t` and `bool`.
-
-An FFI event that does not define `init` gets a generated positional initializer that assigns the fields in the
-order they were declared, so the constructor's argument order matches the `fields` order.
-
-**Example:**
+`newFFIEvent` stores fixed-size fields in a C struct:
 
 ```teal
 local record DamageEvent is tecs.ecs.Event
-    damage: number
-    entityId: integer
-    damageType: integer
+    amount: number
+    entity: integer
 
-    -- The constructor matches the order of the FFI fields.
     metamethod __call: function(
         self,
-        damage: number,
-        entityId: integer,
-        damageType: integer
-    ): self
+        amount: number,
+        entity: integer
+    ): DamageEvent
 end
 
--- Use `"double"` for any field holding an entity ID. A packed ID carries
--- generation bits and does not fit in int32, and truncation would produce
--- a garbage ID on the receiving side.
 tecs.ecs.newFFIEvent(DamageEvent, {
-    {"damage", "float"},
-    {"entityId", "double"},
-    {"damageType", "int32_t"}
+    {"amount", "float"},
+    {"entity", "double"},
 }, "Game_DamageEvent")
 
-local damage <const>: DamageEvent = DamageEvent(15.5, 1234, 2)
-
--- The optimized path, same as for table events.
-world:emit(0, DamageEvent, 15.5, 1234, 2)
+world:emit(0, DamageEvent, 15.5, enemy)
 ```
 
-::: tip FFI event compatibility
-An FFI event's fields live in a C struct, so it cannot carry Lua tables, strings, functions or userdata. Use
-`tecs.ecs.newEvent` for events that need Lua values.
-:::
+Without a custom `init`, the generated initializer follows field order. Field
+names must form unique C identifiers. `eventId` and `typeId` belong to Tecs and
+cannot appear in `fields`.
 
-The builtin [`OnSpawn`](/ecs/builtins#onspawn-event) and [`OnDespawn`](/ecs/builtins#ondespawn-event) events are
-FFI events, each carrying a single `entity` field declared as `double` for exactly that reason.
+Use `double` for an entity ID. The packed slot and generation do not fit in a
+32-bit integer. FFI events cannot carry Lua strings, tables, functions, or
+userdata; table events can.
 
-## MessageBus
+`OnSpawn` and `OnDespawn` use FFI storage with a `double entity` field.
 
-`world:observe` and `world:emit` delegate to the world's `MessageBus`, the address-keyed router that holds the
-observers and dispatches events. Each world owns one. `tecs.ecs.newMessageBus()` creates a standalone bus when you
-want routing without a world.
+## Standalone message buses
 
-```teal
-function tecs.ecs.newMessageBus(): MessageBus
-```
+Each world owns a `MessageBus`. `tecs.ecs.newMessageBus()` creates the same
+address router without a world.
 
-| Method                                                | Description                                                                                                                                                                                         |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bus:observe(address, eventType, observer, id?)`      | Subscribe to an event type at an address. The optional `id` allows unsubscribing by name.                                                                                                           |
-| `bus:observeOnce(address, eventType, observer)`       | Subscribe; the observer removes itself after it fires once.                                                                                                                                         |
-| `bus:stopObserving(address, eventType, observerOrId)` | Unsubscribe a callback, or an `id`, from an event type at an address.                                                                                                                               |
-| `bus:emit(address, event)`                            | Dispatch an already-constructed instance to the observers at the address, returning early when there are none. Construct the event first, or use `world:emit` for the lazy construct-and-skip path. |
-| `bus:hasObservers(address, eventType)`                | Whether any observer exists for that event type at the address.                                                                                                                                     |
-| `bus:clearAddress(address)`                           | Remove every observer at one address. This is what an entity despawn uses.                                                                                                                          |
-| `bus:clearEntityObservers()`                          | Remove every per-entity observer, that is every address except the global `0`, preserving global subscriptions. Used by `world:clearEntities`.                                                      |
-| `bus:reset()`                                         | Remove all observers, global ones included. Full teardown.                                                                                                                                          |
+A standalone bus dispatches an event instance that the caller constructs. It
+also exposes `observeOnce`, per-address clearing, entity-address clearing, and
+a full reset. World methods add lazy construction, pooled emission, and
+automatic cleanup when entities die.

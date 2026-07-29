@@ -1,34 +1,40 @@
---- An image divided into frames, with tags and slices over them.
----
---- The model is Aseprite's, because that is what the art is authored in: a
---- sheet is a list of frames each holding for its own duration, a set of named
---- tags that play an inclusive span of them in a direction, and a set of named
---- slices carrying rectangles, nine-slice centers and pivots that move from
---- frame to frame. Reading an Aseprite JSON sidecar is one function in front of
---- that model rather than the model itself, so another reader for the binary
---- format populates the same sheet without reshaping anything.
----
---- A sheet is data, not a component. A hundred entities drawing the same
---- character share one sheet and point at it, so what an entity carries is the
---- sheet's id rather than a copy of its frame table.
----
---- One component does live here. A `Pivot` is resolved from a slice, and a
---- slice index is this sheet's answer alone, so writing the name a snapshot
---- carries instead needs the registry at the bottom of this file. Putting the
---- component in `tecs.gfx` would point that module at this one, which
---- already points the other way.
----
---- Frames are addressed by index, counting from one, in the order the sheet
---- lays them out: for a grid that is left to right and then top to bottom. A
---- tag is an inclusive span of those indices, and that is what an animation
---- plays. Tag zero is the whole sheet, forward.
----
---- Two coordinate spaces meet here and only one of them is a sheet's business.
---- A frame is written in pixels, because that is how an artist cuts an image
---- up. What a `Sprite` carries is a region of a texture-array layer, which is
---- the fraction of the image the frame covers scaled by the fraction of the
---- layer the image itself covers. The second fraction is the renderer's
---- answer, so a sheet holds pixels until `bind` hands it one.
+--[=[
+A sprite sheet divides one image into frames, tags, and slices.
+
+Aseprite supplies the model: each frame carries its own duration, tags play
+inclusive spans in a direction, and slices carry rectangles, nine-slice
+centers, and pivots that may move between frames. `fromAseprite` reads its JSON
+export into the same interface that `grid`, `rects`, and `build` produce.
+
+Frames count from one in sheet order. Tag zero represents the whole sheet
+playing forward.
+
+Bind the finished sheet to a renderer sprite before drawing:
+
+```teal
+local hero <const> = tecs.gfx.animation.fromAseprite({
+    name = "game.hero",
+    json = asepriteExport,
+})
+
+hero:bind(app.renderer:sprite("sprites/hero.png"))
+```
+
+`sprite(frame)` creates a [`Sprite`](tealdoc:tecs.components.Sprite) for one frame.
+`pivot(name, frame)` creates a
+[`Pivot`](tealdoc:tecs.gfx.animation.Pivot) from a slice. Animation keeps that
+pivot on the named slice as the slice moves.
+
+A sheet name forms a snapshot compatibility surface. Every entity that plays
+the sheet shares its registered frame, tag, slice, and timing data.
+]=]
+-- Implementation details:
+-- Components carry the sheet's interned id rather than its table. The registry
+-- resolves snapshot names and lets all entities share one sheet.
+--
+-- Sheets retain frame rectangles in source-image pixels until `bind` receives
+-- the image's texture-array placement. Binding converts each frame and slice
+-- into the UV coordinates that `Sprite` stores.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -52,73 +58,97 @@ local DEFAULT_DURATION <const> = 100.0
 --- nothing about who read it.
 local revision = 0
 
---- How a tag walks its span.
+--- Selects how a tag walks its span.
 ---
 --- `pingpong` plays forward and then back without repeating either end, so a
 --- three-frame tag is 1, 2, 3, 2 and then round again.
 local enum Direction
+    --- Read-only. Plays the tag from its first frame to its last.
     "forward"
+    --- Read-only. Plays the tag from its last frame to its first.
     "reverse"
+    --- Read-only. Plays forward and then backward without repeating either
+    --- endpoint.
     "pingpong"
 end
 
---- One frame's pixel rect and how long it is held.
+--- Defines one frame's pixel rectangle and duration.
 local record Rect
+    --- Caller-writable. Sets the frame's left edge in image pixels.
     x: number
+    --- Caller-writable. Sets the frame's top edge in image pixels.
     y: number
+    --- Caller-writable. Sets the frame width in pixels.
     w: number
+    --- Caller-writable. Sets the frame height in pixels.
     h: number
-    --- Milliseconds. Defaults to `sheet.DEFAULT_DURATION`.
+    --- Caller-writable. Sets the frame duration in milliseconds and defaults
+    --- to `sheet.DEFAULT_DURATION`.
     duration: number
 end
 
---- An inclusive span of frame indices, played in a direction.
+--- Defines an inclusive frame span and playback direction.
 ---
 --- Aseprite calls this a frame tag, and a tag's name is what an animation asks
 --- for.
 local record Tag
+    --- Caller-writable. Sets the first frame index in the inclusive span.
     from: integer
+    --- Caller-writable. Sets the last frame index in the inclusive span.
     to: integer
-    --- Defaults to "forward".
+    --- Caller-writable. Sets the playback direction and defaults to
+    --- `"forward"`.
     direction: Direction
 end
 
---- Where a slice sits from one frame on, and the points it carries.
+--- Defines where a slice sits from one frame onward and which points it
+--- carries.
 ---
 --- A slice holds a key until the next one, so a slice that never moves is one
 --- key at frame one.
 local record SliceKey
-    --- Frame this key takes effect from, counting from one.
+    --- Caller-writable. Sets the first frame on which this key takes effect,
+    --- counting from one.
     frame: integer
-    --- The slice's rectangle, in the pixels of the frame it sits on.
+    --- Caller-writable. Sets the slice rectangle's left edge in frame pixels.
     x: number
+    --- Caller-writable. Sets the slice rectangle's top edge in frame pixels.
     y: number
+    --- Caller-writable. Sets the slice rectangle's width in pixels.
     w: number
+    --- Caller-writable. Sets the slice rectangle's height in pixels.
     h: number
-    --- Nine-slice center, in the slice's own pixels. Nil for a slice with no
-    --- center, which is every slice that is not a nine-patch.
+    --- Caller-writable. Sets the nine-slice center's left edge in slice
+    --- pixels. Nil means the slice has no center.
     centerX: number
+    --- Caller-writable. Sets the nine-slice center's top edge in slice pixels.
     centerY: number
+    --- Caller-writable. Sets the nine-slice center's width in pixels.
     centerW: number
+    --- Caller-writable. Sets the nine-slice center's height in pixels.
     centerH: number
-    --- Pivot, in the slice's own pixels. Nil for a slice with no pivot.
+    --- Caller-writable. Sets the horizontal pivot in slice pixels. Nil means
+    --- the slice has no pivot.
     pivotX: number
+    --- Caller-writable. Sets the vertical pivot in slice pixels. Nil means the
+    --- slice has no pivot.
     pivotY: number
 end
 
---- A named region that moves across the frames.
+--- Represents a named region that moves across frames.
 ---
 --- Aseprite's slices carry hitboxes, attachment points and nine-patch borders.
 --- The engine reads pivots out of them; everything else is the game's to use.
 local record Slice
+    --- Caller-writable. Sets the name used to find the slice.
     name: string
-    --- Free text Aseprite carries alongside a slice.
+    --- Caller-writable. Stores free text carried by Aseprite.
     data: string
-    --- Keys in frame order, at least one.
+    --- Caller-writable. Sets at least one key in frame order.
     keys: {SliceKey}
 end
 
---- Where an entity's quad turns and scales about.
+--- Sets the point around which an entity's quad rotates and scales.
 ---
 --- A quad with no Pivot turns about its center, so a character rotates about
 --- its waist and a scale grows it in both directions at once. A quad with one
@@ -130,91 +160,122 @@ end
 --- because that is what an artist places in Aseprite and what `pivotOf`
 --- answers. A frame that changes size therefore carries its pivot with it.
 ---
---- `sheet` and `slice` are what the fraction was resolved from. A slice moves
---- from frame to frame, so playback resolves it again on every frame change,
---- and it only does so while the slice belongs to the sheet the entity is
---- playing: a frame index means nothing in another sheet's frames. Both zero
---- is a pivot written directly, which nothing rewrites.
+--- `sheet` and `slice` identify the source of the fraction. Playback resolves a
+--- moving slice on every frame change while the entity plays that sheet. Zero
+--- for both fields marks a direct pivot that playback never rewrites.
 local record Pivot is Component
-    --- Fraction across the frame, from its left edge. Half is the middle.
+    --- Caller-writable. Sets the pivot as a fraction across the frame from its
+    --- left edge. One half selects the middle.
     x: number
-    --- Fraction down the frame, from its top edge. Half is the middle.
+    --- Caller-writable. Sets the pivot as a fraction down the frame from its
+    --- top edge. One half selects the middle.
     y: number
-    --- Registration index of the sheet the slice belongs to, or zero.
+    --- Caller-writable. Selects the sheet that owns the slice by registration
+    --- index, or zero for a direct pivot.
     sheet: number
-    --- Index of the slice within that sheet, from `Sheet:sliceId`, or zero
+    --- Caller-writable. Selects the slice within that sheet by its
+    --- `Sheet:sliceId` index, or zero
     --- for a pivot written directly.
     slice: number
-    --- How far the point above can move over the cycle being played, as half
-    --- the range in each axis and a fraction of the frame.
+    --- Engine-owned. Stores half the horizontal range that the point may travel
+    --- over the current cycle, as a fraction of the frame.
     ---
-    --- Zero for a pivot written directly and for a slice with a single key,
-    --- which is nearly every one of them, and the cull bound is then exactly
-    --- the quad's own. Playback on the GPU resolves the frame after the bound is
-    --- written, so a slice that genuinely moves has to have its travel covered:
-    --- `x` and `y` are then the middle of where it goes and this is how far
-    --- either side of that the quad can be drawn.
+    --- A direct pivot or single-key slice uses zero, keeping the quad's exact
+    --- cull bound. A moving slice uses `x` and `y` for the travel midpoint and
+    --- this field for its reach on either side.
     halfX: number
+    --- Engine-owned. Stores the pivot's vertical travel for culling. Ordinary
+    --- game code should ignore this field.
     halfY: number
 end
 
---- An image divided into frames.
+--- Represents an image divided into frames.
 local record Sheet
-    --- Name the sheet is registered under, and what a snapshot writes.
+    --- Read-only. Reports the registered name that snapshots store.
     name: string
-    --- Registration index, which is what an Animation carries. Assigned when
-    --- the sheet is built and never reused, so a second sheet built under a
-    --- taken name gets a fresh id rather than the old one.
+    --- Read-only. Reports the registration index carried by an
+    --- [`Animation`](tealdoc:tecs.gfx.animation.Animation). Construction assigns
+    --- an id once and never reuses it.
     id: integer
-    --- Number of frames, and so the largest index `rect`, `uv` and `sprite`
+    --- Read-only. Reports the number of frames and the largest index `rect`, `uv` and `sprite`
     --- accept.
     count: integer
-    --- Size of the image the frames are cut from, in pixels. What frame rects
-    --- are measured against, so a sheet cut for one image and bound to another
-    --- of a different size places its frames wrongly with no complaint.
+    --- Read-only. Reports the source image width in pixels. Frame rectangles use
+    --- this width, so binding the sheet to an image of a different size places
+    --- frames incorrectly.
     imageWidth: number
+    --- Read-only. Reports the height in pixels of the image from which frames
+    --- are cut.
     imageHeight: number
 
-    --- Frame rects in pixels, four numbers per frame: x, y, w, h.
+    --- Engine-owned. Stores frame rects in pixels. Ordinary game code should
+    --- use `rect`.
     _rects: {number}
-    --- Seconds each frame is held, converted from the milliseconds the model
-    --- is authored in so playback never divides.
+    --- Engine-owned. Stores each frame's duration in seconds. Ordinary game
+    --- code should use `duration`. Construction converts authored milliseconds
+    --- to seconds so playback never divides.
     _durations: {number}
-    --- Frame regions, four numbers per frame: u0, v0, u1, v1. Fractions of
+    --- Engine-owned. Stores frame regions. Ordinary game code should use `uv`.
+    --- Values remain fractions of
     --- the image until `bind`, of the texture-array layer after it.
     _uvs: {number}
-    --- Tag spans, directions and names, indexed by tag id. Index zero is the
+    --- Engine-owned. Stores tag spans by tag id. Ordinary game code should use
+    --- the tag methods. Index zero is the
     --- whole sheet forward, which is what an animation naming no tag plays.
     _from: {integer}
+    --- Engine-owned. Stores tag endpoints. Ordinary game code should ignore
+    --- this field.
     _to: {integer}
+    --- Engine-owned. Stores tag directions. Ordinary game code should ignore
+    --- this field.
     _direction: {Direction}
+    --- Engine-owned. Stores tag names. Ordinary game code should ignore this
+    --- field.
     _names: {string}
+    --- Engine-owned. Stores tag ids. Ordinary game code should ignore this
+    --- field.
     _ids: {string: integer}
-    --- Frame index at each step of a tag's cycle, indexed by tag id. This is
+    --- Engine-owned. Stores the frame index at each step of a tag's cycle.
+    --- Ordinary game code should ignore this field. This is
     --- what collapses the three directions into one lookup: the direction
     --- decides the order once, when the sheet is built, and playback walks it.
     _order: {{integer}}
-    --- Seconds elapsed at the end of each step of a tag's cycle, indexed by
-    --- tag id, and the cycle's whole length.
+    --- Engine-owned. Stores elapsed seconds at each step of a tag's cycle.
+    --- Ordinary game code should ignore this field. Tag ids index the values,
+    --- including the complete cycle length.
     _timing: {{number}}
+    --- Engine-owned. Stores total cycle durations. Ordinary game code should
+    --- use `cycle`.
     _cycle: {number}
-    --- Slices by index and by name.
+    --- Engine-owned. Stores slices by index. Ordinary game code should use
+    --- `slice`.
     _slices: {Slice}
+    --- Engine-owned. Stores slice ids by name. Ordinary game code should use
+    --- `sliceId`.
     _sliceIds: {string: integer}
 
-    --- What `bind` resolved: the image index and texture-array layer a frame's
-    --- Sprite carries, and the fractions of that layer the image occupies.
+    --- Engine-owned. Stores the image index resolved by `bind`. Ordinary game
+    --- code should ignore this field.
     _image: number
+    --- Engine-owned. Stores the texture-array layer resolved by `bind`.
+    --- Ordinary game code should ignore this field.
     _slot: number
-    --- Where the image sits within its texture-array cell, and how much of
-    --- the cell it covers. A packed cell holds several images, so a frame's
-    --- fraction of the image is scaled and then moved rather than only scaled.
+    -- Implementation details:
+    -- A packed cell may hold several images, so frame UVs apply both an origin
+    -- and a scale.
+    --- Engine-owned. Stores the horizontal origin within the texture-array
+    --- cell. Ordinary game code should ignore this field.
     _originU: number
+    --- Engine-owned. Stores the vertical origin within the texture-array cell.
+    --- Ordinary game code should ignore this field.
     _originV: number
+    --- Engine-owned. Stores the horizontal scale within the texture-array
+    --- cell. Ordinary game code should ignore this field.
     _scaleU: number
+    --- Engine-owned. Stores the vertical scale within the texture-array cell.
+    --- Ordinary game code should ignore this field.
     _scaleV: number
-
-    --- A frame's pixel rect, as x, y, w and h.
+    --- Returns a frame's pixel rectangle as x, y, width, and height.
     --- @param frame One to `count`. Anything else raises, since a frame index
     ---     out of range is a sheet and an animation disagreeing rather than
     ---     something to paper over.
@@ -222,27 +283,27 @@ local record Sheet
     ---     image the sheet was cut from.
     rect: function(self, frame: integer): number, number, number, number
 
-    --- How long a frame is held, in seconds.
+    --- Returns how long a frame remains visible, in seconds.
     --- @param frame One to `count`. Anything else raises.
-    --- @return Seconds, which is the milliseconds the frame was authored with
-    ---     divided by a thousand.
+    --- @return Returns the authored frame duration in seconds.
     duration: function(self, frame: integer): number
 
-    --- A frame's region, as u0, v0, u1 and v1.
+    --- Returns a frame's region as u0, v0, u1, and v1.
     ---
     --- Fractions of the image before `bind` and of the texture-array layer
-    --- after it, which is the pair of numbers a `Sprite` wants.
+    --- after it, which is the region a
+    --- [`Sprite`](tealdoc:tecs.components.Sprite) needs.
     --- @param frame One to `count`. Anything else raises.
     --- @return The region's left, top, right and bottom edges.
     uv: function(self, frame: integer): number, number, number, number
 
-    --- True when the sheet names the given tag.
+    --- Returns whether the sheet contains the given tag.
     --- @param name Any string, and nil answers false rather than raising, so
     ---     this is what to ask before `tag`.
     --- @return Whether `tag` would answer for that name.
     hasTag: function(self, name: string): boolean
 
-    --- The first frame, last frame and direction of a named tag.
+    --- Returns the first frame, last frame, and direction of a named tag.
     ---
     --- Fails on a name the sheet does not carry, because the alternative is an
     --- animation silently playing the whole sheet on a typo.
@@ -250,51 +311,57 @@ local record Sheet
     --- @return The tag's first frame index, its last, and its direction.
     tag: function(self, name: string): integer, integer, Direction
 
-    --- Index a tag name stands for, or zero when the sheet does not name it.
+    --- Returns the index represented by a tag name, or zero when absent.
     ---
     --- Zero reads as the whole sheet rather than as nothing, so an animation
     --- that names no tag plays every frame in order.
     --- @param name A tag name, or nil for the whole sheet.
-    --- @return The index an `Animation` carries, which is this sheet's answer
-    ---     alone: ids follow the tag names in sorted order, so the same name
-    ---     in another sheet is another number.
+    --- @return Returns the index an
+    ---     [`Animation`](tealdoc:tecs.gfx.animation.Animation) carries. The
+    ---     index belongs to this sheet alone: ids follow tag names in sorted
+    ---     order, so the same name in another sheet has another number.
     tagId: function(self, name: string): integer
 
-    --- Name a tag index stands for, or the empty string for the whole sheet.
+    --- Returns the name represented by a tag index, or the empty string for
+    --- the whole sheet.
     --- @param id An index from `tagId`. Nil, zero and anything the sheet does
     ---     not carry all answer the empty string.
     --- @return The tag's name, which is what a snapshot writes instead of the
     ---     index.
     tagName: function(self, id: integer): string
 
-    --- Seconds one pass through a tag's cycle takes.
+    --- Returns the duration of one tag cycle in seconds.
     --- @param id A tag index, or zero for the whole sheet.
     --- @return The sum of the durations of the frames the cycle visits, which
     ---     for a pingpong tag counts the frames it passes twice twice.
     cycle: function(self, id: integer): number
 
-    --- The frame a tag is showing at a point in its cycle.
+    --- Returns the frame shown by a tag at a point in its cycle.
     --- @param id A tag index, or zero for the whole sheet.
     --- @param time Seconds into the cycle. Outside it clamps rather than
     ---     wrapping, since wrapping is the caller's decision about looping.
     --- @return A frame index into the whole sheet, counting from one.
     frameAt: function(self, id: integer, time: number): integer
 
-    --- A slice by name, or nil when the sheet does not carry one.
+    --- Returns a slice by name, or nil when the sheet does not contain one.
     --- @param name A slice name.
     --- @return The slice, whose keys the caller must not mutate.
     slice: function(self, name: string): Slice
 
-    --- Index a slice name stands for, or zero when the sheet does not name it.
+    --- Returns the index represented by a slice name, or zero when absent.
     --- @param name A slice name, or nil.
     --- @return The index, which is what a component carries in place of the
     ---     name for the reason a tag id is.
     sliceId: function(self, name: string): integer
 
-    --- Name a slice index stands for, or the empty string.
+    --- Returns the name represented by a slice index, or the empty string.
+    ---
+    --- @param id A slice index from `sliceId`. Zero or an absent index returns
+    ---     the empty string.
+    --- @return The slice name, or the empty string when the index is absent.
     sliceName: function(self, id: integer): string
 
-    --- The key of a slice that is in force on a frame, or nil.
+    --- Returns the slice key active on a frame, or nil.
     ---
     --- A slice holds a key until the next one, so this answers the last key at
     --- or before the frame rather than only an exact match.
@@ -302,7 +369,7 @@ local record Sheet
     --- @param frame A frame index.
     sliceKeyAt: function(self, id: integer, frame: integer): SliceKey
 
-    --- Where a slice's pivot sits on a frame, as a fraction of that frame.
+    --- Returns a slice pivot as a fraction of its frame.
     ---
     --- Aseprite writes a pivot in the slice's own pixels, so this adds the
     --- slice's origin and divides by the frame, which is the number a quad
@@ -319,7 +386,7 @@ local record Sheet
     ---     left.
     pivotOf: function(self, id: integer, frame: integer): number, number
 
-    --- A Pivot resolved from a named slice, ready to spawn.
+    --- Creates a Pivot from a named slice, ready to spawn.
     ---
     --- Bound to the slice as well as resolved from it, so playback moves the
     --- pivot as the frame changes rather than leaving it where the frame it
@@ -338,95 +405,109 @@ local record Sheet
     ---
     --- `sprite` is what `Renderer:sprite(name)` returns for a whole image: its
     --- `u1` and `v1` are the fractions of the texture-array layer that image
-    --- occupies, and a frame's fraction of the image has to be scaled by them
+    --- occupies. The function scales the frame's image fraction by them
     --- before it names a region of the layer. Pass a sub-rect and the frames
     --- land inside that sub-rect, which is not what the sheet describes.
     ---
-    --- Binding again rescales from the pixel rects rather than from the last
-    --- result, so a sheet survives its image being registered a second time.
+    --- Binding again rescales from the pixel rectangles instead of the previous
+    --- result, so re-registering an image does not accumulate scaling error.
     --- Entities already carrying regions from an earlier bind keep them: a
-    --- rebind moves nothing that has already been written into a `Sprite`.
+    --- rebind does not update any existing [`Sprite`](tealdoc:tecs.components.Sprite).
     --- @param sprite A whole image, from `Renderer:sprite`.
-    --- @return The sheet, so a bind can be chained onto the construction.
+    --- @return Returns the sheet so callers can chain `bind`.
     bind: function(self, sprite: Sprite): Sheet
 
-    --- A Sprite showing one frame, ready to spawn.
+    --- Creates a Sprite showing one frame, ready to spawn.
     ---
     --- Defaults to the first frame. Meaningful after `bind`, since before it
     --- the sheet names no image and the quad has no layer to sample.
     --- @param frame One to `count`, defaulting to one. Anything else raises.
-    --- @return A fresh `Sprite`, which is a value the caller owns rather than a
-    ---     view onto the sheet.
+    --- @return Returns a fresh [`Sprite`](tealdoc:tecs.components.Sprite) that the
+    ---     caller owns, not a view onto the sheet.
     sprite: function(self, frame?: integer): Sprite
 end
 
 local SheetMT <const>: metatable<Sheet> = {__index = Sheet}
 
---- Options for a sheet cut into a uniform grid.
+--- Configures a sheet cut into a uniform grid.
 local record GridOptions
-    --- Name to register the sheet under (required).
+    --- Caller-writable. Sets the required registration name.
     name: string
-    --- Size of the image the grid is cut from, in pixels (required).
+    --- Caller-writable. Sets the required image width in pixels.
     imageWidth: number
+    --- Caller-writable. Sets the required image height in pixels.
     imageHeight: number
-    --- Size of one cell, in pixels (required).
+    --- Caller-writable. Sets the required frame width in pixels.
     frameWidth: number
+    --- Caller-writable. Sets the required frame height in pixels.
     frameHeight: number
-    --- Border between the image's edge and the first cell. Defaults to zero.
+    --- Caller-writable. Sets the border between the image edge and first cell.
+    --- Defaults to zero.
     margin: number
-    --- Gap between neighboring cells. Defaults to zero.
+    --- Caller-writable. Sets the gap between neighboring cells and defaults to
+    --- zero.
     spacing: number
-    --- Cells across and down. Derived from the image size when omitted.
+    --- Caller-writable. Sets how many cells fit across. The constructor derives
+    --- it from the image size when omitted.
     columns: integer
+    --- Caller-writable. Sets how many cells fit down. The constructor derives
+    --- it from the image size when omitted.
     rows: integer
-    --- Frames to take, counting across rows. Defaults to every cell, which is
+    --- Caller-writable. Sets how many frames to take across rows. It defaults to every cell, which is
     --- wrong only for a sheet whose last row is short.
     count: integer
-    --- Milliseconds every cell is held. Defaults to `DEFAULT_DURATION`. A grid
-    --- is one duration for every frame by construction; retime individual
-    --- frames with `sheet.build`.
+    --- Caller-writable. Sets how many milliseconds every cell remains visible.
+    --- It defaults to `DEFAULT_DURATION`. A grid uses one duration for every
+    --- frame; retime individual frames with `sheet.build`.
     duration: number
-    --- Named tags over the frames. Optional.
+    --- Caller-writable. Defines optional named tags over the frames.
     tags: {string: Tag}
-    --- Named slices. Optional.
+    --- Caller-writable. Defines optional named slices.
     slices: {Slice}
 end
 
---- Options for a sheet cut into explicitly listed rects.
+--- Configures a sheet cut into explicitly listed rectangles.
 local record RectsOptions
-    --- Name to register the sheet under (required).
+    --- Caller-writable. Sets the required registration name.
     name: string
-    --- Size of the image the rects are cut from, in pixels (required).
+    --- Caller-writable. Sets the required image width in pixels.
     imageWidth: number
+    --- Caller-writable. Sets the required image height in pixels.
     imageHeight: number
-    --- Frame rects in pixels, in the order they are addressed (required).
+    --- Caller-writable. Sets the required frame rects in address order.
     frames: {Rect}
-    --- Named tags over the frames. Optional.
+    --- Caller-writable. Defines optional named tags over the frames.
     tags: {string: Tag}
-    --- Named slices. Optional.
+    --- Caller-writable. Defines optional named slices.
     slices: {Slice}
 end
 
---- Options for a sheet read from an Aseprite JSON export.
+--- Configures a sheet read from an Aseprite JSON export.
 local record AsepriteOptions
-    --- Name to register the sheet under. Defaults to the export's own image
-    --- name, and is required when the export does not carry one.
+    --- Caller-writable. Sets the registration name. It defaults to the export's
+    --- image name. An export without an image name requires this field.
     name: string
-    --- The export, either as the JSON text or as a table already decoded from
+    --- Caller-writable. Supplies the export as JSON text or a decoded table.
     --- it. A table is what an asset pipeline that decoded once should pass.
     json: any
 end
 
---- Builds a sheet a frame, a tag and a slice at a time.
+--- Builds a sheet one frame, tag, and slice at a time.
 ---
 --- What every constructor here goes through, and what an importer for a format
 --- nothing else reads writes into.
 local record Builder
+    --- Engine-owned. Stores the sheet under construction. Ordinary game code
+    --- should use the builder methods.
     _sheet: Sheet
+    --- Engine-owned. Stores tags under construction. Ordinary game code should
+    --- use `tag`.
     _tags: {string: Tag}
+    --- Engine-owned. Stores slices under construction. Ordinary game code
+    --- should use `slice` or `sliceKeys`.
     _slices: {Slice}
 
-    --- Appends a frame.
+    --- Appends a frame to the sheet under construction.
     --- @param x Left of the frame in the image, in pixels.
     --- @param y Top of the frame.
     --- @param w Width, which must be positive.
@@ -436,7 +517,7 @@ local record Builder
     --- @return The builder.
     frame: function(self, x: number, y: number, w: number, h: number, duration?: number): Builder
 
-    --- Names an inclusive span of frames and how it walks them.
+    --- Names an inclusive frame span and its playback direction.
     --- @param name What an animation asks for.
     --- @param from First frame, counting from one.
     --- @param to Last frame, inclusive.
@@ -444,7 +525,7 @@ local record Builder
     --- @return The builder.
     tag: function(self, name: string, from: integer, to: integer, direction?: Direction): Builder
 
-    --- Adds a slice that never moves, with a pivot.
+    --- Adds a fixed slice with a pivot.
     --- @param name What a sprite names to take its pivot from.
     --- @param x Left of the slice within a frame, in pixels.
     --- @param y Top of the slice.
@@ -458,14 +539,14 @@ local record Builder
         self, name: string, x: number, y: number, w: number, h: number, pivotX?: number, pivotY?: number
     ): Builder
 
-    --- Adds a slice with its keys written out, which is what an importer uses.
+    --- Adds a slice from explicit keys for importers.
     --- @param name The slice's name.
     --- @param data Free text to carry alongside it, or nil for none.
     --- @param keys Keys in frame order, at least one.
     --- @return The builder.
     sliceKeys: function(self, name: string, data: string, keys: {SliceKey}): Builder
 
-    --- Registers the sheet and hands it back.
+    --- Registers and returns the finished sheet.
     ---
     --- Raises on a sheet with no frames, and on a tag whose span falls outside
     --- them.
@@ -474,13 +555,14 @@ end
 
 local BuilderMT <const>: metatable<Builder> = {__index = Builder}
 
---- The sheet surface: the constructors, the process-wide registry they write
---- into, and the `Pivot` component a slice resolves to.
+--- Provides sheet constructors, their process-wide registry, and the Pivot
+--- into, and the [`Pivot`](tealdoc:tecs.gfx.animation.Pivot) component a slice
+--- resolves to.
 ---
 --- Registration is per process rather than per world, so a sheet built once is
 --- reachable from every world by id or by name.
 local record sheet
-    --- How a tag walks its span.
+    --- Selects how a tag walks its span.
     type Direction = Direction
     --- One frame, as `rects` and the builder take it.
     type Rect = Rect
@@ -488,27 +570,29 @@ local record sheet
     type Tag = Tag
     --- A named region that moves across the frames.
     type Slice = Slice
-    --- Where a slice sits from one frame on.
+    --- Defines where a slice sits from one frame onward.
     type SliceKey = SliceKey
-    --- What `grid` takes.
+    --- Configures `grid`.
     type GridOptions = GridOptions
-    --- What `rects` takes.
+    --- Configures `rects`.
     type RectsOptions = RectsOptions
-    --- What `fromAseprite` takes.
+    --- Configures `fromAseprite`.
     type AsepriteOptions = AsepriteOptions
-    --- What `build` answers with.
+    --- Builds custom sheets one frame at a time.
     type Builder = Builder
 
-    --- An image divided into frames.
+    --- Read-only. Exposes an image divided into frames.
     Sheet: Sheet
 
-    --- Where an entity's quad turns and scales about.
+    --- Read-only. Exposes the pivot component that controls where an entity's
+    --- quad turns and scales.
     Pivot: Pivot
 
-    --- Milliseconds a frame is held when nothing says otherwise.
+    --- Read-only. Reports how many milliseconds a frame remains visible when
+    --- nothing overrides its duration.
     DEFAULT_DURATION: number
 
-    --- A sheet whose frames are the cells of a uniform grid.
+    --- Creates a sheet whose frames form a uniform grid.
     ---
     --- Margin surrounds the grid and spacing separates the cells, so a cell's
     --- left edge is `margin + column * (frameWidth + spacing)`. Both default to
@@ -520,7 +604,7 @@ local record sheet
     ---     carrying an `id`.
     grid: function(options: GridOptions): Sheet
 
-    --- A sheet whose frames are listed one rect at a time.
+    --- Creates a sheet from explicitly listed frame rectangles.
     ---
     --- For an image no grid describes: frames of differing sizes, or an atlas
     --- whose cells a packing tool placed.
@@ -532,38 +616,38 @@ local record sheet
     ---     carrying an `id`.
     rects: function(options: RectsOptions): Sheet
 
-    --- A builder, for a sheet no constructor above describes.
+    --- Creates a builder for a sheet that the other constructors cannot
+    --- describe.
     ---
     --- The model is what the builder writes, so an atlas from any tool reaches
     --- the same sheet an Aseprite export does. Frames, tags and slices are
-    --- added in any order and the sheet is registered by `build`.
+    --- added in any order. `build` registers the finished sheet.
     --- @param name Name to register the finished sheet under.
     --- @param imageWidth Size of the image the frames are cut from, in pixels.
     --- @param imageHeight
     --- @return A builder whose methods chain.
     build: function(name: string, imageWidth: number, imageHeight: number): Builder
 
-    --- A sheet read from an Aseprite JSON export.
+    --- Creates a sheet from an Aseprite JSON export.
     ---
     --- One reader in front of the model rather than a second model: frames,
     --- their durations, frame tags with their directions, and slices with their
     --- keys all land in the sheet the builder writes.
     ---
-    --- Both of Aseprite's frame layouts are read, the array and the object
-    --- keyed by frame name, the second in sorted name order. Trimmed exports
-    --- are not read: `spriteSourceSize` is ignored, so export with trimming
-    --- off or the frames land in the wrong place.
+    --- The reader accepts Aseprite's array layout and its object layout, sorting
+    --- the latter by frame name. It ignores `spriteSourceSize`, so export with
+    --- trimming off.
     --- @param options The export and the name to register it under.
     --- @return The finished sheet.
     fromAseprite: function(options: AsepriteOptions): Sheet
 
-    --- The sheet a registration index stands for, or nil.
-    --- @param id An `id` from a sheet this process built. Ids are handed out in
-    ---     construction order, so one is only meaningful within a run.
+    --- Returns the sheet represented by a registration index, or nil.
+    --- @param id An `id` from a sheet this process built. Construction assigns
+    ---     ids in order, so each id is meaningful only within one run.
     --- @return The sheet, or nil for an id nothing was built under.
     byId: function(id: integer): Sheet
 
-    --- The sheet registered under a name, or nil.
+    --- Returns the sheet registered under a name, or nil.
     ---
     --- Building a second sheet under a name already taken replaces what this
     --- returns, so a reload points new entities at the new sheet. Entities
@@ -581,30 +665,30 @@ local record sheet
     --- with the new sheet and leaves every entity already playing on the old
     --- one, which is right for two sheets that happen to share a name and wrong
     --- for one file that was re-exported. This overwrites in place instead, so
-    --- an `Animation` holding the id goes on playing and shows the new frames
-    --- on its next step, with nothing in the world touched.
+    --- an [`Animation`](tealdoc:tecs.gfx.animation.Animation) holding the id
+    --- continues and shows the new frames on its next step without changing the
+    --- world.
     ---
     --- The refusals are the same ones a shader reload makes, for the same
     --- reason: a component holds an index into this sheet, so anything that
-    --- renumbers one is refused rather than half applied. Tag ids follow the
+    --- this function refuses changes that renumber one. Tag ids follow the
     --- tag names in sorted order and slice ids follow the slices, so adding,
     --- removing or renaming either is a restart. Frames are free to change:
-    --- what an entity carries is a tag and a time, and the frame is resolved
-    --- from the cycle on every step.
+    --- an entity carries a tag and time, and each step resolves its frame from
+    --- the cycle.
     ---
-    --- The bind is carried over. A sheet re-exported over the same image is
-    --- already bound to the right layer, so its frames are rescaled against
-    --- the region the old sheet held rather than needing `bind` called again.
+    --- Replacement preserves the existing bind and rescales frames against the
+    --- old sheet's image region, so callers need not call `bind` again.
     ---
     --- The sheet handed in is spent. Its id resolves to the live sheet rather
     --- than to itself, because the two share their frame tables once the fold
     --- is done and only one of them may be bound.
     --- @param built A sheet from any constructor here, registered moments ago
     ---     under a name something else already holds.
-    --- @return The live sheet, and nil, or nil and the reason it was refused.
+    --- @return Returns the live sheet and nil, or nil and the refusal reason.
     replace: function(built: Sheet): Sheet, string
 
-    --- How many times any sheet's frames have changed.
+    --- Returns how many times any sheet's frames have changed.
     ---
     --- Bumped by registration and by `bind`, both of which move where a frame's
     --- region points. Anything holding a copy of those regions compares this

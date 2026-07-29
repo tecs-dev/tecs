@@ -231,9 +231,15 @@ that is.
 
 Two places, and they hold different things:
 
-- **`docs/`** is the reference. A module's page says what it is, what it takes and what it answers.
-  `cargo xtask docs-check` requires every page to carry a one-line `description:`, and `cargo xtask docs-dev`
-  serves the site with hot reload while you write.
+- **`docs/`** holds guides: cross-module workflows, architecture and comparisons. A module page normally
+  contains only frontmatter and its `# tecs.name` heading, so the generated reference starts at the top.
+  Do not add a handwritten module catalog, a `Modules` section or prose that belongs beside one declaration.
+  `cargo xtask docs-check` requires every page to carry a one-line `description:`, and
+  `cargo xtask docs-dev` serves the site with hot reload while you write.
+- **Teal docblocks** hold the API documentation. Each public module starts with a long `--[=[ ... ]=]`
+  doc comment containing its introduction, cross-symbol constraints and primary examples. Declaration
+  docblocks hold signatures, fields, defaults, units, ownership, nil behavior and errors. Tealdoc renders
+  both into the reference appended to the module page.
 - **`README.md`** is the design record. It holds why, not what: the decision, the alternative that
   lost, and the constraint that forced it. A change that only adds a function needs no entry; a
   change that settles a question does.
@@ -248,9 +254,9 @@ tests prose. The only defense is the person making the change, at the time they 
   confident wrong answer is not.
 
 Tealdoc renders the site from `tealdoc.site` in `tlconfig.lua`, which holds the settings, the
-navigation, the sidebar and one entry per page. A page's prose is everything above its
-`<!-- @generated` marker and its reference is rendered from the modules the page names, so nothing
-below that marker is written into the tree and a signature has no second copy to drift from.
+navigation, the sidebar and one entry per page. It reads module prose and declaration contracts
+from Teal, then renders generated summary tables under `Module contents` and the full type,
+function and value sections below them. A signature has no second copy to drift from.
 
 `cargo xtask docs-check` is the gate, and it holds three things: every page carries a one-line
 `description:`; the module list matches `src/tecs/init.tl` in three listings at once
@@ -261,13 +267,36 @@ through the site's `before_build` hook and tealdoc's own link validation.
 
 ### Docblocks
 
-Every public function, record and field carries a `---` docblock, and every public function
-carries `@param` for each parameter and `@return` for each return.
+Every public module starts with a long `--[=[ ... ]=]` doc comment. Every public function,
+record and field carries a `---` docblock, and every public function carries `@param` for
+each parameter and `@return` for each return.
+
+The record that represents the module itself is the exception: its leading long comment
+already documents it, so do not repeat that prose on the returned `local record`. Public
+records declared inside the module still carry their own docblocks.
+
+Write every summary and tag as a complete sentence with an actor and a verb. A function says what it does:
+`Returns the number of queued messages.` A field says who controls it and what it means:
+`Read-only. Reports the number of queued messages after the last send.` Begin every public field with
+`Caller-writable`, `Read-only` or `Engine-owned`. An engine-owned field also says why it is public and
+whether ordinary game code should ignore it.
+
+Use active voice. Never use an em dash. Name sections for their subject, not as generic questions such as
+`What this means`, `How it works` or `Why this exists`. Prefer one complete example to several paragraphs
+that narrate the same calls.
 
 A tag earns its place by saying what the signature cannot: units, the coordinate space, what nil
 means, what happens at a boundary, whether a returned table is the caller's to keep or a view
 onto something live, which errors are raised rather than returned. A tag that restates the
 parameter's own name is worse than no tag, because it costs a line and answers nothing.
+
+Link the first mention of a public type in each docblock. Use its Tealdoc
+declaration target when the site reads that source module:
+``[`World`](tealdoc:tecs.World)``. Use the rendered page and anchor for a type
+re-exported from a module the site does not read directly:
+``[`Transform`](/ecs/#tecs.ecs.Transform)``. Use backticks without a link for
+functions, fields, constants, enum values and literal strings. Do not link
+internal types.
 
 Documentation lives on the declaration, which is the record field, and the implementing function
 below does not repeat it. Two copies drift, and tealdoc reads the declaration.

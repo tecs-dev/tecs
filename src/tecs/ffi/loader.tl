@@ -1,44 +1,46 @@
---- Native library resolution, cdef installation, and FFI-boundary types.
----
---- Generated cdefs are produced by the build from the installed headers.
---- Loading them here, rather than hand-maintaining declarations, is what keeps
---- the bindings honest: a cdef that drifts from the real ABI corrupts memory
---- instead of failing to link.
----
---- A library is reached through the registry the host installed if there is
---- one, and through `ffi.load` otherwise. The registry is a table of function
---- pointers taken at build time, which is the only way to call C on a target
---- that links everything statically and forbids loading a library by name.
---- `ffi.load` remains for desktop development, where running under a plain
---- `luajit` means no host installed anything.
----
---- ## Two calls the JIT must not compile
----
---- Neither is this module's to enforce, because both are properties of a call
---- site rather than of a binding, and both are silent. They are written down
---- here because this is where a binding's conventions are read.
----
---- **A variadic C function.** A call can report success and deliver a
---- corrupted value once its loop is traced. `SDL_LogMessage` in `tecs.log`
---- survives the same stress, so the rule is based on the measured call rather
---- than a theory about which arguments make it through.
----
---- **A function that calls back into Lua.** LuaJIT cannot enter an FFI
---- callback from a compiled trace and does not raise an error anything could
---- catch: it panics with "bad callback" and the process is gone. So the
---- function making the call, not the callback, is the one that has to stay
---- interpreted.
----
---- Both appear only after the loop around them has gone round fifty-six times,
---- which is the trace threshold, so a spec that exercises a call once passes
---- and a game running it every frame fails a minute in. A spec that guards one
---- has to cross that threshold on purpose; `spec/http_spec.lua` sends a
---- hundred and twenty requests for exactly that reason.
----
---- The remedy for a variadic call is `jit.off(fn)` on the calling function,
---- which makes a trace abort where it would have recorded the call.
---- Keep every variadic call behind a named helper so there is a finite set of
---- functions to mark. Prefer a native queue over any callback on a hot path.
+--[=[
+Native library resolution, cdef installation, and FFI-boundary types.
+
+Generated cdefs are produced by the build from the installed headers.
+Loading them here, rather than hand-maintaining declarations, is what keeps
+the bindings honest: a cdef that drifts from the real ABI corrupts memory
+instead of failing to link.
+
+A library is reached through the registry the host installed if there is
+one, and through `ffi.load` otherwise. The registry is a table of function
+pointers taken at build time, which is the only way to call C on a target
+that links everything statically and forbids loading a library by name.
+`ffi.load` remains for desktop development, where running under a plain
+`luajit` means no host installed anything.
+
+## Two calls the JIT must not compile
+
+Neither is this module's to enforce, because both are properties of a call
+site rather than of a binding, and both are silent. They are written down
+here because this is where a binding's conventions are read.
+
+**A variadic C function.** A call can report success and deliver a
+corrupted value once its loop is traced. `SDL_LogMessage` in `tecs.log`
+survives the same stress, so the rule is based on the measured call rather
+than a theory about which arguments make it through.
+
+**A function that calls back into Lua.** LuaJIT cannot enter an FFI
+callback from a compiled trace and does not raise an error anything could
+catch: it panics with "bad callback" and the process is gone. So the
+function making the call, not the callback, is the one that has to stay
+interpreted.
+
+Both appear only after the loop around them has gone round fifty-six times,
+which is the trace threshold, so a spec that exercises a call once passes
+and a game running it every frame fails a minute in. A spec that guards one
+has to cross that threshold on purpose; `spec/http_spec.lua` sends a
+hundred and twenty requests for exactly that reason.
+
+The remedy for a variadic call is `jit.off(fn)` on the calling function,
+which makes a trace abort where it would have recorded the call.
+Keep every variadic call behind a named helper so there is a finite set of
+functions to mark. Prefer a native queue over any callback on a hot path.
+]=]
 
 local ffi <const> = require("ffi")
 

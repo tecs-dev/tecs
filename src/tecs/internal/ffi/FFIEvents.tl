@@ -1,6 +1,8 @@
---- Global FFI-backed event registry plus leased per-world arena slices.
---- Event schemas and stable type IDs are registered once; each world
---- acquires a slice ID and allocates FFI events from that slice.
+--[=[
+Global FFI-backed event registry plus leased per-world arena slices.
+Event schemas and stable type IDs are registered once; each world
+acquires a slice ID and allocates FFI events from that slice.
+]=]
 
 local C <const> = require("ffi")
 local type Arena = require("tecs.internal.ffi.EpochArena")

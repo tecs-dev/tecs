@@ -1,111 +1,100 @@
---- An OS window, and the displays it can sit on.
----
---- The handle is owned by the platform layer and released by `destroy`, not
---- by a finalizer. Tying GPU-adjacent lifetimes to Lua's collector makes
---- hot reload either leak or double-free, depending on collection order.
----
---- ```teal
---- local win <const> = tecs.window.newWindow({title = "Game", width = 1280, height = 720, hidden = true})
---- win:setMinimumSize(640, 360)
---- win:center()
---- win:show()
----
---- -- Screen coordinates, which a pointer arrives in, and pixels, which a render
---- -- target is sized to. They differ on a high-density display.
---- local width, height = win:getSize()
---- local pixelWidth, pixelHeight = win:getPixelSize()
---- tecs.log.get("game"):info("%dx%d screen, %dx%d pixels", width, height, pixelWidth, pixelHeight)
----
---- win:destroy()
---- ```
----
---- ## Two coordinate systems, and no converter between them
----
---- `getSize` is screen coordinates, which is what a mouse, a pen or a touch
---- position arrives in. `getPixelSize` is the drawable, which is what a render
---- target is sized to. On a high-density display they differ by
---- `pixelDensity`, and on every display the desktop's own scaling factor is
---- `displayScale`, which is a hint about how large text should be drawn rather
---- than a ratio between the two.
----
---- Those three answers are what the platform actually knows. There is no
---- `toPixels` or `fromPixels` here, because a converter would have to pick one
---- of the two systems as the real one and silently reinterpret the other; the
---- pair of getters says which is which at every call site instead.
----
---- ## Polled state beside events that report the same thing
----
---- `events` carries `windowMoved`, `windowResized`, `windowFocusGained`,
---- `windowFocusLost`, `windowMinimized`, `windowMaximized`, `windowRestored`,
---- `windowShown`, `windowHidden`, `windowOccluded`, `windowEnterFullscreen`,
---- `windowLeaveFullscreen`, `windowDisplayScaleChanged` and
---- `windowSafeAreaChanged`. Every one of those facts is also readable here,
---- which looks like a second way to learn the same thing and is not.
----
---- An event reports a *change*. Nothing reports the state a window started in:
---- a window created hidden fires no `windowHidden`, a window that has never
---- had focus fires no `windowFocusLost`, and a game that only listens has to
---- assume an initial value and hope the platform agrees. The getters here are
---- how the first frame learns where it stands, and how any later frame
---- resynchronizes without keeping a mirror of the event stream.
----
---- They agree with the events by construction: each one asks SDL rather than
---- caching, so the flags a getter reads are the flags the event was derived
---- from. `id` is the bridge between the two, since it is the value an event's
---- `which` field carries.
----
---- ## What is not here
----
---- Pointer behavior is `Input`'s: relative mouse mode, warping, capture and
---- cursor visibility all act through the window but are input modes, and
---- `Input` already holds the handle for them. What is here instead is
---- *confinement*, which is a property of the window's bargain with the window
---- manager rather than of the pointer: `setMouseGrab`, `setKeyboardGrab` and
---- `setMouseRect`.
----
---- Vsync is not here. SDL has `SDL_SetWindowSurfaceVSync`, and it paces the
---- window *surface*, which is the software-blit path and cannot coexist with a
---- window a GPU device has claimed. Presentation pacing for a claimed window is
---- `Device:setPresentMode`, and offering a second spelling of it on the window
---- would be a call that either does nothing or tears the swapchain down.
----
---- Nor is the surface family itself (`SDL_GetWindowSurface`,
---- `SDL_UpdateWindowSurface`, `SDL_SetWindowShape`), the graphics-API interop
---- (`SDL_GL_*`, `SDL_EGL_*`), the raw property bag
---- (`SDL_GetWindowProperties`, `SDL_GetWindowPixelFormat`,
---- `SDL_GetWindowICCProfile`), the multi-window relationships
---- (`SDL_CreatePopupWindow`, `SDL_SetWindowParent`, `SDL_SetWindowModal`), or
---- the entry points that hand back a raw `SDL_Window *` this module does not
---- own (`SDL_GetWindows`, `SDL_GetWindowFromID`, `SDL_GetGrabbedWindow`).
---- `SDL_SetWindowHitTest` is left out for the reason `clipboard` records for
---- the offer side of the clipboard: it retains a callback SDL enters from its
---- own event pump, and this engine keeps callbacks native.
----
---- ## Changing a window a device has claimed
----
---- Safe: size, position, minimum and maximum size, aspect ratio, fullscreen,
---- borders, opacity, visibility and minimization. The pass graph sizes its
---- targets from the swapchain texture it acquires each frame rather than from
---- anything asked of the window, so a size change is picked up on the next
---- frame with no reconfiguration; a hidden or minimized window acquires no
---- texture and the frame is skipped whole.
----
---- Asynchronous: on some window systems a size, position or fullscreen change
---- is a request the compositor answers later, so reading the value straight
---- back reports the old one. `sync` waits for the pending changes to land,
---- and is the only reason to call it.
----
---- ## With no video
----
---- The display and screen-saver functions belong to SDL's video subsystem and
---- fail with "Video subsystem has not been initialized" without it, so they
---- answer here without calling SDL at all: empty lists, zero sizes, "unknown"
---- orientations and themes. A destroyed window answers the same way, because
---- SDL leaves an out-parameter untouched on failure and a getter that returned
---- it would report the size the window had before it was destroyed.
----
---- `newWindow` is the exception and raises, since a window that could not be
---- created is not a question with a sensible answer.
+--[[
+# Windows
+
+`tecs.window` creates OS windows and reads the displays around them.
+[`Application`](tealdoc:tecs.Application) creates the usual game window as
+`app.window`. Tools and tests that call `newWindow` directly must call
+`destroy` when they finish.
+
+```teal
+local window <const> = tecs.window.newWindow({
+    title = "Starfarer",
+    width = 1600,
+    height = 900,
+    hidden = true,
+})
+
+window:center()
+window:show()
+```
+
+## Screen coordinates and pixels
+
+Window layout and pointer input use screen coordinates. Render targets use
+pixels. A high-density display may put several pixels behind one screen
+coordinate.
+
+```teal
+local width <const>, height <const> = window:getSize()
+local pixelWidth <const>, pixelHeight <const> = window:getPixelSize()
+local density <const> = window:pixelDensity()
+
+assert(pixelWidth == width * density)
+assert(pixelHeight == height * density)
+```
+
+`displayScale` reports the desktop's preferred scale for text and interface
+metrics. It does not convert between the two sizes.
+
+## Compositor changes
+
+Size, position and fullscreen setters may return before the compositor applies
+the request. Most games consume the corresponding event later. Call `sync`
+only before an immediate readback.
+
+```teal
+window:setSize(1280, 720)
+if window:sync() then
+    local width <const>, height <const> = window:getSize()
+end
+```
+
+## Fullscreen modes
+
+Fullscreen uses the desktop resolution when the caller selects no mode.
+Exclusive fullscreen accepts only a mode that `fullscreenModes` or
+`closestFullscreenMode` returns.
+
+```teal
+local mode <const> = tecs.window.Window.closestFullscreenMode(
+    savedWidth,
+    savedHeight,
+    savedRefreshRate,
+    true
+)
+
+if mode ~= nil then
+    window:setFullscreenMode(mode)
+    window:setFullscreen(true)
+end
+```
+
+## Display placement
+
+Desktop positions span every attached display and may contain negative
+coordinates. Use usable bounds to keep windows clear of a taskbar, dock or
+menu bar.
+
+```teal
+for _, displayId in ipairs(tecs.window.Window.displays()) do
+    local x <const>, y <const>, width <const>, height <const> =
+        tecs.window.Window.usableBounds(displayId)
+end
+```
+
+Display and window events report changes. Getters report current state,
+including state that existed before the first event. Use `Window:id` to match a
+window event's `which` field.
+
+## Pointer ownership
+
+The window API owns mouse and keyboard confinement. `tecs.input` owns relative
+mouse mode, warping, capture and cursor visibility. The GPU device owns
+presentation pacing after it claims a window.
+]]
+
+-- Implementation details: the desktop window manager implements confinement,
+-- while SDL carries the commands across the platform boundary.
 
 local ffi <const> = require("ffi")
 local bit <const> = require("bit")
@@ -116,151 +105,721 @@ local C <const> = sdl.C
 local K <const> = sdl.K
 local VIDEO <const> = K.SDL_INIT_VIDEO
 
---- The window, its size, its display and its mode.
 local record window
-    --- One open window, and the displays around it. Every reader asks SDL
-    --- rather than caching, so what a getter answers is what the events were
-    --- derived from.
+    --- A `Window` owns one open OS window and reads the displays around it.
+    ---
+    --- Game code changes state through methods. Public fields expose framework
+    --- state and remain read-only to callers.
     record Window
-        --- The `SDL_Window`. Nil once `destroy` has run, and what a device claims
-        --- for presentation.
+        --- Engine-owned. The framework stores the native window handle here for
+        --- the GPU device to claim for presentation and sets it to nil when
+        --- `destroy` runs. Ordinary game code ignores this field.
         handle: loader.CPtr
-        --- The title last set, kept so reading it back does not cross the FFI.
+        --- Read-only. The framework stores the last title here when it creates
+        --- the window or `setTitle` succeeds. Game code changes it through
+        --- `setTitle`.
         title: string
         _destroyed: boolean
 
-        --- How a display is rotated relative to its natural orientation.
+        --- `Orientation` describes a display's current or natural rotation.
         enum Orientation
+            --- `"unknown"` reports that the platform cannot name the rotation.
             "unknown"
+            --- `"landscape"` reports the natural landscape direction.
             "landscape"
+            --- `"landscapeFlipped"` reports landscape rotated by half a turn.
             "landscapeFlipped"
+            --- `"portrait"` reports the natural portrait direction.
             "portrait"
+            --- `"portraitFlipped"` reports portrait rotated by half a turn.
             "portraitFlipped"
         end
 
-        --- What the desktop asks applications to look like.
+        --- `Theme` describes the desktop's requested appearance.
         enum Theme
+            --- `"unknown"` reports that the desktop has no theme preference.
             "unknown"
+            --- `"light"` asks applications to use a light appearance.
             "light"
+            --- `"dark"` asks applications to use a dark appearance.
             "dark"
         end
 
-        --- How hard to ask for attention.
+        --- `Flash` selects how long the desktop asks for attention.
         enum Flash
-            --- Stops a flash already running.
+            --- `"cancel"` stops a flash already running.
             "cancel"
-            --- One flash, whether or not anybody was looking.
+            --- `"brief"` asks once, whether or not anybody was looking.
             "brief"
-            --- Keeps flashing until the window is focused.
+            --- `"untilFocused"` keeps asking until the window gains focus.
             "untilFocused"
         end
 
-        --- What the taskbar or dock shows over this application's icon.
+        --- `Progress` selects what the taskbar or dock shows over the icon.
         enum Progress
-            --- Nothing shown, which is where a window starts.
+            --- `"none"` hides progress and is the initial state.
             "none"
-            --- Work is happening and its extent is not known.
+            --- `"indeterminate"` reports work whose extent is unknown.
             "indeterminate"
+            --- `"normal"` reports work that is progressing normally.
             "normal"
+            --- `"paused"` reports work that may resume.
             "paused"
-            --- Work stopped because it failed.
+            --- `"error"` reports work that stopped because it failed.
             "error"
         end
 
-        --- One video mode a display can be put into.
+        --- `DisplayMode` describes one video mode returned by the platform.
+        ---
+        --- Callers treat every field as read-only and pass the record back to
+        --- `setFullscreenMode`.
         record DisplayMode
-            --- Display this mode belongs to.
+            --- Read-only. The platform sets `display` when it builds the mode.
             display: integer
-            --- Size in screen coordinates. Multiply by `pixelDensity` for pixels.
+            --- Read-only. The platform sets `width` in screen coordinates when
+            --- it builds the mode. Callers multiply it by `pixelDensity` to
+            --- obtain pixels.
             width: integer
+            --- Read-only. The platform sets `height` in screen coordinates
+            --- when it builds the mode. Callers multiply it by `pixelDensity`
+            --- to obtain pixels.
             height: integer
-            --- Screen coordinates to pixels, so a 1920 by 1080 mode at 2.0 draws
-            --- 3840 by 2160.
+            --- Read-only. The platform sets `pixelDensity` when it builds the
+            --- mode. A 1920 by 1080 mode at 2.0 draws 3840 by 2160 pixels.
             pixelDensity: number
-            --- Refreshes per second, or 0 where the platform will not say.
+            --- Read-only. The platform sets `refreshRate` in hertz when it
+            --- builds the mode, or to zero when it cannot report a rate.
             refreshRate: number
-            --- SDL's own mode, which `setFullscreenMode` passes back to it. A mode
-            --- assembled by hand rather than taken from `fullscreenModes` or
-            --- `closestFullscreenMode` does not carry one and is rejected.
+            -- Implementation details: this native mode handle lets
+            -- `setFullscreenMode` return a selected mode to the platform.
             _mode: loader.CPtr
         end
 
-        --- What `newWindow` takes. Every field is optional.
+        --- Callers may set any
+        --- [`Options`](tealdoc:tecs.window.Window.Options) field before passing
+        --- the record to `newWindow`. The function reads the values and does
+        --- not retain the record.
         record Options
-            --- Defaults to "tecs".
+            --- Caller-writable. The caller sets `title` to the desktop title
+            --- before `newWindow` reads it. It defaults to `"tecs"`.
             title: string
-            --- Size in screen coordinates, not pixels: on a high-density display
-            --- the drawable is larger. Defaults to 1280 by 720.
+            --- Caller-writable. The caller sets `width` in screen coordinates
+            --- before `newWindow` reads it. It defaults to 1280.
             width: integer
+            --- Caller-writable. The caller sets `height` in screen coordinates
+            --- before `newWindow` reads it. It defaults to 720.
             height: integer
-            --- Defaults to true, so omitting it gives a resizable window. Only an
-            --- explicit false turns it off.
+            --- Caller-writable. The caller sets `resizable` before `newWindow`
+            --- reads it. It defaults to true, and only false disables edge
+            --- resizing.
             resizable: boolean
-            --- Whether the drawable follows the display's density instead of being
-            --- stretched to it. Defaults to true, on the same terms, which is what
-            --- makes `getPixelSize` differ from `getSize`.
+            --- Caller-writable. The caller sets `highPixelDensity` before
+            --- `newWindow` reads it. It defaults to true and lets the drawable
+            --- follow the display density instead of stretching.
             highPixelDensity: boolean
-            --- Starts fullscreen on whichever display the window manager picks.
-            --- Defaults to false.
+            --- Caller-writable. The caller sets `fullscreen` before
+            --- `newWindow` reads it to start on the display selected by the
+            --- window manager. It defaults to false.
             fullscreen: boolean
-            --- Drops the title bar and the frame. Defaults to false.
+            --- Caller-writable. The caller sets `borderless` before
+            --- `newWindow` reads it to remove the title bar and frame. It
+            --- defaults to false.
             borderless: boolean
-            --- Creates the window without mapping it, so nothing is shown until
-            --- `show` is called. Defaults to false, and is what a game that wants
-            --- to place and size the window before it is first seen sets.
+            --- Caller-writable. The caller sets `hidden` before `newWindow`
+            --- reads it to defer mapping until `show`. It defaults to false.
             hidden: boolean
-            --- Keeps the window above others. Defaults to false.
+            --- Caller-writable. The caller sets `alwaysOnTop` before
+            --- `newWindow` reads it to keep the window above others. It
+            --- defaults to false.
             alwaysOnTop: boolean
-            --- Asks for a window whose buffer has an alpha channel the desktop
-            --- composites against. Defaults to false, and is refused outright on a
-            --- platform that cannot do it.
+            --- Caller-writable. The caller sets `transparent` before
+            --- `newWindow` reads it to request desktop alpha compositing. It
+            --- defaults to false.
             transparent: boolean
-            --- Position in screen coordinates. Both are needed for either to
-            --- apply; left unset, the window manager places the window.
+            --- Caller-writable. The caller sets `x` with `y` before
+            --- `newWindow` reads them. Without both fields, the window manager
+            --- chooses the position.
             x: integer
+            --- Caller-writable. The caller sets `y` with `x` before
+            --- `newWindow` reads them.
             y: integer
-            --- Size limits, applied after creation. Each pair is needed together.
+            --- Caller-writable. The caller sets `minWidth` with `minHeight`
+            --- before `newWindow` reads them.
             minWidth: integer
+            --- Caller-writable. The caller sets `minHeight` with `minWidth`
+            --- before `newWindow` reads them.
             minHeight: integer
+            --- Caller-writable. The caller sets `maxWidth` with `maxHeight`
+            --- before `newWindow` reads them.
             maxWidth: integer
+            --- Caller-writable. The caller sets `maxHeight` with `maxWidth`
+            --- before `newWindow` reads them.
             maxHeight: integer
-            --- Image file the window is shown as. Decoded once, here, rather than
-            --- going through the asset system, which decodes on a worker and
-            --- answers with a GPU texture.
+            --- Caller-writable. The caller sets `icon` to an image path before
+            --- `newWindow` reads it. `newWindow` decodes it synchronously.
             icon: string
         end
+
+        --- Returns whether the platform can create and inspect windows.
+        ---
+        --- False in a headless process. Display and screen-saver functions
+        --- answer harmless defaults there, while `newWindow` raises.
+        ---
+        --- @return Returns true when this process can create and inspect windows.
+        available: function(): boolean
+
+        --- Releases the window. Safe to call more than once.
+        ---
+        --- Every getter answers zero, false or nil after this call.
+        destroy: function(self: Window)
+
+        --- Returns the id carried in a window event's `which` field.
+        ---
+        --- @return Returns the platform window id, or zero after `destroy`.
+        id: function(self: Window): integer
+
+        --- Waits for the compositor to apply pending window changes.
+        ---
+        --- Size, position and fullscreen changes may land after their setters
+        --- return. Call this only when code must read a changed value back
+        --- immediately.
+        ---
+        --- @return Returns false when the platform times out or after `destroy`.
+        sync: function(self: Window): boolean
+
+        --- Reads the window size in screen coordinates.
+        ---
+        --- Pointer positions use these units. Render targets use
+        --- `getPixelSize`.
+        ---
+        --- @return Returns the width, or zero after `destroy`.
+        --- @return Returns the height, or zero after `destroy`.
+        getSize: function(self: Window): integer, integer
+
+        --- Reads the drawable size in pixels.
+        ---
+        --- @return Returns the pixel width, or zero after `destroy`.
+        --- @return Returns the pixel height, or zero after `destroy`.
+        getPixelSize: function(self: Window): integer, integer
+
+        --- Resizes the window in screen coordinates.
+        ---
+        --- A fullscreen window ignores the request. A compositor may apply it
+        --- after this returns; use `sync` before an immediate readback.
+        ---
+        --- @param width The caller supplies the new width in screen coordinates.
+        --- @param height The caller supplies the new height in screen coordinates.
+        --- @return Returns whether the platform accepted the request.
+        setSize: function(self: Window, width: integer, height: integer): boolean
+
+        --- Returns the ratio of drawable pixels to screen coordinates.
+        ---
+        --- @return Returns the ratio, 1 without high-density drawing, or zero after
+        ---     `destroy`.
+        pixelDensity: function(self: Window): number
+
+        --- Returns the desktop's preferred scale for content.
+        ---
+        --- This is not the ratio between `getSize` and `getPixelSize`; use
+        --- `pixelDensity` for that. A theme or UI can multiply its natural
+        --- metrics by this value.
+        ---
+        --- @return Returns the scale, or zero after `destroy`.
+        displayScale: function(self: Window): number
+
+        --- Reads the top-left corner in desktop screen coordinates.
+        ---
+        --- @return Returns the horizontal position, or zero after `destroy`.
+        --- @return Returns the vertical position, or zero after `destroy`.
+        position: function(self: Window): integer, integer
+
+        --- Moves the window in desktop screen coordinates.
+        ---
+        --- The coordinate space spans all displays and may contain negative
+        --- positions.
+        ---
+        --- @param x The caller supplies the horizontal position.
+        --- @param y The caller supplies the vertical position.
+        --- @return Returns whether the platform accepted the request.
+        setPosition: function(self: Window, x: integer, y: integer): boolean
+
+        --- Centers the window on a display.
+        ---
+        --- @param displayId The caller omits this value to use the display the
+        ---     window occupies.
+        --- @return Returns whether the platform accepted the request.
+        center: function(self: Window, displayId?: integer): boolean
+
+        --- Reads the window decoration thickness in screen coordinates.
+        ---
+        --- @return Returns the top thickness, or zero without decoration.
+        --- @return Returns the left thickness, or zero without decoration.
+        --- @return Returns the bottom thickness, or zero without decoration.
+        --- @return Returns the right thickness, or zero without decoration.
+        borderSize: function(self: Window): integer, integer, integer, integer
+
+        --- Reads the unobstructed region inside the window.
+        ---
+        --- A desktop normally returns the whole window. Phones and handhelds
+        --- may exclude notches, rounded corners or gesture areas.
+        ---
+        --- @return Returns the horizontal offset in screen coordinates.
+        --- @return Returns the vertical offset in screen coordinates.
+        --- @return Returns the width in screen coordinates.
+        --- @return Returns the height in screen coordinates.
+        safeArea: function(self: Window): integer, integer, integer, integer
+
+        --- Reads the minimum resize limit.
+        ---
+        --- @return Returns the minimum width, or zero when unset.
+        --- @return Returns the minimum height, or zero when unset.
+        minimumSize: function(self: Window): integer, integer
+
+        --- Sets the minimum resize limit.
+        ---
+        --- @param width The caller supplies the minimum width, or zero to remove
+        ---     that limit.
+        --- @param height The caller supplies the minimum height, or zero to remove
+        ---     that limit.
+        --- @return Returns whether the platform accepted the limits.
+        setMinimumSize: function(self: Window, width: integer, height: integer): boolean
+
+        --- Reads the maximum resize limit.
+        ---
+        --- @return Returns the maximum width, or zero when unset.
+        --- @return Returns the maximum height, or zero when unset.
+        maximumSize: function(self: Window): integer, integer
+
+        --- Sets the maximum resize limit.
+        ---
+        --- @param width The caller supplies the maximum width, or zero to remove
+        ---     that limit.
+        --- @param height The caller supplies the maximum height, or zero to remove
+        ---     that limit.
+        --- @return Returns whether the platform accepted the limits.
+        setMaximumSize: function(self: Window, width: integer, height: integer): boolean
+
+        --- Reads the allowed width-over-height range.
+        ---
+        --- @return Returns the minimum ratio, or zero when unset.
+        --- @return Returns the maximum ratio, or zero when unset.
+        aspectRatio: function(self: Window): number, number
+
+        --- Constrains the width-over-height ratio.
+        ---
+        --- Equal values pin the window to one shape.
+        ---
+        --- @param minimum The caller supplies the minimum ratio, or zero to
+        ---     remove that bound.
+        --- @param maximum The caller supplies the maximum ratio, or zero to
+        ---     remove that bound.
+        --- @return Returns whether the platform accepted the bounds.
+        setAspectRatio: function(self: Window, minimum: number, maximum: number): boolean
+
+        --- Maps a hidden window onto the desktop.
+        ---
+        --- @return Returns whether the platform showed the window.
+        show: function(self: Window): boolean
+
+        --- Unmaps the window without destroying it.
+        ---
+        --- A claimed swapchain yields no texture while the desktop hides the
+        --- window.
+        ---
+        --- @return Returns whether the platform hid the window.
+        hide: function(self: Window): boolean
+
+        --- Returns whether the desktop shows the window.
+        ---
+        --- Minimizing the window does not hide it.
+        ---
+        --- @return Returns false for a hidden or destroyed window.
+        isVisible: function(self: Window): boolean
+
+        --- Brings the window forward and requests input focus.
+        ---
+        --- Prefer `flash` when the user did not request a focus change.
+        ---
+        --- @return Returns whether the platform accepted the request.
+        raise: function(self: Window): boolean
+
+        --- Minimizes the window to the taskbar or dock.
+        ---
+        --- @return Returns whether the platform accepted the request.
+        minimize: function(self: Window): boolean
+
+        --- Returns whether the window occupies its minimized state.
+        ---
+        --- @return Returns false after `destroy`.
+        isMinimized: function(self: Window): boolean
+
+        --- Maximizes the window to the display's usable bounds.
+        ---
+        --- @return Returns whether the platform accepted the request.
+        maximize: function(self: Window): boolean
+
+        --- Returns whether the window fills the display's usable bounds.
+        ---
+        --- @return Returns false after `destroy`.
+        isMaximized: function(self: Window): boolean
+
+        --- Restores a minimized or maximized window.
+        ---
+        --- @return Returns whether the platform accepted the request.
+        restore: function(self: Window): boolean
+
+        --- Returns whether other windows cover this window completely.
+        ---
+        --- @return Returns false after `destroy`.
+        isOccluded: function(self: Window): boolean
+
+        --- Returns whether keyboard events currently target this window.
+        ---
+        --- @return Returns false after `destroy`.
+        hasFocus: function(self: Window): boolean
+
+        --- Returns whether the pointer is over the window.
+        ---
+        --- Relative mouse mode has no pointer position and reports false.
+        ---
+        --- @return Returns false after `destroy`.
+        hasMouseFocus: function(self: Window): boolean
+
+        --- Enters or leaves fullscreen.
+        ---
+        --- With no selected mode, fullscreen uses the desktop resolution.
+        --- With a mode from `setFullscreenMode`, it changes the display mode.
+        --- The swapchain follows the new size on the next acquired frame.
+        ---
+        --- @param fullscreen The caller passes true to enter fullscreen or false
+        ---     to leave it.
+        --- @return Returns whether the platform accepted the request.
+        setFullscreen: function(self: Window, fullscreen: boolean): boolean
+
+        --- Returns whether the window occupies a fullscreen display.
+        ---
+        --- @return Returns false after `destroy`.
+        isFullscreen: function(self: Window): boolean
+
+        --- Reads the selected exclusive fullscreen mode.
+        ---
+        --- @return Returns the mode, or nil for borderless fullscreen and after
+        ---     `destroy`.
+        fullscreenMode: function(self: Window): Window.DisplayMode
+
+        --- Selects the video mode used by fullscreen.
+        ---
+        --- The mode must come from `fullscreenModes` or
+        --- `closestFullscreenMode`; a hand-built record raises. Nil selects
+        --- borderless fullscreen at the desktop resolution.
+        ---
+        --- @param mode The caller supplies a platform mode, or nil for
+        ---     borderless fullscreen.
+        --- @return Returns whether the platform accepted the mode.
+        setFullscreenMode: function(self: Window, mode: Window.DisplayMode): boolean
+
+        --- Sets the title and updates the public `title` field.
+        ---
+        --- @param title The caller supplies the new title. Nil raises.
+        --- @return Returns whether the platform changed the title.
+        setTitle: function(self: Window, title: string): boolean
+
+        --- Sets the image the desktop shows for the window.
+        ---
+        --- The call decodes the file synchronously.
+        ---
+        --- @param path The caller supplies the image path. Nil raises.
+        --- @return Returns false when the decoder cannot read the file or after
+        ---     `destroy`.
+        setIcon: function(self: Window, path: string): boolean
+
+        --- Returns whether the user can resize the window by dragging an edge.
+        ---
+        --- @return Returns false after `destroy`.
+        isResizable: function(self: Window): boolean
+
+        --- Allows or forbids user resizing.
+        ---
+        --- @param resizable The caller chooses whether the user may resize the
+        ---     window.
+        --- @return Returns whether the platform accepted the change.
+        setResizable: function(self: Window, resizable: boolean): boolean
+
+        --- Returns whether the window has a title bar and frame.
+        ---
+        --- @return Returns false after `destroy`.
+        isBordered: function(self: Window): boolean
+
+        --- Adds or removes the title bar and frame.
+        ---
+        --- The client area keeps its size.
+        ---
+        --- @param bordered The caller chooses whether to show desktop decoration.
+        --- @return Returns whether the platform accepted the change.
+        setBordered: function(self: Window, bordered: boolean): boolean
+
+        --- Returns whether the desktop keeps the window above others.
+        ---
+        --- @return Returns false after `destroy`.
+        isAlwaysOnTop: function(self: Window): boolean
+
+        --- Enables or disables always-on-top behavior.
+        ---
+        --- @param onTop The caller chooses whether to keep the window above
+        ---     others.
+        --- @return Returns whether the platform accepted the change.
+        setAlwaysOnTop: function(self: Window, onTop: boolean): boolean
+
+        --- Returns whether the window may take keyboard focus.
+        ---
+        --- @return Returns false after `destroy`.
+        isFocusable: function(self: Window): boolean
+
+        --- Allows or forbids keyboard focus.
+        ---
+        --- A non-focusable window suits an overlay.
+        ---
+        --- @param focusable The caller chooses whether the window may take focus.
+        --- @return Returns whether the platform accepted the change.
+        setFocusable: function(self: Window, focusable: boolean): boolean
+
+        --- Reads the window opacity.
+        ---
+        --- @return Returns a value from 0 for invisible to 1 for solid, zero after
+        ---     `destroy`, or 1 on a platform without compositing.
+        opacity: function(self: Window): number
+
+        --- Sets the window opacity.
+        ---
+        --- @param opacity The caller supplies a value from 0 for invisible to 1
+        ---     for solid.
+        --- @return Returns whether the desktop accepted the change.
+        setOpacity: function(self: Window, opacity: number): boolean
+
+        --- Asks for attention without taking focus.
+        ---
+        --- `"untilFocused"` keeps asking and `"cancel"` stops a request. An
+        --- unknown operation raises.
+        ---
+        --- @param operation The caller chooses how long to ask for attention.
+        --- @return Returns whether the desktop accepted the request.
+        flash: function(self: Window, operation: Window.Flash): boolean
+
+        --- Reads taskbar or dock progress.
+        ---
+        --- @return Returns the current state, or `"none"` after `destroy`.
+        --- @return Returns progress from 0 to 1, or zero after `destroy`.
+        progress: function(self: Window): Window.Progress, number
+
+        --- Shows progress on the taskbar or dock.
+        ---
+        --- @param state The caller supplies `"none"`, `"indeterminate"`,
+        ---     `"normal"`, `"paused"` or `"error"`. An unknown value raises.
+        --- @param value The caller supplies progress from 0 to 1. The desktop
+        ---     reads it for `"normal"`, `"paused"` and `"error"`; omit it to
+        ---     keep the current value.
+        --- @return Returns whether the desktop accepted the state and value.
+        setProgress: function(self: Window, state: Window.Progress, value?: number): boolean
+
+        --- Returns whether pointer confinement applies to the focused window.
+        ---
+        --- @return Returns false when the window lacks focus or after `destroy`.
+        mouseGrab: function(self: Window): boolean
+
+        --- Confines the pointer to the window or releases it.
+        ---
+        --- Unlike relative mouse mode, this leaves the pointer visible. An
+        --- unfocused window records the request and resumes it on focus.
+        ---
+        --- @param grabbed The caller chooses whether to confine the pointer.
+        --- @return Returns whether the platform accepted the request.
+        setMouseGrab: function(self: Window, grabbed: boolean): boolean
+
+        --- Returns whether the window intercepts desktop keyboard shortcuts.
+        ---
+        --- @return Returns false after `destroy`.
+        keyboardGrab: function(self: Window): boolean
+
+        --- Enables or disables interception of desktop keyboard shortcuts.
+        ---
+        --- Some desktops refuse this or require user permission.
+        ---
+        --- @param grabbed The caller chooses whether to intercept shortcuts
+        ---     while focused.
+        --- @return Returns whether the platform accepted the request.
+        setKeyboardGrab: function(self: Window, grabbed: boolean): boolean
+
+        --- Reads the pointer confinement region.
+        ---
+        --- @return Returns the horizontal offset in screen coordinates.
+        --- @return Returns the vertical offset in screen coordinates.
+        --- @return Returns the width in screen coordinates.
+        --- @return Returns the height in screen coordinates. All four values
+        ---     contain zero when unset.
+        mouseRect: function(self: Window): integer, integer, integer, integer
+
+        --- Confines the pointer to part of the window.
+        ---
+        --- This is independent of `setMouseGrab`. Call with no arguments to
+        --- remove the region.
+        ---
+        --- @param x The caller supplies the horizontal offset, or nil to remove
+        ---     the region.
+        --- @param y The caller supplies the vertical offset with `x`.
+        --- @param width The caller supplies the region width with `x`.
+        --- @param height The caller supplies the region height with `x`.
+        --- @return Returns whether the platform accepted the request.
+        setMouseRect: function(self: Window, x?: integer, y?: integer, width?: integer, height?: integer): boolean
+
+        --- Reads the display this window mostly occupies.
+        ---
+        --- @return Returns the display id, or zero after `destroy`.
+        display: function(self: Window): integer
+
+        --- Lists attached displays in platform order.
+        ---
+        --- @return Returns display ids, or an empty list without video.
+        displays: function(): {integer}
+
+        --- Reads the desktop's primary display.
+        ---
+        --- @return Returns the display id, or zero without video.
+        primaryDisplay: function(): integer
+
+        --- Reads the desktop name for a display.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the name, or an empty string without video.
+        displayName: function(displayId?: integer): string
+
+        --- Reads a display's desktop rectangle.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the horizontal position in desktop screen coordinates.
+        --- @return Returns the vertical position in desktop screen coordinates.
+        --- @return Returns the width in screen coordinates.
+        --- @return Returns the height in screen coordinates.
+        displayBounds: function(displayId?: integer): integer, integer, integer, integer
+
+        --- Reads the display area not occupied by desktop chrome.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the horizontal position in desktop screen coordinates.
+        --- @return Returns the vertical position in desktop screen coordinates.
+        --- @return Returns the width in screen coordinates.
+        --- @return Returns the height in screen coordinates.
+        usableBounds: function(displayId?: integer): integer, integer, integer, integer
+
+        --- Reads a display's preferred content scale.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the scale, or zero without video.
+        contentScale: function(displayId?: integer): number
+
+        --- Reads a display's current rotation.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the orientation, or `"unknown"` without video.
+        orientation: function(displayId?: integer): Window.Orientation
+
+        --- Reads the orientation a display was built for.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the natural orientation, or `"unknown"` without
+        ---     video.
+        naturalOrientation: function(displayId?: integer): Window.Orientation
+
+        --- Reads the display mode the desktop started in.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the mode, or nil without video.
+        desktopMode: function(displayId?: integer): Window.DisplayMode
+
+        --- Reads the display mode in use now.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the mode, or nil without video.
+        currentMode: function(displayId?: integer): Window.DisplayMode
+
+        --- Lists the display's exclusive fullscreen modes, largest first.
+        ---
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns modes accepted by `setFullscreenMode`, or an empty list
+        ---     without video.
+        fullscreenModes: function(displayId?: integer): {Window.DisplayMode}
+
+        --- Finds the nearest fullscreen mode to a requested size.
+        ---
+        --- Use this when restoring a saved mode that the display may no longer
+        --- offer exactly.
+        ---
+        --- @param width The caller supplies the requested width in screen
+        ---     coordinates.
+        --- @param height The caller supplies the requested height in screen
+        ---     coordinates.
+        --- @param refreshRate The caller supplies hertz, or zero or nil for the
+        ---     highest available rate.
+        --- @param highDensity The caller chooses whether the function may select
+        ---     modes above density 1. It defaults to false.
+        --- @param displayId The caller omits this value to use the primary
+        ---     display.
+        --- @return Returns the nearest platform mode, or nil when none fits.
+        closestFullscreenMode: function(
+            width: integer, height: integer, refreshRate?: number, highDensity?: boolean, displayId?: integer
+        ): Window.DisplayMode
+
+        --- Reads the desktop's light or dark preference.
+        ---
+        --- @return Returns `"light"`, `"dark"` or `"unknown"`.
+        theme: function(): Window.Theme
+
+        --- Returns whether the desktop may blank the display.
+        ---
+        --- Video startup disables the screen saver. Enable it for an unattended
+        --- menu or cutscene.
+        ---
+        --- @return Returns false without video.
+        screenSaverEnabled: function(): boolean
+
+        --- Allows or forbids the desktop blanking the display.
+        ---
+        --- @param enabled The caller chooses whether the screen saver may run.
+        --- @return Returns whether the platform accepted the change, or false without
+        ---     video.
+        setScreenSaverEnabled: function(enabled: boolean): boolean
     end
 
-    --- What `newWindow` takes.
+    --- Describes the caller-writable configuration that `newWindow` reads.
     type Options = Window.Options
-    --- One fullscreen mode a display offers.
+    --- Describes one fullscreen mode a display offers.
     type DisplayMode = Window.DisplayMode
-    --- Which way up a display is.
+    --- Describes which way up a display is.
     type Orientation = Window.Orientation
-    --- Light or dark, as the desktop has it.
+    --- Describes the desktop's light or dark preference.
     type Theme = Window.Theme
-    --- How hard a window asks for attention.
+    --- Selects how a window asks for attention.
     type Flash = Window.Flash
-    --- What a taskbar progress indicator shows.
+    --- Selects what a taskbar progress indicator shows.
     type Progress = Window.Progress
 
-    --- Opens a window, and raises rather than answering nil.
+    --- Opens a window and raises when it cannot create a usable one.
     ---
-    --- The one place in this module that raises: every reader here answers a
-    --- harmless default when the platform cannot say, but a window that could
-    --- not be created is not a question with a sensible answer.
+    --- It validates sizes and the icon before returning. Omitted fields take
+    --- the defaults that
+    --- [`Options`](tealdoc:tecs.window.Window.Options) documents.
     ---
-    --- Requires SDL's video subsystem. Flags SDL only accepts at creation are
-    --- taken from `options` and set there; everything else in `options` is
-    --- applied straight afterwards and has a setter of its own, so nothing is
-    --- reachable at creation that is not reachable later.
-    ---
-    --- @param options Validated here, so a bad size or an unreadable icon
-    ---     fails now rather than on the first frame. Omitted fields take the
-    ---     defaults `Options` documents.
-    --- @return The window, whose closing is the caller's through `destroy`. An
-    ---     application creates its own from `Config.window` and hands it to
-    ---     the entry plugin, so a game rarely calls this.
+    --- @param options The caller supplies the initial window configuration.
+    --- @return Returns the caller-owned window. The caller releases it through
+    ---     `destroy`.
     newWindow: function(options: Window.Options): Window
 end
 
@@ -268,7 +827,7 @@ local type Window = window.Window
 
 local WindowMT <const>: metatable<Window> = {__index = Window}
 
--- Reused out-parameters. Nothing here is asked per frame, but there is no
+-- Reuse out-parameters. Nothing here runs per frame, but there is no
 -- reason to allocate for it either.
 local widthOut <const> = loader.newArray("int[1]")
 local heightOut <const> = loader.newArray("int[1]")
@@ -313,12 +872,6 @@ for name, value in pairs(PROGRESS_STATES) do
     PROGRESS_NAMES[value] = name
 end
 
---- Whether there is a video subsystem to ask at all.
----
---- False in a process that never brought it up, where every display and
---- screen-saver function here answers empty rather than failing. `newWindow`
---- raises there instead, so this is what a caller checks before deciding
---- whether to open a window.
 function Window.available(): boolean
     return tonumber(C.SDL_WasInit(VIDEO)) ~= 0
 end
@@ -376,7 +929,7 @@ end
 ---
 --- Shared by `newWindow` and `setIcon` rather than one calling the other, because
 --- an option applied at construction and a setter called later are the same
---- work and only one of them can be written first.
+--- work and the function can write only one of them first.
 local function applyIcon(handle: loader.CPtr, path: string): boolean
     -- Required here rather than at the top of the file so a process which only
     -- asks a window about itself does not load an image decoder.
@@ -459,10 +1012,6 @@ function window.newWindow(options: Window.Options): Window
     return self
 end
 
---- Releases the window. Safe to call more than once.
----
---- Every getter answers zero, false or nil afterwards rather than reading
---- through a null handle.
 function Window:destroy()
     if self._destroyed then
         return
@@ -472,8 +1021,6 @@ function Window:destroy()
     self.handle = nil
 end
 
---- The id events name this window by, which is what an event's `which` field
---- carries. Zero once the window is gone.
 function Window:id(): integer
     if self.handle == nil then
         return 0
@@ -481,16 +1028,6 @@ function Window:id(): integer
     return tonumber(C.SDL_GetWindowID(self.handle)) as integer
 end
 
---- Waits for pending window changes to be applied.
----
---- Size, position and fullscreen are requests rather than commands on a
---- compositing window system, and SDL reports the old value until the
---- compositor answers. This blocks until it has, so a caller that must read
---- back what it just set has somewhere to wait. Everywhere else the change is
---- already applied and this returns immediately.
----
---- Returns false when the changes did not land in SDL's timeout, and false
---- with no window.
 function Window:sync(): boolean
     if self.handle == nil then
         return false
@@ -502,11 +1039,6 @@ end
 -- Size and position
 -------------------------------------------------------------------------------
 
---- Returns the window's size in screen coordinates.
----
---- The units mouse, touch and pen positions arrive in, so this is what a
---- layout positioned against the pointer uses. `getPixelSize` is what a render
---- target is sized to.
 function Window:getSize(): integer, integer
     if self.handle == nil then
         return 0, 0
@@ -514,8 +1046,6 @@ function Window:getSize(): integer, integer
     return pair(C.SDL_GetWindowSize(self.handle, widthOut, heightOut) as boolean)
 end
 
---- Returns the drawable size in pixels, which differs from `getSize` on
---- high-density displays.
 function Window:getPixelSize(): integer, integer
     if self.handle == nil then
         return 0, 0
@@ -523,12 +1053,6 @@ function Window:getPixelSize(): integer, integer
     return pair(C.SDL_GetWindowSizeInPixels(self.handle, widthOut, heightOut) as boolean)
 end
 
---- Resizes the window, in screen coordinates.
----
---- Safe while a device holds the window: the swapchain is recreated by SDL and
---- the renderer sizes its targets to the texture it acquires next frame. A
---- fullscreen window ignores this, and a window whose size the compositor has
---- to agree to reports the old size until `sync` returns.
 function Window:setSize(width: integer, height: integer): boolean
     if self.handle == nil then
         return false
@@ -536,8 +1060,6 @@ function Window:setSize(width: integer, height: integer): boolean
     return C.SDL_SetWindowSize(self.handle, width, height) as boolean
 end
 
---- Ratio of pixels to screen coordinates: 2.0 on a display where the drawable
---- is twice the window. 1.0 without `highPixelDensity`, and 0 with no window.
 function Window:pixelDensity(): number
     if self.handle == nil then
         return 0
@@ -545,12 +1067,6 @@ function Window:pixelDensity(): number
     return tonumber(C.SDL_GetWindowPixelDensity(self.handle)) as number
 end
 
---- How much larger than its natural size the desktop asks content to be drawn.
----
---- Not a ratio between `getSize` and `getPixelSize`, which is `pixelDensity`.
---- This is the user's scaling preference, so it is what a font size or a UI
---- metric is multiplied by, and it changes without the window resizing.
---- `events.windowDisplayScaleChanged` reports that it has.
 function Window:displayScale(): number
     if self.handle == nil then
         return 0
@@ -558,7 +1074,6 @@ function Window:displayScale(): number
     return tonumber(C.SDL_GetWindowDisplayScale(self.handle)) as number
 end
 
---- Position of the window's top-left corner in screen coordinates.
 function Window:position(): integer, integer
     if self.handle == nil then
         return 0, 0
@@ -566,10 +1081,6 @@ function Window:position(): integer, integer
     return pair(C.SDL_GetWindowPosition(self.handle, widthOut, heightOut) as boolean)
 end
 
---- Moves the window, in screen coordinates.
----
---- The coordinate space spans every display, so a negative or very large
---- position is how a window is put on a second monitor.
 function Window:setPosition(x: integer, y: integer): boolean
     if self.handle == nil then
         return false
@@ -577,7 +1088,6 @@ function Window:setPosition(x: integer, y: integer): boolean
     return C.SDL_SetWindowPosition(self.handle, x, y) as boolean
 end
 
---- Centers the window on `display`, or on the display it is already on.
 function Window:center(displayId?: integer): boolean
     if self.handle == nil then
         return false
@@ -589,11 +1099,6 @@ function Window:center(displayId?: integer): boolean
     return C.SDL_SetWindowPosition(self.handle, centered, centered) as boolean
 end
 
---- Thickness of the window manager's decoration, in screen coordinates:
---- top, left, bottom and right.
----
---- All zero on a platform that does not decorate windows and on a borderless
---- one, which is the honest answer rather than a failure.
 function Window:borderSize(): integer, integer, integer, integer
     if self.handle == nil then
         return 0, 0, 0, 0
@@ -605,13 +1110,6 @@ function Window:borderSize(): integer, integer, integer, integer
     return widthOut[0] as integer, heightOut[0] as integer, thirdOut[0] as integer, fourthOut[0] as integer
 end
 
---- The part of the window nothing is drawn over, as x, y, width and height in
---- screen coordinates.
----
---- The whole window on a desktop. Smaller where a notch, a rounded corner or a
---- system gesture area overlaps it, which is what a phone or a handheld needs
---- to keep a health bar out from under. `events.windowSafeAreaChanged` reports
---- that it moved.
 function Window:safeArea(): integer, integer, integer, integer
     if self.handle == nil then
         return 0, 0, 0, 0
@@ -624,7 +1122,6 @@ function Window:safeArea(): integer, integer, integer, integer
     ) as integer
 end
 
---- Smallest size the window may be resized to, in screen coordinates.
 function Window:minimumSize(): integer, integer
     if self.handle == nil then
         return 0, 0
@@ -632,8 +1129,6 @@ function Window:minimumSize(): integer, integer
     return pair(C.SDL_GetWindowMinimumSize(self.handle, widthOut, heightOut) as boolean)
 end
 
---- Sets the smallest size the window may be resized to. Zero for either
---- dimension removes the limit on it.
 function Window:setMinimumSize(width: integer, height: integer): boolean
     if self.handle == nil then
         return false
@@ -641,8 +1136,6 @@ function Window:setMinimumSize(width: integer, height: integer): boolean
     return C.SDL_SetWindowMinimumSize(self.handle, width, height) as boolean
 end
 
---- Largest size the window may be resized to, in screen coordinates. Zero for
---- a dimension that has no limit.
 function Window:maximumSize(): integer, integer
     if self.handle == nil then
         return 0, 0
@@ -650,8 +1143,6 @@ function Window:maximumSize(): integer, integer
     return pair(C.SDL_GetWindowMaximumSize(self.handle, widthOut, heightOut) as boolean)
 end
 
---- Sets the largest size the window may be resized to. Zero for either
---- dimension removes the limit on it.
 function Window:setMaximumSize(width: integer, height: integer): boolean
     if self.handle == nil then
         return false
@@ -659,8 +1150,6 @@ function Window:setMaximumSize(width: integer, height: integer): boolean
     return C.SDL_SetWindowMaximumSize(self.handle, width, height) as boolean
 end
 
---- Narrowest and widest width-over-height the window may be resized to. Zero
---- for a bound that is not set.
 function Window:aspectRatio(): number, number
     if self.handle == nil then
         return 0, 0
@@ -672,10 +1161,6 @@ function Window:aspectRatio(): number, number
     return minAspectOut[0] as number, maxAspectOut[0] as number
 end
 
---- Constrains resizing to a range of width-over-height ratios.
----
---- The same value for both pins the window to one shape, which is what a game
---- that will not letterbox wants. Zero for either removes that bound.
 function Window:setAspectRatio(minimum: number, maximum: number): boolean
     if self.handle == nil then
         return false
@@ -687,8 +1172,6 @@ end
 -- Visibility and window state
 -------------------------------------------------------------------------------
 
---- Maps the window onto the desktop. What a window created `hidden` needs
---- before anything it draws is seen.
 function Window:show(): boolean
     if self.handle == nil then
         return false
@@ -696,10 +1179,6 @@ function Window:show(): boolean
     return C.SDL_ShowWindow(self.handle) as boolean
 end
 
---- Unmaps the window without destroying it.
----
---- Safe while a device holds it: no swapchain texture is acquired while the
---- window is hidden and the frame is skipped whole rather than drawn nowhere.
 function Window:hide(): boolean
     if self.handle == nil then
         return false
@@ -707,9 +1186,6 @@ function Window:hide(): boolean
     return C.SDL_HideWindow(self.handle) as boolean
 end
 
---- Whether the window is mapped. False for a window created `hidden` and one
---- that `hide` was called on, and true for a minimized window, which is mapped
---- and not visible.
 function Window:isVisible(): boolean
     if self.handle == nil then
         return false
@@ -717,11 +1193,6 @@ function Window:isVisible(): boolean
     return not hasFlag(self, K.SDL_WINDOW_HIDDEN)
 end
 
---- Brings the window to the front and gives it input focus.
----
---- Distinct from `flash`: this takes focus, which a desktop may refuse or may
---- allow to interrupt whatever the user was doing. Ask for attention instead
---- unless the user just did something that expects a window to come forward.
 function Window:raise(): boolean
     if self.handle == nil then
         return false
@@ -729,7 +1200,6 @@ function Window:raise(): boolean
     return C.SDL_RaiseWindow(self.handle) as boolean
 end
 
---- Minimizes the window to the taskbar or dock.
 function Window:minimize(): boolean
     if self.handle == nil then
         return false
@@ -737,13 +1207,10 @@ function Window:minimize(): boolean
     return C.SDL_MinimizeWindow(self.handle) as boolean
 end
 
---- Whether the window is minimized. `events.windowMinimized` reports that it
---- became so; this is how the first frame after startup finds out.
 function Window:isMinimized(): boolean
     return hasFlag(self, K.SDL_WINDOW_MINIMIZED)
 end
 
---- Maximizes the window to fill the display's usable bounds.
 function Window:maximize(): boolean
     if self.handle == nil then
         return false
@@ -751,12 +1218,10 @@ function Window:maximize(): boolean
     return C.SDL_MaximizeWindow(self.handle) as boolean
 end
 
---- Whether the window is maximized.
 function Window:isMaximized(): boolean
     return hasFlag(self, K.SDL_WINDOW_MAXIMIZED)
 end
 
---- Returns a minimized or maximized window to its previous size and position.
 function Window:restore(): boolean
     if self.handle == nil then
         return false
@@ -764,29 +1229,14 @@ function Window:restore(): boolean
     return C.SDL_RestoreWindow(self.handle) as boolean
 end
 
---- Whether something is covering the window entirely.
----
---- A frame drawn now is not seen, which is worth knowing before an expensive
---- one is built. Independent of minimization: an occluded window is mapped and
---- not minimized, and both stop the swapchain handing out a texture.
 function Window:isOccluded(): boolean
     return hasFlag(self, K.SDL_WINDOW_OCCLUDED)
 end
 
---- Whether the window has keyboard focus, which is where key events are going.
----
---- `events.windowFocusGained` and `windowFocusLost` report the transitions.
---- This is the value they start from, which no event supplies: a window that
---- has had focus since it opened has fired neither.
 function Window:hasFocus(): boolean
     return hasFlag(self, K.SDL_WINDOW_INPUT_FOCUS)
 end
 
---- Whether the pointer is over the window.
----
---- Beside `events.windowMouseEnter` and `windowMouseLeave` on the same terms
---- as `hasFocus`. False while relative mouse mode is on, since there is no
---- pointer position for the window to contain.
 function Window:hasMouseFocus(): boolean
     return hasFlag(self, K.SDL_WINDOW_MOUSE_FOCUS)
 end
@@ -795,18 +1245,6 @@ end
 -- Fullscreen
 -------------------------------------------------------------------------------
 
---- Enters or leaves fullscreen.
----
---- Which fullscreen depends on `setFullscreenMode`: with no mode set this is
---- borderless fullscreen at the desktop's own resolution, which is what a
---- window that shares a display with other applications wants. With a mode set
---- it changes the display's video mode to it.
----
---- Safe while a device holds the window. The swapchain follows the new size
---- and the renderer picks it up from the texture it acquires next frame.
---- `events.windowEnterFullscreen` and `windowLeaveFullscreen` report that the
---- change actually landed, which on a compositing window system is later than
---- this returns; `sync` is the other way to wait for it.
 function Window:setFullscreen(fullscreen: boolean): boolean
     if self.handle == nil then
         return false
@@ -814,13 +1252,10 @@ function Window:setFullscreen(fullscreen: boolean): boolean
     return C.SDL_SetWindowFullscreen(self.handle, fullscreen ~= false) as boolean
 end
 
---- Whether the window is fullscreen.
 function Window:isFullscreen(): boolean
     return hasFlag(self, K.SDL_WINDOW_FULLSCREEN)
 end
 
---- The video mode fullscreen will use, or nil for borderless fullscreen at
---- whatever the desktop is already running.
 function Window:fullscreenMode(): Window.DisplayMode
     if self.handle == nil then
         return nil
@@ -828,14 +1263,6 @@ function Window:fullscreenMode(): Window.DisplayMode
     return toMode(C.SDL_GetWindowFullscreenMode(self.handle))
 end
 
---- Chooses the video mode fullscreen uses, or nil for borderless fullscreen at
---- the desktop's resolution.
----
---- The mode has to have come from `fullscreenModes` or
---- `closestFullscreenMode`, because SDL matches it against the modes the
---- display actually has and a record assembled by hand names one that may not
---- exist. Takes effect the next time the window is made fullscreen, and
---- immediately if it already is.
 function Window:setFullscreenMode(mode: Window.DisplayMode): boolean
     if self.handle == nil then
         return false
@@ -857,7 +1284,6 @@ end
 -- Decoration and appearance
 -------------------------------------------------------------------------------
 
---- Sets the window's title, and the copy `title` reports.
 function Window:setTitle(title: string): boolean
     if title == nil then
         error("tecs: Window:setTitle needs a string", 2)
@@ -869,12 +1295,6 @@ function Window:setTitle(title: string): boolean
     return C.SDL_SetWindowTitle(self.handle, title) as boolean
 end
 
---- Sets the image the desktop shows the window as.
----
---- Decoded synchronously from `path`, because an icon is wanted before the
---- first frame and the asset system decodes on a worker and answers with a GPU
---- texture, which is not what SDL takes. SDL copies the pixels, so nothing is
---- retained here. False when the file could not be decoded.
 function Window:setIcon(path: string): boolean
     if path == nil then
         error("tecs: Window:setIcon needs a path", 2)
@@ -885,13 +1305,10 @@ function Window:setIcon(path: string): boolean
     return applyIcon(self.handle, path)
 end
 
---- Whether the window can be resized by dragging its edge. Says nothing about
---- `setSize`, which works either way.
 function Window:isResizable(): boolean
     return hasFlag(self, K.SDL_WINDOW_RESIZABLE)
 end
 
---- Allows or forbids the user resizing the window.
 function Window:setResizable(resizable: boolean): boolean
     if self.handle == nil then
         return false
@@ -899,7 +1316,6 @@ function Window:setResizable(resizable: boolean): boolean
     return C.SDL_SetWindowResizable(self.handle, resizable ~= false) as boolean
 end
 
---- Whether the window has a title bar and a frame.
 function Window:isBordered(): boolean
     if self.handle == nil then
         return false
@@ -907,8 +1323,6 @@ function Window:isBordered(): boolean
     return not hasFlag(self, K.SDL_WINDOW_BORDERLESS)
 end
 
---- Adds or removes the title bar and the frame. The client area keeps its
---- size, so the window as a whole changes size by the border thickness.
 function Window:setBordered(bordered: boolean): boolean
     if self.handle == nil then
         return false
@@ -916,12 +1330,10 @@ function Window:setBordered(bordered: boolean): boolean
     return C.SDL_SetWindowBordered(self.handle, bordered ~= false) as boolean
 end
 
---- Whether the window is kept above others.
 function Window:isAlwaysOnTop(): boolean
     return hasFlag(self, K.SDL_WINDOW_ALWAYS_ON_TOP)
 end
 
---- Keeps the window above others, or stops doing so.
 function Window:setAlwaysOnTop(onTop: boolean): boolean
     if self.handle == nil then
         return false
@@ -929,7 +1341,6 @@ function Window:setAlwaysOnTop(onTop: boolean): boolean
     return C.SDL_SetWindowAlwaysOnTop(self.handle, onTop ~= false) as boolean
 end
 
---- Whether the window can take keyboard focus. True for an ordinary window.
 function Window:isFocusable(): boolean
     if self.handle == nil then
         return false
@@ -937,8 +1348,6 @@ function Window:isFocusable(): boolean
     return not hasFlag(self, K.SDL_WINDOW_NOT_FOCUSABLE)
 end
 
---- Allows or forbids the window taking keyboard focus. A window that cannot
---- take focus is what an overlay uses to stay out of the way.
 function Window:setFocusable(focusable: boolean): boolean
     if self.handle == nil then
         return false
@@ -946,8 +1355,6 @@ function Window:setFocusable(focusable: boolean): boolean
     return C.SDL_SetWindowFocusable(self.handle, focusable ~= false) as boolean
 end
 
---- How opaque the window is, 0 for invisible and 1 for solid. Zero with no
---- window, and 1 on a platform that composites nothing.
 function Window:opacity(): number
     if self.handle == nil then
         return 0
@@ -959,8 +1366,6 @@ function Window:opacity(): number
     return value
 end
 
---- Sets how opaque the window is, 0 to 1. Whether the desktop honours it is
---- the desktop's business; false says it did not.
 function Window:setOpacity(opacity: number): boolean
     if self.handle == nil then
         return false
@@ -972,12 +1377,6 @@ end
 -- Attention
 -------------------------------------------------------------------------------
 
---- Asks for the user's attention without taking focus.
----
---- The polite form of `raise`: the taskbar entry or the dock icon is marked
---- and the user decides when to look. `"untilFocused"` keeps asking, which
---- suits a turn-based game waiting on a player who alt-tabbed away, and
---- `"cancel"` stops it.
 function Window:flash(operation: Window.Flash): boolean
     local value = FLASHES[operation]
     if value == nil then
@@ -989,8 +1388,6 @@ function Window:flash(operation: Window.Flash): boolean
     return C.SDL_FlashWindow(self.handle, value) as boolean
 end
 
---- What the taskbar or dock is showing over the application's icon, and how
---- far along it is. "none" and 0 with no window.
 function Window:progress(): Window.Progress, number
     if self.handle == nil then
         return "none", 0
@@ -1002,11 +1399,6 @@ function Window:progress(): Window.Progress, number
     return state, tonumber(C.SDL_GetWindowProgressValue(self.handle)) as number
 end
 
---- Shows how far along a long piece of work is, on the taskbar or the dock.
----
---- What a shader pack build or an asset load has to report to, since neither
---- can draw a progress bar in a window that is not rendering yet. `value` runs
---- 0 to 1 and only means anything for "normal", "paused" and "error".
 function Window:setProgress(state: Window.Progress, value?: number): boolean
     local resolved = PROGRESS_STATES[state]
     if resolved == nil then
@@ -1028,11 +1420,6 @@ end
 -- Confinement
 -------------------------------------------------------------------------------
 
---- Whether the pointer is confined to the window right now.
----
---- False for an unfocused window even where `setMouseGrab` was called and
---- succeeded, since a window that is not receiving the pointer is not holding
---- it either. Becomes true again when focus returns.
 function Window:mouseGrab(): boolean
     if self.handle == nil then
         return false
@@ -1040,15 +1427,6 @@ function Window:mouseGrab(): boolean
     return C.SDL_GetWindowMouseGrab(self.handle) as boolean
 end
 
---- Confines the pointer to the window, or releases it.
----
---- Not the same as `Input:setRelativeMouseMode`, which hides the pointer and
---- delivers deltas: this leaves the pointer visible and stops it walking onto
---- another monitor. A game that wants both sets both.
----
---- Taking the request is not the same as the grab being in force, which is
---- what `mouseGrab` answers: an unfocused window records the request and holds
---- nothing until focus comes back.
 function Window:setMouseGrab(grabbed: boolean): boolean
     if self.handle == nil then
         return false
@@ -1056,7 +1434,6 @@ function Window:setMouseGrab(grabbed: boolean): boolean
     return C.SDL_SetWindowMouseGrab(self.handle, grabbed ~= false) as boolean
 end
 
---- Whether the desktop's own keyboard shortcuts are being intercepted.
 function Window:keyboardGrab(): boolean
     if self.handle == nil then
         return false
@@ -1064,12 +1441,6 @@ function Window:keyboardGrab(): boolean
     return C.SDL_GetWindowKeyboardGrab(self.handle) as boolean
 end
 
---- Intercepts the desktop's keyboard shortcuts while the window has focus, so
---- that alt-tab and the like reach the game instead.
----
---- Costly to get wrong, since it is how a window stops the user leaving it.
---- Some desktops refuse it outright and some require a permission the user
---- grants once.
 function Window:setKeyboardGrab(grabbed: boolean): boolean
     if self.handle == nil then
         return false
@@ -1077,8 +1448,6 @@ function Window:setKeyboardGrab(grabbed: boolean): boolean
     return C.SDL_SetWindowKeyboardGrab(self.handle, grabbed ~= false) as boolean
 end
 
---- The region within the window the pointer is confined to, as x, y, width and
---- height in screen coordinates. All zero when there is none.
 function Window:mouseRect(): integer, integer, integer, integer
     if self.handle == nil then
         return 0, 0, 0, 0
@@ -1092,11 +1461,6 @@ function Window:mouseRect(): integer, integer, integer, integer
     ) as integer
 end
 
---- Confines the pointer to part of the window, in screen coordinates.
----
---- Independent of `setMouseGrab`, which confines it to the window as a whole;
---- this applies while the window has focus whether or not the window is
---- grabbed. Called with nothing, the region is removed.
 function Window:setMouseRect(x?: integer, y?: integer, width?: integer, height?: integer): boolean
     if self.handle == nil then
         return false
@@ -1117,7 +1481,6 @@ end
 -- Displays
 -------------------------------------------------------------------------------
 
---- The display this window is mostly on. Zero with no window.
 function Window:display(): integer
     if self.handle == nil then
         return 0
@@ -1125,11 +1488,6 @@ function Window:display(): integer
     return tonumber(C.SDL_GetDisplayForWindow(self.handle)) as integer
 end
 
---- Every display currently attached, in the order SDL reports them.
----
---- Empty with no video. `events.displayAdded` and `displayRemoved` report that
---- this list changed, so a game with a display menu rebuilds it there rather
---- than polling.
 function Window.displays(): {integer}
     local found: {integer} = {}
     if not Window.available() then
@@ -1148,7 +1506,6 @@ function Window.displays(): {integer}
     return found
 end
 
---- The display the desktop treats as primary, or zero with no video.
 function Window.primaryDisplay(): integer
     if not Window.available() then
         return 0
@@ -1156,8 +1513,6 @@ function Window.primaryDisplay(): integer
     return tonumber(C.SDL_GetPrimaryDisplay()) as integer
 end
 
---- A display's name as the desktop shows it, for a menu that lets the player
---- choose one. Empty with no video.
 function Window.displayName(displayId?: integer): string
     if not Window.available() then
         return ""
@@ -1165,11 +1520,6 @@ function Window.displayName(displayId?: integer): string
     return loader.toString(C.SDL_GetDisplayName(display(displayId)))
 end
 
---- A display's position and size in the desktop's coordinate space, as x, y,
---- width and height in screen coordinates.
----
---- The width and height are the desktop dimensions, and the x and y are what
---- makes the coordinates `setPosition` takes span every monitor.
 function Window.displayBounds(displayId?: integer): integer, integer, integer, integer
     if not Window.available() then
         return 0, 0, 0, 0
@@ -1182,12 +1532,6 @@ function Window.displayBounds(displayId?: integer): integer, integer, integer, i
     ) as integer
 end
 
---- The part of a display not covered by a taskbar, dock or menu bar, in the
---- same coordinates as `displayBounds`.
----
---- Where a window should be placed and how large it should be to be usable,
---- which `displayBounds` does not answer. `events.displayUsableBoundsChanged`
---- reports that it moved.
 function Window.usableBounds(displayId?: integer): integer, integer, integer, integer
     if not Window.available() then
         return 0, 0, 0, 0
@@ -1200,11 +1544,6 @@ function Window.usableBounds(displayId?: integer): integer, integer, integer, in
     ) as integer
 end
 
---- A display's content scale, the same quantity `Window:displayScale` reports
---- for whichever display a window is on. Zero with no video.
----
---- Named for what SDL calls it rather than matching the method, because a
---- record holds one `displayScale` and the two would be the same field.
 function Window.contentScale(displayId?: integer): number
     if not Window.available() then
         return 0
@@ -1212,8 +1551,6 @@ function Window.contentScale(displayId?: integer): number
     return tonumber(C.SDL_GetDisplayContentScale(display(displayId))) as number
 end
 
---- How a display is rotated right now. `events.displayOrientation` reports
---- that it turned.
 function Window.orientation(displayId?: integer): Window.Orientation
     if not Window.available() then
         return "unknown"
@@ -1222,11 +1559,6 @@ function Window.orientation(displayId?: integer): Window.Orientation
     return ORIENTATIONS[value] or "unknown"
 end
 
---- How a display is built to be held, which does not change.
----
---- What tells a landscape reading apart from a device that is landscape to
---- begin with, and so what a game deciding whether to letterbox or rotate its
---- own content asks alongside `orientation`.
 function Window.naturalOrientation(displayId?: integer): Window.Orientation
     if not Window.available() then
         return "unknown"
@@ -1235,8 +1567,6 @@ function Window.naturalOrientation(displayId?: integer): Window.Orientation
     return ORIENTATIONS[value] or "unknown"
 end
 
---- The mode a display was in when the desktop started, which is what leaving
---- fullscreen returns it to. Nil with no video.
 function Window.desktopMode(displayId?: integer): Window.DisplayMode
     if not Window.available() then
         return nil
@@ -1244,8 +1574,6 @@ function Window.desktopMode(displayId?: integer): Window.DisplayMode
     return toMode(C.SDL_GetDesktopDisplayMode(display(displayId)))
 end
 
---- The mode a display is in right now, which differs from `desktopMode` while
---- something holds it fullscreen at another resolution.
 function Window.currentMode(displayId?: integer): Window.DisplayMode
     if not Window.available() then
         return nil
@@ -1253,11 +1581,6 @@ function Window.currentMode(displayId?: integer): Window.DisplayMode
     return toMode(C.SDL_GetCurrentDisplayMode(display(displayId)))
 end
 
---- Every fullscreen mode a display offers, largest first.
----
---- What a resolution menu is built from, and what `setFullscreenMode` takes.
---- Empty with no video, and on a platform whose only fullscreen is the
---- desktop's own resolution.
 function Window.fullscreenModes(displayId?: integer): {Window.DisplayMode}
     local found: {Window.DisplayMode} = {}
     if not Window.available() then
@@ -1278,14 +1601,6 @@ function Window.fullscreenModes(displayId?: integer): {Window.DisplayMode}
     return found
 end
 
---- The mode nearest to a requested size and refresh rate.
----
---- What a game restoring a saved resolution asks for, since the display may no
---- longer offer exactly what was saved. Nil when the display offers nothing
---- that fits, and with no video.
---- @param refreshRate Hertz, or 0 or nil for the highest the size allows.
---- @param highDensity Whether modes whose pixel density is above 1 may be
----     chosen. Defaults to false.
 function Window.closestFullscreenMode(
     width: integer, height: integer, refreshRate?: number, highDensity?: boolean, displayId?: integer
 ): Window.DisplayMode
@@ -1308,9 +1623,6 @@ end
 -- The desktop
 -------------------------------------------------------------------------------
 
---- Whether the desktop is asking applications to draw themselves light or
---- dark. "unknown" where the platform has no such preference, and with no
---- video.
 function Window.theme(): Window.Theme
     if not Window.available() then
         return "unknown"
@@ -1318,13 +1630,6 @@ function Window.theme(): Window.Theme
     return THEMES[tonumber(C.SDL_GetSystemTheme()) as integer] or "unknown"
 end
 
---- Whether the desktop is allowed to blank the display while this application
---- runs.
----
---- False for most of a game's life, since SDL disables the screen saver as
---- soon as video comes up: a player holding a gamepad is not idle, and the
---- keyboard and mouse are what the desktop watches. Turn it back on for a menu
---- or a cutscene nobody is playing through.
 function Window.screenSaverEnabled(): boolean
     if not Window.available() then
         return false
@@ -1332,10 +1637,6 @@ function Window.screenSaverEnabled(): boolean
     return C.SDL_ScreenSaverEnabled() as boolean
 end
 
---- Allows or forbids the desktop blanking the display.
----
---- Applies to the whole application rather than to one window, which is why it
---- is here and not a method. False with no video.
 function Window.setScreenSaverEnabled(enabled: boolean): boolean
     if not Window.available() then
         return false

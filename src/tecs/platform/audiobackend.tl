@@ -1,52 +1,54 @@
---- The output half of the platform seam, for sound.
----
---- Audio only ever goes one way. A game opens a mixer, points a voice at a
---- clip, starts it, adjusts it and stops it; nothing comes back except whether
---- a voice is still sounding. So unlike input, which has an event stream in
---- front of it, this seam is commands and one measurement, and that is the
---- whole contract a port has to answer.
----
---- The unit of playback is a track, because the mixer is what mixes. Every
---- track on one mixer is summed into the buffer the hardware reads, so playing
---- two sounds at once means two tracks and not summing samples here.
----
---- The one measurement is `playing`. A mixer pulls rather than being fed, so
---- there is nothing to top up and no queue depth to read: a voice is over when
---- the mixer says it has stopped, and `Audio:update` asks once a frame. That is
---- also why no callback appears in this contract, in either direction.
---- SDL_mixer offers one for a track that stopped, and it runs on the audio
---- thread. A Lua function invoked from a thread the VM did not create is the
---- unsafe case that keeps raw thread creation unexposed (see the Rust worker),
---- so the answer is polled instead.
----
---- Exactly one thing writes each gain. The master is the mixer's own number
---- and goes straight to it, so setting it costs one call however many voices
---- are sounding. A voice's gain and its group's are multiplied out above this
---- seam and arrive as one product, because SDL_mixer's per-tag gain is not a
---- separate multiplier: it writes each tagged track's own gain, so using it for
---- a group would overwrite whatever the voice asked for.
----
---- A voice is placed one way or the other, never both. `setPosition` and
---- `setStereo` look like they might layer a pan over a position, and they do
---- not: SDL_mixer keeps one spatialization mode per track, and each call
---- writes it. `MIX_SetTrack3DPosition` puts the track in 3D mode, folds its
---- input down to mono and computes the speaker gains from the coordinates;
---- `MIX_SetTrackStereo` puts it in forced-stereo mode, writes those same
---- speaker gains from `left` and `right`, and resets the recorded 3D position
---- to the origin. Whichever was called last is the one that is heard, and a
---- null to either leaves both, which is why one `clearSpatial` answers for
---- them. That is what the header states, and `MIX_SetTrackStereo` and
---- `MIX_SetTrack3DPosition` in `src/SDL_mixer.c` of release-3.2.4 confirm it:
---- both assign `track->spatialization_mode` and both fill the one
---- `track->spatialization_panning` array.
----
---- Clips are not loaded through here. A clip is decoded on the asset worker and
---- arrives as a pointer, the same route a decoded image takes, so what this
---- seam takes is a loaded clip or a path to stream from.
----
---- `Audio` holds a backend and never reaches the FFI itself. The SDL
---- implementation below is the worked example, and the only thing in the audio
---- layer that names a `MIX_` symbol.
+--[=[
+The output half of the platform seam, for sound.
+
+Audio only ever goes one way. A game opens a mixer, points a voice at a
+clip, starts it, adjusts it and stops it; nothing comes back except whether
+a voice is still sounding. So unlike input, which has an event stream in
+front of it, this seam is commands and one measurement, and that is the
+whole contract a port has to answer.
+
+The unit of playback is a track, because the mixer is what mixes. Every
+track on one mixer is summed into the buffer the hardware reads, so playing
+two sounds at once means two tracks and not summing samples here.
+
+The one measurement is `playing`. A mixer pulls rather than being fed, so
+there is nothing to top up and no queue depth to read: a voice is over when
+the mixer says it has stopped, and `Audio:update` asks once a frame. That is
+also why no callback appears in this contract, in either direction.
+SDL_mixer offers one for a track that stopped, and it runs on the audio
+thread. A Lua function invoked from a thread the VM did not create is the
+unsafe case that keeps raw thread creation unexposed (see the Rust worker),
+so the answer is polled instead.
+
+Exactly one thing writes each gain. The master is the mixer's own number
+and goes straight to it, so setting it costs one call however many voices
+are sounding. A voice's gain and its group's are multiplied out above this
+seam and arrive as one product, because SDL_mixer's per-tag gain is not a
+separate multiplier: it writes each tagged track's own gain, so using it for
+a group would overwrite whatever the voice asked for.
+
+A voice is placed one way or the other, never both. `setPosition` and
+`setStereo` look like they might layer a pan over a position, and they do
+not: SDL_mixer keeps one spatialization mode per track, and each call
+writes it. `MIX_SetTrack3DPosition` puts the track in 3D mode, folds its
+input down to mono and computes the speaker gains from the coordinates;
+`MIX_SetTrackStereo` puts it in forced-stereo mode, writes those same
+speaker gains from `left` and `right`, and resets the recorded 3D position
+to the origin. Whichever was called last is the one that is heard, and a
+null to either leaves both, which is why one `clearSpatial` answers for
+them. That is what the header states, and `MIX_SetTrackStereo` and
+`MIX_SetTrack3DPosition` in `src/SDL_mixer.c` of release-3.2.4 confirm it:
+both assign `track->spatialization_mode` and both fill the one
+`track->spatialization_panning` array.
+
+Clips are not loaded through here. A clip is decoded on the asset worker and
+arrives as a pointer, the same route a decoded image takes, so what this
+seam takes is a loaded clip or a path to stream from.
+
+`Audio` holds a backend and never reaches the FFI itself. The SDL
+implementation below is the worked example, and the only thing in the audio
+layer that names a `MIX_` symbol.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")

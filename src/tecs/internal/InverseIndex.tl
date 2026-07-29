@@ -1,14 +1,16 @@
---- InverseIndex: target -> {source: true, ...} mapping for relationship reverse lookups.
----
---- Used by both sparse and dense relationships when reverseIndex = true.
---- Enables O(1) world:targets() and world:traverse() lookups, and cascade delete via removeTarget() during despawn.
----
---- Internal layout: each target maps to a SET of source entity IDs (a Lua table with `{[sourceId] = true}` entries).
---- This makes link/unlink/membership-check all O(1) and link is idempotent -- calling it twice with the same
---- (source, target) pair is a no-op rather than producing duplicate entries.
----
---- Iteration order is non-deterministic (uses pairs). No "ordered relationship" config exists in the codebase, and
---- world:targets/world:traverse don't promise insertion order, so this is acceptable.
+--[=[
+InverseIndex: target -> {source: true, ...} mapping for relationship reverse lookups.
+
+Used by both sparse and dense relationships when reverseIndex = true.
+Enables O(1) world:targets() and world:traverse() lookups, and cascade delete via removeTarget() during despawn.
+
+Internal layout: each target maps to a SET of source entity IDs (a Lua table with `{[sourceId] = true}` entries).
+This makes link/unlink/membership-check all O(1) and link is idempotent -- calling it twice with the same
+(source, target) pair is a no-op rather than producing duplicate entries.
+
+Iteration order is non-deterministic (uses pairs). No "ordered relationship" config exists in the codebase, and
+world:targets/world:traverse don't promise insertion order, so this is acceptable.
+]=]
 
 local record InverseIndex
     --- Create a new InverseIndex.

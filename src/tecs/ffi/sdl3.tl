@@ -1,8 +1,10 @@
---- SDL3 binding.
----
---- Exposes the raw C namespace plus the small helpers every caller needs.
---- Typed engine APIs live above this; this module stays thin so the
---- generated cdef remains the single source of truth.
+--[=[
+SDL3 binding.
+
+Exposes the raw C namespace plus the small helpers every caller needs.
+Typed engine APIs live above this; this module stays thin so the
+generated cdef remains the single source of truth.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

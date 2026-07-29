@@ -1,19 +1,21 @@
---- Tools that read and write the world.
----
---- These run on the game's own thread, inside the frame, before the world
---- updates. So they read a world that is not mid-update and write one that has
---- not yet been stepped, which is why none of them queue anything and none of
---- them lock.
----
---- Component values cross as plain tables through each component's own
---- `serialize` and the constructor beside it, rather than through a second
---- description of every component maintained here. A component the engine
---- gains is a component these tools gain.
----
---- Which components exist is read the same way, from the ECS's own registry
---- through `ecs.declaredComponents`. That registry is process-wide, so these
---- tools can name anything anybody registered, including a game's own, and
---- nothing has to be told about a component twice.
+--[=[
+Tools that read and write the world.
+
+These run on the game's own thread, inside the frame, before the world
+updates. So they read a world that is not mid-update and write one that has
+not yet been stepped, which is why none of them queue anything and none of
+them lock.
+
+Component values cross as plain tables through each component's own
+`serialize` and the constructor beside it, rather than through a second
+description of every component maintained here. A component the engine
+gains is a component these tools gain.
+
+Which components exist is read the same way, from the ECS's own registry
+through `ecs.declaredComponents`. That registry is process-wide, so these
+tools can name anything anybody registered, including a game's own, and
+nothing has to be told about a component twice.
+]=]
 
 local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")

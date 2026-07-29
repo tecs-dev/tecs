@@ -1,51 +1,71 @@
---- Sprite-sheet playback.
----
---- An `Animation` says which tag of a sheet is playing, how fast, whether it
---- repeats, whether it is running, and where in the tag it has got to.
----
---- ```teal
---- local hero <const> = tecs.gfx.animation.grid({
----     name = "hero",
----     imageWidth = 256, imageHeight = 32,
----     frameWidth = 32, frameHeight = 32,
----     tags = {idle = {from = 1, to = 4}, run = {from = 5, to = 8}},
---- })
---- hero:bind(app.renderer:sprite("hero.png"))
---- world:addPlugin(tecs.gfx.animation.plugin)
----
---- world:spawn(
----     tecs.Transform(64, 64, 0, 1, 0, 32, 32),
----     hero:sprite(),
----     tecs.gfx.animation.of(hero, "run"),
----     tecs.gfx.Renderable()
---- )
---- ```
----
---- There are two paths from that to a picture and `useGPU` chooses between them.
---- On, which is the default, `tecs.EncodeAnimation` writes which playback the
---- entity is on into its `Sprite` and the vertex shader resolves the frame, so a
---- frame changing writes nothing at all. Off, `tecs.AdvanceAnimation` walks
---- every playing animation on every fixed step and writes the frame's region
---- into the `Sprite` itself. They agree on the frame and differ on what they
---- write to reach it; `animation.frameOf` is what answers either way.
----
---- Playback is quantised to the fixed step whichever path it takes, because
---- animation is simulation. Two machines fed the same recording have to show the
---- same frame, and a system driven by frame time shows a different one on the
---- machine that drew more frames. So the host path runs in `FixedPostUpdate`,
---- late enough that gameplay logic in `FixedUpdate` has already chosen what
---- should be playing, and the GPU path's clock counts whole fixed steps.
----
---- The component carries a sheet id rather than a sheet. A component is plain
---- C memory and a sheet is a table, and the indirection is the point besides:
---- every entity playing one walk cycle shares one sheet.
----
---- An entity carrying a `Pivot` bound to one of the sheet's slices has it follow
---- the slice, because an Aseprite slice moves from frame to frame and a pivot
---- that did not follow it would drift off the part of the drawing it names. On
---- the host that is a fresh resolve on every frame the sprite changes; on the
---- GPU the entity carries the middle of where the slice goes and the frame table
---- carries each step's offset from it.
+--[=[
+Sprite sheets, fixed-step playback, Aseprite slices, pivots, and reloads.
+
+A [`Sheet`](tealdoc:tecs.gfx.animation.Sheet) divides one image into frames and
+names frame ranges with tags. An
+[`Animation`](tealdoc:tecs.gfx.animation.Animation) selects a sheet tag and
+carries speed, loop, and playback state.
+
+```teal
+local hero <const> = tecs.gfx.animation.grid({
+    name = "hero",
+    imageWidth = 256,
+    imageHeight = 32,
+    frameWidth = 32,
+    frameHeight = 32,
+    tags = {
+        idle = {from = 1, to = 4},
+        run = {from = 5, to = 8},
+    },
+})
+
+hero:bind(app.renderer:sprite("hero.png"))
+world:addPlugin(tecs.gfx.animation.plugin)
+
+world:spawn(
+    tecs.Transform(64, 64, 0, 1, 0, 32, 32),
+    hero:sprite(),
+    tecs.gfx.animation.of(hero, "run"),
+    tecs.gfx.Renderable()
+)
+```
+
+Playback advances in fixed steps. Machines that replay the same simulation
+therefore select the same frames. `frameOf` and `timeOf` report playback on
+the same fixed-step clock.
+
+## Sheet sources
+
+Use `grid` for uniform cells, `rects` for an explicit frame list, `build` for a
+custom sheet, or `fromAseprite` for an Aseprite JSON export. Frames count from
+one. Tags name inclusive frame spans and may play forward, reverse, or
+ping-pong.
+
+Bind a sheet to a renderer sprite before drawing it. Every entity playing that
+sheet shares its frame and timing data.
+
+## Slices and pivots
+
+Aseprite slices may move between frames. A
+[`Pivot`](tealdoc:tecs.gfx.animation.Pivot) bound to a slice follows that
+movement, which keeps attachments such as hands, muzzles, and feet on the part
+of the drawing they name.
+
+## Reloads
+
+Re-exporting a sheet under the same name can replace its frame, tag, slice, and
+timing data in place. Existing entities retain the sheet id and continue from
+their playback state. A replacement must preserve the bound image dimensions.
+]=]
+-- Implementation details:
+-- `useGPU` selects where frame resolution occurs. The default path encodes
+-- playback into `Sprite` and resolves the frame in the vertex shader. The host
+-- path writes each frame region into `Sprite` during `FixedPostUpdate`. Both
+-- paths share the sheet timing tables and fixed-step clock.
+--
+-- Components carry an interned sheet id because FFI columns cannot hold the
+-- shared sheet table. GPU pivot tables store each slice offset from its middle;
+-- the host path resolves the slice on every changed frame.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
@@ -73,19 +93,22 @@ local DEFAULT_SPEED <const> = 1.0
 ---
 --- Deliberately not a frame index. No sheet numbers a frame this, so nothing
 --- can mistake it for one, and what it says is only the opposite of what zero
---- says: this entity's `Sprite` carries a live playback and the phase is in
+--- says: this entity's [`Sprite`](tealdoc:tecs.components.Sprite) carries a live
+--- playback and the phase is in
 --- there rather than in `time`.
 local ENCODED <const> = -1
 
---- Playback state for one entity.
+--- Stores playback state for one entity.
 ---
---- `frame` is the frame the `Sprite` was last written from, as an index into
+--- `frame` is the frame the [`Sprite`](tealdoc:tecs.components.Sprite) last received, as an index into
 --- the whole sheet rather than into the tag. Zero means nothing has been
 --- written yet, which is how a fresh or restored Animation gets its region on
---- the first step it runs instead of drawing whatever the Sprite held.
+--- the first step it runs instead of drawing whatever the
+--- [`Sprite`](tealdoc:tecs.components.Sprite) held.
 ---
 --- With playback on the GPU it stops being an index and keeps only the zero:
---- the encoder writes `ENCODED` to say the `Sprite` carries a live playback,
+--- the encoder writes `ENCODED` to say the
+--- [`Sprite`](tealdoc:tecs.components.Sprite) carries a live playback,
 --- and zero still means the entity is to start its cycle again. Which frame is
 --- showing is `animation.frameOf` on either path.
 ---
@@ -93,12 +116,13 @@ local ENCODED <const> = -1
 --- animation wraps and a one-shot parks at the end, so it never grows without
 --- bound and never loses precision to its own age.
 local record Animation is Component
-    --- Registration index of the sheet, from `Sheet.id`. Zero plays nothing.
+    --- Caller-writable. Selects a sheet by its `Sheet.id` registration index.
+    --- Zero plays nothing.
     sheet: number
-    --- Index of the tag within that sheet, from `Sheet:tagId`. Zero plays the
+    --- Caller-writable. Selects a tag by its `Sheet:tagId` index. Zero plays the
     --- whole sheet in order.
     tag: number
-    --- Multiplier on the timing the sheet carries. One is the timing as
+    --- Caller-writable. Multiplies the timing the sheet carries. One is the timing as
     --- authored, two is twice as fast. Zero or less holds the current frame and
     --- stops time advancing, which is a pause that leaves `playing` alone.
     ---
@@ -106,99 +130,119 @@ local record Animation is Component
     --- because that is where an artist sets it: a hold frame is a frame with a
     --- long duration, which no single rate can express.
     speed: number
-    --- Seconds into the cycle, which is the sum of the durations of the frames
+    --- Engine-owned. Tracks seconds into the cycle. Ordinary game code should
+    --- use `timeOf` instead of writing this field. The cycle duration is the sum of the durations of the frames
     --- the tag visits. Changing `speed` leaves this where it is, so playback
     --- carries on from the frame it was showing rather than jumping.
     time: number
-    --- Frame the Sprite currently shows, or zero for none yet. With playback
+    --- Engine-owned. Tracks the frame the Sprite currently shows, or zero for
+    --- none yet. Ordinary game code should use `frameOf`. With playback
     --- on the GPU it is only that zero, and `animation.frameOf` is the frame.
     frame: number
-    --- Whether the tag restarts after its last frame.
+    --- Caller-writable. Controls whether the tag restarts after its last frame.
     loop: boolean
-    --- Whether time advances.
+    --- Caller-writable. Controls whether time advances.
     playing: boolean
 end
 
---- Asks for `Completed` and `Looped` on an entity.
+--- Requests [`Completed`](tealdoc:tecs.gfx.animation.Completed) and
+--- [`Looped`](tealdoc:tecs.gfx.animation.Looped) events for an entity.
 ---
---- Nothing is emitted for an entity that does not carry this, and the reason is
---- the archetype: a crowd of animating entities is visited by no query at all
---- while the handful that a game listens to sit together and are walked on
---- their own. Adding it costs an archetype move once and nothing per step.
+--- The event query visits only entities carrying this tag. A game can request
+--- events for a handful of entities without walking the rest of its animated
+--- crowd. Adding the tag costs one archetype move and nothing per step.
 ---
---- With playback resolved on the host the events are emitted whether or not
---- this is carried, since the system that advances the frame is already looking
---- at the row when it wraps.
+--- Host playback already visits each advancing row, so it reports these events
+--- for every entity regardless of the tag.
 local record AnimationEvents is Component
 end
 
---- Emitted at address zero on the step a tag that does not loop runs past its
+--- Reports when a non-looping tag runs past its
 --- last frame. The animation stops and holds that frame, so this fires once per
 --- playthrough and never again until something restarts it.
 local record Completed is ecs.Event
+    --- Read-only. Identifies the entity whose animation completed.
     entity: integer
+    --- Read-only. Reports the sheet that completed.
     sheet: Sheet
-    --- Name of the tag that finished, or the empty string for a whole sheet.
+    --- Read-only. Reports the tag that finished, or the empty string for a
+    --- whole sheet.
     tag: string
 
+    --- Creates a completed event value.
+    --- @param self The completed event type.
+    --- @param entity The entity whose animation completed.
+    --- @param sheet The sheet that completed.
+    --- @param tag The tag that completed, or an empty string for the whole sheet.
+    --- @return The completed event value.
     metamethod __call: function(self, entity: integer, sheet: Sheet, tag: string): Completed
 end
 
---- Emitted at address zero on the step a looping tag passes its last frame
+--- Reports when a looping tag passes its last frame
 --- and restarts.
 ---
 --- Once per step at most, not once per cycle: a step long enough to cover
 --- several cycles wraps the time once and reports one loop, so counting these
 --- is not a way to count playthroughs.
 local record Looped is ecs.Event
+    --- Read-only. Identifies the entity whose animation looped.
     entity: integer
+    --- Read-only. Reports the sheet that looped.
     sheet: Sheet
-    --- Name of the tag that wrapped, or the empty string for a whole sheet.
+    --- Read-only. Reports the tag that wrapped, or the empty string for a
+    --- whole sheet.
     tag: string
 
+    --- Creates a looped event value.
+    --- @param self The looped event type.
+    --- @param entity The entity whose animation looped.
+    --- @param sheet The sheet that looped.
+    --- @param tag The tag that looped, or an empty string for the whole sheet.
+    --- @return The looped event value.
     metamethod __call: function(self, entity: integer, sheet: Sheet, tag: string): Looped
 end
 
---- How an animation should play.
+--- Configures how an animation plays.
 local record PlayOptions
-    --- Multiplier on the sheet's own timing. Defaults to one.
+    --- Caller-writable. Multiplies the sheet's own timing and defaults to one.
     speed: number
-    --- Whether the tag restarts after its last frame. Defaults to true.
+    --- Caller-writable. Controls whether the tag restarts after its last
+    --- frame. Defaults to true.
     loop: boolean
-    --- Whether it starts running. Defaults to true.
+    --- Caller-writable. Controls whether playback starts immediately. Defaults
+    --- to true.
     playing: boolean
 end
 
---- The playback surface: the `Animation` component, its two events, the
---- constructors and controls over it, and the system that advances it.
----
---- Nothing here is installed for you. A world that draws no sprite sheets pays
---- for none of it until `plugin` is called.
 local record animation
-    --- What `of` and `play` take.
+    --- Configures `of` and `play`.
     type PlayOptions = PlayOptions
 
-    --- Playback state for one entity.
+    --- Read-only. Exposes the playback-state component for one entity.
     Animation: Animation
 
-    --- Emitted when a tag that does not loop runs past its last frame.
+    --- Read-only. Exposes the event emitted when a non-looping tag finishes.
     Completed: Completed
 
-    --- Emitted when a looping tag passes its last frame and restarts.
+    --- Read-only. Exposes the event emitted when a looping tag restarts.
     Looped: Looped
 
-    --- Asks for `Completed` and `Looped` on an entity.
+    --- Read-only. Exposes the tag that requests
+    --- [`Completed`](tealdoc:tecs.gfx.animation.Completed) and
+    --- [`Looped`](tealdoc:tecs.gfx.animation.Looped) events for an entity.
     AnimationEvents: AnimationEvents
 
-    --- An Animation playing a named tag of a sheet, ready to spawn.
+    --- Creates an [`Animation`](tealdoc:tecs.gfx.animation.Animation) that
+    --- plays a named sheet tag and is ready to spawn.
     ---
     --- Omit the tag to play the whole sheet in order. Fails on a tag the sheet
     --- does not carry, since the alternative is a typo that plays every
     --- frame.
     ---
-    --- The entity also needs a `Sprite`, which is what the query matches on and
-    --- what playback writes the frame's region into. An Animation on its own
-    --- advances nothing.
+    --- The entity also needs a [`Sprite`](tealdoc:tecs.components.Sprite), which the query
+    --- matches and playback updates with the frame's region. An
+    --- [`Animation`](tealdoc:tecs.gfx.animation.Animation) on its own advances
+    --- nothing.
     --- @param source The sheet to play. Nil raises.
     --- @param tag A tag the sheet names, or nil for the whole sheet.
     --- @param options Defaults are the sheet's own timing, looping, and
@@ -213,8 +257,8 @@ local record animation
     --- writes the tag's first frame whatever the entity was showing. An entity
     --- carrying no Animation gets one.
     --- @param world The world the entity lives in.
-    --- @param entity A live entity, which needs a `Sprite` for playback to
-    ---     reach it.
+    --- @param entity A live entity with a
+    ---     [`Sprite`](tealdoc:tecs.components.Sprite).
     --- @param source The sheet to play. Nil raises.
     --- @param tag A tag the sheet names, or nil for the whole sheet.
     --- @param options Defaults are the sheet's own timing, looping, and
@@ -233,7 +277,7 @@ local record animation
     ---     entity untouched, since there is nothing to say what it would play.
     restart: function(world: World, entity: integer): boolean
 
-    --- How far into its tag's cycle an entity's animation has got, in seconds.
+    --- Returns an animation's position in its tag cycle, in seconds.
     ---
     --- Recomputed on the call rather than kept in a column, because keeping it
     --- means writing every animating entity on every step and that is the cost
@@ -247,7 +291,7 @@ local record animation
     ---     for one whose sheet this run does not have.
     timeOf: function(world: World, entity: integer): number
 
-    --- The sheet frame an entity's animation is showing.
+    --- Returns the sheet frame shown by an entity's animation.
     ---
     --- The same answer the vertex shader draws, because both are `frameAt` over
     --- the same tag: the shader reads a table built from it and this calls it.
@@ -261,42 +305,47 @@ local record animation
 
     --- Adds the system that advances playback.
     ---
-    --- Not installed for you, so a world that draws no sprite sheets pays
-    --- nothing for the query. Call it once; a second call on the same world is
-    --- ignored, because adding a system twice under one name is an error.
+    --- Call this once for each world that plays sprite sheets. A second call on
+    --- the same world does nothing.
     ---
     --- Which system depends on `useGPU`. On the host it is
     --- `tecs.AdvanceAnimation` in `FixedPostUpdate`, whose query is a logic
     --- query, so a paused entity holds the frame it is on. On the GPU it is
     --- `tecs.EncodeAnimation` in `PostUpdate`, which writes nothing on a step
     --- where nothing changed what is playing, followed by
-    --- `tecs.ReportAnimation`, which derives `Completed` and `Looped` for the
-    --- entities carrying `AnimationEvents` and writes nothing at all.
+    --- `tecs.ReportAnimation`, which derives
+    --- [`Completed`](tealdoc:tecs.gfx.animation.Completed) and
+    --- [`Looped`](tealdoc:tecs.gfx.animation.Looped) for entities carrying
+    --- [`AnimationEvents`](tealdoc:tecs.gfx.animation.AnimationEvents).
     --- @param world The world to add the system to.
     plugin: function(world: World)
 
-    --- Chooses whether playback is resolved on the GPU.
+    --- Chooses whether the GPU resolves playback.
     ---
     --- Off, a system walks every playing animation on every fixed step and
-    --- writes the frame's region into the entity's `Sprite`, which marks that
+    --- writes the frame's region into the entity's
+    --- [`Sprite`](tealdoc:tecs.components.Sprite), which marks that
     --- column dirty and has extraction rewrite every instance in the
     --- archetype. One animating sprite therefore costs a rewrite of everything
     --- structurally like it, which is what stops a large animated scene being
     --- affordable.
     ---
-    --- On, the `Sprite` carries which animation is playing rather than the
+    --- On, the [`Sprite`](tealdoc:tecs.components.Sprite) carries which animation is
+    --- playing rather than the
     --- region it resolved to, and the vertex shader works the region out from
     --- a shared table and a clock. A frame changing then writes nothing at all,
     --- so what a step costs is what actually changed rather than what is
     --- shaped like it.
     ---
-    --- Three things read differently with this on. `Animation.frame` and
-    --- `Animation.time` stop being written, and `frameOf` and `timeOf` answer
-    --- from the clock instead. `Completed` and `Looped` reach only the entities
-    --- carrying `AnimationEvents`, and a one-shot that finishes leaves `playing`
-    --- alone unless something is listening for it. And the `Sprite` carries a
-    --- playback rather than a region, so its layer and image stop following the
-    --- sheet: the frame table carries both and the shader reads them there.
+    --- Three things read differently with this on. The host stops writing
+    --- `Animation.frame` and `Animation.time`; `frameOf` and `timeOf` answer
+    --- from the clock.
+    --- [`Completed`](tealdoc:tecs.gfx.animation.Completed) and
+    --- [`Looped`](tealdoc:tecs.gfx.animation.Looped) reach only entities carrying
+    --- [`AnimationEvents`](tealdoc:tecs.gfx.animation.AnimationEvents). A
+    --- one-shot that finishes leaves `playing` alone unless something listens
+    --- for it. The [`Sprite`](tealdoc:tecs.components.Sprite) carries playback rather
+    --- than a region, so the frame table supplies its layer and image.
     ---
     --- On is the default. Set this before `plugin`, since it decides which
     --- systems that installs, and worlds already carrying them keep them.
@@ -307,14 +356,14 @@ local record animation
     ---     nothing more, so what a step costs is what is running.
     useGPU: function(enabled: boolean)
 
-    --- Whether playback resolves on the GPU.
+    --- Returns whether playback resolves on the GPU.
     ---
     --- @return The setting as it stands now, which decides what the next world to
     ---     install the plugin gets. Worlds already carrying the systems keep the
     ---     ones they were built with, so this does not describe them.
     usesGPU: function(): boolean
 
-    --- Sheets, which live in `tecs.gfx.sheet` and are reached through here.
+    --- Exposes sheet types and constructors through the animation module.
     ---
     --- Constructing a sheet and playing one are one subject, so a game asks one
     --- module about both. The file stays its own because `frametable` reads it
@@ -326,7 +375,7 @@ local record animation
     --- here would be an animation rather than a sheet; the other eight say what
     --- they answer with in their return type and are unambiguous as they stand.
 
-    --- How a tag walks its span.
+    --- Selects how a tag walks its span.
     type Direction = sheet.Direction
     --- One frame, as `rects` and the builder take it.
     type Rect = sheet.Rect
@@ -334,27 +383,29 @@ local record animation
     type Tag = sheet.Tag
     --- A named region that moves across the frames.
     type Slice = sheet.Slice
-    --- Where a slice sits from one frame on.
+    --- Defines where a slice sits from one frame onward.
     type SliceKey = sheet.SliceKey
-    --- What `grid` takes.
+    --- Configures `grid`.
     type GridOptions = sheet.GridOptions
-    --- What `rects` takes.
+    --- Configures `rects`.
     type RectsOptions = sheet.RectsOptions
-    --- What `fromAseprite` takes.
+    --- Configures `fromAseprite`.
     type AsepriteOptions = sheet.AsepriteOptions
-    --- What `build` answers with.
+    --- Builds custom sheets one frame at a time.
     type Builder = sheet.Builder
 
-    --- An image divided into frames.
+    --- Read-only. Exposes an image divided into frames.
     Sheet: sheet.Sheet
 
-    --- Where an entity's quad turns and scales about.
+    --- Read-only. Exposes the pivot component that controls where an entity's
+    --- quad turns and scales.
     Pivot: sheet.Pivot
 
-    --- Milliseconds a frame is held when nothing says otherwise.
+    --- Read-only. Reports how many milliseconds a frame remains visible when
+    --- nothing overrides its duration.
     DEFAULT_DURATION: number
 
-    --- A sheet whose frames are the cells of a uniform grid.
+    --- Creates a sheet whose frames form a uniform grid.
     --- @param options Raises on a missing name, a non-positive image or frame
     ---     size, a grid that fits no cells, or a `count` past what the grid
     ---     holds. Frames come out in row-major order.
@@ -362,21 +413,22 @@ local record animation
     ---     carrying an `id`.
     grid: function(options: sheet.GridOptions): sheet.Sheet
 
-    --- A sheet whose frames are listed one rect at a time.
+    --- Creates a sheet from explicitly listed frame rectangles.
     --- @param options Raises on a missing name, a non-positive image size, an
     ---     empty frame list, or a frame with no positive size.
     --- @return The finished sheet, already registered under its name and
     ---     carrying an `id`.
     rects: function(options: sheet.RectsOptions): sheet.Sheet
 
-    --- A builder, for a sheet no constructor above describes.
+    --- Creates a builder for a sheet that the other constructors cannot
+    --- describe.
     --- @param name Name to register the finished sheet under.
     --- @param imageWidth Size of the image the frames are cut from, in pixels.
     --- @param imageHeight The other size, in pixels.
-    --- @return A builder, which registers the sheet when `finish` is called.
+    --- @return Returns a builder that registers the sheet when `finish` runs.
     build: function(name: string, imageWidth: number, imageHeight: number): sheet.Builder
 
-    --- A sheet from an Aseprite JSON export.
+    --- Creates a sheet from an Aseprite JSON export.
     --- @param options Raises on a missing name or an export the reader cannot
     ---     make a sheet out of.
     --- @return The finished sheet, already registered.
@@ -386,20 +438,20 @@ local record animation
     --- name, in place, so an entity playing the old id shows the new frames.
     --- @param built A sheet from any constructor here, registered moments ago
     ---     under a name something else already holds.
-    --- @return The live sheet, and nil, or nil and the reason it was refused.
+    --- @return Returns the live sheet and nil, or nil and the refusal reason.
     replace: function(built: sheet.Sheet): sheet.Sheet, string
 
-    --- The sheet a process-wide id names.
+    --- Returns the sheet represented by a process-wide id.
     --- @param id An id a constructor handed out.
     --- @return The sheet, or nil when the id names none.
     findSheetById: function(id: integer): sheet.Sheet
 
-    --- The sheet a name was registered under.
+    --- Returns the sheet registered under a name.
     --- @param name The name a constructor registered.
     --- @return The sheet, or nil when the name names none.
     findSheetByName: function(name: string): sheet.Sheet
 
-    --- How many times any sheet's frames have changed.
+    --- Returns how many times any sheet's frames have changed.
     ---
     --- What a cache of anything derived from a sheet compares against, so a
     --- sheet replaced or rebound under a running game invalidates it.

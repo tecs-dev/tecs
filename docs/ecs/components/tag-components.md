@@ -3,128 +3,72 @@ description: "Dataless presence tags via newTagComponent for flags, markers, and
 outline: deep
 ---
 
-# Tag Components
+# Tag components
 
-A **tag component** is a component with no data. Its presence on an entity is the entire signal. A tag's
-column holds no per-row state at all: reads resolve to the tag container itself and writes are no-ops, so
-membership costs nothing beyond the archetype's signature bit.
-
-If you need a refresher on the shared component model first, start with
-[Component Construction](/ecs/components/construction). For the broader component taxonomy, see the
-[Components overview](/ecs/components/). If you want the same presence-only idea but scoped to a relationship
-target, see [Relationships](/ecs/relationships/) (a `newRelationship` with just a name is the presence-only,
-target-only form) and [FFI Relationships](/ecs/relationships/ffi).
-
-Use tags for flags, markers, and classification: "this entity is `Selected`", "this mob is `Stunned`", "this
-node is a `SpawnPoint`". Anything that reduces to "is this entity part of group X?" is a good fit.
-
-## Creating a tag component
-
-Create a tag with `tecs.ecs.newTagComponent`:
+A tag has no per-entity value. Presence supplies the entire signal:
 
 ```teal
-local Selected = tecs.ecs.newTagComponent({name = "Selected"})
-local Stunned = tecs.ecs.newTagComponent({name = "Stunned"})
+local Selected <const> =
+    tecs.ecs.newTagComponent({name = "Selected"})
+local Stunned <const> =
+    tecs.ecs.newTagComponent({name = "Stunned"})
+
+world:set(entity, Selected)
+assert(world:has(entity, Selected))
+world:remove(entity, Selected)
 ```
 
-```teal
-function tecs.ecs.newTagComponent(options: TagComponentOptions): Component
-```
+Use tags for flags, markers, and classifications. Use a scalar or structured
+component when each entity needs a value.
 
-| Property    | Description                                                                                                                    |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `name`      | (**required**) The component name.                                                                                             |
-| `requires`  | Array of components to auto-add alongside this tag. See [Auto-dependencies](/ecs/components/#auto-dependencies-with-requires). |
-| `container` | Optional pre-declared container to register as the tag. Rarely needed; one is created otherwise.                               |
-| `transient` | If `true`, omit this tag from snapshots. Mutually exclusive with `serialize`.                                                  |
+`world:get` on a tag returns the tag container rather than row data. Prefer
+`world:has` for a presence check.
 
-**Returns:** the registered tag component.
+## Query membership
 
-## Adding, removing, and testing tags
-
-Tags use the standard component API:
+Tags belong in query filters, not column loops:
 
 ```teal
-world:set(entityId, Selected)        -- add
-world:remove(entityId, Selected)     -- remove
-world:has(entityId, Selected)        -- presence check (boolean)
-```
+local activeEnemies <const> = world:query({
+    include = {Enemy, Selected},
+    exclude = {Stunned},
+    type = "logic",
+})
 
-`world:has` is the read you want. `world:get` on a tag resolves to the tag container itself rather than
-per-entity data, because there is no per-entity data to return.
-
-You can also spawn an entity directly with tags:
-
-```teal
-world:spawn(Position(0, 0), Enemy, Hostile)
-```
-
-## Using tags in queries
-
-Tags slot into query descriptors like any other component:
-
-```teal
--- All selected enemies:
-world:query({include = {Enemy, Selected}})
-
--- All enemies that aren't stunned:
-world:query({include = {Enemy}, exclude = {Stunned}})
-```
-
-Because a tag column carries no per-row value, there is nothing useful to bind inside the archetype loop.
-Filter on presence via `include` / `exclude` in the query descriptor, then iterate the components that do
-carry data:
-
-```teal
-for archetype, len, entities in query:iter() do
-    local positions = archetype:get(Position)
-    for row = 1, len do
-        -- Every row is Selected by construction (the query's include list guaranteed it).
+for archetype, length, entities in activeEnemies:iter() do
+    local positions <const> = archetype:get(Position)
+    for row = 1, length do
+        updateSelection(entities[row], positions[row])
     end
 end
 ```
 
-## Performance
+The matching archetype signature already guarantees the tag's presence.
 
-Tag components are compact and fast to query. For workloads like "mark every visible entity this frame" across
-tens of thousands of entities, the difference versus a zero-field
-[table component](/ecs/components/table-components) matters. If you need a single primitive value instead of
-pure presence, compare them with [scalar components](/ecs/components/scalar-components) before reaching for a
-table or FFI payload component.
+## Structural cost
 
-Two performance properties worth knowing:
+Adding or removing a tag moves the entity between archetypes, just like any
+component membership change. Use batch operations for large groups:
 
-- **Presence checks are cheap.** A query matching on a tag is a bitmask test against the archetype's component
-  signature, not a column walk.
-- **Add/remove triggers an archetype transition**, just like any component. Adding `Selected` to a million
-  entities shuffles them all into new archetypes. For bulk paths use `world:batchSet` / `world:batchRemove`
-  against a query rather than a per-entity loop:
+```teal
+local targets <const> = world:query({
+    include = {Enemy, InBlastRadius},
+    temp = true,
+})
 
-  ```teal
-  local enemiesInBlast = world:query({
-      include = {Enemy, InBlastRadius},
-      temp = true
-  })
+world:batchSet(targets, Stunned)
 
-  world:batchSet(enemiesInBlast, Stunned)         -- tag all at once
-  -- ...later...
-  world:batchRemove(stunnedQuery, Stunned)        -- untag all at once
-  ```
+local stunnedEnemies <const> = world:query({
+    include = {Enemy, Stunned},
+    temp = true,
+})
 
-  Both batch operations take a `Query` built with `world:query(...)`, not a descriptor or a raw component
-  list.
+world:batchRemove(stunnedEnemies, Stunned)
+```
 
-## Built-in tags
+`Disabled` causes every ordinary query to exclude the entity unless the query
+explicitly includes that tag. `Paused` remains visible to render work;
+`type = "logic"` excludes it.
 
-Tecs ships a few tag components you'll interact with directly:
-
-- `tecs.ecs.Disabled`: auto-excluded from every query unless the query's `include` list names it
-  explicitly.
-- `tecs.ecs.Paused`: not auto-excluded, because paused entities keep rendering. A query declared
-  `type = "logic"` skips them; `exclude = {Paused}` does the same explicitly.
-
-See [Builtins](/ecs/builtins) for the full set.
-
-The [state stack](/ecs/states) also creates tag components at runtime. `world:createState("game")` registers
-and returns a tag component named `"gameState"`, and the stack auto-adds it to entities spawned while that
-state is on top.
+The [state stack](/ecs/states) creates a tag for each named state and adds the
+current top state's tag to new entities.

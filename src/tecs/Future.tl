@@ -1,79 +1,72 @@
---- A value that settles once, and the combinators over it.
----
---- Whatever started the work, what comes back is a `Future<T>`, and the
---- combinators are how a caller says what to do with it without waiting:
----
---- ```teal
---- tecs.system.runProcess({args = {"git", "rev-parse", "HEAD"}})
----     :map(function(result: tecs.system.ProcessResult): string
----         return result.output
----     end)
----     :recover(function(): string
----         return "unknown"
----     end)
----     :onSettle(function(revision: tecs.Future<string>)
----         print(revision.value)
----     end)
---- ```
----
---- Nothing here settles itself. A future advances when its source is pumped,
---- which a frame does through the subsystem that owns the source, and which
---- `wait` does for startup, a tool or a test.
----
---- Three subsystems in this tree used to own a private settle-once cell with
---- four states, a failure string, a blocking wait that pumped a worker, and a
---- word of its own for each state. They were the same object written more than
---- once. This is that object, written here, and what a subsystem returns
---- instead: `Future<proc.Result>` rather than a `Proc`. No subsystem exports an
---- alias for this type; callers write `Future`.
----
---- ## Four states
----
---- `status` is `"pending"`, `"ready"`, `"failed"` or `"canceled"`, and it is a
---- plain string field rather than a method, because several call sites read it
---- once a frame and a field read plus a string compare is what that should
---- cost.
----
---- `"canceled"` is separate from `"failed"` because `recover` must not run for
---- it: a caller who canceled a load did not ask for a fallback value. An
---- unwelcome answer is also not `"failed"`: a child process that exits 1 and an
---- HTTP response that is 404 both settle `"ready"`, because the code is the
---- answer rather than an error. `"failed"` means the work never produced one.
----
---- ## One thread
----
---- Futures are created and settled on the thread that pumps their source, and
---- there is no synchronization anywhere below. That is what removes the atomics
---- a general-purpose future library carries, so it is load-bearing rather than
---- incidental: **a source must settle its futures on the thread that pumps
---- it.** The only cross-thread boundary any source here has is
---- `Channel:receive`, which copies the bytes out before anything decodes them,
---- so no worker-owned memory and no worker thread reaches a listener. If a
---- second thread ever pumps a source, the answer is a queue handing
---- settlements back to the pumping thread, not a lock-free stack.
----
---- ## Order
----
---- Listeners run in registration order, and futures settled during one drain
---- are drained in the order they settled. Neither is arbitrary: a listener that
---- registers an image allocates through a shelf packer whose coordinates depend
---- on arrival order and end up in a `Sprite` component, which a snapshot
---- stores. Order being fixed does not make the system deterministic, because
---- two decodes still race on the worker and arrive in whatever order they
---- finish; it means a given arrival order always produces the same result,
---- which is the part that is in this design's gift.
----
---- ## Snapshots
----
---- A future is never in a snapshot. It holds listeners, a source and, through
---- its source, a native handle. What is snapshotted is a sequence cursor parked
---- on one, which stores a provider name, an entity and a key. So after a load
---- the wait survives and the future does not: nothing has been tracked,
---- `isPending` answers false, and the parked cursor resumes on the next fixed
---- step. That is why the sequence bridge looks a future up by
---- `(world, entity, key)` and never by object identity. A game that wants the
---- wait to mean something after a restore re-issues the work and re-tracks it
---- under the same key.
+--[=[
+A value that settles once, and the combinators over it.
+
+Assets, child processes, and HTTP requests return
+[`Future`](tealdoc:tecs.Future)`<T>`. Compose their
+results without blocking a frame:
+
+```teal
+tecs.system.runProcess({args = {"git", "rev-parse", "HEAD"}})
+    :map(function(result: tecs.system.ProcessResult): string
+        return result.output
+    end)
+    :recover(function(): string
+        return "unknown"
+    end)
+    :onSettle(function(revision: tecs.Future<string>)
+        print(revision.value)
+    end)
+```
+
+## Settlement
+
+`status` starts as `"pending"` and moves once to `"ready"`, `"failed"`, or
+`"canceled"`. A process exit code or HTTP error status still produces a ready
+result because the operation returned an answer. Failure means the operation
+produced none.
+
+`map` transforms a ready value. `flatMap` starts dependent work and adopts its
+future. `recover` turns failure into a value. Canceled futures skip all three
+transforms except cancellation propagation.
+
+Listeners run in registration order. Registering a listener after settlement
+queues it for the next source drain instead of calling it inline.
+
+## Pumping and waiting
+
+A future advances when its subsystem pumps the source.
+[`Application`](tealdoc:tecs.Application) frames do
+that automatically. `wait` pumps in blocking slices for startup, tools, and
+tests:
+
+```teal
+local result <const> = tecs.system.runProcess({
+    args = {"git", "status", "--porcelain"},
+}):wait(2000)
+
+if result.status == "ready" then
+    print(result.value.output)
+end
+```
+
+Do not call `wait` from a frame. A timeout leaves the future pending.
+
+A source must settle its futures on the same thread that pumps it.
+
+Canceling releases one consumer's interest. Shared operations stop only after
+their last consumer releases the root future.
+
+## Snapshots
+
+A snapshot never stores a future because it contains runtime listeners and
+source state. A saved sequence cursor retains only its provider, entity, and
+key. Reissue and track the work under the same key after load when the wait
+must continue.
+]=]
+
+-- Implementation details: Worker-backed sources copy serialized results
+-- through a channel. The pumping thread decodes those results and settles the
+-- futures, so a worker thread never reaches a listener.
 
 local log <const> = require("tecs.log")
 local time <const> = require("tecs.platform.time")
@@ -91,9 +84,9 @@ local LOGGER <const> = log.get("tecs.future")
 --- Reads the monotonic counter, in milliseconds.
 ---
 --- Through `time.now` rather than the binding, because a wait's budget is
---- wall time and `time.now` is documented as the one reading a replay
+--- wall time, and `time.now` defines the clock that a replay
 --- provider does not reach. A recorded run must not shorten or lengthen how
---- long a decode is waited for.
+--- long code waits for a decode.
 local now <const> = function(): number return time.now() * 1000.0 end
 
 --- Milliseconds a wait spends when neither the caller nor the source says.
@@ -102,21 +95,11 @@ local DEFAULT_WAIT_MS <const> = 5000
 --- Milliseconds one blocking slice costs when the source does not say.
 local DEFAULT_SLICE_MS <const> = 16
 
---- A value that settles once, and the combinators over it.
----
---- `status` moves from "pending" to exactly one of "ready", "failed" or "canceled" and
---- never moves again, so the first answer wins and every later settlement is dropped.
---- Reading `value` is only meaningful on "ready" and `error` only on "failed" or
---- "canceled".
----
---- Nothing settles itself. A future advances when its source is pumped, which a frame does
---- through the subsystem that owns the source and a startup path does through `wait`.
----
---- There is no synchronization here: a future is created, settled and read on one thread,
---- and a source must settle its futures on the thread that pumps it.
 local record Future<T>
-    --- Where a future's settlements come from, and what a blocking wait spends
-    --- its time in.
+    --- Receives a settled future.
+    type Listener = function(future: Future<any>)
+
+    --- Defines how a future receives settlements and advances a blocking wait.
     ---
     --- Every source in this tree is something that can be told to block for up
     --- to N milliseconds and hand over whatever arrived, which is the whole of
@@ -124,75 +107,79 @@ local record Future<T>
     --- process are a worker channel; an HTTP transfer is a Reqwest task whose
     --- bounded event queue has the same shape.
     record Source
-        --- Takes everything ready and settles what it belongs to.
+        --- Caller-writable. Takes every ready result and settles its future.
         ---
         --- Called once per frame per source, and costs a non-blocking receive
         --- that answers nil on any frame where nothing finished.
-        --- @return How many settled.
+        --- @param self The source to poll.
+        --- @return Returns the number of futures settled by this poll.
         poll: function(self: Source): integer
 
-        --- Blocks up to `ms` for one settlement and takes it.
+        --- Caller-writable. Blocks up to `ms` for one result and settles its
+        --- future.
         ---
         --- What `Future:wait` spends a slice in, so it must not block for
-        --- longer than it is asked to.
-        --- @return How many settled.
+        --- longer than the requested duration.
+        --- @param self The source to advance.
+        --- @param ms The maximum number of milliseconds to block.
+        --- @return Returns the number of futures settled while advancing.
         advance: function(self: Source, ms: number): integer
 
-        --- Milliseconds one `wait` slice blocks for. Optional; 16 by default.
+        --- Caller-writable. Sets the maximum milliseconds one `wait` slice
+        --- blocks. The source may omit it to use 16.
         sliceMs: number
 
-        --- Milliseconds `wait` spends when the caller names nothing. Optional;
-        --- 5000 by default. It lives here rather than on `wait` so a subprocess
-        --- can keep a longer default than a decode without a second
-        --- convention.
+        --- Caller-writable. Sets the milliseconds `wait` spends when its caller
+        --- supplies no timeout. The source may omit it to use 5000.
         defaultWaitMs: number
 
-        --- Stops the work behind a root future whose last watcher has gone.
+        --- Caller-writable. Stops the work behind a root future after its last
+        --- watcher leaves.
         ---
         --- Optional. A source with no hook leaves the work running and stops
         --- caring, which is what a future over something uncancelable can
         --- honestly do.
+        --- @param self The source that owns the work.
+        --- @param future The root future whose last watcher left.
         cancel: function(self: Source, future: Future<any>)
     end
 
-    --- "pending", "ready", "failed", or "canceled".
+    --- Read-only. Reports `"pending"`, `"ready"`, `"failed"` or `"canceled"`.
+    --- The source changes it once, and game code should not assign it.
     status: string
-    --- What settled. Valid only on "ready".
+    --- Read-only. Contains the settled result while `status` is `"ready"`.
+    --- The source writes it, and game code should not assign it.
     value: T
-    --- Why it did not. Set on "failed" and on "canceled".
+    --- Read-only. Explains a `"failed"` or `"canceled"` result. The source
+    --- writes it, and game code should not assign it.
     error: string
 
-    --- Where settlements come from. Rewritten when a `flatMap` moves the chain
-    --- onto the inner future's source, which is why `wait` re-reads it every
-    --- slice rather than caching it.
+    --- Engine-owned. Stores the current settlement source. Ordinary game code
+    --- should ignore this field.
     _source: Source
-    --- Registered dependents, in registration order. Allocated on the first.
-    _listeners: {function(Future<any>)}
-    --- How many listeners have been registered. Counted rather than measured,
-    --- because canceling a link clears its slot and `#` over an array with a
-    --- hole in it is not defined.
+    --- Engine-owned. Stores registered dependents in delivery order. Ordinary
+    --- game code should ignore this field.
+    _listeners: {Listener}
+    --- Engine-owned. Records the number of registered listeners without using
+    --- the length of a sparse array. Ordinary game code should ignore it.
     _listenerCount: integer
-    --- How many of them have run. A future already settled when a listener is
-    --- added is queued again, and this is what stops the earlier listeners
-    --- running a second time.
+    --- Engine-owned. Records how many listeners have run. Ordinary game code
+    --- should ignore this field.
     _delivered: integer
-    --- Consumers of this future while it is pending. A deduped load hands the
-    --- same future to a second caller and counts it; each derived future counts
-    --- as one; the source's cancel hook runs when the count reaches zero.
+    --- Engine-owned. Counts consumers while this future remains pending.
+    --- Ordinary game code should ignore this field.
     _watchers: integer
-    --- Whether the source has work of its own behind this future, so the cancel
-    --- hook is worth calling. True for a future the source made and false for
-    --- every derived one, which inherits the source only so a `wait` on it
-    --- knows what to advance. Without this a `map` link giving up would stop
-    --- the decode its upstream is still waiting for.
+    --- Engine-owned. Reports whether this future owns source work that can be
+    --- canceled. Ordinary game code should ignore this field.
     _owned: boolean
-    --- The future this one derives from, so canceling a link can drop its
-    --- listener and decrement what it was watching.
+    --- Engine-owned. Stores the upstream future for a derived link. Ordinary
+    --- game code should ignore this field.
     _upstream: Future<any>
-    --- Index of this future's listener in `_upstream._listeners`.
+    --- Engine-owned. Stores this link's listener index in the upstream future.
+    --- Ordinary game code should ignore this field.
     _upstreamAt: integer
-    --- Every input of a join, which has no single upstream. Canceling the join
-    --- decrements all of them.
+    --- Engine-owned. Stores every upstream future in a join. Ordinary game
+    --- code should ignore this field.
     _upstreams: {Future<any>}
 
     --- Registers a dependent, and returns this future.
@@ -200,53 +187,57 @@ local record Future<T>
     --- The primitive the others are built on. A listener on a future that has
     --- already settled runs on the next drain rather than inline, which is what
     --- keeps a chain built one link at a time from growing the Lua stack. A
-    --- listener that raises is logged and does not stop the others.
+    --- listener that raises writes to the log and does not stop the others.
     ---
+    --- @param self The future on which to register the listener.
     --- @param listener Called once, with this future, whichever of the three terminal
     ---     states it reached; read `status` rather than assuming a value. Nil raises.
     --- @return This same future, not a derived one, so chaining `onSettle` registers
     ---     several listeners on one thing rather than building a chain.
-    onSettle: function(self: Future<T>, listener: function(Future<T>)): Future<T>
+    onSettle: function(self: Future<T>, listener: function(future: Future<T>)): Future<T>
 
-    --- A future carrying `transform` applied to this one's value.
+    --- Returns a future carrying `transform` applied to this future's value.
     ---
     --- `transform` runs only on "ready". A "failed" or "canceled" upstream
     --- propagates without calling it, and a raise inside it becomes this link's
     --- failure.
     ---
+    --- @param self The future whose ready value to transform.
     --- @param transform Called at most once, with the upstream value. Nil raises here and
     ---     now rather than at settlement.
     --- @return A new future watching this one. Canceling it gives up this link's interest
     ---     in the upstream and does not settle the upstream unless nothing else wants it.
-    map: function<U>(self: Future<T>, transform: function(T): U): Future<U>
+    map: function<U>(self: Future<T>, transform: function(value: T): U): Future<U>
 
-    --- A future carrying whatever the future `transform` starts settles to.
+    --- Returns a future that adopts the future started by `transform`.
     ---
     --- The one combinator that expresses a dependent second request. Two things
     --- follow from `transform` starting work rather than transforming work
     --- already done: the derived future's source becomes the inner future's, so
     --- a chain can begin on a worker and end somewhere else; and canceling
-    --- before the outer settles stops `transform` from ever being called, since
+    --- before the outer settles prevents any call to `transform`, since
     --- there is nothing yet to cancel afterwards.
     ---
+    --- @param self The future whose ready value starts the dependent work.
     --- @param transform Called at most once, on "ready" only. Returning nil rather than a
     ---     future fails this link; nil for `transform` itself raises here and now.
     --- @return A new future settling to whatever the inner one settles to, status and all,
-    ---     so an inner that is canceled leaves this canceled and not failed.
-    flatMap: function<U>(self: Future<T>, transform: function(T): Future<U>): Future<U>
+    ---     so canceling an inner leaves this future canceled and not failed.
+    flatMap: function<U>(self: Future<T>, transform: function(value: T): Future<U>): Future<U>
 
-    --- A future that turns this one's failure into a value.
+    --- Returns a future that turns this future's failure into a value.
     ---
     --- `recovery` runs only on "failed". A "canceled" upstream is not
     --- recovered, which is the whole reason the two are distinct states.
     ---
+    --- @param self The future whose failure to recover.
     --- @param recovery Given the upstream's error string. Raising inside it fails this
     ---     link with that raise instead, so a recovery cannot fail silently. Nil raises
     ---     here and now.
     --- @return A new future watching this one, carrying the same type: a recovery
     ---     produces a value where the upstream produced an error, so a ready
     ---     upstream passes through untouched.
-    recover: function(self: Future<T>, recovery: function(string): T): Future<T>
+    recover: function(self: Future<T>, recovery: function(err: string): T): Future<T>
 
     --- Blocks until this future settles, advancing its source.
     ---
@@ -255,7 +246,8 @@ local record Future<T>
     --- budget is wall clock rather than a count of slices, so a source that
     --- answers faster than its slice size does not shorten the wait.
     ---
-    --- A future with no source cannot be advanced and returns at once.
+    --- A future with no source cannot advance and returns at once.
+    --- @param self The future to wait for.
     --- @param timeoutMs How long to wait. Defaults to the source's
     ---     `defaultWaitMs`, or 5000. Running out leaves it "pending".
     --- @return This future.
@@ -271,6 +263,7 @@ local record Future<T>
     --- in turn reach zero.
     ---
     --- Canceling a settled future is a no-op.
+    --- @param self The future whose consumer interest to release.
     cancel: function(self: Future<T>)
 
     --- Settles this future with a value, if nothing has settled it yet.
@@ -281,12 +274,14 @@ local record Future<T>
     --- settling work it does not own. Settling twice is a no-op, so the first
     --- answer wins.
     ---
+    --- @param self The future to settle.
     --- @param value Stored as it is, not copied, and read back off `value`. Nil is a legal
     ---     value and still settles "ready", which is how a future over nothing settles.
     complete: function(self: Future<T>, value: T)
 
     --- Settles this future as failed, if nothing has settled it yet.
     ---
+    --- @param self The future to fail.
     --- @param err A sentence for a log, not something to match on. Nil becomes "failed",
     ---     so `error` is set on every failed future.
     fail: function(self: Future<T>, err: string)
@@ -300,6 +295,7 @@ local record Future<T>
     --- or at its deadline reaches its future through here, as does a transfer
     --- taken off the multi.
     ---
+    --- @param self The future to settle as canceled.
     --- @param err Nil becomes "canceled". No watcher counting happens here: this settles
     ---     the future outright, whoever else was waiting on it.
     abandon: function(self: Future<T>, err: string)
@@ -312,20 +308,22 @@ local record Future<T>
     ---
     --- The producer half, for a source settling its own work and for a test
     --- that decides when something finishes. `source` is what a `wait` on it
-    --- advances; omitted, the future can only be settled by whoever holds it
+    --- advances. When omitted, only code that holds the future can settle it,
     --- and a `wait` on it returns at once.
     ---
+    --- @param source The optional source that advances blocking waits.
     --- @return A future at "pending" with one watcher, so a single `cancel` on it settles
     ---     it "canceled" and calls the source's hook.
     pending: function<U>(source?: Source): Future<U>
 
-    --- A future already carrying a value.
+    --- Creates a future that already carries a value.
     ---
+    --- @param value The value to store without copying.
     --- @return A future at "ready" with no source, so `wait` on it returns at once and
     ---     `cancel` does nothing. A listener added to it still runs on the next drain.
     settled: function<U>(value: U): Future<U>
 
-    --- A future already carrying a failure.
+    --- Creates a future that already carries a failure.
     ---
     --- @param err Nil becomes "failed".
     --- @return A future at "failed" with no source, so `wait` on it returns at once
@@ -333,7 +331,7 @@ local record Future<T>
     ---     transform, while `recover` on it is the one thing that still runs.
     failed: function<U>(err: string): Future<U>
 
-    --- A future carrying every input's value, in input order.
+    --- Joins every input value into one future in input order.
     ---
     --- Settles when the last input does, whatever order they settle in. A
     --- failed or canceled input fails the join with that input's error; the
@@ -352,8 +350,8 @@ local record Future<T>
     ---
     --- @param inputs Read once; adding to the list afterwards changes nothing. Empty gives
     ---     an already-ready future over an empty array. Nil raises.
-    --- @return A future whose value is a fresh array indexed as `inputs` is, so a hole
-    ---     cannot appear: the join only settles "ready" once every slot is filled.
+    --- @return A future whose value is a fresh array in `inputs` order. The join
+    ---     settles "ready" only after every slot contains a value, so no hole can appear.
     all: function<U>(inputs: {Future<U>}): Future<{U}>
 
     --- Makes a future something a sequence can wait for.
@@ -370,20 +368,21 @@ local record Future<T>
     --- function's to change. An await needs a live bound entity, because the VM
     --- releases a cursor whose entity is dead rather than stranding it, so the
     --- key is a pair and the entity is the game's own loader. The key is a
-    --- program constant, so a future is awaited by the name it was tracked
+    --- program constant, so a program awaits a future by the name used to track it
     --- under rather than by identity, which is what lets the wait survive a
     --- snapshot the future cannot. And only the fixed clock delivers awaits, so
     --- a program on the frame or presentation clock parked on a future is
     --- released by a fixed step; that is already true of every awaitable.
     ---
-    --- The entry is dropped when the future settles, so a program that reaches
+    --- Tecs drops the entry when the future settles, so a program that reaches
     --- its await after the work finished carries on rather than hanging, and
     --- nothing accumulates. Tracking a second future under one entity and key
     --- replaces the first.
     ---
-    --- There is no `setPaused`: a decode in flight cannot be paused, and the
+    --- There is no `setPaused`: the asset worker cannot pause a decode in flight, and the
     --- contract says a provider that cannot pause its work does not offer it.
     ---
+    --- @param world The world that owns the bound entity.
     --- @param entity What the await binds to, and it must still be alive when the program
     ---     parks; the VM releases a cursor whose entity is dead.
     --- @param key A program constant, not something derived per call, since the await
@@ -536,8 +535,8 @@ end
 --- A future derived from this one: same source, and watching it.
 ---
 --- Built and attached in two steps, because attaching to an upstream that has
---- already settled runs the listener from inside `listen`, and a listener needs
---- the future it settles to exist before it can be called.
+--- already settled runs the listener from inside `listen`, and that listener
+--- needs the derived future before it runs.
 local function derive(upstream: Future<any>): Future<any>
     local derived = newFuture(upstream._source)
     derived._upstream = upstream
@@ -921,7 +920,7 @@ end
 
 local type Tracked = {integer: {string: Future<any>}}
 
---- Futures a sequence can be parked on, by entity and then by key.
+--- Futures where a sequence can park, indexed by entity and then key.
 local TRACKED <const> = Context.newKey("tecs.future.tracked", nil as Tracked)
 
 function Future.track<U>(world: World, entity: integer, key: string, future: Future<U>)

@@ -1,4 +1,6 @@
---- runIf.tl - Scheduling and timer helpers for system execution
+--[=[
+runIf.tl - Scheduling and timer helpers for system execution
+]=]
 local types <const> = require("tecs.types")
 local random <const> = require("tecs.random")
 

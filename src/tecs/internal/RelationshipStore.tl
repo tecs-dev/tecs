@@ -1,26 +1,28 @@
---- RelationshipStore: per-world storage for relationship inverse indexes (and
---- optionally forward data for sparse relationships).
----
---- Two implementations behind one interface:
----
----   Sparse -- owns BOTH a forward map (entityId → value) and an inverse index.
----     Used for relationships declared with `sparse = true`. The forward map
----     is the primary storage for the relationship value.
----
----   Dense  -- owns ONLY an inverse index. Forward data lives in archetype
----     columns (one column per (container, target) pair). Used for dense
----     relationships with `reverseIndex = true`. Forward storage methods
----     (get/set/has/etc) are no-ops on this implementation.
----
---- Both implementations satisfy the same `RelationshipStore` record so call
---- sites can dispatch polymorphically. Each implementation uses a single
---- shared metatable so LuaJIT sees a bimorphic call site rather than
---- per-instance metatables.
----
---- Lifecycle: relationship stores live on the World (`world.relationshipStores`)
---- and are created lazily on first use via `world:getRelationshipStore(container)`.
---- This prevents the cross-world state leak that would occur if stores lived on
---- the relationship container itself.
+--[=[
+RelationshipStore: per-world storage for relationship inverse indexes (and
+optionally forward data for sparse relationships).
+
+Two implementations behind one interface:
+
+  Sparse -- owns BOTH a forward map (entityId → value) and an inverse index.
+    Used for relationships declared with `sparse = true`. The forward map
+    is the primary storage for the relationship value.
+
+  Dense  -- owns ONLY an inverse index. Forward data lives in archetype
+    columns (one column per (container, target) pair). Used for dense
+    relationships with `reverseIndex = true`. Forward storage methods
+    (get/set/has/etc) are no-ops on this implementation.
+
+Both implementations satisfy the same `RelationshipStore` record so call
+sites can dispatch polymorphically. Each implementation uses a single
+shared metatable so LuaJIT sees a bimorphic call site rather than
+per-instance metatables.
+
+Lifecycle: relationship stores live on the World (`world.relationshipStores`)
+and are created lazily on first use via `world:getRelationshipStore(container)`.
+This prevents the cross-world state leak that would occur if stores lived on
+the relationship container itself.
+]=]
 
 local InverseIndex <const> = require("tecs.internal.InverseIndex")
 local types <const> = require("tecs.types")

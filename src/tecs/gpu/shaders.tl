@@ -1,20 +1,22 @@
---- Finds shader sources, resolves their includes, and reads their variants.
----
---- GLSL lives in `.glsl` files under `shaders/` in an asset root, not in Lua
---- strings. The packaging step has to enumerate every shader the engine can
---- ask for, and a directory glob does that without a device, a window, a world,
---- or Lua running at all. Files also get syntax highlighting, a language server
---- and a formatter, which a long string does not.
----
---- A console having no filesystem does not argue against this: files are read
---- at build time on a developer's machine, and a release reads only the pack.
----
---- Stage is in the filename rather than a directory, because a shared include
---- has no home under `fragment/` or `vertex/` and is included by both.
----
----   shaders/instance.frag.glsl        fragment
----   shaders/instance.cull.comp.glsl   compute
----   shaders/include/depth.glsl        included, never compiled alone
+--[=[
+Finds shader sources, resolves their includes, and reads their variants.
+
+GLSL lives in `.glsl` files under `shaders/` in an asset root, not in Lua
+strings. The packaging step has to enumerate every shader the engine can
+ask for, and a directory glob does that without a device, a window, a world,
+or Lua running at all. Files also get syntax highlighting, a language server
+and a formatter, which a long string does not.
+
+A console having no filesystem does not argue against this: files are read
+at build time on a developer's machine, and a release reads only the pack.
+
+Stage is in the filename rather than a directory, because a shared include
+has no home under `fragment/` or `vertex/` and is included by both.
+
+  shaders/instance.frag.glsl        fragment
+  shaders/instance.cull.comp.glsl   compute
+  shaders/include/depth.glsl        included, never compiled alone
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local content <const> = require("tecs.platform.content")

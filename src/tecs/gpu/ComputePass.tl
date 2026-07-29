@@ -1,20 +1,22 @@
---- A compute pass recorded into a frame's command buffer.
----
---- Read-write bindings are declared when the pass begins rather than bound
---- inside it. That is SDL_GPU's design, not an accident of this wrapper: the
---- declaration is what lets SDL insert the barriers between a compute pass
---- that writes a buffer and the render pass that reads it.
----
---- Nothing is synchronized within a pass. Two dispatches in one pass race
---- against each other over anything they both touch, so a dispatch that reads
---- what an earlier one wrote belongs in a second pass: finish this one and
---- begin another. That is also the only sequencing available, since no other
---- pass of any kind may begin on the command buffer until this one finishes.
----
---- `begin` and `bindStorageBuffers` each fill a module-level array that SDL
---- copies out of during the call and never reads again, so one of each may be
---- in flight at a time. That is the same constraint SDL's own one-pass rule
---- already imposes, and it is what makes both allocation free.
+--[=[
+A compute pass recorded into a frame's command buffer.
+
+Read-write bindings are declared when the pass begins rather than bound
+inside it. That is SDL_GPU's design, not an accident of this wrapper: the
+declaration is what lets SDL insert the barriers between a compute pass
+that writes a buffer and the render pass that reads it.
+
+Nothing is synchronized within a pass. Two dispatches in one pass race
+against each other over anything they both touch, so a dispatch that reads
+what an earlier one wrote belongs in a second pass: finish this one and
+begin another. That is also the only sequencing available, since no other
+pass of any kind may begin on the command buffer until this one finishes.
+
+`begin` and `bindStorageBuffers` each fill a module-level array that SDL
+copies out of during the call and never reads again, so one of each may be
+in flight at a time. That is the same constraint SDL's own one-pass rule
+already imposes, and it is what makes both allocation free.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

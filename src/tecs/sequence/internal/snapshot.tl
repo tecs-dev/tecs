@@ -1,14 +1,16 @@
---- Saving and restoring a world's playbacks.
----
---- A snapshot payload is versioned: a save written by a build whose
---- cursor layout this one does not understand is refused rather than
---- restored field by field into a half-cursor.
----
---- A snapshot carries the exact program versions its live cursors are
---- running, so a load resumes the instructions each playback started with
---- even when the code has since been redefined. Programs restored this way
---- register under their original (name, version), leaving the newest version
---- untouched for later `play` calls.
+--[=[
+Saving and restoring a world's playbacks.
+
+A snapshot payload is versioned: a save written by a build whose
+cursor layout this one does not understand is refused rather than
+restored field by field into a half-cursor.
+
+A snapshot carries the exact program versions its live cursors are
+running, so a load resumes the instructions each playback started with
+even when the code has since been redefined. Programs restored this way
+register under their original (name, version), leaving the newest version
+untouched for later `play` calls.
+]=]
 
 local type types = require("tecs.types")
 local log <const> = require("tecs.log")

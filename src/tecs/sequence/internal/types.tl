@@ -1,8 +1,10 @@
---- Shared record types for the sequencer.
----
---- A leaf module in the shape of `debug/internal/cmdtypes`: the internal
---- modules read these without requiring the public surface back, which would
---- be a cycle. `tecs.sequence` re-exports every one of them.
+--[=[
+Shared record types for the sequencer.
+
+A leaf module in the shape of `debug/internal/cmdtypes`: the internal
+modules read these without requiring the public surface back, which would
+be a cycle. `tecs.sequence` re-exports every one of them.
+]=]
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")

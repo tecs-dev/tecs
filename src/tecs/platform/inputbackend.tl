@@ -1,19 +1,21 @@
---- The device half of the platform seam, in both directions.
----
---- The event stream carries input *in*. Rumble, LED, cursor modes and text
---- input go the other way: they are commands a game issues and the platform
---- carries out, and nothing in the typed event vocabulary can express them. So
---- the seam has a second face, and this is it.
----
---- `Input` and `Gamepad` hold a backend and never reach the FFI themselves. A
---- port supplies one of these and touches nothing above it; the SDL
---- implementation below is the worked example, and the only thing in the input
---- layer that names an SDL symbol.
----
---- Names are resolved here too. "south" and "leftShoulder" are the engine's
---- vocabulary, not SDL's, but the numbers behind them are the platform's, so a
---- port that numbers its buttons differently answers differently and every
---- query above keeps working.
+--[=[
+The device half of the platform seam, in both directions.
+
+The event stream carries input *in*. Rumble, LED, cursor modes and text
+input go the other way: they are commands a game issues and the platform
+carries out, and nothing in the typed event vocabulary can express them. So
+the seam has a second face, and this is it.
+
+`Input` and `Gamepad` hold a backend and never reach the FFI themselves. A
+port supplies one of these and touches nothing above it; the SDL
+implementation below is the worked example, and the only thing in the input
+layer that names an SDL symbol.
+
+Names are resolved here too. "south" and "leftShoulder" are the engine's
+vocabulary, not SDL's, but the numbers behind them are the platform's, so a
+port that numbers its buttons differently answers differently and every
+query above keeps working.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

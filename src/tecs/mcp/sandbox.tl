@@ -1,15 +1,17 @@
---- The environment `run_lua` compiles into.
----
---- Two jobs, kept here rather than in the tool so protocol dispatch carries no
---- policy. It decides what code can reach, and it holds the environment across
---- calls so an agent can stash a handle in one call and read it in the next,
---- which is what makes an exploratory session possible at all.
----
---- The filtering is a guard rail, not a security boundary. `run_lua` exists to
---- do what no structured tool covers, so anything reachable from the engine is
---- reachable from it; what is removed are the operations that damage the
---- machine rather than the game, because an agent exploring a world should not
---- be able to delete a file by mistyping a table name.
+--[=[
+The environment `run_lua` compiles into.
+
+Two jobs, kept here rather than in the tool so protocol dispatch carries no
+policy. It decides what code can reach, and it holds the environment across
+calls so an agent can stash a handle in one call and read it in the next,
+which is what makes an exploratory session possible at all.
+
+The filtering is a guard rail, not a security boundary. `run_lua` exists to
+do what no structured tool covers, so anything reachable from the engine is
+reachable from it; what is removed are the operations that damage the
+machine rather than the game, because an agent exploring a world should not
+be able to delete a file by mistyping a table name.
+]=]
 
 local data <const> = require("tecs.data")
 

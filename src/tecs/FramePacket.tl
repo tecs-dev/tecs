@@ -1,18 +1,20 @@
---- One frame's worth of render data, as it crosses from the world to the GPU.
----
---- The extractor fills one and the backend consumes it. Neither reaches into
---- the other: everything the backend needs to record a frame is here, and
---- nothing here needs a world to read it.
----
---- What is deliberately *not* here is the instance and bounds bytes. Those are
---- already in the mapped staging the backend owns, written straight into it by
---- the extractor, and copying them into a packet would be the intermediate copy
---- the whole design exists to avoid. What crosses is where they went: the slot
---- that was written and the byte ranges within it.
----
---- Nothing here is heap-backed and nothing refers to a Lua object. The ranges
---- and the lights are already C storage and the rest is scalars, which is what
---- keeps a frame's crossing free of anything the collector has to walk.
+--[=[
+One frame's worth of render data, as it crosses from the world to the GPU.
+
+The extractor fills one and the backend consumes it. Neither reaches into
+the other: everything the backend needs to record a frame is here, and
+nothing here needs a world to read it.
+
+What is deliberately *not* here is the instance and bounds bytes. Those are
+already in the mapped staging the backend owns, written straight into it by
+the extractor, and copying them into a packet would be the intermediate copy
+the whole design exists to avoid. What crosses is where they went: the slot
+that was written and the byte ranges within it.
+
+Nothing here is heap-backed and nothing refers to a Lua object. The ranges
+and the lights are already C storage and the rest is scalars, which is what
+keeps a frame's crossing free of anything the collector has to walk.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local dirtyranges <const> = require("tecs.gpu.dirtyranges")

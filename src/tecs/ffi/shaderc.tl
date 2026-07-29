@@ -1,8 +1,10 @@
---- shaderc binding: GLSL source to SPIR-V.
----
---- This is the front half of the shader pipeline. Runtime compilation is a
---- requirement rather than a convenience: material variants are assembled from
---- source at load time, so an offline-only bake would not serve them.
+--[=[
+shaderc binding: GLSL source to SPIR-V.
+
+This is the front half of the shader pipeline. Runtime compilation is a
+requirement rather than a convenience: material variants are assembled from
+source at load time, so an offline-only bake would not serve them.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 

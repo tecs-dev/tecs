@@ -5,9 +5,8 @@ outline: deep
 
 # Tecs CLI
 
-The command line tool is the primary way to use Tecs: install one file, run `tecs new`, and never install
-LuaRocks or a compiler on a player's machine. The executable carries the engine, Teal toolchain, project template
-and its Rust native services inside the same file.
+The `tecs` executable carries the engine, Teal toolchain, project template, and native services. It builds games
+without LuaRocks or a compiler on the player's machine.
 
 ## Commands
 
@@ -24,13 +23,13 @@ and its Rust native services inside the same file.
 | `tecs docs [query]`             | Browse or search the offline reference carried with the tool          |
 | `tecs mcp`                      | Connect an MCP client on stdio to a running game's HTTP endpoint      |
 
-Clap parses and validates this surface. `tecs help`, `tecs --help` and command-specific `--help` render it, and
-`tecs --version` prints the CLI version.
+Run `tecs help`, `tecs --help`, or `<command> --help` for the complete command reference. `tecs --version` prints
+the CLI version.
 
 A project is a directory containing `tecs.lua`. Project commands search upward for it, so they work from any
 directory inside the project.
 
-## Run another entry
+## Entries and arguments
 
 With no operand, `tecs run` uses the `entry` configured in `tecs.lua`. A project-relative `.tl` or `.lua` path
 selects another application entry for that invocation:
@@ -42,14 +41,10 @@ tecs run tools/asset-preview.lua
 tecs run src/main.tl -- --debug "save slot 2"
 ```
 
-A Teal entry is type-checked and compiled with the project. It may live under the configured source directory or
-elsewhere inside the project. A Lua entry runs directly after the project has been built. Both entry forms receive
-the `tecs` global and can require the project's compiled modules, and both must return the application created by
-`tecs.newApplication`.
+The build type-checks and compiles a Teal entry. A Lua entry runs after the project build. Both receive the `tecs`
+global, can require compiled project modules, and must return `tecs.newApplication(...)`.
 
-Only operands after `--` are game arguments. The application sees them as `arg[1]` through `arg[#arg]`; the CLI
-command, selected entry and host bootstrap are not present in that table. Use the separator even when the first
-game argument does not begin with a hyphen, so the command remains unambiguous.
+Only operands after `--` become game arguments. The application receives them in `arg[1]` through `arg[#arg]`.
 
 ## Offline reference
 
@@ -62,14 +57,11 @@ tecs docs physics
 tecs docs tecs.physics.attach
 ```
 
-The reference is staged from this site's Markdown and embedded in the
-single-file executable with the rest of its content. It works outside a
-project and does not use the network. An exact or unique match exits zero. An
-unknown query exits one with the command that lists available topics, and an
-ambiguous query lists its matches and exits two so scripts can distinguish it
-from a missing reference.
+The single-file executable embeds this site's Markdown. `tecs docs` works outside a project and never uses the
+network. An exact or unique match exits zero. A missing query exits one. An ambiguous query lists its matches and
+exits two.
 
-## Connect an agent to a running game
+## MCP bridge
 
 Configure the agent to start the single-file CLI as an MCP stdio server:
 
@@ -84,11 +76,9 @@ Configure the agent to start the single-file CLI as an MCP stdio server:
 }
 ```
 
-`tecs mcp` uses the official RMCP implementation at both ends. It keeps stdout exclusively for MCP, discovers a
-running game's Streamable HTTP endpoint at `/mcp`, and proxies the game's current tools to the invoking agent.
-Diagnostics go to stderr.
+`tecs mcp` keeps stdout for MCP, discovers a running game's Streamable HTTP endpoint at `/mcp`, and proxies the
+game's tools to the client. It writes diagnostics to stderr.
 
-Discovery checks three loopback ports beginning at `TECS_MCP_PORT`, or `19999` when the variable is absent or
-invalid: `19999`, `20000` and `20001` by default. It retries after one second when the game is still starting. If
-the game restarts or the selected connection fails, the next operation drops the stale session, scans those ports
-again and reconnects.
+Discovery checks three loopback ports beginning at `TECS_MCP_PORT`, or `19999` by default. It retries after one
+second while the game starts. After a restart or failed connection, the next operation scans the ports and
+reconnects.

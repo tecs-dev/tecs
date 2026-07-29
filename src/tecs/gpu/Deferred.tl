@@ -1,67 +1,69 @@
---- The standard deferred pipeline, assembled on a PassGraph.
----
---- Five passes: geometry fills a G-buffer, lighting resolves it against a
---- buffer of lights, composite turns that into the frame's image in the
---- `scene` target, forward blends what the G-buffer could not hold over that
---- image, and present copies `scene` to the swapchain. Geometry and forward are
---- callbacks because what to draw is the caller's problem; everything else is
---- the engine's opinion and is built in.
----
---- Four more when `shadows` is set, all of them between geometry and lighting,
---- because a shadow is not something done to a finished image. Three build the
---- occluder mask: one draw of every occluder's silhouette, then a separable
---- blur across and down. The fourth fills the drop-shadow target. Lighting
---- reads both, and reads them as one mask marched by every light rather than as
---- a pass per light, which is what makes the cost independent of how many
---- lights the scene holds.
----
---- The two are not the same feature at different strengths. The mask is inside
---- the light loop and blocks a light's own contribution; the drop-shadow target
---- multiplies the sum, ambient included, so in a scene lit mostly by ambient
---- the mask has no output at all and the other one is the whole effect. That is
---- also why an occluder and a drop-shadow caster are exclusive roles rather
---- than two flags: a thing that wants to be grounded is exactly the thing that
---- must not put a light-blocking silhouette in the mask, because a crowd of
---- them merges under the mask's max blend into one flat mat of darkness.
----
---- Composite and present are two passes rather than one because a pass writing
---- the swapchain is the end of the frame: the swapchain texture belongs to the
---- presenter once submitted, is not created with the sampled usage bit, and is
---- not a target the graph owns, so nothing can read it and nothing can follow
---- it. `scene` is the seam that buys the gap. It is a graph target like any
---- other, frame sized, sampled, and readable between frames, and everything
---- declared between composite and present sees it. `forward` is the first such
---- pass and the shape the rest take:
----
---- * A post-process reading `scene` and writing it back, or reading it and
----   writing a target of its own that a later pass folds in.
---- * A second view compositing into a rectangle of the same `scene`.
----
---- `scene` declares no clear, so every pass that writes it loads what is
---- already there and each of those adds to the last. Composite is what makes
---- that defined: it covers every pixel and runs first, so nothing downstream
---- reads memory no frame has written. Where a shared target does declare a
---- clear, as `lit` does, a pass that must not clear it says
---- `clear = PassGraph.LOAD`.
----
---- Deferred is what makes light count independent of object count: geometry is
---- rasterised once regardless of how many lights touch it, and lighting runs
---- once per pixel regardless of how many objects overlap it.
----
---- Geometry owns the depth attachment, testing and writing, so wherever two
---- instances overlap the nearer one is what the G-buffer keeps. Forward tests
---- against the same attachment and writes none of it, which is what puts
---- blended geometry behind the opaque geometry in front of it and leaves it
---- unable to hide another blended fragment from the blend. The three
---- fullscreen passes have none: each covers every pixel exactly once and has
---- nothing to be occluded by, so an attachment there would be state to keep in
---- step for no result.
----
---- One compute dispatch runs ahead of the graph, binning the lights into a
---- grid over what the camera can see so the lighting pass reads a tile's worth
---- rather than the whole buffer. It is here rather than in the graph because
---- the graph is a graph of render passes; the same is true of the instance
---- cull, which runs ahead of `render` for the same reason.
+--[=[
+The standard deferred pipeline, assembled on a PassGraph.
+
+Five passes: geometry fills a G-buffer, lighting resolves it against a
+buffer of lights, composite turns that into the frame's image in the
+`scene` target, forward blends what the G-buffer could not hold over that
+image, and present copies `scene` to the swapchain. Geometry and forward are
+callbacks because what to draw is the caller's problem; everything else is
+the engine's opinion and is built in.
+
+Four more when `shadows` is set, all of them between geometry and lighting,
+because a shadow is not something done to a finished image. Three build the
+occluder mask: one draw of every occluder's silhouette, then a separable
+blur across and down. The fourth fills the drop-shadow target. Lighting
+reads both, and reads them as one mask marched by every light rather than as
+a pass per light, which is what makes the cost independent of how many
+lights the scene holds.
+
+The two are not the same feature at different strengths. The mask is inside
+the light loop and blocks a light's own contribution; the drop-shadow target
+multiplies the sum, ambient included, so in a scene lit mostly by ambient
+the mask has no output at all and the other one is the whole effect. That is
+also why an occluder and a drop-shadow caster are exclusive roles rather
+than two flags: a thing that wants to be grounded is exactly the thing that
+must not put a light-blocking silhouette in the mask, because a crowd of
+them merges under the mask's max blend into one flat mat of darkness.
+
+Composite and present are two passes rather than one because a pass writing
+the swapchain is the end of the frame: the swapchain texture belongs to the
+presenter once submitted, is not created with the sampled usage bit, and is
+not a target the graph owns, so nothing can read it and nothing can follow
+it. `scene` is the seam that buys the gap. It is a graph target like any
+other, frame sized, sampled, and readable between frames, and everything
+declared between composite and present sees it. `forward` is the first such
+pass and the shape the rest take:
+
+* A post-process reading `scene` and writing it back, or reading it and
+  writing a target of its own that a later pass folds in.
+* A second view compositing into a rectangle of the same `scene`.
+
+`scene` declares no clear, so every pass that writes it loads what is
+already there and each of those adds to the last. Composite is what makes
+that defined: it covers every pixel and runs first, so nothing downstream
+reads memory no frame has written. Where a shared target does declare a
+clear, as `lit` does, a pass that must not clear it says
+`clear = PassGraph.LOAD`.
+
+Deferred is what makes light count independent of object count: geometry is
+rasterised once regardless of how many lights touch it, and lighting runs
+once per pixel regardless of how many objects overlap it.
+
+Geometry owns the depth attachment, testing and writing, so wherever two
+instances overlap the nearer one is what the G-buffer keeps. Forward tests
+against the same attachment and writes none of it, which is what puts
+blended geometry behind the opaque geometry in front of it and leaves it
+unable to hide another blended fragment from the blend. The three
+fullscreen passes have none: each covers every pixel exactly once and has
+nothing to be occluded by, so an attachment there would be state to keep in
+step for no result.
+
+One compute dispatch runs ahead of the graph, binning the lights into a
+grid over what the camera can see so the lighting pass reads a tile's worth
+rather than the whole buffer. It is here rather than in the graph because
+the graph is a graph of render passes; the same is true of the instance
+cull, which runs ahead of `render` for the same reason.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local sdl <const> = require("tecs.ffi.sdl3")

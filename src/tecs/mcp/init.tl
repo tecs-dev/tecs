@@ -1,36 +1,53 @@
---- MCP server: JSON-RPC over HTTP, answered from a phase.
----
---- The surface is a registry. A tool is a name, a schema and a function, and
---- everything an agent can do is something registered here, so the tool list
---- is generated from the same table that dispatches. There is no second list
---- to keep in step, which is what went wrong often enough elsewhere to be
---- worth designing against.
----
---- ```teal
---- local placed <const> = world:query({include = {tecs.Transform}})
----
---- tecs.mcp.register({
----     name = "placed_count",
----     description = "How many entities carry a Transform",
----     inputSchema = {["type"] = "object", properties = {}},
----     readOnly = true,
----     handler = function(_arguments: {string: any}): {string: any}
----         return {count = placed:count()}
----     end,
---- })
----
---- local server <const> = tecs.mcp.listen(7100)
---- -- Once per frame, then `server:destroy()` at teardown.
---- server:poll()
---- ```
----
---- `listen` pairs with `destroy`, and `poll` is what answers: a tool registered
---- but never polled is listed and never called.
----
---- Answering happens inside `update`, on the game's own thread, so a tool
---- reads and writes the world without locking and without a frame boundary in
---- the middle of it. The cost is that a tool must not block: it is running
---- during a frame someone is watching.
+--[=[
+MCP debug server and tool registry.
+
+## Server lifecycle
+
+Set `Application.Config.mcpPort` for the built-in server. A custom host can
+call `listen`, call `Server:poll` once per frame, and call
+`Server:destroy` at teardown. The listener accepts loopback connections only.
+Each call to `poll` runs at most one queued handler. The handler sees a
+committed world, but it must return quickly because the frame cannot end until
+it does.
+
+## Custom tools
+
+```teal
+local placed <const> = world:query({include = {tecs.Transform}})
+
+tecs.mcp.register({
+    name = "placed_count",
+    description = "Count entities that carry a Transform",
+    inputSchema = {["type"] = "object", properties = {}},
+    readOnly = true,
+    handler = function(_arguments: {string: any}): {string: any}
+        return {count = placed:count()}
+    end,
+})
+```
+
+The registry produces both the advertised tool list and dispatch table. Tool
+handlers can use the world captured when the game registers them.
+
+## World inspection
+
+Start with `components_info`, `query`, and `info`. Use `modify` for a partial
+component update and `set` for a complete value or a missing component.
+`modify` skips entities without the component and marks changed columns dirty.
+Prefer these structured tools to `run_lua`; the Lua sandbox limits accidents
+but does not create a security boundary.
+
+## Crash access
+
+The server keeps polling after an uncaught gameplay error. `ping`, `context`,
+`get_logs`, and `send_event` remain available; tools that touch the world
+report the stored traceback instead.
+]=]
+-- Implementation details:
+-- The Rust RMCP service owns HTTP, sessions, JSON-RPC, and SSE. Tool calls
+-- cross a bounded queue of 64 entries and return through one-shot reply
+-- channels. `poll` is the only path from that queue into Lua, so protocol
+-- workers never enter LuaJIT.
 
 local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
@@ -43,61 +60,59 @@ local PARSE_ERROR <const> = -32700
 local INVALID_REQUEST <const> = -32600
 local METHOD_NOT_FOUND <const> = -32601
 
---- The tool registry, and the JSON-RPC server that dispatches it.
----
---- The registry is module-wide rather than per-server: `register` and `tools`
---- act on one table, so every server started here answers the same list and
---- destroying a server leaves the registrations standing.
----
---- A handler runs on the game thread, inside the `poll` that read the request,
---- which is to say partway through the update that called it. That is what
---- lets a tool read and write the world without locking, and it is also why a
---- tool must not block: the frame does not end until the handler returns.
 local record mcp
-    --- What a tool receives and returns. Arguments arrive decoded; the result
-    --- is encoded as the tool's structured content.
+    --- Defines the decoded arguments a tool receives and the structured
+    --- content it returns.
     type Handler = function(arguments: {string: any}): {string: any}
 
-    --- One registered tool: what it is called, how it is described to an
-    --- agent, and what runs when the agent calls it.
+    --- Describes one registered tool and its handler.
     record Tool
-        --- The name an agent calls, and the registry key. Established MCP
-        --- tool names are spelled the way the protocol's ecosystem spells
-        --- them, `run_lua` and `send_event` among them, so they are
-        --- snake_case where the rest of this tree is camelCase; that is
-        --- deliberate and is not to be renamed. Required.
+        --- Caller-writable. This is the name an agent calls and the registry
+        --- key. Established MCP tool names follow the protocol ecosystem's
+        --- spelling, including `run_lua` and `send_event`, so they use
+        --- snake_case where the rest of this tree uses camelCase. This
+        --- Do not rename this compatibility surface. Required.
         name: string
-        --- One line shown to the agent alongside the name. Optional: nil is
-        --- sent as an empty string rather than omitted.
+        --- Caller-writable. This is one line shown to the agent alongside the
+        --- name. Optional; nil is sent as an empty string rather than omitted.
         description: string
-        --- JSON Schema for the arguments, sent verbatim in the tool list.
+        --- Caller-writable. This JSON Schema describes the arguments and is
+        --- sent verbatim in the tool list.
         inputSchema: {string: any}
-        --- Runs on the game thread when the tool is called. Required, and its
-        --- absence raises at registration rather than at call time.
+        --- Caller-writable. This handler runs synchronously inside `poll`.
+        --- Required; its absence raises at registration rather than at call
+        --- time.
         handler: Handler
-        --- Declared so an agent can tell what a call will do before making it.
+        --- Caller-writable. This declares whether the tool only reads state so
+        --- an agent can judge a call before making it.
         readOnly: boolean
-        --- Whether a call changes state that a caller would not want changed
-        --- without asking. Optional, false when nil. Advisory, like
-        --- `readOnly`: both are reported to the agent and neither is checked
-        --- here, so a tool declared read-only is still free to write.
+        --- Caller-writable. This declares whether a call changes state that a
+        --- caller would not want changed without asking. Optional, false when
+        --- nil. Advisory, like
+        --- `readOnly`: the server reports both values to the agent and enforces
+        --- neither, so a tool declared read-only may still write.
         destructive: boolean
-        --- Still callable after the game has crashed. False by default,
+        --- Caller-writable. This allows the tool to remain callable after the
+        --- game has crashed. False by default,
         --- because a crashed world cannot answer anything about itself, and a
         --- tool that read it would return nonsense rather than an error.
         whenCrashed: boolean
     end
 
-    --- A listening MCP endpoint. Answers only while something calls `poll`.
+    --- Represents a listening MCP endpoint. It answers only while something
+    --- calls `poll`.
     record Server
-        --- The TCP port bound, which is 7100 when `listen` was given none.
+        --- Read-only. This is the bound TCP port, which is 7100 when `listen`
+        --- was given none.
         port: integer
-        --- Private. RMCP plus the SDL-thread tool-call bridge.
+        --- Engine-owned. Stores the server transport. Ordinary game code
+        --- should ignore this field.
         _transport: transport.Server
-        --- Private. Last encoded registry copied into Rust.
+        --- Engine-owned. Stores the last encoded tool registry. Ordinary game
+        --- code should ignore this field.
         _toolsJSON: string
-        --- Private. Set by `destroy`. Once true, `poll` answers false and the
-        --- server cannot be restarted.
+        --- Engine-owned. Reports whether `destroy` has stopped the server.
+        --- Ordinary game code should ignore this field.
         _destroyed: boolean
     end
 end
@@ -124,10 +139,10 @@ function mcp.setCrashed(traceback: string)
     crashed = traceback
 end
 
---- The crash traceback, or nil while the game is healthy.
+--- Returns the crash traceback, or nil while the game is healthy.
 ---
---- @return nil means no crash has been recorded, which is the only sense in
----     which the game is known to be healthy: nothing here polls for one.
+--- @return nil means no code has recorded a crash. Nothing here polls the game
+---     to confirm that it remains healthy.
 function mcp.crashed(): string
     return crashed
 end
@@ -139,7 +154,8 @@ end
 ---
 --- @param tool Stored by reference and never copied, so mutating the table
 ---     afterwards changes what the server dispatches and reports. `name` and
----     `handler` are required and their absence raises; the rest may be nil.
+---     The call requires `name` and `handler` and raises when either is absent;
+---     the rest may be nil.
 function mcp.register(tool: mcp.Tool)
     if tool.name == nil or tool.handler == nil then
         error("tecs: a tool needs a name and a handler", 2)
@@ -150,9 +166,10 @@ function mcp.register(tool: mcp.Tool)
     tools[tool.name] = tool
 end
 
---- Every registered tool, in registration order.
+--- Returns every registered tool in registration order.
 ---
---- @return A fresh list each call, so the caller may keep it. The `Tool`
+--- @return A fresh list each call, so the caller may keep it. The
+---     [`Tool`](tealdoc:tecs.mcp.Tool)
 ---     values in it are the registered tables themselves rather than copies,
 ---     so writing to one writes to the registry.
 function mcp.tools(): {mcp.Tool}
@@ -202,23 +219,23 @@ end
 
 --- Runs one JSON-RPC request and returns the response text.
 ---
---- Exposed so the protocol can be tested without a socket, which is most of
---- what there is to get wrong here.
+--- Lets tests exercise the protocol without a socket, which covers most of
+--- the failure surface.
 ---
 --- The three methods answered, `initialize`, `tools/list` and `tools/call`,
---- are spelled as the MCP specification spells them and are not this tree's to
+--- use the names from the MCP specification, which this tree must not
 --- rename. Anything else is a method-not-found error.
 ---
---- A handler that raises is caught: the agent is told through `isError` and
---- the server carries on. A handler that returns nil is not an error, and
---- comes back as an empty `structuredContent`.
+--- When a handler raises, the server sets `isError` for the agent and
+--- continues. A handler may return nil, which produces an empty
+--- `structuredContent`.
 ---
---- @param text One JSON-RPC request object. A batch, that is a JSON array, is
----     not supported; it decodes, has no `method`, and comes back as an
----     invalid-request error rather than being fanned out.
+--- @param text One JSON-RPC request object. The server does not support a
+---     batch, which decodes as a JSON array with no `method` and produces an
+---     invalid-request error rather than dispatching each element.
 --- @return Always a response as JSON text, never nil, and never a raise, since
----     bad input is reported in-band. A request that carried no `id` is still
----     answered, with the `id` field absent from the response.
+---     the response reports bad input in-band. The server still answers a
+---     request with no `id`, omitting the `id` field from the response.
 function mcp.dispatch(text: string): string
     local ok, decoded = pcall(data.decodeJSON, text)
     if not ok then
@@ -293,7 +310,7 @@ end
 --- Starts the server on `port`.
 ---
 --- @param port Defaults to 7100. A port already in use raises rather than
----     being worked around, since a debugger that moved could not be found.
+---     selecting another port, since a debugger could not find a moved server.
 --- @return Listening, but answering nothing until something calls `poll`.
 function mcp.listen(port?: integer): mcp.Server
     local self = setmetatable({} as mcp.Server, ServerMT)
@@ -304,11 +321,7 @@ function mcp.listen(port?: integer): mcp.Server
     return self
 end
 
---- Answers at most one engine-facing tool call. Call once per frame.
----
---- RMCP answers initialize, discovery, tool listing and protocol errors on
---- Tokio. Only a call that needs the engine crosses this queue, and its
---- handler runs here on the SDL thread.
+--- Answers at most one tool call. Call once per frame.
 ---
 --- @return True when one tool handler ran. Protocol-only traffic does not
 ---     count. False when no tool call is waiting or after destruction.

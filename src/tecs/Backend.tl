@@ -1,22 +1,24 @@
---- Turns a frame packet into a submitted frame.
----
---- The device-facing half of rendering. It owns the device buffers, the
---- staging slots, the cull, the deferred pass graph and the image array. It
---- knows nothing about worlds, queries, archetypes or components: everything it
---- draws arrives as bytes already in staging plus a packet saying what changed,
---- so it is testable against a device with no world behind it.
----
---- Images live in one array texture, so the texture is a per-instance integer
---- and the whole scene is one draw. That is also what frees the instance
---- layout: with nothing to sort by, each archetype keeps a contiguous run, and
---- a run whose components did not change does not have to be rewritten.
----
---- What is drawn is decided on the GPU. A compute pass tests each instance
---- against the view, compacts the survivors into an index list, and writes the
---- draw arguments, so the draw touches only what is visible and the CPU never
---- learns how many that was. The instance buffer stays archetype-contiguous
---- for the dirty gate; the compacted list is rebuilt every frame and is a
---- separate array, so the two do not fight.
+--[=[
+Turns a frame packet into a submitted frame.
+
+The device-facing half of rendering. It owns the device buffers, the
+staging slots, the cull, the deferred pass graph and the image array. It
+knows nothing about worlds, queries, archetypes or components: everything it
+draws arrives as bytes already in staging plus a packet saying what changed,
+so it is testable against a device with no world behind it.
+
+Images live in one array texture, so the texture is a per-instance integer
+and the whole scene is one draw. That is also what frees the instance
+layout: with nothing to sort by, each archetype keeps a contiguous run, and
+a run whose components did not change does not have to be rewritten.
+
+What is drawn is decided on the GPU. A compute pass tests each instance
+against the view, compacts the survivors into an index list, and writes the
+draw arguments, so the draw touches only what is visible and the CPU never
+learns how many that was. The instance buffer stays archetype-contiguous
+for the dirty gate; the compacted list is rebuilt every frame and is a
+separate array, so the two do not fight.
+]=]
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")

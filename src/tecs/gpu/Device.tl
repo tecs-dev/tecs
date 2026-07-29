@@ -1,9 +1,11 @@
---- The GPU device.
----
---- Owns the swapchain and hands out per-frame command buffers. There is no
---- immediate mode and no global render state: SDL_GPU bakes blend, depth, and
---- cull into immutable pipeline objects, so every draw goes through a render
---- pass on an explicit frame.
+--[=[
+The GPU device.
+
+Owns the swapchain and hands out per-frame command buffers. There is no
+immediate mode and no global render state: SDL_GPU bakes blend, depth, and
+cull into immutable pipeline objects, so every draw goes through a render
+pass on an explicit frame.
+]=]
 local sdl <const> = require("tecs.ffi.sdl3")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local loader <const> = require("tecs.ffi.loader")

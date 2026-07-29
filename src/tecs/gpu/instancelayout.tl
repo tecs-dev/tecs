@@ -1,13 +1,15 @@
---- The shape of one drawable instance, in one place.
----
---- Two things write this layout: the renderer, walking archetype columns, and
---- any producer drawing instances it owns rather than entities. Both write into
---- the same buffers and the GPU reads one description of them, so a second
---- statement of the shape is a second thing to keep in step with the shaders.
----
---- What the fields mean lives with the shader that reads them,
---- `assets/shaders/instance.vert.glsl`. What is here is what a writer needs to
---- place them and to size a buffer.
+--[=[
+The shape of one drawable instance, in one place.
+
+Two things write this layout: the renderer, walking archetype columns, and
+any producer drawing instances it owns rather than entities. Both write into
+the same buffers and the GPU reads one description of them, so a second
+statement of the shape is a second thing to keep in step with the shaders.
+
+What the fields mean lives with the shader that reads them,
+`assets/shaders/instance.vert.glsl`. What is here is what a writer needs to
+place them and to size a buffer.
+]=]
 
 --- What the two signs of a cull bound say an instance is.
 ---

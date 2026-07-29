@@ -1,9 +1,11 @@
---- The sequencer's compiler and disassembler.
----
---- A program is a flat integer array with stride 3 -- (op, a, b) -- over a
---- const pool, which is what makes it serializable: a saved program carries
---- its own instructions rather than a reference to the Lua that built it.
---- The opcodes live here because the VM interprets what this module emits.
+--[=[
+The sequencer's compiler and disassembler.
+
+A program is a flat integer array with stride 3 -- (op, a, b) -- over a
+const pool, which is what makes it serializable: a saved program carries
+its own instructions rather than a reference to the Lua that built it.
+The opcodes live here because the VM interprets what this module emits.
+]=]
 
 local seqtypes <const> = require("tecs.sequence.internal.types")
 

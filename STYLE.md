@@ -53,7 +53,7 @@ it, not because anybody has to apply it.
   column-aligned, because alignment breaks on the first rename and churns the
   diff of every line around it.
 
-## What the formatter cannot decide
+## Human decisions
 
 These are judgment, and they are what a review is for.
 
@@ -62,9 +62,12 @@ These are judgment, and they are what a review is for.
   meaningful where one module has to be reached before another runs, so a tool
   that reordered them could change behavior.
 - Prefer early returns over nested conditionals.
-- Comments are sparse and informational. Public functions, records and modules
-  get `---` doc comments describing behavior and constraints rather than
-  restating the signature. No commented-out code.
+- Comments are sparse and informational. Public modules start with a long
+  `--[=[ ... ]=]` doc comment. Public functions, records, and fields use `---`
+  docblocks. Documentation describes behavior and constraints rather than
+  restating the signature. Maintainer rationale follows the public module
+  comment as ordinary comments under `Implementation details:`. No
+  commented-out code.
 - Names, and the file and module split above, which no tool can check.
 
 ## Formatters

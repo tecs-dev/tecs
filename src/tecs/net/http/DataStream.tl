@@ -1,50 +1,52 @@
---- Bytes, wherever they happen to be.
----
---- A body is a string, or a buffer, or a file, or a handle something else
---- opened. Spelling each of those as its own field is how an HTTP API ends up
---- with `body`, `bodyBytes`, `bodyLength`, `into` and a response whose `body`
---- is nil whenever its `path` is not. This is the one value all of them
---- become: it knows where its bytes are, it reports a length when it can know
---- one, and it is read a piece at a time so a 500 MB download is never also a
---- 500 MB string.
----
----     tecs.net.http.newClient():send({
----         url = "https://example.com/upload",
----         method = "PUT",
----         body = tecs.net.http.DataStream.ofFile("save.bin"),
----         into = tecs.net.http.DataStream.ofFile("reply.bin"),
----     })
----
---- ## One value, two directions
----
---- The same stream is a source in `Request.body` and a destination in
---- `Request.into`, and its kind decides which it can be: a file and a handle
---- are both, a string and a buffer are only a source. Position says which is
---- meant, so there is one set of constructors rather than two mirrored ones,
---- and asking a string to be a destination raises where it is written.
----
---- A `Response` carries one of these too, so the answer to "where is the body"
---- is one field whatever was asked for. `text()` is how it becomes a string,
---- which for a body that was never written anywhere costs nothing: the string
---- is already what is behind it.
----
---- ## Length is a claim, not a promise
----
---- `length` is the number of bytes when something knows it before they are
---- read: a string knows, a buffer was given one, a file is asked for its size.
---- A handle does not, unless whoever opened it says so. That is what decides
---- whether a request carries a `Content-Length` or is sent chunked, which is
---- why it is a field a caller can set rather than something inferred at the
---- last moment.
----
---- ## Files go through the storage seam and handles do not
----
---- `ofFile` reads and writes through `tecs.filesystem`, so a port that
---- replaced storage gets it, and it streams wherever the backend supplies
---- `openRead` and `openWrite`. `ofHandle` is the other case on purpose: a
---- caller that opened its own file is already outside the storage abstraction
---- and has said so, and it streams everywhere because nothing between it and
---- the bytes has an opinion.
+--[=[
+Bytes, wherever they happen to be.
+
+A body is a string, or a buffer, or a file, or a handle something else
+opened. Spelling each of those as its own field is how an HTTP API ends up
+with `body`, `bodyBytes`, `bodyLength`, `into` and a response whose `body`
+is nil whenever its `path` is not. This is the one value all of them
+become: it knows where its bytes are, it reports a length when it can know
+one, and it is read a piece at a time so a 500 MB download is never also a
+500 MB string.
+
+    tecs.net.http.newClient():send({
+        url = "https://example.com/upload",
+        method = "PUT",
+        body = tecs.net.http.DataStream.ofFile("save.bin"),
+        into = tecs.net.http.DataStream.ofFile("reply.bin"),
+    })
+
+## One value, two directions
+
+The same stream is a source in `Request.body` and a destination in
+`Request.into`, and its kind decides which it can be: a file and a handle
+are both, a string and a buffer are only a source. Position says which is
+meant, so there is one set of constructors rather than two mirrored ones,
+and asking a string to be a destination raises where it is written.
+
+A `Response` carries one of these too, so the answer to "where is the body"
+is one field whatever was asked for. `text()` is how it becomes a string,
+which for a body that was never written anywhere costs nothing: the string
+is already what is behind it.
+
+## Length is a claim, not a promise
+
+`length` is the number of bytes when something knows it before they are
+read: a string knows, a buffer was given one, a file is asked for its size.
+A handle does not, unless whoever opened it says so. That is what decides
+whether a request carries a `Content-Length` or is sent chunked, which is
+why it is a field a caller can set rather than something inferred at the
+last moment.
+
+## Files go through the storage seam and handles do not
+
+`ofFile` reads and writes through `tecs.filesystem`, so a port that
+replaced storage gets it, and it streams wherever the backend supplies
+`openRead` and `openWrite`. `ofHandle` is the other case on purpose: a
+caller that opened its own file is already outside the storage abstraction
+and has said so, and it streams everywhere because nothing between it and
+the bytes has an opinion.
+]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local filesystem <const> = require("tecs.platform.filesystem")

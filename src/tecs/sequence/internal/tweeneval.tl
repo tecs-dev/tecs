@@ -1,14 +1,16 @@
---- The part of a tween that runs every tick.
----
---- Easing curves, animation targets, tracking sources, and the slot loop that
---- turns elapsed time into component writes. Everything here is about
---- evaluating a value; nothing here knows what a timeline is, how a playback
---- is scheduled, or when it ends.
----
---- It lives under the sequencer rather than beside `tween` because the
---- sequencer is what evaluates it: an `eval` step walks these slots on its
---- clock's active set. Keeping the loop separate from the scheduling around it
---- is what lets one runtime serve both.
+--[=[
+The part of a tween that runs every tick.
+
+Easing curves, animation targets, tracking sources, and the slot loop that
+turns elapsed time into component writes. Everything here is about
+evaluating a value; nothing here knows what a timeline is, how a playback
+is scheduled, or when it ends.
+
+It lives under the sequencer rather than beside `tween` because the
+sequencer is what evaluates it: an `eval` step walks these slots on its
+clock's active set. Keeping the loop separate from the scheduling around it
+is what lets one runtime serve both.
+]=]
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")

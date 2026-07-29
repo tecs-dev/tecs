@@ -1,43 +1,43 @@
---- The ECS, for a game and for engine code alike.
----
---- A world, a query built once outside the system that reads it, a system
---- placed in a phase, and an entity for it to find:
----
---- ```teal
---- local game <const> = tecs.ecs.newWorld()
---- local moving <const> = game:query({include = {tecs.Transform}})
----
---- game:addSystem({
----     name = "game.Drift",
----     phase = tecs.ecs.phases.Update,
----     run = function(delta: number)
----         for archetype, length in moving:iter() do
----             local transform <const> = archetype:getMut(tecs.Transform)
----             for row = 1, length do
----                 transform[row].x = transform[row].x + 60 * delta
----             end
----         end
----     end,
---- })
----
---- game:spawn(tecs.Transform(0, 0))
---- game:update(1 / 60)
---- ```
----
---- A query is built at setup and reused for the world's lifetime, never inside
---- `run`. Reads go through `archetype:get` and writes through `getMut`, which
---- is what marks the column dirty for everything gated on it.
----
---- One table, two readers. A game writes `tecs.ecs.newWorld()`, because
---- `tecs.ecs` is the field the public API publishes this under. An engine
---- module writes `require("tecs.ecs")`, because `tecs` is the aggregator that
---- pulls every engine module in and a module `tecs` exports cannot also depend
---- on `tecs` without making a cycle, which Teal rejects even through a
---- type-only require.
----
---- So the rule is one direction. Internal code depends on this half; only a
---- game depends on the whole. Both spellings reach the same table, so there is
---- one place a name is defined and one place to read about it.
+--[=[
+The ECS shared by game code and engine systems.
+
+Build queries during setup, reuse them from systems, and put all game state on
+entities:
+
+```teal
+local moving: tecs.Query
+
+local function game(world: tecs.World)
+    moving = world:query({include = {tecs.Transform}})
+
+    world:addSystem({
+        name = "game.Drift",
+        phase = tecs.ecs.phases.Update,
+        run = function(delta: number)
+            for archetype, length in moving:iter() do
+                local transform <const> = archetype:getMut(tecs.Transform)
+                for row = 1, length do
+                    transform[row].x = transform[row].x + 60 * delta
+                end
+            end
+        end,
+    })
+
+    world:spawn(tecs.Transform(0, 0))
+end
+```
+
+Read columns through `archetype:get`. Write through `getMut` so dirty-gated
+systems can find the change. See [Worlds](/ecs/world),
+[Components](/ecs/components/), [Queries](/ecs/queries/), and
+[Systems](/ecs/systems) for the complete ECS model.
+]=]
+
+-- Implementation details:
+-- Games reach this table as `tecs.ecs`, while engine modules require
+-- `tecs.ecs` directly. Exported modules cannot depend on the root aggregator
+-- without creating a Teal require cycle. Both paths reach the same table, so
+-- the dependency graph stays one-way and each public name has one declaration.
 
 -- First, as in before anything else. `componentcodegen` captures
 -- `table.unpack` when it loads, and on this interpreter that name only exists
@@ -67,46 +67,86 @@ local Context <const> = require("tecs.internal.Context")
 local type World = types.World
 
 local record ecs
+    --- `Pipeline` identifies a world update pipeline.
     type Pipeline = types.Pipeline
+    --- `FixedOverload` selects fixed-step overload
+    --- behavior.
     type FixedOverload = types.FixedOverload
+    --- `Component` names any component definition.
     type Component = types.components.Component
+    --- `ScalarComponent` names a single-value component.
     type ScalarComponent<T> = types.components.ScalarComponent<T>
+    --- `ComponentOptions` configures a table component.
     type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
+    --- `FFIComponentOptions` configures an FFI component.
     type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
+    --- `ScalarComponentOptions` configures a scalar
+    --- component.
     type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T>
+    --- `TagComponentOptions` configures a tag component.
     type TagComponentOptions = types.components.TagComponentOptions
+    --- `Relationship` names any relationship definition.
     type Relationship = types.components.Relationship
+    --- `RelationshipOptions` configures a relationship.
     type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
+    --- `FFIRelationshipOptions` configures an FFI
+    --- relationship.
     type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
+    --- `QueryDescriptor` configures a query.
     type QueryDescriptor = types.Query.Descriptor
+    --- `QueryCursor` controls an explicitly closed query
+    --- traversal.
     type QueryCursor = types.Query.Cursor
+    --- `Archetype` stores contiguous component columns.
     type Archetype = types.Archetype
+    --- `ArchetypeEntityObserver` receives entity changes
+    --- within an archetype.
     type ArchetypeEntityObserver = types.ArchetypeEntityObserver
+    --- `Event` names any ECS event record.
     type Event = types.events.Event
+    --- `EventListener` receives matching ECS events.
     type EventListener = types.events.EventListener
+    --- `EventInit` initializes an event definition.
     type EventInit = types.events.EventInit
+    --- `MessageBus` dispatches events outside a world.
     type MessageBus = types.events.MessageBus
+    --- `Context` stores values under typed keys.
     type Context = types.Context
+    --- `Key` identifies one typed context value.
     type Key<T> = types.Context.Key<T>
+    --- `StatePolicy` controls state-stack participation.
     type StatePolicy = types.StatePolicy
+    --- `Stats` reports live world counts.
     type Stats = types.World.Stats
+    --- `Phase` identifies one system phase.
     type Phase = types.Phase
+    --- `SystemConfig` configures a system.
     type SystemConfig = types.SystemConfig
+    --- `DoubleArray` names an FFI array of doubles.
     type DoubleArray = types.DoubleArray
+    --- `Bundle` names a reusable component collection.
     type Bundle = types.Bundle
+    --- `BundleDef` configures a bundle.
     type BundleDef = types.Bundle.Definition
+    --- `Snapshot` names serialized world state.
     type Snapshot = types.World.Snapshot
+    --- `SnapshotPrelude` names snapshot metadata.
     type SnapshotPrelude = types.World.SnapshotPrelude
+    --- `SnapshotComponentTableEntry` identifies one
+    --- component in a snapshot.
     type SnapshotComponentTableEntry = types.World.SnapshotComponentTableEntry
+    --- `SnapshotOptions` controls snapshot serialization.
     type SnapshotOptions = types.World.SnapshotOptions
+    --- `SnapshotOutput` collects serialized data.
     type SnapshotOutput = types.World.SnapshotOutput
+    --- `SnapshotHandler` saves and restores plugin data.
     type SnapshotHandler = types.World.SnapshotHandler
 
-    --- The phases a system can be scheduled into.
+    --- Read-only. `phases` contains the phases a system may join.
     phases: phases
-    --- Composable run conditions, for `SystemConfig.runIf`.
+    --- Read-only. `runif` contains composable system run conditions.
     runif: runIfHelpers
-    --- Seeded generation, in named streams a snapshot carries.
+    --- Read-only. `random` provides seeded named streams that snapshots carry.
     random: random
 
     -- The components, the relationship and the events every world registers
@@ -124,189 +164,166 @@ local record ecs
     -- a save format. Moving one of these fields does not move the string it
     -- is registered under, and neither may be changed casually.
 
-    --- Positions everything a world holds: the hierarchy, physics, the
-    --- sequencer and the renderer all move the same one. Not a drawing
-    --- component, which is why it is here and not on `tecs.gfx`, and why a
-    --- headless world has it.
+    --- Read-only. [`Transform`](/ecs/#tecs.ecs.Transform) positions everything a
+    --- world holds. Hierarchy, physics, sequencing, and rendering all use it.
     Transform: builtins.Transform
 
-    --- A transform expressed relative to a `ChildOf` parent. The builtin
-    --- hierarchy system composes it with the parent's `Transform` into the
-    --- child's world-space one, so a game writes this and reads `Transform`.
+    --- Read-only.
+    --- [`RelativeTransform`](/ecs/#tecs.ecs.RelativeTransform) expresses a
+    --- pose relative to a [`ChildOf`](/ecs/#tecs.ecs.ChildOf) parent. The
+    --- hierarchy system composes it with the parent's
+    --- [`Transform`](/ecs/#tecs.ecs.Transform), so a game writes this component
+    --- and reads the world-space transform.
     RelativeTransform: builtins.RelativeTransform
 
-    --- Parent and child. Sparse, so adding one does not split archetypes, and
-    --- cascade-deleting, so despawning a parent takes its children.
+    --- Read-only. [`ChildOf`](/ecs/#tecs.ecs.ChildOf) links a parent and child.
+    --- It stores edges sparsely and cascade-deletes children with their parent.
     ChildOf: Relationship
 
-    --- A label for an entity, stored as the raw string. Not unique: use
-    --- `EntityKey` where something has to find one entity again.
+    --- Read-only. [`Name`](/ecs/#tecs.ecs.Name) stores an entity label as a
+    --- raw string. It does not enforce uniqueness. Use
+    --- [`EntityKey`](/ecs/#tecs.ecs.EntityKey) for durable unique lookup.
     Name: ScalarComponent<string>
 
-    --- A durable, unique lookup key, read back with `world:byKey`. For hot
-    --- reload, authored references, tooling and save-compatible lookup, where
-    --- an entity id is meaningless across runs.
+    --- Read-only. [`EntityKey`](/ecs/#tecs.ecs.EntityKey) stores a durable
+    --- unique lookup key for `world:byKey`. It supports hot reload, authored
+    --- references, tooling, and save-compatible lookup.
     ---
-    --- Spelled `EntityKey` here and registered as `"Key"`, because `Key` on
-    --- this module is the typed `world.resources` key `newKey` hands out, and
-    --- Teal refuses the second declaration outright. The registered name is a
-    --- save format and does not move; this one is the surface.
+    --- The snapshot-compatible registration name remains `"Key"`;
+    --- `ecs.Key` names typed context keys.
     EntityKey: ScalarComponent<string>
 
-    --- Despawns an entity once its time to live reaches zero, counted down in
-    --- `FixedUpdate` by a query declared `type = "logic"`, so a `Paused`
-    --- entity does not burn through it.
+    --- Read-only. [`TTL`](/ecs/#tecs.ecs.TTL) despawns an entity when its time
+    --- to live reaches zero. The engine counts it down in `FixedUpdate` through
+    --- a logic query, so a [`Paused`](/ecs/#tecs.ecs.Paused) entity does not
+    --- burn through it.
     TTL: builtins.TTL
 
-    --- Excluded from every query that does not ask for it.
+    --- Read-only. [`Disabled`](/ecs/#tecs.ecs.Disabled) excludes an entity
+    --- from queries that do not ask for it.
     Disabled: Component
 
-    --- Excluded from logic queries and still drawn, which is the difference
-    --- from `Disabled`: a paused world is one that renders and does not think.
+    --- Read-only. [`Paused`](/ecs/#tecs.ecs.Paused) excludes an entity from
+    --- logic queries while keeping it visible.
+    --- [`Disabled`](/ecs/#tecs.ecs.Disabled) excludes both logic and rendering
+    --- queries.
     Paused: Component
 
-    --- Emitted at the entity when it is spawned.
+    --- Read-only. `OnSpawn` fires at an entity after spawning.
     OnSpawn: builtins.OnSpawn
-    --- Emitted at the entity when it is despawned.
+    --- Read-only. `OnDespawn` fires at an entity before removal.
     OnDespawn: builtins.OnDespawn
-    --- Emitted at entity 0 when a new archetype is created.
+    --- Read-only. `ArchetypeCreated` fires at entity 0 after archetype creation.
     ArchetypeCreated: builtins.ArchetypeCreated
 
-    --- Emitted when a state is pushed onto the stack.
+    --- Read-only. `StateEnter` fires when a state enters the stack.
     StateEnter: builtins.StateEnter
-    --- Emitted when a state is popped off it.
+    --- Read-only. `StateExit` fires when a state leaves the stack.
     StateExit: builtins.StateExit
-    --- Emitted at the state losing focus when another is pushed above it.
+    --- Read-only. `StateBlur` fires at a state when another takes focus above
+    --- it.
     StateBlur: builtins.StateBlur
-    --- Emitted at the state regaining focus when the one above it is popped.
+    --- Read-only. `StateFocus` fires at a state when it regains focus.
     StateFocus: builtins.StateFocus
 
-    --- Emitted at entity 0 before a snapshot's archetypes are written, which
-    --- is where a plugin attaches keyed data or excludes what it re-derives.
+    --- Read-only. `OnSnapshotSave` fires at entity 0 before snapshot archetype
+    --- serialization so plugins can attach keyed data or exclude derived data.
     OnSnapshotSave: builtins.OnSnapshotSave
-    --- Emitted at entity 0 after a snapshot's world is restored and before its
-    --- data section is dispatched, which is where a plugin registers what to
-    --- do with each key it wrote.
+    --- Read-only. `StartSnapshotLoad` fires at entity 0 after world restoration
+    --- and before data dispatch so plugins can register their keyed handlers.
     StartSnapshotLoad: builtins.StartSnapshotLoad
-    --- Emitted at entity 0 once every entity is restored and every data
-    --- callback has run.
+    --- Read-only. `FinishSnapshotLoad` fires at entity 0 after every entity and
+    --- data callback finishes restoration.
     FinishSnapshotLoad: builtins.FinishSnapshotLoad
 
-    --- Absolute ceiling for `World.Config.maxEntities` (2^22 - 1 usable
-    --- slots; slot 0 is reserved by the entity-id format).
+    --- Read-only. `MAX_ENTITIES` sets the absolute
+    --- `World.Config.maxEntities` ceiling (2^22 - 1 usable
+    --- slots; the entity-id format reserves slot 0).
     MAX_ENTITIES: integer
 
-    --- Default `World.Config.maxEntities` when none is given (2^20).
+    --- Read-only. `DEFAULT_MAX_ENTITIES` supplies 2^20 when world configuration
+    --- omits `maxEntities`.
     DEFAULT_MAX_ENTITIES: integer
 
-    --- Create a new World.
+    --- Creates a new World.
     ---
-    --- @param config May be nil, which takes `DEFAULT_MAX_ENTITIES` slots and
-    ---     the default pipeline. `maxEntities` is the one field worth deciding
-    ---     up front: it sizes the entity index at creation and is not grown
-    ---     later, so a world that runs out of slots raises rather than
-    ---     reallocating.
-    --- @return A world with the builtin components already registered and no
-    ---     systems. Worlds are independent: an entity id is meaningful only in
-    ---     the world that issued it, while a component id is process-wide and
-    ---     shared by every world that carries one.
+    --- @param config The caller supplies world settings or omits them for
+    ---     `DEFAULT_MAX_ENTITIES` and the default pipeline. The entity ceiling
+    ---     cannot grow after creation.
+    --- @return Returns an independent world with builtins registered and no
+    ---     systems.
     newWorld: function(config?: types.World.Config): World
 
     --- Creates and registers a new table component. See `ecs.ComponentOptions`
     --- and the component docs for the shared `fields` / `defaults` / `init` /
     --- `.new` model.
     ---
-    --- @param options Its `name` is the registry key, so it has to be unique in
-    ---     the process and is what queries, snapshots and the MCP tools address
-    ---     the component by.
-    --- @return The same `container` record passed in, now registered and
-    ---     callable as a constructor. Registration is process-wide and
-    ---     permanent, so this belongs at module scope rather than in a plugin
-    ---     that may be added to two worlds.
+    --- @param options The caller supplies a process-unique name and the table
+    ---     component definition.
+    --- @return Returns the supplied container after permanent process-wide
+    ---     registration makes it callable.
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
 
     --- Creates and registers a new scalar component.
     ---
-    --- @param options Describes a component that is one value rather than a
-    ---     record of fields, so its column holds that value directly.
-    --- @return The registered component, whose rows are read and written as
-    ---     bare values rather than through a field.
+    --- @param options The caller supplies the scalar type, name and defaults.
+    --- @return Returns the registered component whose rows hold bare values.
     newScalarComponent: function<T>(options: ScalarComponentOptions<T>): ScalarComponent<T>
 
-    --- Creates and registers a new tag component that uses bitset storage for efficiency.
+    --- Creates and registers a tag component.
     ---
-    --- @param options Name only: a tag carries no fields, which is what lets it
-    ---     be stored as one bit.
-    --- @return The registered tag. Queries match it by archetype rather than by
-    ---     scanning, so a stable flag is cheaper as a tag than as a boolean
-    ---     field, while one toggled often is not: every flip moves the entity
-    ---     between archetypes.
+    --- @param options The caller supplies the tag name.
+    --- @return Returns the registered bitset-backed tag.
     newTagComponent: function(options: TagComponentOptions): Component
 
     --- Creates and registers an FFI-based component. Same constructor model
     --- as `newComponent`, but the base instance is an FFI struct.
     ---
-    --- @param options Its `fields` have to map to a C struct, so numbers,
-    ---     booleans and fixed-size arrays only. One field needing a Lua table
-    ---     makes the whole component a table component.
-    --- @return The registered component. Its columns are contiguous cdata, so
-    ---     writing a row through `world:get` bypasses dirty tracking and needs
-    ---     an explicit `world:markComponentDirty`, and `world:batchSpawn`
-    ---     skips its defaults.
+    --- @param options The caller supplies fields that map to a C struct:
+    ---     numbers, booleans and fixed-size arrays.
+    --- @return Returns the registered component with contiguous cdata columns.
+    ---     Direct writes through `world:get` require
+    ---     `world:markComponentDirty`.
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
 
-    --- Creates and registers a new relationship component. See the relationship
-    --- docs for target/exclusive/sparse semantics. A target-only relationship
-    --- (name plus flags, no `container`/`fields`) is backed by a compact FFI
-    --- struct automatically; add `container`/`fields` for relationships that
-    --- carry data.
+    --- Creates and registers a relationship component.
     ---
-    --- @param config `exclusive` keeps one target per entity, replacing rather
-    ---     than adding. `sparse` keeps edges out of the archetype key, so
-    ---     adding one does not split archetypes. `cascadeDelete` despawns the
-    ---     sources when the target goes, and raises here unless `exclusive` and
-    ---     `reverseIndex` are both set, since finding the sources is what the
-    ---     reverse index is for.
-    --- @return The registered relationship, called with a target to make an
-    ---     instance. A dense relationship registers one component per target
-    ---     under a stamped name, which is why `declaredComponents` leaves those
-    ---     out.
+    --- A target-only relationship needs a name and flags. Add `container` and
+    --- `fields` when each edge carries data.
+    ---
+    --- @param config The caller supplies target, exclusivity, sparsity, reverse
+    ---     index and cascade behavior.
+    --- @return Returns the registered relationship, callable with a target to
+    ---     create an instance.
     newRelationship: function<R is Relationship>(config: RelationshipOptions<R>): R
 
-    --- Create an FFI-backed relationship with data fields.
+    --- Creates an FFI-backed relationship with data fields.
     ---
-    --- @param config As `newRelationship`, plus the `fields` the edge itself
-    ---     carries, under the same C-struct restriction `newFFIComponent` has.
-    --- @return The registered relationship.
+    --- @param config The caller supplies relationship behavior and C-compatible
+    ---     edge fields.
+    --- @return Returns the registered relationship.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
 
-    --- Configure an event to have an appropriate __call based constructor.
+    --- Configures an event with a callable constructor.
     ---
-    --- @param event Mutated in place rather than copied, so the record the
-    ---     caller declared is the one that becomes callable. Its `init`, where
-    ---     it has one, is what the constructor's arguments are handed to, so
-    ---     `init` is what decides the call signature.
+    --- @param event The caller supplies the event record to configure in place.
     newEvent: function<E is Event>(event: E)
 
-    --- Configure an FFI event to have an appropriate __call based constructor.
+    --- Configures an FFI event with a callable constructor.
     ---
-    --- @param event Mutated in place, as `newEvent` does it.
-    --- @param fields Name and C type per field, in declaration order, which is
-    ---     also the order the constructor takes them in. The same C-struct
-    ---     restriction `newFFIComponent` has applies.
-    --- @param structName Optional. One is generated when it is left out, and it
-    ---     only needs naming when something else has to name the same struct.
+    --- @param event The caller supplies the event record to configure in place.
+    --- @param fields The caller supplies each field name and C type in
+    ---     constructor order.
+    --- @param structName The caller supplies a shared C struct name or omits it
+    ---     to generate one.
     newFFIEvent: function<E is Event>(event: E, fields: {{string, string}}, structName?: string)
 
-    --- Create a new address-based event message bus.
+    --- Creates an address-based event message bus.
     ---
-    --- @return A bus of its own, unconnected to any world's. A world already
-    ---     carries one, which `world:emit` and `world:observe` reach, so this
-    ---     is for messaging that should outlive or sit outside a world.
+    --- @return Returns an independent bus for messaging outside a world.
     newMessageBus: function(): MessageBus
 
-    --- A typed key for `world.resources`, and the way an engine module stores
-    --- something scoped to one world.
+    --- Creates a typed key for `world.resources`.
     ---
     --- Always pass a name: named keys are discoverable at runtime through
     --- `findKey`/`listKeys` and the tooling built on them (the MCP `inspect`
@@ -319,78 +336,60 @@ local record ecs
     --- argument at a call site: pass `nil as T` for `world.resources[key]` to
     --- read as a `T` rather than as `any`.
     ---
-    --- @param name Namespaced, like "game.state". Omitting it is what triggers
-    ---     the warning above, and the key it returns is still usable, just
-    ---     anonymous and new on every call.
-    --- @param forType Never read. It exists so the call site can say what `T`
-    ---     is, since Teal has no explicit type argument; pass `nil as T`.
-    --- @return The key for that name, which is the same one every later call
-    ---     with the same name gets rather than a fresh one. That is what makes
-    ---     values keyed by it survive a module re-running under hot reload.
+    --- @param name The caller supplies a namespaced identity such as
+    ---     `"game.state"`. Omitting it creates an anonymous key and warns.
+    --- @param forType The caller passes `nil as T` to carry the phantom value
+    ---     type; the function does not read it.
+    --- @return Returns the stable key for a name or a fresh anonymous key.
     newKey: function<T>(name?: string, forType?: T): Key<T>
 
-    --- Find a named key created by `newKey`. Returns nil when unknown.
+    --- Returns a named key created by `newKey`.
     ---
-    --- @param name The name the key was created with. Unnamed keys are
-    ---     unreachable here, which is the reason `newKey` warns about them.
-    --- @return The existing key, so a value stored under it is readable without
-    ---     the module that created it. Nil when no key of that name has been
-    ---     created yet, which is a question of load order rather than of
-    ---     spelling: the key appears once its module has run.
+    --- @param name The caller supplies the name used during key creation.
+    --- @return Returns the existing key, or nil before any module creates it.
     findKey: function<T>(name: string): Key<T> | nil
 
-    --- All named keys, as a fresh name -> numeric key id table.
+    --- Returns all named keys as name-to-id entries.
     ---
-    --- @return A fresh table each call, so the caller may keep it and the
-    ---     registry stays unwritable from outside `newKey`. Names span the
-    ---     process rather than one world, so a key here is not evidence that
-    ---     any world has a value under it.
+    --- @return Returns a fresh caller-owned process-wide table.
     listKeys: function(): {string: integer}
 
-    --- Create a new Context instance.
+    --- Creates a Context.
     ---
-    --- @return An empty context, which is the keyed store `world.resources` is
-    ---     one of. For something wanting that store without a world.
+    --- @return Returns an empty typed key-value store.
     newContext: function(): Context
 
-    --- Look up a registered component by numeric ID.
+    --- Returns a registered component by numeric id.
     ---
-    --- @param id A component id, which is allocated once at registration and is
-    ---     the same in every world in the process.
-    --- @return The component, or nil for an id that was never allocated. Ids
-    ---     are not stable across runs: registration order decides them, so a
-    ---     saved id is only meaningful within the run that wrote it.
+    --- @param id The caller supplies a process-wide component id.
+    --- @return Returns the component, or nil for an unallocated id. Numeric ids
+    ---     do not remain stable across runs.
     findComponentById: function(id: integer): Component
 
-    --- The component registered under `name`, or nil.
+    --- Returns the component registered under `name`.
     ---
-    --- The registry is process-wide, because a component's id is allocated
-    --- once at registration and every world that carries one agrees on it. So
-    --- this answers what can be named, and a world answers what is present.
+    --- The process-wide registry allocates each component id once, and every
+    --- world agrees on it. This function answers which components have names;
+    --- a world answers which components it carries.
     ---
     --- Finds a dense relationship instance by its stamped name as well, which
     --- `declaredComponents` leaves out.
     ---
-    --- @param name The `name` the component was registered under, which is the
-    ---     record's own name by convention.
-    --- @return The component, or nil when nothing has registered that name yet.
-    ---     Nil is a question of whether the declaring module has been required,
-    ---     not of whether any world carries the component.
+    --- @param name The caller supplies the process-wide registration name.
+    --- @return Returns the component, or nil when nothing has registered that
+    ---     name.
     findComponentByName: function(name: string): Component
 
-    --- Every component declared in this process, name to component.
+    --- Returns every component declared in this process.
     ---
     --- A fresh table per call, so the registry itself stays unwritable from
     --- outside registration.
     ---
-    --- Dense relationship instances are left out. One is registered per target
-    --- under a stamped `Rel->42` name, so a world with many edges has many of
-    --- them, and none of them is a component anybody declared.
+    --- The result omits dense relationship instances. Registration creates one
+    --- stamped component per target, and no caller declared those components.
     ---
-    --- @return A fresh table each call, built by walking the whole registry, so
-    ---     this is for tooling rather than for a per-frame path. What is
-    ---     declared in the process, which is a superset of what any one world
-    ---     carries.
+    --- @return Returns a fresh caller-owned name-to-component table that omits
+    ---     generated dense relationship instances.
     declaredComponents: function(): {string: Component}
 end
 

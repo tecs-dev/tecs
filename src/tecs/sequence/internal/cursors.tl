@@ -1,15 +1,17 @@
---- Cursor lifetime: the arena, the wait indexes, and the branch tree.
----
---- These belong together because they are mutually recursive. Retiring a
---- cursor cancels its branches and may fault its parent, and faulting one
---- retires it; splitting them would need an indirection through a table in
---- the middle of the hot path to say the same thing.
----
---- A finished cursor frees its slot immediately, so the arena is bounded by
---- peak concurrency rather than by every playback ever started. Its record
---- survives until the slot is handed out again, which is what lets `status`
---- report a final state; once reused, the generation check makes the old
---- handle report nothing rather than another playback's state.
+--[=[
+Cursor lifetime: the arena, the wait indexes, and the branch tree.
+
+These belong together because they are mutually recursive. Retiring a
+cursor cancels its branches and may fault its parent, and faulting one
+retires it; splitting them would need an indirection through a table in
+the middle of the hot path to say the same thing.
+
+A finished cursor frees its slot immediately, so the arena is bounded by
+peak concurrency rather than by every playback ever started. Its record
+survives until the slot is handed out again, which is what lets `status`
+report a final state; once reused, the generation check makes the old
+handle report nothing rather than another playback's state.
+]=]
 
 local type types = require("tecs.types")
 local log <const> = require("tecs.log")

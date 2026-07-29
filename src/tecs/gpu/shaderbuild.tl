@@ -1,14 +1,16 @@
---- Builds a shader pack from the registry.
----
---- This runs at build time and needs the compiler, which is the point: it is
---- how a target that has no compiler gets shaders. It compiles through
---- `shadercompiler`, the same path a development build takes, so the packaged
---- reflection is produced by the same code that would have produced it at run
---- time rather than by a second implementation that can drift.
----
---- The manifest it emits alongside is for people. A pack is opaque, and
---- packaging that cannot be inspected is packaging that gets trusted when it
---- should be checked.
+--[=[
+Builds a shader pack from the registry.
+
+This runs at build time and needs the compiler, which is the point: it is
+how a target that has no compiler gets shaders. It compiles through
+`shadercompiler`, the same path a development build takes, so the packaged
+reflection is produced by the same code that would have produced it at run
+time rather than by a second implementation that can drift.
+
+The manifest it emits alongside is for people. A pack is opaque, and
+packaging that cannot be inspected is packaging that gets trusted when it
+should be checked.
+]=]
 
 local shaders <const> = require("tecs.gpu.shaders")
 local materials <const> = require("tecs.gpu.materials")
