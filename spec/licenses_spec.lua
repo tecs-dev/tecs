@@ -4,15 +4,16 @@
 -- written only in a document lasts until the first person who has not read it.
 -- The realistic way it breaks is small and plausible: someone wants an mp3
 -- decoder that handles a file dr_mp3 chokes on, finds `SDLMIXER_MP3_MPG123`
--- sitting in `cmake/Pinned.cmake` set to OFF, flips it, and nothing anywhere
--- says no. So the options that decide a license are declared here, each with
--- the license behind it, and this holds `Pinned.cmake` to the declaration.
+-- sitting in the native dependency builder set to OFF, flips it, and nothing
+-- anywhere says no. So the options that decide a license are declared here,
+-- each with the license behind it, and this holds the builder to the
+-- declaration.
 --
 -- Five checks, in increasing order of what they are good for:
 --
---  * Every option in the declaration is set in `Pinned.cmake` to the value the
+--  * Every option in the declaration is set in the Cargo builder to the value the
 --    declaration requires. Flipping one fails here.
---  * Every `SDLMIXER_` option `Pinned.cmake` sets appears in
+--  * Every `SDLMIXER_` option the builder sets appears in
 --    the declaration. This is the family where one option decides
 --    which codec gets linked, so adding one means writing down its license
 --    rather than only its value.
@@ -20,7 +21,7 @@
 --    dependency introduces them. This one is forward-looking: it names the
 --    LGPL-capable options of libraries this repository does not build yet, so
 --    the answer is in place before one lands rather than after.
---  * Every dependency pinned in `cmake/Revisions.cmake` is named in
+--  * Every native dependency revision in the build-support crate is named in
 --    `THIRD_PARTY_NOTICES.md`. Pinning a new one fails this until its notice
 --    is written, because a package that ships the code and not the notice is
 --    the one compliance failure this engine is capable of committing.
@@ -34,7 +35,7 @@
 --    creates an unused cache variable
 --    and configures cleanly, and this check is exactly as happy with it. Only
 --    configuring the real thing and reading what it produced tells those
---    apart, which is what `make check-package` does to binaries.
+--    apart, which is what `cargo xtask check-package` does to binaries.
 --  * It cannot read a license out of a binary, because nothing can. The
 --    licenses below are what a person read in each project's own license file
 --    at the pinned revision. A revision bump that changed the terms passes
@@ -118,20 +119,49 @@ local NOTICE_NAMES = {
     GLSLANG = "glslang",
     SPIRV_TOOLS = "SPIRV-Tools",
     SPIRV_HEADERS = "SPIRV-Headers",
-    SPVC = "SPIRV-Cross",
+    SPIRV_CROSS = "SPIRV-Cross",
     ZLIB = "zlib",
 }
 
+-- These are Cargo build dependencies, not code linked into a product. The
+-- lockfile is workspace-wide, so the runtime-only check has to name the
+-- packages that enter through build-support and xtask.
+local BUILD_ONLY_CRATES = {
+    ["aho-corasick"] = true,
+    anyhow = true,
+    ["block-buffer"] = true,
+    ["crypto-common"] = true,
+    digest = true,
+    errno = true,
+    fastrand = true,
+    ["generic-array"] = true,
+    ["linux-raw-sys"] = true,
+    regex = true,
+    ["regex-automata"] = true,
+    ["regex-syntax"] = true,
+    rustix = true,
+    serde_spanned = true,
+    sha2 = true,
+    tempfile = true,
+    tinyvec = true,
+    tinyvec_macros = true,
+    toml = true,
+    toml_datetime = true,
+    toml_parser = true,
+    toml_writer = true,
+    ["unicode-normalization"] = true,
+    version_check = true,
+    winnow = true,
+}
+
 describe("the license position", function()
-    local pinned = readFile("cmake/Pinned.cmake")
-    local revisions = readFile("cmake/Revisions.cmake")
-    local cargoLock = readFile("native/rust/Cargo.lock")
+    local product = readFile("native/rust/build-support/src/product.rs")
+    local cargoLock = readFile("Cargo.lock")
     local notices = readFile("THIRD_PARTY_NOTICES.md")
 
-    -- What Pinned.cmake sets: option to value, read from the forced cache sets
-    -- rather than from anything that merely names an option.
+    -- What the native dependency builder passes to SDL_mixer.
     local settings = {}
-    for option, value in pinned:gmatch("set%(%s*([%w_]+)%s+([%w_]+)%s+CACHE%s+BOOL") do
+    for option, value in product:gmatch('"%s*-D([%w_]+)=([%w_]+)"') do
         settings[option] = value
     end
 
@@ -141,7 +171,7 @@ describe("the license position", function()
             local actual = settings[option]
             assert.is_true(
                 actual ~= nil,
-                ("cmake/Pinned.cmake does not set %s, and it has to: %s (%s)"):format(option, why, license)
+                ("the Cargo builder does not set %s, and it has to: %s (%s)"):format(option, why, license)
             )
             assert.is_true(
                 actual == wanted,
@@ -155,7 +185,7 @@ describe("the license position", function()
             if option:match("^SDLMIXER_") then
                 assert.is_true(
                     REQUIRED[option] ~= nil,
-                    ("cmake/Pinned.cmake sets %s, which this file does not declare. "):format(option)
+                    ("the Cargo builder sets %s, which this file does not declare. "):format(option)
                         .. "Add it with the license it decides and the reason for the value, "
                         .. "or this declaration has stopped describing the build."
                 )
@@ -164,28 +194,29 @@ describe("the license position", function()
     end)
 
     it("enables nothing on the denylist", function()
-        -- Read from the whole file rather than from the parsed sets above, so
-        -- an option enabled in some other form than a forced cache set is
-        -- caught too.
+        -- Read the whole builder so an option enabled outside the expected
+        -- table is caught too.
         for option, license in pairs(NEVER_ENABLED) do
             assert.is_true(
-                pinned:match("set%(%s*" .. option .. "%s+ON") == nil,
-                ("cmake/Pinned.cmake enables %s, which is %s. This engine brings in no LGPL."):format(option, license)
+                product:match("%-D" .. option .. "=ON") == nil,
+                ("the Cargo builder enables %s, which is %s. This engine brings in no LGPL."):format(option, license)
             )
         end
     end)
 
     it("names every pinned dependency in the notices", function()
         local missing = {}
-        for tag in revisions:gmatch("set%(TECS_([%w_]+)_TAG") do
-            local name = NOTICE_NAMES[tag]
-            assert.is_true(
-                name ~= nil,
-                ("cmake/Revisions.cmake pins TECS_%s_TAG, which this file cannot name. "):format(tag)
-                    .. "Add it to NOTICE_NAMES and write its notice."
-            )
-            if not notices:find(name, 1, true) then
-                table.insert(missing, name)
+        for tag in product:gmatch("pub const ([%w_]+)_REVISION") do
+            if tag ~= "TEAL" and tag ~= "CERULEAN" and tag ~= "TEALDOC" then
+                local name = NOTICE_NAMES[tag]
+                assert.is_true(
+                    name ~= nil,
+                    ("the Cargo builder pins %s_REVISION, which this file cannot name. "):format(tag)
+                        .. "Add it to NOTICE_NAMES and write its notice."
+                )
+                if not notices:find(name, 1, true) then
+                    table.insert(missing, name)
+                end
             end
         end
         assert.is_true(
@@ -199,7 +230,13 @@ describe("the license position", function()
     it("names every pinned Rust dependency in the notices", function()
         local missing = {}
         for name in cargoLock:gmatch('%[%[package%]%]%s+name = "([^"]+)"') do
-            if name ~= "tecs-native" and not notices:find("`" .. name .. "`", 1, true) then
+            if
+                name ~= "tecs-native"
+                and name ~= "tecs-build-support"
+                and name ~= "tecs-xtask"
+                and not BUILD_ONLY_CRATES[name]
+                and not notices:find("`" .. name .. "`", 1, true)
+            then
                 table.insert(missing, name)
             end
         end

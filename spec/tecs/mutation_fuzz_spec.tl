@@ -44,8 +44,8 @@ leak), while free ORDER is canonicalized so recycling stays in
 lockstep.
 
 Soak knobs: TECS_FUZZ_SEEDS and TECS_FUZZ_OPS deepen the run without
-changing the fast defaults `make test` uses, e.g.
-`TECS_FUZZ_SEEDS=100 TECS_FUZZ_OPS=1000 make test`.
+changing the fast defaults `cargo xtask test` uses, e.g.
+`TECS_FUZZ_SEEDS=100 TECS_FUZZ_OPS=1000 cargo xtask test`.
 TECS_FUZZ_SEED_OFFSET shifts the seed window so scheduled runs explore
 fresh seeds each night; failure messages report the absolute seed, so
 a red nightly reproduces locally with the same offset.

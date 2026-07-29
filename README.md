@@ -205,7 +205,7 @@ declarations for LuaJIT itself are not tecs's to ship: they are the
 Code inside this repository keeps its explicit requires. `src`, `main.tl` and
 `bench` all say what they depend on, which is worth more than the line it saves,
 and the engine's modules require `tecs.ecs` rather than the whole surface for a
-reason the global would quietly undo. So `make check` runs with no declaration
+reason the global would quietly undo. So `cargo xtask check` runs with no declaration
 loaded, and a module that reached for `tecs` without requiring it is an error
 here rather than a cycle later.
 
@@ -823,7 +823,7 @@ start, stop it. It is built on SDL_mixer 3 and on six decisions.
 this build has is a question with a runtime answer rather than a configure-time
 one, because a decoder whose dependency was missing is dropped without
 complaint, so `Audio.decoders()` reports the list the library itself gives.
-`cmake/Pinned.cmake` names every decoder option rather than accepting defaults:
+The Cargo dependency builder names every decoder option rather than accepting defaults:
 several of them are LGPL and on by default, and a statically linked game must
 not import those. dr_mp3 stands in for mpg123, dr_flac for libFLAC, stb_vorbis
 for vorbisfile, and `SDLMIXER_STRICT` turns a dependency that could not be
@@ -1692,7 +1692,7 @@ Only frames that consumed an event are sampled, and a batch is charged to the
 frame from its oldest event. A frame nobody was waiting on has no latency, and
 averaging it in only makes the number smaller.
 
-`make bench-latency` produces the number without a human at the keyboard. It
+`cargo xtask bench latency` produces the number without a human at the keyboard. It
 pushes synthetic events through SDL's own queue rather than through
 `events.source`, so they are delivered to the host and stamped exactly as a
 real press is: a replay source would skip the arrival stamp and leave the
@@ -1706,7 +1706,7 @@ where it lands as a block in acquire.
 A frame that allocates has bought a collection it will pay for later, in some
 other frame. Frame time cannot see that either: the cost lands away from where
 it was incurred and arrives as a tail nobody can attribute. So steady-state
-allocation is measured on its own, by `make bench-alloc`, and held by
+allocation is measured on its own, by `cargo xtask bench alloc`, and held by
 `spec/allocation_spec.lua`.
 
 Measuring it is mostly a matter of not being fooled three times.
@@ -2196,7 +2196,7 @@ decides whether a large animated scene is affordable. One animating sprite marks
 the `Sprite` column of the archetype it lives in, and a dirty column has its
 whole run rewritten and uploaded, so two thousand animating sprites in a field
 of two hundred thousand cost two hundred thousand instances written. That is
-measured rather than argued: `make bench-sprites` reports it as `rewritten`, and
+measured rather than argued: `cargo xtask bench sprites` reports it as `rewritten`, and
 the sparse regime exists to show it.
 
 Playback therefore resolves in the shader, which is what `animation.useGPU`
@@ -3002,7 +3002,7 @@ lane and do not yet reach it.
 
 ## GPU-driven by default
 
-`make run` animates 4000 instances and never tells the GPU how many of them to
+`cargo xtask run` animates 4000 instances and never tells the GPU how many of them to
 draw. Per-instance data lives in a storage buffer the host writes the deltas of,
 and what decides the draw is a chain of compute passes: mark, scan and compact
 for the opaque lane, five more for the blended one, light binning beside them.
@@ -3031,7 +3031,7 @@ A release compiles nothing. On iOS there is no writable executable memory to
 hand a compiler, on a console there is no compiler to link, and everywhere else
 it is tens of megabytes baked into a build that already knows every shader it
 will ever use. So every shader the engine can ask for is registered by name in
-`tecs.gpu.shaders`, and `make shaders` walks that registry and writes a pack:
+`tecs.gpu.shaders`, and `cargo xtask shaders` walks that registry and writes a pack:
 code, entry point, reflected counts, workgroup size, and a hash of the source it
 came from. Because the builder calls the same compiler a development build
 calls, the packaged reflection cannot drift from what would have happened at run
@@ -3375,7 +3375,7 @@ for shaderc or SPIRV-Cross and links neither.
 
 ## Bindings are generated, never hand-written
 
-`scripts/gencdef.py` runs the system preprocessor over the installed headers,
+The Cargo binding generator runs the system preprocessor over the installed headers,
 keeps the declarations that came from the library, and rewrites them into the
 subset of C that LuaJIT's parser accepts. Integer `#define` constants are
 recovered separately by compiling a program that prints them, because the
@@ -3384,7 +3384,7 @@ of them (`SDL_WINDOW_RESIZABLE`) hide behind helper macros that pattern
 matching misses.
 
 A hand-maintained cdef does not fail to link when it drifts. It reinterprets
-memory and surfaces later as corruption far from the cause. `make abi-check`
+memory and surfaces later as corruption far from the cause. `cargo xtask abi-check`
 compares LuaJIT's view of every generated record against the C compiler's:
 size, alignment, and the offset of every field. It currently verifies 219
 records. A binding whose header is written against another library's types
@@ -3398,11 +3398,12 @@ Lua where it cannot inline across an FFI call.
 ## Layout
 
 ```
+Cargo.toml                project workspace and canonical build entry
+xtask/                    project assembly, generation, checks, and packaging
 native/rust/runtime/      host, services, image, HTTP, physics, and CLI parsing
+native/rust/build-support reusable build and generator implementation
 native/rust.h             the C-compatible ABI LuaJIT reaches
 native/                   headers, generated linker glue, SPIRV-Cross wrapper
-scripts/gencdef.py        header -> cdef + constants generator
-scripts/abicheck.py       cdef vs C compiler layout verification
 src/tecs/init.tl          the public API: one module per name, ECS and engine
 src/tecs/ecs.tl           what a game writes, and what engine modules require
 src/tecs/global.d.tl      declares the `tecs` global, typed off init.tl
@@ -3434,64 +3435,61 @@ bench/                    where the numbers in this file come from
 
 ## Build
 
-CMake is canonical. Make is a wrapper that forwards to it, so there is one
-description of how the engine is assembled rather than one per platform to keep
-in step.
+Cargo is canonical. The root workspace owns the Rust runtime and a dedicated
+`xtask` binary owns final assembly, native dependency builds, generated files,
+tests, packaging, and repository maintenance. Native dependencies may use
+their own upstream build systems internally; they do not add a second project
+build graph.
 
-Rust native services live in one Cargo workspace under `native/rust`. CMake
-selects the Rust target that matches its own preset, asks Cargo for one static
-archive, and owns the final link. That keeps a single-file build single: Cargo,
-the crate graph, and the archive are build inputs, not files a game needs at
-run time. Every Rust archive build first runs `rustfmt --check` and Clippy with
-warnings denied. The same archive owns image decoding, networking, HTTP, the
-RMCP Streamable HTTP server, physics, and Clap parsing while Teal retains the
-public API and command implementations.
+That keeps a single-file build single: Cargo, the crate graph, and native
+archives are build inputs, not files a game needs at run time. Every product
+build first runs `rustfmt --check` and Clippy with warnings denied. The runtime
+owns image decoding, networking, HTTP, the RMCP Streamable HTTP server,
+physics, and Clap parsing while Teal retains the public API and command
+implementations.
 
 ```
-make presets        list the platform matrix
-make build          build the selected preset
-make run            run the demo
-make test           run the spec suite
-make check          type-check Teal sources
-make abi-check      verify generated cdefs against the C ABI
-make package        install a tree into out/package
-make check-package  verify a package carries its own dependencies
-make test-package   run the spec suite against out/package
-make deps           install development dependencies (Homebrew)
+cargo xtask presets       list the platform matrix
+cargo xtask build         build the host development preset
+cargo xtask run           run the demo
+cargo xtask test          run the spec suite
+cargo xtask check         type-check Teal sources
+cargo xtask abi-check     verify generated cdefs against the C ABI
+cargo xtask package --preset macos-arm64
+cargo xtask check-package out/package
+cargo xtask test-package --preset macos-arm64
+cargo xtask deps          install development dependencies (Homebrew)
 ```
 
-`PRESET=` selects the target; it defaults to `macos-arm64-dev`. Presets come in
-two kinds. A development preset resolves dependencies from the system, which is
-convenient and not shippable: it links the build machine's libraries by
-absolute path. A packaged preset builds pinned revisions from source, so a
-release is reproducible and carries no path from the machine that made it.
+`--preset` selects the target; when omitted it selects the host development
+preset. Presets come in two kinds. A development preset resolves dependencies
+from the system, which is convenient and not shippable: it links the build
+machine's libraries by absolute path. A packaged preset builds pinned revisions
+from source, so a release is reproducible and carries no path from the machine
+that made it.
 
 A packaged preset also builds the pinned LuaJIT and SDL family. LuaJIT's
 Makefile refuses to guess a deployment target on Apple, so the macOS presets
 name one.
 
-`make check-package` is the gate on that distinction. It inspects the installed
+`cargo xtask check-package` is the gate on that distinction. It inspects the installed
 binaries for search paths and absolute references that leave the package, and it
 checks that a pack is there, since a release ships no compiler and must
-therefore ship its shaders. The script also refuses a shader compiler outright,
-and that is the one check the make target turns off: it passes
-`--allow-compiler`, because `check-package` packages whatever `PRESET=` names
-and that defaults to a development preset, which links one on purpose. Only a
-packaged install can pass the rest: a development one keeps its link paths on
-purpose, so what runs against one is the half that is about the tree rather than
-the preset, the license position and the packaged types, and the rest is
-reported as not run. A package that resolved a library from the build machine
-works there and nowhere else, and the failure only appears once someone else
-unpacks it.
+therefore ship its shaders. The checker also refuses a shader compiler
+outright unless `--allow-compiler` is passed for a development install. Only a
+packaged install can pass the containment checks: a development one keeps its
+link paths on purpose, so the license position and packaged types are checked
+and containment is reported as not run. A package that resolved a library from
+the build machine works there and nowhere else, and the failure only appears
+once someone else unpacks it.
 
-`make test-package` is the other half of the same idea. `make test` runs the
-suite against a build tree, which on a development preset means against the
-machine's own SDL family and zlib; against an installed packaged tree it is
-the only thing that exercises the revisions a release actually ships. It sets a
-path per library, because `loader.library` tries a library's plain soname
-before any directory it was told about, so `ffi.load("SDL3")` otherwise reaches
-whatever the machine has installed from inside a package carrying its own, and
-two SDL3 images end up in one process.
+`cargo xtask test-package` is the other half of the same idea. It runs the
+package checker and the headless specs against a freshly installed tree. The
+rest of the spec suite belongs to the development build: shader-reload specs
+require the compiler a release deliberately omits, and rendering specs require
+a display. Native loading prefers the package's discovered `lib` directory
+before the machine's plain soname, so a packaged SDL cannot be mixed with a
+system SDL in one process.
 
 It holds the installed types to the same standard, for the same reason: it
 type-checks a file that uses the `tecs` global against `share/tecs/teal` and
@@ -3500,31 +3498,30 @@ incomplete fails here rather than for whoever unpacks it. That one fails on
 both kinds of install, since types are not something a development build is
 allowed to borrow from its machine.
 
-`TECS_FRAMES=N make run` exits after N frames, so an automated run can drive
+`TECS_FRAMES=N cargo xtask run` exits after N frames, so an automated run can drive
 a real window to completion.
 
 ## Requirements
 
-CMake 3.24+, Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU),
+Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU),
 SDL3_mixer, shaderc, SPIRV-Cross, zlib, and Teal
-(`tl`). `rust-toolchain.toml` selects the Rust toolchain. The configure requires
-every one of them. `make deps` installs the ones Homebrew supplies; zlib is not
+(`tl`). `rust-toolchain.toml` selects the Rust toolchain. A development build
+requires every one of them. `cargo xtask deps` installs the ones Homebrew supplies; zlib is not
 among them, because a development preset finds the host's.
 
 A version is a requirement rather than a floor. The spec suite runs against
 whatever a development preset resolved, so a suite run against a different SDL,
-SDL_mixer, LuaJIT or shaderc than `cmake/Revisions.cmake`
-names is not testing what a release ships, and the configure fails on the
+SDL_mixer, LuaJIT or shaderc than the pinned revisions in the build-support crate
+names is not testing what a release ships, and the build fails on the
 difference rather than leaving it to be found as a spec that passes on one
-machine and not another. `-DTECS_ALLOW_VERSION_DRIFT=ON` proceeds anyway, which
-is for working on a dependency before its revision is raised. SPIRV-Cross and
-zlib are unchecked, and `cmake/SystemVersions.cmake`
-says why each is.
+machine and not another. `TECS_ALLOW_VERSION_DRIFT=1` permits a deliberate
+dependency update. SPIRV-Cross and zlib are unchecked because neither exposes
+the release identity needed for that comparison.
 
 A development build takes SDL_mixer from the system, and a system build is
 whatever the packager configured: Homebrew's loads its optional decoders by
 name at `MIX_Init`, so a developer's machine may well have the LGPL ones
-available where a package built from `cmake/Pinned.cmake` does not.
+available where the pinned package does not.
 `Audio.decoders()` is how to tell which build is running.
 
 Image decoding does not have that development/package split: the same pinned
@@ -3535,9 +3532,9 @@ Rust `image` crate with only PNG and JPEG enabled is linked in every build.
 Everything this engine links is permissive, and it stays that way. LGPL is the
 one rule with no exceptions, because a statically linked game cannot satisfy
 the relinking obligation and a shipped binary is what this is for. It is not
-left to a document: `cmake/Pinned.cmake` names every decoder option that would
-fetch one, `spec/licenses_spec.lua` holds those options to their values and
-fails on a name it does not recognize, and `scripts/checkpackage.py` holds the
+left to a document: the Cargo dependency builder names every decoder option
+that would fetch one, `spec/licenses_spec.lua` holds those options to their
+values and fails on a name it does not recognize, and the package checker holds the
 libraries an installed tree actually links against a list carrying a license
 and a reason for each. Neither of those two checks reads a license out of a
 binary, because that is not something a binary carries; what they prove is that
@@ -3546,7 +3543,7 @@ nothing gets linked without somebody having written down what it is.
 `THIRD_PARTY_NOTICES.md` is the list, and it installs to `share/tecs` with the
 binaries it describes. A package that carried the code and not the notice would
 be the one compliance failure this engine could commit on its own, so
-`make check-package` fails an install that is missing it.
+`cargo xtask check-package` fails an install that is missing it.
 
 System dependencies are found through pkg-config rather than a package manager's
 paths, which is what lets the same build description cross-compile. TCP, UDP,

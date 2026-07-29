@@ -64,7 +64,7 @@ describe("ffi.loader", function()
     it("agrees with the C compiler on SDL_Event's size", function()
         local ffi = require("ffi")
         require("tecs.ffi.sdl3")
-        -- A drifted cdef would change this silently; make abi-check verifies
+        -- A drifted cdef would change this silently; cargo xtask abi-check verifies
         -- every record, this pins the one the event loop depends on.
         assert.are.equal(128, ffi.sizeof("SDL_Event"))
     end)

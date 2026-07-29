@@ -1,6 +1,6 @@
 --- Sprites at scale, and what extraction rewrites when almost nothing moved.
 ---
---- `make bench` measures one regime: every entity moves every frame, which is
+--- `cargo xtask bench shapes` measures one regime: every entity moves every frame, which is
 --- the case where the dirty gate can never help and where the instance layout
 --- never shifts. A game is not that. A game is mostly still, with a few things
 --- animating and a steady trickle of things appearing and disappearing, and
@@ -13,7 +13,7 @@
 ---            the only regime with an exact expected answer: zero.
 ---   dense    every sprite advances its animation on every fixed step, so
 ---            every Sprite column is dirty and the whole scene is rewritten.
----            Comparable to `make bench`, and the ceiling the other three are
+---            Comparable to `cargo xtask bench shapes`, and the ceiling the other three are
 ---            measured against.
 ---   sparse   a small fraction animates and the rest hold their frame. The
 ---            entities are structurally identical, so they share an archetype

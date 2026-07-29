@@ -31,10 +31,10 @@ code; migrate old code opportunistically.
 
 ## Layout, which the formatter owns
 
-`make format` decides all of this and `make format-check` fails on it, so none
-of it is worth reading a diff for or asking about in review. It is written down
-because knowing what the tool will do is how you stop fighting it, not because
-anybody has to apply it.
+`cargo xtask format` decides all of this and `cargo xtask format-check` fails
+on it, so none of it is worth reading a diff for or asking about in review. It
+is written down because knowing what the tool will do is how you stop fighting
+it, not because anybody has to apply it.
 
 - 4-space indentation, no tabs, and 120 columns. Both live in `tlconfig.lua`.
 - Long signatures wrap with one parameter group per line and the closing
@@ -69,10 +69,10 @@ These are judgment, and they are what a review is for.
 
 ## Formatters
 
-`make format` applies them and `make format-check` reports without writing.
-Both call `scripts/format.py`, which is where the file list and the tool per
-language live. Every tool is configured to the two rules above, and none of
-them reflows a comment body.
+`cargo xtask format` applies them and `cargo xtask format-check` reports
+without writing. The formatter table lives in the Cargo build-support crate.
+Every tool is configured to the two rules above, and none of them reflows a
+comment body.
 
 ```
  Language  Tool          Config
@@ -80,8 +80,7 @@ them reflows a comment body.
  C         clang-format  .clang-format
  Lua       stylua        .stylua.toml
  Teal      Cerulean      tlconfig.lua
- Python    ruff format   ruff.toml
- CMake     gersemi       .gersemirc
+ Rust      rustfmt       rustfmt.toml
  Web       prettier      .prettierrc
 ```
 
@@ -89,7 +88,7 @@ Prettier covers JSON, Markdown, YAML, CSS and the JS/TS family. Markdown is
 formatted with `proseWrap: preserve`, so hand-wrapped prose keeps its line
 breaks and only structure is normalized.
 
-Teal uses the exact Cerulean revision installed by `make deps`. That revision
+Teal uses the exact Cerulean revision installed by `cargo xtask deps`. That revision
 supports this tree's local macro declarations, macro invocations, and quoted
 macro bodies. Require sorting is disabled because import order can be
 meaningful, while indentation and line width come from `tlconfig.lua`. The
@@ -302,7 +301,7 @@ is a name that matches nothing the library's own documentation says.
 ## Tests
 
 - Specs run headless under Busted. The engine's are Lua under `spec/`; the
-  ECS's are Teal under `spec/tecs/`. Both are collected by one `make test`.
+  ECS's are Teal under `spec/tecs/`. Both are collected by one `cargo xtask test`.
 - Assert with luassert's flat API (`luassert.equal`, `luassert.is_true`).
 - Do not sleep and hope: drive a deterministic number of frames and assert
   on what they produced.

@@ -1,13 +1,12 @@
---- `tecs format`, over the table `scripts/format.py` owns.
+--- `tecs format`, over the table the Cargo build owns.
 ---
 --- **There is one description of what gets formatted and by what, and this is
---- not it.** `scripts/format.py` is, and the build asks that script to print
---- its own tables and bakes the answer in as `tecscli.toolchain`. So the
---- repository's `make format`, the CMake target of the same name and this
---- command all read the same suffix map, the same exclusions and the same
---- argument lists. A second list here is the failure this arrangement exists to
---- prevent: an editor formatting on save and a CI job checking formatting would
---- one day disagree about one file, and the diff would belong to nobody.
+--- not it.** The build-support crate owns it and bakes the answer in as
+--- `tecscli.toolchain`. So `cargo xtask format` and this command read the same
+--- suffix map, exclusions and argument lists. A second list here is the
+--- failure this arrangement exists to prevent: an editor formatting on save
+--- and a check job would one day disagree about one file, and the diff would
+--- belong to nobody.
 ---
 --- **The Teal formatter is inside the binary and is pinned by commit.** That is
 --- the part worth stating twice. A formatter resolved at run time is one that
@@ -15,11 +14,11 @@
 --- Cerulean rewrote three `= macroexp(...)` declarations without their bodies,
 --- and `tl check` still passed, because what a rewrite like that removes is the
 --- implementation and what it leaves is the declaration. `tecs format` runs the
---- exact commit `cmake/Revisions.cmake` names, and `tecs info` prints it.
+--- exact commit the build pins, and `tecs info` prints it.
 ---
 --- Everything else formats through a program on `PATH`, because a C++, Rust or
 --- Node formatter cannot be carried inside a Lua payload. A missing one is
---- reported by name, which is what `format.py` does with the same table.
+--- reported by name.
 
 local shell <const> = require("tecscli.shell")
 local files <const> = require("tecscli.files")

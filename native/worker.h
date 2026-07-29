@@ -1,7 +1,7 @@
 /* Worker threads and channels. See worker.c for why this is native.
  *
  * The cdef the FFI uses is generated from this header, so the two cannot
- * drift: `make abi-check` compares the generated record layouts against what
+ * drift: `cargo xtask abi-check` compares the generated record layouts against what
  * the C compiler produces.
  */
 

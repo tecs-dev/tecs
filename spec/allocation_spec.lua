@@ -60,7 +60,7 @@
 -- allocates enough to fail the specs that watch the process size. An exact
 -- number is not worth handing the rest of the suite an interpreter.
 --
--- `make bench-alloc` is where the exact figures live. It runs under the
+-- `cargo xtask bench alloc` is where the exact figures live. It runs under the
 -- engine's own binary, which does reserve the arena, so the compiler settles
 -- and better than nine frames in ten come out untouched by it.
 
@@ -128,7 +128,7 @@ local EXTRACTIONS = 4000
 -- SDL hands back nine pointers a frame that have to be held in Lua, and LuaJIT
 -- boxes each into 24 bytes of cdata, sinking one or another of them depending
 -- on what it has compiled. The 144 is the two staging flushes, which the bar
--- below this one covers exactly. The numbers are in `make bench-alloc`.
+-- below this one covers exactly. The numbers are in `cargo xtask bench alloc`.
 --
 -- Under `busted` the same frame reads between 320 bytes and 4 KB as the
 -- smallest of `WINDOWS` windows, the difference being the compiler, for the
@@ -338,7 +338,7 @@ describe("allocation", function()
             small <= FRAME_BAR and large <= FRAME_BAR,
             (
                 "a steady-state frame allocates %.0f bytes at %d entities and %.0f at %d, "
-                .. "over the %d byte ceiling. Run `make bench-alloc` for the breakdown "
+                .. "over the %d byte ceiling. Run `cargo xtask bench alloc` for the breakdown "
                 .. "by stage."
             ):format(small, STILL + MOVERS, large, STILL + EXTRA + MOVERS, FRAME_BAR)
         )

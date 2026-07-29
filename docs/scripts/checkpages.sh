@@ -34,7 +34,7 @@
 # pass as "the index is complete", never as "the pages are right".
 #
 # The one machine-checkable claim about content lives next door:
-# docs/scripts/reference.py --check diffs the reference section of every module
+# cargo xtask docs-reference and docs-check own generated reference sections
 # page against a fresh render, so signatures cannot drift even though the words
 # around them can.
 #

@@ -19,35 +19,34 @@ Primary entry point:
 
 ## Key Commands
 
-CMake owns final assembly, Cargo owns the Rust archive, and Make wraps both.
+Cargo owns the project build. The `cargo xtask` command assembles native
+dependencies, generates bindings and payloads, links products, runs checks,
+and packages releases.
 
 ```bash
-make build          # Build the selected preset
-make test           # Run the spec suite (both suites, one Busted run)
-make check          # Type-check Teal sources
-make format         # Format sources in place
-make format-check   # Report unformatted sources, writing nothing
-make run            # Run the demo
-make bench          # Shapes benchmark
-make bench-physics  # Physics benchmark
-make bench-sprites  # Sprite extraction, in four regimes
-make bench-latency  # Event-to-photon latency, with synthetic input
-make abi-check      # Verify generated cdefs against the C ABI
-make shaders        # Build the shader pack a target without a compiler consumes
-make package        # Install a tree into out/package
-make check-package  # Verify a package carries its own dependencies
-make test-package   # Run the spec suite against out/package
-make presets        # List the platform matrix
-make deps           # Install development dependencies (Homebrew)
+cargo xtask build          # Build the host development preset
+cargo xtask test           # Run the spec suite, headless specs first
+cargo xtask check          # Type-check Teal sources
+cargo xtask format         # Format sources in place
+cargo xtask format-check   # Report unformatted sources
+cargo xtask run            # Run the demo
+cargo xtask bench shapes   # Run a native-host benchmark
+cargo xtask abi-check      # Verify generated cdefs against the C ABI
+cargo xtask shaders        # Build the shader pack
+cargo xtask package --preset macos-arm64
+cargo xtask check-package out/package
+cargo xtask test-package --preset macos-arm64 # Verify the installed release
+cargo xtask presets        # List the platform matrix
+cargo xtask deps           # Install development dependencies
 ```
 
-`PRESET=` selects the target and defaults to `macos-arm64-dev`. A development preset resolves dependencies from
-the system, which is convenient and not shippable. A packaged preset builds pinned revisions from source, and
-`make check-package` is the gate on the difference, and only a packaged install can pass it.
+`--preset` selects the target and defaults to the host development preset. A development preset resolves
+dependencies from the system, which is convenient and not shippable. A packaged preset builds pinned revisions
+from source. `cargo xtask check-package` is the gate on the difference, and only a packaged install can pass it.
 
 `macos-arm64-sanitize` and `linux-x64-sanitize` are development presets with AddressSanitizer and
-UndefinedBehaviorSanitizer under the C. Run the host through them, which is `make run` or any of the
-benchmarks; `make test` cannot use them, and CONTRIBUTING.md says why and what to do instead.
+UndefinedBehaviorSanitizer under the C. Run the host through them with `cargo xtask run --preset <name>` or a
+benchmark; `cargo xtask test` cannot use them, and CONTRIBUTING.md says why and what to do instead.
 
 ## Project Structure
 
@@ -77,10 +76,11 @@ tecs/
 │   ├── workers.tl
 │   ├── log.tl             # SDL's logging, per platform
 │   └── json.tl            # lua-cjson, with the build's own copy found
-├── native/                # Host, worker runner, log sink, solver pool, registry
+├── native/                # Headers and generated-linker support
+├── native/rust/           # Runtime and reusable Cargo build support
+├── xtask/                 # Project build command
 ├── assets/                # shaders/ and materials/, globbed at build time
-├── cmake/                 # Pinned dependency revisions
-├── scripts/               # cdef generation, ABI check, shader pack, package check
+├── scripts/               # Lua and shell helpers used by the Cargo build
 ├── spec/                  # Engine specs in Lua, ECS specs in Teal under spec/tecs
 ├── bench/
 └── out/<preset>/          # Build output
@@ -185,27 +185,25 @@ decision worth making deliberately.
 
 ### The C the tree is written in
 
-**C99, and that is settled.** The only things a later standard offers this code are
-`_Static_assert` and `_Atomic`; atomics already arrive from SDL as `SDL_AtomicInt`, and MSVC drives
-the Windows preset with comparatively recent support for later C. `CMAKE_C_STANDARD_REQUIRED` is
-`ON`, so a compiler that cannot give C99 fails to configure rather than quietly giving something
-else.
+**C99, and that is settled.** The Cargo build compiles first-party C as
+`gnu99`. The only things a later standard offers this code are `_Static_assert`
+and `_Atomic`; atomics already arrive from SDL as `SDL_AtomicInt`.
 
-`CMAKE_C_EXTENSIONS` is left at its default, which is `gnu99` rather than `c99`, and that is load
-bearing on Linux. `-std=c99` defines `__STRICT_ANSI__`, glibc's `features.h` then leaves
+The GNU extensions are load bearing on Linux. `-std=c99` defines
+`__STRICT_ANSI__`, glibc's `features.h` then leaves
 `_DEFAULT_SOURCE` and `_GNU_SOURCE` undefined, and native POSIX code may reach
 for APIs those macros gate. Moving to `c99` means writing feature-test macros
 into every file that touches a POSIX header, which buys nothing the standard pin does not already
 buy.
 
-**A header the FFI binds must stay a C subset LuaJIT can parse.** `scripts/gencdef.py` runs the
+**A header the FFI binds must stay a C subset LuaJIT can parse.** The Cargo binding generator runs the
 preprocessor over `native/*.h` and hands the result to `ffi.cdef`, which accepts less than a
 compiler does. An anonymous union, a bit-field of an unusual width, a `_Static_assert`, an attribute
 in a declaration: each of those compiles and then breaks binding generation, which fails as a module
 that will not load rather than as a header that will not compile. So the headers under `native/`
 are declarations and nothing else, and anything a binding does not need stays in the `.c`.
 
-Do not write `_Static_assert` layout checks. `make abi-check` already does the stronger version: it
+Do not write `_Static_assert` layout checks. `cargo xtask abi-check` already does the stronger version: it
 generates a C program comparing LuaJIT's view of every record against the compiler's, checking size,
 alignment and every field offset across 219 records. A static assert only checks a header against
 itself.
@@ -213,10 +211,11 @@ itself.
 ### Testing
 
 - Add or update tests when changing behavior, fixing bugs or extending public APIs.
-- Engine specs are Lua under `spec/`; ECS specs are Teal under `spec/tecs/`. Both run in one `make test`.
+- Engine specs are Lua under `spec/`; ECS specs are Teal under `spec/tecs/`. Both run through
+  `cargo xtask test`, with headless specs first in a fresh Busted process.
 - Teal specs are compiled by `scripts/compile_specs.lua`, which emits code even when a file does not type-check.
   That is deliberate: their type errors are in the test code, and refusing to build them would take real coverage
-  away over that. `make check` therefore covers `src`, `main.tl` and `bench`.
+  away over that. `cargo xtask check` therefore covers `src`, `main.tl` and `bench`.
 
 ### Documentation
 
@@ -233,7 +232,7 @@ that is.
 Two places, and they hold different things:
 
 - **`docs/`** is the reference. A module's page says what it is, what it takes and what it answers.
-  `make docs-check` requires every page to carry a one-line `description:`, and `make docs-dev`
+  `cargo xtask docs-check` requires every page to carry a one-line `description:`, and `cargo xtask docs-dev`
   serves the site with hot reload while you write.
 - **`README.md`** is the design record. It holds why, not what: the decision, the alternative that
   lost, and the constraint that forced it. A change that only adds a function needs no entry; a
@@ -248,12 +247,12 @@ tests prose. The only defense is the person making the change, at the time they 
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
 
-`make docs-check` is the gate, and it holds four things: every page carries a one-line
+`cargo xtask docs-check` is the gate, and it holds four things: every page carries a one-line
 `description:`; the module list matches `src/tecs/init.tl` in three listings at once
 (`docs/index.md`, `docs/modules/index.md` and the sidebar in `docs/.vitepress/config.mts`), in
 one order, with one page per public name and no page outliving its module; every link and anchor
 resolves; and each page's generated reference section matches a fresh render. That last one is
-why a page is never hand-edited below its `@generated` marker: run `python3 docs/scripts/reference.py`.
+why a page is never hand-edited below its `@generated` marker: run `cargo xtask docs-reference`.
 
 ### Docblocks
 
@@ -284,7 +283,7 @@ The rules that prevent the most common defect class:
 
 ### Code Style
 
-`STYLE.md` is the long form, and it separates what `make format` decides from what it cannot. Layout is the
+`STYLE.md` is the long form, and it separates what `cargo xtask format` decides from what it cannot. Layout is the
 formatter's: indentation, columns, wrapping, alignment. What is left to a person is `local` and `<const>` where
 appropriate, early returns over deep nesting, require grouping (the formatter deliberately does not sort them,
 because import order is meaningful), comments sparse and informational, and the naming rules above.
@@ -338,9 +337,10 @@ validation that finds state written under it, and neither is in scope for a name
 - Avoid allocations in hot paths.
 - Prefer archetype/query iteration patterns that work with contiguous columns.
 - Be careful when changing rendering, storage and snapshot code paths; they are performance-sensitive.
-- Benchmarks are the argument. `make bench` is a uniform loop over transforms, `make bench-physics` is lumpy and
+- Benchmarks are the argument. `cargo xtask bench shapes` is a uniform loop over transforms,
+  `cargo xtask bench physics` is lumpy and
   CPU-bound, and a frame-structure change has to be judged against both, p50 and p95 together.
-- `make bench-latency` measures what neither of those can see: the wait from an event arriving to the frame that
+- `cargo xtask bench latency` measures what neither of those can see: the wait from an event arriving to the frame that
   reacted to it being submitted. Anything that pipelines the frame buys throughput and pays for it there.
 
 ## History

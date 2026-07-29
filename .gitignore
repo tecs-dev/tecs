@@ -4,7 +4,7 @@
 
 /out/
 /build/
-/native/rust/target/
+/target/
 
 # Development dependencies installed into the tree. The vendored C sources
 # under vendor/cjson are ours to carry, so they are exempt.
@@ -21,7 +21,3 @@
 
 # macOS system files
 .DS_Store
-
-# Python bytecode, which the generator scripts leave behind.
-__pycache__/
-*.pyc

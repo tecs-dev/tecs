@@ -306,7 +306,7 @@ local STDIO = {
     ["tecs/gpu/shaderpack.lua"] = {
         bucket = "tool",
         reason = "Writes the pack a target without a compiler consumes. Runs "
-            .. "from `make shaders` on a build machine; the loading half of "
+            .. "from `cargo xtask shaders` on a build machine; the loading half of "
             .. "the same module reads through filesystem.",
     },
     ["tecs/gpu/shaderbuild.lua"] = {

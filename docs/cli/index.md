@@ -5,7 +5,7 @@ outline: deep
 
 # Tecs CLI
 
-The command line tool is the primary way to use Tecs: install one file, run `tecs new`, and never install CMake,
+The command line tool is the primary way to use Tecs: install one file, run `tecs new`, and never install
 LuaRocks or a compiler on a player's machine. The executable carries the engine, Teal toolchain, project template
 and its Rust native services inside the same file.
 

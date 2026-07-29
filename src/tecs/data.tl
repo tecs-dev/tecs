@@ -131,7 +131,7 @@ local zlib <const> = require("tecs.ffi.zlib")
 -- The directories come from the loader, so where this build put its native
 -- code is described once. Entries there carrying `%s` are `ffi.load` patterns
 -- for a named dependency and match no Lua module, so they are skipped. The
--- suffix is `.so` on every platform, because that is what CMake sets on the
+-- suffix is `.so` on every platform, because that is what the Cargo build sets on the
 -- module rather than what the platform would pick.
 local candidates: {string} = {}
 for _, directory in ipairs(loader.searchPaths) do

@@ -4,8 +4,8 @@ Tecs includes and links third-party material under licences other than the
 repository's MIT-or-Apache-2.0 code licence. Everything named here is
 permissive.
 
-Licences below were read from each project's own files at the revision
-`cmake/Revisions.cmake` pins, not from what a project is commonly said to be
+Licences below were read from each project's own files at the revision the
+Cargo build-support crate pins, not from what a project is commonly said to be
 under. Two of those are worth naming because the common answer is wrong:
 **libxmp is MIT**, not the LGPL it is usually called, and **SPIRV-Headers is
 MIT**, not the Apache-2.0 that the rest of shaderc's tree is.
@@ -21,15 +21,15 @@ not adopted, however convenient it is.
 That is not left to this document. Three things enforce it, and each is honest
 about what it does not cover:
 
-- `cmake/Pinned.cmake` names every decoder option that would fetch an LGPL
-  codec instead of accepting a version's defaults. SDL_mixer's defaults are on
-  for the LGPL paths, so an unconfigured build is encumbered; this is the file
-  that makes it not.
+- The Cargo native dependency builder names every decoder option that would
+  fetch an LGPL codec instead of accepting a version's defaults. SDL_mixer's
+  defaults are on for the LGPL paths, so an unconfigured build is encumbered;
+  this is the code that makes it not.
 - `spec/licenses_spec.lua` holds those options to their values, fails on an
   option it does not recognise, and fails when a dependency is pinned without
   being named below. It reads a declaration, so it cannot tell an option that
   works from one upstream renamed.
-- `scripts/checkpackage.py` holds the libraries an installed tree actually
+- The Cargo package checker holds the libraries an installed tree actually
   links against a list carrying a licence and a reason for each, and fails an
   install missing this file. It reads link tables, so it cannot see a static
   archive and it cannot read a licence out of a binary, because nothing can.
@@ -142,7 +142,7 @@ registration, LuaJIT's machine-code arena, and the single-file payload loader.
 SDL still owns the application loop and LuaJIT still owns game execution.
 
 The exact versions and declared SPDX expressions are pinned in
-`native/rust/Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
+the root `Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
 Apache-2.0, ISC, BSD-3-Clause, Zlib, Unicode-3.0, CDLA-Permissive-2.0,
 Unlicense, and 0BSD. The build selects Ring as Rustls' crypto provider; it does
 not compile AWS-LC or OpenSSL. `LICENSE-APACHE` and `LICENSE-MIT` travel with
@@ -290,15 +290,15 @@ wants its notice in all copies.
 
 **shaderc**, Apache-2.0, and only in a build that compiles shaders at runtime. A
 release consumes a prebuilt shader pack and links no compiler, which
-`make check-package` enforces, so this section applies to a development build
+`cargo xtask check-package` enforces, so this section applies to a development build
 and to any tool that ships one, not to a shipped game.
 
 shaderc builds in third-party projects of its own, and vendors none of them. It
 carries a `DEPS` file naming a commit of each and a `git-sync-deps` script that
 clones what that names, so pinning shaderc alone pins the wrapper and leaves the
-compiler inside it moving. The three that reach object code are pinned in
-`cmake/Revisions.cmake` at the revisions shaderc's own `DEPS` names at the
-shaderc revision beside them:
+compiler inside it moving. The Cargo build pins the three that reach object
+code at the revisions shaderc's own `DEPS` names at the shaderc revision beside
+them:
 
 - **SPIRV-Tools**, Apache-2.0
 - **SPIRV-Headers**, MIT
@@ -345,8 +345,8 @@ required of a binary; the notice ships anyway.
 
 ## Where the list comes from
 
-`cmake/Revisions.cmake` is the pinned revision of each dependency and
-`cmake/Pinned.cmake` is how each is obtained and configured. Those two are what
-to work from when assembling notices for a distribution; this file is checked
-against the first of them by `spec/licenses_spec.lua`. Cargo dependencies are
-pinned in `native/rust/Cargo.lock` and checked by the same spec.
+`native/rust/build-support/src/product.rs` carries each native revision and
+how it is obtained and configured. That is what to work from when assembling
+notices for a distribution; this file is checked against it by
+`spec/licenses_spec.lua`. Rust dependencies are pinned in the root
+`Cargo.lock` and checked by the same spec.
