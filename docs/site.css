@@ -10,6 +10,14 @@
 @import url("https://fonts.googleapis.com/css2?family=Jersey+15&display=swap");
 
 :root {
+    /* One root size, at every width. Pico steps this from 100% to 131.25%
+     * across five breakpoints, which makes `rem` a function of the viewport,
+     * and browser zoom is a change in the viewport: crossing 1280 or 1536 on
+     * the way out moves every rem-sized heading, margin and gap on the page.
+     * A reader zooming asks for the same page at a different size, so the base
+     * is a constant and zoom is the only thing that scales it. */
+    --pico-font-size: 125%;
+
     /* Paper and ink. Warm rather than white, because a page of signatures is
      * read for minutes at a time. */
     --tealdoc-light-background: #e8e4dc;
@@ -65,8 +73,16 @@
     --tealdoc-outline-font-family: var(--tealdoc-font-heading);
     --tealdoc-sidebar-font-size: 0.85rem;
     --tealdoc-sidebar-heading-font-size: 0.85rem;
+
+    /* One weight, on all three, because the display face ships one. A rule
+     * asking for 700 gets a synthesized bold instead: the browser smears the
+     * 400 outlines sideways, and a face drawn on a pixel grid is exactly the
+     * kind that cannot survive it. Tealdoc's default heading weight is 700,
+     * which is right for the text face it assumes and wrong for this one. */
     --tealdoc-sidebar-font-weight: 400;
     --tealdoc-sidebar-active-font-weight: 400;
+    --tealdoc-sidebar-heading-font-weight: 400;
+
     --tealdoc-outline-font-size: 0.78rem;
     --tealdoc-outline-nested-font-size: 0.72rem;
 
@@ -75,15 +91,18 @@
     --tealdoc-code-block-radius: 0;
 
     /* The hero name is set in the display face, which carries more weight per
-     * point than a text face, so it takes fewer of them. */
-    --tealdoc-hero-name-size: clamp(2rem, 5vw, 2.9rem);
-    --tealdoc-hero-name-size-narrow: clamp(2rem, 9vw, 2.9rem);
-    --tealdoc-hero-text-size: clamp(1.1rem, 2vw, 1.6rem);
+     * point than a text face, so it takes fewer of them. The narrow value is
+     * the step a phone gets, at tealdoc's own breakpoint. */
+    --tealdoc-hero-name-size: 2.9rem;
+    --tealdoc-hero-name-size-narrow: 2.4rem;
+    --tealdoc-hero-text-size: 1.5rem;
+    --tealdoc-hero-text-size-narrow: 1.25rem;
+    --tealdoc-hero-glow-size: 480px;
 }
 
 /* The wordmark. A black badge with the logo red on it and a purple rule under,
  * which is the one piece of the identity that is a drawing rather than a
- * colour, so it is written against tealdoc's classes rather than its tokens.
+ * color, so it is written against tealdoc's classes rather than its tokens.
  * No `logo` is configured, so this is the whole mark. */
 .tealdoc-brand-name {
     display: inline-flex;

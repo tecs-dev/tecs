@@ -289,7 +289,8 @@ end
 -- Alphabetical ignoring case, and spelled the way a game writes it. A reader
 -- looking for `tecs.filesystem.watch` scans for that string; a thematic
 -- grouping makes them guess which of four headings somebody filed it under
--- first, and a collapsed group hides the name entirely until they guess right.
+-- first. The name a group carries is the prefix of every name inside it, so a
+-- closed group still tells a reader scanning for a name whether to open it.
 --
 -- The one nesting is the real one. A module that sits inside another is a row
 -- inside its parent's group, because that is where its name puts it: a reader
@@ -423,6 +424,24 @@ local SIDEBAR = {
         },
     },
 }
+
+-- Every group starts closed, and tealdoc opens the ones that hold the page
+-- being read. Opened all at once the sidebar is a hundred and fifty rows, and
+-- the reader scrolls past the whole surface to reach the part they are in.
+-- Written here rather than on each group so a group added later gets it, and
+-- set only where a group has not asked for something else.
+local function collapseGroups(items)
+    for _, item in ipairs(items) do
+        if item.items then
+            if item.collapsed == nil then
+                item.collapsed = true
+            end
+            collapseGroups(item.items)
+        end
+    end
+end
+
+collapseGroups(SIDEBAR)
 
 --- The value fields of `record tecs`, in the three groups a listing presents
 --- them in: the modules a game reaches directly, the modules that sit inside

@@ -3587,6 +3587,25 @@ the pages no longer carry their signatures, so it answers about a page rather
 than about a name. Putting those back means staging the rendered site rather
 than its sources, and a site render is twelve seconds every product build.
 
+Type is sized in `rem`, and the root size is one value at every width. What
+lost was sizing the page against the viewport, which is what tealdoc's hero
+did in `vw` and what Pico's root size does in five steps between 576 and 1536
+pixels. Browser zoom is a change in the viewport, so a page written that way
+gets laid out again rather than scaled: the heading and the line under it went
+from 1.8 to 2.5 times apart across the range, and every rem-sized margin
+stepped as the reader crossed 1280 or 1536. A reader who zooms is asking for
+the same page at a different size. The hero is fixed in tealdoc, and the root
+size is pinned here, because the base text size is the site's call rather than
+the generator's.
+
+The sidebar opens the section holding the page being read, and nothing else.
+Open at once it is a hundred and fifty rows, and a reader scrolls past the
+whole surface to reach the part they are in. What argued for leaving it open
+is that a closed group hides the names inside it from someone scanning, and
+that loses to the one property these groups have: a group's name is the prefix
+of every name under it, so a closed `tecs.gfx` still tells a reader looking for
+`tecs.gfx.layers` whether to open it.
+
 ## Requirements
 
 Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU),
