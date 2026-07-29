@@ -79,7 +79,7 @@ question from whether a particular pad has one; [`Gamepad`](/modules/input#gamep
 is the one hardware answer here that is asked of the platform each time the capabilities are resolved, because
 neither a desktop with a touchscreen nor a simulator without one follows from the OS name.
 
-#### The two shader bits
+#### runtimeShaders and packagedShaders
 
 `runtimeShaders` is whether a shader compiler was linked into this build, and it is what separates a development
 build from a release. [`watch`](/modules/filesystem/watch) refuses to install without it, on the grounds that a release has
@@ -96,7 +96,7 @@ function tecs.system.resetCapabilities()
 
 A platform change is noticed without this, so it is for a test that changed something the resolution reads.
 
-## The clipboard
+## Clipboard
 
 Text in, text out, the mime types on offer, the bytes behind one of them, and the primary selection beside
 it.
@@ -238,7 +238,7 @@ for _, mime in ipairs(tecs.system.clipboardMimeTypes()) do
 end
 ```
 
-### The primary selection
+### Primary selection
 
 A second, independent clipboard: X11 and Wayland fill it with whatever was last selected and paste it on a
 middle click, with no copy step at all. It is not a flavour of the clipboard and does not track it.
@@ -479,7 +479,7 @@ longer exists.
 
 The application runs this at teardown.
 
-### The worker
+### Worker boundary
 
 Nothing but the request and the answer crosses the worker boundary. The child is created, fed, polled, read,
 killed and destroyed entirely on the worker; what comes back is bytes, an exit code and a pid. The process handle

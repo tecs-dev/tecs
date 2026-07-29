@@ -775,7 +775,7 @@ end
 Closes one deferred scope level. When the counter reaches zero and the world has pending staged mutations, the
 transaction drains: staged despawns apply first, then spawns are placed, then component moves execute, with
 query observers firing along the way; batch mutations and sparse relationship writes apply after the structural
-passes. See the [Mutation model](/ecs/mutation-model#the-commit-drain) for the full ordering contract.
+passes. See the [Mutation model](/ecs/mutation-model#commit-drain) for the full ordering contract.
 
 ```teal
 function World:commit()

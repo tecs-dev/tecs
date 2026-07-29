@@ -24,4 +24,4 @@ same `tl` the tool already runs. Every field except `name` has a default.
 `tlconfig.lua` is still written by `tecs new`, because `tl` needs it, but it is not the project marker.
 
 The entry file compiles to `build/main.lua` and runs through the seam the host already has: `tecs --entry
-build/main.lua`. It must return an application. See [getting started](/getting-started#the-entry-file).
+build/main.lua`. It must return an application. See [getting started](/getting-started#entry-file).

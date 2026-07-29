@@ -59,7 +59,7 @@ action's body does take effect immediately.
 
 Node values are opaque, and a node must not be reused across programs.
 
-### The clocks
+### Clocks
 
 A program is scheduled against exactly one clock, and its waits are counted in that clock's ticks.
 

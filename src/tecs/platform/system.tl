@@ -18,7 +18,7 @@
 --- an interpreter-only LuaJIT from a jitting one, and both distinctions change
 --- what the engine is allowed to attempt.
 ---
---- ## The clipboard
+--- ## Clipboard
 --- `events.clipboardUpdate` reports that the clipboard changed and lists the
 --- mime types now on offer. This is the other half: what those bytes are, and
 --- how to put text there.
@@ -51,7 +51,7 @@
 --- taking that bet. Reading an arbitrary mime type carries none of it, so
 --- `mimeTypes`, `hasData` and `data` are here and the offer side is not.
 ---
---- ## The primary selection
+--- ## Primary selection
 ---
 --- A second, independent clipboard: X11 and Wayland fill it with whatever was
 --- last selected and paste it on a middle click, with no copy step at all. It

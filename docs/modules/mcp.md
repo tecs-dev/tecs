@@ -71,7 +71,7 @@ Releases the server and any connection. Safe to call more than once.
 function mcp.Server:destroy()
 ```
 
-## The protocol
+## Protocol
 
 RMCP implements the MCP lifecycle and Streamable HTTP transport, including protocol negotiation, legacy
 sessions, current stateless requests, request validation, JSON responses and SSE when the protocol needs a
@@ -167,7 +167,7 @@ Read-only, answers after a crash.
 **Returns:** `path`, `offset` and `lines`. A read covers at most 64 KB and stops on a line boundary, so a
 cursor never lands mid-record. An `after` past the end of the file restarts at 0, which is what a truncated
 file looks like from here. The path is returned so an agent sharing a filesystem with the game can read it
-directly instead of pulling it through the protocol. See [`log`](/modules/log#the-log-file) for the record
+directly instead of pulling it through the protocol. See [`log`](/modules/log#log-file) for the record
 format.
 
 ### screenshot
@@ -544,7 +544,7 @@ the device claimed, which is knowledge the [`Renderer`](/modules/gfx/) has and n
 `world.bind` is what the eight world tools act on. A tool called before its binding exists reports why rather
 than failing obscurely.
 
-### The reloads
+### Reloads
 
 The four reloads are functions first and tools second, because a saved file arriving at the file watcher and an
 agent asking have to be refused on identical terms or the two disagree about what the process is drawing. Each
@@ -561,7 +561,7 @@ function tools.reloadFont(path: string): string, integer
 and height. `reloadSound` returns whether the clip is held in memory, which is what was replaced. `reloadFont`
 returns the name the font is loaded under and how many glyphs it carries.
 
-## The sandbox
+## Sandbox
 
 `tecs.mcp.sandbox` is the environment `run_lua` compiles into. It is kept out of the tool so protocol dispatch
 carries no policy, and it holds the environment across calls, so an agent can stash a handle in one call and
@@ -592,7 +592,7 @@ the host does not silently become reachable.
 it. What is removed are the operations that damage the machine rather than the game.
 :::
 
-## The transport
+## Transport
 
 `tecs.mcp.transport` is now only the Lua side of the RMCP bridge. Rust owns the listener and every protocol
 byte. The bridge starts the server with an encoded tool list, refreshes that list when a registered tool table

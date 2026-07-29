@@ -77,7 +77,7 @@ function events.kinds(): {string}
 For tooling that enumerates them. A kind whose SDL constant this build does not have is not in the list, and
 `unknown` is not either, since nothing maps to it.
 
-## The borrow rule
+## Borrow rule
 
 `Event` is one wide record discriminated by `kind` rather than a union of per-kind records. Teal can express the
 union, but not a union that pools, and an event stream that allocates per event is not one this engine can use.

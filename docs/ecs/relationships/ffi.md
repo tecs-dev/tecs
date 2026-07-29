@@ -76,7 +76,7 @@ See [Components](/ecs/components/) for the shared `fields` / `defaults` / `init`
 
 `name`, `container` and `fields` are all required; omitting any of them errors at registration.
 
-## The target field
+## Target field
 
 The `target` field is added to the FFI struct for you, as the struct's first member, and you must not declare it
 yourself. It is typed `double` rather than an integer: an entity id packs a 22-bit slot together with a

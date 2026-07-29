@@ -48,13 +48,13 @@ swap.
 The plugin runs at the end of initialization, after every engine subsystem is installed and before the startup
 phases run, so a `Startup` system it registers runs on this initialization rather than the next one.
 
-## The config
+## Config
 
 Every field is optional, including `plugin`. Nothing here is validated by the application: values are passed
 through to the object that owns them, so a timestep of zero is refused by the world rather than in two places
 that could disagree.
 
-### The window and the device
+### Window and device
 
 | Field            | What it does                                                                     |
 | ---------------- | -------------------------------------------------------------------------------- |
@@ -67,7 +67,7 @@ that could disagree.
 thing anyone builds, and it should look like what it is: sprites at their own color, with lights adding on top.
 A game doing its own lighting turns this down to the level it wants unlit parts of the scene to sit at.
 
-### The world and the renderer
+### World and renderer
 
 | Field           | Default  | What it does                                                                |
 | --------------- | -------- | --------------------------------------------------------------------------- |
@@ -252,7 +252,7 @@ something about the run has changed, try it again.
 Physics resumability is a separate and open question: a solver stepped out of is not obviously a solver that can
 be stepped again.
 
-## The platform lifecycle
+## Platform lifecycle
 
 SDL dispatches the platform lifecycle from its event watcher rather than queueing it, and the host calls one
 method per event at the instant it arrives, because on Android the process blocks as soon as backgrounding has

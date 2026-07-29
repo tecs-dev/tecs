@@ -6,9 +6,9 @@ outline: deep
 # tecs.gfx
 
 `tecs.gfx` is where drawing lives. Four things sit on it directly, because a scene that draws anything
-at all reaches for them: the [camera](#the-camera) a frame is drawn from, the
-[components](#the-components-a-scene-is-drawn-from) an entity carries to be drawn, the
-[renderer](#the-renderer) that draws them, and [text](#text-and-fonts), which is a vocabulary small enough to
+at all reaches for them: the [camera](#camera) a frame is drawn from, the
+[components](#components-a-scene-is-drawn-from) an entity carries to be drawn, the
+[renderer](#renderer) that draws them, and [text](#text-and-fonts), which is a vocabulary small enough to
 read here rather than a module of its own. The four larger vocabularies are each a module one level
 below, with a page of its own.
 
@@ -55,7 +55,7 @@ module. `Camera` and `Renderer` are classes rather than modules of their own: th
 this namespace, `tecs.gfx.Camera`, and documented here rather than on a page apiece, because a class is
 a type its namespace owns.
 
-## The camera
+## Camera
 
 A camera is what the view is looking at: a center in world units, a zoom, a rotation, and a projection
 mode. It is one type rather than a 2D camera and a 3D one, because the only thing that would differ
@@ -65,7 +65,7 @@ the cull, cares which built it.
 Position is the center of the view rather than a corner, so a camera that has never been moved shows the
 world origin in the middle of the window. The renderer centers a default camera on the first frame it
 draws, so a scene that never mentions a camera behaves as though world coordinates were screen
-coordinates. See [the renderer](#the-renderer) for how a camera reaches a frame.
+coordinates. See [the renderer](#renderer) for how a camera reaches a frame.
 
 ### Creating a camera
 
@@ -120,7 +120,7 @@ camera.y = player.y
 camera.zoom = camera.zoom * 1.01
 ```
 
-### The viewport size is passed, never stored
+### Viewport size is passed, never stored
 
 Every method takes the viewport's width and height rather than the camera holding them, because a camera
 outlives a window size and the pair a call is answered against has to be the pair the frame is being
@@ -131,7 +131,7 @@ Passing one size to `matrix` and another to `toWorld` produces two mappings that
 same width and height for every call about the same frame.
 :::
 
-### The Y flip
+### Y flip
 
 World Y runs down from the top left while clip Y runs up. The flip lives in this module and only here,
 and the three things that have to agree about it are the matrix, `toScreen` and `toWorld`. They agree by
@@ -262,7 +262,7 @@ outside the camera's zoom. Contents of such a layer are not placed where the cam
 the cull gives up on them rather than testing a world bound that does not describe where they draw.
 [layers](/modules/gfx/layers) has the rules.
 
-## The components a scene is drawn from
+## Components a scene is drawn from
 
 The components the engine itself reads describe what an entity looks like: what color it is, which
 image it samples, which material shades it, whether it is clipped, whether it lights the scene, and
@@ -285,7 +285,7 @@ local entity <const> = world:spawn(
 )
 ```
 
-### The set
+### At a glance
 
 | Component           | Storage          | Fields                                    | Read by                                       |
 | ------------------- | ---------------- | ----------------------------------------- | --------------------------------------------- |
@@ -572,7 +572,7 @@ Subsystems register components of their own, and they are documented with the su
 | `RigidBody`           | [`physics`](/modules/physics)                    | The body an entity is.                                |
 | `TweenTrackingTarget` | [`sequence`](/modules/sequence#tracking-sources) | Selects the entity a tracking tween chases.           |
 
-## The renderer
+## Renderer
 
 `tecs.gfx.Renderer` is the path from a world to the GPU. A game does not construct one: the
 [application](/modules/Application) does, and hands it over as `app.renderer`.
@@ -725,10 +725,10 @@ that never casts pays for that and for nothing else.
 ### What feeds it
 
 Everything the renderer draws is an entity in a world. The components it reads are
-[above](#the-components-a-scene-is-drawn-from), together with the ECS builtin `Transform`, and the
+[above](#components-a-scene-is-drawn-from), together with the ECS builtin `Transform`, and the
 modules that produce them have pages of their own:
 
-- [`tecs.gfx.Camera`](#the-camera), the view it draws from
+- [`tecs.gfx.Camera`](#camera), the view it draws from
 - [`tecs.gfx.layers`](/modules/gfx/layers), z-ordering and per-layer behavior
 - [`tecs.gfx.animation`](/modules/gfx/animation), sprite sheets and playback
 - [`tecs.gfx`](/modules/gfx/), distance-field text drawn through an instance producer
@@ -750,7 +750,7 @@ modules that produce them have pages of their own:
 
 `dropped` is the one to watch. `capacity` is a ceiling rather than a hint, and rows past it are dropped rather
 than growing a buffer mid-frame; a scene that is missing something and reports a non-zero `dropped` needs a
-larger `capacity` in the [application config](/modules/Application#the-world-and-the-renderer).
+larger `capacity` in the [application config](/modules/Application#world-and-renderer).
 
 `rewritten` being zero is the dirty model working. A frame in which nothing moved rewrites nothing.
 
@@ -849,7 +849,7 @@ Nothing has to be enabled: spawn `PreviousTransform` beside `Transform` and the 
 
 `tecs.gfx` draws strings from a multi-channel signed distance field. A `Text` names a font and a
 string, and it is one entity: its glyphs are not entities at all. The plugin registers an instance
-producer with the [renderer](#the-renderer) and every text owns a span of that producer's run.
+producer with the [renderer](#renderer) and every text owns a span of that producer's run.
 
 A glyph is still an ordinary textured quad, with a UV rect addressing the font atlas and a material
 selecting the distance-field shader, so culling, depth, layers, clip regions and the indirect draw
@@ -944,7 +944,7 @@ A font is two files and only the metrics reload as a font. The atlas is an image
 and reloads as one under the rect it already occupies.
 :::
 
-#### The Font record
+#### Font record
 
 | Field           | Type                           | What it is                                                      |
 | --------------- | ------------------------------ | --------------------------------------------------------------- |
@@ -1014,7 +1014,7 @@ The image lands beside the metrics, which is where the loader looks for it when 
 passed. The shipped font carries printable ASCII, `U+0020` through `U+007E`; a codepoint an atlas has
 no glyph for advances the pen by the width of a space and draws nothing.
 
-### The Text component
+### Text component
 
 A string laid out into glyph instances.
 
@@ -1049,7 +1049,7 @@ An `align` that is none of the three raises where the component is constructed.
 top-left corner of the text block and orients and scales the whole block; a `Tint` colors every
 glyph; a `Clip` keeps the glyphs inside a rectangle exactly as it would any other quad. All three
 are ordinary components on an ordinary entity, so a text is moved, parented, tweened and layered
-like anything else. See [components](#the-renderer) for `Tint` and `Clip`.
+like anything else. See [components](#renderer) for `Tint` and `Clip`.
 
 **Constructing one**, positionally or by name:
 
@@ -1117,7 +1117,7 @@ number the glyphs will occupy.
 local width, height = tecs.gfx.measureText(world:get(entity, tecs.gfx.Text))
 ```
 
-### The text plugin
+### Text plugin
 
 ```teal
 function tecs.gfx.textPlugin(options: TextOptions): function(World)
@@ -1125,7 +1125,7 @@ function tecs.gfx.textPlugin(options: TextOptions): function(World)
 
 **Parameters:**
 
-- `options.renderer`: the [renderer](#the-renderer) the font atlases upload into and the glyph
+- `options.renderer`: the [renderer](#renderer) the font atlases upload into and the glyph
   instances are produced for. Required; the call raises without it.
 
 **Example:**

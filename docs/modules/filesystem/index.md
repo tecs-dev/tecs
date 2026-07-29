@@ -53,7 +53,7 @@ tecs.filesystem.organization = "Ex Nihilo"
 tecs.filesystem.application = "Starfarer"
 ```
 
-### The roots a path is resolved against
+### Roots a path is resolved against
 
 #### basePath
 

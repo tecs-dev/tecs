@@ -442,7 +442,7 @@ if mode ~= nil then
 end
 ```
 
-## The desktop
+## Desktop settings
 
 ```teal
 function Window.theme(): Window.Theme

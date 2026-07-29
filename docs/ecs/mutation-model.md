@@ -67,7 +67,7 @@ Staged semantics; the instant path converges to the same post-commit result.
 `spawnAt` requires the id to not be live; it revives ids sitting on the free stack and reconciles the
 allocator. Passing a live id is caller error with undefined results.
 
-## The commit drain
+## Commit drain
 
 When the outermost scope closes on a dirty world, the transaction drains. The drain runs in **waves** over the
 dirty archetype list, and each wave applies phases in this order:

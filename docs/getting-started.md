@@ -82,7 +82,7 @@ return {
 
 `tl check` then reports `tecs.ecs.newWorldd()` as an invalid key at the line that wrote it.
 
-## The entry file
+## Entry file
 
 SDL owns the loop. An entry file does not run until done; it returns an application, and a Rust host drives it
 through `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. A platform that never hands control

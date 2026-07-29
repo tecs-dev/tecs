@@ -42,7 +42,7 @@ the integer part selecting and the fraction carrying. So each material spends it
 transform cannot say, and a material that genuinely needed two would mean growing every instance in
 the scene.
 
-## The materials the engine ships
+## Materials the engine ships
 
 | Name       | What it draws                          | What `param` means                                             |
 | ---------- | -------------------------------------- | -------------------------------------------------------------- |

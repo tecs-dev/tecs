@@ -346,7 +346,7 @@ listener on an already-settled future queues rather than firing inline. It makes
 construction rather than by a rule a caller has to remember: a listener may settle, cancel or register on
 anything it likes, including the future it is being called from.
 
-## The sequence bridge
+## Sequence bridge
 
 ### track
 

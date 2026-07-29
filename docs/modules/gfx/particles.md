@@ -184,7 +184,7 @@ One depth is taken for the whole effect rather than one per particle: an effect 
 its band and sort mode are constant, and what a per-particle depth would buy is sorting within the
 band, which is a separate feature.
 
-### The Effect record
+### Effect record
 
 | Field         | What it is                                                                                |
 | ------------- | ----------------------------------------------------------------------------------------- |
@@ -238,7 +238,7 @@ have, for the same trade the frame table already made: what an author writes sta
 wherever the author put them, and the shader does one lookup rather than walking a graph per particle
 per frame.
 
-## The ParticleEmitter component
+## ParticleEmitter component
 
 An emitter is an effect, its playback state, and a few per-instance scales. It is deliberately small:
 if an instance could override every effect field then effects would stop being reusable GPU data and
@@ -339,7 +339,7 @@ field lives where a snapshot cannot reach, so a burst effect is gone by the time
 an ambient one comes back empty and refills over a lifetime. Restoring an emitter whose effect this
 process has not registered raises, because the effect is named by its registry index.
 
-## The plugin
+## Plugin
 
 ```teal
 function particles.plugin(options: PoolOptions): function(World)
@@ -388,7 +388,7 @@ the effect's longest lifetime has passed and only then hands it back. An emitter
 component rather than its entity is caught the same way, by comparing what the walk saw against what
 the pool holds.
 
-## The pool
+## Pool
 
 ```teal
 function particles.poolOf(world: World): Pool

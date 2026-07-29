@@ -180,7 +180,7 @@ Do not pre-format arguments. Formatting only runs when the level is enabled, so 
 is what makes a disabled level cost nothing. Use `%s` for anything that needs `tostring`.
 :::
 
-## The log file
+## Log file
 
 The platform destination is human-readable and is what `tail -f`, logcat and Console.app show. A file is what
 makes a log queryable after the fact: seek to an offset, read to the end. Opening one adds the file; it does

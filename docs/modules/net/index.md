@@ -23,7 +23,7 @@ The surface follows the game loop rather than hiding one:
 There are no Lua callbacks crossing the native boundary. Rust workers perform DNS and client connection, and Lua
 polls ordinary results on the thread that owns the future. TCP and UDP sockets stay nonblocking.
 
-## The loop
+## Polling each frame
 
 `resolve` and `connect` start work and return at once. Advance them once per frame:
 

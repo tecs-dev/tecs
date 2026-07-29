@@ -12,7 +12,7 @@ observers and entities. It is the unit of composition in Tecs, and it is the onl
 type Plugin = function(world: World)
 ```
 
-## The entry plugin
+## Entry plugin
 
 `Application.Config` carries one `plugin`, a `function(world, app)`, and nothing else a game supplies is called
 by the loop. Everything a game wants to happen is registered from there, because the ECS already answers the
@@ -230,11 +230,11 @@ end
 world:addPlugin(gameplayPlugins)
 ```
 
-## The builtin plugin
+## Builtin plugin
 
 Constructing a world installs the builtin plugin automatically. It owns the `TTL` countdown and the
 `RelativeTransform` composition systems, and the components and events they work on. Nothing has to add it, and
-there is no way to opt out. See [Builtins](/ecs/builtins#the-builtin-plugin).
+there is no way to opt out. See [Builtins](/ecs/builtins#builtin-plugin).
 
 ## Practices worth keeping
 

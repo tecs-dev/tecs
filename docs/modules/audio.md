@@ -7,7 +7,7 @@ outline: deep
 
 `tecs.audio.Audio` is the whole of sound output: load a clip, play it, set a gain, fade it, repeat it, pitch
 it, seek it, pan it, put it in a group, cap how often it may start, stop it. It is built on SDL_mixer 3, and an
-entity that should make a noise carries a [`Sound`](#the-sound-component) component rather than a handle a game
+entity that should make a noise carries a [`Sound`](#sound-component) component rather than a handle a game
 has to remember to release.
 
 A game does not usually construct one. [`Application`](/modules/Application) creates the audio from its `audio`
@@ -86,7 +86,7 @@ no handling. An explicit physical id stays on that device until this `Audio` is 
 | Field       | Type      | Description                                                                                                           |
 | ----------- | --------- | --------------------------------------------------------------------------------------------------------------------- |
 | `available` | `boolean` | Whether an output opened. `false` on a machine with no sound, where every call here still works and nothing is heard. |
-| `Sound`     | `Sound`   | The component type, also reachable as `tecs.audio.Sound`. See [the Sound component](#the-sound-component).            |
+| `Sound`     | `Sound`   | The component type, also reachable as `tecs.audio.Sound`. See [the Sound component](#sound-component).            |
 
 ### install
 
@@ -492,7 +492,7 @@ Returns a voice to unpositioned mixing, out of either placement.
 function Audio:clearSpatial(handle: integer)
 ```
 
-## The master
+## Master gain and mute
 
 ### setMasterGain
 
@@ -734,7 +734,7 @@ Name a group index stands for, or `nil` when it names nothing.
 function Audio.groupName(id: integer): string
 ```
 
-## The Sound component
+## Sound component
 
 A sound attached to an entity. Presence is the instruction: an entity carrying this with a loaded clip starts
 sounding on the next audio pass, and stops when the component or the entity goes away. That is what makes sound

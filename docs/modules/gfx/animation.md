@@ -311,7 +311,7 @@ local sheet <const> = tecs.gfx.animation.build("banner.png", 128, 64)
     :finish()
 ```
 
-## The Sheet
+## Sheet
 
 ### Fields
 
@@ -560,7 +560,7 @@ than leaving it where the frame it was built from put it.
 
 **Returns:** a component value, not an entity.
 
-## The Pivot component
+## Pivot component
 
 `animation.Pivot` is where an entity's quad turns and scales about. A quad with no `Pivot` turns about its
 center, so a character rotates about its waist and a scale grows it in both directions at once. A quad
@@ -592,7 +592,7 @@ written directly, which nothing rewrites.
 nearly every one of them, and the cull bound is then exactly the quad's own. Playback on the GPU resolves
 the frame after the bound is written, so a slice that genuinely moves has to have its travel covered: `x`
 and `y` are then the middle of where it goes and the halves are how far either side of that the quad can
-be drawn. See [animation](/modules/gfx/animation#the-pivot-that-follows-a-moving-slice).
+be drawn. See [animation](/modules/gfx/animation#pivots-that-follow-a-moving-slice).
 
 A snapshot carries the sheet's name and the slice's name alongside the fraction, and they are resolved
 again on the way back in. The travel is deliberately dropped: it is playback's answer rather than the
@@ -644,7 +644,7 @@ function Sheet:sprite(frame?: integer): Sprite
 
 Meaningful after `bind`, since before it the sheet names no image and the quad has no layer to sample.
 
-## The registry
+## Registry
 
 Every constructor registers the sheet it builds, under its name and under a fresh id.
 
@@ -766,7 +766,7 @@ writes nothing at all beyond the flag a finished one-shot parks behind. `tecs.Ad
 logic query, so a paused entity holds the frame it is on, and `FixedPostUpdate` is late enough that
 gameplay logic in `FixedUpdate` has already chosen what should be playing.
 
-## The Animation component
+## Animation component
 
 An entity also needs a [`Sprite`](/modules/gfx/), which is what the query matches on and what
 playback writes into. An `Animation` on its own advances nothing.
@@ -1050,9 +1050,9 @@ reach the encoder without anything having to notice them.
 The same re-encode is what makes a speed change hold its position: a new rate is applied from where the
 cycle is rather than from where it began.
 
-## The pivot that follows a moving slice
+## Pivots that follow a moving slice
 
-An entity carrying a [`Pivot`](#the-pivot-component) bound to one of the sheet's slices has
+An entity carrying a [`Pivot`](#pivot-component) bound to one of the sheet's slices has
 it follow the slice, because an Aseprite slice moves from frame to frame and a pivot that did not follow
 it would drift off the part of the drawing it names.
 

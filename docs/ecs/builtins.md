@@ -536,7 +536,7 @@ end
 Namespace the keys a plugin writes, `"mygame.scoreboard"` rather than `"scoreboard"`, so two plugins cannot
 collide.
 
-## The builtin plugin
+## Builtin plugin
 
 Constructing a world installs the builtin plugin, which registers three systems:
 

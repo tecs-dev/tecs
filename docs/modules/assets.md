@@ -23,7 +23,7 @@ not enabled in the runtime. Sound is the other way round: whatever the mixer's d
 `Audio.decoders()` reports what the mixer actually linked.
 :::
 
-## The worker
+## Worker lifecycle
 
 ### install
 
