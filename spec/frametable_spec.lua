@@ -153,7 +153,9 @@ describe("a frame table", function()
             local id = frametable.register(source, source:tagId("forward"))
 
             local data = frametable.floats()
-            local entry = (id - 1) * frametable.DIRECTORY_FLOATS
+            assert.are.equal(id, data[0], "the playback count the shader bounds an identifier against")
+
+            local entry = frametable.HEADER_FLOATS + (id - 1) * frametable.DIRECTORY_FLOATS
             local entryBase = data[entry]
             local tickBase = data[entry + 1]
             local ticks = data[entry + 2]
@@ -200,7 +202,7 @@ describe("a frame table", function()
         -- The offset the entry a tick names carries.
         local function offsetAt(id, tick)
             local data = frametable.floats()
-            local directory = (id - 1) * frametable.DIRECTORY_FLOATS
+            local directory = frametable.HEADER_FLOATS + (id - 1) * frametable.DIRECTORY_FLOATS
             local tickBase = data[directory + 1]
             local entry = data[tickBase + tick]
             return data[entry + 5], data[entry + 6]

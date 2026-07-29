@@ -662,6 +662,22 @@ local function hideRun(self: Extractor, packet: FramePacket, offset: integer, co
     end
     local floats = self._instances
     local bounds = self._bounds
+    -- Two things below are safe because a zero is positive, not because it is
+    -- zero, and neither survives being written any other way.
+    --
+    -- The region's first float is the playback sentinel: `isPlayback` in
+    -- assets/shaders/include/playback.glsl takes a negative one as "this
+    -- carries a playback", so a zeroed region decodes as a static instance
+    -- with a degenerate rect and resolves nothing against the frame table. The
+    -- geometry pass and the shadow pass both resolve one and the particle
+    -- simulate pass writes the same encoding from compute, so this is no
+    -- longer one shader's business.
+    --
+    -- A half extent's sign bit is the caster flag `cullNegativeW` in
+    -- assets/shaders/include/cull.glsl reads. The drop-shadow lane claims a
+    -- conservative fan-out per caster in the mark pass, before anything looks
+    -- at where the bound is, so a hidden slot must read as no caster on the
+    -- sign alone.
     for slot = offset, offset + count - 1 do
         local base = slot * INSTANCE_FLOATS
         for index = 0, INSTANCE_FLOATS - 1 do
