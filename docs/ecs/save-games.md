@@ -537,8 +537,6 @@ A component with a custom `serialize` / `deserialize` opts out of the bulk path 
 per entity through its own codec. So does an archetype carrying a serializable sparse relationship, which is
 written row-major with a presence mask instead.
 
-`make bench-snapshot` runs the snapshot benchmarks.
-
 ## Snapshot format spec
 
 ### Binary (LuaJIT `string.buffer`)

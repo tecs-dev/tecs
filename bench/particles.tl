@@ -12,7 +12,7 @@
 ---            field is replaced several times a second and the emit and spawn
 ---            passes carry their worst case rather than their steady one
 ---
---- Read against `make bench`, which is the gate on whether a pool costs a
+--- Read against `cargo xtask bench particles`, which is the gate on whether a pool costs a
 --- scene with no particles in it. Nothing here has a Renderable, so what the
 --- frame stage measures is the three compute passes, the cull over the pool's
 --- run and the one draw that consumes what survives.

@@ -16,7 +16,7 @@ local OUT_PREFIX = select(2, ...) or "build/test_deps"
 local LUA_DIR = select(3, ...)
 
 -- The build system passes where the Teal compiler lives rather than relying on
--- an inherited LUA_PATH, since a path list is a semicolon list and CMake reads
+-- an inherited LUA_PATH, since a path list is a semicolon list and the build reads
 -- one of those as its own.
 if LUA_DIR then
     package.path = LUA_DIR .. "/?.lua;" .. LUA_DIR .. "/?/init.lua;" .. package.path

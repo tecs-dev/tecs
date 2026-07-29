@@ -34,7 +34,7 @@
 # pass as "the index is complete", never as "the pages are right".
 #
 # The one machine-checkable claim about content lives next door:
-# docs/scripts/reference.py --check diffs the reference section of every module
+# cargo xtask docs-reference and docs-check own generated reference sections
 # page against a fresh render, so signatures cannot drift even though the words
 # around them can.
 #
@@ -156,10 +156,21 @@ done < <(grep -rl '^::: warning This page is pending$' --include='*.md' docs/mod
 # Fields of `record tecs` that are not modules: a function, a string, or a type
 # the root carries because it crosses subsystems. The discriminator is the one
 # already used for subordinate modules, and for the same reason: a module is
-# luacase and is declared as the type of its own name (`assets: assets`), while
+# luacase and is declared as a type imported from a module ending in its public
+# name. Usually the alias matches (`assets: assets`), but it may differ to avoid
+# shadowing a standard-library global (`math: vectorMath`).
 # `newApplication: function(...)`, `version: string` and `Transform:
 # ecs.Transform` are none of those things.
 rootnames=$(awk '
+    /^local type [a-z][A-Za-z0-9_]* = require\("tecs\.[A-Za-z0-9_.]+"\)$/ {
+        alias = $3
+        path = $5
+        sub(/^require\("tecs\./, "", path)
+        sub(/"\)$/, "", path)
+        count = split(path, parts, ".")
+        module[alias] = parts[count]
+        next
+    }
     /^local record tecs$/ { intecs = 1; next }
     intecs && /^end$/ { intecs = 0; next }
     intecs && /^    [A-Za-z_][A-Za-z0-9_]*: / {
@@ -168,7 +179,7 @@ rootnames=$(awk '
         sub(/^ +/, "", name)
         declared = halves[2]
         for (i = 3; i <= length(halves); i++) { declared = declared ": " halves[i] }
-        if (name ~ /^[a-z]/ && declared == name) { next }
+        if (name ~ /^[a-z]/ && (declared == name || module[declared] == name)) { next }
         print name
     }
 ' "$init")

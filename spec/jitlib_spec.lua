@@ -11,8 +11,8 @@
 -- `luajit` has its own copy on the default `package.path` and would answer from
 -- `/opt/homebrew/share/luajit-2.1` without either the build tree or the package
 -- carrying anything. So the assertion is on the file being in the content root
--- the build system named, which is the build tree under `make test` and an
--- installed one under `make test-package`. Only the second proves the thing
+-- the build system named, which is the build tree under `cargo xtask test` and
+-- an installed one under `cargo xtask test-package`. Only the second proves the thing
 -- worth proving, which is why it runs there too rather than only here.
 --
 -- Two hand-written stand-ins used to be in `src/tecs/internal/compat/` for the

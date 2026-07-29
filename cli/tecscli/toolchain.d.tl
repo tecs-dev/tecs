@@ -1,12 +1,12 @@
 --- Types for the generated `tecscli/toolchain.lua`.
 ---
---- The module itself is written by `scripts/gentooling.py` at build time, out
---- of `scripts/format.py` and `cmake/Revisions.cmake`. There is no `.tl` for it
---- because there is no source for it: it is an answer taken from the two files
---- that own it. This declares its shape so everything reading it is checked.
+--- The module itself is written by the Cargo build from the formatter and
+--- revision tables it owns. There is no `.tl` for it because there is no
+--- separate source for it. This declares its shape so everything reading it
+--- is checked.
 
 local record toolchain
-    --- What gets formatted and by what, as `scripts/format.py` describes it.
+    --- What gets formatted and by what, as the Cargo build describes it.
     record Format
         --- Path prefixes nothing formats.
         excluded: {string}
@@ -34,7 +34,7 @@ local record toolchain
         module: string
     end
 
-    --- The revisions this binary carries, from cmake/Revisions.cmake.
+    --- The revisions this binary carries.
     record Pins
         teal: string
         cerulean: string

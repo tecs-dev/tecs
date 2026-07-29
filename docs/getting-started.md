@@ -19,33 +19,35 @@ There is no installer and no package to fetch, because the tool that would provi
 ```bash
 git clone https://github.com/tecs-dev/tecs.git
 cd tecs
-make deps     # install development dependencies (Homebrew)
-make build    # build the selected preset
-make run      # run the demo
+cargo xtask deps   # install development dependencies (Homebrew)
+cargo xtask build  # build the host's development preset
+cargo xtask run    # run the demo
 ```
 
-`make deps` is the only step that touches the machine outside this directory, and on macOS it is Homebrew. It
-installs what the engine links against and the development tools the build runs: the Teal compiler, the
-formatter and the documentation generator land in `vendor/`, pinned by revision in `cmake/Revisions.cmake`, so
-every checkout formats and type-checks with the same versions rather than whatever a machine happens to have.
+`cargo xtask deps` is the only step that touches the machine outside this directory, and on macOS it is
+Homebrew. It installs what the engine links against and the development tools the build runs: the Teal compiler,
+the formatter and the documentation generator land in `vendor/`, pinned by revision in the Cargo build-support
+crate, so every checkout formats and type-checks with the same versions rather than whatever a machine happens
+to have.
 
 Nothing is installed globally, and there is no `tecs` on the path afterwards. A game is built and run through
-`make` from this tree, which is what the rest of this page does. Installing the single-file CLI replaces that
+Cargo from this tree, which is what the rest of this page does. Installing the single-file CLI replaces that
 toolchain for a game project; see [Tecs CLI](/cli/) for its commands.
 
 ## Building the engine
 
-CMake is canonical and Make wraps it, so there is one description of how the tree is assembled.
+Cargo is the project build and `cargo xtask` owns assembly, generation, tests, packaging, and maintenance.
 
 ```bash
-make build    # build the selected preset
-make test     # run the spec suite
-make check    # type-check Teal sources
+cargo xtask build  # build the selected preset
+cargo xtask test   # run the spec suite
+cargo xtask check  # type-check Teal sources
 ```
 
-`PRESET=` selects the target and defaults to `macos-arm64-dev`; `make presets` lists the matrix. A development
-preset resolves dependencies from the system, which is convenient and not shippable. A packaged preset builds
-pinned revisions from source, and `make check-package` is the gate on the difference.
+`--preset` selects the target and defaults to the host's development preset; `cargo xtask presets` lists the
+matrix. A development preset resolves dependencies from the system, which is convenient and not shippable. A
+packaged preset builds pinned revisions from source, and `cargo xtask check-package` is the gate on the
+difference.
 
 ## Reaching the engine
 

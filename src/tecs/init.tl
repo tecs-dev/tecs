@@ -42,6 +42,9 @@ local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
 local type physics = require("tecs.physics")
 local type log = require("tecs.log")
+-- `math` is the standard library global, and shadowing it makes a clean
+-- project type-check warn. The public name and required module are still math.
+local type vectorMath = require("tecs.math")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")
 local type regex = require("tecs.regex")
@@ -352,6 +355,7 @@ local record tecs
     gfx: gfx
     input: input
     log: log
+    math: vectorMath
     mcp: mcp
     net: net
     regex: regex
@@ -445,6 +449,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     input = {module = "tecs.platform.input"},
     log = {module = "tecs.log"},
+    math = {module = "tecs.math"},
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net", within = {http = {module = "tecs.net.http"}}},
     regex = {module = "tecs.regex"},

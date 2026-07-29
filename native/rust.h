@@ -108,6 +108,8 @@ bool tecsRegexIsMatch(const TecsRegex *regex, const uint8_t *subject, size_t len
 bool tecsRegexFind(const TecsRegex *regex, const uint8_t *subject, size_t length, size_t start, TecsRegexSpan *span);
 bool tecsRegexCaptures(const TecsRegex *regex, const uint8_t *subject, size_t length, size_t start,
                        TecsRegexSpan *spans, size_t count);
+TecsBytes *tecsRegexReplace(const TecsRegex *regex, const uint8_t *subject, size_t length, const uint8_t *replacement,
+                            size_t replacement_length, size_t limit);
 void tecsRegexDestroy(TecsRegex *regex);
 
 /* Rapier 2D. Every arena handle stays paired with its owning opaque world. */

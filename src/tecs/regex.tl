@@ -72,6 +72,25 @@ local record regex
         --- @param init First byte considered, under the same rules as `find`.
         --- @return The whole match, numbered groups and named aliases, or nil when nothing matches.
         captures: function(self: Regex, subject: string, init?: integer): Captures
+
+        --- Replaces the first match.
+        ---
+        --- Capture references in the replacement are expanded: `$0` is the whole match, `$1` is the
+        ---     first group, `$name` and `${name}` select a named group, and `$$` writes one dollar
+        ---     sign. A reference the pattern does not declare expands to an empty string.
+        --- @param subject Arbitrary bytes.
+        --- @param replacement Arbitrary bytes, with capture references interpreted as described above.
+        --- @return A new string when something matched, or the original string unchanged when nothing
+        ---     did.
+        replace: function(self: Regex, subject: string, replacement: string): string
+
+        --- Replaces every non-overlapping match.
+        ---
+        --- @param subject Arbitrary bytes.
+        --- @param replacement The same capture-reference syntax as `replace`.
+        --- @return A new string when something matched, or the original string unchanged when nothing
+        ---     did.
+        replaceAll: function(self: Regex, subject: string, replacement: string): string
     end
 
     --- Compiles a Rust regular expression.
@@ -140,16 +159,7 @@ function regex.Regex:captures(subject: string, init?: integer): regex.Captures
     if start == nil then
         return nil
     end
-    if
-        not C.tecsRegexCaptures(
-            self._handle,
-            subject,
-            #subject,
-            start,
-            self._spans,
-            self._captureCount
-        ) as boolean
-    then
+    if not C.tecsRegexCaptures(self._handle, subject, #subject, start, self._spans, self._captureCount) as boolean then
         return nil
     end
 
@@ -174,6 +184,25 @@ function regex.Regex:captures(subject: string, init?: integer): regex.Captures
         groupCount = self._captureCount - 1,
         named = named,
     }
+end
+
+local function replaceMatches(expression: regex.Regex, subject: string, replacement: string, limit: integer): string
+    local bytes <const> = C.tecsRegexReplace(expression._handle, subject, #subject, replacement, #replacement, limit)
+    if bytes == nil then
+        return subject
+    end
+    local length <const> = tonumber(C.tecsBytesLength(bytes)) as integer
+    local output <const> = loader.toBytes(C.tecsBytesData(bytes), length)
+    C.tecsBytesDestroy(bytes)
+    return output
+end
+
+function regex.Regex:replace(subject: string, replacement: string): string
+    return replaceMatches(self, subject, replacement, 1)
+end
+
+function regex.Regex:replaceAll(subject: string, replacement: string): string
+    return replaceMatches(self, subject, replacement, 0)
 end
 
 function regex.compile(pattern: string): regex.Regex

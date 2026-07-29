@@ -155,6 +155,7 @@ export default defineConfig({
                     },
                     { text: "tecs.input", link: "/modules/input" },
                     { text: "tecs.log", link: "/modules/log" },
+                    { text: "tecs.math", link: "/modules/math" },
                     { text: "tecs.mcp", link: "/modules/mcp" },
                     {
                         text: "tecs.net",

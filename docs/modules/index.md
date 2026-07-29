@@ -40,6 +40,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.gfx`](/modules/gfx/)               | the camera, the components, the renderer, text, and the vocabularies below |
 | [`tecs.input`](/modules/input)            | gameplay input, the gamepads on it, and standalone sensors                 |
 | [`tecs.log`](/modules/log)                | SDL's logging, per platform, with a named logger as the unit of filtering  |
+| [`tecs.math`](/modules/math)              | allocation-free 2D vector and angle math                                   |
 | [`tecs.mcp`](/modules/mcp)                | the debug server: transport, tools, sandbox                                |
 | [`tecs.net`](/modules/net/)               | nonblocking TCP streams and UDP datagrams                                  |
 | [`tecs.physics`](/modules/physics)        | rigid-body simulation on Rapier 2D                                         |

@@ -4,28 +4,28 @@ Thanks for your interest in contributing!
 
 ## Mandatory requirements
 
-- `make test` must pass.
+- `cargo xtask test` must pass.
 - Add tests for new features, bug fixes, or edge cases when reasonable.
 - **Update `docs/` for any user-facing change.** A change a game can see is not
   done until its page says so. Prose is the one thing no test can check, so the
-  only defense is the person making the change. `make docs-dev` serves the site
+  only defense is the person making the change. `cargo xtask docs-dev` serves the site
   with hot reload.
-- **`make docs-check` must pass.** It holds the module list against
+- **`cargo xtask docs-check` must pass.** It holds the module list against
   `src/tecs/init.tl` in three listings at once, resolves every link and anchor,
   requires a `description:` on every page, and diffs each page's generated
   reference against a fresh render. Regenerate with
-  `python3 docs/scripts/reference.py` rather than editing below the
-  `@generated` marker.
+  `cargo xtask docs-reference` rather than editing below the `@generated`
+  marker.
 - **Public docblocks carry `@param` and `@return`**, and they say what the
   signature cannot: units, coordinate spaces, what nil means, what happens at a
   boundary. A tag that restates the parameter's name is worse than none.
-- `make check` and `make format-check` must pass.
+- `cargo xtask check` and `cargo xtask format-check` must pass.
 
 ## Code style
 
-`make format` decides layout: indentation, line width, wrapping and alignment,
-per language. Run it rather than matching by eye, and do not argue with it in
-review.
+`cargo xtask format` decides layout: indentation, line width, wrapping and
+alignment, per language. Run it rather than matching by eye, and do not argue
+with it in review.
 
 What it cannot decide is in `STYLE.md`: naming, the file and module split,
 early returns over deep nesting, and comments that say why rather than what.
@@ -35,8 +35,8 @@ Documentation comments start with `---`.
 
 The tree is C99 and stays C99. `AGENTS.md` holds why, and the rule that a
 header under `native/` has to stay a subset LuaJIT's `ffi.cdef` can parse,
-because `scripts/gencdef.py` reads those headers rather than a hand-written
-binding.
+because the Cargo binding generator reads those headers rather than a
+hand-written binding.
 
 ### Warnings
 
@@ -58,8 +58,8 @@ AddressSanitizer and UndefinedBehaviorSanitizer under it. Run the host through
 them, which means the demo or any benchmark:
 
 ```bash
-PRESET=macos-arm64-sanitize make run
-PRESET=macos-arm64-sanitize make bench-physics
+cargo xtask run --preset macos-arm64-sanitize
+cargo xtask bench physics --preset macos-arm64-sanitize
 ```
 
 Both presets are `RelWithDebInfo`, like every other preset here. They are not a
@@ -68,7 +68,7 @@ the Rust host reserves for LuaJIT's machine code, so states created
 after startup compile fewer traces than they would otherwise, and the arena
 reports that by returning false rather than by failing.
 
-**`make test` cannot run under them on macOS.** The spec suite runs under a
+**`cargo xtask test` cannot run under them on macOS.** The spec suite runs under a
 plain interpreter that loads the instrumented libraries with `dlopen`, so the
 sanitizer runtime has to be inserted with `DYLD_INSERT_LIBRARIES`, and macOS
 strips every `DYLD_` variable when it launches a protected binary. `busted` is a
@@ -87,7 +87,7 @@ LuaJIT and the graphics driver hold allocations to exit by design.
 disabled check was disabled. It is not a gate; the compiler's warnings are.
 
 ```bash
-brew install llvm    # deliberately not in `make deps`
+brew install llvm    # deliberately not in `cargo xtask deps`
 clang-tidy -p out/macos-arm64-dev \
   --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" native/*.c
 ```

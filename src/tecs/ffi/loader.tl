@@ -273,9 +273,9 @@ end
 
 --- Resolves a native library.
 ---
---- Prefers the registry, then an explicit override from `envVar`, then the
---- plain soname so the dynamic linker's own search applies, then each known
---- prefix. Returns the namespace and what satisfied it.
+--- Prefers the registry, then an explicit override from `envVar`, then each
+--- known prefix, and finally the plain soname so the dynamic linker's own
+--- search applies. Returns the namespace and what satisfied it.
 ---
 --- Raises when every candidate fails, with the full list of what was tried;
 --- there is no nil return to test for. A library that resolved once is cached,
@@ -330,12 +330,12 @@ function loader.library(
     if override ~= nil and override ~= "" then
         attempts[#attempts + 1] = override
     end
-    attempts[#attempts + 1] = soname
 
     for _, prefix in ipairs(loader.searchPaths) do
         local dir = prefix:find("%%s") and prefix:format(formula) or prefix
         attempts[#attempts + 1] = dir .. "lib" .. soname .. suffix
     end
+    attempts[#attempts + 1] = soname
 
     local failures: {string} = {}
     for _, path in ipairs(attempts) do

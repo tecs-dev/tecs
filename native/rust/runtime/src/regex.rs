@@ -4,13 +4,14 @@
 //! Patterns remain UTF-8 Rust regex syntax while subjects may contain any
 //! bytes, and every position crossing the ABI is a byte offset.
 
+use std::borrow::Cow;
 use std::ptr;
 use std::slice;
 use std::str;
 
 use ::regex::bytes::Regex;
 
-use super::set_error;
+use super::{set_error, TecsBytes};
 
 pub struct TecsRegex {
     regex: Regex,
@@ -233,6 +234,50 @@ pub unsafe extern "C" fn tecsRegexCaptures(
             .unwrap_or_else(unmatched);
     }
     true
+}
+
+/// Replaces up to `limit` non-overlapping matches.
+///
+/// A limit of zero replaces every match. Capture references in `replacement`
+/// use Rust regex syntax: `$0`, `$1`, `$name`, `${name}`, and `$$`. Returns
+/// null when nothing matched, which lets Lua retain its original string
+/// without copying it.
+///
+/// # Safety
+///
+/// `regex` and the subject follow `tecsRegexFind`'s contract. When
+/// `replacement_length` is nonzero, `replacement` must address at least that
+/// many readable bytes for the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn tecsRegexReplace(
+    regex: *const TecsRegex,
+    subject: *const u8,
+    length: usize,
+    replacement: *const u8,
+    replacement_length: usize,
+    limit: usize,
+) -> *mut TecsBytes {
+    if regex.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: Propagates this function's pointer validity contract.
+    let Some(subject) = (unsafe { bytes(subject, length) }) else {
+        return ptr::null_mut();
+    };
+    // SAFETY: Propagates this function's pointer validity contract.
+    let Some(replacement) = (unsafe { bytes(replacement, replacement_length) }) else {
+        return ptr::null_mut();
+    };
+    // SAFETY: The caller promises that this is a live compiled regex.
+    let replaced = unsafe { &*regex }
+        .regex
+        .replacen(subject, limit, replacement);
+    match replaced {
+        Cow::Borrowed(_) => ptr::null_mut(),
+        Cow::Owned(bytes) => Box::into_raw(Box::new(TecsBytes {
+            bytes: bytes.into_boxed_slice(),
+        })),
+    }
 }
 
 /// Releases a compiled regular expression.
