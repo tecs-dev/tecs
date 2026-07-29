@@ -148,6 +148,28 @@
     color: var(--tealdoc-accent-hover);
 }
 
+/* No negative tracking on the display face. Tealdoc tightens its headings by
+ * a hair, which is right for the text face it assumes and wrong for a face
+ * drawn on a pixel grid: pulling these letters together closes the gaps the
+ * glyphs are built around, and the word reads as though it lost its kerning.
+ * The values are tealdoc's own, hardcoded rather than tokens, so this is
+ * written against its classes. */
+.tealdoc-brand,
+.tealdoc-content h1,
+.tealdoc-content h2,
+.tealdoc-hero-copy h1 {
+    letter-spacing: 0;
+}
+
+/* The line under the hero name is set in the display face, like the name
+ * above it, so the two read as one piece rather than as a heading with a
+ * caption. It stays at 400: Jersey 15 ships one weight, and asking for a
+ * bolder one gets the browser's smeared imitation rather than a bold. */
+.tealdoc-hero-text {
+    font-family: var(--tealdoc-font-heading);
+    font-weight: 400;
+}
+
 /* A home page layout, which is the page's own and not the generator's: a list
  * of module names reads down two columns rather than along one tall one. */
 .module-columns ul {

@@ -3,7 +3,7 @@ description: "Tecs home: a typed entity component system for LuaJIT and the GPU-
 layout: home
 
 hero:
-  name: "Build games with LuaJIT"
+  name: "Build 2D games with LuaJIT"
   text: "Typed. GPU-driven. One data model."
   image:
     src: /images/tecs.png
