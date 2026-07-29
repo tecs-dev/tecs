@@ -5,9 +5,13 @@
  * of each pair are the light and the dark value, and tealdoc picks between
  * them from the reader's system setting and from the theme toggle. What is
  * written against a class instead is the wordmark and the column layout the
- * home page asks for, and those are the parts to check after an update. */
-
-@import url("https://fonts.googleapis.com/css2?family=Jersey+15&display=swap");
+ * home page asks for, and those are the parts to check after an update.
+ *
+ * The display face is asked for from `head` in `tlconfig.lua` rather than by
+ * an `@import` here. An import is found only once this sheet has been fetched
+ * and parsed, so the font's own request queued behind it and the page painted
+ * a whole round trip in the fallback face before swapping. A link in the head
+ * is found with the rest of the head and goes out at the same time. */
 
 :root {
     /* One root size, at every width. Pico steps this from 100% to 131.25%
