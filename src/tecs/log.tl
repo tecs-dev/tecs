@@ -1,5 +1,21 @@
 --- Logging, which is SDL's with a guard in front of it.
 ---
+--- A logger is a name, and the name is what a developer filters on:
+---
+--- ```teal
+--- local logger <const> = tecs.log.get("game.combat")
+---
+--- logger:info("wave %d spawned %d enemies", 3, 12)
+--- logger:setLevel(tecs.log.DEBUG)
+---
+--- -- A queryable copy beside the platform destination, not instead of it.
+--- tecs.log.openFile(tecs.filesystem.writablePath("game.log"))
+--- tecs.log.closeFile()
+--- ```
+---
+--- Arguments are formatted only once the priority has passed, so a filtered
+--- call costs a load and a compare rather than a string.
+---
 --- There is deliberately nothing here to maintain: no sinks, no prefixes, no
 --- timestamp cache, no ring buffer, no level configuration of our own. SDL
 --- already dispatches to the right destination per platform, which is the

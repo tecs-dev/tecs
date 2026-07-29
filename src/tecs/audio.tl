@@ -1,5 +1,26 @@
 --- Sound output, rooted at `app.audio`.
 ---
+--- A clip is loaded once, a key caps how often it may start, and `play` hands
+--- back the voice handle that stops it:
+---
+--- ```teal
+--- local step <const> = app.audio:load("sfx/step.ogg")
+--- app.audio:setLimit("footstep", {voices = 3, cooldown = 0.05})
+---
+--- local voice <const> = app.audio:play(step, {
+---     gain = 0.7,
+---     key = "footstep",
+---     pitchVariance = 0.1,
+---     group = "sfx",
+--- })
+---
+--- app.audio:stop(voice, 0.2)
+--- ```
+---
+--- An entity that should make a noise carries a `Sound` instead, and stops
+--- sounding when the component or the entity goes away, so nothing has to
+--- remember a handle.
+---
 --- **The mixer decodes.** A clip is whatever SDL_mixer's decoders can read:
 --- WAV, AIFF, VOC, AU, Ogg Vorbis, Opus, FLAC, MP3 and WavPack, depending on
 --- what the build linked. `Audio.decoders` reports what this one has, which is

@@ -1,5 +1,28 @@
 --- Asynchronous asset loading.
 ---
+--- A load answers with a handle straight away, and the handle moves off
+--- "loading" only when something on the main thread takes the worker's answer.
+--- A batch is how several loads are waited on together, and it is where the
+--- pixels are read and released:
+---
+--- ```teal
+--- local batch <const> = tecs.assets.newBatch(function(name: string, handle: tecs.assets.Handle)
+---     if handle.status == "ready" then
+---         print(name, handle.width, handle.height)
+---     end
+---     handle:release()
+--- end)
+---
+--- batch:add(tecs.assets.loadImage("sprites/hero.png"), "hero")
+--- batch:add(tecs.assets.loadImage("sprites/enemy.png"), "enemy")
+---
+--- -- Once per frame, until pending reaches zero.
+--- batch:resolve()
+--- ```
+---
+--- `release` is the other half of a load: the pixels and the clip are the
+--- handle's, and reading either after it is freed memory.
+---
 --- **The formats an image may be in are PNG and JPEG.** Rust's `image` crate
 --- is built with only those two decoders, because every enabled codec becomes
 --- code a shipped binary carries. That is a decision the engine makes on a
@@ -35,9 +58,10 @@
 ---
 --- Reading a document is therefore two halves with nothing between them:
 ---
----     local tecs <const> = require("tecs")
----     local bytes <const> = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
----     local level <const> = tecs.data.decodeJSON(bytes)
+--- ```teal
+--- local bytes <const> = tecs.filesystem.read(tecs.filesystem.assetPath("levels/1.json"))
+--- local level <const> = tecs.data.decodeJSON(bytes)
+--- ```
 ---
 --- `filesystem.assetPath` resolves against the content root and `read` answers nil for
 --- a path with no file, so a game distinguishes an absent document from a

@@ -1,5 +1,28 @@
 --- Worker threads and channels.
 ---
+--- A worker is source text and two queues. It shares nothing with the state
+--- that spawned it, so it reaches its own ends through `workers.current`, and
+--- `spawn` pairs with `stop`:
+---
+--- ```teal
+--- local worker <const> = tecs.workers.spawn({source = [[
+---     local tecs <const> = require("tecs")
+---     local self <const> = tecs.workers.current()
+---     while true do
+---         local job = self:receive()
+---         if job == nil then break end
+---         self:send({name = job.name, hash = tecs.data.fnv1a64(job.bytes)})
+---     end
+--- ]]})
+---
+--- worker:send({name = "level1", bytes = "..."})
+--- local answer <const> = worker:receive(1000)
+--- worker:stop()
+--- ```
+---
+--- The worker's source writes a require line because it is a separate state
+--- with a separate global table, which is the one place in a game that does.
+---
 --- This is the only sanctioned way to run work off the main thread. Raw
 --- thread creation is deliberately not exposed: a LuaJIT FFI callback invoked
 --- from a thread the VM did not create is unsafe, and a thread entry point

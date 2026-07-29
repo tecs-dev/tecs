@@ -3,6 +3,25 @@
 --- The name is the subject rather than the implementation: the entity and
 --- component surface stays engine-owned while Rapier owns the solve.
 ---
+--- The plugin carries the simulation and `attach` gives an entity a body in
+--- it, so a body is an entity that already has a `Transform`:
+---
+--- ```teal
+--- world:addPlugin(tecs.physics.plugin({gravity = {0.0, 980.0}}))
+---
+--- local ground <const> = world:spawn(tecs.Transform(320, 460))
+--- tecs.physics.attach(world, ground, {["type"] = "static", halfWidth = 320, halfHeight = 20})
+---
+--- local crate <const> = world:spawn(tecs.Transform(320, 100))
+--- tecs.physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0.4})
+---
+--- tecs.physics.applyImpulse(world, crate, 400.0, 0.0)
+--- ```
+---
+--- The solver writes each body's `Transform` back, so nothing else has to move
+--- the entity, and `detach` takes a body out of the solve without despawning
+--- what carried it.
+---
 --- A body is four components. `Body` and `Collider` are the declaration, what
 --- a game asked for; `Motion` is the one piece of simulation state that has to
 --- survive a body being taken out of the solve; `RigidBody` is the live
