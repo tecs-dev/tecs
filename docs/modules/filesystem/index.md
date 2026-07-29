@@ -17,7 +17,7 @@ There is still deliberately no second way to resolve a path. Every operation tak
 takes, so a path from `assetPath`, a path a user typed and an absolute path from somewhere else all work, and
 none of them is rewritten on the way through. No virtual filesystem, no mount table, no invented scheme.
 
-## What is under it
+## Modules
 
 | Module                                               | What it is                                      |
 | ---------------------------------------------------- | ----------------------------------------------- |
