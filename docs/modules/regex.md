@@ -95,7 +95,6 @@ close it and collection releases it. Each compiled expression also reuses one sp
 `captures`; `isMatch` and `find` create no native match allocation, while `captures` creates only the Lua
 tables it returns.
 
-
 Every function and type this module carries, rendered from `src/tecs/regex.tl`.
 
 <a id="tecs.regex.Captures"></a>

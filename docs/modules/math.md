@@ -52,7 +52,6 @@ or underflow to zero, just as the equivalent inline expression would. Engine
 component coordinates are single-precision values, so their squares remain
 well inside Lua numbers during ordinary use.
 
-
 Every function and type this module carries, rendered from `src/tecs/math.tl`.
 
 <a id="tecs.math.add"></a>
