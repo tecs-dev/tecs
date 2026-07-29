@@ -884,19 +884,27 @@ end
 --- Compaction is what stops the extent drifting upwards for ever, and two
 --- things ask for it: an allocation that no longer fits, and an extent far
 --- enough above what a fresh layout would occupy to be worth the full rewrite.
---- The second is measured against what a compaction would produce rather than
---- against the live rows, which is what keeps a compaction from asking for
---- another one: the moment it runs the gap it triggers on is zero, and it
---- cannot open again until growth and shrinkage have put `RECLAIM_RATIO` of a
---- packed layout back into it.
+--- The second is measured against the extent a compaction would actually
+--- settle on, which is the widest of the three reservations that fits and not
+--- always the widest one there is. That is what keeps a compaction from asking
+--- for another one: the moment it runs the gap it triggers on is zero, and it
+--- cannot open again until growth and shrinkage have put `RECLAIM_RATIO` of
+--- that same layout back into it.
 local function layoutReserved(self: Extractor, packet: FramePacket): integer, integer, boolean
     local runs <const> = self._runs
     local seen <const> = self._seen
     local capacity <const> = self.capacity
 
-    -- What a compaction would produce, and what the runs that have outgrown
-    -- their reservation want at the end of the extent.
-    local packed = 0
+    -- What a compaction would produce at each of the three reservations, and
+    -- what the runs that have outgrown their reservation want at the end of
+    -- the extent. Only `RESERVE_FULL` needs a reservation worked out per run:
+    -- `RESERVE_FLOOR` gives every run `MIN_SLACK` whatever it has grown into,
+    -- and `RESERVE_NONE` gives it its rows, so both are sums this walk is
+    -- already in a position to take. Picking the tier from a walk of its own
+    -- would cost one per tier every frame and answer the same thing.
+    local widest = 0
+    local rows = 0
+    local count = 0
     local needed = 0
     for archetype, length in self._renderables:iter() do
         seen[archetype] = length
@@ -908,15 +916,33 @@ local function layoutReserved(self: Extractor, packet: FramePacket): integer, in
             run.grown = true
         end
         local reserved <const> = reservedFor(length, run ~= nil and run.grown)
-        packed = packed + reserved
+        widest = widest + reserved
+        rows = rows + length
+        count = count + 1
         if run == nil or length > run.capacity then
             needed = needed + reserved
         end
     end
 
+    -- The same walk `compactRuns` makes, over the totals above rather than
+    -- over the runs: widest first, and the first that fits is the one it would
+    -- lay out with.
+    local settled = widest
+    if settled > capacity then
+        settled = rows + count * MIN_SLACK
+    end
+    if settled > capacity then
+        settled = rows
+    end
+    if settled > capacity then
+        -- Rows alone that do not fit are truncated at the ceiling, which is
+        -- where a compaction leaves the extent.
+        settled = capacity
+    end
+
     local high <const> = self._high
-    local waste <const> = high - packed
-    local compacting <const> = high + needed > capacity or (waste > packed * RECLAIM_RATIO and waste > MIN_RECLAIM)
+    local waste <const> = high - settled
+    local compacting <const> = high + needed > capacity or (waste > settled * RECLAIM_RATIO and waste > MIN_RECLAIM)
 
     for archetype, run in pairs(runs) do
         if seen[archetype] == nil then
