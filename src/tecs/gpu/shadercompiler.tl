@@ -369,7 +369,7 @@ local function reflect(
         end
 
         if not translate then
-            local threadsOnly = stage == "compute" and localSize(compiler) or nil
+            local threadsOnly = stage == "compute" and localSize(compiler) or {1, 1, 1}
             return nil, counts, threadsOnly
         end
 
@@ -416,7 +416,7 @@ local function reflect(
         local sourceOut = loader.newArray("const char*[1]")
         spvcCheck(context, SP.spvc_compiler_compile(compiler, sourceOut), "spvc_compiler_compile")
 
-        local threads = stage == "compute" and localSize(compiler) or nil
+        local threads = stage == "compute" and localSize(compiler) or {1, 1, 1}
 
         -- The MSL string is owned by the context, so toString copies it out
         -- before the context is destroyed below.
@@ -498,8 +498,8 @@ end
 --- Translates on every host, unlike `compile`, which only does so on macOS.
 --- @return The MSL, with bindings already flattened into SDL's Metal order.
 --- @return What the shader binds, reflected out of the SPIR-V.
---- @return The declared workgroup size for a compute stage, and nil for the
----     other two.
+--- @return The declared workgroup size for a compute stage, and `{1, 1, 1}`
+---     for the other two.
 function shadercompiler.translate(
     source: string, stage: string, options: CompileOptions
 ): string, ResourceCounts, {integer}

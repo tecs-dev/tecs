@@ -213,6 +213,100 @@ describe("shaderpack", function()
         end
     end)
 
+    it("encodes deterministically without LuaJIT's native serializer", function()
+        local built = shaderbuild.build()
+        local encoded = shaderpack.encode(built)
+
+        local reversed = {
+            version = built.version,
+            target = built.target,
+            format = built.format,
+            shaders = {},
+        }
+        local keys = {}
+        for key in pairs(built.shaders) do
+            keys[#keys + 1] = key
+        end
+        table.sort(keys, function(left, right)
+            return left > right
+        end)
+        for _, key in ipairs(keys) do
+            reversed.shaders[key] = built.shaders[key]
+        end
+
+        assert.are.equal(encoded, shaderpack.encode(reversed))
+        -- The first body field is the target. Its length is an explicit
+        -- little-endian uint32, rather than a native-size LuaJIT table field.
+        assert.are.equal(
+            string.char(#built.target, 0, 0, 0) .. built.target,
+            encoded:sub(8, 11 + #built.target)
+        )
+    end)
+
+    it("matches the portable format's golden bytes", function()
+        local fixture = {
+            version = shaderpack.VERSION,
+            target = "T",
+            format = 5,
+            shaders = {
+                k = {
+                    key = "k",
+                    name = "n",
+                    stage = "v",
+                    format = 5,
+                    entrypoint = "e",
+                    sourceHash = "h",
+                    counts = {
+                        samplers = 1,
+                        readOnlyStorageTextures = 2,
+                        readOnlyStorageBuffers = 3,
+                        readWriteStorageTextures = 4,
+                        readWriteStorageBuffers = 5,
+                        uniformBuffers = 6,
+                    },
+                    threadCount = { 7, 8, 9 },
+                    code = string.char(0, 65, 255, 66),
+                },
+            },
+        }
+        local golden = table.concat({
+            "TECSSP",
+            string.char(3),
+            string.char(1, 0, 0, 0),
+            "T",
+            string.char(5, 0, 0, 0),
+            string.char(1, 0, 0, 0),
+            string.char(1, 0, 0, 0),
+            "k",
+            string.char(1, 0, 0, 0),
+            "n",
+            string.char(1, 0, 0, 0),
+            "v",
+            string.char(5, 0, 0, 0),
+            string.char(1, 0, 0, 0),
+            "e",
+            string.char(1, 0, 0, 0),
+            "h",
+            string.char(1, 0, 0, 0),
+            string.char(2, 0, 0, 0),
+            string.char(3, 0, 0, 0),
+            string.char(4, 0, 0, 0),
+            string.char(5, 0, 0, 0),
+            string.char(6, 0, 0, 0),
+            string.char(7, 0, 0, 0),
+            string.char(8, 0, 0, 0),
+            string.char(9, 0, 0, 0),
+            string.char(4, 0, 0, 0),
+            string.char(0, 65, 255, 66),
+        })
+
+        assert.are.equal(golden, shaderpack.encode(fixture))
+        local decoded = shaderpack.decode(golden)
+        assert.are.equal(string.char(0, 65, 255, 66), decoded.shaders.k.code)
+        assert.are.equal(6, decoded.shaders.k.counts.uniformBuffers)
+        assert.are.same({ 7, 8, 9 }, decoded.shaders.k.threadCount)
+    end)
+
     it("carries the reflection SDL_GPU cannot recover from code", function()
         local pack = shaderbuild.build()
         -- The lighting pass binds two G-buffer samplers, three storage buffers
@@ -230,6 +324,9 @@ describe("shaderpack", function()
         local mark = pack.shaders["instance.mark.comp"]
         assert.are.equal(256, mark.threadCount[1])
         assert.are.equal(1, mark.threadCount[2])
+
+        local fragment = pack.shaders["instance.frag"]
+        assert.are.same({ 1, 1, 1 }, fragment.threadCount)
     end)
 
     it("rejects a file that is not a pack", function()
@@ -253,6 +350,16 @@ describe("shaderpack", function()
         local ok, reason = pcall(shaderpack.decode, wrong, "wrong.tsp")
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("version 99"))
+    end)
+
+    it("rejects truncated and trailing pack data", function()
+        local encoded = shaderpack.encode(shaderbuild.build())
+        assert.has_error(function()
+            shaderpack.decode(encoded:sub(1, #encoded - 1), "truncated.tsp")
+        end)
+        assert.has_error(function()
+            shaderpack.decode(encoded .. "extra", "trailing.tsp")
+        end)
     end)
 
     it("returns nil for a path with no pack", function()

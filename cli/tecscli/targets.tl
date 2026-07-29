@@ -5,30 +5,29 @@
 --- ```
 ---  Host      Can produce                  Cannot, and why
 ---  ────────  ───────────────────────────  ─────────────────────────────────
----  macOS     macOS arm64, macOS x64, iOS  Windows: needs MSVC
----  Linux     Linux x64, Android           macOS and iOS: the Xcode SDK is
----                                         not redistributable
----  Windows   Windows x64                  macOS and iOS: the same
+---  macOS     macOS arm64, macOS x64       Windows: needs MSVC
+---  Linux     Linux x64                    macOS: the Xcode SDK is not
+---                                         redistributable
+---  Windows   Windows x64                  macOS: the same
 --- ```
 ---
 --- Two different kinds of obstacle sit in that table and only one of them
 --- could ever be engineered away. Windows needs MSVC and there is no mingw
---- toolchain in this tree; that is work nobody has done. macOS and iOS need the
---- Xcode SDK, whose license forbids redistribution, so no non-Apple machine can
---- ship a toolchain that produces a Mach-O however much work is done. Saying
+--- toolchain in this tree; that is work nobody has done. macOS needs the Xcode
+--- SDK, whose license forbids redistribution, so no non-Apple machine can ship
+--- a toolchain that produces a Mach-O however much work is done. Saying
 --- "unsupported" for both would hide that difference.
 ---
---- The answer is the same one the engine's own build already gives: `make
---- presets` lists nine and any machine configures two or three. A three-OS CI
---- matrix is how a solo developer reaches all five, which is why `tecs new`
---- scaffolds one.
+--- The answer is the same one the engine's own build gives: `cargo xtask
+--- presets` names the complete set, and a three-OS CI matrix reaches every
+--- packaged target. `tecs new` scaffolds that matrix.
 
 local ffi <const> = require("ffi")
 
 local record targets
     --- One packaging target and whether this machine can reach it.
     record Target
-        --- The preset name, as `make presets` lists it.
+        --- The preset name, as `cargo xtask presets` lists it.
         name: string
         --- What it produces.
         description: string
@@ -78,22 +77,10 @@ function targets.all(): {targets.Target}
             reason = apple and "" or appleReason,
         },
         {
-            name = "ios",
-            description = "iOS device",
-            available = apple,
-            reason = apple and "" or appleReason,
-        },
-        {
             name = "linux-x64",
             description = "Linux on x86-64",
             available = linux,
             reason = linux and "" or "needs a Linux host",
-        },
-        {
-            name = "android-arm64",
-            description = "Android on arm64",
-            available = linux,
-            reason = linux and "" or "needs a Linux host with the Android NDK",
         },
         {
             name = "windows-x64",

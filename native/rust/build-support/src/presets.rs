@@ -117,33 +117,6 @@ pub const PRESETS: &[Preset] = &[
         deployment_target: None,
         entry: "main.lua",
     },
-    Preset {
-        name: "ios",
-        rust_target: "aarch64-apple-ios",
-        dependencies: DependencyMode::Packaged,
-        shaders: ShaderMode::Packaged,
-        sanitize: false,
-        deployment_target: Some("13.0"),
-        entry: "main.lua",
-    },
-    Preset {
-        name: "android-arm64",
-        rust_target: "aarch64-linux-android",
-        dependencies: DependencyMode::Packaged,
-        shaders: ShaderMode::Packaged,
-        sanitize: false,
-        deployment_target: Some("29"),
-        entry: "main.lua",
-    },
-    Preset {
-        name: "android-x64",
-        rust_target: "x86_64-linux-android",
-        dependencies: DependencyMode::Packaged,
-        shaders: ShaderMode::Packaged,
-        sanitize: false,
-        deployment_target: Some("29"),
-        entry: "main.lua",
-    },
 ];
 
 impl FromStr for Preset {
@@ -177,6 +150,10 @@ pub fn host_default() -> anyhow::Result<Preset> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::fs;
+    use std::path::Path;
+
     use super::{DependencyMode, Preset, PRESETS};
 
     #[test]
@@ -204,5 +181,25 @@ mod tests {
     fn unknown_preset_is_actionable() {
         let error = "wat".parse::<Preset>().unwrap_err().to_string();
         assert!(error.contains("cargo xtask presets"));
+    }
+
+    #[test]
+    fn cli_targets_match_packaged_presets() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = fs::read_to_string(root.join("cli/tecscli/targets.tl")).unwrap();
+        let cli: BTreeSet<_> = source
+            .lines()
+            .filter_map(|line| {
+                line.trim()
+                    .strip_prefix("name = \"")
+                    .and_then(|name| name.strip_suffix("\","))
+            })
+            .collect();
+        let presets: BTreeSet<_> = PRESETS
+            .iter()
+            .filter(|preset| matches!(preset.dependencies, DependencyMode::Packaged))
+            .map(|preset| preset.name)
+            .collect();
+        assert_eq!(cli, presets);
     }
 }
