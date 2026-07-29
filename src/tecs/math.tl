@@ -1,10 +1,77 @@
 --- Allocation-free two-dimensional vector and angle math.
 ---
---- Vectors are separate `x, y` numbers rather than tables or cdata. Functions
---- return vector results as two values, so they allocate no temporary objects
---- and LuaJIT can compile their arithmetic into a caller's trace. Every angle
---- is in radians. A positive quarter turn maps `(1, 0)` to `(0, 1)`, which
---- appears clockwise in screen coordinates whose y-axis points down.
+--- Every function here is arithmetic a caller could have written inline, and
+--- that is the argument for the module rather than against it. The expressions
+--- are short and the mistakes in them are the same ones every time: a
+--- normalize that divides by the length of a zero vector, an angle difference
+--- that jumps by a whole turn as it crosses pi, a chase step that overshoots
+--- its target on a long frame. Each of those has one right answer, that answer
+--- does not vary by caller, and settling it once means the boundary cases are
+--- settled once. Naming is the other half of it. A call to `moveTowards` says
+--- what the line is for, where the same arithmetic spelled out says only what
+--- it computes.
+---
+--- **Coordinates, not vectors.** A vector is passed as separate `x` and `y`
+--- numbers and returned as two of them. A vector type is the obvious
+--- alternative and it loses on the one axis that decides something called this
+--- often: every operation would allocate its result, or every caller would
+--- keep a pool of them alive. Two numbers in and two numbers out allocate
+--- nothing, and LuaJIT compiles the arithmetic into the caller's own trace, so
+--- the call costs what the expression it replaced would have cost.
+---
+--- A game writes this shape, moving an entity toward what it is chasing and
+--- turning it to face the way it went:
+---
+--- ```teal
+--- local record Homing is tecs.ecs.Component
+---     targetX: number
+---     targetY: number
+---     speed: number
+--- end
+---
+--- tecs.ecs.newFFIComponent({
+---     name = "Homing",
+---     container = Homing,
+---     fields = {{"targetX", "float"}, {"targetY", "float"}, {"speed", "float"}},
+--- })
+---
+--- local homing <const> = world:query({include = {tecs.Transform, Homing}})
+---
+--- world:addSystem({
+---     name = "game.Homing",
+---     phase = tecs.ecs.phases.Update,
+---     run = function(dt: number)
+---         for archetype, length in homing:iter() do
+---             local transforms = archetype:getMut(tecs.Transform)
+---             local targets = archetype:get(Homing)
+---             for row = 1, length do
+---                 local transform = transforms[row]
+---                 local target = targets[row]
+---                 transform.x, transform.y = tecs.math.moveTowards(
+---                     transform.x, transform.y,
+---                     target.targetX, target.targetY,
+---                     target.speed * dt
+---                 )
+---                 transform.rotation = tecs.math.angle(
+---                     target.targetX - transform.x,
+---                     target.targetY - transform.y
+---                 )
+---             end
+---         end
+---     end,
+--- })
+--- ```
+---
+--- Nothing in that loop allocates, which is what lets it run over every row of
+--- every matching archetype each frame. The two writes go to a column taken
+--- with `getMut`; the component read beside it uses `get`, because taking
+--- `getMut` to read would mark it dirty every frame and defeat the consumers
+--- that skip clean columns.
+---
+--- Every angle is in radians. A positive quarter turn maps `(1, 0)` to
+--- `(0, 1)`, which appears clockwise in screen coordinates whose y-axis points
+--- down. An operation with no unique geometric answer returns a stable value
+--- rather than a NaN, and each one says which value on its own entry.
 ---
 --- Operations use direct Lua-number arithmetic for game-coordinate magnitudes.
 --- As with writing the expressions directly, values near the limits of an
