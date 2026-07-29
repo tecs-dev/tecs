@@ -20,7 +20,7 @@
      * the way out moves every rem-sized heading, margin and gap on the page.
      * A reader zooming asks for the same page at a different size, so the base
      * is a constant and zoom is the only thing that scales it. */
-    --pico-font-size: 125%;
+    --pico-font-size: 135%;
 
     /* Paper and ink. Warm rather than white, because a page of signatures is
      * read for minutes at a time. */
