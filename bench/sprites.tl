@@ -6,7 +6,7 @@
 --- animating and a steady trickle of things appearing and disappearing, and
 --- the cost of those regimes is not the cost of the dense one.
 ---
---- Four regimes, because they stress different parts of the sync:
+--- Five regimes, because they stress different parts of the sync:
 ---
 ---   static   nothing changes after the field is built, so every archetype is
 ---            clean and the sync should write nothing at all. The floor, and
@@ -30,7 +30,21 @@
 ---            bounded: the resident field and the churn pool carry the same
 ---            components and share one archetype, so there is no second run
 ---            for a reservation to leave alone, and a spawn marks the columns
----            the whole field lives in either way.
+---            the whole field lives in either way. `spawner` is the regime
+---            that can answer it.
+---   spawner  a still field spread over many archetypes, and a wave of
+---            sprites rising and falling in an archetype of its own. Every
+---            frame the wave moves by `BENCH_SPAWN` rows in one direction or
+---            the other, so no frame leaves the pool's length where the last
+---            one left it, and the field it sits beside never changes at all.
+---            That is the one shape the two layouts answer differently:
+---            packed, a length that moved lays the whole scene out again and
+---            rewrites a field nothing touched; reserved, the wave grows into
+---            slack of its own and the field stays resident. What reserving
+---            pays for it is also only visible here, because it is paid in
+---            compactions: the slots a growing run leaves behind stay in the
+---            extent until one reclaims them, and a compaction rewrites
+---            everything at once.
 ---
 --- The report prints `rewritten` beside the stage table for that reason. It is
 --- the cheaper and more diagnostic signal of the two: frame time is a noisy
@@ -43,6 +57,12 @@
 --- run moves or shrinks, which are written and uploaded like any other. So
 --- `rewritten` is the signal for a change in what the dirty gate lets through,
 --- and the `extract` stage is the one to compare two layouts on.
+---
+--- The other number to read carefully is the instance count, which is the
+--- extent the cull is dispatched over and not a population. A reserved layout
+--- holds slack inside that extent, so the line reads more instances synced
+--- than there are sprites, and the difference is what reserving costs the
+--- cull. Neither number is the layout comparison; `extract` p50 and p95 are.
 ---
 --- The picture the sprites carry is the atlas the engine already ships, cut
 --- into a grid. Extraction never looks at what a texel holds, so the content
@@ -71,7 +91,7 @@ local Animation <const> = animation.Animation
 --- instance count is this plus `BENCH_SPAWN * BENCH_LIFETIME` in that regime.
 local COUNT <const> = math.floor(tonumber(os.getenv("BENCH_SPRITES")) or 200000)
 
---- "static", "dense", "sparse" or "churn".
+--- "static", "dense", "sparse", "churn" or "spawner".
 local MODE <const> = os.getenv("BENCH_MODE") or "dense"
 
 --- Fraction of the field that animates in `sparse`, 0 to 1. Every sprite
@@ -95,6 +115,23 @@ local function switch(name: string, byDefault: boolean): boolean
         error(("tecs: %s takes 0 or 1, not '%s'"):format(name, value), 0)
     end
     return value == "1"
+end
+
+--- Reads a fraction whose unset value is the bench's own.
+---
+--- Strict for the reason `switch` is: this one decides which reservation is
+--- measured, and a value that did not parse would fall back to the default and
+--- be reported under the name that was asked for.
+local function fraction(name: string, byDefault: number): number
+    local value <const> = os.getenv(name)
+    if value == nil or value == "" then
+        return byDefault
+    end
+    local parsed <const> = tonumber(value)
+    if parsed == nil or parsed < 0.0 then
+        error(("tecs: %s takes a fraction of zero or more, not '%s'"):format(name, value), 0)
+    end
+    return parsed
 end
 
 --- Resolve playback on the GPU rather than on the host.
@@ -121,8 +158,31 @@ local RESERVE <const> = switch("BENCH_RESERVE", false)
 
 --- Sprites spawned per frame in `churn`, each despawned `BENCH_LIFETIME`
 --- frames later, so the population is level while the identities turn over.
+---
+--- In `spawner` the same rate is the rows the wave moves per frame, up on a
+--- rising frame and down on a falling one.
 local SPAWN_RATE <const> = math.floor(tonumber(os.getenv("BENCH_SPAWN")) or 64)
 local LIFETIME <const> = math.floor(tonumber(os.getenv("BENCH_LIFETIME")) or 60)
+
+--- Frames the `spawner` wave takes to fill, and as many again to empty.
+---
+--- One is the smallest wave there is: the pool appears and is gone again, so
+--- every frame either creates the archetype or empties it. Longer waves keep
+--- the archetype alive and make the run grow, which is what puts slots behind
+--- it and eventually asks for a compaction.
+local WAVE <const> = math.floor(tonumber(os.getenv("BENCH_WAVE")) or LIFETIME)
+
+--- Archetypes the resident field is spread over in `spawner`.
+---
+--- More than one is what gives a reservation something to leave alone, and the
+--- number matters beyond that: `Extractor` reclaims an extent voluntarily only
+--- once the slack in it passes both half of a fresh layout and a floor of 512
+--- slots, and the least a still run can hold is `MIN_SLACK`, which is sixteen.
+--- So a scene with 32 archetypes or fewer cannot reach that floor on slack
+--- alone, and the trigger is out of reach whatever the capacity is. Sixty-four
+--- puts it within reach without making the field's archetypes so small that
+--- the floor is all any of them holds.
+local FIELDS <const> = math.floor(tonumber(os.getenv("BENCH_FIELDS")) or 64)
 
 --- The field the sprites are scattered over, and the viewport looking at it.
 --- Copied from the shapes bench so the dense regime is comparable to it: about
@@ -146,8 +206,9 @@ local ROWS <const> = 4
 --- "every sprite advances" has to mean every sprite writes.
 local FRAME_MS <const> = 8.0
 
---- Sprites the churn pool holds once it is full.
-local POOL <const> = MODE == "churn" and SPAWN_RATE * LIFETIME or 0
+--- Sprites the churn pool holds once it is full, or the `spawner` wave holds
+--- at its crest.
+local POOL <const> = MODE == "churn" and SPAWN_RATE * LIFETIME or MODE == "spawner" and SPAWN_RATE * WAVE or 0
 local TOTAL <const> = COUNT + POOL
 
 --- Instance slots past the population, so a reserved layout has something to
@@ -161,13 +222,22 @@ local TOTAL <const> = COUNT + POOL
 --- sprites and reports a packed layout under a reserved name.
 ---
 --- A quarter of the population plus the floor is therefore what the widest
---- reservation asks for here, because every sprite lives in one archetype:
---- `static` and `churn` carry Transform, Tint, Sprite and Renderable, and
---- `dense` and `sparse` carry those plus Animation, so the sum over
---- archetypes is one term. Packed takes the same headroom and never uses it,
---- which is the point: the two layouts are compared at one capacity and the
---- flag is the only thing that differs.
-local HEADROOM <const> = math.floor(TOTAL * 0.25) + 16
+--- reservation asks for in the four regimes that hold every sprite in one
+--- archetype: `static` and `churn` carry Transform, Tint, Sprite and
+--- Renderable, and `dense` and `sparse` carry those plus Animation, so the sum
+--- over archetypes is one term. `spawner` spreads the field over `FIELDS`
+--- archetypes and puts the wave in one more, and every one of them is given
+--- the floor before any of them is given a quarter, so the floor is counted
+--- per run there. Packed takes the same headroom and never uses it, which is
+--- the point: the two layouts are compared at one capacity and the flag is the
+--- only thing that differs.
+---
+--- The fraction is a knob because it is the memory the reservation costs, and
+--- because it is what decides which of the three reservations a compaction
+--- settles on. Shrinking it is how the tiers below the widest one are reached.
+local SLACK <const> = fraction("BENCH_SLACK", 0.25)
+local FLOORS <const> = MODE == "spawner" and 16 * (FIELDS + 1) or 0
+local HEADROOM <const> = math.floor(TOTAL * SLACK) + 16 + FLOORS
 
 --- Sprites whose animation is playing, which is the number of sprites that
 --- change anything on a fixed step.
@@ -189,25 +259,39 @@ local resident: tecs.gfx.Sprite = nil
 local ring: {integer} = {}
 local ringAt = 0
 
+--- The `spawner` wave, as a stack, and the rows it holds. Rising frames push
+--- and falling frames pop, so what a frame does to the pool's length is one
+--- comparison rather than a list walk.
+local wave: {integer} = {}
+local waveHeld = 0
+local waveRising = true
+
 local rewrittenTotal = 0
 local rewrittenPeak = 0
 local quietFrames = 0
 local instances = 0
 
---- Scatters `count` sprites over the field.
+--- Scatters `count` sprites over the field, in the archetype `marker` names.
 ---
---- One archetype for the lot: every sprite carries the same components, and in
---- `sparse` the ones that stand still carry an Animation that is not playing
---- rather than no Animation at all. Splitting them would put the movers in an
---- archetype of their own and the dirty gate would then be exact, which is a
---- different scene from the one a game has.
-local function scatter(world: tecs.World, count: integer, animated: boolean)
+--- One archetype for the lot when there is no marker: every sprite carries the
+--- same components, and in `sparse` the ones that stand still carry an
+--- Animation that is not playing rather than no Animation at all. Splitting
+--- them would put the movers in an archetype of their own and the dirty gate
+--- would then be exact, which is a different scene from the one a game has.
+---
+--- A marker is how `spawner` gets the other shape deliberately. It carries no
+--- data and nothing reads it, so it changes which archetype a sprite lives in
+--- and nothing else about the frame.
+local function scatter(world: tecs.World, count: integer, animated: boolean, marker?: tecs.ecs.Component)
     if count < 1 then
         return
     end
 
     local types: {tecs.ecs.Component} = animated and {Transform, Tint, Sprite, Renderable, Animation}
         or {Transform, Tint, Sprite, Renderable}
+    if marker ~= nil then
+        types[#types + 1] = marker
+    end
 
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5
@@ -267,7 +351,12 @@ local function scatter(world: tecs.World, count: integer, animated: boolean)
     )
 end
 
---- One sprite, for the churn pool.
+--- One sprite, for the churn pool or the `spawner` wave.
+---
+--- It carries no marker, which is what puts it in the field's archetype in
+--- `churn` and in an archetype of its own in `spawner`, where the field carries
+--- one. Marking it after the spawn instead would move the row twice and charge
+--- the regime a transition a game does not pay.
 local function spawnOne(world: tecs.World, at: integer): integer
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5
@@ -295,8 +384,11 @@ return tecs.newApplication(
 
         plugin = function(world: tecs.World, app: tecs.Application)
             local renderer = app.renderer
-            if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" then
+            if MODE ~= "static" and MODE ~= "dense" and MODE ~= "sparse" and MODE ~= "churn" and MODE ~= "spawner" then
                 error(("tecs: no sprite bench regime '%s'"):format(MODE))
+            end
+            if MODE == "spawner" and (FIELDS < 1 or WAVE < 1 or SPAWN_RATE < 1) then
+                error("tecs: the spawner regime needs BENCH_FIELDS, BENCH_WAVE and BENCH_SPAWN of at least one", 0)
             end
 
             -- Blocking, because the field cannot be built before the sheet knows
@@ -332,12 +424,29 @@ return tecs.newApplication(
             end
 
             math.randomseed(42)
-            scatter(world, COUNT, MODE == "dense" or MODE == "sparse")
+            if MODE == "spawner" then
+                -- A marker per archetype, and the field split evenly between
+                -- them. The remainder goes to the first rather than being
+                -- dropped, so the population is the one the report names.
+                local share <const> = math.floor(COUNT / FIELDS)
+                for index = 1, FIELDS do
+                    local marker <const> = tecs.ecs.newTagComponent({name = ("BenchSpriteField%03d"):format(index)})
+                    scatter(world, index == 1 and COUNT - share * (FIELDS - 1) or share, false, marker)
+                end
+            else
+                scatter(world, COUNT, MODE == "dense" or MODE == "sparse")
+            end
 
             if MODE == "churn" then
                 print(
                     ("sprites: %d resident + %d churning, %d spawned and %d " .. "despawned per frame"):format(
                         COUNT, POOL, SPAWN_RATE, SPAWN_RATE
+                    )
+                )
+            elseif MODE == "spawner" then
+                print(
+                    ("sprites: %d still over %d archetypes, a wave of %d in one " .. "more, %d rows a frame"):format(
+                        COUNT, FIELDS, POOL, SPAWN_RATE
                     )
                 )
             else
@@ -374,6 +483,36 @@ return tecs.newApplication(
                                 ring[slot] = spawnOne(world, ringAt)
                                 ringAt = ringAt + 1
                             end
+                        elseif MODE == "spawner" then
+                            -- Every frame moves the pool's length, which is the
+                            -- whole point: a length that stood still is a layout
+                            -- neither of the two has to lay out again, and that is
+                            -- the case `churn` already covers. The turn is taken at
+                            -- the crest and at nothing left, so the wave is
+                            -- `WAVE` frames up and `WAVE` frames down whatever the
+                            -- rate is.
+                            if waveRising then
+                                for _ = 1, SPAWN_RATE do
+                                    waveHeld = waveHeld + 1
+                                    wave[waveHeld] = spawnOne(world, ringAt)
+                                    ringAt = ringAt + 1
+                                end
+                                if waveHeld >= POOL then
+                                    waveRising = false
+                                end
+                            else
+                                for _ = 1, SPAWN_RATE do
+                                    if waveHeld < 1 then
+                                        break
+                                    end
+                                    world:despawn(wave[waveHeld])
+                                    wave[waveHeld] = nil
+                                    waveHeld = waveHeld - 1
+                                end
+                                if waveHeld < 1 then
+                                    waveRising = true
+                                end
+                            end
                         end
 
                         if frame >= WARMUP then
@@ -409,9 +548,15 @@ return tecs.newApplication(
                                 MODE, GPU and "GPU" or "host", RESERVE and "reserved" or "packed"
                             )
                         )
+                        -- The first number is the extent the cull is dispatched
+                        -- over, which a reserved layout holds slack inside, so it
+                        -- reads above the population and is not one. The gap is
+                        -- what reserving costs the cull.
                         print(
                             ("%d of %d instances synced, %d changing per fixed step"):format(
-                                instances, TOTAL, MODE == "churn" and SPAWN_RATE * 2 or PLAYING
+                                instances,
+                                TOTAL,
+                                MODE == "churn" and SPAWN_RATE * 2 or MODE == "spawner" and SPAWN_RATE or PLAYING
                             )
                         )
                         -- `rewritten` counts the slots written from a component column
