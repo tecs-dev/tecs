@@ -1,5 +1,5 @@
 ---
-description: "The tecs command line tool: project commands and the MCP bridge to a running game"
+description: "The tecs command line tool: project commands, offline reference, and MCP bridge"
 outline: deep
 ---
 
@@ -21,6 +21,7 @@ and its Rust native services inside the same file.
 | `tecs run [entry] [-- args...]` | Build, then replace the CLI process with the selected game entry      |
 | `tecs clean`                    | Remove the project's build directory                                  |
 | `tecs info`                     | Print versions, pinned revisions, project details and package targets |
+| `tecs docs [query]`             | Browse or search the offline reference carried with the tool          |
 | `tecs mcp`                      | Connect an MCP client on stdio to a running game's HTTP endpoint      |
 
 Clap parses and validates this surface. `tecs help`, `tecs --help` and command-specific `--help` render it, and
@@ -49,6 +50,24 @@ the `tecs` global and can require the project's compiled modules, and both must 
 Only operands after `--` are game arguments. The application sees them as `arg[1]` through `arg[#arg]`; the CLI
 command, selected entry and host bootstrap are not present in that table. Use the separator even when the first
 game argument does not begin with a hyphen, so the command remains unambiguous.
+
+## Offline reference
+
+`tecs docs` prints an index of API pages and guides. A short page name resolves
+the page, while a fully-qualified public name resolves its generated reference:
+
+```bash
+tecs docs
+tecs docs physics
+tecs docs tecs.physics.attach
+```
+
+The reference is staged from this site's Markdown and embedded in the
+single-file executable with the rest of its content. It works outside a
+project and does not use the network. An exact or unique match exits zero. An
+unknown query exits one with the command that lists available topics, and an
+ambiguous query lists its matches and exits two so scripts can distinguish it
+from a missing reference.
 
 ## Connect an agent to a running game
 

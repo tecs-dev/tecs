@@ -1086,6 +1086,7 @@ fn stage_content(
     run(&mut cli, "Teal CLI compilation")?;
 
     copy_tree(&root.join("assets"), &paths.lua, false)?;
+    stage_offline_docs(&root.join("docs"), &paths.lua.join("tecsdocs"))?;
     copy_tree(
         &root.join("cli/tecscli/templates"),
         &paths.lua.join("tecscli/templates"),
@@ -1162,6 +1163,28 @@ fn copy_tree(source: &Path, destination: &Path, clean: bool) -> Result<()> {
             }
             fs::copy(entry.path(), target)?;
         }
+    }
+    Ok(())
+}
+
+fn stage_offline_docs(source: &Path, destination: &Path) -> Result<()> {
+    if destination.exists() {
+        fs::remove_dir_all(destination)?;
+    }
+    for path in source_files(source, |path| {
+        path.extension().and_then(|value| value.to_str()) == Some("md")
+            && !path
+                .components()
+                .any(|part| part.as_os_str() == "node_modules")
+    })? {
+        let relative = path.strip_prefix(source)?;
+        let target = destination.join(relative);
+        fs::create_dir_all(
+            target
+                .parent()
+                .context("offline documentation page has no parent")?,
+        )?;
+        fs::copy(path, target)?;
     }
     Ok(())
 }

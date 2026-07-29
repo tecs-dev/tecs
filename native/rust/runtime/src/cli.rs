@@ -71,6 +71,12 @@ pub enum Command {
     /// Print versions, pinned revisions, project details, and targets.
     Info,
 
+    /// Search the offline reference.
+    Docs {
+        /// Topic or fully-qualified API name.
+        query: Option<String>,
+    },
+
     /// Connect an MCP client on stdio to a running game.
     Mcp,
 
@@ -166,6 +172,12 @@ fn run_result(command: Command) -> Vec<u8> {
         }
         Command::Clean => push_field(&mut result, b"clean"),
         Command::Info => push_field(&mut result, b"info"),
+        Command::Docs { query } => {
+            push_field(&mut result, b"docs");
+            if let Some(query) = query {
+                push_field(&mut result, query.as_bytes());
+            }
+        }
         Command::Mcp => push_field(&mut result, b"mcp"),
         Command::Version => {
             return exit_result(
@@ -247,6 +259,32 @@ pub unsafe extern "C" fn tecsCliParse(
     }))
 }
 
+/// Searches the staged offline reference and returns an `exit` wire result.
+///
+/// # Safety
+///
+/// `directory` must name a NUL-terminated path. A non-null `query` must name
+/// a NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn tecsCliDocs(
+    directory: *const c_char,
+    query: *const c_char,
+) -> *mut TecsBytes {
+    if directory.is_null() {
+        return Box::into_raw(Box::new(TecsBytes {
+            bytes: exit_result(2, true, b"tecs docs: documentation path is null\n")
+                .into_boxed_slice(),
+        }));
+    }
+    let directory = unsafe { CStr::from_ptr(directory) };
+    let directory = PathBuf::from(argument(directory.to_bytes()));
+    let query = (!query.is_null()).then(|| unsafe { CStr::from_ptr(query) }.to_string_lossy());
+    let output = crate::cli_docs::render(&directory, query.as_deref());
+    Box::into_raw(Box::new(TecsBytes {
+        bytes: exit_result(output.code, output.stderr, output.text.as_bytes()).into_boxed_slice(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
@@ -310,7 +348,7 @@ mod tests {
     fn public_help_lists_public_commands_but_not_the_internal_one() {
         let help = String::from_utf8(help()).unwrap();
         for command in [
-            "new", "check", "format", "test", "build", "run", "clean", "info", "mcp",
+            "new", "check", "format", "test", "build", "run", "clean", "info", "docs", "mcp",
         ] {
             assert!(help.contains(command), "help does not name {command}");
         }
@@ -347,7 +385,6 @@ mod tests {
                 &b"spec"[..]
             ]
         );
-
         let parsed = parse(
             ["run", "tools/editor.lua", "--", "--inspect", "save one"]
                 .into_iter()
@@ -375,6 +412,17 @@ mod tests {
         assert_eq!(
             fields(&parsed),
             vec![&b"run"[..], &b"run"[..], &b"false"[..], &b"--inspect"[..],]
+        );
+
+        let parsed = parse(
+            ["docs", "tecs.physics.attach"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+        );
+        assert_eq!(
+            fields(&parsed),
+            vec![&b"run"[..], &b"docs"[..], &b"tecs.physics.attach"[..]]
         );
     }
 

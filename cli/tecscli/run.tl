@@ -1,6 +1,6 @@
 --- The command surface, and what each command does.
 ---
---- Eight commands, and between them a whole toolchain at one pinned set of
+--- Commands spanning a whole toolchain at one pinned set of
 --- revisions. That is the point of the exercise rather than a convenience: a
 --- Lua developer today assembles a formatter, a test runner and a build from
 --- three unrelated projects and gets no type checker at all, and every one of
@@ -17,10 +17,12 @@
 ---  run      Builds, then becomes the selected application entry
 ---  clean    Removes build/
 ---  info     Versions, pins, project status, packaging targets
+---  docs     Searches the offline reference carried with the command
 --- ```
 ---
---- Every one of them finds the project by searching upward for `tecs.lua`, so
---- all of them work from any directory inside it.
+--- A command that acts on a project finds it by searching upward for
+--- `tecs.lua`, so it works from any directory inside it. `new`, `docs`,
+--- `info`, and `mcp` need no project.
 
 local tecs <const> = require("tecs")
 local arguments <const> = require("tecscli.arguments")
@@ -174,6 +176,21 @@ local function commandInfo(paths: layout): integer
     return 0
 end
 
+--- `tecs docs [query]`
+---
+--- This is deliberately not a project command. The staged reference is part
+--- of the tool's content root, so it works from any directory and never
+--- reaches the network.
+local function commandDocs(paths: layout, query?: string): integer
+    local result <const> = arguments.docs(paths.root, query)
+    if result.stderr then
+        io.stderr:write(result.output)
+    else
+        io.write(result.output)
+    end
+    return result.code
+end
+
 --- `tecs test`
 ---
 --- Specs run in this process, which already has the engine loaded, so a spec
@@ -311,6 +328,8 @@ function run.main(root: string)
         code = commandClean()
     elseif command == "info" then
         code = commandInfo(paths)
+    elseif command == "docs" then
+        code = commandDocs(paths, args[1])
     elseif command == "mcp" then
         code = arguments.runMcp()
     else

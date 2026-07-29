@@ -3458,8 +3458,13 @@ cargo xtask abi-check     verify generated cdefs against the C ABI
 cargo xtask package --preset macos-arm64
 cargo xtask check-package out/package
 cargo xtask test-package --preset macos-arm64
+cargo xtask single        build out/single/bin/tecs
 cargo xtask deps          install development dependencies (Homebrew)
 ```
+
+The single executable also carries the Markdown reference used by the
+documentation site. `tecs docs` lists it, and queries such as `physics` or
+`tecs.physics.attach` search it without a project or a network connection.
 
 `--preset` selects the target; when omitted it selects the host development
 preset. Presets come in two kinds. A development preset resolves dependencies

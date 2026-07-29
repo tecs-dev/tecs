@@ -17,6 +17,7 @@ loader.declare("rust")
 
 local C <const> = loader.library("tecs_native", "tecs-native", "TECS_RUST_PATH", "rust")
 local parseNative <const> = C.tecsCliParse as function(integer, any): loader.CValue
+local docsNative <const> = C.tecsCliDocs as function(string, any): loader.CValue
 local bytesData <const> = C.tecsBytesData as function(loader.CValue): loader.CValue
 local bytesLength <const> = C.tecsBytesLength as function(loader.CValue): any
 local bytesDestroy <const> = C.tecsBytesDestroy as function(loader.CValue)
@@ -72,14 +73,10 @@ local function fieldsOf(encoded: string): {string}
     return fields
 end
 
---- Parses the arguments after the executable and host-only `--entry` pair.
-function arguments.parse(raw: {string}): arguments.Invocation
-    local argv, held = nativeArguments(raw)
-    local result = parseNative(#raw, argv)
-    -- Keep the backing strings live across the FFI call.
-    local _ <const> = held
+--- Decodes one result from the Rust CLI boundary.
+local function invocationOf(result: loader.CValue): arguments.Invocation
     if result == nil then
-        error(("tecs: cannot parse command line: %s"):format(loader.toString(rustError())))
+        error(("tecs: cannot run command: %s"):format(loader.toString(rustError())))
     end
 
     local length <const> = tonumber(bytesLength(result)) as integer
@@ -112,6 +109,23 @@ function arguments.parse(raw: {string}): arguments.Invocation
         }
     end
     error("tecs: Rust returned an unknown command result")
+end
+
+--- Parses the arguments after the executable and host-only `--entry` pair.
+function arguments.parse(raw: {string}): arguments.Invocation
+    local argv, held = nativeArguments(raw)
+    local result = parseNative(#raw, argv)
+    -- Keep the backing strings live across the FFI call.
+    local _ <const> = held
+    return invocationOf(result)
+end
+
+--- Searches the reference staged with the CLI.
+---
+--- Rust reads and renders Markdown because it already owns the command
+--- grammar and can unit-test matching without booting an SDL host.
+function arguments.docs(root: string, query?: string): arguments.Invocation
+    return invocationOf(docsNative(root .. "/tecsdocs", query))
 end
 
 --- Runs the blocking stdio-to-game MCP bridge.

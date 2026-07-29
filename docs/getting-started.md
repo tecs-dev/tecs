@@ -13,8 +13,9 @@ Entities are the interface. Anything that renders or updates per frame is an ent
 
 ## Installation
 
-There is no installer and no package to fetch, because the tool that would provide one is
-[not built yet](/cli/). What you install today is a checkout and its build dependencies.
+The [Tecs CLI](/cli/) is a single executable carrying the engine, project
+toolchain, templates, and offline reference. To work on the engine itself,
+build from a checkout:
 
 ```bash
 git clone https://github.com/tecs-dev/tecs.git
@@ -30,9 +31,10 @@ the formatter and the documentation generator land in `vendor/`, pinned by revis
 crate, so every checkout formats and type-checks with the same versions rather than whatever a machine happens
 to have.
 
-Nothing is installed globally, and there is no `tecs` on the path afterwards. A game is built and run through
-Cargo from this tree, which is what the rest of this page does. Installing the single-file CLI replaces that
-toolchain for a game project; see [Tecs CLI](/cli/) for its commands.
+Nothing is installed globally by these commands. `cargo xtask single` writes a
+self-contained CLI to `out/single/bin/tecs`; putting that file on `PATH`
+provides the project commands. A game can instead be built and run through
+Cargo from this tree, which is what the rest of this page does.
 
 ## Building the engine
 
