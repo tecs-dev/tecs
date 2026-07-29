@@ -4,6 +4,21 @@
 --- they are declared and registered, and engine code requires it directly to
 --- stay below `tecs`.
 ---
+--- ```teal
+--- local player <const> = world:spawn(
+---     tecs.Transform(120, 80, 0, 1, 0, 32, 32),
+---     app.renderer:sprite("player.png"),
+---     tecs.gfx.Tint(1.0, 1.0, 1.0, 1.0),
+---     tecs.gfx.Renderable()
+--- )
+---
+--- local tint <const> = world:getMut(player, tecs.gfx.Tint)
+--- tint.a = 0.5
+--- ```
+---
+--- A `Transform` says where, something visible says what, and `Renderable` is
+--- what puts the entity in front of the renderer at all.
+---
 --- These are FFI components on purpose. Their columns are contiguous C memory,
 --- which is what lets the sync walk rows and write straight into mapped GPU
 --- staging instead of reading fields one entity at a time through a table.

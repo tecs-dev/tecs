@@ -1,5 +1,33 @@
 --- The ECS, for a game and for engine code alike.
 ---
+--- A world, a query built once outside the system that reads it, a system
+--- placed in a phase, and an entity for it to find:
+---
+--- ```teal
+--- local game <const> = tecs.ecs.newWorld()
+--- local moving <const> = game:query({include = {tecs.Transform}})
+---
+--- game:addSystem({
+---     name = "game.Drift",
+---     phase = tecs.ecs.phases.Update,
+---     run = function(delta: number)
+---         for archetype, length in moving:iter() do
+---             local transform <const> = archetype:getMut(tecs.Transform)
+---             for row = 1, length do
+---                 transform[row].x = transform[row].x + 60 * delta
+---             end
+---         end
+---     end,
+--- })
+---
+--- game:spawn(tecs.Transform(0, 0))
+--- game:update(1 / 60)
+--- ```
+---
+--- A query is built at setup and reused for the world's lifetime, never inside
+--- `run`. Reads go through `archetype:get` and writes through `getMut`, which
+--- is what marks the column dirty for everything gated on it.
+---
 --- One table, two readers. A game writes `tecs.ecs.newWorld()`, because
 --- `tecs.ecs` is the field the public API publishes this under. An engine
 --- module writes `require("tecs.ecs")`, because `tecs` is the aggregator that

@@ -5,6 +5,25 @@
 --- once to shut down. An entry file returns one instead of blocking, because
 --- on iOS there is no loop for it to block in.
 ---
+--- A whole entry file, which ends where a `run()` would have started:
+---
+--- ```teal
+--- return tecs.newApplication({
+---     window = {title = "Game", width = 1280, height = 720},
+---     plugin = function(world: tecs.World, app: tecs.Application)
+---         world:spawn(tecs.Transform(640, 360), tecs.gfx.Renderable())
+---
+---         world:addSystem({
+---             name = "game.Spin",
+---             phase = tecs.ecs.phases.Update,
+---             run = function(delta: number)
+---                 app.renderer.camera.rotation = app.renderer.camera.rotation + delta
+---             end,
+---         })
+---     end,
+--- })
+--- ```
+---
 --- The underscored methods are the host's contract, not the game's.
 ---
 --- A game's own code runs in systems and observers, and there is one way in:

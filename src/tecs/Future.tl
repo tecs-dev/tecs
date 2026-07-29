@@ -1,5 +1,25 @@
 --- A value that settles once, and the combinators over it.
 ---
+--- Whatever started the work, what comes back is a `Future<T>`, and the
+--- combinators are how a caller says what to do with it without waiting:
+---
+--- ```teal
+--- tecs.system.runProcess({args = {"git", "rev-parse", "HEAD"}})
+---     :map(function(result: tecs.system.ProcessResult): string
+---         return result.output
+---     end)
+---     :recover(function(): string
+---         return "unknown"
+---     end)
+---     :onSettle(function(revision: tecs.Future<string>)
+---         print(revision.value)
+---     end)
+--- ```
+---
+--- Nothing here settles itself. A future advances when its source is pumped,
+--- which a frame does through the subsystem that owns the source, and which
+--- `wait` does for startup, a tool or a test.
+---
 --- Three subsystems in this tree used to own a private settle-once cell with
 --- four states, a failure string, a blocking wait that pumped a worker, and a
 --- word of its own for each state. They were the same object written more than
