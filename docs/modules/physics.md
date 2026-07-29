@@ -69,9 +69,8 @@ excluding the caps. `offsetX` and `offsetY` move a shape in the body frame.
 
 Material options are `density`, `friction`, and `restitution`. Filtering uses
 32-bit `categoryBits` and `maskBits`. `isSensor = true` reports overlaps
-without collision response. `groupIndex` remains in the serialized component
-for source compatibility, but Rapier has no Box2D-style signed group override;
-Rapier applies the category and mask bits.
+without collision response. A shared nonzero `groupIndex` overrides those
+bits: a positive value always collides and a negative value never does.
 
 Editing `Collider` through `world:getMut` replaces its live shape at the next
 fixed step.
