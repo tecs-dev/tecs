@@ -95,3 +95,100 @@ describe("a layer's depth", function()
         assert.is_true(above < below, "layer 9 is in front of layer 8 whatever either contains")
     end)
 end)
+
+-- Extraction resolves a layer once a run and spends the result once a row, so
+-- the two entry points are one formula reached two ways. They have to answer
+-- the same bits and not merely the same number: a depth decides sort order,
+-- and the depth format may collapse two values that differ in the last place
+-- into one, so a difference too small to see here is a difference in what
+-- draws in front.
+describe("a depth written through a resolved band", function()
+    local ffi = require("ffi")
+    local pair = ffi.new("double[2]")
+    local asWords = ffi.cast("uint64_t *", pair)
+
+    local function sameBits(a, b)
+        pair[0] = a
+        pair[1] = b
+        return asWords[0] == asWords[1]
+    end
+
+    -- Both clamp edges of every normalized term, both signs of each, and the
+    -- values just inside and just outside the extent the module was told to
+    -- expect.
+    local function sweepZ()
+        return { 0.0, 1.0, -1.0, layers.maxZ, -layers.maxZ, layers.maxZ + 1.0, layers.maxZ * 10.0, -layers.maxZ * 10.0 }
+    end
+
+    local function sweepXY()
+        return { 0.0, 1.0, -1.0, layers.maxY, -layers.maxY, layers.maxY + 1.0, layers.maxY * 10.0, -layers.maxY * 10.0 }
+    end
+
+    after_each(function()
+        for layer = 1, layers.MAX do
+            layers.configure(layer, { sort = "topdown" })
+        end
+    end)
+
+    it("answers what depthOf answers, on every layer and every sort", function()
+        local checked = 0
+        for _, sort in ipairs({ "topdown", "z", "isometric" }) do
+            for layer = 1, layers.MAX do
+                layers.configure(layer, { sort = sort })
+            end
+            -- Two past each end, so the clamp is exercised rather than assumed.
+            for layer = -1, layers.MAX + 2 do
+                local base, mode = layers.bandOf(layer)
+                for _, z in ipairs(sweepZ()) do
+                    for _, x in ipairs(sweepXY()) do
+                        for _, y in ipairs(sweepXY()) do
+                            local want = layers.depthOf(layer, z, x, y)
+                            local got = layers.depthIn(base, mode, z, x, y)
+                            assert.is_true(
+                                sameBits(want, got),
+                                ("%s layer %d at z=%s x=%s y=%s: %.17g vs %.17g"):format(
+                                    sort,
+                                    layer,
+                                    z,
+                                    x,
+                                    y,
+                                    want,
+                                    got
+                                )
+                            )
+                            checked = checked + 1
+                        end
+                    end
+                end
+            end
+        end
+        assert.is_true(checked > 0)
+    end)
+
+    it("resolves the clamped layer's sort, which is not what sortOf answers", function()
+        -- The one place the two disagree, and the reason bandOf does its own
+        -- lookup rather than leaning on sortOf: past the top, depthOf takes the
+        -- topmost layer whole, while sortOf falls through to the default.
+        layers.configure(layers.MAX, { sort = "isometric" })
+        local _, mode = layers.bandOf(layers.MAX + 4)
+        assert.are.equal(layers.sortOf(layers.MAX), mode)
+        assert.are_not.equal(layers.sortOf(layers.MAX + 4), mode)
+    end)
+
+    it("follows a layer reconfigured after the band was resolved", function()
+        -- A band held across a configure is stale, which is why extraction
+        -- resolves one per run rather than caching it between frames.
+        layers.configure(4, { sort = "topdown" })
+        local before = layers.revision()
+        local base, mode = layers.bandOf(4)
+        layers.configure(4, { sort = "z" })
+        assert.is_true(layers.revision() > before, "configure moves the revision")
+
+        local fresh, freshMode = layers.bandOf(4)
+        assert.are.equal(base, fresh, "the band's near edge does not move")
+        assert.are_not.equal(mode, freshMode, "the sort does")
+        assert.is_true(
+            sameBits(layers.depthOf(4, 100.0, 0.0, 500.0), layers.depthIn(fresh, freshMode, 100.0, 0.0, 500.0))
+        )
+    end)
+end)

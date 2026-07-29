@@ -152,6 +152,30 @@ would resolve them the other way, since a larger value is farther, and quietly i
 was built expecting.
 :::
 
+### bandOf and depthIn
+
+`depthOf` is two pieces of work stacked together: resolving what the layer decides, which is the same for
+every entity on it, and placing one entity inside what that resolved to. These two are those pieces,
+split so a caller writing many depths on one layer pays the first once.
+
+```teal
+function layers.bandOf(layer: integer): number, integer
+function layers.depthIn(base: number, sort: integer, z: number, x: number, y: number): number
+```
+
+`bandOf` answers the band's near edge and the sort identifier, and `depthIn` takes both alongside the
+same `z`, `x` and `y` that `depthOf` takes. The result is bit for bit what `depthOf` answers for the
+layer the two terms came from, so a run written through the pair sorts against a run written through
+`depthOf` exactly as it would against itself. Extraction and the text producer both go this way: a run of
+rows or a block of glyphs resolves the band once and spends it per row.
+
+The layer `bandOf` takes is clamped the way `depthOf` clamps it, so the sort it answers for a layer
+outside one to `MAX` is the nearest real layer's and not what `sortOf` answers for the same argument.
+
+Two terms held across a `configure` are stale, since a layer's sort is exactly what `configure` replaces.
+`revision` is what says so; resolving once per run of rows, which is what extraction does, is simpler
+than watching it.
+
 ### depthResolution
 
 The smallest depth difference `depthOf` produces between two entities one unit apart, taken over every
