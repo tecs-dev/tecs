@@ -25,7 +25,12 @@
 ---            held level. `syncInstances` sets `relayout` whenever any
 ---            archetype's length or offset moves, and `relayout` forces every
 ---            archetype dirty, so this is where a single spawn is charged the
----            whole scene.
+---            whole scene. `BENCH_RESERVE` is the other layout, where a run
+---            grows into slack of its own instead. What that can show here is
+---            bounded: the resident field and the churn pool carry the same
+---            components and share one archetype, so there is no second run
+---            for a reservation to leave alone, and a spawn marks the columns
+---            the whole field lives in either way.
 ---
 --- The report prints `rewritten` beside the stage table for that reason. It is
 --- the cheaper and more diagnostic signal of the two: frame time is a noisy
@@ -33,6 +38,11 @@
 --- rewritten to express a change of a known size. If it tracks the instance
 --- count rather than the changed count, the cliff is real and no amount of
 --- timing noise hides it.
+---
+--- One thing it does not count is the slots a reserved layout blanks when a
+--- run moves or shrinks, which are written and uploaded like any other. So
+--- `rewritten` is the signal for a change in what the dirty gate lets through,
+--- and the `extract` stage is the one to compare two layouts on.
 ---
 --- The picture the sprites carry is the atlas the engine already ships, cut
 --- into a grid. Extraction never looks at what a texel holds, so the content
@@ -70,13 +80,44 @@ local MODE <const> = os.getenv("BENCH_MODE") or "dense"
 --- where a few characters are walking is one archetype, not two.
 local CHURN <const> = tonumber(os.getenv("BENCH_CHURN")) or 0.01
 
+--- Reads a switch whose unset value is somebody else's default.
+---
+--- Three states rather than two, because the bench exists to compare a setting
+--- against itself: unset takes the default a game gets, `0` and `1` force a
+--- side. Anything else is a typo, and a typo that reads as `0` would be
+--- measured and reported as if it had been asked for.
+local function switch(name: string, byDefault: boolean): boolean
+    local value <const> = os.getenv(name)
+    if value == nil or value == "" then
+        return byDefault
+    end
+    if value ~= "0" and value ~= "1" then
+        error(("tecs: %s takes 0 or 1, not '%s'"):format(name, value), 0)
+    end
+    return value == "1"
+end
+
 --- Resolve playback on the GPU rather than on the host.
 ---
 --- The regime this changes is `dense` and `sparse`, and what it should change
 --- is `rewritten`: a frame advancing stops being a write to the Sprite column,
 --- so it stops rewriting every instance in the archetype. `churn` is untouched
 --- either way, because what drives that one is the layout moving.
-local GPU <const> = os.getenv("BENCH_GPU_ANIM") == "1"
+---
+--- Unset follows the engine, which is what a game gets and is what this should
+--- measure by default; the answer comes from `animation.usesGPU` rather than
+--- from a copy of it here, so the two cannot drift apart again.
+local GPU <const> = switch("BENCH_GPU_ANIM", animation.usesGPU())
+
+--- Lay each archetype out in a run with room to grow rather than packing the
+--- runs end to end.
+---
+--- Off is the engine's default, so unset measures what a game gets. What it
+--- changes is what a length or an offset moving costs: packed, a run cannot
+--- grow without shifting every run after it and the whole scene is rewritten;
+--- reserved, a run grows into its own slack and the runs around it stay where
+--- they are. `capacity` below is what decides whether the reservation is real.
+local RESERVE <const> = switch("BENCH_RESERVE", false)
 
 --- Sprites spawned per frame in `churn`, each despawned `BENCH_LIFETIME`
 --- frames later, so the population is level while the identities turn over.
@@ -108,6 +149,25 @@ local FRAME_MS <const> = 8.0
 --- Sprites the churn pool holds once it is full.
 local POOL <const> = MODE == "churn" and SPAWN_RATE * LIFETIME or 0
 local TOTAL <const> = COUNT + POOL
+
+--- Instance slots past the population, so a reserved layout has something to
+--- reserve out of.
+---
+--- `Extractor` gives a run that has outgrown its slot `length` plus a quarter
+--- of it, with a floor of sixteen, and when the buffer cannot afford that it
+--- drops the whole layout to the floor and then to no reservation at all. So
+--- the headroom decides which of the three is measured, and a capacity sized
+--- to the population alone reserves sixteen slots for two hundred thousand
+--- sprites and reports a packed layout under a reserved name.
+---
+--- A quarter of the population plus the floor is therefore what the widest
+--- reservation asks for here, because every sprite lives in one archetype:
+--- `static` and `churn` carry Transform, Tint, Sprite and Renderable, and
+--- `dense` and `sparse` carry those plus Animation, so the sum over
+--- archetypes is one term. Packed takes the same headroom and never uses it,
+--- which is the point: the two layouts are compared at one capacity and the
+--- flag is the only thing that differs.
+local HEADROOM <const> = math.floor(TOTAL * 0.25) + 16
 
 --- Sprites whose animation is playing, which is the number of sprites that
 --- change anything on a fixed step.
@@ -225,7 +285,8 @@ return tecs.newApplication({
     window = {title = "sprites", width = WIDTH, height = HEIGHT},
     presentMode = "immediate",
     ambientLight = {1.0, 1.0, 1.0},
-    capacity = TOTAL + 64,
+    capacity = TOTAL + HEADROOM,
+    reserveRuns = RESERVE,
     -- The default ceiling is a million slots, so a scale run has to raise it
     -- rather than discovering the limit as a spawn failure.
     maxEntities = TOTAL + 1024,
@@ -334,11 +395,23 @@ return tecs.newApplication({
             phase = tecs.ecs.phases.Shutdown,
             run = function()
                 local frames <const> = math.max(1, frame - WARMUP)
+                -- Said again at the end, so a pasted report carries what it
+                -- was measuring rather than only what came out.
+                print(
+                    ("sprites: mode %s, playback on the %s, runs %s"):format(
+                        MODE, GPU and "GPU" or "host", RESERVE and "reserved" or "packed"
+                    )
+                )
                 print(
                     ("%d of %d instances synced, %d changing per fixed step"):format(
                         instances, TOTAL, MODE == "churn" and SPAWN_RATE * 2 or PLAYING
                     )
                 )
+                -- `rewritten` counts the slots written from a component column
+                -- and not the ones a reserved layout blanks when a run moves,
+                -- an archetype leaves or a run shrinks, so it under-reports
+                -- reserved and the two layouts are not comparable through it.
+                -- The `extract` stage below is, p50 and p95 together.
                 print(
                     ("rewritten %.0f mean and %d peak per frame, %d of %d " .. "frames rewrote nothing"):format(
                         rewrittenTotal / frames, rewrittenPeak, quietFrames, frames
@@ -352,8 +425,18 @@ return tecs.newApplication({
         })
 
         print(
-            ("sprites: mode %s, playback on the %s, viewport %dx%d, " .. "measuring %d frames after %d warmup"):format(
-                MODE, GPU and "GPU" or "host", WIDTH, HEIGHT, FRAMES, WARMUP
+            (
+                "sprites: mode %s, playback on the %s, runs %s in %d slots, "
+                .. "viewport %dx%d, measuring %d frames after %d warmup"
+            ):format(
+                MODE,
+                GPU and "GPU" or "host",
+                RESERVE and "reserved" or "packed",
+                TOTAL + HEADROOM,
+                WIDTH,
+                HEIGHT,
+                FRAMES,
+                WARMUP
             )
         )
     end,
