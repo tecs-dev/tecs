@@ -13,8 +13,9 @@ use super::TecsBytes;
     about = "A typed entity component system and the engine around it",
     subcommand_required = true,
     disable_help_subcommand = false,
-    after_help = "A project is a directory holding tecs.lua. Every command searches upward for\n\
-                  it, so all of them work from anywhere inside a project."
+    after_help = "A project is a directory holding tecs.lua. Project commands search upward for\n\
+                  it, so they work from anywhere inside one. New, docs, info, and mcp do not\n\
+                  require a project."
 )]
 pub struct Cli {
     #[command(subcommand)]
