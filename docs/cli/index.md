@@ -18,7 +18,7 @@ and its Rust native services inside the same file.
 | `tecs format [--check] [paths]` | Format, or report files that are not formatted                        |
 | `tecs test`                     | Compile and run the project's specs                                   |
 | `tecs build`                    | Compile sources and stage assets in the project's build directory     |
-| `tecs run`                      | Build, then replace the CLI process with the game                     |
+| `tecs run [entry] [-- args...]` | Build, then replace the CLI process with the selected game entry      |
 | `tecs clean`                    | Remove the project's build directory                                  |
 | `tecs info`                     | Print versions, pinned revisions, project details and package targets |
 | `tecs mcp`                      | Connect an MCP client on stdio to a running game's HTTP endpoint      |
@@ -28,6 +28,27 @@ Clap parses and validates this surface. `tecs help`, `tecs --help` and command-s
 
 A project is a directory containing `tecs.lua`. Project commands search upward for it, so they work from any
 directory inside the project.
+
+## Run another entry
+
+With no operand, `tecs run` uses the `entry` configured in `tecs.lua`. A project-relative `.tl` or `.lua` path
+selects another application entry for that invocation:
+
+```bash
+tecs run
+tecs run src/editor.tl
+tecs run tools/asset-preview.lua
+tecs run src/main.tl -- --debug "save slot 2"
+```
+
+A Teal entry is type-checked and compiled with the project. It may live under the configured source directory or
+elsewhere inside the project. A Lua entry runs directly after the project has been built. Both entry forms receive
+the `tecs` global and can require the project's compiled modules, and both must return the application created by
+`tecs.newApplication`.
+
+Only operands after `--` are game arguments. The application sees them as `arg[1]` through `arg[#arg]`; the CLI
+command, selected entry and host bootstrap are not present in that table. Use the separator even when the first
+game argument does not begin with a hyphen, so the command remains unambiguous.
 
 ## Connect an agent to a running game
 

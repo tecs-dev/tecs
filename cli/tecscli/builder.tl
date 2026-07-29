@@ -16,9 +16,9 @@
 ---  build/build.lua   What was built, and whether it was a development build
 --- ```
 ---
---- `build/main.lua` is what `tecs run` passes to `--entry`, which is the seam
---- the host already has and which every benchmark in the engine's own tree
---- already uses. Nothing new was added to run a game.
+--- `build/main.lua` is what `tecs run` passes to `--entry`. An invocation that
+--- selects another entry writes `build/run.lua` instead, leaving the manifest
+--- build alone.
 ---
 --- Files are written only when their content changed. A no-op rebuild that
 --- rewrote every file would restamp the tree and wake the content watcher in a
@@ -67,6 +67,8 @@ if engine:sub(-1) == "/" then engine = engine:sub(1, -2) end
 local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)[/\\][^/\\]*$") or "."
 
 package.path = table.concat({
+    here .. "/entry/?.lua",
+    here .. "/entry/?/init.lua",
     here .. "/lua/?.lua",
     here .. "/lua/?/init.lua",
     engine .. "/?.lua",
@@ -74,25 +76,45 @@ package.path = table.concat({
     package.path,
 }, ";")
 
+-- The private host entry is an implementation detail, not a game argument.
+-- Only operands after `tecs run ... --` are visible to the application.
+local forwarded = {[0] = arg[0]}
+local at = 1
+while arg[at] ~= nil and arg[at] ~= "--entry" do at = at + 1 end
+if arg[at] == "--entry" then at = at + 2 else at = 1 end
+while arg[at] ~= nil do
+    forwarded[#forwarded + 1] = arg[at]
+    at = at + 1
+end
+arg = forwarded
+
 -- Requiring the engine is what installs the `tecs` global the game is written
 -- against, so it comes before the game rather than being left to it.
 require("tecs")
 
-return require("%s")
+%s
 ]]
 
---- The module name a compiled entry answers to.
----
---- `src/main.tl` compiled with `--root src` lands at `build/lua/main.lua`, so
---- the module is the entry path with its directory prefix and suffix removed.
-local function entryModule(self: project): string, string
-    local relative = self.entry
+--- Rejects a path that is not relative to the project root.
+local function projectEntry(entry: string): string, string
+    local relative = entry:gsub("\\", "/")
+    if relative == "" or relative:sub(1, 1) == "/" or relative:match("^%a:") then
+        return nil, ("entry must be relative to the project root, and %s is not"):format(entry)
+    end
+    for segment in relative:gmatch("[^/]+") do
+        if segment == ".." then
+            return nil, ("entry must stay inside the project, and %s does not"):format(entry)
+        end
+    end
+    return relative
+end
+
+--- The module name a Teal entry under the source directory answers to.
+local function sourceModule(self: project, entry: string): string
+    local relative = entry
     local prefix = self.source .. "/"
     if relative:sub(1, #prefix) == prefix then
         relative = relative:sub(#prefix + 1)
-    end
-    if not files.hasSuffix(relative, ".tl") then
-        return nil, ("entry must be a .tl file, and %s is not"):format(self.entry)
     end
     return (relative:sub(1, -4):gsub("/", "."))
 end
@@ -107,16 +129,30 @@ local function writeChanged(path: string, body: string): boolean
 end
 
 --- Compiles and stages a project.
-function builder.build(self: project, paths: layout): builder.Result, string
+---
+--- @param entry Application entry for this build only. Omitted uses the
+---     manifest. Override paths are relative to the project root and may be
+---     Teal or Lua.
+function builder.build(self: project, paths: layout, entry?: string): builder.Result, string
     if self.native ~= nil then
         return nil, (
             "%s declares native code, and building it needs a C toolchain this release does not drive yet.\n"
         ):format(project.manifest) .. "Remove the `native` key to build the Lua and assets alone."
     end
 
-    local module, reason = entryModule(self)
-    if module == nil then
+    local selected, reason = projectEntry(entry or self.entry)
+    if selected == nil then
         return nil, reason
+    end
+    local override <const> = entry ~= nil
+    if not files.hasSuffix(selected, ".tl") and not (override and files.hasSuffix(selected, ".lua")) then
+        return nil, (
+            override and ("entry must be a .tl or .lua file, and %s is not"):format(selected)
+            or ("entry must be a .tl file, and %s is not"):format(selected)
+        )
+    end
+    if not tecs.filesystem.isFile(project.path(self, selected)) then
+        return nil, ("entry does not exist: %s"):format(selected)
     end
 
     local sourceRoot = project.path(self, self.source)
@@ -138,6 +174,35 @@ function builder.build(self: project, paths: layout): builder.Result, string
         return nil, "the type checker refused the sources"
     end
 
+    local body: string
+    local metadataEntry: string
+    local compiled = #sources
+    if files.hasSuffix(selected, ".lua") then
+        local absolute <const> = project.path(self, selected)
+        metadataEntry = selected
+        body = ("local chunk, reason = loadfile(%q)\n"):format(absolute)
+            .. "if chunk == nil then error(reason) end\n"
+            .. "return chunk()\n"
+    else
+        local prefix <const> = self.source .. "/"
+        local module: string
+        if selected:sub(1, #prefix) == prefix then
+            module = sourceModule(self, selected)
+        else
+            local directory <const> = selected:match("^(.*)/[^/]+$") or "."
+            module = selected:match("([^/]+)%.tl$") as string
+            local overrideCode <const> = teal.generate(
+                paths, self.root, sourceRoot, directory, self.build .. "/entry", {selected}
+            )
+            if overrideCode ~= 0 then
+                return nil, "the type checker refused the entry"
+            end
+            compiled = compiled + 1
+        end
+        metadataEntry = module
+        body = ("return require(%q)\n"):format(module)
+    end
+
     -- Assets are copied rather than referenced, so a build directory is the
     -- whole of what a game needs and moving it moves everything.
     local assetRoot = project.path(self, self.assets)
@@ -146,7 +211,8 @@ function builder.build(self: project, paths: layout): builder.Result, string
         copied = files.copyTree(assetRoot, buildRoot .. "/assets")
     end
 
-    writeChanged(buildRoot .. "/main.lua", BOOTSTRAP:format(module))
+    local bootstrap <const> = override and (buildRoot .. "/run.lua") or (buildRoot .. "/main.lua")
+    writeChanged(bootstrap, BOOTSTRAP:format(body))
 
     -- `dev` is what a shipped build turns off, and the debug server is what
     -- reads it. It is written by every build so the key always exists, rather
@@ -156,12 +222,12 @@ function builder.build(self: project, paths: layout): builder.Result, string
         ("-- Generated by tecs build. Do not edit.\nreturn {\n")
             .. ("    name = %q,\n"):format(self.name)
             .. ("    identifier = %q,\n"):format(self.identifier)
-            .. ("    entry = %q,\n"):format(module)
+            .. ("    entry = %q,\n"):format(metadataEntry)
             .. "    dev = true,\n"
             .. "}\n"
     )
 
-    return {compiled = #sources, assets = copied, entry = buildRoot .. "/main.lua"}
+    return {compiled = compiled, assets = copied, entry = bootstrap}
 end
 
 --- Removes a project's build output.

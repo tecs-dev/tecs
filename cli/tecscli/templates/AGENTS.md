@@ -11,7 +11,8 @@ tecs check     # Type-check src/
 tecs format    # Format sources in place
 tecs test      # Compile and run spec/
 tecs build     # Compile src/, stage assets, write build/
-tecs run       # Build, then launch the game
+tecs run                    # Build, then launch the manifest entry
+tecs run src/editor.tl      # Build, then launch another application entry
 tecs clean     # Remove build/
 tecs info      # Versions, project status, what can be packaged here
 ```

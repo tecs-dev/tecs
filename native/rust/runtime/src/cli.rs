@@ -56,7 +56,14 @@ pub enum Command {
     Build,
 
     /// Build and launch the game.
-    Run,
+    Run {
+        /// Application entry to run instead of the one in tecs.lua.
+        entry: Option<PathBuf>,
+
+        /// Arguments passed to the game.
+        #[arg(last = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
+    },
 
     /// Remove the project's build output.
     Clean,
@@ -144,7 +151,19 @@ fn run_result(command: Command) -> Vec<u8> {
         }
         Command::Test => push_field(&mut result, b"test"),
         Command::Build => push_field(&mut result, b"build"),
-        Command::Run => push_field(&mut result, b"run"),
+        Command::Run { entry, arguments } => {
+            push_field(&mut result, b"run");
+            push_field(
+                &mut result,
+                if entry.is_some() { b"true" } else { b"false" },
+            );
+            if let Some(entry) = entry {
+                push_field(&mut result, &os_bytes(entry.into_os_string()));
+            }
+            for item in arguments {
+                push_field(&mut result, &os_bytes(item));
+            }
+        }
         Command::Clean => push_field(&mut result, b"clean"),
         Command::Info => push_field(&mut result, b"info"),
         Command::Mcp => push_field(&mut result, b"mcp"),
@@ -262,6 +281,29 @@ mod tests {
             }
             command => panic!("parsed the wrong command: {command:?}"),
         }
+
+        let parsed =
+            Cli::try_parse_from(["tecs", "run", "src/editor.tl", "--", "--debug", "slot 2"])
+                .unwrap();
+        match parsed.command {
+            Command::Run { entry, arguments } => {
+                assert_eq!(
+                    entry.as_deref(),
+                    Some(std::path::Path::new("src/editor.tl"))
+                );
+                assert_eq!(arguments, ["--debug", "slot 2"]);
+            }
+            command => panic!("parsed the wrong command: {command:?}"),
+        }
+
+        let parsed = Cli::try_parse_from(["tecs", "run", "--", "campaign"]).unwrap();
+        match parsed.command {
+            Command::Run { entry, arguments } => {
+                assert!(entry.is_none());
+                assert_eq!(arguments, ["campaign"]);
+            }
+            command => panic!("parsed the wrong command: {command:?}"),
+        }
     }
 
     #[test]
@@ -304,6 +346,35 @@ mod tests {
                 &b"src"[..],
                 &b"spec"[..]
             ]
+        );
+
+        let parsed = parse(
+            ["run", "tools/editor.lua", "--", "--inspect", "save one"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+        );
+        assert_eq!(
+            fields(&parsed),
+            vec![
+                &b"run"[..],
+                &b"run"[..],
+                &b"true"[..],
+                &b"tools/editor.lua"[..],
+                &b"--inspect"[..],
+                &b"save one"[..],
+            ]
+        );
+
+        let parsed = parse(
+            ["run", "--", "--inspect"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+        );
+        assert_eq!(
+            fields(&parsed),
+            vec![&b"run"[..], &b"run"[..], &b"false"[..], &b"--inspect"[..],]
         );
     }
 

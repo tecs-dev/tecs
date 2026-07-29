@@ -498,15 +498,14 @@ unsafe fn initialize(
         }
     }
 
-    let mut entry = None;
-    for index in 1..arguments.len().saturating_sub(1) {
-        if !arguments[index].is_null()
-            && unsafe { CStr::from_ptr(arguments[index]) }.to_bytes() == b"--entry"
-        {
-            entry = (!arguments[index + 1].is_null())
-                .then(|| unsafe { CStr::from_ptr(arguments[index + 1]) }.to_owned());
-        }
-    }
+    // `--entry` is a private leading host option. Looking for it later would
+    // mistake a forwarded game argument of the same spelling for another
+    // bootstrap.
+    let entry = (arguments.len() > 2
+        && !arguments[1].is_null()
+        && unsafe { CStr::from_ptr(arguments[1]) }.to_bytes() == b"--entry"
+        && !arguments[2].is_null())
+    .then(|| unsafe { CStr::from_ptr(arguments[2]) }.to_owned());
     let configured_entry = clean_cstring(ENTRY);
     let carried = entry.as_deref().unwrap_or(configured_entry.as_c_str());
     let resolved = entry.clone().unwrap_or_else(|| {
