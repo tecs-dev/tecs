@@ -47,6 +47,7 @@ local ffi <const> = require("ffi")
 -- target that can load one at all.
 ffi.cdef([[
 void *dlopen(const char *path, int mode);
+char *dlerror(void);
 ]])
 
 --- Load now, and never unmap.
@@ -60,10 +61,11 @@ void *dlopen(const char *path, int mode);
 ---
 --- Keeping a second reference the loader never drops means the mapping
 --- outlives the state that asked for it, which is what a thread the engine
---- started needs. The handle is deliberately not stored: nothing should be
---- able to close it.
+--- started needs. The raw handles are retained privately and are never passed
+--- to `dlclose`.
 local RTLD_NOW <const> = 0x2
-local RTLD_NODELETE <const> = 0x80
+local RTLD_NODELETE <const> = ffi.os == "OSX" and 0x80 or 0x1000
+local pinned <const>: {string: any} = {}
 
 --- Resolves native libraries, installs their generated cdefs, and names the
 --- types a value crosses the FFI boundary as.
@@ -167,6 +169,11 @@ local function siblingLibraryPaths(): {string}
     -- Six is past the deepest layout either tree uses, so this stops rather
     -- than walking to the filesystem root on a path it does not recognise.
     for _ = 1, 6 do
+        if ffi.os == "Windows" then
+            -- Windows resolves linked DLLs beside the executable, so release
+            -- packages stage runtime libraries in `bin` rather than `lib`.
+            paths[#paths + 1] = directory .. "/bin/"
+        end
         paths[#paths + 1] = directory .. "/lib/"
         local parent = directory:match("^(.*)[/\\][^/\\]+$")
         if parent == nil or parent == "" or parent == directory then
@@ -333,26 +340,59 @@ function loader.library(
 
     for _, prefix in ipairs(loader.searchPaths) do
         local dir = prefix:find("%%s") and prefix:format(formula) or prefix
-        attempts[#attempts + 1] = dir .. "lib" .. soname .. suffix
+        if ffi.os == "Windows" then
+            attempts[#attempts + 1] = dir .. soname .. suffix
+            if formula ~= soname then
+                attempts[#attempts + 1] = dir .. formula .. suffix
+            end
+            -- Some MinGW projects retain the Unix prefix even for a DLL.
+            attempts[#attempts + 1] = dir .. "lib" .. soname .. suffix
+        else
+            attempts[#attempts + 1] = dir .. "lib" .. soname .. suffix
+        end
     end
-    attempts[#attempts + 1] = soname
+    if ffi.os == "Windows" then
+        attempts[#attempts + 1] = soname .. suffix
+        if formula ~= soname then
+            attempts[#attempts + 1] = formula .. suffix
+        end
+    else
+        -- `ffi.load("name")` adds the platform spelling internally, but the
+        -- raw `dlopen` used to pin it does not. Keep the attempted value valid
+        -- for both calls.
+        attempts[#attempts + 1] = "lib" .. soname .. suffix
+    end
 
     local failures: {string} = {}
     for _, path in ipairs(attempts) do
         local ok, result = pcall(ffi.load, path)
         if ok then
             local namespace = result as loader.CNamespace
-            -- Pinned before anything can start a thread inside it. A failure
-            -- here is not fatal: the library is already loaded and usable, and
-            -- only an orderly shutdown that beats its own threads is at risk.
-            pcall(function()
+            -- Pinned before anything can start a thread inside it. Loading the
+            -- namespace without pinning it is not a safe partial success: the
+            -- failure would surface later as executable code being unmapped
+            -- during `lua_close`.
+            if ffi.os ~= "Windows" then
                 local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
-                dlopen(path, RTLD_NOW + RTLD_NODELETE)
-            end)
+                local dlerror = (ffi.C as {string: any}).dlerror as function(): any
+                dlerror()
+                local handle = dlopen(path, RTLD_NOW + RTLD_NODELETE)
+                if handle == nil then
+                    local detailValue = dlerror()
+                    local detail = detailValue ~= nil and ffi.string(detailValue as string) as string or ""
+                    error(
+                        ("tecs: loaded %s but could not pin it with dlopen: %s"):format(
+                            path, detail ~= "" and detail or "unknown dynamic loader error"
+                        ),
+                        2
+                    )
+                end
+                pinned[path] = handle
+            end
             loaded[key] = namespace
             return namespace, path
         end
-        failures[#failures + 1] = path
+        failures[#failures + 1] = path .. ": " .. tostring(result)
     end
 
     error(

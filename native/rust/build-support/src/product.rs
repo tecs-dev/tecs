@@ -125,8 +125,16 @@ impl Paths {
 struct Package {
     name: &'static str,
     includes: Vec<PathBuf>,
+    compile_flags: Vec<OsString>,
     library_directories: Vec<PathBuf>,
     libraries: Vec<String>,
+    link_flags: Vec<OsString>,
+}
+
+struct CompileOptions<'a> {
+    defines: &'a [&'a str],
+    flags: &'a [OsString],
+    warnings: bool,
 }
 
 pub fn build(root: &Path, preset: Preset) -> Result<PathBuf> {
@@ -241,8 +249,14 @@ pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
         paths.binary.join(executable_name()),
         prefix.join("bin").join(executable_name()),
     )?;
-    copy_dynamic_libraries(&paths.library, &prefix.join("lib"))?;
-    copy_runtime_dependencies(&paths.dependencies.join("prefix/lib"), &prefix.join("lib"))?;
+    let runtime = if preset.rust_target.contains("windows") {
+        prefix.join("bin")
+    } else {
+        prefix.join("lib")
+    };
+    copy_dynamic_libraries(&paths.library, &runtime)?;
+    copy_runtime_dependencies(&paths.dependencies.join("prefix/lib"), &runtime)?;
+    copy_runtime_dependencies(&paths.dependencies.join("prefix/bin"), &runtime)?;
     copy_tree(&paths.lua, &prefix.join("share/tecs/lua"), false)?;
     copy_tree(&paths.teal, &prefix.join("share/tecs/teal"), false)?;
     copy_tree(&paths.notices, &prefix.join("share/tecs"), false)?;
@@ -342,10 +356,11 @@ fn copy_dynamic_libraries_if(
             continue;
         }
         let name = entry.file_name().to_string_lossy();
-        if (name.ends_with(".dylib")
-            || name.ends_with(".so")
-            || name.contains(".so.")
-            || name.ends_with(".dll"))
+        let lowered = name.to_ascii_lowercase();
+        if (lowered.ends_with(".dylib")
+            || lowered.ends_with(".so")
+            || lowered.contains(".so.")
+            || lowered.ends_with(".dll"))
             && wanted(&name)
         {
             let target = destination.join(entry.file_name());
@@ -407,6 +422,14 @@ fn apply_development_environment(command: &mut Command, paths: &Paths) {
         .env("TECS_LIB", &paths.library)
         .env("TECS_ASSETS", &paths.lua)
         .env("TECS_SPEC", &paths.spec);
+    if std::env::consts::OS == "windows" {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut directories = vec![paths.library.clone()];
+        directories.extend(std::env::split_paths(&path));
+        if let Ok(path) = std::env::join_paths(directories) {
+            command.env("PATH", path);
+        }
+    }
 }
 
 fn preflight(root: &Path, preset: Preset) -> Result<()> {
@@ -670,8 +693,10 @@ fn pinned_packages(
         Package {
             name: "sdl3",
             includes: vec![prefix.join("include")],
+            compile_flags: Vec::new(),
             library_directories: vec![library.clone()],
             libraries: vec!["SDL3".into()],
+            link_flags: Vec::new(),
         },
     );
     packages.insert(
@@ -679,8 +704,10 @@ fn pinned_packages(
         Package {
             name: "sdl3mixer",
             includes: vec![prefix.join("include")],
+            compile_flags: Vec::new(),
             library_directories: vec![library.clone()],
             libraries: vec!["SDL3_mixer".into()],
+            link_flags: Vec::new(),
         },
     );
     packages.insert(
@@ -688,12 +715,14 @@ fn pinned_packages(
         Package {
             name: "zlib",
             includes: vec![prefix.join("include")],
+            compile_flags: Vec::new(),
             library_directories: vec![library.clone()],
             libraries: vec![if preset.rust_target.contains("windows") {
                 "zlib".into()
             } else {
                 "z".into()
             }],
+            link_flags: Vec::new(),
         },
     );
     packages.insert(
@@ -701,12 +730,14 @@ fn pinned_packages(
         Package {
             name: "luajit",
             includes: vec![prefix.join("include/luajit-2.1")],
+            compile_flags: Vec::new(),
             library_directories: vec![library.clone()],
             libraries: vec![if preset.rust_target.contains("windows") {
                 "lua51".into()
             } else {
                 "luajit-5.1".into()
             }],
+            link_flags: Vec::new(),
         },
     );
     packages.insert(
@@ -714,12 +745,14 @@ fn pinned_packages(
         Package {
             name: "shaderc",
             includes: vec![prefix.join("include")],
+            compile_flags: Vec::new(),
             library_directories: vec![library.clone()],
             libraries: vec![if shared {
                 "shaderc_shared".into()
             } else {
                 "shaderc_combined".into()
             }],
+            link_flags: Vec::new(),
         },
     );
     packages.insert(
@@ -727,8 +760,10 @@ fn pinned_packages(
         Package {
             name: "spvc",
             includes: vec![prefix.join("include/spirv_cross")],
+            compile_flags: Vec::new(),
             library_directories: vec![library],
             libraries: Vec::new(),
+            link_flags: Vec::new(),
         },
     );
     let _ = root;
@@ -1325,13 +1360,22 @@ fn check_system_versions(preset: Preset) -> Result<()> {
 }
 
 fn pkg_config(name: &'static str, package: &'static str) -> Result<Package> {
-    let cflags = pkg_output(package, &["--cflags-only-I"])?;
+    let cflags = pkg_output(package, &["--cflags"])?;
+    let flags = pkg_output(package, &["--libs"])?;
+    Ok(package_from_flags(name, &cflags, &flags))
+}
+
+fn package_from_flags(name: &'static str, cflags: &str, flags: &str) -> Package {
     let includes = cflags
         .split_whitespace()
         .filter_map(|flag| flag.strip_prefix("-I"))
         .map(PathBuf::from)
         .collect();
-    let flags = pkg_output(package, &["--libs"])?;
+    let compile_flags = cflags
+        .split_whitespace()
+        .filter(|flag| !flag.starts_with("-I"))
+        .map(OsString::from)
+        .collect();
     let library_directories = flags
         .split_whitespace()
         .filter_map(|flag| flag.strip_prefix("-L"))
@@ -1342,12 +1386,19 @@ fn pkg_config(name: &'static str, package: &'static str) -> Result<Package> {
         .filter_map(|flag| flag.strip_prefix("-l"))
         .map(str::to_owned)
         .collect();
-    Ok(Package {
+    let link_flags = flags
+        .split_whitespace()
+        .filter(|flag| !flag.starts_with("-L") && !flag.starts_with("-l"))
+        .map(OsString::from)
+        .collect();
+    Package {
         name,
         includes,
+        compile_flags,
         library_directories,
         libraries,
-    })
+        link_flags,
+    }
 }
 
 fn pkg_output(package: &str, arguments: &[&str]) -> Result<String> {
@@ -1924,6 +1975,7 @@ fn compile_and_link(
     }
     includes.sort();
     includes.dedup();
+    let compile_flags = package_compile_flags(packages);
 
     let cjson_objects = CJSON_SOURCES
         .iter()
@@ -1934,8 +1986,11 @@ fn compile_and_link(
                 paths,
                 &root.join(source),
                 &includes,
-                &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
-                false,
+                CompileOptions {
+                    defines: &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
+                    flags: &compile_flags,
+                    warnings: false,
+                },
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1961,7 +2016,20 @@ fn compile_and_link(
     }
     let registry_objects = registry_sources
         .iter()
-        .map(|source| compile_c(root, preset, paths, source, &includes, &[], true))
+        .map(|source| {
+            compile_c(
+                root,
+                preset,
+                paths,
+                source,
+                &includes,
+                CompileOptions {
+                    defines: &[],
+                    flags: &compile_flags,
+                    warnings: true,
+                },
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     let registry_archive = paths.out.join("libtecs_registry.a");
     archive(&registry_archive, &registry_objects)?;
@@ -1987,8 +2055,11 @@ fn compile_and_link(
         paths,
         &paths.generated.join("worker_anchor.c"),
         &includes,
-        &[],
-        true,
+        CompileOptions {
+            defines: &[],
+            flags: &compile_flags,
+            warnings: true,
+        },
     )?;
     let worker = paths.library.join(shared_name("tecsworker"));
     let mut worker_flags = vec![
@@ -2012,8 +2083,11 @@ fn compile_and_link(
         paths,
         &paths.generated.join("sdl_main.c"),
         &includes,
-        &[],
-        true,
+        CompileOptions {
+            defines: &[],
+            flags: &compile_flags,
+            warnings: true,
+        },
     )?;
     let executable = paths.binary.join(executable_name());
     let worker_link = if std::env::consts::OS == "windows" {
@@ -2072,6 +2146,7 @@ fn compile_and_link_single(
     }
     includes.sort();
     includes.dedup();
+    let compile_flags = package_compile_flags(packages);
 
     let cjson_objects = CJSON_SOURCES
         .iter()
@@ -2082,8 +2157,11 @@ fn compile_and_link_single(
                 paths,
                 &root.join(source),
                 &includes,
-                &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
-                false,
+                CompileOptions {
+                    defines: &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
+                    flags: &compile_flags,
+                    warnings: false,
+                },
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -2107,7 +2185,20 @@ fn compile_and_link_single(
     }
     let registry_objects = registry_sources
         .iter()
-        .map(|source| compile_c(root, preset, paths, source, &includes, &[], true))
+        .map(|source| {
+            compile_c(
+                root,
+                preset,
+                paths,
+                source,
+                &includes,
+                CompileOptions {
+                    defines: &[],
+                    flags: &compile_flags,
+                    warnings: true,
+                },
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     let registry_archive = paths.out.join("libtecs_registry.a");
     archive(&registry_archive, &registry_objects)?;
@@ -2118,10 +2209,24 @@ fn compile_and_link_single(
         paths,
         &paths.generated.join("sdl_main.c"),
         &includes,
-        &["TECS_PAYLOAD=1"],
-        true,
+        CompileOptions {
+            defines: &["TECS_PAYLOAD=1"],
+            flags: &compile_flags,
+            warnings: true,
+        },
     )?;
-    let payload_object = compile_c(root, preset, paths, &payload_source, &includes, &[], true)?;
+    let payload_object = compile_c(
+        root,
+        preset,
+        paths,
+        &payload_source,
+        &includes,
+        CompileOptions {
+            defines: &[],
+            flags: &compile_flags,
+            warnings: true,
+        },
+    )?;
     let mut flags = vec![
         registry_archive.into_os_string(),
         cjson_archive.into_os_string(),
@@ -2180,8 +2285,7 @@ fn compile_c(
     paths: &Paths,
     source: &Path,
     includes: &[PathBuf],
-    defines: &[&str],
-    warnings: bool,
+    options: CompileOptions<'_>,
 ) -> Result<PathBuf> {
     let relative = source
         .strip_prefix(root)
@@ -2216,7 +2320,7 @@ fn compile_c(
     if preset.sanitize {
         command.args(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]);
     }
-    if warnings {
+    if options.warnings {
         if std::env::consts::OS == "windows" {
             command.arg("/W4");
         } else {
@@ -2230,7 +2334,7 @@ fn compile_c(
             command.arg("-I").arg(include);
         }
     }
-    for define in defines {
+    for define in options.defines {
         command.arg(format!(
             "{}{define}",
             if std::env::consts::OS == "windows" {
@@ -2240,6 +2344,7 @@ fn compile_c(
             }
         ));
     }
+    command.args(options.flags);
     run(
         &mut command,
         &format!("C compilation of {}", source.display()),
@@ -2411,8 +2516,11 @@ fn link_spirv_cross(
         paths,
         &paths.generated.join("spvc_anchor.c"),
         includes,
-        &[],
-        true,
+        CompileOptions {
+            defines: &[],
+            flags: &package_compile_flags(packages),
+            warnings: true,
+        },
     )?;
     let package = package(packages, "spvc")?;
     let directory = package
@@ -2495,8 +2603,16 @@ fn package_link_flags(packages: &[&Package]) -> Vec<OsString> {
                 format!("-l{library}")
             }));
         }
+        flags.extend(package.link_flags.iter().cloned());
     }
     flags
+}
+
+fn package_compile_flags(packages: &BTreeMap<&'static str, Package>) -> Vec<OsString> {
+    packages
+        .values()
+        .flat_map(|package| package.compile_flags.iter().cloned())
+        .collect()
 }
 
 fn force_load(archive: &Path) -> Vec<OsString> {
@@ -2672,6 +2788,7 @@ fn run(command: &mut Command, description: &str) -> Result<()> {
 
 #[cfg(all(test, unix))]
 mod tests {
+    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::process::Command;
@@ -2679,8 +2796,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        copy_dynamic_libraries, fetch_source_at, Paths, GLSLANG_REVISION, LUAJIT_REVISION,
-        SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION, SPIRV_CROSS_REVISION,
+        copy_dynamic_libraries, fetch_source_at, package_from_flags, Paths, GLSLANG_REVISION,
+        LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION, SPIRV_CROSS_REVISION,
         SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
     };
 
@@ -2703,7 +2820,6 @@ mod tests {
             std::path::PathBuf::from("libSDL3.0.dylib")
         );
     }
-
     #[test]
     fn preparing_a_build_removes_outputs_but_preserves_caches() {
         let root = tempdir().unwrap();
@@ -2965,5 +3081,32 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         String::from_utf8(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn pkg_config_preserves_non_path_flags() {
+        let package = package_from_flags(
+            "sample",
+            "-I/opt/sample/include -pthread -DSAMPLE=1",
+            "-L/opt/sample/lib -lsample -pthread -Wl,-z,now",
+        );
+
+        assert_eq!(
+            package.includes,
+            [std::path::PathBuf::from("/opt/sample/include")]
+        );
+        assert_eq!(package.libraries, ["sample"]);
+        assert!(package
+            .compile_flags
+            .iter()
+            .any(|flag| flag == OsStr::new("-pthread")));
+        assert!(package
+            .compile_flags
+            .iter()
+            .any(|flag| flag == OsStr::new("-DSAMPLE=1")));
+        assert!(package
+            .link_flags
+            .iter()
+            .any(|flag| flag == OsStr::new("-Wl,-z,now")));
     }
 }

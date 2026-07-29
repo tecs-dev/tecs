@@ -1,21 +1,63 @@
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use anyhow::{Context, Result};
 use regex::Regex;
 use tempfile::tempdir;
 use walkdir::WalkDir;
 
-const SYSTEM_PREFIXES: &[&str] = &[
-    "/usr/lib/",
-    "/System/Library/",
-    "@rpath/",
-    "@executable_path/",
-    "@loader_path/",
-    "/lib/",
-    "/lib64/",
+const MACOS_SYSTEM_PREFIXES: &[&str] = &["/usr/lib/", "/System/Library/"];
+const LINUX_SYSTEM_LIBRARIES: &[&str] = &[
+    "ld-linux-aarch64.so.1",
+    "ld-linux-x86-64.so.2",
+    "libc.so.6",
+    "libdl.so.2",
+    "libgcc_s.so.1",
+    "libm.so.6",
+    "libpthread.so.0",
+    "librt.so.1",
+    "libstdc++.so.6",
+    "linux-vdso.so.1",
+];
+const WINDOWS_SYSTEM_LIBRARIES: &[&str] = &[
+    "advapi32.dll",
+    "avrt.dll",
+    "bcrypt.dll",
+    "cfgmgr32.dll",
+    "combase.dll",
+    "crypt32.dll",
+    "d3d11.dll",
+    "d3d12.dll",
+    "dwmapi.dll",
+    "dxgi.dll",
+    "gdi32.dll",
+    "hid.dll",
+    "imm32.dll",
+    "iphlpapi.dll",
+    "kernel32.dll",
+    "mf.dll",
+    "mfplat.dll",
+    "mfreadwrite.dll",
+    "mfuuid.dll",
+    "mmdevapi.dll",
+    "ntdll.dll",
+    "ole32.dll",
+    "oleaut32.dll",
+    "powrprof.dll",
+    "secur32.dll",
+    "setupapi.dll",
+    "shell32.dll",
+    "shlwapi.dll",
+    "ucrtbase.dll",
+    "user32.dll",
+    "userenv.dll",
+    "uuid.dll",
+    "version.dll",
+    "winmm.dll",
+    "ws2_32.dll",
 ];
 const COMPILER_NAMES: &[&str] = &["shaderc", "spirvcross", "spirv-cross", "dxcompiler"];
 const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
@@ -27,13 +69,17 @@ const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
     ),
     (r"cjson", "MIT", "the vendored lua-cjson"),
     (r"SDL3(_mixer)?", "Zlib", "SDL and its audio satellite"),
-    (r"luajit", "MIT", "the VM, including PUC-Rio Lua's notice"),
+    (
+        r"(luajit|lua51)",
+        "MIT",
+        "the VM, including PUC-Rio Lua's notice",
+    ),
     (
         r"shaderc(_shared)?",
         "Apache-2.0",
         "the development shader compiler",
     ),
-    (r"z", "Zlib", "the public deflate service"),
+    (r"z(lib)?", "Zlib", "the public deflate service"),
     (
         r"(ogg|opus|opusfile)",
         "BSD-3-Clause",
@@ -65,14 +111,24 @@ pub struct Options<'a> {
     pub teal_types: Option<&'a Path>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Platform {
+    Linux,
+    Macos,
+    Windows,
+}
+
 pub fn check(options: &Options<'_>) -> Result<()> {
     let prefix = options
         .prefix
         .canonicalize()
         .with_context(|| format!("no such install prefix: {}", options.prefix.display()))?;
     let info = prefix.join("share/tecs/build-info.txt");
-    let development = fs::read_to_string(info)
-        .is_ok_and(|text| text.contains("systemDeps=ON") || text.contains("systemDeps=true"));
+    let build_info =
+        fs::read_to_string(&info).with_context(|| format!("reading {}", info.display()))?;
+    let development =
+        build_info.contains("systemDeps=ON") || build_info.contains("systemDeps=true");
+    let platform = platform_from_build_info(&build_info)?;
     let binaries = binaries(&prefix)?;
     if binaries.is_empty() {
         anyhow::bail!("no binaries found under {}", prefix.display());
@@ -96,19 +152,13 @@ pub fn check(options: &Options<'_>) -> Result<()> {
 
     let mut problems = Vec::new();
     for binary in &binaries {
-        let (rpaths, libraries) = references(binary)?;
-        check_licenses(binary, &libraries, &mut license_problems)?;
+        let (rpaths, libraries) = references(binary, platform)?;
+        check_licenses(binary, &libraries, platform, &mut license_problems)?;
         for rpath in rpaths {
-            if !["@executable_path", "@loader_path", "$ORIGIN"]
-                .iter()
-                .any(|prefix| rpath.starts_with(prefix))
-            {
+            if !contained_search_path(&prefix, binary, &rpath) {
                 problems.push(format!(
                     "{}: search path leaves the package: {rpath}",
-                    binary
-                        .file_name()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("<binary>")
+                    display_name(binary)
                 ));
             }
         }
@@ -117,24 +167,30 @@ pub fn check(options: &Options<'_>) -> Result<()> {
                 if !packaged_names.contains(name) {
                     problems.push(format!(
                         "{}: links {library}, but {name} is not in the package",
-                        binary
-                            .file_name()
-                            .and_then(|value| value.to_str())
-                            .unwrap_or("<binary>")
+                        display_name(binary)
                     ));
                 }
-            }
-            if library.starts_with('/')
-                && !SYSTEM_PREFIXES
-                    .iter()
-                    .any(|prefix| library.starts_with(prefix))
+            } else if library.starts_with("@loader_path/")
+                || library.starts_with("@executable_path/")
             {
+                if !contained_library_path(&prefix, binary, &library) {
+                    problems.push(format!(
+                        "{}: links {library}, which is missing or leaves the package",
+                        display_name(binary)
+                    ));
+                }
+            } else if library.starts_with('/') && !is_system_library(platform, &library) {
                 problems.push(format!(
                     "{}: links an absolute path: {library}",
-                    binary
-                        .file_name()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("<binary>")
+                    display_name(binary)
+                ));
+            } else if !library.contains('/')
+                && !is_system_library(platform, &library)
+                && !contains_packaged_name(&packaged_names, &library, platform)
+            {
+                problems.push(format!(
+                    "{}: links {library}, but it is neither a target system library nor in the package",
+                    display_name(binary)
                 ));
             }
         }
@@ -252,22 +308,33 @@ fn binaries(prefix: &Path) -> Result<Vec<PathBuf>> {
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| entry.file_type().is_file() || entry.file_type().is_symlink())
         .filter(|entry| {
             let path = entry.path();
-            matches!(
-                path.extension().and_then(|value| value.to_str()),
-                Some("dylib" | "so" | "dll")
-            ) || path
-                .parent()
-                .and_then(Path::file_name)
-                .and_then(|value| value.to_str())
-                == Some("bin")
+            is_shared_library(path)
+                || path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|value| value.to_str())
+                    == Some("bin")
         })
         .map(|entry| entry.into_path())
         .collect();
     binaries.sort();
     Ok(binaries)
+}
+
+fn is_shared_library(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name.ends_with(".dylib")
+        || name.contains(".dylib.")
+        || name.ends_with(".so")
+        || name.contains(".so.")
+        || name.ends_with(".dll")
 }
 
 fn files_with_suffix(prefix: &Path, extension: &str) -> Result<Vec<PathBuf>> {
@@ -340,7 +407,7 @@ fn check_teal_types(
 
 fn library_stem(reference: &str) -> Result<String> {
     let name = reference.rsplit('/').next().unwrap_or(reference);
-    let shared = Regex::new(r"\.(dylib|so)(\.[\d.]+)?$")?;
+    let shared = Regex::new(r"(?i)\.(dylib|so)(\.[\d.]+)?$|\.dll$")?;
     let versions = Regex::new(r"\.[\d.]+$")?;
     let suffix = Regex::new(r"-[\d.]+$")?;
     let name = shared.replace(name, "");
@@ -349,16 +416,18 @@ fn library_stem(reference: &str) -> Result<String> {
     Ok(name.strip_prefix("lib").unwrap_or(&name).to_owned())
 }
 
-fn check_licenses(binary: &Path, libraries: &[String], problems: &mut Vec<String>) -> Result<()> {
+fn check_licenses(
+    binary: &Path,
+    libraries: &[String],
+    platform: Platform,
+    problems: &mut Vec<String>,
+) -> Result<()> {
     let patterns: Vec<_> = LINKED_LIBRARIES
         .iter()
         .map(|(pattern, _, _)| Regex::new(&format!("^(?:{pattern})$")))
         .collect::<Result<_, _>>()?;
     for library in libraries {
-        if ["/usr/lib/", "/System/", "/lib/", "/lib64/"]
-            .iter()
-            .any(|prefix| library.starts_with(prefix))
-        {
+        if is_system_library(platform, library) {
             continue;
         }
         let stem = library_stem(library)?;
@@ -372,23 +441,27 @@ fn check_licenses(binary: &Path, libraries: &[String], problems: &mut Vec<String
     Ok(())
 }
 
-fn references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
-    match std::env::consts::OS {
-        "macos" => macho_references(binary),
-        "windows" => pe_references(binary),
-        _ => elf_references(binary),
+fn references(binary: &Path, platform: Platform) -> Result<(Vec<String>, Vec<String>)> {
+    match platform {
+        Platform::Macos => macho_references(binary),
+        Platform::Windows => pe_references(binary),
+        Platform::Linux => elf_references(binary),
     }
 }
 
 fn macho_references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
-    let load = Command::new("otool").arg("-l").arg(binary).output()?;
+    let mut load_command = Command::new("otool");
+    load_command.arg("-l").arg(binary);
+    let load = checked_output(&mut load_command, "otool -l")?;
     let text = String::from_utf8(load.stdout)?;
     let rpath = Regex::new(r"(?s)cmd LC_RPATH.*?path ([^\s]+)")?;
     let rpaths = rpath
         .captures_iter(&text)
         .map(|found| found[1].to_owned())
         .collect();
-    let linked = Command::new("otool").arg("-L").arg(binary).output()?;
+    let mut linked_command = Command::new("otool");
+    linked_command.arg("-L").arg(binary);
+    let linked = checked_output(&mut linked_command, "otool -L")?;
     let libraries = String::from_utf8(linked.stdout)?
         .lines()
         .skip(1)
@@ -398,7 +471,9 @@ fn macho_references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
 }
 
 fn elf_references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
-    let output = Command::new("readelf").arg("-d").arg(binary).output()?;
+    let mut command = Command::new("readelf");
+    command.arg("-d").arg(binary);
+    let output = checked_output(&mut command, "readelf -d")?;
     let text = String::from_utf8(output.stdout)?;
     let rpath = Regex::new(r"\(R(?:UN)?PATH\).*\[([^\]]+)\]")?;
     let rpaths = rpath
@@ -414,11 +489,9 @@ fn elf_references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
 }
 
 fn pe_references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
-    let output = Command::new("dumpbin")
-        .arg("/dependents")
-        .arg(binary)
-        .output()
-        .context("running dumpbin /dependents")?;
+    let mut command = Command::new("dumpbin");
+    command.arg("/dependents").arg(binary);
+    let output = checked_output(&mut command, "dumpbin /dependents")?;
     let dll = Regex::new(r"(?i)^\s+([A-Za-z0-9_.+-]+\.dll)\s*$")?;
     let libraries = String::from_utf8(output.stdout)?
         .lines()
@@ -427,9 +500,120 @@ fn pe_references(binary: &Path) -> Result<(Vec<String>, Vec<String>)> {
     Ok((Vec::new(), libraries))
 }
 
+fn checked_output(command: &mut Command, description: &str) -> Result<Output> {
+    let output = command
+        .output()
+        .with_context(|| format!("running {description}"))?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        anyhow::bail!(
+            "{description} exited with {}:\n{}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    }
+}
+
+fn platform_from_build_info(build_info: &str) -> Result<Platform> {
+    let system = build_info
+        .lines()
+        .find_map(|line| line.strip_prefix("system="))
+        .context("build-info.txt has no system entry")?;
+    match system {
+        "Linux" => Ok(Platform::Linux),
+        "macOS" => Ok(Platform::Macos),
+        "Windows" => Ok(Platform::Windows),
+        _ => anyhow::bail!("unsupported packaged system {system:?}"),
+    }
+}
+
+fn display_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("<binary>")
+}
+
+fn contains_packaged_name(names: &BTreeSet<String>, library: &str, platform: Platform) -> bool {
+    if platform == Platform::Windows {
+        let library = library.to_ascii_lowercase();
+        names
+            .iter()
+            .any(|name| name.to_ascii_lowercase() == library)
+    } else {
+        names.contains(library)
+    }
+}
+
+fn is_system_library(platform: Platform, library: &str) -> bool {
+    match platform {
+        Platform::Macos => MACOS_SYSTEM_PREFIXES
+            .iter()
+            .any(|prefix| library.starts_with(prefix)),
+        Platform::Linux => LINUX_SYSTEM_LIBRARIES.contains(&library),
+        Platform::Windows => {
+            let library = library.to_ascii_lowercase();
+            WINDOWS_SYSTEM_LIBRARIES.contains(&library.as_str())
+                || library.starts_with("api-ms-win-")
+                || library.starts_with("ext-ms-win-")
+        }
+    }
+}
+
+fn contained_search_path(prefix: &Path, binary: &Path, rpath: &str) -> bool {
+    let (base, relative) = if let Some(relative) = rpath.strip_prefix("$ORIGIN") {
+        (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
+    } else if let Some(relative) = rpath.strip_prefix("@loader_path") {
+        (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
+    } else if let Some(relative) = rpath.strip_prefix("@executable_path") {
+        (prefix.join("bin"), relative)
+    } else {
+        return false;
+    };
+    lexical_join_within(prefix, &base, relative)
+}
+
+fn contained_library_path(prefix: &Path, binary: &Path, library: &str) -> bool {
+    let (base, relative) = if let Some(relative) = library.strip_prefix("@loader_path") {
+        (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
+    } else if let Some(relative) = library.strip_prefix("@executable_path") {
+        (prefix.join("bin"), relative)
+    } else {
+        return false;
+    };
+    lexical_path_within(prefix, &base, relative).is_some_and(|path| path.exists())
+}
+
+fn lexical_join_within(prefix: &Path, base: &Path, relative: &str) -> bool {
+    lexical_path_within(prefix, base, relative).is_some()
+}
+
+fn lexical_path_within(prefix: &Path, base: &Path, relative: &str) -> Option<PathBuf> {
+    let mut path = base.to_path_buf();
+    for component in Path::new(relative.trim_start_matches('/')).components() {
+        use std::path::Component;
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => path.push(part),
+            Component::ParentDir => {
+                path.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    path.starts_with(prefix).then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::library_stem;
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    use super::{
+        contains_packaged_name, is_shared_library, is_system_library, lexical_join_within,
+        library_stem, platform_from_build_info, Platform,
+    };
 
     #[test]
     fn normalizes_shared_library_names() {
@@ -438,7 +622,66 @@ mod tests {
             "luajit"
         );
         assert_eq!(library_stem("libSDL3.so.0").unwrap(), "SDL3");
-        assert_eq!(library_stem("z.dll").unwrap(), "z.dll");
+        assert_eq!(library_stem("z.dll").unwrap(), "z");
+        assert_eq!(library_stem("SDL3_MIXER.DLL").unwrap(), "SDL3_MIXER");
+    }
+
+    #[test]
+    fn identifies_versioned_elf_libraries() {
+        assert!(is_shared_library(Path::new("libSDL3.so.0")));
+        assert!(is_shared_library(Path::new("libSDL3.so.0.2.4")));
+        assert!(is_shared_library(Path::new("SDL3.dll")));
+        assert!(!is_shared_library(Path::new("libSDL3.a")));
+    }
+
+    #[test]
+    fn reads_the_package_target_from_build_info() {
+        assert_eq!(
+            platform_from_build_info("systemDeps=false\nsystem=Windows\narch=x86_64\n").unwrap(),
+            Platform::Windows
+        );
+    }
+
+    #[test]
+    fn compares_windows_package_names_without_case() {
+        let names = BTreeSet::from(["SDL3.dll".to_owned()]);
+        assert!(contains_packaged_name(
+            &names,
+            "sdl3.DLL",
+            Platform::Windows
+        ));
+        assert!(!contains_packaged_name(
+            &names,
+            "SDL3_mixer.dll",
+            Platform::Windows
+        ));
+    }
+
+    #[test]
+    fn applies_platform_system_library_allowlists() {
+        assert!(is_system_library(Platform::Linux, "libc.so.6"));
+        assert!(!is_system_library(Platform::Linux, "libSDL3.so.0"));
+        assert!(is_system_library(Platform::Windows, "KERNEL32.DLL"));
+        assert!(is_system_library(
+            Platform::Windows,
+            "api-ms-win-core-file-l1-2-0.dll"
+        ));
+        assert!(!is_system_library(Platform::Windows, "SDL3.dll"));
+    }
+
+    #[test]
+    fn rejects_search_paths_that_escape_the_package() {
+        let prefix = Path::new("/package");
+        assert!(lexical_join_within(
+            prefix,
+            Path::new("/package/bin"),
+            "../lib"
+        ));
+        assert!(!lexical_join_within(
+            prefix,
+            Path::new("/package/bin"),
+            "../../outside"
+        ));
     }
 
     #[cfg(unix)]
