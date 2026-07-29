@@ -16,7 +16,9 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local assets = require("tecs.assets")
+local adapter = require("tecs.platform.adapter")
 local filesystem = require("tecs.platform.filesystem")
+local storagebackend = require("tecs.platform.storagebackend")
 local watch = require("tecs.platform.watch")
 local system = require("tecs.platform.system")
 
@@ -78,6 +80,7 @@ describe("the file watcher", function()
         watch.on("sound", nil)
         watch.on("font", nil)
         watch.on("document", nil)
+        adapter.reset()
         os.execute("rm -rf '" .. dir .. "'")
     end)
 
@@ -89,6 +92,59 @@ describe("the file watcher", function()
         watch.install({ root = dir })
 
         assert.are.same({ dir .. "opened.glsl" }, watch.watching())
+    end)
+
+    it("keeps a neighboring path out when the root has no trailing separator", function()
+        local contentRoot = dir .. "content"
+        local neighbor = dir .. "content-old"
+        assert.is_true(filesystem.createDirectory(contentRoot))
+        assert.is_true(filesystem.createDirectory(neighbor))
+        write(contentRoot .. "/inside.glsl", FIRST)
+        write(neighbor .. "/outside.glsl", FIRST)
+        filesystem.read(contentRoot .. "/inside.glsl")
+        filesystem.read(neighbor .. "/outside.glsl")
+
+        watch.install({ root = contentRoot })
+
+        assert.are.same({ contentRoot .. "/inside.glsl" }, watch.watching())
+    end)
+
+    it("asks the installed storage backend whether a watched path changed", function()
+        local path = dir .. "virtual.glsl"
+        local version = 1
+        local calls = 0
+        local storage = setmetatable({
+            name = "watch-spec",
+            info = function(asked)
+                assert.are.equal(path, asked)
+                calls = calls + 1
+                return {
+                    kind = "file",
+                    size = version,
+                    createdAt = 1,
+                    modifiedAt = version,
+                    accessedAt = 1,
+                }
+            end,
+        }, { __index = storagebackend.sdl })
+        local platform = setmetatable({
+            name = "watch-spec",
+            storage = storage,
+        }, { __index = adapter.current() })
+        adapter.install(platform)
+        filesystem.note(path, "shader")
+        local seen = 0
+        watch.on("shader", function()
+            seen = seen + 1
+        end)
+
+        watch.install({ root = dir })
+        version = 2
+        watch.scan()
+        watch.scan()
+
+        assert.are.equal(1, seen)
+        assert.is_true(calls >= 3, "the watcher did not ask the installed backend")
     end)
 
     it("takes a loaded file as it reads and reports no change for it", function()
@@ -324,11 +380,11 @@ describe("the file watcher", function()
         assert.are.equal(1, #seen)
     end)
 
-    it("refuses a build that links no shader compiler", function()
+    it("refuses a build with no hot-reload capability", function()
         local real = system.capabilities
         system.capabilities = function()
             local answered = real()
-            return setmetatable({ runtimeShaders = false }, { __index = answered })
+            return setmetatable({ hotReload = false }, { __index = answered })
         end
 
         local ok, failure = pcall(watch.install, { root = dir })
@@ -336,7 +392,7 @@ describe("the file watcher", function()
 
         assert.is_false(ok)
         assert.is_truthy(
-            tostring(failure):find("no shader compiler", 1, true),
+            tostring(failure):find("no hot-reload support", 1, true),
             "unexpected refusal: " .. tostring(failure)
         )
         assert.is_false(watch.installed())

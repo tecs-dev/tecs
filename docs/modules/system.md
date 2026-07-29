@@ -61,6 +61,7 @@ print(("%s on %s, %d decode workers"):format(caps.target, caps.architecture, dec
 | `jit`              | `boolean`  | Whether machine code is being generated. False on a target that forbids it, where the interpreter runs instead. Independent of `ffi`.                                                                             |
 | `ffi`              | `boolean`  | Always true. The engine has no path that does not use the FFI, so a build without it does not run at all rather than running degraded.                                                                            |
 | `dynamicLibraries` | `boolean`  | Whether a library can be loaded by name at run time. False where every library is linked into the executable.                                                                                                     |
+| `hotReload`        | `boolean`  | Whether development-time content reload is present in this build.                                                                                                                                                 |
 | `runtimeShaders`   | `boolean`  | Whether shaders can be compiled from source at run time.                                                                                                                                                          |
 | `packagedShaders`  | `boolean`  | Whether shaders are being read from a packaged artifact. Independent of `runtimeShaders`: a development build may have both, and a release has only this.                                                         |
 | `shaderFormats`    | `{string}` | Shader formats this target consumes. One entry, since a build supplies one format.                                                                                                                                |
@@ -79,12 +80,13 @@ question from whether a particular pad has one; [`Gamepad`](/modules/input#gamep
 is the one hardware answer here that is asked of the platform each time the capabilities are resolved, because
 neither a desktop with a touchscreen nor a simulator without one follows from the OS name.
 
-#### runtimeShaders and packagedShaders
+#### hotReload, runtimeShaders and packagedShaders
 
-`runtimeShaders` is whether a shader compiler was linked into this build, and it is what separates a development
-build from a release. [`watch`](/modules/filesystem/watch) refuses to install without it, on the grounds that a release has
-no business polling the filesystem for reloads it could not complete. `packagedShaders` is whether a prebuilt
-pack was loaded, which a release always has and a development build may have as well.
+`hotReload` is whether the content watcher can run, and `runtimeShaders` is whether a shader compiler was linked
+into this build. The current development presets enable both and release presets enable neither, but they are
+separate answers: the watcher also reloads images, sounds, fonts and documents and does not infer its
+availability from the shader kind. `packagedShaders` is whether a prebuilt pack was loaded, which a release
+always has and a development build may have as well.
 
 ### resetCapabilities
 

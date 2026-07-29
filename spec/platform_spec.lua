@@ -66,11 +66,12 @@ describe("platform.capabilities", function()
         assert.is_boolean(caps.jit)
     end)
 
-    it("reports runtime shaders as a property of the build", function()
+    it("reports development capabilities as properties of the build", function()
         -- A release links no compiler and consumes packaged artifacts, so this
         -- cannot be derived from the platform. The two are independent: a
         -- development build has a compiler and may also have a pack.
         local caps = system.capabilities()
+        assert.is_boolean(caps.hotReload)
         assert.is_boolean(caps.runtimeShaders)
         assert.is_boolean(caps.packagedShaders)
         assert.are.equal(1, #caps.shaderFormats, "one format, the one the shader pipeline supplies")

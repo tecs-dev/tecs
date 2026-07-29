@@ -303,10 +303,10 @@ Destructive.
 | `poll`    | `boolean` | Looks at every watched file now, without waiting for the interval. |
 
 **Returns:** `watching`, the number of `files` and their `paths`, the `unsettled` ones, the `kinds` registered,
-`dispatched` and how many reloads `fired` on this call. It refuses on a build that links no shader compiler,
-which is a release and has no business polling the filesystem. Polling from here as well as from the loop is
-what lets an agent that has just written a file wait for the effect rather than for the interval. See
-[`watch`](/modules/filesystem/watch).
+`dispatched` and how many reloads `fired` on this call. It refuses when the build has no
+[`hotReload`](/modules/system#hotreload-runtimeshaders-and-packagedshaders) capability. Polling from here as well
+as from the loop is what lets an agent that has just written a file wait for the effect rather than for the
+interval. See [`watch`](/modules/filesystem/watch).
 
 `unsettled` names the files that have changed and have not been dispatched yet. A file has to report the same
 size and modification time on consecutive polls first, because an editor saving commonly truncates and

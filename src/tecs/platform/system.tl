@@ -261,6 +261,9 @@ local record Capabilities
     --- Whether a library can be loaded by name at run time. False where every
     --- library is linked into the executable.
     dynamicLibraries: boolean
+    --- Whether development-time content reload is present in this build.
+    --- Named independently of any one kind the watcher reloads.
+    hotReload: boolean
     --- Whether shaders can be compiled from source at run time.
     runtimeShaders: boolean
     --- Whether shaders are being read from a packaged artifact. Independent of
@@ -985,6 +988,7 @@ function system.capabilities(): Capabilities
     local pack = shadercompiler.pack()
     local formats: {string} = {shaderpack.formatName(shadercompiler.format())}
 
+    local runtimeShaders <const> = shadercompiler.available()
     resolved = {
         target = platform,
         architecture = ffi.arch,
@@ -995,7 +999,11 @@ function system.capabilities(): Capabilities
         -- A registry means the libraries were linked, which is the case
         -- precisely where loading one by name is not available.
         dynamicLibraries = installed.dynamicLibraries,
-        runtimeShaders = shadercompiler.available(),
+        -- Runtime shaders and hot reload are selected by the same development
+        -- preset today. They remain separate capabilities so neither consumer
+        -- has to infer itself from the other.
+        hotReload = runtimeShaders,
+        runtimeShaders = runtimeShaders,
         packagedShaders = pack ~= nil,
         shaderFormats = formats,
         touch = hasTouch(),

@@ -15,13 +15,14 @@ microseconds. What it polls is not the content tree but what was loaded:
 far smaller set and is exactly the set where a change has something to act on, since a file nothing opened has no
 reloader to route to.
 
-The poll runs between frames, on the main thread, synchronously. One path query per watched path per interval,
-measured at 0.86 microseconds a path: a hundred files at two polls a second is 172 microseconds a second, and a
-frame the interval has not elapsed on costs a clock read and a compare.
+The poll runs between frames, on the main thread, synchronously. It asks the installed storage backend about each
+watched path, so a platform whose content is not in SDL's filesystem is still the authority over it. The default
+SDL backend's query measured 0.86 microseconds a path: a hundred files at two polls a second is 172 microseconds
+a second, and a frame the interval has not elapsed on costs a clock read and a compare.
 
 ::: warning Development only
-`install` refuses on a build that links no shader compiler, which is what tells a release apart from a
-development build. A release polls nothing.
+`install` refuses when [`system.capabilities().hotReload`](/modules/system#hotreload-runtimeshaders-and-packagedshaders)
+is false. A release polls nothing.
 :::
 
 [`Application`](/modules/Application) starts the watcher when its config asks for one, and registers the
@@ -43,8 +44,7 @@ Whether the watcher can run on this build.
 function watch.available(): boolean
 ```
 
-**Returns:** [`capabilities.get().runtimeShaders`](/modules/system#runtimeshaders-and-packagedshaders). A release links no
-shader compiler, which is the same bit the shader reload tool refuses on and means the same thing.
+**Returns:** [`system.capabilities().hotReload`](/modules/system#hotreload-runtimeshaders-and-packagedshaders).
 
 ### install
 
@@ -56,11 +56,11 @@ function watch.install(config?: watch.Config)
 
 **`Config` fields:**
 
-| Field      | Type      | Default          | Description                                                                                                                                                                                                                                                                    |
-| ---------- | --------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `interval` | `number`  | `0.5`            | Seconds between polls.                                                                                                                                                                                                                                                         |
-| `settle`   | `integer` | `1`              | Polls a change must repeat before it is dispatched, so the default sees a change twice. Zero dispatches the first time a file reads differently, which is what a test that writes whole files wants and what an editor that truncates will trip over. A negative value raises. |
-| `root`     | `string`  | `paths.assets()` | Only paths under this prefix are watched, so a file the engine read from somewhere else is not content and is left alone.                                                                                                                                                      |
+| Field      | Type      | Default                  | Description                                                                                                                                                                                                                                                                    |
+| ---------- | --------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `interval` | `number`  | `0.5`                    | Seconds between polls.                                                                                                                                                                                                                                                         |
+| `settle`   | `integer` | `1`                      | Polls a change must repeat before it is dispatched, so the default sees a change twice. Zero dispatches the first time a file reads differently, which is what a test that writes whole files wants and what an editor that truncates will trip over. A negative value raises. |
+| `root`     | `string`  | `filesystem.assetRoot()` | Only this path and paths below it are watched, so a neighboring prefix such as `/content-old` is not below `/content`.                                                                                                                                                         |
 
 Every path already loaded is taken as it reads now, so nothing is dispatched for a file that has not changed
 since the process opened it. Raises when `available` is false.

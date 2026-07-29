@@ -3193,10 +3193,10 @@ reachable from game code alone.
 SDL has no change notification: not in 3.4 and not behind a hint, and
 `SDL_AddEventWatch` watches the event queue rather than the filesystem. What
 `SDL_filesystem.h` offers is `SDL_GetPathInfo`, which answers a type, a size and
-three timestamps. So `tecs.platform.watch` polls, and going native to avoid
-polling would mean inotify, FSEvents and `ReadDirectoryChangesW`, plus one more
-for every platform whose SDK is licensed, to save work measured below in
-microseconds.
+three timestamps. So `tecs.platform.watch` polls through the installed storage
+backend, and going native to avoid polling would mean inotify, FSEvents and
+`ReadDirectoryChangesW`, plus one more for every platform whose SDK is licensed,
+to save work measured below in microseconds.
 
 It polls what was loaded rather than the content tree. `filesystem` records
 every path this process has read or decoded, which is both a much smaller set
@@ -3239,9 +3239,10 @@ by the application, not by the watcher, so nothing in `tecs.platform` has to
 know what an image or a clip is.
 
 It is development only. `Application.Config.watch` starts it, the `watch` tool
-turns it on, off and a poll at a time, and `install` refuses on a build that
-links no shader compiler, which is the same bit `reload_shaders` refuses on and
-the same thing it means: a release polls nothing.
+turns it on, off and a poll at a time, and `install` asks the explicit
+`hotReload` capability rather than inferring itself from the shader kind. The
+current development presets enable both hot reload and runtime shader
+compilation, while a release enables neither and polls nothing.
 
 Each reload ends by asking `clearCrash` to pick the loop back up, which is what
 the watcher is for. A file that broke the game is a file someone is about to

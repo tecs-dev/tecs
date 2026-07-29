@@ -176,6 +176,7 @@ mcp.register({
             architecture = caps.architecture,
             jit = caps.jit,
             dynamicLibraries = caps.dynamicLibraries,
+            hotReload = caps.hotReload,
             runtimeShaders = caps.runtimeShaders,
             packagedShaders = caps.packagedShaders,
             shaderFormats = caps.shaderFormats,
@@ -787,11 +788,7 @@ mcp.register({
     },
     handler = function(args: {string: any}): {string: any}
         if not watch.available() then
-            error(
-                "this build links no shader compiler, so it is a release "
-                    .. "and has no business polling the filesystem",
-                0
-            )
+            error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
         end
 
         local enabled = args.enabled as boolean

@@ -4,7 +4,8 @@
 --- **SDL has no change notification.** Not in 3.4, and not behind a hint or a
 --- property: `SDL_AddEventWatch` watches the event queue and nothing in
 --- `SDL_filesystem.h` or `SDL_storage.h` reports a change. What is there is
---- `SDL_GetPathInfo`, which answers a type, a size and three timestamps, and
+--- a storage backend's `info`, which answers a type, a size and three
+--- timestamps, and
 --- `SDL_EnumerateDirectory` and `SDL_GlobDirectory` to find paths to ask it
 --- about. So a portable watcher is a poll, and going native for one would mean
 --- three implementations (inotify, FSEvents, ReadDirectoryChangesW) plus a
@@ -33,17 +34,16 @@
 --- unnecessary, so `SDL_EnumerateDirectory` is not called at all.
 ---
 --- **It runs between frames, on the main thread, synchronously.** Not on a
---- worker and not through async IO, and the second is not a choice: SDL's
---- asynchronous IO opens, reads, writes and closes files, and there is no
---- asynchronous form of `SDL_GetPathInfo`, so asking what a file's size and
---- modification time are is a blocking `stat` however it is reached.
+--- worker and not through async IO. A backend's path-info operation is
+--- synchronous, so asking what a file's size and modification time are is a
+--- blocking query however it is reached.
 ---
---- What makes that fine is the cost. One `SDL_GetPathInfo` per watched path per
---- interval, measured at 0.86 microseconds a path on this machine: a hundred
---- files at two polls a second is 172 microseconds a second, under a fiftieth
---- of one percent of one core, and it lands between frames rather than inside
---- one. Frames the interval has not elapsed on cost a clock read and a compare.
---- A worker would have to be told the watched set every time something loaded,
+--- What makes that fine is the cost. The default SDL backend's path query was
+--- measured at 0.86 microseconds a path on this machine: a hundred files at two
+--- polls a second is 172 microseconds a second, under a fiftieth of one percent
+--- of one core, and it lands between frames rather than inside one. Frames the
+--- interval has not elapsed on cost a monotonic clock read and a compare. A
+--- worker would have to be told the watched set every time something loaded,
 --- and every reload it could trigger has to happen on the main thread anyway,
 --- so it would move the one part that is already free and put a message
 --- boundary in front of the part that is not.
@@ -59,18 +59,16 @@
 --- already refuse safely: a truncated PNG does not decode and a broken shader
 --- does not compile, and neither replaces what the process is drawing.
 ---
---- **Development only.** A release polls nothing. The gate is the one
---- `reload_shaders` already uses, because it is the same distinction: a release
---- links no shader compiler, and `install` refuses on a build that has none
---- rather than starting a poll no reload could complete.
+--- **Development only.** A release polls nothing. `hotReload` is the capability
+--- for that distinction, so the watcher does not infer its own availability
+--- from one of the kinds it happens to reload.
 
-local sdl <const> = require("tecs.ffi.sdl3")
-local loader <const> = require("tecs.ffi.loader")
+local adapter <const> = require("tecs.platform.adapter")
 local content <const> = require("tecs.platform.content")
 local system <const> = require("tecs.platform.system")
+local time <const> = require("tecs.platform.time")
 local log <const> = require("tecs.log")
 
-local C <const> = sdl.C
 -- The name a developer filters on with `SDL_SetLogPriority`, so it is
 -- configuration rather than an identifier and does not follow this module if
 -- the module moves.
@@ -153,17 +151,11 @@ end
 local handlers <const>: {string: watch.Handler} = {}
 local entries: {string: Entry} = {}
 local running = false
-local intervalMs = DEFAULT_INTERVAL * 1000
+local interval = DEFAULT_INTERVAL
 local settleCount = DEFAULT_SETTLE
 local root = ""
 local lastPoll = 0.0
 local dispatched = 0
-
---- One SDL_PathInfo, reused. A poll asks about every watched path in turn and
---- reads the answer before the next question, so one is all it ever needs.
-local INFO <const> = loader.newStruct("SDL_PathInfo")
-local FIELDS <const> = INFO as {string: any}
-local PATHTYPE_FILE <const> = tonumber(C.SDL_PATHTYPE_FILE)
 
 --- The size and modification time of a file, or -1 for both when there is no
 --- file there right now.
@@ -173,13 +165,11 @@ local PATHTYPE_FILE <const> = tonumber(C.SDL_PATHTYPE_FILE)
 --- renaming it over the target, so a poll landing in the gap sees nothing and
 --- has to treat that as "not settled" rather than as a change.
 local function look(path: string): integer, number
-    if not C.SDL_GetPathInfo(path, INFO) then
+    local info <const> = adapter.storage().info(path)
+    if info == nil or info.kind ~= "file" then
         return -1, -1
     end
-    if tonumber(FIELDS.type) ~= PATHTYPE_FILE then
-        return -1, -1
-    end
-    return tonumber(FIELDS.size) as integer, tonumber(FIELDS.modify_time)
+    return info.size, info.modifiedAt
 end
 
 --- What a path is reloaded as, from the kind it was loaded under.
@@ -196,10 +186,11 @@ end
 
 --- Whether the watcher can run on this build.
 ---
---- A release links no shader compiler, which is what tells it apart from a
---- development build, and it is the same bit `reload_shaders` refuses on.
+--- Named independently of any one reloader: images, sounds, fonts and
+--- documents do not acquire a shader dependency merely because the build can
+--- also reload shaders.
 function watch.available(): boolean
-    return system.capabilities().runtimeShaders
+    return system.capabilities().hotReload
 end
 
 --- Starts watching, and refuses on a build that should not.
@@ -208,14 +199,11 @@ end
 --- for a file that has not changed since the process opened it.
 function watch.install(config?: watch.Config)
     if not watch.available() then
-        error(
-            "this build links no shader compiler, so it is a release and " .. "has no business polling the filesystem",
-            0
-        )
+        error("this build has no hot-reload support, so it has no business polling the filesystem", 0)
     end
 
     local given = config or {} as watch.Config
-    intervalMs = (given.interval or DEFAULT_INTERVAL) * 1000
+    interval = given.interval or DEFAULT_INTERVAL
     settleCount = given.settle or DEFAULT_SETTLE
     if settleCount < 0 then
         error("tecs: settle counts polls, so it cannot be negative", 2)
@@ -224,7 +212,7 @@ function watch.install(config?: watch.Config)
     entries = {}
     running = true
     dispatched = 0
-    lastPoll = tonumber(C.SDL_GetTicks()) as number
+    lastPoll = time.now()
     watch.scan()
 end
 
@@ -298,6 +286,26 @@ function watch.dispatched(): integer
     return dispatched
 end
 
+--- Whether `path` is the root itself or below it.
+---
+--- Paths stay lexical because the installed storage may not be an operating
+--- system filesystem. The separator check is the boundary a plain prefix
+--- lacks: `/content-old/file` is not under `/content`.
+local function underRoot(path: string): boolean
+    if path:sub(1, #root) ~= root then
+        return false
+    end
+    if #path == #root or root == "" then
+        return true
+    end
+    local last <const> = root:sub(-1)
+    if last == "/" or last == "\\" then
+        return true
+    end
+    local boundary <const> = path:sub(#root + 1, #root + 1)
+    return boundary == "/" or boundary == "\\"
+end
+
 --- Takes up whatever has been loaded since the last look.
 ---
 --- A path is accepted as it reads the first time it is seen, so a run that
@@ -305,7 +313,7 @@ end
 local function adopt()
     local loaded = content.loaded()
     for path, loadedAs in pairs(loaded) do
-        if entries[path] == nil and path:sub(1, #root) == root then
+        if entries[path] == nil and underRoot(path) then
             local size, stamp = look(path)
             entries[path] = {
                 kind = kindOf(path, loadedAs),
@@ -397,8 +405,8 @@ function watch.poll(): integer
     if not running then
         return 0
     end
-    local now = tonumber(C.SDL_GetTicks()) as number
-    if now - lastPoll < intervalMs then
+    local now = time.now()
+    if now - lastPoll < interval then
         return 0
     end
     lastPoll = now
