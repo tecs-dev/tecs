@@ -381,6 +381,7 @@ fn install_dev_tools(root: &std::path::Path) -> Result<()> {
         .env("CERULEAN_REF", product::CERULEAN_REVISION)
         .env("TEALDOC_REF", product::TEALDOC_REVISION)
         .env("BUSTED_VERSION", product::BUSTED_VERSION)
+        .env("SCINTILLUA_REF", product::SCINTILLUA_REVISION)
         .current_dir(root)
         .status()?;
     if status.success() {

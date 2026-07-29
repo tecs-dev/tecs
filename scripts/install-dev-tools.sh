@@ -6,6 +6,7 @@ set -eu
 : "${CERULEAN_REF:?Run this through make dev-tools}"
 : "${TEALDOC_REF:?Run this through make dev-tools}"
 : "${BUSTED_VERSION:?Run this through cargo xtask dev-tools}"
+: "${SCINTILLUA_REF:?Run this through make dev-tools}"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 vendor="$repo/vendor"
@@ -48,9 +49,21 @@ install -m 0644 "$scratch/tealdoc/LICENSE" "$licenses/tealdoc/LICENSE"
     cd "$scratch/tealdoc"
     luarocks make --tree="$vendor" --lua-version=5.1 tealdoc-dev-1.rockspec
 )
-
 luarocks install \
     --tree="$vendor" \
     --lua-version=5.1 \
     busted \
     "$BUSTED_VERSION"
+
+# The documentation site's lexers for every language that is not Teal. Pure
+# Lua, so this is a checkout and a copy rather than a build: tealdoc reads them
+# through `tealdoc.site.lexers` and highlights nothing extra when they are
+# absent.
+git clone --quiet https://github.com/orbitalquark/scintillua.git \
+    "$scratch/scintillua"
+git -C "$scratch/scintillua" checkout --quiet --detach "$SCINTILLUA_REF"
+rm -rf "$vendor/scintillua"
+install -d "$vendor/scintillua/lexers"
+install -m 0644 "$scratch"/scintillua/lexers/*.lua "$vendor/scintillua/lexers/"
+install -d "$licenses/scintillua"
+install -m 0644 "$scratch/scintillua/LICENSE" "$licenses/scintillua/LICENSE"

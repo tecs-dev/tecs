@@ -16,8 +16,12 @@ use crate::registry::{self, Options as RegistryOptions};
 use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
-pub const CERULEAN_REVISION: &str = "a09b6d734a55d58489e16498bd83387d39c4cafe";
-pub const TEALDOC_REVISION: &str = "198a81c9ebf81b79cebd671e16aec9da8649e9e4";
+pub const CERULEAN_REVISION: &str = "a77c1138cc738b782543693864ca153d47f55fd6";
+pub const TEALDOC_REVISION: &str = "dfc52832471da8d5e64e4d8bb349aac029324ded";
+// Scintillua is not on LuaRocks and is pure Lua, so it is pinned and copied
+// rather than depended on. The lexers give the documentation site every
+// language that is not Teal; Teal keeps the compiler's own lexer.
+pub const SCINTILLUA_REVISION: &str = "b9986ecad77b1ea73d75bf1e82e6e0fd3b4958b1";
 pub const BUSTED_VERSION: &str = "2.2.0-1";
 pub const SDL3_VERSION: &str = "3.4.12";
 pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";

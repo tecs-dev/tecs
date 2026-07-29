@@ -802,6 +802,12 @@ return {
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
             custom_css = "docs/site.css",
+            -- Scintillua's lexers, installed by `cargo xtask dev-tools` at
+            -- the revision `product.rs` pins. They cover every language on
+            -- this site that is not Teal; Teal keeps the compiler's own lexer,
+            -- because that is what turns a type name in a code block into a
+            -- link. Absent, those blocks render unhighlighted.
+            lexers = "vendor/scintillua/lexers",
             social_image = "/images/tecs.png",
             copyright = "Copyright Michael Dowling",
             license = "MIT or Apache-2.0, at your option",
