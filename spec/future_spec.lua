@@ -657,6 +657,27 @@ describe("tecs.Future", function()
             assert.are.same({ 1, 2 }, joined.value)
         end)
 
+        -- The join promises an array indexed as its inputs are, and nil is a
+        -- legal value that an array cannot hold: storing one leaves the slot
+        -- reading as absent and every index past it past a hole. Counting
+        -- settlements rather than filled slots is what used to let that through
+        -- as a "ready" join over a short array, which is silent and is worse
+        -- than any error.
+        it("fails rather than leaving a hole where an input settled with nothing", function()
+            local first, second, third = Future.pending(), Future.pending(), Future.pending()
+            local joined = Future.all({ first, second, third })
+
+            first:complete("a")
+            second:complete(nil)
+
+            assert.are.equal("failed", joined.status)
+            assert.is_truthy(joined.error:find("input 2"), "the join did not say which slot was empty")
+
+            -- And the last input settling does not talk it round afterwards.
+            third:complete("c")
+            assert.are.equal("failed", joined.status)
+        end)
+
         it("fails the join with the first input to fail", function()
             local first, second = Future.pending(), Future.pending()
             local joined = Future.all({ first, second })

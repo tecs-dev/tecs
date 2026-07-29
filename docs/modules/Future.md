@@ -239,6 +239,12 @@ shared with something outside the join is not this join's to stop.
 Fan-in does not nest: each listener decrements a counter and only the last input settles the join, so a join over
 five hundred loads is two deep rather than five hundred.
 
+The value is a fresh array indexed as `inputs` is, and a hole cannot appear in it. The counter above counts
+**filled slots** rather than settlements, so an input that settles `"ready"` carrying nil fails the join naming
+the slot rather than filling it: nil is a legal value that an array cannot hold, and a slot holding one would
+read as absent with every index past it past a hole. A caller with a value that may be missing recovers to
+something — a shared sentinel, say — rather than to nil.
+
 **Example:**
 
 ```teal
