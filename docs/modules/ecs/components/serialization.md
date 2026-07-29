@@ -26,7 +26,7 @@ column as raw bytes. Scalar components save their raw value, and tags save
 their presence.
 
 The named constructor must remain defined for automatic table deserialization.
-See [Named construction](/ecs/components/construction#table-construction).
+See [Named construction](/modules/ecs/components/construction#table-construction).
 
 ## Durable identity
 

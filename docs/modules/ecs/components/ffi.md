@@ -10,7 +10,7 @@ forms one contiguous memory block instead of an array of Lua table references.
 
 Use FFI storage for numeric, boolean, pointer, and fixed-array data that hot
 systems or native-facing code process in bulk. Use a
-[table component](/ecs/components/table-components) for strings, nested Lua
+[table component](/modules/ecs/components/table-components) for strings, nested Lua
 objects, or flexible shape.
 
 ## Struct declarations
@@ -82,7 +82,7 @@ tecs.ecs.newFFIComponent({
 })
 ```
 
-The shared [construction model](/ecs/components/construction) provides
+The shared [construction model](/modules/ecs/components/construction) provides
 positional calls, named `new`, defaults, validation through `init`, and custom
 constructor shapes.
 
@@ -101,7 +101,7 @@ velocity.x = velocity.x + acceleration * dt
 
 Use `world:getMut` or `archetype:getMut` for writes. A write through `get`
 requires an explicit dirty mark. See
-[Dirty tracking](/ecs/components/dirty-tracking).
+[Dirty tracking](/modules/ecs/components/dirty-tracking).
 
 ## Durable representations
 
@@ -112,4 +112,4 @@ state transient.
 
 Binary snapshots copy matching FFI columns in bulk. Schema changes can migrate
 same-named fields. See
-[Component serialization](/ecs/components/serialization).
+[Component serialization](/modules/ecs/components/serialization).

@@ -294,7 +294,7 @@ Link the first mention of a public type in each docblock. Use its Tealdoc
 declaration target when the site reads that source module:
 ``[`World`](tealdoc:tecs.World)``. Use the rendered page and anchor for a type
 re-exported from a module the site does not read directly:
-``[`Transform`](/ecs/#tecs.ecs.Transform)``. Use backticks without a link for
+``[`Transform`](/modules/ecs/#tecs.ecs.Transform)``. Use backticks without a link for
 functions, fields, constants, enum values and literal strings. Do not link
 internal types.
 

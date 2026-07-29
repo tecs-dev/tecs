@@ -97,4 +97,4 @@ world:batchSpawn(1000, {Position},
 Placement already marks the destination columns. The callback still uses
 `getMut` to state its write intent clearly.
 
-The [mutation model](/ecs/mutation-model) defines the normative marking rules.
+The [mutation model](/modules/ecs/mutation-model) defines the normative marking rules.

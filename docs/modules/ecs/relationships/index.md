@@ -6,7 +6,7 @@ outline: deep
 # Relationships
 
 A relationship connects one entity to another. Tecs ships
-[`ChildOf`](/ecs/builtins#childof), an exclusive sparse relationship with a
+[`ChildOf`](/modules/ecs/builtins#childof), an exclusive sparse relationship with a
 reverse index and cascade delete:
 
 ```teal
@@ -31,7 +31,7 @@ or archetype.
 ## Defining a relationship
 
 `newRelationship` creates either a target-only relationship or a relationship
-with a Lua payload. Use [`newFFIRelationship`](/ecs/relationships/ffi) when the
+with a Lua payload. Use [`newFFIRelationship`](/modules/ecs/relationships/ffi) when the
 payload belongs in a packed C struct.
 
 This target-only relationship lets an entity like several targets:
@@ -79,7 +79,7 @@ The target always comes first in the positional form and lives under `target`
 in the table form. Tecs owns `target`; treat it as read-only and replace an
 edge through `world:set` instead of changing the field. Do not include
 `"target"` in `fields`.
-[Component construction](/ecs/components/construction) covers `fields`,
+[Component construction](/modules/ecs/components/construction) covers `fields`,
 `defaults`, `init`, custom `__call`, and `.new`.
 
 ## Exclusive relationships

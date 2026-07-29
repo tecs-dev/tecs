@@ -16,7 +16,7 @@ world:spawn(
 )
 ```
 
-The fourth [`Transform`](/ecs/#tecs.ecs.Transform) argument selects the layer.
+The fourth [`Transform`](/modules/ecs/#tecs.ecs.Transform) argument selects the layer.
 
 ## Sort modes
 

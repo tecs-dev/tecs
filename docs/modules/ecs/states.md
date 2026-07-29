@@ -126,4 +126,4 @@ registered.
 
 After load, use state-tag queries to rebuild group indexes and `EntityKey` for
 the few individual entities that code must rediscover. See
-[Save games](/ecs/save-games).
+[Save games](/modules/ecs/save-games).

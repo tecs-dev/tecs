@@ -233,7 +233,7 @@ end
 --- `voice`, which is the same thing changing its clip takes.
 ---
 --- Disabling an entity silences its sound and re-enabling starts it again.
---- Queries exclude [`Disabled`](/ecs/#tecs.ecs.Disabled) unless they name it, so a
+--- Queries exclude [`Disabled`](/modules/ecs/#tecs.ecs.Disabled) unless they name it, so a
 --- disabled row is not followed and its voice is taken back; the audio pass
 --- clears the handle at the same moment, which is what lets the sound return
 --- with the entity rather than reading as a one-shot that had finished.
@@ -2210,7 +2210,7 @@ local rowOptions <const>: Audio.PlayOptions = {}
 
 --- Puts the rows of entities something has disabled back to rest.
 ---
---- Queries exclude [`Disabled`](/ecs/#tecs.ecs.Disabled) unless they name
+--- Queries exclude [`Disabled`](/modules/ecs/#tecs.ecs.Disabled) unless they name
 --- it, so the walk below skips disabled rows and the sweep treats their voices
 --- as abandoned. The row still names a voice that has gone,
 --- which reads on re-enabling as a one-shot that finished, and the sound never

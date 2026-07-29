@@ -43,11 +43,11 @@ A snapshot records:
 
 - entity IDs, including their slot and generation
 - components and relationship targets
-- the complete [state stack](/ecs/states)
+- the complete [state stack](/modules/ecs/states)
 - the fixed-step accumulator and per-phase enable flags
 - custom data
 
-Load rebuilds the [`EntityKey`](/ecs/builtins#entitykey) index after it restores
+Load rebuilds the [`EntityKey`](/modules/ecs/builtins#entitykey) index after it restores
 the entities. A same-world load therefore preserves entity handles whose saved
 IDs still exist.
 
@@ -89,7 +89,7 @@ input after load.
 Dense FFI components normally cross the binary format as raw columns. Table
 components use their default serializer. A component can instead provide
 `serialize` and `deserialize` callbacks. See
-[Component serialization](/ecs/components/serialization) for the registration
+[Component serialization](/modules/ecs/components/serialization) for the registration
 API.
 
 Custom codecs must turn process-local numbers into durable names:
@@ -140,7 +140,7 @@ Save omits the transient column. Load applies normal spawn behavior, including
 ### Derived entities
 
 A subsystem can exclude fully derived entities during
-[`OnSnapshotSave`](/ecs/builtins#snapshot-events):
+[`OnSnapshotSave`](/modules/ecs/builtins#snapshot-events):
 
 ```teal
 world:observe(0, tecs.ecs.OnSnapshotSave,

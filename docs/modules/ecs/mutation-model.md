@@ -10,14 +10,14 @@ disagrees with this specification, this page wins.
 
 ## Execution paths
 
-| Path        | APIs                                                                    | Applied                  |
-| ----------- | ----------------------------------------------------------------------- | ------------------------ |
-| Instant     | `spawn`, `set`, `remove`, and `despawn` at depth 0                      | Before return            |
-| Staged      | The same APIs inside a [deferred scope](/ecs/world#deferred-operations) | At commit                |
-| Batch       | The `batch*` APIs                                                       | At the outer boundary    |
-| Bundle      | Bundle spawn APIs                                                       | Immediately or at commit |
-| Explicit ID | `spawnAt`, `batchSpawnAt`, and snapshot load                            | At placement             |
-| Sparse      | Sparse relationship `set` and `remove`                                  | Last in the drain        |
+| Path        | APIs                                                                        | Applied                  |
+| ----------- | --------------------------------------------------------------------------- | ------------------------ |
+| Instant     | `spawn`, `set`, `remove`, and `despawn` at depth 0                          | Before return            |
+| Staged      | The same APIs in a [deferred scope](/modules/ecs/world#deferred-operations) | At commit                |
+| Batch       | The `batch*` APIs                                                           | At the outer boundary    |
+| Bundle      | Bundle spawn APIs                                                           | Immediately or at commit |
+| Explicit ID | `spawnAt`, `batchSpawnAt`, and snapshot load                                | At placement             |
+| Sparse      | Sparse relationship `set` and `remove`                                      | Last in the drain        |
 
 Every path must produce the same post-commit state for the same logical
 operations. The instant path optimizes staged semantics.
@@ -172,7 +172,7 @@ callers still owe these access rules:
   it depends on.
 
 Tecs owns dirty state. Callers declare write intent; they must not mutate the
-dirty metadata itself. [Dirty tracking](/ecs/components/dirty-tracking)
+dirty metadata itself. [Dirty tracking](/modules/ecs/components/dirty-tracking)
 covers consumer-side iteration.
 
 ## Mutation-path requirements

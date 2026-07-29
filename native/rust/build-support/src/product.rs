@@ -16,7 +16,7 @@ use crate::registry::{self, Options as RegistryOptions};
 use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
-pub const CERULEAN_REVISION: &str = "a09b6d734a55d58489e16498bd83387d39c4cafe";
+pub const CERULEAN_REVISION: &str = "a77c1138cc738b782543693864ca153d47f55fd6";
 pub const TEALDOC_REVISION: &str = "bacae8ca895a65e4a9ac395a7ccb499b65613c4e";
 pub const SDL3_REVISION: &str = "release-3.4.12";
 pub const SDL3_MIXER_REVISION: &str = "release-3.2.4";

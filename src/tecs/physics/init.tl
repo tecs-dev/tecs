@@ -2,7 +2,7 @@
 Rapier 2D as part of the world.
 
 Install the plugin, spawn an entity with a
-[`Transform`](/ecs/#tecs.ecs.Transform), and attach a body:
+[`Transform`](/modules/ecs/#tecs.ecs.Transform), and attach a body:
 
 ```teal
 world:addPlugin(tecs.physics.plugin({gravity = {0.0, 980.0}}))
@@ -16,7 +16,7 @@ tecs.physics.attach(world, crate, {halfWidth = 16, halfHeight = 16, friction = 0
 tecs.physics.applyImpulse(world, crate, 400.0, 0.0)
 ```
 
-The solver writes each body's [`Transform`](/ecs/#tecs.ecs.Transform) back, so
+The solver writes each body's [`Transform`](/modules/ecs/#tecs.ecs.Transform) back, so
 nothing else has to move the entity. `detach` takes a body out of the solve
 without despawning its entity.
 
@@ -606,7 +606,7 @@ end
 --- @param entity The caller supplies the entity that gains
 ---     [`Body`](tealdoc:tecs.physics.Body),
 ---     [`Collider`](tealdoc:tecs.physics.Collider),
----     [`Transform`](/ecs/#tecs.ecs.Transform), and
+---     [`Transform`](/modules/ecs/#tecs.ecs.Transform), and
 ---     [`Motion`](tealdoc:tecs.physics.Motion) as needed.
 --- @param options The caller supplies the initial body and collider settings.
 ---     Unknown body types and invalid capsules raise.
@@ -927,7 +927,7 @@ end
 --- @param world The caller supplies the world holding the entity.
 --- @param entity The caller supplies the target entity. A missing live body
 ---     makes the call a no-op, including
----     [`Transform`](/ecs/#tecs.ecs.Transform).
+---     [`Transform`](/modules/ecs/#tecs.ecs.Transform).
 --- @param x The caller supplies the body's origin in world pixels along x.
 --- @param y The caller supplies the body's origin in world pixels along y,
 ---     positive downward.

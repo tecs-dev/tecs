@@ -5,7 +5,7 @@ outline: deep
 
 # Systems
 
-A system runs one function in one [phase](/ecs/phases). Build its query once
+A system runs one function in one [phase](/modules/ecs/phases). Build its query once
 inside a plugin, then close over that query:
 
 ```teal
@@ -141,7 +141,7 @@ the system until the duration elapses.
 ### Active state {#instate}
 
 `runif.inState(name)` allows the system only while that state occupies the top
-of the [state stack](/ecs/states):
+of the [state stack](/modules/ecs/states):
 
 ```teal
 runIf = tecs.ecs.runif.inState("game")

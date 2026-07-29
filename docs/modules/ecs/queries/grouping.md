@@ -73,6 +73,6 @@ end
 ```
 
 Grouped iteration opens the same deferred scope as `query:iter()`. Use a
-separate [cursor](/ecs/queries/#breaking-out-early) for any traversal that may
+separate [cursor](/modules/ecs/queries/#breaking-out-early) for any traversal that may
 stop early, and close it after the loop. Nested grouped traversals need one
 cursor each.
