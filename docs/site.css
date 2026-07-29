@@ -85,6 +85,8 @@
 
     --tealdoc-outline-font-size: 0.78rem;
     --tealdoc-outline-nested-font-size: 0.72rem;
+    --tealdoc-outline-font-weight: 400;
+    --tealdoc-outline-title-font-weight: 400;
 
     /* Square corners on the code, which is the one place this site is a
      * terminal rather than a page. */
@@ -95,7 +97,14 @@
      * the step a phone gets, at tealdoc's own breakpoint. */
     --tealdoc-hero-name-size: 2.9rem;
     --tealdoc-hero-name-size-narrow: 2.4rem;
-    --tealdoc-hero-text-size: 1.5rem;
+
+    /* 1.35rem is what puts the tagline on one line: it needs 562px of the
+     * copy column's 607. Fitting a line is not something a fixed size can
+     * promise, since the column narrows with the window, so this holds from
+     * the design width up and wraps below it. Sizing it to fit at every width
+     * means sizing it against the viewport, which is the thing this file
+     * removed. */
+    --tealdoc-hero-text-size: 1.35rem;
     --tealdoc-hero-text-size-narrow: 1.25rem;
     --tealdoc-hero-glow-size: 480px;
 }

@@ -708,9 +708,10 @@ return {
             social_image = "/images/tecs.png",
             copyright = "Copyright Michael Dowling",
             license = "MIT or Apache-2.0, at your option",
+            -- No row for MIT and Apache-2.0: the license line above already
+            -- names both, and a footer that says a thing twice reads as a
+            -- footer that was not looked at.
             footer_links = {
-                { text = "MIT", path = "https://github.com/tecs-dev/tecs/blob/main/LICENSE-MIT" },
-                { text = "Apache-2.0", path = "https://github.com/tecs-dev/tecs/blob/main/LICENSE-APACHE" },
                 {
                     text = "Third-party notices",
                     path = "https://github.com/tecs-dev/tecs/blob/main/THIRD_PARTY_NOTICES.md",
