@@ -13,6 +13,7 @@ use image::codecs::png::PngEncoder;
 use image::{ImageEncoder, ImageError};
 
 mod cli;
+mod cli_docs;
 mod cli_mcp;
 mod dialogs;
 mod host;

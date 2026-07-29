@@ -99,6 +99,19 @@ local function scratch()
     return path
 end
 
+local function write(path, body)
+    local handle = assert(io.open(path, "w"))
+    handle:write(body)
+    handle:close()
+end
+
+local function read(path)
+    local handle = assert(io.open(path, "r"))
+    local body = handle:read("*a")
+    handle:close()
+    return body
+end
+
 describe("a scaffolded project", function()
     local directory, project, created
 
@@ -176,6 +189,55 @@ describe("a scaffolded project", function()
         local entry = io.open(project .. "/build/main.lua", "r")
         assert.is_not_nil(entry, "no build/main.lua: " .. built.output)
         entry:close()
+    end)
+
+    it("runs a project-root Teal entry instead of the manifest entry", function()
+        write(
+            project .. "/alternate.tl",
+            [[
+local marker <const> = assert(io.open("teal-entry.txt", "w"))
+marker:write("teal override")
+marker:close()
+
+return tecs.newApplication({
+    window = {title = "alternate", width = 64, height = 64},
+    debugMaxFrames = 1,
+})
+]]
+        )
+
+        local ran = tecs({ "run", "alternate.tl" }, project)
+        assert.is_not_nil(ran, "tecs run never returned")
+        assert.are.equal("teal override", read(project .. "/teal-entry.txt"), ran.output)
+    end)
+
+    it("runs Lua with only the arguments after the separator", function()
+        assert(filesystem.createDirectory(project .. "/tools"))
+        write(
+            project .. "/tools/alternate.lua",
+            [[
+local marker = assert(io.open("lua-entry.txt", "w"))
+marker:write(type(require("main")), "\n", tostring(#arg))
+for index = 1, #arg do
+    marker:write("\n", arg[index])
+end
+marker:close()
+
+return tecs.newApplication({
+    window = {title = "alternate", width = 64, height = 64},
+    debugMaxFrames = 1,
+})
+]]
+        )
+
+        local ran =
+            tecs({ "run", "tools/alternate.lua", "--", "first", "--entry", "still-an-argument", "last value" }, project)
+        assert.is_not_nil(ran, "tecs run never returned")
+        assert.are.equal(
+            "table\n4\nfirst\n--entry\nstill-an-argument\nlast value",
+            read(project .. "/lua-entry.txt"),
+            ran.output
+        )
     end)
 
     it("passes its own specs", function()

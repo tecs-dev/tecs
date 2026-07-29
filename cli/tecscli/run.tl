@@ -1,6 +1,6 @@
 --- The command surface, and what each command does.
 ---
---- Eight commands, and between them a whole toolchain at one pinned set of
+--- Commands spanning a whole toolchain at one pinned set of
 --- revisions. That is the point of the exercise rather than a convenience: a
 --- Lua developer today assembles a formatter, a test runner and a build from
 --- three unrelated projects and gets no type checker at all, and every one of
@@ -14,13 +14,15 @@
 ---  format   Formats, or checks formatting, with the carried Cerulean
 ---  test     Compiles spec/ and runs it
 ---  build    Compiles src/, stages assets, writes build/
----  run      Builds, then becomes the game
+---  run      Builds, then becomes the selected application entry
 ---  clean    Removes build/
 ---  info     Versions, pins, project status, packaging targets
+---  docs     Searches the offline reference carried with the command
 --- ```
 ---
---- Every one of them finds the project by searching upward for `tecs.lua`, so
---- all of them work from any directory inside it.
+--- A command that acts on a project finds it by searching upward for
+--- `tecs.lua`, so it works from any directory inside it. `new`, `docs`,
+--- `info`, and `mcp` need no project.
 
 local tecs <const> = require("tecs")
 local arguments <const> = require("tecscli.arguments")
@@ -137,17 +139,17 @@ local function commandBuild(paths: layout): integer
     return 0
 end
 
---- `tecs run`
+--- `tecs run [entry] [-- arguments]`
 ---
 --- Becomes the game rather than starting it as a child. One process, one exit
 --- status, and an interrupt that reaches the game instead of the tool.
-local function commandRun(paths: layout): integer
+local function commandRun(paths: layout, gameArguments: {string}, entry?: string): integer
     local found, reason = project.find()
     if found == nil then
         return noProject(reason)
     end
 
-    local result, failure = builder.build(found, paths)
+    local result, failure = builder.build(found, paths, entry)
     if result == nil then
         complain(("tecs run: %s"):format(failure))
         return 1
@@ -159,7 +161,11 @@ local function commandRun(paths: layout): integer
     shell.setenv("TECS_LUA", paths.root)
     shell.setenv("TECS_ASSETS", paths.root)
 
-    local trouble = shell.become({layout.self(), "--entry", result.entry})
+    local command <const>: {string} = {layout.self(), "--entry", result.entry}
+    for _, argument in ipairs(gameArguments) do
+        command[#command + 1] = argument
+    end
+    local trouble = shell.become(command)
     complain(("tecs run: %s"):format(trouble))
     return 1
 end
@@ -168,6 +174,21 @@ end
 local function commandInfo(paths: layout): integer
     report.write(paths, say)
     return 0
+end
+
+--- `tecs docs [query]`
+---
+--- This is deliberately not a project command. The staged reference is part
+--- of the tool's content root, so it works from any directory and never
+--- reaches the network.
+local function commandDocs(paths: layout, query?: string): integer
+    local result <const> = arguments.docs(paths.root, query)
+    if result.stderr then
+        io.stderr:write(result.output)
+    else
+        io.write(result.output)
+    end
+    return result.code
 end
 
 --- `tecs test`
@@ -289,13 +310,26 @@ function run.main(root: string)
     elseif command == "build" then
         code = commandBuild(paths)
     elseif command == "run" then
-        code = commandRun(paths)
+        local hasEntry <const> = args[1] == "true"
+        local entry: string
+        local firstArgument = 2
+        if hasEntry then
+            entry = args[2]
+            firstArgument = 3
+        end
+        local gameArguments: {string} = {}
+        for index = firstArgument, #args do
+            gameArguments[#gameArguments + 1] = args[index]
+        end
+        code = commandRun(paths, gameArguments, entry)
     elseif command == "test" then
         code = commandTest(paths)
     elseif command == "clean" then
         code = commandClean()
     elseif command == "info" then
         code = commandInfo(paths)
+    elseif command == "docs" then
+        code = commandDocs(paths, args[1])
     elseif command == "mcp" then
         code = arguments.runMcp()
     else

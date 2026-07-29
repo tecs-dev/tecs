@@ -36,6 +36,7 @@ cargo xtask shaders        # Build the shader pack
 cargo xtask package --preset macos-arm64
 cargo xtask check-package out/package
 cargo xtask test-package --preset macos-arm64 # Verify the installed release
+cargo xtask single         # Build the one-file CLI in out/single/bin
 cargo xtask presets        # List the platform matrix
 cargo xtask deps           # Install development dependencies
 ```

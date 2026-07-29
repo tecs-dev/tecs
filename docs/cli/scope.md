@@ -13,12 +13,15 @@ so there is no second implementation and no shelling out to Cargo from a
 user's machine. `cargo xtask run` runs this repository's own demo, which is a
 test of the engine; `tecs run` builds and runs a project.
 
-**It does not cross-compile.** A macOS host cannot produce a Windows game and the reverse is worse, since a Mach-O
-needs an SDK whose license forbids redistributing it. `tecs dist` packages for the platform it is running on, and
-`tecs new` scaffolds a CI workflow with a three-OS matrix that runs it on each.
+**It does not cross-compile.** A macOS host cannot produce a Windows game and
+the reverse is worse, since a Mach-O needs an SDK whose license forbids
+redistributing it. The current command builds and runs projects on the platform
+where it is invoked; release packaging is not part of its command surface.
 
 ## Offline documentation
 
-This site and the tool's offline reference are meant to be one content tree, not two. Every page here carries a
-one-line `description:` in its frontmatter for exactly that reason: the descriptions label pages in the generated
-`llms.txt` index and in an offline reference. `cargo xtask docs-check` gates it.
+This site and `tecs docs` are one content tree, not two. Every page here carries
+a one-line `description:` in its frontmatter for exactly that reason: the
+descriptions label pages in the offline index. Product staging copies the
+Markdown into the CLI content root, and the one-file build compresses that root
+into its payload. `cargo xtask docs-check` gates the source pages.

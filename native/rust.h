@@ -34,6 +34,7 @@ const char *tecsRustError(void);
 
 TecsBytes *tecsCliHelp(void);
 TecsBytes *tecsCliParse(size_t count, const char *const *arguments);
+TecsBytes *tecsCliDocs(const char *directory, const char *query);
 int tecsCliMcp(void);
 
 TecsImage *tecsImageDecode(const uint8_t *bytes, size_t length);

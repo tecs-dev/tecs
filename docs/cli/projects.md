@@ -5,14 +5,6 @@ outline: deep
 
 # Projects
 
-::: warning Not built yet
-The `tecs` command does not exist on this branch. This page records the shape it is planned to take so that
-nothing else in the site has to pretend it is already there. Everything below is a plan, not a reference, and
-the commands cannot be run today.
-
-Build and run through `make` in the meantime. See [getting started](/getting-started).
-:::
-
 A directory containing `tecs.lua`, which returns a table. The file is both the marker and the manifest, and the
 tool searches upward from the working directory for it, so it can be run from a subdirectory.
 
