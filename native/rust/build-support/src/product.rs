@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -484,6 +484,9 @@ fn pinned_packages(
     let source_root = paths.dependencies.join("src");
     let build_root = paths.dependencies.join("build");
     let prefix = paths.dependencies.join("prefix");
+    for path in [&source_root, &build_root, &prefix] {
+        validate_owned_path(&paths.out, path, false)?;
+    }
     fs::create_dir_all(&source_root)?;
     for path in [&build_root, &prefix] {
         if path.exists() {
@@ -506,6 +509,7 @@ fn pinned_packages(
         SDL3_MIXER_REVISION,
     )?;
     update_submodules(
+        &source_root,
         &mixer,
         &[
             "external/ogg",
@@ -533,16 +537,19 @@ fn pinned_packages(
         SHADERC_REVISION,
     )?;
     fetch_source_at(
+        &source_root,
         &shaderc.join("third_party/glslang"),
         "https://github.com/KhronosGroup/glslang.git",
         GLSLANG_REVISION,
     )?;
     fetch_source_at(
+        &source_root,
         &shaderc.join("third_party/spirv-tools"),
         "https://github.com/KhronosGroup/SPIRV-Tools.git",
         SPIRV_TOOLS_REVISION,
     )?;
     fetch_source_at(
+        &source_root,
         &shaderc.join("third_party/spirv-tools/external/spirv-headers"),
         "https://github.com/KhronosGroup/SPIRV-Headers.git",
         SPIRV_HEADERS_REVISION,
@@ -734,16 +741,22 @@ fn define_bool(name: &str, enabled: bool) -> OsString {
 
 fn fetch_source(root: &Path, name: &str, repository: &str, revision: &str) -> Result<PathBuf> {
     let destination = root.join(name);
-    fetch_source_at(&destination, repository, revision)?;
+    fetch_source_at(root, &destination, repository, revision)?;
     Ok(destination)
 }
 
-fn fetch_source_at(destination: &Path, repository: &str, revision: &str) -> Result<()> {
+fn fetch_source_at(
+    source_cache: &Path,
+    destination: &Path,
+    repository: &str,
+    revision: &str,
+) -> Result<()> {
     if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         anyhow::bail!(
             "{repository} is pinned to {revision:?}, not an immutable 40-character commit"
         );
     }
+    validate_owned_path(source_cache, destination, true)?;
     if destination.exists() && !destination.join(".git").exists() {
         fs::remove_dir_all(destination)?;
     }
@@ -776,7 +789,7 @@ fn fetch_source_at(destination: &Path, repository: &str, revision: &str) -> Resu
         )?;
     }
     command::run("git", ["reset", "--hard", revision], destination)?;
-    command::run("git", ["clean", "-ffd"], destination)?;
+    command::run("git", ["clean", "-ffdx"], destination)?;
 
     let head = git_output(destination, &["rev-parse", "HEAD"])?;
     if head != revision {
@@ -800,10 +813,108 @@ fn fetch_source_at(destination: &Path, repository: &str, revision: &str) -> Resu
             destination.display()
         );
     }
+    let residue = git_output(destination, &["clean", "-nffdx"])?;
+    if !residue.is_empty() {
+        anyhow::bail!(
+            "{} retains ignored or untracked files after restoring {revision}:\n{residue}",
+            destination.display()
+        );
+    }
     Ok(())
 }
 
-fn update_submodules(source: &Path, submodules: &[&str]) -> Result<()> {
+fn validate_owned_path(root: &Path, destination: &Path, reject_git_file: bool) -> Result<()> {
+    let root_metadata = fs::symlink_metadata(root)
+        .with_context(|| format!("reading dependency source cache {}", root.display()))?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        anyhow::bail!(
+            "dependency source cache {} is not a real directory",
+            root.display()
+        );
+    }
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("resolving dependency source cache {}", root.display()))?;
+    let relative = destination.strip_prefix(root).with_context(|| {
+        format!(
+            "dependency source {} is outside its owned cache {}",
+            destination.display(),
+            root.display()
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        anyhow::bail!(
+            "dependency source {} cannot be the cache root itself",
+            destination.display()
+        );
+    }
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::Normal(name) => current.push(name),
+            Component::CurDir => continue,
+            _ => {
+                anyhow::bail!(
+                    "dependency source {} escapes its owned cache {}",
+                    destination.display(),
+                    root.display()
+                );
+            }
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "dependency source path {} is a symbolic link",
+                    current.display()
+                );
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                anyhow::bail!(
+                    "dependency source path {} is not a directory",
+                    current.display()
+                );
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    if destination.exists() {
+        let canonical_destination = destination
+            .canonicalize()
+            .with_context(|| format!("resolving dependency source {}", destination.display()))?;
+        if !canonical_destination.starts_with(&canonical_root) {
+            anyhow::bail!(
+                "dependency source {} resolves outside its owned cache {}",
+                destination.display(),
+                root.display()
+            );
+        }
+    }
+    if reject_git_file {
+        match fs::symlink_metadata(destination.join(".git")) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                anyhow::bail!(
+                    "dependency source {} has a .git file or link; linked worktrees are not owned caches",
+                    destination.display()
+                );
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn update_submodules(source_cache: &Path, source: &Path, submodules: &[&str]) -> Result<()> {
+    for submodule in submodules {
+        let directory = source.join(submodule);
+        validate_owned_path(source_cache, &directory, false)?;
+        validate_submodule_git_directory(source, &directory)?;
+    }
     let fingerprint = submodule_fingerprint(source, submodules)?;
     let git_directory = git_output(source, &["rev-parse", "--git-dir"])?;
     let git_directory = if Path::new(&git_directory).is_absolute() {
@@ -833,9 +944,11 @@ fn update_submodules(source: &Path, submodules: &[&str]) -> Result<()> {
     run(&mut command, "fetching SDL_mixer decoder sources")?;
     for submodule in submodules {
         let directory = source.join(submodule);
+        validate_owned_path(source_cache, &directory, false)?;
+        validate_submodule_git_directory(source, &directory)?;
         let expected = git_output(source, &["rev-parse", &format!("HEAD:{submodule}")])?;
         command::run("git", ["reset", "--hard", &expected], &directory)?;
-        command::run("git", ["clean", "-ffd"], &directory)?;
+        command::run("git", ["clean", "-ffdx"], &directory)?;
     }
     if !submodules_are_ready(source, submodules)? {
         anyhow::bail!(
@@ -844,6 +957,60 @@ fn update_submodules(source: &Path, submodules: &[&str]) -> Result<()> {
         );
     }
     fs::write(marker, fingerprint)?;
+    Ok(())
+}
+
+fn validate_submodule_git_directory(source: &Path, submodule: &Path) -> Result<()> {
+    let metadata = match fs::symlink_metadata(submodule.join(".git")) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "dependency submodule {} has a symbolic-link .git directory",
+            submodule.display()
+        );
+    }
+    if metadata.is_dir() {
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        anyhow::bail!(
+            "dependency submodule {} has an invalid .git entry",
+            submodule.display()
+        );
+    }
+
+    let contents = fs::read_to_string(submodule.join(".git"))
+        .with_context(|| format!("reading submodule metadata in {}", submodule.display()))?;
+    let git_directory = contents
+        .trim()
+        .strip_prefix("gitdir:")
+        .map(str::trim)
+        .context("submodule .git file has no gitdir target")?;
+    let git_directory = Path::new(git_directory);
+    let git_directory = if git_directory.is_absolute() {
+        git_directory.to_path_buf()
+    } else {
+        submodule.join(git_directory)
+    };
+    let git_directory = git_directory.canonicalize().with_context(|| {
+        format!(
+            "resolving submodule Git directory {}",
+            git_directory.display()
+        )
+    })?;
+    let source_git = source
+        .join(".git")
+        .canonicalize()
+        .with_context(|| format!("resolving dependency Git directory {}", source.display()))?;
+    if !git_directory.starts_with(source_git.join("modules")) {
+        anyhow::bail!(
+            "dependency submodule {} points its .git file outside the owned checkout",
+            submodule.display()
+        );
+    }
     Ok(())
 }
 
@@ -881,6 +1048,9 @@ fn submodules_are_ready(source: &Path, submodules: &[&str]) -> Result<bool> {
         )?
         .is_empty()
         {
+            return Ok(false);
+        }
+        if !git_output(&directory, &["clean", "-nffdx"])?.is_empty() {
             return Ok(false);
         }
     }
@@ -1036,8 +1206,6 @@ fn install_shaderc(source: &Path, build: &Path, prefix: &Path, shared: bool) -> 
 }
 
 fn build_luajit(preset: Preset, source: &Path, prefix: &Path) -> Result<()> {
-    command::run("git", ["reset", "--hard", LUAJIT_REVISION], source)?;
-    command::run("git", ["clean", "-ffdx"], source)?;
     if preset.rust_target.contains("windows") {
         let mut build = Command::new("cmd");
         build
@@ -2616,13 +2784,25 @@ mod tests {
         assert!(status.success());
         let revision = git_output_for_test(origin.path(), &["rev-parse", "HEAD"]);
 
-        let checkout_root = tempdir().unwrap();
-        let checkout = checkout_root.path().join("source");
-        fetch_source_at(&checkout, origin.path().to_str().unwrap(), revision.trim()).unwrap();
+        let source_cache = tempdir().unwrap();
+        let checkout = source_cache.path().join("source");
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
         fs::write(checkout.join("tracked"), b"modified").unwrap();
         fs::write(checkout.join("untracked"), b"untracked").unwrap();
 
-        fetch_source_at(&checkout, origin.path().to_str().unwrap(), revision.trim()).unwrap();
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
 
         assert_eq!(fs::read(checkout.join("tracked")).unwrap(), b"original");
         assert!(!checkout.join("untracked").exists());
@@ -2639,10 +2819,133 @@ mod tests {
     }
 
     #[test]
+    fn source_fetch_removes_ignored_files() {
+        let origin = tempdir().unwrap();
+        git(origin.path(), &["init"]);
+        fs::write(origin.path().join(".gitignore"), b"ignored\n").unwrap();
+        fs::write(origin.path().join("tracked"), b"original").unwrap();
+        git(origin.path(), &["add", ".gitignore", "tracked"]);
+        commit(origin.path());
+        let revision = git_output_for_test(origin.path(), &["rev-parse", "HEAD"]);
+        let source_cache = tempdir().unwrap();
+        let checkout = source_cache.path().join("source");
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
+        fs::write(checkout.join("ignored"), b"residue").unwrap();
+
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
+
+        assert!(!checkout.join("ignored").exists());
+        assert!(git_output_for_test(&checkout, &["clean", "-nffdx"])
+            .trim()
+            .is_empty());
+    }
+
+    #[test]
+    fn source_fetch_rejects_symlink_destinations_without_touching_targets() {
+        let source_cache = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("protected"), b"outside").unwrap();
+        let destination = source_cache.path().join("source");
+        symlink(outside.path(), &destination).unwrap();
+
+        let error = fetch_source_at(
+            source_cache.path(),
+            &destination,
+            "unused",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("symbolic link"));
+        assert_eq!(
+            fs::read(outside.path().join("protected")).unwrap(),
+            b"outside"
+        );
+    }
+
+    #[test]
+    fn source_fetch_rejects_linked_worktree_git_files() {
+        let source_cache = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("protected"), b"outside").unwrap();
+        let destination = source_cache.path().join("source");
+        fs::create_dir(&destination).unwrap();
+        fs::write(
+            destination.join(".git"),
+            format!("gitdir: {}\n", outside.path().join("git").display()),
+        )
+        .unwrap();
+        fs::write(destination.join("protected"), b"inside").unwrap();
+
+        let error = fetch_source_at(
+            source_cache.path(),
+            &destination,
+            "unused",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(".git file"));
+        assert_eq!(fs::read(destination.join("protected")).unwrap(), b"inside");
+        assert_eq!(
+            fs::read(outside.path().join("protected")).unwrap(),
+            b"outside"
+        );
+    }
+
+    #[test]
+    fn source_fetch_rejects_paths_outside_the_owned_cache() {
+        let parent = tempdir().unwrap();
+        let source_cache = parent.path().join("cache");
+        fs::create_dir(&source_cache).unwrap();
+        let outside = parent.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("protected"), b"outside").unwrap();
+        let destination = source_cache.join("../outside");
+
+        let error = fetch_source_at(
+            &source_cache,
+            &destination,
+            "unused",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("escapes its owned cache"));
+        assert_eq!(fs::read(outside.join("protected")).unwrap(), b"outside");
+    }
+
+    #[test]
     fn source_fetch_rejects_mutable_references() {
-        let checkout = tempdir().unwrap();
-        let error = fetch_source_at(checkout.path(), "unused", "v1.0").unwrap_err();
+        let source_cache = tempdir().unwrap();
+        let checkout = source_cache.path().join("source");
+        let error = fetch_source_at(source_cache.path(), &checkout, "unused", "v1.0").unwrap_err();
         assert!(error.to_string().contains("not an immutable"));
+    }
+
+    fn commit(directory: &std::path::Path) {
+        let status = Command::new("git")
+            .args(["commit", "-m", "Initial"])
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .current_dir(directory)
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     fn git(directory: &std::path::Path, arguments: &[&str]) {
