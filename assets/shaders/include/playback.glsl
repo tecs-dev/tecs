@@ -49,6 +49,16 @@ layout(set = PLAYBACK_SET, binding = PLAYBACK_BINDING) readonly buffer Playbacks
     float value[];
 } playbacks;
 
+// Floats before the directory, holding how many playbacks it has.
+//
+// The count rides the buffer rather than a uniform because every caller already
+// binds the buffer and none of them has a spare uniform component to be handed
+// one in: the geometry pass's layer block and the shadow pass's caster block are
+// both fully assigned. It is also what lets the count arrive without a second
+// parameter on the resolve below, whose signature callers are written against.
+// `HEADER_FLOATS` in src/tecs/gfx/frametable.tl is the same number.
+const int PLAYBACK_HEADER_FLOATS = 1;
+
 // Floats per directory entry. `DIRECTORY_FLOATS` in
 // src/tecs/gfx/frametable.tl is the same number and the pair only works while
 // they agree.
@@ -91,8 +101,24 @@ bool isPlayback(vec4 encoded) {
 //
 // Three dependent reads and no loop, whatever the tag holds: the directory, the
 // tick, and the entry the tick names.
+//
+// An identifier the table has no directory entry for resolves to a degenerate
+// rect at the origin of array layer zero, which is where the backend keeps its
+// white pixel, so it draws the plain white quad an instance carrying no region
+// at all draws. The alternative is a read past the buffer, and the identifier
+// is written from two places now, one of them a compute pass, against a table
+// whose length changes as sheets register.
 Playback resolvePlayback(vec4 encoded, float clock) {
-    int entry = (int(-encoded.x) - 1) * PLAYBACK_DIRECTORY_FLOATS;
+    int id = int(-encoded.x);
+    if (id < 1 || id > int(playbacks.value[0])) {
+        Playback missing;
+        missing.rect = vec4(0.0);
+        missing.layer = 0.0;
+        missing.pivot = vec2(0.0);
+        return missing;
+    }
+
+    int entry = PLAYBACK_HEADER_FLOATS + (id - 1) * PLAYBACK_DIRECTORY_FLOATS;
     float tickBase = playbacks.value[entry + 1];
     float tickCount = playbacks.value[entry + 2];
 

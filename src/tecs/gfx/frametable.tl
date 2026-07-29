@@ -18,14 +18,22 @@
 --- with a single key, and no slice at all, both give an offset of zero on every
 --- frame, which is the overwhelming majority and costs the same as before.
 ---
---- The table is three regions of one buffer, all floats:
+--- The table is a header and three regions of one buffer, all floats:
 ---
+---   header      one float, how many playbacks the directory holds
 ---   directory   four per playback: where its entries and ticks are, how many
 ---               ticks its cycle runs for, and how many steps it visits
 ---   ticks       one per millisecond of the cycle, holding the offset of the
 ---               entry in force at that millisecond
 ---   entries     eight per step of the cycle: the region, the array layer, and
 ---               the pivot offset that step is drawn at
+---
+--- The count is in the buffer rather than in a uniform because the shader needs
+--- it to bound an identifier before it indexes anything, and every pass that
+--- resolves a playback already binds this buffer while none of them has a spare
+--- uniform component: the geometry pass's layer block and the shadow pass's
+--- caster block are both fully assigned. Putting it here also keeps the shared
+--- include's signature as it is, which a second parameter would not.
 ---
 --- A millisecond is the resolution because a millisecond is the unit the model
 --- is authored in: `Builder:frame` takes milliseconds and `sheet.fromAseprite`
@@ -54,6 +62,9 @@ local floor <const> = math.floor
 
 --- Ticks per second of clip time, which is milliseconds.
 local TICK_HZ <const> = 1000.0
+
+--- Floats before the directory, holding how many playbacks it has.
+local HEADER_FLOATS <const> = 1
 
 --- Floats per directory entry: entry base, tick base, tick count, step count.
 local DIRECTORY_FLOATS <const> = 4
@@ -104,6 +115,9 @@ end
 local record frametable
     --- Ticks per second of clip time.
     TICK_HZ: number
+    --- Floats before the directory, holding the playback count the shader
+    --- bounds an identifier against.
+    HEADER_FLOATS: integer
     --- Floats per directory entry: entry base, tick base, tick count, step
     --- count.
     DIRECTORY_FLOATS: integer
@@ -196,6 +210,7 @@ local record frametable
 end
 
 frametable.TICK_HZ = TICK_HZ
+frametable.HEADER_FLOATS = HEADER_FLOATS
 frametable.DIRECTORY_FLOATS = DIRECTORY_FLOATS
 frametable.ENTRY_FLOATS = ENTRY_FLOATS
 
@@ -502,13 +517,12 @@ local function assemble()
         end
     end
 
-    local total = count * DIRECTORY_FLOATS
+    -- The header is what keeps this at least one float, so a process that
+    -- registers nothing still has an index zero to read a count of zero from.
+    local total = HEADER_FLOATS + count * DIRECTORY_FLOATS
     for id = 1, count do
         local playback <const> = playbacks[id]
         total = total + #playback.ticks + #playback.order * ENTRY_FLOATS
-    end
-    if total < 1 then
-        total = 1
     end
 
     if total > capacity then
@@ -520,7 +534,8 @@ local function assemble()
     end
 
     local data <const> = buffer
-    local at = count * DIRECTORY_FLOATS
+    data[0] = count
+    local at = HEADER_FLOATS + count * DIRECTORY_FLOATS
 
     -- Ticks first, then entries, so a playback's two regions are laid out in
     -- the order the shader reads them.
@@ -542,7 +557,7 @@ local function assemble()
 
     for id = 1, count do
         local playback <const> = playbacks[id]
-        local base <const> = (id - 1) * DIRECTORY_FLOATS
+        local base <const> = HEADER_FLOATS + (id - 1) * DIRECTORY_FLOATS
         data[base] = playback.entryBase
         data[base + 1] = playback.tickBase
         data[base + 2] = #playback.ticks
