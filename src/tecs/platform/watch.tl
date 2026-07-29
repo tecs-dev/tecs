@@ -11,6 +11,21 @@
 --- fourth for every platform whose SDK is licensed, to save work measured
 --- below in microseconds.
 ---
+--- ```teal
+--- local watch <const> = tecs.filesystem.watch
+---
+--- if watch.available() then
+---     watch.on("document", function(change: watch.Change)
+---         print("reload " .. change.path)
+---     end)
+---     watch.install({interval = 0.25})
+--- end
+---
+--- -- Once an iteration. An application with `watch` in its config does this and
+--- -- the install above for you.
+--- watch.poll()
+--- ```
+---
 --- **It polls what was loaded, not the content tree.** `assets` records every
 --- path this process has read or decoded, which is a far smaller set than the
 --- tree and is exactly the set where a change has something to act on: a file

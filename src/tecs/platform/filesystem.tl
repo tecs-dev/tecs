@@ -71,10 +71,16 @@
 --- beside the call that opens a file rather than beside the code that decodes
 --- one. `assets` records its own decodes through `note` for the same reason.
 ---
----     local tecs <const> = require("tecs")
----     local save <const> = tecs.filesystem.writablePath("slot1.json")
----     tecs.filesystem.write(save, tecs.data.encodeJSON(state))
----     local bytes <const> = tecs.filesystem.read(save)
+--- ```teal
+--- local save <const> = tecs.filesystem.writablePath("slot1.json")
+--- tecs.filesystem.write(save, tecs.data.encodeJSON({level = 3, hp = 100}))
+---
+--- local bytes <const> = tecs.filesystem.read(save)
+--- if bytes ~= nil then
+---     local state <const> = tecs.data.decodeJSON(bytes)
+---     print(state)
+--- end
+--- ```
 ---
 --- ## Path info is one answer, asked four ways
 ---

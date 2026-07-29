@@ -18,6 +18,21 @@
 --- code knowing a menu exists. Code that names no layer reads the base layer,
 --- which is the safe default: it goes quiet when anything is pushed over it.
 ---
+--- ```teal
+--- local input <const> = app.input
+--- local pause <const> = input:pushLayer("pause")
+---
+--- if input:keyPressed("Escape", pause) then
+---     input:popLayer()
+--- end
+---
+--- -- Naming no layer reads the base layer, which is silent while `pause` is up,
+--- -- so gameplay needs to know nothing about the menu over it.
+--- if input:keyDown("W") and input:mousePressed("left") then
+---     print(input.mouseX, input.mouseY)
+--- end
+--- ```
+---
 --- A gamepad is not part of this object. It has identity, a lifetime, metadata
 --- and outputs, so it is reached through `gamepads()` and answers for itself.
 --- What is here is what the machine has one of: a keyboard, an aggregate

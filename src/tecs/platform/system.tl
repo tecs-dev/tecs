@@ -11,6 +11,16 @@
 --- Names are qualified by what they act on, because one module makes a bare
 --- `text`, `data`, `clear`, `run` or `update` mean nothing on its own.
 ---
+--- ```teal
+--- local run <const> = tecs.system.runProcess({args = {"git", "rev-parse", "HEAD"}})
+---
+--- -- Once a frame, until the child answers.
+--- tecs.system.updateProcesses()
+--- if run.status == "ready" and run.value:succeeded() then
+---     tecs.system.setClipboardText(run.value.output)
+--- end
+--- ```
+---
 --- ## Capabilities
 ---
 --- Read rather than inferred. Selecting behavior from `ffi.os` guesses: it

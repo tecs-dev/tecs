@@ -5,6 +5,18 @@
 --- what makes recorded replay possible: frames are the coordinate system, dt
 --- is data. Reading the performance counter directly from the run loop would
 --- make deterministic replay unimplementable rather than merely unimplemented.
+---
+--- ```teal
+--- local recorded <const>: {number} = {}
+--- local frame = 0
+---
+--- tecs.time.provider = function(realDt: number): number
+---     frame = frame + 1
+---     -- Nil keeps the measurement, so a run past the end of the recording is
+---     -- live again.
+---     return recorded[frame]
+--- end
+--- ```
 
 local sdl <const> = require("tecs.ffi.sdl3")
 

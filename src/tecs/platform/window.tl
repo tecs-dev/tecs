@@ -4,6 +4,21 @@
 --- by a finalizer. Tying GPU-adjacent lifetimes to Lua's collector makes
 --- hot reload either leak or double-free, depending on collection order.
 ---
+--- ```teal
+--- local win <const> = tecs.window.newWindow({title = "Game", width = 1280, height = 720, hidden = true})
+--- win:setMinimumSize(640, 360)
+--- win:center()
+--- win:show()
+---
+--- -- Screen coordinates, which a pointer arrives in, and pixels, which a render
+--- -- target is sized to. They differ on a high-density display.
+--- local width, height = win:getSize()
+--- local pixelWidth, pixelHeight = win:getPixelSize()
+--- tecs.log.get("game"):info("%dx%d screen, %dx%d pixels", width, height, pixelWidth, pixelHeight)
+---
+--- win:destroy()
+--- ```
+---
 --- ## Two coordinate systems, and no converter between them
 ---
 --- `getSize` is screen coordinates, which is what a mouse, a pen or a touch

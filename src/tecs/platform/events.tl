@@ -17,6 +17,17 @@
 --- how a drop is handled. See `KindTypes` for why the vocabulary is a type per
 --- kind rather than one type carrying the kind.
 ---
+--- ```teal
+--- world:observe(0, tecs.events.on.dropFile, function(event: tecs.events.Event)
+---     print(event.text, event.x, event.y)
+--- end)
+---
+--- local pending <const>: {tecs.events.Event} = {}
+--- world:observe(0, tecs.events.on.keyDown, function(event: tecs.events.Event)
+---     pending[#pending + 1] = tecs.events.copy(event)
+--- end)
+--- ```
+---
 --- Unrecognized SDL events arrive as `unknown` with their numeric type rather
 --- than being dropped, so upgrading SDL surfaces new input instead of silently
 --- losing it.
