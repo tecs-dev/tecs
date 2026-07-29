@@ -248,7 +248,19 @@ for _, page in ipairs(modulePages()) do
 end
 
 for _, page in ipairs({
-    { route = "ecs/", title = "tecs.ecs", public = "tecs.ecs", api = { "tecs.ecs" } },
+    {
+        route = "ecs/",
+        title = "tecs.ecs",
+        public = "tecs.ecs",
+        api = {
+            "tecs.ecs",
+            {
+                module = "tecs.types",
+                public = "tecs",
+                include = { "World", "Query", "System", "Plugin" },
+            },
+        },
+    },
     { route = "ecs/archetype", title = "Archetypes" },
     { route = "ecs/builtins", title = "Builtins" },
     { route = "ecs/components/", title = "Components" },
@@ -635,7 +647,8 @@ local function checkPages(context)
             documented[page.public] = true
             route[page.public] = page.path
         end
-        for _, module in ipairs(page.api or {}) do
+        for _, api in ipairs(page.api or {}) do
+            local module = type(api) == "table" and api.module or api
             if not context.env.registry["$" .. module] then
                 error("/" .. page.path .. " names a module nothing read: " .. module, 0)
             end
@@ -763,7 +776,8 @@ end
 local sources = {}
 local staged = {}
 for _, page in ipairs(pages) do
-    for _, module in ipairs(page.api or {}) do
+    for _, api in ipairs(page.api or {}) do
+        local module = type(api) == "table" and api.module or api
         if not staged[module] then
             staged[module] = true
             table.insert(sources, (moduleFile((module:gsub("%.init$", "")))))

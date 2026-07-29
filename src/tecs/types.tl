@@ -1,3 +1,12 @@
+--[=[
+The declarations behind the public ECS types.
+]=]
+
+-- Implementation details:
+-- ECS records refer to one another in both directions. Keeping their
+-- declarations together lets Teal resolve those references without a require
+-- cycle. The public API publishes them under `tecs` and `tecs.ecs`.
+
 local StringBuffer <const> = require("string.buffer")
 
 --- Public type definitions for Tecs.
@@ -15,10 +24,11 @@ local record types
         metamethod __newindex: function<T>(Context, key: Key<T>, value: T)
     end
 
-    --- Plugins are functions that receive the world and can add systems, resources, etc.
+    --- A plugin configures a world with systems, resources, observers, and
+    --- initial entities.
     type Plugin = function(world: World)
 
-    --- A `System` used to update the world on each tick of the game loop.
+    --- A system function runs once when its phase dispatches.
     type System = function(dt: number, world: World)
 
     --- Component factory option shapes, collated separately from the
@@ -429,7 +439,7 @@ local record types
         onArchetypeDestroyed: function(self, archetype: Archetype)
     end
 
-    --- A query for finding entities with specific components.
+    --- A reusable filter over the archetypes in a world.
     interface Query
         --- Whether a query drives simulation or presentation.
         enum Kind
@@ -442,12 +452,13 @@ local record types
             "render"
         end
 
-        --- Query descriptor for creating queries.
+        --- The options passed to `world:query`.
         interface Descriptor
-            --- An optional name to give the query, used in logging.
+            --- Caller-writable. Names the query in logs, profiles, and debug
+            --- tools.
             name: string
 
-            --- Whether this query drives simulation or presentation.
+            --- Caller-writable. Selects simulation or presentation behavior.
             ---
             --- `"logic"` excludes `Paused` entities, so pausing a state stops
             --- the systems that move, damage, or think. `"render"` records the
@@ -456,28 +467,46 @@ local record types
             --- written before this option existed.
             type: Kind
 
-            --- The components an archetype must contain in order to match the query.
+            --- Caller-writable. Lists every component a matching archetype
+            --- must contain.
             include: {components.Component}
 
-            --- The components an archetype must have at least one of (OR condition).
-            --- Archetype matches if it has ALL of include AND at least one of includeAny.
+            --- Caller-writable. Lists components of which a matching
+            --- archetype must contain at least one.
             includeAny: {components.Component}
 
-            --- The components an archetype must not contain in order to match the query.
+            --- Caller-writable. Lists every component a matching archetype
+            --- must omit.
             exclude: {components.Component}
 
-            --- Called once per contiguous range of newly-matched entities.
+            --- Caller-writable. Receives each contiguous range of entities
+            --- that enters the query.
+            ---
+            --- @param archetype The archetype that contains the range.
+            --- @param firstRow The first row in the range.
+            --- @param lastRow The last row in the range.
+            --- @param count The number of rows in the range.
             onEntitiesAdded: function(archetype: Archetype, firstRow: integer, lastRow: integer, count: integer)
 
-            --- Called once per contiguous range of entities leaving the match set.
+            --- Caller-writable. Receives each contiguous range of entities
+            --- that leaves the query.
+            ---
+            --- @param archetype The archetype that contains the range.
+            --- @param firstRow The first row in the range.
+            --- @param lastRow The last row in the range.
+            --- @param count The number of rows in the range.
             onEntitiesRemoved: function(archetype: Archetype, firstRow: integer, lastRow: integer, count: integer)
 
-            --- If true, the query is a snapshot of current archetypes only and does not register subscriptions.
+            --- Caller-writable. Set true to match only the archetypes that
+            --- exist when the query is created.
             temp: boolean
 
-            --- Optional function to group archetypes by an integer key.
+            --- Caller-writable. Assigns an integer group to each archetype.
             --- Archetypes with the same group are iterated contiguously.
             --- Use with groups() and group(id) for efficient grouped iteration.
+            ---
+            --- @param archetype The archetype to classify.
+            --- @return The group identifier.
             groupBy: function(archetype: Archetype): integer
         end
 
@@ -508,6 +537,11 @@ local record types
             groups: function(self): (GroupsIterFn, Cursor, any)
 
             --- Iterate over active archetypes in one group.
+            ---
+            --- @param groupId The group to traverse.
+            --- @return The cursor's grouped step function.
+            --- @return This cursor.
+            --- @return The iterator's initial control value.
             group: function(self, groupId: integer): (GroupIterFn, Cursor, any)
 
             --- Close this cursor's deferred scope.
@@ -531,7 +565,7 @@ local record types
         --- values as `IterFn` narrowed to one group.
         type GroupIterFn = function(Query, any): (Archetype, integer, {integer})
 
-        --- The query descriptor used to create the query.
+        --- Read-only. Returns the descriptor used to create the query.
         --- Exposed for inspection. Mutating it after query construction does
         --- not rebuild component masks, subscriptions, or grouping state.
         descriptor: Descriptor
@@ -574,16 +608,26 @@ local record types
         --- Only available when groupBy is specified.
         --- Usage: `for archetype, len, entities in query:group(id) do ... end`.
         --- Yields nothing if the group has no archetypes.
+        ---
+        --- @param groupId The group to traverse.
+        --- @return The query's grouped step function.
+        --- @return This query.
+        --- @return The iterator's initial control value.
         group: function(self, groupId: integer): (GroupIterFn, Query, any)
 
-        --- Get the cached group ID for an archetype.
-        --- Only available when groupBy is specified.
-        --- Returns nil if archetype is not in this query or groupBy not specified.
+        --- Returns the cached group identifier for an archetype.
+        ---
+        --- Only available when `groupBy` is specified. Returns nil when the
+        --- archetype does not match this query.
+        ---
+        --- @param archetype The archetype to inspect.
+        --- @return Its cached group identifier, or nil when it has none.
         getGroup: function(self, archetype: Archetype): integer
 
-        --- Get the total entity count for a group.
-        --- Only available when groupBy is specified.
-        --- Returns 0 if group doesn't exist or has no entities.
+        --- Returns the total entity count for a group.
+        ---
+        --- @param groupId The group to count.
+        --- @return Its entity count, or zero when the group does not exist.
         getGroupCount: function(self, groupId: integer): integer
 
         --- Total number of entities currently matched by this query.
@@ -735,27 +779,31 @@ local record types
         runIf: function(dt: number, world: World, systemName: string): boolean
     end
 
-    --- The main World interface.
+    --- A world owns entities, components, queries, systems, resources, events,
+    --- snapshots, and the state stack.
     interface World
-        --- World configuration
+        --- The options passed to `tecs.ecs.newWorld`.
         interface Config
-            --- Seconds one fixed step covers. Must be greater than zero.
-            --- Defaults to 1/60.
+            --- Caller-writable. Sets the positive duration of one fixed step
+            --- in seconds. Defaults to 1/60.
             timestep: number
-            --- The most fixed steps one update runs before the overload
-            --- policy applies. Must be a positive integer. Defaults to 10.
+            --- Caller-writable. Sets the positive number of fixed steps one
+            --- update may run before the overload policy applies. Defaults
+            --- to 10.
             fixedMaxSteps: integer
-            --- What becomes of the catch-up that did not fit. Defaults to
-            --- `"drop"`, which bounds a frame's work and reports the loss.
+            --- Caller-writable. Selects what happens to catch-up steps that
+            --- exceed `fixedMaxSteps`. Defaults to `"drop"`.
             fixedOverload: FixedOverload
-            --- Replace the pipeline the world runs systems through. Called
-            --- once at world construction with the three fixed-step settings
-            --- above, already defaulted, and defaults to the built-in
-            --- pipeline. Only a custom scheduler needs this.
+            --- Caller-writable. Builds a custom system pipeline once during
+            --- world construction. Most callers omit this field.
+            ---
+            --- @param timestep The configured fixed timestep.
+            --- @param fixedMaxSteps The configured fixed-step limit.
+            --- @param fixedOverload The configured overload policy.
+            --- @return The pipeline this world will run.
             pipelineFactory: function(number, integer, FixedOverload): Pipeline
-            --- Maximum number of concurrent entity slots. Must be a positive integer,
-            --- at most 2^22 - 1 (~4M; slot 0 is reserved by the packed-id format).
-            --- Defaults to 2^20 (~1M). Arena memory is preallocated to accommodate this size.
+            --- Caller-writable. Sets the positive number of concurrent entity
+            --- slots, up to 2^22 - 1. Defaults to 2^20.
             maxEntities: integer
         end
 
@@ -763,11 +811,12 @@ local record types
         --- frames name components by 1-based index into the component table
         --- rather than repeating the name per archetype.
         interface SnapshotComponentTableEntry
-            --- The component's registered `componentName`, which is how a
-            --- load resolves it against the components registered now.
+            --- Caller-writable. Names the registered component a load
+            --- resolves this entry against.
             name: string
 
-            --- Canonical field-layout fingerprint, for FFI components only.
+            --- Caller-writable. Carries the canonical FFI field-layout
+            --- fingerprint, or nil for a non-FFI component.
             --- Binary output embeds it so a load can detect that the saved
             --- struct layout differs from the current one and route those
             --- rows through per-entity migration. nil for every non-FFI
@@ -779,36 +828,38 @@ local record types
 
         --- The header of a snapshot, and what `loadSnapshot` answers with.
         interface SnapshotPrelude
-            --- Format version of the bytes, not of the game. A load asserts
-            --- on an exact match, so an older snapshot is rejected rather
-            --- than partially read.
+            --- Read-only. Reports the snapshot format version, not the game
+            --- version.
             version: integer
 
-            --- The entity slot allocation resumes from. A load moves the
+            --- Read-only. Reports where entity slot allocation resumes. A load moves the
             --- allocator forward to this when it is ahead of where the
             --- allocator already is, and never backwards, so ids handed out
             --- after a load cannot collide with restored ones.
             nextEntityId: integer
 
-            --- Optional. A writer that knows the count cheaply sets it; a
-            --- streaming writer with no total up front omits it.
+            --- Read-only. Reports the entity count when the writer knew it,
+            --- or nil for a streaming writer.
             entityCount: integer
 
-            --- Optional, on the same terms as `entityCount`.
+            --- Read-only. Reports the archetype count when the writer knew
+            --- it, or nil for a streaming writer.
             archetypeCount: integer
 
-            --- Every component the snapshot's archetypes reference, in the
-            --- order the archetype frames index into.
+            --- Read-only. Lists every referenced component in archetype index
+            --- order.
             componentTable: {SnapshotComponentTableEntry}
         end
 
         --- One archetype's worth of entities in a `"table"` snapshot.
         interface SnapshotArchetypeEntry
-            --- 1-based indices into `Snapshot.componentTable`, in the same
+            --- Caller-writable. Lists 1-based indices into
+            --- `Snapshot.componentTable`, in the same
             --- order the per-entity payloads appear.
             columnIndices: {integer}
 
-            --- One entry per entity, shaped `{id, data1, ..., dataN}`, where
+            --- Caller-writable. Holds one entry per entity, shaped
+            --- `{id, data1, ..., dataN}`, where
             --- `dataI` is whatever the component at `columnIndices[i]`
             --- returned from `serialize`.
             entities: {{any}}
@@ -816,11 +867,13 @@ local record types
 
         --- One keyed value in a snapshot's data section.
         interface SnapshotDataEntry
-            --- The key a `SnapshotHandler` or `customData` entry wrote under.
+            --- Caller-writable. Names the key a `SnapshotHandler` or
+            --- `customData` entry wrote under.
             --- Keys beginning `__tecs.` are the engine's own.
             key: string
 
-            --- Whatever was written. Must survive the chosen format: a
+            --- Caller-writable. Holds the value written under `key`. It must
+            --- survive the chosen format: a
             --- `"binary"` snapshot can carry anything the serializer accepts,
             --- a `"table"` one anything a plain Lua table can hold.
             value: any
@@ -829,20 +882,23 @@ local record types
         --- A whole snapshot in plain-table form, which is what
         --- `saveSnapshot` returns under `format = "table"`.
         interface Snapshot
-            --- Format version, on the same terms as `SnapshotPrelude.version`.
+            --- Caller-writable. Sets the snapshot format version.
             version: integer
 
-            --- The slot allocation resumes from, as on `SnapshotPrelude`.
+            --- Caller-writable. Sets the slot where entity allocation
+            --- resumes.
             nextEntityId: integer
 
-            --- The single source of truth for component references;
+            --- Caller-writable. Lists the components referenced by the
+            --- archetype entries;
             --- `SnapshotArchetypeEntry.columnIndices` points into it.
             componentTable: {SnapshotComponentTableEntry}
 
-            --- The archetypes, in save order.
+            --- Caller-writable. Lists archetypes in save order.
             archetypes: {SnapshotArchetypeEntry}
 
-            --- Keyed values written after every archetype, in the order they
+            --- Caller-writable. Lists keyed values after every archetype, in
+            --- the order they
             --- were added, from `opts.customData` and from `OnSnapshotSave`
             --- listeners.
             data: {SnapshotDataEntry}
@@ -860,25 +916,28 @@ local record types
 
         --- Options passed to `saveSnapshot`. All fields are optional.
         interface SnapshotOptions
-            --- `"binary"` (default) returns a LuaJIT string.buffer;
-            --- `"table"` returns a plain Lua snapshot table.
+            --- Caller-writable. Selects `"binary"` for a LuaJIT
+            --- `string.buffer` or `"table"` for a plain table.
             format: SnapshotFormat
-            --- Reuse this `string.buffer` instead of allocating a fresh one.
+            --- Caller-writable. Supplies a `string.buffer` to reset and reuse
+            --- for binary output.
             --- It is reset before anything is written, so whatever it held is
             --- gone. Binary output only: passing one with `format = "table"`
             --- errors rather than being ignored.
             buffer: StringBuffer
-            --- Optional file path. When provided, saveSnapshot writes the
+            --- Caller-writable. Supplies an optional path for binary output.
+            --- When provided, `saveSnapshot` writes the
             --- bytes to disk and still returns the tagged buffer result.
             --- Binary output only: passing one with `format = "table"` errors
             --- rather than being ignored.
             path: string
-            --- Query descriptor whose include/includeAny/exclude set selects the
-            --- archetypes that should be saved. Built into a temp query internally.
+            --- Caller-writable. Selects saved archetypes through a temporary
+            --- query.
             filterQuery: Query.Descriptor
-            --- Allow-list of `Transform.layer` values (must fit in 0..31).
+            --- Caller-writable. Allows only the listed `Transform.layer`
+            --- values from 0 through 31.
             layers: {integer}
-            --- Ad-hoc keyed metadata to attach to this snapshot.
+            --- Caller-writable. Adds keyed metadata to the snapshot.
             customData: {string: any}
         end
 
@@ -887,16 +946,18 @@ local record types
         --- `loadSnapshot` accepts this record whole, so a round trip needs no
         --- unpacking.
         interface SnapshotOutput
-            --- Which of the two fields below carries the snapshot.
+            --- Read-only. Reports which representation carries the snapshot.
             format: SnapshotFormat
 
-            --- The bytes, under `format = "binary"`. This is `opts.buffer`
+            --- Read-only. Returns the bytes under `format = "binary"`, or nil
+            --- for table output. This is `opts.buffer`
             --- itself when one was passed, so a caller that reuses a buffer
             --- gets the same object back and must read it before the next
             --- save overwrites it.
             buffer: StringBuffer | nil
 
-            --- The snapshot table, under `format = "table"`. Freshly built
+            --- Read-only. Returns the snapshot under `format = "table"`, or
+            --- nil for binary output. The table is freshly built
             --- and the caller's to keep.
             snapshot: Snapshot | nil
         end
@@ -907,28 +968,34 @@ local record types
         --- returns non-nil. `load` receives that value after the ECS world has
         --- been restored. `finish` runs after every data callback has completed.
         interface SnapshotHandler
-            --- The key the value is stored under, and it must be non-empty
+            --- Caller-writable. Sets the non-empty key used to store the
+            --- value
             --- or registration errors. Namespace it with dots
             --- (`"myGame.gameState"`); keys beginning `__tecs.` are the
             --- engine's own.
             name: string
 
-            --- Optional. Returning nil writes no entry at all, which is how
+            --- Caller-writable. Optionally returns data to save. Returning
+            --- nil writes no entry, which is how
             --- a handler declines rather than storing an empty value.
+            ---
+            --- @param world The world being saved.
+            --- @return The value to store, or nil to omit this handler.
             save: function(world: World): any | nil
 
-            --- Optional. Runs only when the snapshot being loaded carries
+            --- Caller-writable. Optionally receives saved data. Tecs calls
+            --- it only when the snapshot carries
             --- this handler's key, so a snapshot saved before the handler
             --- existed simply does not call it.
             load: function(world: World, value: any) | nil
 
-            --- Optional. Runs after every data callback in the load has
+            --- Caller-writable. Optionally runs after every data callback has
             --- completed, which is the place for work that depends on more
             --- than one handler's value.
             finish: function(world: World, prelude: SnapshotPrelude) | nil
         end
 
-        --- Resources stored in the world.
+        --- Caller-writable. Stores world resources under typed keys.
         resources: Context
 
         --- Open a defer scope. Mutations within the scope are staged and
@@ -1014,6 +1081,9 @@ local record types
         --- -- it only dispatches systems. Useful for piecewise phase
         --- execution (e.g. custom game loops splitting Update and
         --- Render across distinct ticks).
+        ---
+        --- @param phase The phase to run.
+        --- @param dt The elapsed seconds passed to its systems, or zero when omitted.
         runPhase: function(self, phase: Phase, dt?: number)
 
         -------------------------------------------------------------------------------
@@ -1252,10 +1322,16 @@ local record types
 
         --- Return the live entity currently carrying `tecs.ecs.EntityKey(key)`,
         --- or nil if no live entity has that key.
+        ---
+        --- @param key The durable key to find.
+        --- @return The live entity, or nil when the key has none.
         byKey: function(self, key: string): integer | nil
 
         --- Return the live entity currently carrying `tecs.ecs.EntityKey(key)`,
         --- or error if no live entity has that key.
+        ---
+        --- @param key The durable key to find.
+        --- @return The live entity.
         requireKey: function(self, key: string): integer
 
         --- Get a component instance attached to an entity.
@@ -1293,7 +1369,8 @@ local record types
         --- Add or update a component on an entity.
         ---
         --- @param entity Entity ID.
-        --- @param component Component instance to set.
+        --- @param component The component instance or scalar component type.
+        --- @param value The scalar value, or nil to use the registered default.
         set: function(self, entity: integer, component: components.Component, value?: any)
 
         --- Remove a component from an entity.
@@ -1454,6 +1531,7 @@ local record types
         ---
         --- @param address The address to emit to (0 for world, entity ID for entity).
         --- @param eventOrType The event instance to emit, or an event type plus constructor args.
+        --- @param ... Constructor arguments when `eventOrType` is an event type.
         emit: function(self, address: integer, eventOrType: events.Event, ...: any)
 
         --- Observe an event at an address.
@@ -1476,9 +1554,9 @@ local record types
 
         --- Check if there are observers for an event at an address.
         ---
-        --- @return Whether anything is listening, so a caller can skip building
-        ---     an event nobody receives. Counts observers registered right now:
-        ---     one added later in the same frame is not reflected.
+        --- @param address The world address or entity identifier.
+        --- @param event The event type to inspect.
+        --- @return True when the address has an observer for this event type.
         hasObservers: function<T is events.Event>(self, address: integer, event: T): boolean
 
         --- Clear all observers for an address (used on entity despawn).
@@ -1577,27 +1655,26 @@ local record types
         --- @return The bundle, or nil if not found.
         getBundle: function(self, name: string): Bundle | nil
 
-        --- World stats information.
+        --- Counts and fixed-step loss reported by `world:getStats`.
         interface Stats
-            --- The number of active entities.
+            --- Read-only. Reports the number of active entities.
             entities: integer
 
-            --- The number of archetypes.
+            --- Read-only. Reports the number of archetypes.
             archetypes: integer
 
-            --- The number of components.
+            --- Read-only. Reports the number of registered components.
             components: integer
 
-            --- The number of systems.
+            --- Read-only. Reports the number of registered systems.
             systems: integer
 
-            --- Simulated seconds the fixed step abandoned because catching up
-            --- would have cost more steps than one update is allowed. Zero on
-            --- a world that has kept up, and the only place a game or a tool
-            --- finds out that it has not.
+            --- Read-only. Reports simulated seconds abandoned by the fixed
+            --- step overload policy.
             fixedTimeDropped: number
 
-            --- Fixed steps that were owed and never ran, on the same terms.
+            --- Read-only. Reports fixed steps abandoned by the overload
+            --- policy.
             fixedStepsDropped: integer
         end
     end
