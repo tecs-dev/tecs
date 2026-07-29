@@ -1588,36 +1588,44 @@ function sequence.plugin(world: World)
     -- install the sequencer.
     seqtweenrun.install()
 
-    world:addSystem({
-        name = "sequence.Advance",
-        phase = ecs.phases.FixedFirst,
-        run = function(dt: number) seqvm.tick(world, state, "fixed", dt) end,
-    })
+    world:addSystem(
+        {
+            name = "sequence.Advance",
+            phase = ecs.phases.FixedFirst,
+            run = function(dt: number) seqvm.tick(world, state, "fixed", dt) end,
+        }
+    )
 
     -- phases.First is the earliest gameplay phase, ahead of the fixed group,
     -- so a frame-clock program has run before anything reads what it did. That
     -- is what scripted input needs and what the fixed clock cannot give it: a
     -- frame runs the fixed phases zero times or several, and a program driving
     -- input has to advance exactly once per frame either way.
-    world:addSystem({
-        name = "sequence.AdvanceFrame",
-        phase = ecs.phases.First,
-        run = function(dt: number) seqvm.tick(world, state, "frame", dt) end,
-    })
+    world:addSystem(
+        {
+            name = "sequence.AdvanceFrame",
+            phase = ecs.phases.First,
+            run = function(dt: number) seqvm.tick(world, state, "frame", dt) end,
+        }
+    )
 
     -- Presentation runs in Update with the frame's real dt: what it carries
     -- has to move at the display's rate, not the simulation's.
-    world:addSystem({
-        name = "sequence.AdvancePresentation",
-        phase = ecs.phases.Update,
-        run = function(dt: number) seqvm.tick(world, state, "presentation", dt) end,
-    })
+    world:addSystem(
+        {
+            name = "sequence.AdvancePresentation",
+            phase = ecs.phases.Update,
+            run = function(dt: number) seqvm.tick(world, state, "presentation", dt) end,
+        }
+    )
 
-    world:addSnapshotHandler({
-        name = "tecs.sequence",
-        save = function(w: World): any return seqsnapshot.save(w) end,
-        load = function(w: World, value: any) seqsnapshot.load(w, value) end,
-    })
+    world:addSnapshotHandler(
+        {
+            name = "tecs.sequence",
+            save = function(w: World): any return seqsnapshot.save(w) end,
+            load = function(w: World, value: any) seqsnapshot.load(w, value) end,
+        }
+    )
 
     -- Owner lifetime: a despawned owner cancels the playbacks it governs.
     world:observe(

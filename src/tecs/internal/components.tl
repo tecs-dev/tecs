@@ -46,9 +46,9 @@ local record components
 end
 
 components.registeredComponents = {}
-components.componentsById = setmetatable({} as {integer: Component}, {
-    __newindex = function() error("componentsById is read-only") end
-})
+components.componentsById = setmetatable(
+    {} as {integer: Component}, {__newindex = function() error("componentsById is read-only") end}
+)
 
 -------------------------------------------------------------------------------
 -- Component creation
@@ -293,15 +293,17 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
                 return instance
             end
         else
-            local ffiAlloc = componentcodegen.createCallFn({
-                backend = "allocatorCall",
-                fields = ffiFields,
-                defaults = ffiDefaults,
-                leadingArgCount = 0,
-                includeSelfParam = true,
-                allocator = ffiAllocator,
-                instanceMt = nil,
-            }) as function(C, ...: any): C
+            local ffiAlloc = componentcodegen.createCallFn(
+                {
+                    backend = "allocatorCall",
+                    fields = ffiFields,
+                    defaults = ffiDefaults,
+                    leadingArgCount = 0,
+                    includeSelfParam = true,
+                    allocator = ffiAllocator,
+                    instanceMt = nil,
+                }
+            ) as function(C, ...: any): C
             if opts.init then
                 local userInit <const> = opts.init
                 callFn = function(_c: C, ...: any): C
@@ -333,15 +335,17 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
             local baseCall: function(C, ...: any): C
             if opts.fields then
                 local tableFields = opts.fields
-                local generated = componentcodegen.createCallFn({
-                    backend = "tableLiteral",
-                    fields = tableFields,
-                    defaults = opts.defaults,
-                    leadingArgCount = 0,
-                    includeSelfParam = true,
-                    instanceMt = tableInstanceMt as metatable<any>,
-                    allocator = nil,
-                })
+                local generated = componentcodegen.createCallFn(
+                    {
+                        backend = "tableLiteral",
+                        fields = tableFields,
+                        defaults = opts.defaults,
+                        leadingArgCount = 0,
+                        includeSelfParam = true,
+                        instanceMt = tableInstanceMt as metatable<any>,
+                        allocator = nil,
+                    }
+                )
                 baseCall = generated as function(C, ...: any): C
             else
                 baseCall = function(_c: C, ...: any): C
@@ -455,19 +459,21 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- per instance. Data-carrying relationships (with `container`/`fields`,
     -- a custom `new`, or internal `storage`) fall through to the paths below.
     if not cfg.container and not cfg.fields and cfgAny.new == nil and cfgAny.storage == nil then
-        return components.newFFIRelationship({
-            name = name,
-            container = {},
-            fields = {},
-            exclusive = cfg.exclusive,
-            sparse = cfg.sparse,
-            reverseIndex = cfg.reverseIndex,
-            cascadeDelete = cfg.cascadeDelete,
-            transient = cfg.transient,
-            serialize = (cfgAny.serialize as function(R): {string: any}),
-            deserialize = (cfgAny.deserialize as function(types.World, {string: any}): R),
-            __call = (cfgAny.__call as function(R, ...: any)),
-        }) as R
+        return components.newFFIRelationship(
+            {
+                name = name,
+                container = {},
+                fields = {},
+                exclusive = cfg.exclusive,
+                sparse = cfg.sparse,
+                reverseIndex = cfg.reverseIndex,
+                cascadeDelete = cfg.cascadeDelete,
+                transient = cfg.transient,
+                serialize = (cfgAny.serialize as function(R): {string: any}),
+                deserialize = (cfgAny.deserialize as function(types.World, {string: any}): R),
+                __call = (cfgAny.__call as function(R, ...: any)),
+            }
+        ) as R
     end
 
     -- `storage` is an internal options field (see newComponent). Cast.
@@ -511,15 +517,17 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                 return instance
             end
         else
-            ctor = componentcodegen.createCallFn({
-                backend = "allocatorCall",
-                fields = relationshipFields,
-                defaults = cfg.defaults,
-                leadingArgCount = 1,
-                includeSelfParam = false,
-                allocator = relationshipAllocator,
-                instanceMt = nil,
-            }) as function(integer, ...: any): R
+            ctor = componentcodegen.createCallFn(
+                {
+                    backend = "allocatorCall",
+                    fields = relationshipFields,
+                    defaults = cfg.defaults,
+                    leadingArgCount = 1,
+                    includeSelfParam = false,
+                    allocator = relationshipAllocator,
+                    instanceMt = nil,
+                }
+            ) as function(integer, ...: any): R
         end
     elseif cfg.fields then
         -- Codegen a plain-table constructor (no metatable; the relationship
@@ -534,15 +542,17 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                 return instance
             end
         else
-            ctor = componentcodegen.createCallFn({
-                backend = "tableLiteral",
-                fields = relationshipFields,
-                defaults = cfg.defaults,
-                leadingArgCount = 1,
-                includeSelfParam = false,
-                instanceMt = nil,
-                allocator = nil,
-            }) as function(integer, ...: any): R
+            ctor = componentcodegen.createCallFn(
+                {
+                    backend = "tableLiteral",
+                    fields = relationshipFields,
+                    defaults = cfg.defaults,
+                    leadingArgCount = 1,
+                    includeSelfParam = false,
+                    instanceMt = nil,
+                    allocator = nil,
+                }
+            ) as function(integer, ...: any): R
         end
     else
         if customCall then
@@ -763,13 +773,15 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
 
     local isSparse = cfg.sparse or false
 
-    local ffiStorage = storage.newFFIStorage({
-        name = name .. "_FFIRelationship",
-        bindingName = name,
-        fields = allFields,
-        metatable = cfg.metatable,
-        perEntityComponent = not isSparse, -- sparse relationships don't need per-instance IDs
-    })
+    local ffiStorage = storage.newFFIStorage(
+        {
+            name = name .. "_FFIRelationship",
+            bindingName = name,
+            fields = allFields,
+            metatable = cfg.metatable,
+            perEntityComponent = not isSparse, -- sparse relationships don't need per-instance IDs
+        }
+    )
 
     -- Convert FFI field tuples to plain names so newRelationship can
     -- codegen `.new` (unpack-by-name into positional args for the ctor).
@@ -782,24 +794,26 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
 
     -- Use newRelationship with the container and FFI storage. `storage`
     -- is an internal options field; same any-cast treatment as elsewhere.
-    return (components.newRelationship as function(any): R)({
-        name = name,
-        container = container,
-        fields = fieldNames,
-        defaults = cfg.defaults,
-        init = cfg.init,
-        __call = (cfg as {string: any})["__call"],
-        new = cfg.new,
-        exclusive = cfg.exclusive,
-        sparse = cfg.sparse,
-        reverseIndex = cfg.reverseIndex,
-        cascadeDelete = cfg.cascadeDelete,
-        transient = cfg.transient,
-        serialize = (cfg as {string: any}).serialize,
-        deserialize = (cfg as {string: any}).deserialize,
-        storage = ffiStorage,
-        __internalStorageToken = INTERNAL_STORAGE_TOKEN,
-    })
+    return (components.newRelationship as function(any): R)(
+        {
+            name = name,
+            container = container,
+            fields = fieldNames,
+            defaults = cfg.defaults,
+            init = cfg.init,
+            __call = (cfg as {string: any})["__call"],
+            new = cfg.new,
+            exclusive = cfg.exclusive,
+            sparse = cfg.sparse,
+            reverseIndex = cfg.reverseIndex,
+            cascadeDelete = cfg.cascadeDelete,
+            transient = cfg.transient,
+            serialize = (cfg as {string: any}).serialize,
+            deserialize = (cfg as {string: any}).deserialize,
+            storage = ffiStorage,
+            __internalStorageToken = INTERNAL_STORAGE_TOKEN,
+        }
+    )
 end
 
 -------------------------------------------------------------------------------
@@ -811,14 +825,16 @@ function components.newTagComponent(options: TagComponentOptions): Component
         error("Tag component " .. tostring(options.name) .. ": `transient` cannot be combined with `serialize`")
     end
     local container = options.container or {}
-    return (components.newComponent as function(any): Component)({
-        name = assert(options.name, "Missing tag component name"),
-        container = container,
-        storage = storage.newBitsetStorage(container),
-        __internalStorageToken = INTERNAL_STORAGE_TOKEN,
-        requires = options.requires,
-        transient = options.transient,
-    })
+    return (components.newComponent as function(any): Component)(
+        {
+            name = assert(options.name, "Missing tag component name"),
+            container = container,
+            storage = storage.newBitsetStorage(container),
+            __internalStorageToken = INTERNAL_STORAGE_TOKEN,
+            requires = options.requires,
+            transient = options.transient,
+        }
+    )
 end
 
 function components.newScalarComponent<T>(options: ScalarComponentOptions<T>): types.components.ScalarComponent<T>
@@ -850,14 +866,18 @@ function components.newScalarComponent<T>(options: ScalarComponentOptions<T>): t
 
     -- `newComponent` provides scalar-specific callFn, `.new`, serialize, and
     -- deserialize for storageType=="scalar" -- no need to forward them here.
-    local component = ((components.newComponent as function(any): any)({
-        name = assert(opts.name, "Missing scalar component name"),
-        container = container,
-        storage = storage.newScalarStorage(kind, defaultValue),
-        __internalStorageToken = INTERNAL_STORAGE_TOKEN,
-        requires = opts.requires,
-        transient = opts.transient,
-    })) as types.components.ScalarComponent<T>
+    local component = (
+        (components.newComponent as function(any): any)(
+            {
+                name = assert(opts.name, "Missing scalar component name"),
+                container = container,
+                storage = storage.newScalarStorage(kind, defaultValue),
+                __internalStorageToken = INTERNAL_STORAGE_TOKEN,
+                requires = opts.requires,
+                transient = opts.transient,
+            }
+        )
+    ) as types.components.ScalarComponent<T>
 
     local cAny = component as {string: any}
     cAny.scalarKind = kind
@@ -875,9 +895,9 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     assert(opts.container, "Missing component container")
     assert(opts.fields, "Missing FFI fields definition")
 
-    local componentStorage = storage.newFFIStorage({
-        name = opts.name, bindingName = opts.name, fields = opts.fields, metatable = opts.metatable
-    })
+    local componentStorage = storage.newFFIStorage(
+        {name = opts.name, bindingName = opts.name, fields = opts.fields, metatable = opts.metatable}
+    )
 
     -- Default `.new(data)` unpacks FFI field tuples by name and routes through
     -- `__call`, so init-managed runtime state is rebuilt on reconstruction.
@@ -894,21 +914,23 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
 
     -- Structured serialize/deserialize fall through to FFIStorage unless the
     -- caller provided custom hooks.
-    local component = (components.newComponent as function(any): C)({
-        name = opts.name,
-        container = opts.container,
-        fields = opts.fields,
-        defaults = opts.defaults,
-        __call = (opts as {string: any})["__call"],
-        init = opts.init,
-        storage = componentStorage,
-        __internalStorageToken = INTERNAL_STORAGE_TOKEN,
-        serialize = opts.serialize,
-        deserialize = opts.deserialize,
-        new = newFn,
-        requires = opts.requires,
-        transient = opts.transient,
-    })
+    local component = (components.newComponent as function(any): C)(
+        {
+            name = opts.name,
+            container = opts.container,
+            fields = opts.fields,
+            defaults = opts.defaults,
+            __call = (opts as {string: any})["__call"],
+            init = opts.init,
+            storage = componentStorage,
+            __internalStorageToken = INTERNAL_STORAGE_TOKEN,
+            serialize = opts.serialize,
+            deserialize = opts.deserialize,
+            new = newFn,
+            requires = opts.requires,
+            transient = opts.transient,
+        }
+    )
 
     -- Expose FFIStorage's buffer-direct raw path on the container. Binary
     -- writers (e.g. snapshot's BufferWriter) can use these to copy struct

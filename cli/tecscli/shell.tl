@@ -16,11 +16,13 @@
 
 local ffi <const> = require("ffi")
 
-ffi.cdef([[
+ffi.cdef(
+    [[
 int execv(const char *path, char *const argv[]);
 int setenv(const char *name, const char *value, int overwrite);
 int chdir(const char *path);
-]])
+]]
+)
 
 -- Named one at a time rather than reached through an open namespace, because
 -- an open FFI namespace types as `any` and an `any` is not callable in Teal.

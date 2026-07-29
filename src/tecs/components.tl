@@ -79,16 +79,18 @@ local record PreviousTransform is Component
     rotation: number
 end
 
-ecs.newFFIComponent({
-    name = "PreviousTransform",
-    container = PreviousTransform,
-    fields = {
-        {"x", "float"},
-        {"y", "float"},
-        {"rotation", "float"},
-    },
-    defaults = {0, 0, 0},
-})
+ecs.newFFIComponent(
+    {
+        name = "PreviousTransform",
+        container = PreviousTransform,
+        fields = {
+            {"x", "float"},
+            {"y", "float"},
+            {"rotation", "float"},
+        },
+        defaults = {0, 0, 0},
+    }
+)
 
 --- Controls base color and how much of the background remains visible.
 ---
@@ -120,17 +122,19 @@ local record Tint is Component
     a: number
 end
 
-ecs.newFFIComponent({
-    name = "Tint",
-    container = Tint,
-    fields = {
-        {"r", "float"},
-        {"g", "float"},
-        {"b", "float"},
-        {"a", "float"},
-    },
-    defaults = {1, 1, 1, 1},
-})
+ecs.newFFIComponent(
+    {
+        name = "Tint",
+        container = Tint,
+        fields = {
+            {"r", "float"},
+            {"g", "float"},
+            {"b", "float"},
+            {"a", "float"},
+        },
+        defaults = {1, 1, 1, 1},
+    }
+)
 
 --- Represents a light resolved by the deferred lighting pass.
 local record PointLight is Component
@@ -149,19 +153,21 @@ local record PointLight is Component
     intensity: number
 end
 
-ecs.newFFIComponent({
-    name = "PointLight",
-    container = PointLight,
-    fields = {
-        {"height", "float"},
-        {"radius", "float"},
-        {"r", "float"},
-        {"g", "float"},
-        {"b", "float"},
-        {"intensity", "float"},
-    },
-    defaults = {64, 256, 1, 1, 1, 1},
-})
+ecs.newFFIComponent(
+    {
+        name = "PointLight",
+        container = PointLight,
+        fields = {
+            {"height", "float"},
+            {"radius", "float"},
+            {"r", "float"},
+            {"g", "float"},
+            {"b", "float"},
+            {"intensity", "float"},
+        },
+        defaults = {64, 256, 1, 1, 1, 1},
+    }
+)
 
 --- Interned image names.
 ---
@@ -286,53 +292,55 @@ local record Sprite is Component
     slot: number
 end
 
-ecs.newFFIComponent({
-    name = "Sprite",
-    container = Sprite,
-    fields = {
-        {"image", "int32_t"},
-        {"u0", "float"},
-        {"v0", "float"},
-        {"u1", "float"},
-        {"v1", "float"},
-        {"slot", "int32_t"},
-    },
-    defaults = {0, 0, 0, 1, 1, -1},
-    serialize = function(instance: Sprite): {string: any}
-        -- A negative first coordinate is not a rect. The four UV lanes carry a
-        -- playback instead when an animation resolves on the GPU, and what
-        -- they hold then is an index into this run's frame table and a count
-        -- of this world's fixed steps, neither of which means anything in
-        -- another run. `Animation` writes what is playing by name and the
-        -- encoder derives these again on the first step after a load, so the
-        -- whole image is what a saved sprite carries and the animation puts
-        -- its own answer back.
-        if instance.u0 < 0.0 then
+ecs.newFFIComponent(
+    {
+        name = "Sprite",
+        container = Sprite,
+        fields = {
+            {"image", "int32_t"},
+            {"u0", "float"},
+            {"v0", "float"},
+            {"u1", "float"},
+            {"v1", "float"},
+            {"slot", "int32_t"},
+        },
+        defaults = {0, 0, 0, 1, 1, -1},
+        serialize = function(instance: Sprite): {string: any}
+            -- A negative first coordinate is not a rect. The four UV lanes carry a
+            -- playback instead when an animation resolves on the GPU, and what
+            -- they hold then is an index into this run's frame table and a count
+            -- of this world's fixed steps, neither of which means anything in
+            -- another run. `Animation` writes what is playing by name and the
+            -- encoder derives these again on the first step after a load, so the
+            -- whole image is what a saved sprite carries and the animation puts
+            -- its own answer back.
+            if instance.u0 < 0.0 then
+                return {
+                    image = imageNames[instance.image as integer],
+                    u0 = 0.0,
+                    v0 = 0.0,
+                    u1 = 1.0,
+                    v1 = 1.0,
+                }
+            end
             return {
                 image = imageNames[instance.image as integer],
-                u0 = 0.0,
-                v0 = 0.0,
-                u1 = 1.0,
-                v1 = 1.0,
+                u0 = instance.u0,
+                v0 = instance.v0,
+                u1 = instance.u1,
+                v1 = instance.v1,
             }
-        end
-        return {
-            image = imageNames[instance.image as integer],
-            u0 = instance.u0,
-            v0 = instance.v0,
-            u1 = instance.u1,
-            v1 = instance.v1,
-        }
-    end,
-    deserialize = function(_world: types.World, data: {string: any}): Sprite
-        local name = data.image as string
-        local image = 0
-        if name ~= nil and name ~= "" then
-            image = imageId(name)
-        end
-        return Sprite(image, data.u0 as number, data.v0 as number, data.u1 as number, data.v1 as number)
-    end,
-})
+        end,
+        deserialize = function(_world: types.World, data: {string: any}): Sprite
+            local name = data.image as string
+            local image = 0
+            if name ~= nil and name ~= "" then
+                image = imageId(name)
+            end
+            return Sprite(image, data.u0 as number, data.v0 as number, data.u1 as number, data.v1 as number)
+        end,
+    }
+)
 
 --- Selects the material that shades a renderable's quad.
 ---
@@ -355,44 +363,47 @@ local record Material is Component
     param: number
 end
 
-ecs.newFFIComponent({
-    name = "Material",
-    container = Material,
-    fields = {
-        {"id", "int32_t"},
-        {"param", "float"},
-    },
-    defaults = {0, 0.25},
-    serialize = function(instance: Material): {string: any}
-        -- The name, the way a Sprite writes its image and an Animation its
-        -- sheet. The id is this build's answer, and the file has to hold
-        -- something that means the same in the next one.
-        return {
-            material = materials.name(instance.id as integer),
-            param = instance.param,
-        }
-    end,
-    deserialize = function(_world: types.World, data: {string: any}): Material
-        local name = data.material as string
-        local id = 0
-        if name ~= nil and name ~= "" then
-            id = materials.find(name)
-            -- Neither the default nor a skipped component. Both of those load
-            -- without a word and draw the entity through a shader nobody
-            -- asked for, which is the failure a name is written to prevent;
-            -- refusing is the only answer that is not a guess.
-            if id == nil then
-                error(
-                    (
-                        "loadSnapshot: snapshot references material '%s' " .. "which this build does not have; found %s"
-                    ):format(name, table.concat(materials.names(), ", ")),
-                    0
-                )
+ecs.newFFIComponent(
+    {
+        name = "Material",
+        container = Material,
+        fields = {
+            {"id", "int32_t"},
+            {"param", "float"},
+        },
+        defaults = {0, 0.25},
+        serialize = function(instance: Material): {string: any}
+            -- The name, the way a Sprite writes its image and an Animation its
+            -- sheet. The id is this build's answer, and the file has to hold
+            -- something that means the same in the next one.
+            return {
+                material = materials.name(instance.id as integer),
+                param = instance.param,
+            }
+        end,
+        deserialize = function(_world: types.World, data: {string: any}): Material
+            local name = data.material as string
+            local id = 0
+            if name ~= nil and name ~= "" then
+                id = materials.find(name)
+                -- Neither the default nor a skipped component. Both of those load
+                -- without a word and draw the entity through a shader nobody
+                -- asked for, which is the failure a name is written to prevent;
+                -- refusing is the only answer that is not a guess.
+                if id == nil then
+                    error(
+                        (
+                            "loadSnapshot: snapshot references material '%s' "
+                            .. "which this build does not have; found %s"
+                        ):format(name, table.concat(materials.names(), ", ")),
+                        0
+                    )
+                end
             end
-        end
-        return Material(id, data.param as number)
-    end,
-})
+            return Material(id, data.param as number)
+        end,
+    }
+)
 
 --- Restricts a renderable's fragments to a clip region.
 ---
@@ -410,14 +421,16 @@ local record Clip is Component
     index: number
 end
 
-ecs.newFFIComponent({
-    name = "Clip",
-    container = Clip,
-    fields = {
-        {"index", "int32_t"},
-    },
-    defaults = {0},
-})
+ecs.newFFIComponent(
+    {
+        name = "Clip",
+        container = Clip,
+        fields = {
+            {"index", "int32_t"},
+        },
+        defaults = {0},
+    }
+)
 
 --- Blocks light from reaching what lies behind the entity.
 ---
@@ -436,14 +449,16 @@ local record Occluder is Component
     height: number
 end
 
-ecs.newFFIComponent({
-    name = "Occluder",
-    container = Occluder,
-    fields = {
-        {"height", "float"},
-    },
-    defaults = {1.0},
-})
+ecs.newFFIComponent(
+    {
+        name = "Occluder",
+        container = Occluder,
+        fields = {
+            {"height", "float"},
+        },
+        defaults = {1.0},
+    }
+)
 
 --- Casts a stretched copy of the entity along the ground, away from light.
 ---
@@ -462,24 +477,28 @@ local record DropShadow is Component
     height: number
 end
 
-ecs.newFFIComponent({
-    name = "DropShadow",
-    container = DropShadow,
-    fields = {
-        {"height", "float"},
-    },
-    defaults = {1.0},
-})
+ecs.newFFIComponent(
+    {
+        name = "DropShadow",
+        container = DropShadow,
+        fields = {
+            {"height", "float"},
+        },
+        defaults = {1.0},
+    }
+)
 
 --- Marks an entity as contributing geometry. Without it, a
 --- [`Transform`](/modules/ecs/#tecs.ecs.Transform) represents only a position.
 local record Renderable is Component
 end
 
-ecs.newComponent({
-    name = "Renderable",
-    container = Renderable,
-})
+ecs.newComponent(
+    {
+        name = "Renderable",
+        container = Renderable,
+    }
+)
 
 -- Implementation details:
 -- All render components except Renderable use FFI columns. Transform remains

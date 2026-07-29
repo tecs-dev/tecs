@@ -691,11 +691,13 @@ local function finishDialog(entry: DialogEntry)
             paths[index + 1] = loader.toString(D.tecsDialogPath(handle, index))
         end
         local selected = tonumber(D.tecsDialogFilter(handle)) as integer
-        entry.future:complete({
-            paths = paths,
-            filter = selected >= 0 and selected + 1 or 0,
-            canceled = D.tecsDialogCancelled(handle) as boolean,
-        })
+        entry.future:complete(
+            {
+                paths = paths,
+                filter = selected >= 0 and selected + 1 or 0,
+                canceled = D.tecsDialogCancelled(handle) as boolean,
+            }
+        )
     end
     D.tecsDialogDestroy(handle)
 end
@@ -722,10 +724,13 @@ function DialogSource:advance(ms: number): integer
     return self:poll()
 end
 
-local dialogSource <const> = setmetatable({
-    sliceMs = 16,
-    defaultWaitMs = 300000,
-} as DialogSource, DialogSourceMT)
+local dialogSource <const> = setmetatable(
+    {
+        sliceMs = 16,
+        defaultWaitMs = 300000,
+    } as DialogSource,
+    DialogSourceMT
+)
 
 local function filterArrays(options: DialogOptions): loader.CArray, loader.CArray, integer
     local filters = options.filters
@@ -1102,10 +1107,12 @@ function system.installProcessRunner(luaPath?: string)
     if worker ~= nil then
         return
     end
-    worker = workers.spawn({
-        source = RUNNER,
-        luaPath = luaPath or package.path,
-    })
+    worker = workers.spawn(
+        {
+            source = RUNNER,
+            luaPath = luaPath or package.path,
+        }
+    )
 end
 
 function system.processRunnerInstalled(): boolean
@@ -1226,12 +1233,15 @@ function Runner:cancel(future: Future<any>)
     worker:send({kind = "kill", id = entry.id, force = true})
 end
 
-local runner <const> = setmetatable({
-    -- Both live here rather than in `Future`, which is what lets a child
-    -- process keep a longer default than a decode without a second convention.
-    sliceMs = SLICE_MS,
-    defaultWaitMs = DEFAULT_WAIT_MS,
-} as Runner, RunnerMT)
+local runner <const> = setmetatable(
+    {
+        -- Both live here rather than in `Future`, which is what lets a child
+        -- process keep a longer default than a decode without a second convention.
+        sliceMs = SLICE_MS,
+        defaultWaitMs = DEFAULT_WAIT_MS,
+    } as Runner,
+    RunnerMT
+)
 
 local source <const> = runner as Future.Source
 
@@ -1258,29 +1268,34 @@ function system.runProcess(options: Options): Future<Result>
     local entry: Entry = {
         id = id,
         future = future,
-        result = setmetatable({
-            args = options.args,
-            pid = 0,
-            exitCode = 0,
-            output = "",
-            errorOutput = "",
-        } as Result, ResultMT),
+        result = setmetatable(
+            {
+                args = options.args,
+                pid = 0,
+                exitCode = 0,
+                output = "",
+                errorOutput = "",
+            } as Result,
+            ResultMT
+        ),
     }
     pending[id] = entry
     byFuture[future] = entry
     results[future] = entry.result
     pendingCount = pendingCount + 1
 
-    worker:send({
-        id = id,
-        args = options.args,
-        cwd = options.cwd,
-        env = options.env,
-        clearEnv = options.clearEnv,
-        mergeStderr = options.mergeStderr,
-        input = options.input,
-        timeoutMs = options.timeoutMs,
-    })
+    worker:send(
+        {
+            id = id,
+            args = options.args,
+            cwd = options.cwd,
+            env = options.env,
+            clearEnv = options.clearEnv,
+            mergeStderr = options.mergeStderr,
+            input = options.input,
+            timeoutMs = options.timeoutMs,
+        }
+    )
     return future
 end
 

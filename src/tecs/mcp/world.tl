@@ -123,9 +123,9 @@ end
 --- Serializes an instance, or returns nil for a component that carries no
 --- data. A tag is presence, so it has nothing to show.
 local function valueOf(kind: ecs.Component, instance: any): {string: any}
-    local ok, serialized = pcall(function(): {string: any}
-        return (kind.serialize as function(any): {string: any})(instance)
-    end)
+    local ok, serialized = pcall(
+        function(): {string: any} return (kind.serialize as function(any): {string: any})(instance) end
+    )
     if not ok or serialized == nil then
         return nil
     end
@@ -194,148 +194,156 @@ local function presentIn(w: types.World): {ecs.Component: boolean}
     if w == nil then
         return present
     end
-    w:forEachArchetype(function(archetype: ecs.Archetype)
-        if archetype.entities[0] == 0 then
-            return
+    w:forEachArchetype(
+        function(archetype: ecs.Archetype)
+            if archetype.entities[0] == 0 then
+                return
+            end
+            local list = archetype.componentList
+            for index = 1, #list do
+                present[list[index]] = true
+            end
         end
-        local list = archetype.componentList
-        for index = 1, #list do
-            present[list[index]] = true
-        end
-    end)
+    )
     return present
 end
 
-mcp.register({
-    name = "components_info",
-    description = "Lists the components these tools can name, with the fields "
-        .. "each carries and whether the bound world carries any.",
-    readOnly = true,
-    inputSchema = {type = "object", properties = data.empty_array},
-    handler = function(_: {string: any}): {string: any}
-        local declared = ecs.declaredComponents()
-        local names = sortedNames(declared)
-        local present = presentIn(bound)
+mcp.register(
+    {
+        name = "components_info",
+        description = "Lists the components these tools can name, with the fields "
+            .. "each carries and whether the bound world carries any.",
+        readOnly = true,
+        inputSchema = {type = "object", properties = data.empty_array},
+        handler = function(_: {string: any}): {string: any}
+            local declared = ecs.declaredComponents()
+            local names = sortedNames(declared)
+            local present = presentIn(bound)
 
-        local described: {any} = {}
-        for index, name in ipairs(names) do
-            local kind = declared[name]
-            -- Fields are read from a default instance rather than declared
-            -- again here, so this cannot describe a component incorrectly.
-            local fields: {string} = {}
-            local built, sample = pcall(function(): any return (kind as function(): any)() end)
-            local contents = built and valueOf(kind, sample) or nil
-            if contents ~= nil then
-                for field in pairs(contents) do
-                    fields[#fields + 1] = field
+            local described: {any} = {}
+            for index, name in ipairs(names) do
+                local kind = declared[name]
+                -- Fields are read from a default instance rather than declared
+                -- again here, so this cannot describe a component incorrectly.
+                local fields: {string} = {}
+                local built, sample = pcall(function(): any return (kind as function(): any)() end)
+                local contents = built and valueOf(kind, sample) or nil
+                if contents ~= nil then
+                    for field in pairs(contents) do
+                        fields[#fields + 1] = field
+                    end
+                    table.sort(fields)
                 end
-                table.sort(fields)
+                described[index] = {
+                    name = name,
+                    id = kind.componentId,
+                    -- A component with no fields is a tag: presence is its whole
+                    -- meaning, which is worth saying rather than leaving inferred
+                    -- from an empty list.
+                    tag = #fields == 0,
+                    fields = #fields > 0 and fields or data.empty_array,
+                    -- Declared here and carried by nothing is a real state, so it
+                    -- reads as absent rather than as a name that does not exist.
+                    present = present[kind] == true,
+                }
             end
-            described[index] = {
-                name = name,
-                id = kind.componentId,
-                -- A component with no fields is a tag: presence is its whole
-                -- meaning, which is worth saying rather than leaving inferred
-                -- from an empty list.
-                tag = #fields == 0,
-                fields = #fields > 0 and fields or data.empty_array,
-                -- Declared here and carried by nothing is a real state, so it
-                -- reads as absent rather than as a name that does not exist.
-                present = present[kind] == true,
-            }
-        end
-        return {components = described, bound = bound ~= nil}
-    end,
-})
+            return {components = described, bound = bound ~= nil}
+        end,
+    }
+)
 
-mcp.register({
-    name = "query",
-    description = "Finds entities carrying every named component. Returns "
-        .. "their ids and, unless values is false, their component values.",
-    readOnly = true,
-    inputSchema = {
-        type = "object",
-        properties = {
-            include = {
-                type = "array",
-                items = {type = "string"},
-                description = "Component names an entity must have.",
+mcp.register(
+    {
+        name = "query",
+        description = "Finds entities carrying every named component. Returns "
+            .. "their ids and, unless values is false, their component values.",
+        readOnly = true,
+        inputSchema = {
+            type = "object",
+            properties = {
+                include = {
+                    type = "array",
+                    items = {type = "string"},
+                    description = "Component names an entity must have.",
+                },
+                limit = {type = "integer", description = "Default 50."},
+                values = {
+                    type = "boolean",
+                    description = "Include component values. Default true.",
+                },
             },
-            limit = {type = "integer", description = "Default 50."},
-            values = {
-                type = "boolean",
-                description = "Include component values. Default true.",
-            },
+            required = {"include"},
         },
-        required = {"include"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local include = componentList(args.include as {any})
-        if #include == 0 then
-            error("include must name at least one component", 0)
-        end
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local include = componentList(args.include as {any})
+            if #include == 0 then
+                error("include must name at least one component", 0)
+            end
 
-        local limit = math.floor(tonumber(args.limit) or 50) as integer
-        local wantValues = args.values ~= false
-        -- Read once for the page rather than per row, since a describe walks
-        -- it whole and the registry cannot change while this runs.
-        local declared = ecs.declaredComponents()
+            local limit = math.floor(tonumber(args.limit) or 50) as integer
+            local wantValues = args.values ~= false
+            -- Read once for the page rather than per row, since a describe walks
+            -- it whole and the registry cannot change while this runs.
+            local declared = ecs.declaredComponents()
 
-        local query = w:query({include = include})
-        local rows: {any} = {}
-        local total = 0
+            local query = w:query({include = include})
+            local rows: {any} = {}
+            local total = 0
 
-        -- A cursor rather than iter, because this stops at the limit and
-        -- leaving an archetype loop early through iter leaves the world
-        -- deferred, which silently queues every later spawn.
-        local cursor = query:cursor()
-        for archetype, length in cursor:iter() do
-            total = total + length
-            for row = 1, length do
-                if #rows < limit then
-                    local entity = archetype.entities[row] as integer
-                    if wantValues then
-                        rows[#rows + 1] = describe(w, entity, declared)
-                    else
-                        rows[#rows + 1] = {
-                            entity = entity,
-                            name = nameOf(w, entity) or data.null,
-                        }
+            -- A cursor rather than iter, because this stops at the limit and
+            -- leaving an archetype loop early through iter leaves the world
+            -- deferred, which silently queues every later spawn.
+            local cursor = query:cursor()
+            for archetype, length in cursor:iter() do
+                total = total + length
+                for row = 1, length do
+                    if #rows < limit then
+                        local entity = archetype.entities[row] as integer
+                        if wantValues then
+                            rows[#rows + 1] = describe(w, entity, declared)
+                        else
+                            rows[#rows + 1] = {
+                                entity = entity,
+                                name = nameOf(w, entity) or data.null,
+                            }
+                        end
                     end
                 end
             end
-        end
-        cursor:close()
+            cursor:close()
 
-        return {
-            matched = total,
-            returned = #rows,
-            entities = #rows > 0 and rows or data.empty_array,
-        }
-    end,
-})
+            return {
+                matched = total,
+                returned = #rows,
+                entities = #rows > 0 and rows or data.empty_array,
+            }
+        end,
+    }
+)
 
-mcp.register({
-    name = "info",
-    description = "Everything known about one entity.",
-    readOnly = true,
-    inputSchema = {
-        type = "object",
-        properties = {entity = {type = "integer"}},
-        required = {"entity"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local entity = math.floor(tonumber(args.entity) or 0) as integer
-        if not w:isAlive(entity) then
-            return {entity = entity, alive = false}
-        end
-        local described = describeOne(w, entity)
-        described.alive = true
-        return described
-    end,
-})
+mcp.register(
+    {
+        name = "info",
+        description = "Everything known about one entity.",
+        readOnly = true,
+        inputSchema = {
+            type = "object",
+            properties = {entity = {type = "integer"}},
+            required = {"entity"},
+        },
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local entity = math.floor(tonumber(args.entity) or 0) as integer
+            if not w:isAlive(entity) then
+                return {entity = entity, alive = false}
+            end
+            local described = describeOne(w, entity)
+            described.alive = true
+            return described
+        end,
+    }
+)
 
 -------------------------------------------------------------------------------
 -- Writing
@@ -359,157 +367,167 @@ local function construct(kind: ecs.Component, values: {string: any}): any
     return instance
 end
 
-mcp.register({
-    name = "spawn",
-    description = "Creates an entity carrying the given components.",
-    destructive = true,
-    inputSchema = {
-        type = "object",
-        properties = {
-            components = {
-                type = "object",
-                description = "Component name to its field values.",
+mcp.register(
+    {
+        name = "spawn",
+        description = "Creates an entity carrying the given components.",
+        destructive = true,
+        inputSchema = {
+            type = "object",
+            properties = {
+                components = {
+                    type = "object",
+                    description = "Component name to its field values.",
+                },
             },
+            required = {"components"},
         },
-        required = {"components"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local requested = args.components as {string: any}
-        if requested == nil or next(requested) == nil then
-            error("components must name at least one component", 0)
-        end
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local requested = args.components as {string: any}
+            if requested == nil or next(requested) == nil then
+                error("components must name at least one component", 0)
+            end
 
-        local instances: {any} = {}
-        for name, values in pairs(requested) do
-            instances[#instances + 1] = construct(component(name), values as {string: any})
-        end
+            local instances: {any} = {}
+            for name, values in pairs(requested) do
+                instances[#instances + 1] = construct(component(name), values as {string: any})
+            end
 
-        -- LuaJIT is 5.1, where unpack is a global rather than table.unpack.
-        local unpackAll = (_G as {string: any})["unpack"] as function({any}): any...
-        local entity = (w.spawn as function(types.World, ...: any): integer)(w, unpackAll(instances))
-        return describeOne(w, entity)
-    end,
-})
+            -- LuaJIT is 5.1, where unpack is a global rather than table.unpack.
+            local unpackAll = (_G as {string: any})["unpack"] as function({any}): any...
+            local entity = (w.spawn as function(types.World, ...: any): integer)(w, unpackAll(instances))
+            return describeOne(w, entity)
+        end,
+    }
+)
 
-mcp.register({
-    name = "set",
-    description = "Replaces a component in full, adding it if absent. Fields "
-        .. "the payload omits take the component's defaults, so prefer modify "
-        .. "for changing a value without disturbing the rest.",
-    destructive = true,
-    inputSchema = {
-        type = "object",
-        properties = {
-            entity = {type = "integer"},
-            component = {type = "string"},
-            values = {type = "object"},
+mcp.register(
+    {
+        name = "set",
+        description = "Replaces a component in full, adding it if absent. Fields "
+            .. "the payload omits take the component's defaults, so prefer modify "
+            .. "for changing a value without disturbing the rest.",
+        destructive = true,
+        inputSchema = {
+            type = "object",
+            properties = {
+                entity = {type = "integer"},
+                component = {type = "string"},
+                values = {type = "object"},
+            },
+            required = {"entity", "component"},
         },
-        required = {"entity", "component"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local entity = math.floor(tonumber(args.entity) or 0) as integer
-        if not w:isAlive(entity) then
-            error(("entity %d is not alive"):format(entity), 0)
-        end
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local entity = math.floor(tonumber(args.entity) or 0) as integer
+            if not w:isAlive(entity) then
+                error(("entity %d is not alive"):format(entity), 0)
+            end
 
-        local kind = component(args.component as string)
-        local added = not w:has(entity, kind)
-        w:set(entity, kind, construct(kind, args.values as {string: any}))
+            local kind = component(args.component as string)
+            local added = not w:has(entity, kind)
+            w:set(entity, kind, construct(kind, args.values as {string: any}))
 
-        local described = describeOne(w, entity)
-        described.added = added
-        return described
-    end,
-})
+            local described = describeOne(w, entity)
+            described.added = added
+            return described
+        end,
+    }
+)
 
-mcp.register({
-    name = "modify",
-    description = "Changes only the named fields, leaving the rest alone. "
-        .. "An entity without the component is skipped rather than gaining "
-        .. "one, so a typo cannot silently add a component.",
-    destructive = true,
-    inputSchema = {
-        type = "object",
-        properties = {
-            entity = {type = "integer"},
-            component = {type = "string"},
-            values = {type = "object"},
+mcp.register(
+    {
+        name = "modify",
+        description = "Changes only the named fields, leaving the rest alone. "
+            .. "An entity without the component is skipped rather than gaining "
+            .. "one, so a typo cannot silently add a component.",
+        destructive = true,
+        inputSchema = {
+            type = "object",
+            properties = {
+                entity = {type = "integer"},
+                component = {type = "string"},
+                values = {type = "object"},
+            },
+            required = {"entity", "component", "values"},
         },
-        required = {"entity", "component", "values"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local entity = math.floor(tonumber(args.entity) or 0) as integer
-        local kind = component(args.component as string)
-        if not w:isAlive(entity) or not w:has(entity, kind) then
-            return {entity = entity, skipped = true}
-        end
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local entity = math.floor(tonumber(args.entity) or 0) as integer
+            local kind = component(args.component as string)
+            if not w:isAlive(entity) or not w:has(entity, kind) then
+                return {entity = entity, skipped = true}
+            end
 
-        local values = args.values as {string: any}
-        if values == nil or next(values) == nil then
-            error("values must name at least one field", 0)
-        end
+            local values = args.values as {string: any}
+            if values == nil or next(values) == nil then
+                error("values must name at least one field", 0)
+            end
 
-        -- getMut rather than get, so the column is marked dirty and whatever
-        -- consumes it re-uploads. Writing through get would change the memory
-        -- and leave the GPU showing the old value.
-        local instance = w:getMut(entity, kind) as {string: any}
-        for field, value in pairs(values) do
-            instance[field] = value
-        end
+            -- getMut rather than get, so the column is marked dirty and whatever
+            -- consumes it re-uploads. Writing through get would change the memory
+            -- and leave the GPU showing the old value.
+            local instance = w:getMut(entity, kind) as {string: any}
+            for field, value in pairs(values) do
+                instance[field] = value
+            end
 
-        local described = describeOne(w, entity)
-        described.skipped = false
-        return described
-    end,
-})
+            local described = describeOne(w, entity)
+            described.skipped = false
+            return described
+        end,
+    }
+)
 
-mcp.register({
-    name = "remove",
-    description = "Removes a component from an entity.",
-    destructive = true,
-    inputSchema = {
-        type = "object",
-        properties = {
-            entity = {type = "integer"},
-            component = {type = "string"},
+mcp.register(
+    {
+        name = "remove",
+        description = "Removes a component from an entity.",
+        destructive = true,
+        inputSchema = {
+            type = "object",
+            properties = {
+                entity = {type = "integer"},
+                component = {type = "string"},
+            },
+            required = {"entity", "component"},
         },
-        required = {"entity", "component"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local entity = math.floor(tonumber(args.entity) or 0) as integer
-        local kind = component(args.component as string)
-        if not w:isAlive(entity) or not w:has(entity, kind) then
-            return {entity = entity, skipped = true}
-        end
-        w:remove(entity, kind)
-        local described = describeOne(w, entity)
-        described.skipped = false
-        return described
-    end,
-})
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local entity = math.floor(tonumber(args.entity) or 0) as integer
+            local kind = component(args.component as string)
+            if not w:isAlive(entity) or not w:has(entity, kind) then
+                return {entity = entity, skipped = true}
+            end
+            w:remove(entity, kind)
+            local described = describeOne(w, entity)
+            described.skipped = false
+            return described
+        end,
+    }
+)
 
-mcp.register({
-    name = "despawn",
-    description = "Destroys an entity.",
-    destructive = true,
-    inputSchema = {
-        type = "object",
-        properties = {entity = {type = "integer"}},
-        required = {"entity"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local w = current()
-        local entity = math.floor(tonumber(args.entity) or 0) as integer
-        if not w:isAlive(entity) then
-            return {entity = entity, skipped = true}
-        end
-        w:despawn(entity)
-        return {entity = entity, skipped = false}
-    end,
-})
+mcp.register(
+    {
+        name = "despawn",
+        description = "Destroys an entity.",
+        destructive = true,
+        inputSchema = {
+            type = "object",
+            properties = {entity = {type = "integer"}},
+            required = {"entity"},
+        },
+        handler = function(args: {string: any}): {string: any}
+            local w = current()
+            local entity = math.floor(tonumber(args.entity) or 0) as integer
+            if not w:isAlive(entity) then
+                return {entity = entity, skipped = true}
+            end
+            w:despawn(entity)
+            return {entity = entity, skipped = false}
+        end,
+    }
+)
 
 return world

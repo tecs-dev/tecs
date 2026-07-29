@@ -138,10 +138,11 @@ local function runCarried(tool: formatting.Tool, check: boolean, paths: {string}
     local newStdio <const> = (cli.Stdio as {string: any}).new as function(
         function(string), function(string), function(): string
     ): any
-    local stdio <const> = newStdio(function(text: string) io.stdout:write(text) end, function(text: string)
-        io.stderr:write(text)
-    end,
-    function(): string return io.stdin:read("*a") end)
+    local stdio <const> = newStdio(
+        function(text: string) io.stdout:write(text) end,
+        function(text: string) io.stderr:write(text) end,
+        function(): string return io.stdin:read("*a") end
+    )
     return (cli.run as function({string}, any): integer)(argv, stdio)
 end
 

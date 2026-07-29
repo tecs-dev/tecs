@@ -12,20 +12,24 @@ describe(
         local TestTag: tecs.ecs.Component
         local TestColor: tecs.ecs.Component
 
-        before_each(function()
-            local testId = math.random(1, 1000000)
+        before_each(
+            function()
+                local testId = math.random(1, 1000000)
 
-            local tagContainer: tecs.ecs.Component = {}
-            TestTag = tecs.ecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
+                local tagContainer: tecs.ecs.Component = {}
+                TestTag = tecs.ecs.newTagComponent({name = "BuiltinTest_Tag" .. testId, container = tagContainer})
 
-            local colorContainer: tecs.ecs.Component = {}
-            TestColor = tecs.ecs.newFFIComponent({
-                name = "BuiltinTest_Color" .. testId,
-                container = colorContainer,
-                fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
-                defaults = {1, 1, 1},
-            })
-        end)
+                local colorContainer: tecs.ecs.Component = {}
+                TestColor = tecs.ecs.newFFIComponent(
+                    {
+                        name = "BuiltinTest_Color" .. testId,
+                        container = colorContainer,
+                        fields = {{"r", "float"}, {"g", "float"}, {"b", "float"}},
+                        defaults = {1, 1, 1},
+                    }
+                )
+            end
+        )
 
         it(
             "preserves Transform values after spawn/despawn cycles using builtin Transform",
@@ -266,21 +270,23 @@ describe(
         -- system marks Transform when it recomputes).
         local function addDirtyProbe(w: tecs.World, child: integer): {boolean}
             local seen: {boolean} = {}
-            w:addSystem({
-                name = "TransformDirtyProbe",
-                phase = tecs.ecs.phases.Last,
-                run = function()
-                    local arch = (w as WorldImpl):currentArchetype(child)
-                    local found = false
-                    for darch in w:dirtyArchetypes() do
-                        if darch == arch then
-                            found = true
-                            break
+            w:addSystem(
+                {
+                    name = "TransformDirtyProbe",
+                    phase = tecs.ecs.phases.Last,
+                    run = function()
+                        local arch = (w as WorldImpl):currentArchetype(child)
+                        local found = false
+                        for darch in w:dirtyArchetypes() do
+                            if darch == arch then
+                                found = true
+                                break
+                            end
                         end
-                    end
-                    seen[#seen + 1] = found
-                end,
-            })
+                        seen[#seen + 1] = found
+                    end,
+                }
+            )
             return seen
         end
 

@@ -113,86 +113,96 @@ timing.enable()
 --- the two is the host loop and the presentation wait around it.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.newApplication({
-    window = {title = "shapes", width = WIDTH, height = HEIGHT},
-    presentMode = "immediate",
-    ambientLight = {1.0, 1.0, 1.0},
-    capacity = COUNT + 64,
-    -- The default ceiling is a million slots, so a scale run has to raise it
-    -- rather than discovering the limit as a spawn failure.
-    maxEntities = COUNT + 1024,
-    debugMaxFrames = WARMUP + FRAMES,
+return tecs.newApplication(
+    {
+        window = {title = "shapes", width = WIDTH, height = HEIGHT},
+        presentMode = "immediate",
+        ambientLight = {1.0, 1.0, 1.0},
+        capacity = COUNT + 64,
+        -- The default ceiling is a million slots, so a scale run has to raise it
+        -- rather than discovering the limit as a spawn failure.
+        maxEntities = COUNT + 1024,
+        debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
-        local renderer = app.renderer
-        spawnField(world)
+        plugin = function(world: tecs.World, app: tecs.Application)
+            local renderer = app.renderer
+            spawnField(world)
 
-        -- Translation only, matching the reference scene. Rotation would make
-        -- the sync recompute a basis per entity per frame, which is a different
-        -- amount of work and would not be comparable.
-        local moving = world:query({include = {Transform, Renderable}})
-        local phase = MODE == "fixed" and tecs.ecs.phases.FixedUpdate or tecs.ecs.phases.Update
+            -- Translation only, matching the reference scene. Rotation would make
+            -- the sync recompute a basis per entity per frame, which is a different
+            -- amount of work and would not be comparable.
+            local moving = world:query({include = {Transform, Renderable}})
+            local phase = MODE == "fixed" and tecs.ecs.phases.FixedUpdate or tecs.ecs.phases.Update
 
-        world:addSystem({
-            name = "bench.Drift",
-            phase = phase,
-            run = function(dt: number)
-                local step = dt * 40.0
-                for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform)
-                    for row = 1, length do
-                        local transform = transforms[row]
-                        local x = transform.x + step
-                        -- Wrap rather than branch on a bound per axis, so the
-                        -- field stays put and the work per frame is constant.
-                        if x > AREA_W then
-                            x = x - AREA_W
+            world:addSystem(
+                {
+                    name = "bench.Drift",
+                    phase = phase,
+                    run = function(dt: number)
+                        local step = dt * 40.0
+                        for archetype, length in moving:iter() do
+                            local transforms = archetype:getMut(Transform)
+                            for row = 1, length do
+                                local transform = transforms[row]
+                                local x = transform.x + step
+                                -- Wrap rather than branch on a bound per axis, so the
+                                -- field stays put and the work per frame is constant.
+                                if x > AREA_W then
+                                    x = x - AREA_W
+                                end
+                                transform.x = x
+                            end
                         end
-                        transform.x = x
-                    end
-                end
-            end,
-        })
-
-        -- The bench's own bookkeeping, in `First` so it runs ahead of every
-        -- system whose cost it is about to record. Counting frames here rather
-        -- than reading the loop's counter keeps the harness inside the world
-        -- like everything else it measures.
-        local frame = 0
-        world:addSystem({
-            name = "bench.Sample",
-            phase = tecs.ecs.phases.First,
-            run = function(dt: number)
-                -- Warmup frames are the ones that built and first uploaded the
-                -- scene. Dropping them from every stage at once is what makes
-                -- the report a distribution of the steady state rather than of
-                -- the run.
-                if frame == WARMUP then
-                    timing.reset()
-                end
-                if frame >= WARMUP then
-                    timing.mark(DELTA, dt)
-                end
-                frame = frame + 1
-            end,
-        })
-
-        world:addSystem({
-            name = "bench.Report",
-            phase = tecs.ecs.phases.Shutdown,
-            run = function()
-                print(("frames after %d warmup, %d of %d instances synced"):format(WARMUP, renderer.count, COUNT))
-                local report = timing.format()
-                if report ~= "" then
-                    print(report)
-                end
-            end,
-        })
-
-        print(
-            ("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s"):format(
-                PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE
+                    end,
+                }
             )
-        )
-    end,
-})
+
+            -- The bench's own bookkeeping, in `First` so it runs ahead of every
+            -- system whose cost it is about to record. Counting frames here rather
+            -- than reading the loop's counter keeps the harness inside the world
+            -- like everything else it measures.
+            local frame = 0
+            world:addSystem(
+                {
+                    name = "bench.Sample",
+                    phase = tecs.ecs.phases.First,
+                    run = function(dt: number)
+                        -- Warmup frames are the ones that built and first uploaded the
+                        -- scene. Dropping them from every stage at once is what makes
+                        -- the report a distribution of the steady state rather than of
+                        -- the run.
+                        if frame == WARMUP then
+                            timing.reset()
+                        end
+                        if frame >= WARMUP then
+                            timing.mark(DELTA, dt)
+                        end
+                        frame = frame + 1
+                    end,
+                }
+            )
+
+            world:addSystem(
+                {
+                    name = "bench.Report",
+                    phase = tecs.ecs.phases.Shutdown,
+                    run = function()
+                        print(
+                            ("frames after %d warmup, %d of %d instances synced"):format(WARMUP, renderer.count, COUNT)
+                        )
+                        local report = timing.format()
+                        if report ~= "" then
+                            print(report)
+                        end
+                    end,
+                }
+            )
+
+            print(
+                ("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s"):format(
+                    PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE
+                )
+            )
+        end,
+    }
+)

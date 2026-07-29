@@ -2055,15 +2055,19 @@ local function plugin(options: PoolOptions): function(World)
         -- age through the pause. Which of the two it is decides whether the
         -- clock advances, so they are two queries rather than one and a test
         -- per row.
-        local running <const> = world:query({
-            name = "tecs.ParticleEmitters",
-            include = {ParticleEmitter, Transform},
-            exclude = {ecs.Paused},
-        })
-        local held <const> = world:query({
-            name = "tecs.PausedParticleEmitters",
-            include = {ParticleEmitter, Transform, ecs.Paused},
-        })
+        local running <const> = world:query(
+            {
+                name = "tecs.ParticleEmitters",
+                include = {ParticleEmitter, Transform},
+                exclude = {ecs.Paused},
+            }
+        )
+        local held <const> = world:query(
+            {
+                name = "tecs.PausedParticleEmitters",
+                include = {ParticleEmitter, Transform, ecs.Paused},
+            }
+        )
 
         renderer:addProducer(self as Renderer.InstanceProducer)
         renderer:addComputeStage(self as Renderer.ComputeStage)
@@ -2071,12 +2075,14 @@ local function plugin(options: PoolOptions): function(World)
         -- `PostUpdate`, after `RelativeTransform`, for the reason text is: a
         -- parented emitter's world transform is composed in that phase, and
         -- reading it earlier would use the transform the previous frame left.
-        world:addSystem({
-            name = "tecs.ParticleEmitterSync",
-            phase = ecs.phases.PostUpdate,
-            after = {"RelativeTransform"},
-            run = function() sync(self, world, running, held) end,
-        })
+        world:addSystem(
+            {
+                name = "tecs.ParticleEmitterSync",
+                phase = ecs.phases.PostUpdate,
+                after = {"RelativeTransform"},
+                run = function() sync(self, world, running, held) end,
+            }
+        )
     end
 end
 
@@ -2215,80 +2221,84 @@ function particles.poolOf(world: World): Pool
     return pools[world]
 end
 
-particles.ParticleEmitter = ecs.newComponent({
-    name = "ParticleEmitter",
-    container = ParticleEmitter,
-    -- An emitter is a position and an effect. Requiring the position means one
-    -- is never accidentally left off, which would leave the emitter out of the
-    -- pool's query and quietly emitting nothing.
-    requires = {Transform},
-    -- One options table rather than seven positional arguments. Six of the
-    -- seven are scales a caller almost never sets, and the one that matters is
-    -- named: `ParticleEmitter({ effect = sparks })` says what it is, and
-    -- `ParticleEmitter(sparks, nil, nil, 1, 1, 1)` does not.
-    __call = function(item: ParticleEmitter, options: EmitterOptions) initEmitter(item, options) end,
-    new = function(data: {string: any}): ParticleEmitter
-        local item <const> = {} as ParticleEmitter
-        initEmitter(item, data as EmitterOptions)
-        return item
-    end,
-    serialize = function(item: ParticleEmitter): {string: any}
-        -- The configuration and nothing else. Not one particle of the field
-        -- can cross, for the reason the mixer's voices cannot: it lives where
-        -- a snapshot cannot reach, and what a restore rebuilds is the emitter.
-        -- A burst effect nobody notices; an ambient one comes back empty and
-        -- refills over a lifetime.
-        --
-        -- The effect crosses as its name, the way a Sprite carries its image
-        -- and an Animation its sheet. Its index is a position in registration
-        -- order, so a saved one names whichever effect the loading process put
-        -- there: one conditional registration or one plugin installed earlier
-        -- is enough to play a different effect and say nothing about it.
-        -- The tint crosses whole rather than as the four numbers it parses
-        -- to. A `Color` is a name, a packed number or a table, and the parsed
-        -- form is a cache on the pool's own record; writing the parsed one back
-        -- would turn every named color into an anonymous quadruple that no
-        -- longer follows the palette it was named from.
-        return {
-            state = item.state,
-            seed = item.seed,
-            rateScale = item.rateScale,
-            sizeScale = item.sizeScale,
-            timeScale = item.timeScale,
-            tint = item.tint,
-            effect = item.effect ~= nil and item.effect.name or nil,
-        }
-    end,
-    deserialize = function(_world: World, data: {string: any}): ParticleEmitter
-        local name <const> = data.effect as string
-        if name == nil or name == "" then
-            error("loadSnapshot: snapshot holds a ParticleEmitter that names " .. "no effect", 0)
-        end
-        -- Neither the first effect nor a dropped component. Both of those load
-        -- without a word and leave the scene playing something nobody asked
-        -- for, which is the failure the name is written to prevent; refusing
-        -- is the only answer here that is not a guess.
-        local effect <const> = findEffect(name)
-        if effect == nil then
-            local known <const> = effectNames()
-            error(
-                (
-                    "loadSnapshot: snapshot references particle effect '%s' "
-                    .. "which this build does not have; found %s"
-                ):format(name, #known > 0 and table.concat(known, ", ") or "none"),
-                0
+particles.ParticleEmitter = ecs.newComponent(
+    {
+        name = "ParticleEmitter",
+        container = ParticleEmitter,
+        -- An emitter is a position and an effect. Requiring the position means one
+        -- is never accidentally left off, which would leave the emitter out of the
+        -- pool's query and quietly emitting nothing.
+        requires = {Transform},
+        -- One options table rather than seven positional arguments. Six of the
+        -- seven are scales a caller almost never sets, and the one that matters is
+        -- named: `ParticleEmitter({ effect = sparks })` says what it is, and
+        -- `ParticleEmitter(sparks, nil, nil, 1, 1, 1)` does not.
+        __call = function(item: ParticleEmitter, options: EmitterOptions) initEmitter(item, options) end,
+        new = function(data: {string: any}): ParticleEmitter
+            local item <const> = {} as ParticleEmitter
+            initEmitter(item, data as EmitterOptions)
+            return item
+        end,
+        serialize = function(item: ParticleEmitter): {string: any}
+            -- The configuration and nothing else. Not one particle of the field
+            -- can cross, for the reason the mixer's voices cannot: it lives where
+            -- a snapshot cannot reach, and what a restore rebuilds is the emitter.
+            -- A burst effect nobody notices; an ambient one comes back empty and
+            -- refills over a lifetime.
+            --
+            -- The effect crosses as its name, the way a Sprite carries its image
+            -- and an Animation its sheet. Its index is a position in registration
+            -- order, so a saved one names whichever effect the loading process put
+            -- there: one conditional registration or one plugin installed earlier
+            -- is enough to play a different effect and say nothing about it.
+            -- The tint crosses whole rather than as the four numbers it parses
+            -- to. A `Color` is a name, a packed number or a table, and the parsed
+            -- form is a cache on the pool's own record; writing the parsed one back
+            -- would turn every named color into an anonymous quadruple that no
+            -- longer follows the palette it was named from.
+            return {
+                state = item.state,
+                seed = item.seed,
+                rateScale = item.rateScale,
+                sizeScale = item.sizeScale,
+                timeScale = item.timeScale,
+                tint = item.tint,
+                effect = item.effect ~= nil and item.effect.name or nil,
+            }
+        end,
+        deserialize = function(_world: World, data: {string: any}): ParticleEmitter
+            local name <const> = data.effect as string
+            if name == nil or name == "" then
+                error("loadSnapshot: snapshot holds a ParticleEmitter that names " .. "no effect", 0)
+            end
+            -- Neither the first effect nor a dropped component. Both of those load
+            -- without a word and leave the scene playing something nobody asked
+            -- for, which is the failure the name is written to prevent; refusing
+            -- is the only answer here that is not a guess.
+            local effect <const> = findEffect(name)
+            if effect == nil then
+                local known <const> = effectNames()
+                error(
+                    (
+                        "loadSnapshot: snapshot references particle effect '%s' "
+                        .. "which this build does not have; found %s"
+                    ):format(name, #known > 0 and table.concat(known, ", ") or "none"),
+                    0
+                )
+            end
+            return particles.ParticleEmitter(
+                {
+                    effect = effect,
+                    state = data.state as EmitterState,
+                    seed = data.seed as number,
+                    rateScale = data.rateScale as number,
+                    sizeScale = data.sizeScale as number,
+                    timeScale = data.timeScale as number,
+                    tint = data.tint as Color,
+                }
             )
-        end
-        return particles.ParticleEmitter({
-            effect = effect,
-            state = data.state as EmitterState,
-            seed = data.seed as number,
-            rateScale = data.rateScale as number,
-            sizeScale = data.sizeScale as number,
-            timeScale = data.timeScale as number,
-            tint = data.tint as Color,
-        })
-    end,
-})
+        end,
+    }
+)
 
 return particles

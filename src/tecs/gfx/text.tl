@@ -1136,9 +1136,9 @@ end
 
 --- Layouts run, by world, for a test or a tool that wants to see the gate
 --- working. Weak keys, so a discarded world is not held alive by its count.
-local layoutCounts <const>: {World: integer} = setmetatable({} as {World: integer}, {
-    __mode = "k"
-} as metatable<{World: integer}>)
+local layoutCounts <const>: {World: integer} = setmetatable(
+    {} as {World: integer}, {__mode = "k"} as metatable<{World: integer}>
+)
 
 --- What the plugin holds on one world, for the same reason and on the same
 --- terms: a reload is asked for from outside any frame and has to reach the run
@@ -1159,9 +1159,9 @@ local record Install
     reloaded: {Font: boolean}
 end
 
-local installs <const>: {World: Install} = setmetatable({} as {World: Install}, {
-    __mode = "k"
-} as metatable<{World: Install}>)
+local installs <const>: {World: Install} = setmetatable(
+    {} as {World: Install}, {__mode = "k"} as metatable<{World: Install}>
+)
 
 -------------------------------------------------------------------------------
 -- Re-reading a font
@@ -1487,10 +1487,12 @@ function text.textPlugin(options: TextOptions): function(World)
     local renderer <const> = options.renderer
 
     return function(world: World)
-        local texts <const> = world:query({
-            name = "tecs.Text",
-            include = {text.Text, Transform},
-        })
+        local texts <const> = world:query(
+            {
+                name = "tecs.Text",
+                include = {text.Text, Transform},
+            }
+        )
         local install <const>: Install = {
             glyphs = newGlyphs(),
             known = {},
@@ -1503,93 +1505,95 @@ function text.textPlugin(options: TextOptions): function(World)
         installs[world] = install
         renderer:addProducer(glyphs as Renderer.InstanceProducer)
 
-        world:addSystem({
-            name = "tecs.TextLayout",
-            phase = ecs.phases.PostUpdate,
-            after = {"RelativeTransform"},
-            run = function()
-                -- A font that has not arrived leaves its texts unbuilt and
-                -- their archetypes clean, so the gate is held open until it
-                -- does, and the decode is pumped meanwhile. A font just re-read
-                -- holds it open for the same reason: its atlas was given up and
-                -- has to be resolved again.
-                local all = install.waiting
-                if all then
-                    assets.update()
-                end
-                install.waiting = false
-                -- Read once and dropped, because clearing what it marks is the
-                -- text's own build record and that survives until a build
-                -- actually succeeds. An atlas that takes a few frames to come
-                -- back is retried on the record, not on this.
-                local reloaded <const> = install.reloaded
-                install.reloaded = nil
+        world:addSystem(
+            {
+                name = "tecs.TextLayout",
+                phase = ecs.phases.PostUpdate,
+                after = {"RelativeTransform"},
+                run = function()
+                    -- A font that has not arrived leaves its texts unbuilt and
+                    -- their archetypes clean, so the gate is held open until it
+                    -- does, and the decode is pumped meanwhile. A font just re-read
+                    -- holds it open for the same reason: its atlas was given up and
+                    -- has to be resolved again.
+                    local all = install.waiting
+                    if all then
+                        assets.update()
+                    end
+                    install.waiting = false
+                    -- Read once and dropped, because clearing what it marks is the
+                    -- text's own build record and that survives until a build
+                    -- actually succeeds. An atlas that takes a few frames to come
+                    -- back is retried on the record, not on this.
+                    local reloaded <const> = install.reloaded
+                    install.reloaded = nil
 
-                local built = 0
-                local live = 0
-                for archetype, length, entities in texts:iter() do
-                    live = live + length
-                    if
-                        all
-                        or archetype:isComponentDirty(text.Text)
-                        or archetype:isComponentDirty(Tint)
-                        or archetype:isComponentDirty(Clip)
-                        or archetype:isComponentDirty(Transform)
-                    then
-                        local column = archetype:get(text.Text)
-                        local transforms = archetype:get(Transform)
-                        local tints = archetype:get(Tint)
-                        -- Absent on a text nobody clips, which is the common
-                        -- case and costs one test for the whole archetype.
-                        local clips = archetype:get(Clip)
-                        for row = 1, length do
-                            local item = column[row]
-                            local transform = transforms[row]
-                            local tint = tints ~= nil and tints[row] or nil
-                            local clip = 0
-                            if clips ~= nil then
-                                clip = clips[row].index as integer
-                            end
-                            -- The font this text holds was read again under it,
-                            -- so what its glyphs were built from is the table
-                            -- it still names and comparing the two says
-                            -- nothing. Forgetting the font is what makes the
-                            -- comparison fail, and it goes on failing until a
-                            -- build writes it back, which is what carries the
-                            -- text across the frames its atlas is decoding in.
-                            if reloaded ~= nil and reloaded[item.font] then
-                                item._builtFont = nil
-                            end
-                            if stale(item, transform, tint, clip) then
-                                built = built + 1
-                                if not build(renderer, known, glyphs, item, transform, tint, clip) then
-                                    install.waiting = true
+                    local built = 0
+                    local live = 0
+                    for archetype, length, entities in texts:iter() do
+                        live = live + length
+                        if
+                            all
+                            or archetype:isComponentDirty(text.Text)
+                            or archetype:isComponentDirty(Tint)
+                            or archetype:isComponentDirty(Clip)
+                            or archetype:isComponentDirty(Transform)
+                        then
+                            local column = archetype:get(text.Text)
+                            local transforms = archetype:get(Transform)
+                            local tints = archetype:get(Tint)
+                            -- Absent on a text nobody clips, which is the common
+                            -- case and costs one test for the whole archetype.
+                            local clips = archetype:get(Clip)
+                            for row = 1, length do
+                                local item = column[row]
+                                local transform = transforms[row]
+                                local tint = tints ~= nil and tints[row] or nil
+                                local clip = 0
+                                if clips ~= nil then
+                                    clip = clips[row].index as integer
                                 end
-                                own(glyphs, entities[row] as integer, item)
+                                -- The font this text holds was read again under it,
+                                -- so what its glyphs were built from is the table
+                                -- it still names and comparing the two says
+                                -- nothing. Forgetting the font is what makes the
+                                -- comparison fail, and it goes on failing until a
+                                -- build writes it back, which is what carries the
+                                -- text across the frames its atlas is decoding in.
+                                if reloaded ~= nil and reloaded[item.font] then
+                                    item._builtFont = nil
+                                end
+                                if stale(item, transform, tint, clip) then
+                                    built = built + 1
+                                    if not build(renderer, known, glyphs, item, transform, tint, clip) then
+                                        install.waiting = true
+                                    end
+                                    own(glyphs, entities[row] as integer, item)
+                                end
                             end
                         end
                     end
-                end
 
-                -- More spans held than there are texts to hold them means at
-                -- least one lost its component, which nothing reports. The
-                -- counts the last sweep saw are remembered so a scene that
-                -- keeps texts out of this query, by disabling them, is walked
-                -- once rather than every frame.
-                if
-                    glyphs._ownerCount > live
-                    and (glyphs._ownerCount ~= glyphs._sweptOwners or live ~= glyphs._sweptLive)
-                then
-                    sweepOwners(glyphs, world)
-                    glyphs._sweptOwners = glyphs._ownerCount
-                    glyphs._sweptLive = live
-                end
+                    -- More spans held than there are texts to hold them means at
+                    -- least one lost its component, which nothing reports. The
+                    -- counts the last sweep saw are remembered so a scene that
+                    -- keeps texts out of this query, by disabling them, is walked
+                    -- once rather than every frame.
+                    if
+                        glyphs._ownerCount > live
+                        and (glyphs._ownerCount ~= glyphs._sweptOwners or live ~= glyphs._sweptLive)
+                    then
+                        sweepOwners(glyphs, world)
+                        glyphs._sweptOwners = glyphs._ownerCount
+                        glyphs._sweptLive = live
+                    end
 
-                if built > 0 then
-                    layoutCounts[world] = (layoutCounts[world] or 0) + built
-                end
-            end,
-        })
+                    if built > 0 then
+                        layoutCounts[world] = (layoutCounts[world] or 0) + built
+                    end
+                end,
+            }
+        )
 
         -- A span outlives its text otherwise: nothing else knows the slots are
         -- free, and the glyphs in them keep being drawn.
@@ -1620,71 +1624,73 @@ end
 -- The component
 -------------------------------------------------------------------------------
 
-text.Text = ecs.newComponent({
-    name = "Text",
-    container = Text,
-    -- A text is a position and a string. Requiring the position means one is
-    -- never accidentally left off, which would make the text quietly not
-    -- appear rather than fail.
-    requires = {Transform},
-    fields = {
-        "text",
-        "font",
-        "size",
-        "align",
-        "lineSpacing",
-        "tracking",
-    },
-    init = function(item: Text)
-        if item.text == nil then
-            item.text = ""
-        end
-        if item.size == nil then
-            item.size = 16
-        end
-        if item.align == nil then
-            item.align = "left"
-        end
-        if item.lineSpacing == nil then
-            item.lineSpacing = 1.0
-        end
-        if item.tracking == nil then
-            item.tracking = 0.0
-        end
-        if ALIGNMENTS[item.align] == nil then
-            error(("tecs: '%s' is not an alignment; use left, center or right"):format(tostring(item.align)), 3)
-        end
-        item.width = 0.0
-        item.height = 0.0
-        item._span = 0
-        item._spanCount = 0
-    end,
-    serialize = function(item: Text): {string: any}
-        -- The authored fields and the font by name. The span is one process's
-        -- answer and the font is a shared table; neither belongs in a save.
-        return {
-            text = item.text,
-            font = item.font ~= nil and item.font.name or nil,
-            size = item.size,
-            align = item.align,
-            lineSpacing = item.lineSpacing,
-            tracking = item.tracking,
-        }
-    end,
-    deserialize = function(_world: World, stored: {string: any}): Text
-        -- A font that was never loaded in this process leaves the text
-        -- without one, which lays out nothing rather than failing a load.
-        local name = stored.font as string
-        local font = name ~= nil and fontsByName[name] or nil
-        return text.Text(
-            stored.text as string,
-            font,
-            stored.size as number,
-            stored.align as string,
-            stored.lineSpacing as number,
-            stored.tracking as number
-        )
-    end,
-})
+text.Text = ecs.newComponent(
+    {
+        name = "Text",
+        container = Text,
+        -- A text is a position and a string. Requiring the position means one is
+        -- never accidentally left off, which would make the text quietly not
+        -- appear rather than fail.
+        requires = {Transform},
+        fields = {
+            "text",
+            "font",
+            "size",
+            "align",
+            "lineSpacing",
+            "tracking",
+        },
+        init = function(item: Text)
+            if item.text == nil then
+                item.text = ""
+            end
+            if item.size == nil then
+                item.size = 16
+            end
+            if item.align == nil then
+                item.align = "left"
+            end
+            if item.lineSpacing == nil then
+                item.lineSpacing = 1.0
+            end
+            if item.tracking == nil then
+                item.tracking = 0.0
+            end
+            if ALIGNMENTS[item.align] == nil then
+                error(("tecs: '%s' is not an alignment; use left, center or right"):format(tostring(item.align)), 3)
+            end
+            item.width = 0.0
+            item.height = 0.0
+            item._span = 0
+            item._spanCount = 0
+        end,
+        serialize = function(item: Text): {string: any}
+            -- The authored fields and the font by name. The span is one process's
+            -- answer and the font is a shared table; neither belongs in a save.
+            return {
+                text = item.text,
+                font = item.font ~= nil and item.font.name or nil,
+                size = item.size,
+                align = item.align,
+                lineSpacing = item.lineSpacing,
+                tracking = item.tracking,
+            }
+        end,
+        deserialize = function(_world: World, stored: {string: any}): Text
+            -- A font that was never loaded in this process leaves the text
+            -- without one, which lays out nothing rather than failing a load.
+            local name = stored.font as string
+            local font = name ~= nil and fontsByName[name] or nil
+            return text.Text(
+                stored.text as string,
+                font,
+                stored.size as number,
+                stored.align as string,
+                stored.lineSpacing as number,
+                stored.tracking as number
+            )
+        end,
+    }
+)
 
 return text

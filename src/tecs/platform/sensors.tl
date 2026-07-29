@@ -169,14 +169,17 @@ function sensors.openSensor(id: number): Sensor, string
         return nil, sdl.error()
     end
     local kind = tonumber(C.SDL_GetSensorType(handle)) as integer
-    return setmetatable({
-        id = tonumber(C.SDL_GetSensorID(handle)) as number,
-        name = loader.toString(C.SDL_GetSensorName(handle)),
-        kind = SENSOR_TYPES[kind] or "unknown",
-        platformType = tonumber(C.SDL_GetSensorNonPortableType(handle)) as integer,
-        _handle = handle,
-        _destroyed = false,
-    } as Sensor, SensorMT), nil
+    return setmetatable(
+        {
+            id = tonumber(C.SDL_GetSensorID(handle)) as number,
+            name = loader.toString(C.SDL_GetSensorName(handle)),
+            kind = SENSOR_TYPES[kind] or "unknown",
+            platformType = tonumber(C.SDL_GetSensorNonPortableType(handle)) as integer,
+            _handle = handle,
+            _destroyed = false,
+        } as Sensor,
+        SensorMT
+    ), nil
 end
 
 function Sensor:read(count?: integer): {number}, string

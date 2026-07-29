@@ -217,12 +217,15 @@ function audio.openMicrophone(config?: MicrophoneConfig): Microphone, string
         C.SDL_DestroyAudioStream(stream)
         return nil, message
     end
-    return setmetatable({
-        frequency = frequency,
-        channels = channels,
-        _stream = stream,
-        _destroyed = false,
-    } as Microphone, MicrophoneMT), nil
+    return setmetatable(
+        {
+            frequency = frequency,
+            channels = channels,
+            _stream = stream,
+            _destroyed = false,
+        } as Microphone,
+        MicrophoneMT
+    ), nil
 end
 
 function Microphone:availableFrames(): integer

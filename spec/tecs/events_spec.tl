@@ -4,9 +4,7 @@ local luassert <const> = require("luassert")
 
 local type Event = tecs.ecs.Event
 
--------------------------------------------------------------------------------------------------------------------------
 -- Test fixtures
--------------------------------------------------------------------------------------------------------------------------
 
 local record Greet is Event
     name: string
@@ -27,9 +25,7 @@ tecs.ecs.newEvent(Depart)
 -- Test address
 local ADDR <const> = 0
 
--------------------------------------------------------------------------------------------------------------------------
 -- Test cases
--------------------------------------------------------------------------------------------------------------------------
 
 describe(
     "MessageBus",
@@ -490,15 +486,18 @@ describe(
                             metamethod __call: function(self: FFIReservedField, value: integer): FFIReservedField
                         end
 
-                        assert.has_error(function()
-                            tecs.ecs.newFFIEvent(
-                                FFIReservedField,
-                                {
-                                    {"typeId", "int32_t"},
-                                    {"value", "int32_t"},
-                                }
-                            )
-                        end, "Field #1: 'typeId' is reserved and must not be specified manually")
+                        assert.has_error(
+                            function()
+                                tecs.ecs.newFFIEvent(
+                                    FFIReservedField,
+                                    {
+                                        {"typeId", "int32_t"},
+                                        {"value", "int32_t"},
+                                    }
+                                )
+                            end,
+                            "Field #1: 'typeId' is reserved and must not be specified manually"
+                        )
 
                         luassert.is_nil(
                             FFIReservedField.eventId, "Expected invalid FFI event registration to leave eventId unset"

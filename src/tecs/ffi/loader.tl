@@ -47,9 +47,11 @@ local ffi <const> = require("ffi")
 -- Enough of dlfcn to pin a library in memory. Declared here rather than
 -- generated, because it is the C library's own interface and exists on every
 -- target that can load one at all.
-ffi.cdef([[
+ffi.cdef(
+    [[
 void *dlopen(const char *path, int mode);
-]])
+]]
+)
 
 --- Load now, and never unmap.
 ---
@@ -194,13 +196,15 @@ end
 
 -- Then the system, where a dependency such as SDL lives. Homebrew installs
 -- outside the default linker path, hence the prefixes.
-for _, path in ipairs({
-    "/opt/homebrew/lib/",
-    "/opt/homebrew/opt/%s/lib/",
-    "/usr/local/lib/",
-    "/usr/local/opt/%s/lib/",
-    "/usr/lib/",
-}) do
+for _, path in ipairs(
+    {
+        "/opt/homebrew/lib/",
+        "/opt/homebrew/opt/%s/lib/",
+        "/usr/local/lib/",
+        "/usr/local/opt/%s/lib/",
+        "/usr/lib/",
+    }
+) do
     loader.searchPaths[#loader.searchPaths + 1] = path
 end
 
@@ -347,10 +351,12 @@ function loader.library(
             -- Pinned before anything can start a thread inside it. A failure
             -- here is not fatal: the library is already loaded and usable, and
             -- only an orderly shutdown that beats its own threads is at risk.
-            pcall(function()
-                local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
-                dlopen(path, RTLD_NOW + RTLD_NODELETE)
-            end)
+            pcall(
+                function()
+                    local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
+                    dlopen(path, RTLD_NOW + RTLD_NODELETE)
+                end
+            )
             loaded[key] = namespace
             return namespace, path
         end

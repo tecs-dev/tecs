@@ -142,26 +142,29 @@ function pipeline.new(fixedTimestep: number, fixedMaxSteps?: integer, fixedOverl
         error("tecs: fixedOverload must be 'drop' or 'accumulate', got " .. tostring(fixedOverload), 2)
     end
 
-    local result: PipelineImpl = setmetatable({
-        dirty = true,
-        systems = {},
-        phaseStates = table_new(#phases.index, 0) as {boolean},
-        fixedTimestep = fixedTimestep or DEFAULT_TIMESTEP,
-        fixedAccumulator = 0,
-        fixedStepCount = 0,
-        fixedMaxSteps = fixedMaxSteps or DEFAULT_MAX_STEPS,
-        fixedOverload = fixedOverload or DEFAULT_OVERLOAD,
-        fixedTimeDropped = 0,
-        fixedStepsDropped = 0,
-        nextDropReport = 1,
-        count = 0,
-        beforeFixedGroup = EMPTY_GROUP,
-        fixedGroup = EMPTY_GROUP,
-        afterFixedGroup = EMPTY_GROUP,
-        phaseGroups = {},
-        systemNameRegistry = {},
-        anonymousSystemCount = 0,
-    }, {__index = PipelineImpl})
+    local result: PipelineImpl = setmetatable(
+        {
+            dirty = true,
+            systems = {},
+            phaseStates = table_new(#phases.index, 0) as {boolean},
+            fixedTimestep = fixedTimestep or DEFAULT_TIMESTEP,
+            fixedAccumulator = 0,
+            fixedStepCount = 0,
+            fixedMaxSteps = fixedMaxSteps or DEFAULT_MAX_STEPS,
+            fixedOverload = fixedOverload or DEFAULT_OVERLOAD,
+            fixedTimeDropped = 0,
+            fixedStepsDropped = 0,
+            nextDropReport = 1,
+            count = 0,
+            beforeFixedGroup = EMPTY_GROUP,
+            fixedGroup = EMPTY_GROUP,
+            afterFixedGroup = EMPTY_GROUP,
+            phaseGroups = {},
+            systemNameRegistry = {},
+            anonymousSystemCount = 0,
+        },
+        {__index = PipelineImpl}
+    )
 
     -- Initialize each phase.
     for i = 1, #phases.index do

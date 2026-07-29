@@ -591,65 +591,79 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._forwardBuffers = {self._lightBuffer.handle, self._tileCounts.handle, self._tileLights.handle}
 
     local graph = PassGraph.create(device, swapchainFormat)
-    graph:target({
-        name = "albedo",
-        format = RGBA8,
-        clear = {r = 0, g = 0, b = 0, a = 0},
-    })
-    graph:target({
-        name = "normal",
-        format = RGBA8,
-        -- The alpha is what carries here. Zero marks a pixel as unlit, so
-        -- anything nothing drew over composites as the albedo clear instead of
-        -- picking up ambient over a normal it never wrote. The rgb encodes a
-        -- surface facing the viewer, which is what geometry writes, so the
-        -- attachment reads consistently either way.
-        clear = {r = 0.5, g = 0.5, b = 1.0, a = 0},
-    })
-    graph:target({
-        name = "lit",
-        format = RGBA8,
-        clear = {r = 0, g = 0, b = 0, a = 1},
-    })
-    graph:target({
-        -- No clear: this is what anything running between composite and
-        -- present writes into, and a clear here would be applied by each of
-        -- those passes in turn. Composite covers every pixel and goes first,
-        -- so there is nothing undefined for a later pass to load.
-        name = "scene",
-        format = RGBA8,
-    })
+    graph:target(
+        {
+            name = "albedo",
+            format = RGBA8,
+            clear = {r = 0, g = 0, b = 0, a = 0},
+        }
+    )
+    graph:target(
+        {
+            name = "normal",
+            format = RGBA8,
+            -- The alpha is what carries here. Zero marks a pixel as unlit, so
+            -- anything nothing drew over composites as the albedo clear instead of
+            -- picking up ambient over a normal it never wrote. The rgb encodes a
+            -- surface facing the viewer, which is what geometry writes, so the
+            -- attachment reads consistently either way.
+            clear = {r = 0.5, g = 0.5, b = 1.0, a = 0},
+        }
+    )
+    graph:target(
+        {
+            name = "lit",
+            format = RGBA8,
+            clear = {r = 0, g = 0, b = 0, a = 1},
+        }
+    )
+    graph:target(
+        {
+            -- No clear: this is what anything running between composite and
+            -- present writes into, and a clear here would be applied by each of
+            -- those passes in turn. Composite covers every pixel and goes first,
+            -- so there is nothing undefined for a later pass to load.
+            name = "scene",
+            format = RGBA8,
+        }
+    )
 
     if shadows then
-        graph:target({
-            -- One mask for every light, rather than a pass per light. Red
-            -- carries how tall the occluder covering a pixel is and green marks
-            -- that an occluder really covers it, so a march can tell a
-            -- silhouette from the halo the blur spreads around one. Both clear
-            -- to zero, which reads as no occluder anywhere.
-            name = "occluders",
-            format = RGBA8,
-            scale = self._shadowMaskScale,
-            clear = {r = 0, g = 0, b = 0, a = 0},
-        })
-        graph:target({
-            -- Where the first blur pass puts its result so the second can read
-            -- it. Nothing outside the two touches it.
-            name = "occludersTemp",
-            format = RGBA8,
-            scale = self._shadowMaskScale,
-            clear = {r = 0, g = 0, b = 0, a = 0},
-        })
-        graph:target({
-            -- One channel: how much of all lighting reaches a pixel after every
-            -- drop shadow thrown across it. Cleared to white, because a pixel
-            -- no shadow lands on multiplies the light it receives by one, and
-            -- half sized because it holds nothing sharp.
-            name = "dropShadowAO",
-            format = R8,
-            scale = tuning.dropScale or 0.5,
-            clear = {r = 1, g = 1, b = 1, a = 1},
-        })
+        graph:target(
+            {
+                -- One mask for every light, rather than a pass per light. Red
+                -- carries how tall the occluder covering a pixel is and green marks
+                -- that an occluder really covers it, so a march can tell a
+                -- silhouette from the halo the blur spreads around one. Both clear
+                -- to zero, which reads as no occluder anywhere.
+                name = "occluders",
+                format = RGBA8,
+                scale = self._shadowMaskScale,
+                clear = {r = 0, g = 0, b = 0, a = 0},
+            }
+        )
+        graph:target(
+            {
+                -- Where the first blur pass puts its result so the second can read
+                -- it. Nothing outside the two touches it.
+                name = "occludersTemp",
+                format = RGBA8,
+                scale = self._shadowMaskScale,
+                clear = {r = 0, g = 0, b = 0, a = 0},
+            }
+        )
+        graph:target(
+            {
+                -- One channel: how much of all lighting reaches a pixel after every
+                -- drop shadow thrown across it. Cleared to white, because a pixel
+                -- no shadow lands on multiplies the light it receives by one, and
+                -- half sized because it holds nothing sharp.
+                name = "dropShadowAO",
+                format = R8,
+                scale = tuning.dropScale or 0.5,
+                clear = {r = 1, g = 1, b = 1, a = 1},
+            }
+        )
     end
 
     self._lightingPipeline = buildPipeline(
@@ -661,148 +675,166 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     self._compositePipeline = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
     self._presentPipeline = buildPipeline(device, "deferred.present.frag", swapchainFormat, "present", nil)
 
-    graph:pass({
-        name = "geometry",
-        outputs = {"albedo", "normal"},
-        -- Cleared to the far plane every frame, and "lessOrEqual" rather than
-        -- "less" so equal depths still resolve to whatever drew last. Draw
-        -- order is deterministic and means something here, so depth decides
-        -- between instances that differ and leaves the rest alone.
-        depth = {
-            test = true,
-            write = true,
-            compare = "lessOrEqual",
-            clear = 1.0,
-        },
-        execute = function(context: PassGraph.PassContext)
-            if options.geometry ~= nil then
-                options.geometry(context)
-            end
-        end,
-    })
+    graph:pass(
+        {
+            name = "geometry",
+            outputs = {"albedo", "normal"},
+            -- Cleared to the far plane every frame, and "lessOrEqual" rather than
+            -- "less" so equal depths still resolve to whatever drew last. Draw
+            -- order is deterministic and means something here, so depth decides
+            -- between instances that differ and leaves the rest alone.
+            depth = {
+                test = true,
+                write = true,
+                compare = "lessOrEqual",
+                clear = 1.0,
+            },
+            execute = function(context: PassGraph.PassContext)
+                if options.geometry ~= nil then
+                    options.geometry(context)
+                end
+            end,
+        }
+    )
 
     if shadows then
-        graph:pass({
-            -- Before lighting rather than after, because the mask is what
-            -- lighting reads. This is the seam shadows want, and it is a
-            -- different one from the seam a post-process wants: a shadow is not
-            -- something done to a finished image.
-            name = "occluders",
-            outputs = {"occluders"},
-            execute = function(context: PassGraph.PassContext)
-                if options.occluders ~= nil then
-                    options.occluders(context)
-                end
-            end,
-        })
-        graph:pass({
-            name = "occluderBlurH",
-            inputs = {"occluders"},
-            outputs = {"occludersTemp"},
-            execute = function(context: PassGraph.PassContext)
-                local blur <const> = self._blurUniform
-                blur[0] = 1.0 / context.width
-                blur[1] = 0.0
-                blur[2] = 0.0
-                blur[3] = 0.0
-                context.pass:bindPipeline(self._blurPipeline.handle)
-                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
-                context.pass:draw(3)
-            end,
-        })
-        graph:pass({
-            -- Back into the mask, which a target may be written twice for. The
-            -- clear it declares is applied again and costs nothing: this covers
-            -- every pixel of it, so there is nothing of the first write left to
-            -- preserve.
-            name = "occluderBlurV",
-            inputs = {"occludersTemp"},
-            outputs = {"occluders"},
-            execute = function(context: PassGraph.PassContext)
-                local blur <const> = self._blurUniform
-                blur[0] = 0.0
-                blur[1] = 1.0 / context.height
-                blur[2] = 0.0
-                blur[3] = 0.0
-                context.pass:bindPipeline(self._blurPipeline.handle)
-                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
-                context.pass:draw(3)
-            end,
-        })
-        graph:pass({
-            -- Reads no G-buffer target, so it introduces no dependency the
-            -- graph has to resolve and could sit anywhere before lighting. It
-            -- is here because that is where a reader looks for it.
-            name = "dropShadowAO",
-            outputs = {"dropShadowAO"},
-            execute = function(context: PassGraph.PassContext)
-                if options.dropShadows ~= nil then
-                    options.dropShadows(context)
-                end
-            end,
-        })
+        graph:pass(
+            {
+                -- Before lighting rather than after, because the mask is what
+                -- lighting reads. This is the seam shadows want, and it is a
+                -- different one from the seam a post-process wants: a shadow is not
+                -- something done to a finished image.
+                name = "occluders",
+                outputs = {"occluders"},
+                execute = function(context: PassGraph.PassContext)
+                    if options.occluders ~= nil then
+                        options.occluders(context)
+                    end
+                end,
+            }
+        )
+        graph:pass(
+            {
+                name = "occluderBlurH",
+                inputs = {"occluders"},
+                outputs = {"occludersTemp"},
+                execute = function(context: PassGraph.PassContext)
+                    local blur <const> = self._blurUniform
+                    blur[0] = 1.0 / context.width
+                    blur[1] = 0.0
+                    blur[2] = 0.0
+                    blur[3] = 0.0
+                    context.pass:bindPipeline(self._blurPipeline.handle)
+                    C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
+                    context.pass:draw(3)
+                end,
+            }
+        )
+        graph:pass(
+            {
+                -- Back into the mask, which a target may be written twice for. The
+                -- clear it declares is applied again and costs nothing: this covers
+                -- every pixel of it, so there is nothing of the first write left to
+                -- preserve.
+                name = "occluderBlurV",
+                inputs = {"occludersTemp"},
+                outputs = {"occluders"},
+                execute = function(context: PassGraph.PassContext)
+                    local blur <const> = self._blurUniform
+                    blur[0] = 0.0
+                    blur[1] = 1.0 / context.height
+                    blur[2] = 0.0
+                    blur[3] = 0.0
+                    context.pass:bindPipeline(self._blurPipeline.handle)
+                    C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, blur, 16)
+                    context.pass:draw(3)
+                end,
+            }
+        )
+        graph:pass(
+            {
+                -- Reads no G-buffer target, so it introduces no dependency the
+                -- graph has to resolve and could sit anywhere before lighting. It
+                -- is here because that is where a reader looks for it.
+                name = "dropShadowAO",
+                outputs = {"dropShadowAO"},
+                execute = function(context: PassGraph.PassContext)
+                    if options.dropShadows ~= nil then
+                        options.dropShadows(context)
+                    end
+                end,
+            }
+        )
     end
 
-    graph:pass({
-        name = "lighting",
-        inputs = shadows and {"albedo", "normal", "occluders", "dropShadowAO"} or {"albedo", "normal"},
-        outputs = {"lit"},
-        execute = function(context: PassGraph.PassContext)
-            local scene <const> = sceneUniform(self, context.width, context.height)
+    graph:pass(
+        {
+            name = "lighting",
+            inputs = shadows and {"albedo", "normal", "occluders", "dropShadowAO"} or {"albedo", "normal"},
+            outputs = {"lit"},
+            execute = function(context: PassGraph.PassContext)
+                local scene <const> = sceneUniform(self, context.width, context.height)
 
-            local buffers <const> = self._lightingBuffers
-            buffers[1] = self._lightBuffer.handle
-            buffers[2] = self._tileCounts.handle
-            buffers[3] = self._tileLights.handle
+                local buffers <const> = self._lightingBuffers
+                buffers[1] = self._lightBuffer.handle
+                buffers[2] = self._tileCounts.handle
+                buffers[3] = self._tileLights.handle
 
-            context.pass:bindPipeline(self._lightingPipeline.handle)
-            context.pass:bindFragmentStorageBuffers(0, buffers)
-            C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, SCENE_BYTES)
-            context.pass:draw(3)
-        end,
-    })
+                context.pass:bindPipeline(self._lightingPipeline.handle)
+                context.pass:bindFragmentStorageBuffers(0, buffers)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, scene, SCENE_BYTES)
+                context.pass:draw(3)
+            end,
+        }
+    )
 
-    graph:pass({
-        name = "composite",
-        inputs = {"lit"},
-        outputs = {"scene"},
-        execute = function(context: PassGraph.PassContext)
-            context.pass:bindPipeline(self._compositePipeline.handle)
-            context.pass:draw(3)
-        end,
-    })
+    graph:pass(
+        {
+            name = "composite",
+            inputs = {"lit"},
+            outputs = {"scene"},
+            execute = function(context: PassGraph.PassContext)
+                context.pass:bindPipeline(self._compositePipeline.handle)
+                context.pass:draw(3)
+            end,
+        }
+    )
 
-    graph:pass({
-        -- Writes what composite left rather than clearing it, which `scene`
-        -- gives for nothing by declaring no clear of its own.
-        --
-        -- Depth is attached without a clear, so what it loads is what geometry
-        -- wrote, and without a write, so a blended fragment is rejected by the
-        -- opaque geometry in front of it and rejects nothing itself. That is
-        -- the whole of why blended content has to arrive sorted: depth decides
-        -- it against the G-buffer and cannot decide it against itself.
-        name = "forward",
-        outputs = {"scene"},
-        depth = {test = true, write = false},
-        execute = function(context: PassGraph.PassContext)
-            if options.forward ~= nil then
-                options.forward(context)
-            end
-        end,
-    })
+    graph:pass(
+        {
+            -- Writes what composite left rather than clearing it, which `scene`
+            -- gives for nothing by declaring no clear of its own.
+            --
+            -- Depth is attached without a clear, so what it loads is what geometry
+            -- wrote, and without a write, so a blended fragment is rejected by the
+            -- opaque geometry in front of it and rejects nothing itself. That is
+            -- the whole of why blended content has to arrive sorted: depth decides
+            -- it against the G-buffer and cannot decide it against itself.
+            name = "forward",
+            outputs = {"scene"},
+            depth = {test = true, write = false},
+            execute = function(context: PassGraph.PassContext)
+                if options.forward ~= nil then
+                    options.forward(context)
+                end
+            end,
+        }
+    )
 
-    graph:pass({
-        -- Declared last and executed last, since the graph runs passes in
-        -- declaration order and this is the one that writes the swapchain.
-        -- Anything added to the seam is declared above this, not after it.
-        name = "present",
-        inputs = {"scene"},
-        outputs = {},
-        execute = function(context: PassGraph.PassContext)
-            context.pass:bindPipeline(self._presentPipeline.handle)
-            context.pass:draw(3)
-        end,
-    })
+    graph:pass(
+        {
+            -- Declared last and executed last, since the graph runs passes in
+            -- declaration order and this is the one that writes the swapchain.
+            -- Anything added to the seam is declared above this, not after it.
+            name = "present",
+            inputs = {"scene"},
+            outputs = {},
+            execute = function(context: PassGraph.PassContext)
+                context.pass:bindPipeline(self._presentPipeline.handle)
+                context.pass:draw(3)
+            end,
+        }
+    )
 
     self.graph = graph
     return self
@@ -1010,17 +1042,19 @@ function Deferred:rebuildPipelines()
     local present: GraphicsPipeline = nil
     local blur: GraphicsPipeline = nil
     local bin: ComputePipeline = nil
-    local built, reason = pcall(function(): string
-        lighting = buildPipeline(
-            device, "deferred.lighting.frag", RGBA8, "lighting", self._shadows and {SHADOWS = "1"} or nil
-        )
-        composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
-        present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present", nil)
-        if self._shadows then
-            blur = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
+    local built, reason = pcall(
+        function(): string
+            lighting = buildPipeline(
+                device, "deferred.lighting.frag", RGBA8, "lighting", self._shadows and {SHADOWS = "1"} or nil
+            )
+            composite = buildPipeline(device, "deferred.composite.frag", RGBA8, "composite", nil)
+            present = buildPipeline(device, "deferred.present.frag", self.graph.swapchainFormat, "present", nil)
+            if self._shadows then
+                blur = buildPipeline(device, "occluder.blur.frag", RGBA8, "occluderBlur", nil)
+            end
+            bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
         end
-        bin = ComputePipeline.load(device, "deferred.lightbin.comp", {})
-    end)
+    )
     if not built then
         if lighting ~= nil then
             lighting:destroy()

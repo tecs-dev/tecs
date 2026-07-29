@@ -612,11 +612,14 @@ function net.DatagramSocket:receive(): net.Packet, string
     local host <const> = text ~= nil and loader.toBytes(text, tonumber(addressLength[0]) as integer) or ""
     local bytesLength <const> = loader.newArray("size_t[1]")
     local bytes <const> = C.tecsNetPacketBytes(datagram, bytesLength)
-    local packet <const> = setmetatable({
-        address = addressFrom(source, host),
-        port = tonumber(C.tecsNetPacketPort(datagram)) as integer,
-        bytes = loader.toBytes(bytes, tonumber(bytesLength[0]) as integer),
-    } as net.Packet, PacketMT)
+    local packet <const> = setmetatable(
+        {
+            address = addressFrom(source, host),
+            port = tonumber(C.tecsNetPacketPort(datagram)) as integer,
+            bytes = loader.toBytes(bytes, tonumber(bytesLength[0]) as integer),
+        } as net.Packet,
+        PacketMT
+    )
     C.tecsNetPacketDestroy(datagram)
     return packet
 end

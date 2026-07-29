@@ -42,11 +42,13 @@ describe(
                     function()
                         local structName = "ReloadedStorageStruct" .. math.random(1, 1000000)
                         local bindingName = "ReloadedStorageComponent" .. math.random(1, 1000000)
-                        local s1 = FFIStorage.new({
-                            name = structName,
-                            bindingName = bindingName,
-                            fields = {{"x", "float"}},
-                        })
+                        local s1 = FFIStorage.new(
+                            {
+                                name = structName,
+                                bindingName = bindingName,
+                                fields = {{"x", "float"}},
+                            }
+                        )
                         local a = {componentName = bindingName} as any
                         s1:createComponent(a)
 
@@ -55,11 +57,13 @@ describe(
                         local ReloadedFFIStorage = require(moduleName) as any
                         package.loaded[moduleName] = FFIStorage
 
-                        local s2 = ReloadedFFIStorage.new({
-                            name = structName,
-                            bindingName = bindingName,
-                            fields = {{"x", "float"}},
-                        }) as any
+                        local s2 = ReloadedFFIStorage.new(
+                            {
+                                name = structName,
+                                bindingName = bindingName,
+                                fields = {{"x", "float"}},
+                            }
+                        ) as any
                         local b = {componentName = bindingName} as any
                         local allocate = s2:createComponent(b) as function(): any
                         local instance = allocate()

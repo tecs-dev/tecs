@@ -72,38 +72,42 @@ local function spawnEmitters(world: tecs.World)
     end
 
     local perEmitter <const> = math.floor(LIVE / EMITTERS)
-    local effect <const> = particles.effect({
-        name = "benchSparks",
-        capacity = perEmitter,
-        overflow = "replace",
-        schedule = {rate = perEmitter / LIFETIME, looping = true},
-        spawn = {
-            shape = "disc",
-            width = 60.0,
-            direction = 0.0,
-            spread = math.pi * 2.0,
-            space = "world",
-        },
-        initial = {
-            lifetime = LIFETIME,
-            speed = {min = 20.0, max = 90.0},
-            size = {min = 3.0, max = 9.0},
-            rotation = {min = 0.0, max = math.pi * 2.0},
-            angularVelocity = {min = -4.0, max = 4.0},
-            accelerationY = {min = 40.0, max = 120.0},
-            color = "#ffd080",
-        },
-        update = {
-            drag = 0.4,
-            tangentialAcceleration = {min = -60.0, max = 60.0},
-            size = particles.curve({{0.0, 0.2}, {0.1, 1.0}, {1.0, 0.1}}),
-            color = particles.gradient({
-                {0.0, "#fff4c0"},
-                {1.0, "#ff8020"},
-            }),
-        },
-        render = {layer = 1},
-    })
+    local effect <const> = particles.effect(
+        {
+            name = "benchSparks",
+            capacity = perEmitter,
+            overflow = "replace",
+            schedule = {rate = perEmitter / LIFETIME, looping = true},
+            spawn = {
+                shape = "disc",
+                width = 60.0,
+                direction = 0.0,
+                spread = math.pi * 2.0,
+                space = "world",
+            },
+            initial = {
+                lifetime = LIFETIME,
+                speed = {min = 20.0, max = 90.0},
+                size = {min = 3.0, max = 9.0},
+                rotation = {min = 0.0, max = math.pi * 2.0},
+                angularVelocity = {min = -4.0, max = 4.0},
+                accelerationY = {min = 40.0, max = 120.0},
+                color = "#ffd080",
+            },
+            update = {
+                drag = 0.4,
+                tangentialAcceleration = {min = -60.0, max = 60.0},
+                size = particles.curve({{0.0, 0.2}, {0.1, 1.0}, {1.0, 0.1}}),
+                color = particles.gradient(
+                    {
+                        {0.0, "#fff4c0"},
+                        {1.0, "#ff8020"},
+                    }
+                ),
+            },
+            render = {layer = 1},
+        }
+    )
 
     -- A grid over the viewport, so the emitters are spread rather than stacked
     -- and the field covers what the camera can see.
@@ -123,55 +127,65 @@ timing.enable()
 --- Wall time between iterations, which is the frame time a player feels.
 local DELTA <const> = timing.stage("delta")
 
-return tecs.newApplication({
-    window = {title = "particles", width = WIDTH, height = HEIGHT},
-    presentMode = "immediate",
-    ambientLight = {1.0, 1.0, 1.0},
-    capacity = POOL + 1024,
-    maxEntities = 4096,
-    debugMaxFrames = WARMUP + FRAMES,
+return tecs.newApplication(
+    {
+        window = {title = "particles", width = WIDTH, height = HEIGHT},
+        presentMode = "immediate",
+        ambientLight = {1.0, 1.0, 1.0},
+        capacity = POOL + 1024,
+        maxEntities = 4096,
+        debugMaxFrames = WARMUP + FRAMES,
 
-    plugin = function(world: tecs.World, app: tecs.Application)
-        local renderer = app.renderer
-        world:addPlugin(particles.plugin({
-            renderer = renderer,
-            capacity = POOL,
-            maxEmitters = EMITTERS + 8,
-        }))
-        spawnEmitters(world)
-
-        -- In `First`, so the sample is taken ahead of the systems it covers.
-        local frame = 0
-        world:addSystem({
-            name = "bench.Sample",
-            phase = tecs.ecs.phases.First,
-            run = function(dt: number)
-                if frame == WARMUP then
-                    timing.reset()
-                end
-                if frame >= WARMUP then
-                    timing.mark(DELTA, dt)
-                end
-                frame = frame + 1
-            end,
-        })
-
-        world:addSystem({
-            name = "bench.Report",
-            phase = tecs.ecs.phases.Shutdown,
-            run = function()
-                print(("frames after %d warmup, %d instances resident"):format(WARMUP, renderer.count))
-                local report = timing.format()
-                if report ~= "" then
-                    print(report)
-                end
-            end,
-        })
-
-        print(
-            ("particles: regime %s, %d live over %d emitters in a pool of " .. "%d, viewport %dx%d"):format(
-                REGIME, LIVE, LIVE > 0 and EMITTERS or 0, POOL, WIDTH, HEIGHT
+        plugin = function(world: tecs.World, app: tecs.Application)
+            local renderer = app.renderer
+            world:addPlugin(
+                particles.plugin(
+                    {
+                        renderer = renderer,
+                        capacity = POOL,
+                        maxEmitters = EMITTERS + 8,
+                    }
+                )
             )
-        )
-    end,
-})
+            spawnEmitters(world)
+
+            -- In `First`, so the sample is taken ahead of the systems it covers.
+            local frame = 0
+            world:addSystem(
+                {
+                    name = "bench.Sample",
+                    phase = tecs.ecs.phases.First,
+                    run = function(dt: number)
+                        if frame == WARMUP then
+                            timing.reset()
+                        end
+                        if frame >= WARMUP then
+                            timing.mark(DELTA, dt)
+                        end
+                        frame = frame + 1
+                    end,
+                }
+            )
+
+            world:addSystem(
+                {
+                    name = "bench.Report",
+                    phase = tecs.ecs.phases.Shutdown,
+                    run = function()
+                        print(("frames after %d warmup, %d instances resident"):format(WARMUP, renderer.count))
+                        local report = timing.format()
+                        if report ~= "" then
+                            print(report)
+                        end
+                    end,
+                }
+            )
+
+            print(
+                ("particles: regime %s, %d live over %d emitters in a pool of " .. "%d, viewport %dx%d"):format(
+                    REGIME, LIVE, LIVE > 0 and EMITTERS or 0, POOL, WIDTH, HEIGHT
+                )
+            )
+        end,
+    }
+)

@@ -274,73 +274,75 @@ local record Sound is Component
     voice: number
 end
 
-ecs.newFFIComponent({
-    name = "Sound",
-    container = Sound,
-    fields = {
-        {"clip", "int32_t"},
-        {"playing", "uint8_t"},
-        {"gain", "float"},
-        {"loop", "uint8_t"},
-        {"pitch", "float"},
-        {"spatial", "uint8_t"},
-        {"x", "float"},
-        {"y", "float"},
-        {"z", "float"},
-        {"group", "int32_t"},
-        {"voice", "int32_t"},
-    },
-    defaults = {0, 1, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0},
-    serialize = function(instance: Sound): {string: any}
-        -- Both the clip and the group cross as the names they were interned
-        -- from. An index is this run's numbering, and a file that carried one
-        -- would name whatever the next run happened to intern in its place.
-        return {
-            clip = clipPaths[instance.clip as integer],
-            playing = instance.playing ~= 0,
-            gain = instance.gain,
-            loop = instance.loop ~= 0,
-            pitch = instance.pitch,
-            spatial = instance.spatial ~= 0,
-            x = instance.x,
-            y = instance.y,
-            z = instance.z,
-            group = groupNames[instance.group as integer],
-        }
-    end,
-    deserialize = function(_world: types.World, data: {string: any}): Sound
-        local path = data.clip as string
-        local clip = 0
-        if path ~= nil and path ~= "" then
-            clip = clipId(path)
-        end
-        local name = data.group as string
-        local group = 0
-        if name ~= nil and name ~= "" then
-            group = groupId(name)
-        end
-        -- A file written before `playing` existed carries no answer, and the
-        -- one that matches what it recorded is that the sound was on.
-        local playing = 1
-        if data.playing == false then
-            playing = 0
-        end
-        -- The voice is not restored. A snapshot records that an entity has a
-        -- sound, not how far through it the mixer had got, so it starts.
-        return Sound(
-            clip,
-            playing,
-            data.gain as number,
-            (data.loop as boolean) and 1 or 0,
-            (data.pitch as number) or 1.0,
-            (data.spatial as boolean) and 1 or 0,
-            (data.x as number) or 0.0,
-            (data.y as number) or 0.0,
-            (data.z as number) or 0.0,
-            group
-        )
-    end,
-})
+ecs.newFFIComponent(
+    {
+        name = "Sound",
+        container = Sound,
+        fields = {
+            {"clip", "int32_t"},
+            {"playing", "uint8_t"},
+            {"gain", "float"},
+            {"loop", "uint8_t"},
+            {"pitch", "float"},
+            {"spatial", "uint8_t"},
+            {"x", "float"},
+            {"y", "float"},
+            {"z", "float"},
+            {"group", "int32_t"},
+            {"voice", "int32_t"},
+        },
+        defaults = {0, 1, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0},
+        serialize = function(instance: Sound): {string: any}
+            -- Both the clip and the group cross as the names they were interned
+            -- from. An index is this run's numbering, and a file that carried one
+            -- would name whatever the next run happened to intern in its place.
+            return {
+                clip = clipPaths[instance.clip as integer],
+                playing = instance.playing ~= 0,
+                gain = instance.gain,
+                loop = instance.loop ~= 0,
+                pitch = instance.pitch,
+                spatial = instance.spatial ~= 0,
+                x = instance.x,
+                y = instance.y,
+                z = instance.z,
+                group = groupNames[instance.group as integer],
+            }
+        end,
+        deserialize = function(_world: types.World, data: {string: any}): Sound
+            local path = data.clip as string
+            local clip = 0
+            if path ~= nil and path ~= "" then
+                clip = clipId(path)
+            end
+            local name = data.group as string
+            local group = 0
+            if name ~= nil and name ~= "" then
+                group = groupId(name)
+            end
+            -- A file written before `playing` existed carries no answer, and the
+            -- one that matches what it recorded is that the sound was on.
+            local playing = 1
+            if data.playing == false then
+                playing = 0
+            end
+            -- The voice is not restored. A snapshot records that an entity has a
+            -- sound, not how far through it the mixer had got, so it starts.
+            return Sound(
+                clip,
+                playing,
+                data.gain as number,
+                (data.loop as boolean) and 1 or 0,
+                (data.pitch as number) or 1.0,
+                (data.spatial as boolean) and 1 or 0,
+                (data.x as number) or 0.0,
+                (data.y as number) or 0.0,
+                (data.z as number) or 0.0,
+                group
+            )
+        end,
+    }
+)
 
 -------------------------------------------------------------------------------
 -- Types
@@ -1091,17 +1093,19 @@ function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
     local loading <const> = assets.loadSound(path, mode, self._streamMs)
     self._inFlight[id] = loading
     self._loading = self._loading + 1
-    loading:onSettle(function(settled: Future<assets.Sound>)
-        self._inFlight[id] = nil
-        self._loading = self._loading - 1
-        if settled.status == "canceled" then
-            -- Given up at destroy. There is no mixer left to point a clip at,
-            -- and reporting it as a load that failed would be a line in the log
-            -- about something nobody asked for any more.
-            return
+    loading:onSettle(
+        function(settled: Future<assets.Sound>)
+            self._inFlight[id] = nil
+            self._loading = self._loading - 1
+            if settled.status == "canceled" then
+                -- Given up at destroy. There is no mixer left to point a clip at,
+                -- and reporting it as a load that failed would be a line in the log
+                -- about something nobody asked for any more.
+                return
+            end
+            settleClip(clip, settled)
         end
-        settleClip(clip, settled)
-    end)
+    )
     return clip
 end
 
@@ -2463,32 +2467,40 @@ function Audio:install(world: types.World)
     -- the generator it was made with.
     self._random = random.stream(world, "tecs.audio")
 
-    local sounds = world:query({
-        name = "tecs.Sounds",
-        include = {Sound},
-    })
+    local sounds = world:query(
+        {
+            name = "tecs.Sounds",
+            include = {Sound},
+        }
+    )
 
     -- Naming `Disabled` opts out of the exclusion every other query gets, so
     -- this is the disabled rows and only those. They are in archetypes of
     -- their own, so it matches nothing until something is disabled.
-    local hushed = world:query({
-        name = "tecs.DisabledSounds",
-        include = {Sound, ecs.Disabled},
-    })
+    local hushed = world:query(
+        {
+            name = "tecs.DisabledSounds",
+            include = {Sound, ecs.Disabled},
+        }
+    )
 
-    world:addSystem({
-        name = "tecs.PlaySounds",
-        -- After gameplay has decided what exists and before anything renders,
-        -- so a sound spawned this frame starts this frame.
-        phase = ecs.phases.PostUpdate,
-        run = function() reconcile(self, sounds, hushed) end,
-    })
+    world:addSystem(
+        {
+            name = "tecs.PlaySounds",
+            -- After gameplay has decided what exists and before anything renders,
+            -- so a sound spawned this frame starts this frame.
+            phase = ecs.phases.PostUpdate,
+            run = function() reconcile(self, sounds, hushed) end,
+        }
+    )
 
-    world:addSnapshotHandler({
-        name = "tecs.audio",
-        save = function(_world: types.World): any return saveMixer(self) end,
-        load = function(_world: types.World, value: any) loadMixer(self, value as {string: any}) end,
-    })
+    world:addSnapshotHandler(
+        {
+            name = "tecs.audio",
+            save = function(_world: types.World): any return saveMixer(self) end,
+            load = function(_world: types.World, value: any) loadMixer(self, value as {string: any}) end,
+        }
+    )
 end
 
 return audio

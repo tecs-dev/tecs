@@ -6,11 +6,13 @@
 --   * `world:defer()` / `world:commit()` scopes still work explicitly.
 
 local tecs <const> = require("tecs")
-local Pos = tecs.ecs.newComponent({
-    name = "InstantSpecPos",
-    container = {},
-    fields = {"x", "y"},
-})
+local Pos = tecs.ecs.newComponent(
+    {
+        name = "InstantSpecPos",
+        container = {},
+        fields = {"x", "y"},
+    }
+)
 local Mark = tecs.ecs.newTagComponent({name = "InstantSpecMark"})
 
 describe(

@@ -288,16 +288,19 @@ end
 function Bitset.new(initialCapacity?: integer): Bitset
     local capacity = initialCapacity or 64
     local wordCount = max(1, bitsToWords!(capacity)) as integer
-    return setmetatable({
-        _data = cffi.new("uint32_t[?]", wordCount) as {integer},
-        wordCount = wordCount,
-        usedWordCount = 0,
-        count = 0,
-        _scanActive = false,
-        _scanWordIndex = 0,
-        _scanWord = 0,
-        _scanUsed = 0,
-    }, BITSET_MT)
+    return setmetatable(
+        {
+            _data = cffi.new("uint32_t[?]", wordCount) as {integer},
+            wordCount = wordCount,
+            usedWordCount = 0,
+            count = 0,
+            _scanActive = false,
+            _scanWordIndex = 0,
+            _scanWord = 0,
+            _scanUsed = 0,
+        },
+        BITSET_MT
+    )
 end
 
 function Bitset:ensureCapacity(n: integer)

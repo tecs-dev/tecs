@@ -180,68 +180,74 @@ local record Motion is Component
     omega: number
 end
 
-ecs.newFFIComponent({
-    name = "Motion",
-    container = Motion,
-    fields = {
-        {"vx", "float"},
-        {"vy", "float"},
-        {"omega", "float"},
-    },
-    defaults = {0, 0, 0},
-})
+ecs.newFFIComponent(
+    {
+        name = "Motion",
+        container = Motion,
+        fields = {
+            {"vx", "float"},
+            {"vy", "float"},
+            {"omega", "float"},
+        },
+        defaults = {0, 0, 0},
+    }
+)
 
-ecs.newFFIComponent({
-    name = "Body",
-    container = Body,
-    requires = {Transform, Motion},
-    fields = {
-        {"kind", "uint8_t"},
-        {"fixedRotation", "uint8_t"},
-        {"isBullet", "uint8_t"},
-        {"sleepEnabled", "uint8_t"},
-        {"gravityScale", "float"},
-        {"linearDamping", "float"},
-        {"angularDamping", "float"},
-    },
-    defaults = {BODY_KINDS.dynamic, 0, 0, 1, 1.0, 0.0, 0.0},
-})
+ecs.newFFIComponent(
+    {
+        name = "Body",
+        container = Body,
+        requires = {Transform, Motion},
+        fields = {
+            {"kind", "uint8_t"},
+            {"fixedRotation", "uint8_t"},
+            {"isBullet", "uint8_t"},
+            {"sleepEnabled", "uint8_t"},
+            {"gravityScale", "float"},
+            {"linearDamping", "float"},
+            {"angularDamping", "float"},
+        },
+        defaults = {BODY_KINDS.dynamic, 0, 0, 1, 1.0, 0.0, 0.0},
+    }
+)
 
-ecs.newFFIComponent({
-    name = "Collider",
-    container = Collider,
-    fields = {
-        {"shape", "uint8_t"},
-        {"halfWidth", "float"},
-        {"halfHeight", "float"},
-        {"radius", "float"},
-        {"length", "float"},
-        {"offsetX", "float"},
-        {"offsetY", "float"},
-        {"density", "float"},
-        {"friction", "float"},
-        {"restitution", "float"},
-        {"categoryBits", "uint32_t"},
-        {"maskBits", "uint32_t"},
-        {"isSensor", "uint8_t"},
-    },
-    -- Geometry, material, filtering, and sensor defaults.
-    defaults = {
-        COLLIDER_SHAPES.box,
-        8.0,
-        8.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.6,
-        0.0,
-        1,
-        0xFFFFFFFF,
-        0,
-    },
-})
+ecs.newFFIComponent(
+    {
+        name = "Collider",
+        container = Collider,
+        fields = {
+            {"shape", "uint8_t"},
+            {"halfWidth", "float"},
+            {"halfHeight", "float"},
+            {"radius", "float"},
+            {"length", "float"},
+            {"offsetX", "float"},
+            {"offsetY", "float"},
+            {"density", "float"},
+            {"friction", "float"},
+            {"restitution", "float"},
+            {"categoryBits", "uint32_t"},
+            {"maskBits", "uint32_t"},
+            {"isSensor", "uint8_t"},
+        },
+        -- Geometry, material, filtering, and sensor defaults.
+        defaults = {
+            COLLIDER_SHAPES.box,
+            8.0,
+            8.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.6,
+            0.0,
+            1,
+            0xFFFFFFFF,
+            0,
+        },
+    }
+)
 
 --- A `RigidBody` identifies one live body in a Rapier simulation.
 ---
@@ -261,17 +267,19 @@ local record RigidBody is Component
     generation: number
 end
 
-ecs.newFFIComponent({
-    name = "RigidBody",
-    container = RigidBody,
-    fields = {
-        {"index1", "int32_t"},
-        {"world0", "uint16_t"},
-        {"generation", "uint32_t"},
-    },
-    defaults = {0, 0, 0},
-    transient = true,
-})
+ecs.newFFIComponent(
+    {
+        name = "RigidBody",
+        container = RigidBody,
+        fields = {
+            {"index1", "int32_t"},
+            {"world0", "uint16_t"},
+            {"generation", "uint32_t"},
+        },
+        defaults = {0, 0, 0},
+        transient = true,
+    }
+)
 
 --- Engine-owned and transient. Marks a paused body after the solver changes it
 --- to static and stores its motion.
@@ -289,28 +297,32 @@ local record ColliderShape is Component
     world0: number
     generation: number
 end
-ecs.newFFIComponent({
-    name = "ColliderShape",
-    container = ColliderShape,
-    fields = {
-        {"index1", "int32_t"},
-        {"world0", "uint16_t"},
-        {"generation", "uint32_t"},
-    },
-    defaults = {0, 0, 0},
-    transient = true,
-})
+ecs.newFFIComponent(
+    {
+        name = "ColliderShape",
+        container = ColliderShape,
+        fields = {
+            {"index1", "int32_t"},
+            {"world0", "uint16_t"},
+            {"generation", "uint32_t"},
+        },
+        defaults = {0, 0, 0},
+        transient = true,
+    }
+)
 
 --- A secondary collider's owning body. The relationship is sparse so adding
 --- shapes does not split body archetypes, reverse-indexed for inspection, and
 --- cascade-deleted with the body.
-local ColliderOf <const> = ecs.newRelationship({
-    name = "ColliderOf",
-    exclusive = true,
-    sparse = true,
-    reverseIndex = true,
-    cascadeDelete = true,
-})
+local ColliderOf <const> = ecs.newRelationship(
+    {
+        name = "ColliderOf",
+        exclusive = true,
+        sparse = true,
+        reverseIndex = true,
+        cascadeDelete = true,
+    }
+)
 
 --- `BodyOptions` describes one complete body or secondary collider declaration.
 ---
@@ -996,14 +1008,16 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         -- Per world, so two worlds each installing this get a simulation each
         -- and neither sees the other's bodies. Hoisted into a local here and
         -- closed over by the systems below, so a step costs no resource lookup.
-        local simulation <const> = World.create({
-            gravity = {
-                x = toMeters(gravity[1]),
-                y = toMeters(gravity[2]),
-            },
-            subStepCount = options.subStepCount,
-            workerCount = options.workerCount,
-        })
+        local simulation <const> = World.create(
+            {
+                gravity = {
+                    x = toMeters(gravity[1]),
+                    y = toMeters(gravity[2]),
+                },
+                subStepCount = options.subStepCount,
+                workerCount = options.workerCount,
+            }
+        )
         world.resources[simulationKey] = simulation
 
         local function addShape(body: Handle, entity: integer, collider: Collider): Handle
@@ -1028,89 +1042,117 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         end
 
         local function createBody(entity: integer, transform: Transform, declared: Body, collider: Collider): Handle
-            local body = simulation:createBody({
-                type = BODY_NAMES[declared.kind as integer] or "dynamic",
-                position = {x = toMeters(transform.x), y = toMeters(transform.y)},
-                angle = transform.rotation,
-                fixedRotation = declared.fixedRotation ~= 0,
-                gravityScale = declared.gravityScale,
-                linearDamping = declared.linearDamping,
-                angularDamping = declared.angularDamping,
-                sleepEnabled = declared.sleepEnabled ~= 0,
-                isBullet = declared.isBullet ~= 0,
-                entity = entity,
-            })
+            local body = simulation:createBody(
+                {
+                    type = BODY_NAMES[declared.kind as integer] or "dynamic",
+                    position = {x = toMeters(transform.x), y = toMeters(transform.y)},
+                    angle = transform.rotation,
+                    fixedRotation = declared.fixedRotation ~= 0,
+                    gravityScale = declared.gravityScale,
+                    linearDamping = declared.linearDamping,
+                    angularDamping = declared.angularDamping,
+                    sleepEnabled = declared.sleepEnabled ~= 0,
+                    isBullet = declared.isBullet ~= 0,
+                    entity = entity,
+                }
+            )
             addShape(body, entity, collider)
             return body
         end
 
-        local pendingBodies = world:query({
-            name = "tecs.PendingBodies",
-            include = {Transform, Body, Collider},
-            exclude = {RigidBody},
-        })
-        local detachedBodies = world:query({
-            name = "tecs.DetachedBodies",
-            include = {RigidBody},
-            exclude = {Body},
-        })
-        local detachedDisabledBodies = world:query({
-            name = "tecs.DetachedDisabledBodies",
-            include = {RigidBody, ecs.Disabled},
-            exclude = {Body},
-        })
-        local pausedBodies = world:query({
-            name = "tecs.PausedBodies",
-            include = {Body, Motion, RigidBody, ecs.Paused},
-            exclude = {PhysicsHeld},
-        })
-        local resumedBodies = world:query({
-            name = "tecs.ResumedBodies",
-            include = {Body, Motion, RigidBody, PhysicsHeld},
-            exclude = {ecs.Paused},
-        })
-        local disabledBodies = world:query({
-            name = "tecs.DisabledBodies",
-            include = {RigidBody, ecs.Disabled},
-            exclude = {PhysicsDisabled},
-        })
-        local enabledBodies = world:query({
-            name = "tecs.EnabledBodies",
-            include = {RigidBody, PhysicsDisabled},
-            exclude = {ecs.Disabled},
-        })
-        local declaredBodies = world:query({
-            name = "tecs.LiveBodyDeclarations",
-            include = {Body, RigidBody},
-            exclude = {PhysicsHeld, PhysicsDisabled},
-        })
-        local colliders = world:query({
-            name = "tecs.LiveColliders",
-            include = {Collider, RigidBody},
-        })
-        local pendingSecondary = world:query({
-            name = "tecs.PendingSecondaryColliders",
-            include = {Collider, ColliderOf},
-            exclude = {ColliderShape},
-        })
-        local secondaryColliders = world:query({
-            name = "tecs.LiveSecondaryColliders",
-            include = {Collider, ColliderOf, ColliderShape},
-        })
+        local pendingBodies = world:query(
+            {
+                name = "tecs.PendingBodies",
+                include = {Transform, Body, Collider},
+                exclude = {RigidBody},
+            }
+        )
+        local detachedBodies = world:query(
+            {
+                name = "tecs.DetachedBodies",
+                include = {RigidBody},
+                exclude = {Body},
+            }
+        )
+        local detachedDisabledBodies = world:query(
+            {
+                name = "tecs.DetachedDisabledBodies",
+                include = {RigidBody, ecs.Disabled},
+                exclude = {Body},
+            }
+        )
+        local pausedBodies = world:query(
+            {
+                name = "tecs.PausedBodies",
+                include = {Body, Motion, RigidBody, ecs.Paused},
+                exclude = {PhysicsHeld},
+            }
+        )
+        local resumedBodies = world:query(
+            {
+                name = "tecs.ResumedBodies",
+                include = {Body, Motion, RigidBody, PhysicsHeld},
+                exclude = {ecs.Paused},
+            }
+        )
+        local disabledBodies = world:query(
+            {
+                name = "tecs.DisabledBodies",
+                include = {RigidBody, ecs.Disabled},
+                exclude = {PhysicsDisabled},
+            }
+        )
+        local enabledBodies = world:query(
+            {
+                name = "tecs.EnabledBodies",
+                include = {RigidBody, PhysicsDisabled},
+                exclude = {ecs.Disabled},
+            }
+        )
+        local declaredBodies = world:query(
+            {
+                name = "tecs.LiveBodyDeclarations",
+                include = {Body, RigidBody},
+                exclude = {PhysicsHeld, PhysicsDisabled},
+            }
+        )
+        local colliders = world:query(
+            {
+                name = "tecs.LiveColliders",
+                include = {Collider, RigidBody},
+            }
+        )
+        local pendingSecondary = world:query(
+            {
+                name = "tecs.PendingSecondaryColliders",
+                include = {Collider, ColliderOf},
+                exclude = {ColliderShape},
+            }
+        )
+        local secondaryColliders = world:query(
+            {
+                name = "tecs.LiveSecondaryColliders",
+                include = {Collider, ColliderOf, ColliderShape},
+            }
+        )
         local createQueue: {PendingCreation} = {}
         local shapeQueue: {PendingShape} = {}
         local createdBodies: {integer: Handle} = {}
 
-        local bodies = world:query({
-            name = "tecs.SimulatedBodies",
-            type = "logic",
-            include = {Transform, RigidBody},
-        })
-        local snapshotBodies = world:query({
-            name = "tecs.SnapshotBodies",
-            include = {Motion, RigidBody},
-            exclude = {PhysicsHeld},
-        })
+        local bodies = world:query(
+            {
+                name = "tecs.SimulatedBodies",
+                type = "logic",
+                include = {Transform, RigidBody},
+            }
+        )
+        local snapshotBodies = world:query(
+            {
+                name = "tecs.SnapshotBodies",
+                include = {Motion, RigidBody},
+                exclude = {PhysicsHeld},
+            }
+        )
 
         -- A body outlives its entity otherwise. Rapier owns it until something
         -- says so, and nothing else knows the entity is gone, so it keeps
@@ -1153,372 +1195,402 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         local STEP <const> = timing.stage("physics.step")
         local SYNC <const> = timing.stage("physics.sync")
 
-        world:addSystem({
-            name = "tecs.ReconcileBodies",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length, entities in detachedBodies:iter() do
-                    local rows = archetype:get(RigidBody)
-                    for row = 1, length do
-                        local body = handleOf(rows[row])
-                        if World.isBodyValid(body) then
-                            World.destroyBody(body)
-                        end
-                        world:remove(entities[row], RigidBody)
-                    end
-                end
-                for archetype, length, entities in detachedDisabledBodies:iter() do
-                    local rows = archetype:get(RigidBody)
-                    for row = 1, length do
-                        local body = handleOf(rows[row])
-                        if World.isBodyValid(body) then
-                            World.destroyBody(body)
-                        end
-                        world:remove(entities[row], RigidBody)
-                    end
-                end
-
-                table_clear(createQueue)
-                table_clear(createdBodies)
-                for archetype, length, entities in pendingBodies:iter() do
-                    local transforms = archetype:get(Transform)
-                    local declarations = archetype:get(Body)
-                    local shapes = archetype:get(Collider)
-                    local motions = archetype:get(Motion)
-                    for row = 1, length do
-                        createQueue[#createQueue + 1] = {
-                            entity = entities[row],
-                            transform = transforms[row],
-                            body = declarations[row],
-                            collider = shapes[row],
-                            motion = motions[row],
-                        }
-                    end
-                end
-                table.sort(
-                    createQueue,
-                    function(a: PendingCreation, b: PendingCreation): boolean return a.entity < b.entity end
-                )
-                world:defer()
-                for index = 1, #createQueue do
-                    local pending = createQueue[index]
-                    local native = createBody(pending.entity, pending.transform, pending.body, pending.collider)
-                    createdBodies[pending.entity] = native
-                    World.setVelocity(native, toMeters(pending.motion.vx), toMeters(pending.motion.vy))
-                    World.setAngularVelocity(native, pending.motion.omega)
-                    local wrapped = native as {string: any}
-                    local handle = wrapped.native as loader.CStruct
-                    local nativeWorld = wrapped.world as {string: any}
-                    world:set(
-                        pending.entity,
-                        RigidBody((handle.index as number) + 1, nativeWorld._id as number, handle.generation as number)
-                    )
-                    world:set(
-                        pending.entity,
-                        components.PreviousTransform(
-                            pending.transform.x, pending.transform.y, pending.transform.rotation
-                        )
-                    )
-                end
-                table_clear(createQueue)
-
-                table_clear(shapeQueue)
-                for archetype, length, entities in pendingSecondary:iter() do
-                    local shapes = archetype:get(Collider)
-                    for row = 1, length do
-                        local entity = entities[row]
-                        local relationship = world:getFirstRelationship(entity, ColliderOf)
-                        if relationship ~= nil then
-                            local owner = world:get(relationship.target, RigidBody)
-                            if createdBodies[relationship.target] ~= nil or (owner ~= nil and owner.index1 ~= 0) then
-                                shapeQueue[#shapeQueue + 1] = {
-                                    entity = entity,
-                                    owner = relationship.target,
-                                    collider = shapes[row],
-                                }
-                            end
-                        end
-                    end
-                end
-                table.sort(
-                    shapeQueue, function(a: PendingShape, b: PendingShape): boolean return a.entity < b.entity end
-                )
-                for index = 1, #shapeQueue do
-                    local pending = shapeQueue[index]
-                    local owner = createdBodies[pending.owner]
-                    if owner == nil then
-                        owner = handleOf(world:get(pending.owner, RigidBody))
-                    end
-                    local wrapped = addShape(owner, pending.entity, pending.collider) as {string: any}
-                    local shape = wrapped.native as loader.CStruct
-                    local nativeWorld = wrapped.world as {string: any}
-                    world:set(
-                        pending.entity,
-                        ColliderShape(
-                            (shape.index as number) + 1, nativeWorld._id as number, shape.generation as number
-                        )
-                    )
-                end
-                table_clear(shapeQueue)
-                table_clear(createdBodies)
-                world:commit()
-            end,
-        })
-
-        world:addSystem({
-            name = "tecs.HoldPausedBodies",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length, entities in pausedBodies:iter() do
-                    local rows = archetype:get(RigidBody)
-                    local motions = archetype:getMut(Motion)
-                    for row = 1, length do
-                        local body = handleOf(rows[row])
-                        local vx, vy = World.getVelocity(body)
-                        motions[row].vx, motions[row].vy = toPixels(vx), toPixels(vy)
-                        motions[row].omega = World.angularVelocity(body)
-                        World.setVelocity(body, 0.0, 0.0)
-                        World.setAngularVelocity(body, 0.0)
-                        World.setBodyType(body, 0)
-                        world:set(entities[row], PhysicsHeld)
-                    end
-                end
-            end,
-        })
-
-        world:addSystem({
-            name = "tecs.ReleasePausedBodies",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length, entities in resumedBodies:iter() do
-                    local declarations = archetype:get(Body)
-                    local rows = archetype:get(RigidBody)
-                    local motions = archetype:get(Motion)
-                    for row = 1, length do
-                        local body = handleOf(rows[row])
-                        World.setBodyType(body, declarations[row].kind as integer)
-                        World.setVelocity(body, toMeters(motions[row].vx), toMeters(motions[row].vy))
-                        World.setAngularVelocity(body, motions[row].omega)
-                        world:remove(entities[row], PhysicsHeld)
-                    end
-                end
-            end,
-        })
-
-        world:addSystem({
-            name = "tecs.ApplyColliderChanges",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length, entities in colliders:iter() do
-                    if archetype:isComponentDirty(Collider) then
-                        local shapes = archetype:get(Collider)
+        world:addSystem(
+            {
+                name = "tecs.ReconcileBodies",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length, entities in detachedBodies:iter() do
                         local rows = archetype:get(RigidBody)
                         for row = 1, length do
                             local body = handleOf(rows[row])
-                            World.removeShape(body, entities[row])
-                            addShape(body, entities[row], shapes[row])
+                            if World.isBodyValid(body) then
+                                World.destroyBody(body)
+                            end
+                            world:remove(entities[row], RigidBody)
                         end
                     end
-                end
-                for archetype, length, entities in secondaryColliders:iter() do
-                    if archetype:isComponentDirty(Collider) then
-                        local collidersInArchetype = archetype:get(Collider)
-                        local rows = archetype:getMut(ColliderShape)
+                    for archetype, length, entities in detachedDisabledBodies:iter() do
+                        local rows = archetype:get(RigidBody)
                         for row = 1, length do
-                            local old = shapeOf(rows[row])
-                            local body = World.bodyOfShape(old)
-                            World.destroyShape(old)
-                            local wrapped = addShape(body, entities[row], collidersInArchetype[row]) as {string: any}
-                            local shape = wrapped.native as loader.CStruct
-                            local nativeWorld = wrapped.world as {string: any}
-                            rows[row].index1 = (shape.index as number) + 1
-                            rows[row].world0 = nativeWorld._id as number
-                            rows[row].generation = shape.generation as number
+                            local body = handleOf(rows[row])
+                            if World.isBodyValid(body) then
+                                World.destroyBody(body)
+                            end
+                            world:remove(entities[row], RigidBody)
                         end
                     end
-                end
-            end,
-        })
 
-        world:addSystem({
-            name = "tecs.ApplyBodyChanges",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length in declaredBodies:iter() do
-                    if archetype:isComponentDirty(Body) then
+                    table_clear(createQueue)
+                    table_clear(createdBodies)
+                    for archetype, length, entities in pendingBodies:iter() do
+                        local transforms = archetype:get(Transform)
+                        local declarations = archetype:get(Body)
+                        local shapes = archetype:get(Collider)
+                        local motions = archetype:get(Motion)
+                        for row = 1, length do
+                            createQueue[#createQueue + 1] = {
+                                entity = entities[row],
+                                transform = transforms[row],
+                                body = declarations[row],
+                                collider = shapes[row],
+                                motion = motions[row],
+                            }
+                        end
+                    end
+                    table.sort(
+                        createQueue,
+                        function(a: PendingCreation, b: PendingCreation): boolean return a.entity < b.entity end
+                    )
+                    world:defer()
+                    for index = 1, #createQueue do
+                        local pending = createQueue[index]
+                        local native = createBody(pending.entity, pending.transform, pending.body, pending.collider)
+                        createdBodies[pending.entity] = native
+                        World.setVelocity(native, toMeters(pending.motion.vx), toMeters(pending.motion.vy))
+                        World.setAngularVelocity(native, pending.motion.omega)
+                        local wrapped = native as {string: any}
+                        local handle = wrapped.native as loader.CStruct
+                        local nativeWorld = wrapped.world as {string: any}
+                        world:set(
+                            pending.entity,
+                            RigidBody(
+                                (handle.index as number) + 1, nativeWorld._id as number, handle.generation as number
+                            )
+                        )
+                        world:set(
+                            pending.entity,
+                            components.PreviousTransform(
+                                pending.transform.x, pending.transform.y, pending.transform.rotation
+                            )
+                        )
+                    end
+                    table_clear(createQueue)
+
+                    table_clear(shapeQueue)
+                    for archetype, length, entities in pendingSecondary:iter() do
+                        local shapes = archetype:get(Collider)
+                        for row = 1, length do
+                            local entity = entities[row]
+                            local relationship = world:getFirstRelationship(entity, ColliderOf)
+                            if relationship ~= nil then
+                                local owner = world:get(relationship.target, RigidBody)
+                                if
+                                    createdBodies[relationship.target] ~= nil or (owner ~= nil and owner.index1 ~= 0)
+                                then
+                                    shapeQueue[#shapeQueue + 1] = {
+                                        entity = entity,
+                                        owner = relationship.target,
+                                        collider = shapes[row],
+                                    }
+                                end
+                            end
+                        end
+                    end
+                    table.sort(
+                        shapeQueue, function(a: PendingShape, b: PendingShape): boolean return a.entity < b.entity end
+                    )
+                    for index = 1, #shapeQueue do
+                        local pending = shapeQueue[index]
+                        local owner = createdBodies[pending.owner]
+                        if owner == nil then
+                            owner = handleOf(world:get(pending.owner, RigidBody))
+                        end
+                        local wrapped = addShape(owner, pending.entity, pending.collider) as {string: any}
+                        local shape = wrapped.native as loader.CStruct
+                        local nativeWorld = wrapped.world as {string: any}
+                        world:set(
+                            pending.entity,
+                            ColliderShape(
+                                (shape.index as number) + 1, nativeWorld._id as number, shape.generation as number
+                            )
+                        )
+                    end
+                    table_clear(shapeQueue)
+                    table_clear(createdBodies)
+                    world:commit()
+                end,
+            }
+        )
+
+        world:addSystem(
+            {
+                name = "tecs.HoldPausedBodies",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length, entities in pausedBodies:iter() do
+                        local rows = archetype:get(RigidBody)
+                        local motions = archetype:getMut(Motion)
+                        for row = 1, length do
+                            local body = handleOf(rows[row])
+                            local vx, vy = World.getVelocity(body)
+                            motions[row].vx, motions[row].vy = toPixels(vx), toPixels(vy)
+                            motions[row].omega = World.angularVelocity(body)
+                            World.setVelocity(body, 0.0, 0.0)
+                            World.setAngularVelocity(body, 0.0)
+                            World.setBodyType(body, 0)
+                            world:set(entities[row], PhysicsHeld)
+                        end
+                    end
+                end,
+            }
+        )
+
+        world:addSystem(
+            {
+                name = "tecs.ReleasePausedBodies",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length, entities in resumedBodies:iter() do
                         local declarations = archetype:get(Body)
                         local rows = archetype:get(RigidBody)
+                        local motions = archetype:get(Motion)
                         for row = 1, length do
-                            local declared = declarations[row]
                             local body = handleOf(rows[row])
-                            World.applyBodyDefinition(
-                                body,
-                                declared.kind as integer,
-                                declared.fixedRotation ~= 0,
-                                declared.isBullet ~= 0,
-                                declared.sleepEnabled ~= 0,
-                                declared.gravityScale,
-                                declared.linearDamping,
-                                declared.angularDamping
-                            )
+                            World.setBodyType(body, declarations[row].kind as integer)
+                            World.setVelocity(body, toMeters(motions[row].vx), toMeters(motions[row].vy))
+                            World.setAngularVelocity(body, motions[row].omega)
+                            world:remove(entities[row], PhysicsHeld)
                         end
                     end
-                end
-            end,
-        })
+                end,
+            }
+        )
 
-        world:addSystem({
-            name = "tecs.DisablePhysicsBodies",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length, entities in disabledBodies:iter() do
-                    local rows = archetype:get(RigidBody)
-                    for row = 1, length do
-                        World.setEnabled(handleOf(rows[row]), false)
-                        world:set(entities[row], PhysicsDisabled)
-                    end
-                end
-            end,
-        })
-
-        world:addSystem({
-            name = "tecs.EnablePhysicsBodies",
-            phase = ecs.phases.FixedFirst,
-            run = function()
-                for archetype, length, entities in enabledBodies:iter() do
-                    local rows = archetype:get(RigidBody)
-                    for row = 1, length do
-                        World.setEnabled(handleOf(rows[row]), true)
-                        world:remove(entities[row], PhysicsDisabled)
-                    end
-                end
-            end,
-        })
-
-        world:addSystem({
-            name = "tecs.StepPhysics",
-            phase = ecs.phases.FixedUpdate,
-            run = function()
-                local started = timing.begin()
-                -- The rate comes from the world rather than from an option
-                -- here. Two numbers that have to agree and can disagree is a
-                -- simulation that integrates at one rate while the phase
-                -- driving it runs at another.
-                simulation:step((world:getFixedTiming()))
-
-                -- Rapier's narrow phase is drained through a native buffer, so
-                -- no Rust callback ever enters LuaJIT.
-                simulation:beginPairEvents()
-                for index = 0, simulation:pairEventCount() - 1 do
-                    local entityA, entityB, collisionStarted, sensor = simulation:pairEvent(index)
-                    if sensor then
-                        world:emit(0, collisionStarted and SensorBegin or SensorEnd, entityA, entityB)
-                    else
-                        world:emit(0, collisionStarted and ContactBegin or ContactEnd, entityA, entityB)
-                    end
-                end
-                timing.finish(STEP, started)
-            end,
-        })
-
-        world:addSystem({
-            name = "tecs.SyncBodyTransforms",
-            phase = ecs.phases.FixedPostUpdate,
-            run = function()
-                local started = timing.begin()
-                simulation:beginMoves()
-
-                for archetype, length in bodies:iter() do
-                    local rows = archetype:get(RigidBody)
-
-                    -- Taken mutable on the first body that actually moved, and
-                    -- not at all otherwise. Taking it up front would mark the
-                    -- column dirty every frame for every archetype holding a
-                    -- body, which defeats every consumer gated on that: a
-                    -- world whose bodies have gone to sleep would still
-                    -- re-upload each of their instances.
-                    local transforms: {any} = nil
-
-                    for row = 1, length do
-                        local px, py, cosine, sine = simulation:moveOf(rows[row].index1 as integer)
-                        if px ~= nil then
-                            if transforms == nil then
-                                transforms = archetype:getMut(Transform) as {any}
+        world:addSystem(
+            {
+                name = "tecs.ApplyColliderChanges",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length, entities in colliders:iter() do
+                        if archetype:isComponentDirty(Collider) then
+                            local shapes = archetype:get(Collider)
+                            local rows = archetype:get(RigidBody)
+                            for row = 1, length do
+                                local body = handleOf(rows[row])
+                                World.removeShape(body, entities[row])
+                                addShape(body, entities[row], shapes[row])
                             end
-                            local transform = transforms[row] as Transform
-                            transform.x = toPixels(px)
-                            transform.y = toPixels(py)
-                            transform.rotation = atan2(sine, cosine)
                         end
                     end
-                end
+                    for archetype, length, entities in secondaryColliders:iter() do
+                        if archetype:isComponentDirty(Collider) then
+                            local collidersInArchetype = archetype:get(Collider)
+                            local rows = archetype:getMut(ColliderShape)
+                            for row = 1, length do
+                                local old = shapeOf(rows[row])
+                                local body = World.bodyOfShape(old)
+                                World.destroyShape(old)
+                                local wrapped = addShape(
+                                    body, entities[row], collidersInArchetype[row]
+                                ) as {string: any}
+                                local shape = wrapped.native as loader.CStruct
+                                local nativeWorld = wrapped.world as {string: any}
+                                rows[row].index1 = (shape.index as number) + 1
+                                rows[row].world0 = nativeWorld._id as number
+                                rows[row].generation = shape.generation as number
+                            end
+                        end
+                    end
+                end,
+            }
+        )
 
-                simulation:endMoves()
-                timing.finish(SYNC, started)
-            end,
-        })
+        world:addSystem(
+            {
+                name = "tecs.ApplyBodyChanges",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length in declaredBodies:iter() do
+                        if archetype:isComponentDirty(Body) then
+                            local declarations = archetype:get(Body)
+                            local rows = archetype:get(RigidBody)
+                            for row = 1, length do
+                                local declared = declarations[row]
+                                local body = handleOf(rows[row])
+                                World.applyBodyDefinition(
+                                    body,
+                                    declared.kind as integer,
+                                    declared.fixedRotation ~= 0,
+                                    declared.isBullet ~= 0,
+                                    declared.sleepEnabled ~= 0,
+                                    declared.gravityScale,
+                                    declared.linearDamping,
+                                    declared.angularDamping
+                                )
+                            end
+                        end
+                    end
+                end,
+            }
+        )
 
-        world:addSnapshotHandler({
-            -- This name is part of the persisted snapshot format.
-            name = "tecs.physics",
-            save = function(_world: types.World): any
-                for archetype, length in snapshotBodies:iter() do
-                    local rows = archetype:get(RigidBody)
-                    local motions = archetype:getMut(Motion)
-                    for row = 1, length do
-                        local body = handleOf(rows[row])
-                        local vx, vy = World.getVelocity(body)
-                        motions[row].vx, motions[row].vy = toPixels(vx), toPixels(vy)
-                        motions[row].omega = World.angularVelocity(body)
-                    end
-                end
-                return {
-                    engine = "rapier2d-0.34",
-                    state = simulation:snapshot(),
-                    workerCount = simulation.taskPool.workerCount,
-                    subStepCount = simulation.subStepCount,
-                }
-            end,
-            load = function(_world: types.World, value: any)
-                local saved = value as {string: any}
-                if saved.engine ~= "rapier2d-0.34" or saved.state == nil then
-                    return
-                end
-                simulation:restore(saved.state as string)
-                world:defer()
-                for _, length, entities in pendingBodies:iter() do
-                    for row = 1, length do
-                        local entity = entities[row]
-                        local wrapped = simulation:bodyByEntity(entity) as {string: any}
-                        if wrapped ~= nil then
-                            local handle = wrapped.native as loader.CStruct
-                            world:set(
-                                entity,
-                                RigidBody(
-                                    (handle.index as number) + 1, simulation._id as number, handle.generation as number
-                                )
-                            )
+        world:addSystem(
+            {
+                name = "tecs.DisablePhysicsBodies",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length, entities in disabledBodies:iter() do
+                        local rows = archetype:get(RigidBody)
+                        for row = 1, length do
+                            World.setEnabled(handleOf(rows[row]), false)
+                            world:set(entities[row], PhysicsDisabled)
                         end
                     end
-                end
-                for _, length, entities in pendingSecondary:iter() do
-                    for row = 1, length do
-                        local entity = entities[row]
-                        local wrapped = simulation:colliderByEntity(entity) as {string: any}
-                        if wrapped ~= nil then
-                            local handle = wrapped.native as loader.CStruct
-                            world:set(
-                                entity,
-                                ColliderShape(
-                                    (handle.index as number) + 1, simulation._id as number, handle.generation as number
-                                )
-                            )
+                end,
+            }
+        )
+
+        world:addSystem(
+            {
+                name = "tecs.EnablePhysicsBodies",
+                phase = ecs.phases.FixedFirst,
+                run = function()
+                    for archetype, length, entities in enabledBodies:iter() do
+                        local rows = archetype:get(RigidBody)
+                        for row = 1, length do
+                            World.setEnabled(handleOf(rows[row]), true)
+                            world:remove(entities[row], PhysicsDisabled)
                         end
                     end
-                end
-                world:commit()
-            end,
-        })
+                end,
+            }
+        )
+
+        world:addSystem(
+            {
+                name = "tecs.StepPhysics",
+                phase = ecs.phases.FixedUpdate,
+                run = function()
+                    local started = timing.begin()
+                    -- The rate comes from the world rather than from an option
+                    -- here. Two numbers that have to agree and can disagree is a
+                    -- simulation that integrates at one rate while the phase
+                    -- driving it runs at another.
+                    simulation:step((world:getFixedTiming()))
+
+                    -- Rapier's narrow phase is drained through a native buffer, so
+                    -- no Rust callback ever enters LuaJIT.
+                    simulation:beginPairEvents()
+                    for index = 0, simulation:pairEventCount() - 1 do
+                        local entityA, entityB, collisionStarted, sensor = simulation:pairEvent(index)
+                        if sensor then
+                            world:emit(0, collisionStarted and SensorBegin or SensorEnd, entityA, entityB)
+                        else
+                            world:emit(0, collisionStarted and ContactBegin or ContactEnd, entityA, entityB)
+                        end
+                    end
+                    timing.finish(STEP, started)
+                end,
+            }
+        )
+
+        world:addSystem(
+            {
+                name = "tecs.SyncBodyTransforms",
+                phase = ecs.phases.FixedPostUpdate,
+                run = function()
+                    local started = timing.begin()
+                    simulation:beginMoves()
+
+                    for archetype, length in bodies:iter() do
+                        local rows = archetype:get(RigidBody)
+
+                        -- Taken mutable on the first body that actually moved, and
+                        -- not at all otherwise. Taking it up front would mark the
+                        -- column dirty every frame for every archetype holding a
+                        -- body, which defeats every consumer gated on that: a
+                        -- world whose bodies have gone to sleep would still
+                        -- re-upload each of their instances.
+                        local transforms: {any} = nil
+
+                        for row = 1, length do
+                            local px, py, cosine, sine = simulation:moveOf(rows[row].index1 as integer)
+                            if px ~= nil then
+                                if transforms == nil then
+                                    transforms = archetype:getMut(Transform) as {any}
+                                end
+                                local transform = transforms[row] as Transform
+                                transform.x = toPixels(px)
+                                transform.y = toPixels(py)
+                                transform.rotation = atan2(sine, cosine)
+                            end
+                        end
+                    end
+
+                    simulation:endMoves()
+                    timing.finish(SYNC, started)
+                end,
+            }
+        )
+
+        world:addSnapshotHandler(
+            {
+                -- This name is part of the persisted snapshot format.
+                name = "tecs.physics",
+                save = function(_world: types.World): any
+                    for archetype, length in snapshotBodies:iter() do
+                        local rows = archetype:get(RigidBody)
+                        local motions = archetype:getMut(Motion)
+                        for row = 1, length do
+                            local body = handleOf(rows[row])
+                            local vx, vy = World.getVelocity(body)
+                            motions[row].vx, motions[row].vy = toPixels(vx), toPixels(vy)
+                            motions[row].omega = World.angularVelocity(body)
+                        end
+                    end
+                    return {
+                        engine = "rapier2d-0.34",
+                        state = simulation:snapshot(),
+                        workerCount = simulation.taskPool.workerCount,
+                        subStepCount = simulation.subStepCount,
+                    }
+                end,
+                load = function(_world: types.World, value: any)
+                    local saved = value as {string: any}
+                    if saved.engine ~= "rapier2d-0.34" or saved.state == nil then
+                        return
+                    end
+                    simulation:restore(saved.state as string)
+                    world:defer()
+                    for _, length, entities in pendingBodies:iter() do
+                        for row = 1, length do
+                            local entity = entities[row]
+                            local wrapped = simulation:bodyByEntity(entity) as {string: any}
+                            if wrapped ~= nil then
+                                local handle = wrapped.native as loader.CStruct
+                                world:set(
+                                    entity,
+                                    RigidBody(
+                                        (handle.index as number) + 1,
+                                        simulation._id as number,
+                                        handle.generation as number
+                                    )
+                                )
+                            end
+                        end
+                    end
+                    for _, length, entities in pendingSecondary:iter() do
+                        for row = 1, length do
+                            local entity = entities[row]
+                            local wrapped = simulation:colliderByEntity(entity) as {string: any}
+                            if wrapped ~= nil then
+                                local handle = wrapped.native as loader.CStruct
+                                world:set(
+                                    entity,
+                                    ColliderShape(
+                                        (handle.index as number) + 1,
+                                        simulation._id as number,
+                                        handle.generation as number
+                                    )
+                                )
+                            end
+                        end
+                    end
+                    world:commit()
+                end,
+            }
+        )
 
         -- Where the release goes, because there is no `world:destroy` in the
         -- ECS: what exists is `world:shutdown`, which an application calls
@@ -1530,11 +1602,13 @@ function physics.plugin(options: PhysicsOptions): function(types.World)
         -- the thread pool. Nothing at this layer can act on one nobody shuts
         -- down; what it can do is leave the leak visible, and
         -- `TaskPool.liveThreadCount` is where it shows.
-        world:addSystem({
-            name = "tecs.ShutdownPhysics",
-            phase = ecs.phases.Shutdown,
-            run = function() world.resources[simulationKey] = nil; simulation:destroy() end,
-        })
+        world:addSystem(
+            {
+                name = "tecs.ShutdownPhysics",
+                phase = ecs.phases.Shutdown,
+                run = function() world.resources[simulationKey] = nil; simulation:destroy() end,
+            }
+        )
     end
 end
 

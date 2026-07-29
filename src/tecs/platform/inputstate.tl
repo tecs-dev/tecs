@@ -87,13 +87,16 @@ end
 
 --- Creates an empty set, with nothing held and no edges recorded.
 function Buttons.create(): Buttons
-    return setmetatable({
-        down = {},
-        pressed = {},
-        released = {},
-        latchedPressed = {},
-        latchedReleased = {},
-    } as Buttons, ButtonsMT)
+    return setmetatable(
+        {
+            down = {},
+            pressed = {},
+            released = {},
+            latchedPressed = {},
+            latchedReleased = {},
+        } as Buttons,
+        ButtonsMT
+    )
 end
 
 --- Records a press in all three tiers.
@@ -180,10 +183,13 @@ end
 --- The base layer blocks, which is what makes it the thing everything beneath
 --- would be hidden from if there were anything beneath it.
 function Gate.create(): Gate
-    return setmetatable({
-        layers = {{name = "base", blocking = true, index = 1}},
-        fixed = false,
-    } as Gate, GateMT)
+    return setmetatable(
+        {
+            layers = {{name = "base", blocking = true, index = 1}},
+            fixed = false,
+        } as Gate,
+        GateMT
+    )
 end
 
 --- The lowest layer index still allowed to read.

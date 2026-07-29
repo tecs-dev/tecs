@@ -70,13 +70,15 @@ local function makeRelationshipStoresMT(world: WorldImpl): metatable<{Component:
     return {
         __index = function(t: {Component: RelationshipStore}, container: Relationship): RelationshipStore
             local containerI = container as ComponentInternal
-            local store = RelationshipStore.create({
-                sparse = containerI.isSparse,
-                reverseIndex = containerI.reverseIndex,
-                exclusive = container.exclusiveRelationship,
-                onTargetAdded = onAdded,
-                onTargetRemoved = onRemoved,
-            })
+            local store = RelationshipStore.create(
+                {
+                    sparse = containerI.isSparse,
+                    reverseIndex = containerI.reverseIndex,
+                    exclusive = container.exclusiveRelationship,
+                    onTargetAdded = onAdded,
+                    onTargetRemoved = onRemoved,
+                }
+            )
             if store then
                 rawset(t as table, container, store)
                 -- Gate for the instant despawn path's `_targetRefCounts[id]`
@@ -96,55 +98,58 @@ function WorldImpl.new(config?: types.World.Config): World
     local archetypeIndex = ArchetypeIndex.new(dirtyArchetypes)
     local maxSlotCount = allocator.maxSlotCount
 
-    local instance: WorldImpl = setmetatable({
-        resources = Context.new(),
-        messages = events.MessageBus.new(),
-        _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
-        _eventPool = pool.newTablePool({clearOn = "acquire", maxSize = 32}),
-        allocator = allocator,
-        _slots = allocator.slots as {integer: EntitySlot},
-        archetypeIndex = archetypeIndex,
-        _targetRefCounts = {},
-        _hasRelationshipStores = false,
-        relationshipStores = nil as {Component: RelationshipStore},
-        _bundles = {},
-        _dirtyArchetypes = dirtyArchetypes,
-        _stateStack = {},
-        _stateComponents = {},
-        _statePolicies = {},
-        _keyIndex = {},
-        _transitionObserver = nil,
-        _archetypeSnapshotPool = pool.newTablePool({clearOn = "release"}),
-        _scopeDepth = 0,
+    local instance: WorldImpl = setmetatable(
+        {
+            resources = Context.new(),
+            messages = events.MessageBus.new(),
+            _ffiSliceId = GLOBAL_FFI_EVENTS:acquireSlice(),
+            _eventPool = pool.newTablePool({clearOn = "acquire", maxSize = 32}),
+            allocator = allocator,
+            _slots = allocator.slots as {integer: EntitySlot},
+            archetypeIndex = archetypeIndex,
+            _targetRefCounts = {},
+            _hasRelationshipStores = false,
+            relationshipStores = nil as {Component: RelationshipStore},
+            _bundles = {},
+            _dirtyArchetypes = dirtyArchetypes,
+            _stateStack = {},
+            _stateComponents = {},
+            _statePolicies = {},
+            _keyIndex = {},
+            _transitionObserver = nil,
+            _archetypeSnapshotPool = pool.newTablePool({clearOn = "release"}),
+            _scopeDepth = 0,
 
-        -- Transaction staging state.
-        _dirtyEpoch = 1,
-        dirtyArchetypeList = {},
-        dirtyArchetypeCount = 0,
-        -- Epoch-stamped slot arrays. uint8 state holds STATE_SPAWN/MUTATE/
-        -- DESPAWN (1/2/3) or 0 for unset. uint32 pendingArch holds the
-        -- target Archetype.id (0 for unset). A slot's value is only valid
-        -- when the parallel stamp equals `_transactionEpoch`. Starting
-        -- epoch is 1 so uninitialized memory (zero) compares unequal.
-        _stateArr = C.new(UINT8_ARR_T, maxSlotCount + 1),
-        _pendingArchArr = C.new(UINT32_ARR_T, maxSlotCount + 1),
-        _slotStamp = C.new(UINT32_ARR_T, maxSlotCount + 1),
-        _transactionEpoch = 1,
-        _maxSlotCount = maxSlotCount,
-        entityStateCount = 0,
-        sparseSets = {},
-        sparseSetCount = 0,
-        _swapRemoveQueue = {},
-        batchMutations = {},
-        batchMutationCount = 0,
-        _valsPool = {},
-        _valsPoolSize = 0,
-        _valsPoolNext = 1,
-        _sparseArraysPool = pool.newTablePool({clearOn = "release"}),
-        _exclusivePool = pool.newTablePool({clearOn = "acquire"}),
-        isDirty = false,
-        emptyArchetype = archetypeIndex.emptyArchetype,
-    }, WORLD_MT)
+            -- Transaction staging state.
+            _dirtyEpoch = 1,
+            dirtyArchetypeList = {},
+            dirtyArchetypeCount = 0,
+            -- Epoch-stamped slot arrays. uint8 state holds STATE_SPAWN/MUTATE/
+            -- DESPAWN (1/2/3) or 0 for unset. uint32 pendingArch holds the
+            -- target Archetype.id (0 for unset). A slot's value is only valid
+            -- when the parallel stamp equals `_transactionEpoch`. Starting
+            -- epoch is 1 so uninitialized memory (zero) compares unequal.
+            _stateArr = C.new(UINT8_ARR_T, maxSlotCount + 1),
+            _pendingArchArr = C.new(UINT32_ARR_T, maxSlotCount + 1),
+            _slotStamp = C.new(UINT32_ARR_T, maxSlotCount + 1),
+            _transactionEpoch = 1,
+            _maxSlotCount = maxSlotCount,
+            entityStateCount = 0,
+            sparseSets = {},
+            sparseSetCount = 0,
+            _swapRemoveQueue = {},
+            batchMutations = {},
+            batchMutationCount = 0,
+            _valsPool = {},
+            _valsPoolSize = 0,
+            _valsPoolNext = 1,
+            _sparseArraysPool = pool.newTablePool({clearOn = "release"}),
+            _exclusivePool = pool.newTablePool({clearOn = "acquire"}),
+            isDirty = false,
+            emptyArchetype = archetypeIndex.emptyArchetype,
+        },
+        WORLD_MT
+    )
 
     instance.relationshipStores = setmetatable({}, makeRelationshipStoresMT(instance))
 
@@ -1436,21 +1441,23 @@ end
 function WorldImpl:_rebuildKeyIndex()
     local nextIndex: {string: integer} = {}
     local Key <const> = builtins.Key
-    self:forEachArchetype(function(arch: Archetype)
-        local col = arch.columns[Key] as {string}
-        if col then
-            local entities = arch.entities as {integer}
-            for row = 1, entities[0] do
-                local key = col[row]
-                validateKey(key)
-                local owner = nextIndex[key]
-                if owner ~= nil and owner ~= entities[row] then
-                    error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
+    self:forEachArchetype(
+        function(arch: Archetype)
+            local col = arch.columns[Key] as {string}
+            if col then
+                local entities = arch.entities as {integer}
+                for row = 1, entities[0] do
+                    local key = col[row]
+                    validateKey(key)
+                    local owner = nextIndex[key]
+                    if owner ~= nil and owner ~= entities[row] then
+                        error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
+                    end
+                    nextIndex[key] = entities[row]
                 end
-                nextIndex[key] = entities[row]
             end
         end
-    end)
+    )
     table_clear(self._keyIndex)
     for key, id in pairs(nextIndex) do
         self._keyIndex[key] = id

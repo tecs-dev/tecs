@@ -14,16 +14,18 @@ describe(
         local VelComponent: TestHelpers.Vel
         local HealthComponent: TestHelpers.Health
 
-        before_each(function()
-            index = ArchetypeIndex.new()
-            testId = testId + 1
+        before_each(
+            function()
+                index = ArchetypeIndex.new()
+                testId = testId + 1
 
-            -- Use the test helper provider
-            provider = TestHelpers.createComponentProvider("IndexTest", testId)
-            PosComponent = provider.PosComponent
-            VelComponent = provider.VelComponent
-            HealthComponent = provider.HealthComponent
-        end)
+                -- Use the test helper provider
+                provider = TestHelpers.createComponentProvider("IndexTest", testId)
+                PosComponent = provider.PosComponent
+                VelComponent = provider.VelComponent
+                HealthComponent = provider.HealthComponent
+            end
+        )
 
         describe(
             "archetype creation and retrieval",
