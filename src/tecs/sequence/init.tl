@@ -6,20 +6,26 @@
 --- stack and cannot be serialized. A sequence keeps its position as data, so
 --- it survives snapshots, rewind, and hot reload.
 ---
---- Usage:
----   local sequence = require("tecs.sequence")
+--- An action is registered on the world, a program names it, and a playback
+--- binds the entities the program acts on:
 ---
----   sequence.registerAction(world, "game.lockControls", function(_w, _ctx)
----       controlsLocked = true
----   end)
+--- ```teal
+--- tecs.sequence.registerAction(world, "game.lockControls", function()
+---     print("controls locked")
+--- end)
 ---
----   local intro = sequence.define("game.bossIntro", {
----       sequence.call("game.lockControls"),
----       sequence.wait(1.5),
----       sequence.emit("boss.ready"),
----   })
+--- local intro <const> = tecs.sequence.define("game.bossIntro", {
+---     tecs.sequence.call("game.lockControls"),
+---     tecs.sequence.wait(1.5),
+---     tecs.sequence.emit("boss.ready"),
+--- })
 ---
----   sequence.play(world, intro, {owner = encounter, bindings = {boss = bossId}})
+--- tecs.sequence.play(world, intro, {owner = entity, bindings = {boss = entity}})
+--- ```
+---
+--- `define` compiles once and `play` starts a playback of it, so one program
+--- serves every encounter and what differs between two of them travels in
+--- `bindings` and `params`.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")

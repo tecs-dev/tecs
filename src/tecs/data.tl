@@ -17,8 +17,10 @@
 --- The parser and the encoder are lua-cjson, in C, so a snapshot, a debug
 --- protocol frame or a sprite sheet crosses without a Lua parser in the way.
 ---
----     local text <const> = tecs.data.encodeJSON({name = "player", hp = 100})
----     local value <const> = tecs.data.decodeJSON(text)
+--- ```teal
+--- local text <const> = tecs.data.encodeJSON({name = "player", hp = 100})
+--- local value <const> = tecs.data.decodeJSON(text)
+--- ```
 ---
 --- Both raise rather than guess. `encodeJSON` raises on a value JSON has no
 --- form for, a function or a cdata among them, so a field never silently

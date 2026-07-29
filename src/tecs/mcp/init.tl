@@ -6,6 +6,27 @@
 --- to keep in step, which is what went wrong often enough elsewhere to be
 --- worth designing against.
 ---
+--- ```teal
+--- local placed <const> = world:query({include = {tecs.Transform}})
+---
+--- tecs.mcp.register({
+---     name = "placed_count",
+---     description = "How many entities carry a Transform",
+---     inputSchema = {["type"] = "object", properties = {}},
+---     readOnly = true,
+---     handler = function(_arguments: {string: any}): {string: any}
+---         return {count = placed:count()}
+---     end,
+--- })
+---
+--- local server <const> = tecs.mcp.listen(7100)
+--- -- Once per frame, then `server:destroy()` at teardown.
+--- server:poll()
+--- ```
+---
+--- `listen` pairs with `destroy`, and `poll` is what answers: a tool registered
+--- but never polled is listed and never called.
+---
 --- Answering happens inside `update`, on the game's own thread, so a tool
 --- reads and writes the world without locking and without a frame boundary in
 --- the middle of it. The cost is that a tool must not block: it is running

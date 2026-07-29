@@ -16,6 +16,22 @@
 --- pending, or use the future's bounded `wait` method outside a frame.
 --- Listening, accepting, reading, writing and receiving are nonblocking.
 ---
+--- ```teal
+--- local address <const> = tecs.net.resolve("game.example"):wait()
+--- if address.status == "ready" then
+---     local stream <const> = tecs.net.connect(address.value, 7777):wait()
+---     if stream.status == "ready" then
+---         stream.value:write("ping\n")
+---         print(stream.value:read())
+---         stream.value:close()
+---     end
+---     address.value:close()
+--- end
+--- ```
+---
+--- `wait` is for startup, tools and tests. A frame starts the same two calls,
+--- calls `tecs.net.poll` once an iteration, and reads `status` instead.
+---
 --- Every address, stream, server and datagram socket owns a native resource.
 --- Close it explicitly. Closing is idempotent; using a closed value returns a
 --- failure instead of reaching a stale native handle.

@@ -1,11 +1,14 @@
 --- Asynchronous HTTP over Reqwest and rustls.
 ---
----     tecs.net.http.newClient({userAgent = "mygame/1.0"})
----         :send({url = "https://example.com/manifest.json"})
----         :map(function(response: tecs.net.http.Response): string
----             return response.body:text()
----         end)
----         :onSettle(function(manifest: tecs.Future<string>) print(manifest.value) end)
+--- ```teal
+--- tecs.net.http.newClient({userAgent = "mygame/1.0"})
+---     :send({url = "https://example.com/manifest.json"})
+---     :map(function(response: tecs.net.http.Response): string
+---         local body <const> = response.body:text()
+---         return body
+---     end)
+---     :onSettle(function(manifest: tecs.Future<string>) print(manifest.value) end)
+--- ```
 ---
 --- Nothing goes in a frame. An application turns every open client once an
 --- iteration, so a request is started and answered without a game asking

@@ -5,6 +5,17 @@
 --- such as `(?i)` and `(?m)` configure a pattern without a second options
 --- vocabulary.
 ---
+--- ```teal
+--- local trailingDigits <const> = tecs.regex.compile([[(\d+)$]])
+---
+--- local frame <const> = trailingDigits:find("sprites/hero_04")
+--- if frame ~= nil then
+---     print(frame.value, frame.first, frame.last)
+--- end
+---
+--- print(trailingDigits:replaceAll("hero_04 orc_11", "N"))
+--- ```
+---
 --- Subjects remain byte strings, including strings that are not valid UTF-8.
 --- Match positions therefore follow Lua's string functions: 1-based,
 --- inclusive byte indices. An empty match has `last == first - 1`.

@@ -73,6 +73,24 @@
 --- down. An operation with no unique geometric answer returns a stable value
 --- rather than a NaN, and each one says which value on its own entry.
 ---
+--- Turning toward a point and stepping along the new facing, which is two
+--- values in and two values out at every line:
+---
+--- ```teal
+--- local x, y = 100.0, 100.0
+--- local facing = 0.0
+---
+--- local toTargetX, toTargetY = tecs.math.subtract(320, 240, x, y)
+--- local heading <const> = tecs.math.angle(toTargetX, toTargetY)
+--- facing = facing + tecs.math.deltaAngle(facing, heading) * 4 * dt
+---
+--- local stepX, stepY = tecs.math.rotate(90 * dt, 0, facing)
+--- x, y = tecs.math.add(x, y, stepX, stepY)
+--- ```
+---
+--- `deltaAngle` takes the short way round, so a turn across the wrap does not
+--- go the long way.
+---
 --- Operations use direct Lua-number arithmetic for game-coordinate magnitudes.
 --- As with writing the expressions directly, values near the limits of an
 --- IEEE double can overflow when squared or underflow to zero.
