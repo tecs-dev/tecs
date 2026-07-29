@@ -20,7 +20,7 @@ file, and does not repeat here.
 The API is not yet stable and may change as development progresses.
 :::
 
-## Where it lives
+## Reaching it
 
 `tecs.ecs` is a module on `tecs`, so a game writes `tecs.ecs.newWorld()` with no require line: `tecs` is
 ambient, loaded by the host before a game's first line. A headless tool or a spec does not go through the host
