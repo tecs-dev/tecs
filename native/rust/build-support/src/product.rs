@@ -17,7 +17,7 @@ use crate::{staging, tooling};
 
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
 pub const CERULEAN_REVISION: &str = "a09b6d734a55d58489e16498bd83387d39c4cafe";
-pub const TEALDOC_REVISION: &str = "16c396b52bcbbbd530b667a9deb58943283029e5";
+pub const TEALDOC_REVISION: &str = "83548b9ab5262c581c228e3762181a4b07be061f";
 pub const SDL3_REVISION: &str = "release-3.4.12";
 pub const SDL3_MIXER_REVISION: &str = "release-3.2.4";
 pub const LUAJIT_REVISION: &str = "871db2c84ecefd70a850e03a6c340214a81739f0";
