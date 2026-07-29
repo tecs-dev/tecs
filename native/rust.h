@@ -22,6 +22,13 @@ typedef struct TecsNetStream TecsNetStream;
 typedef struct TecsNetServer TecsNetServer;
 typedef struct TecsNetDatagram TecsNetDatagram;
 typedef struct TecsNetPacket TecsNetPacket;
+typedef struct TecsRegex TecsRegex;
+
+typedef struct TecsRegexSpan {
+    size_t start;
+    size_t end;
+    bool matched;
+} TecsRegexSpan;
 
 const char *tecsRustError(void);
 
@@ -89,6 +96,19 @@ TecsNetAddress *tecsNetPacketTakeAddress(TecsNetPacket *packet);
 uint16_t tecsNetPacketPort(const TecsNetPacket *packet);
 const uint8_t *tecsNetPacketBytes(const TecsNetPacket *packet, size_t *length);
 void tecsNetPacketDestroy(TecsNetPacket *packet);
+
+/* Compiled byte-string regular expressions. Patterns are UTF-8 Rust regex
+ * syntax; subjects are arbitrary Lua strings, and every span is a zero-based,
+ * end-exclusive byte range. */
+
+TecsRegex *tecsRegexCompile(const uint8_t *pattern, size_t length);
+size_t tecsRegexCaptureCount(const TecsRegex *regex);
+const uint8_t *tecsRegexCaptureName(const TecsRegex *regex, size_t index, size_t *length);
+bool tecsRegexIsMatch(const TecsRegex *regex, const uint8_t *subject, size_t length);
+bool tecsRegexFind(const TecsRegex *regex, const uint8_t *subject, size_t length, size_t start, TecsRegexSpan *span);
+bool tecsRegexCaptures(const TecsRegex *regex, const uint8_t *subject, size_t length, size_t start,
+                       TecsRegexSpan *spans, size_t count);
+void tecsRegexDestroy(TecsRegex *regex);
 
 /* Rapier 2D. Every arena handle stays paired with its owning opaque world. */
 

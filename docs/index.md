@@ -232,6 +232,7 @@ behind each one.
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
+- [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time

@@ -108,6 +108,7 @@ MODULES = [
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
     ("docs/modules/net/index.md", [("src/tecs/net.tl", "tecs.net")]),
     ("docs/modules/physics.md", [("src/tecs/physics/init.tl", "tecs.physics")]),
+    ("docs/modules/regex.md", [("src/tecs/regex.tl", "tecs.regex")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),

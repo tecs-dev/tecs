@@ -25,6 +25,7 @@ mod net;
 #[cfg(feature = "payload")]
 mod payload;
 mod physics;
+mod regex;
 mod registry;
 mod worker;
 

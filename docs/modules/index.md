@@ -43,6 +43,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.mcp`](/modules/mcp)                | the debug server: transport, tools, sandbox                                |
 | [`tecs.net`](/modules/net/)               | nonblocking TCP streams and UDP datagrams                                  |
 | [`tecs.physics`](/modules/physics)        | rigid-body simulation on Rapier 2D                                         |
+| [`tecs.regex`](/modules/regex)            | compiled regular expressions over Lua byte strings                         |
 | [`tecs.sequence`](/modules/sequence)      | the sequencer, with the tween runtime inside it                            |
 | [`tecs.system`](/modules/system)          | capabilities, the clipboard, child processes, and what the desktop offers  |
 | [`tecs.time`](/modules/time)              | monotonic time                                                             |

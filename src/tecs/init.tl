@@ -44,6 +44,7 @@ local type physics = require("tecs.physics")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")
+local type regex = require("tecs.regex")
 local type system = require("tecs.platform.system")
 local type loader = require("tecs.ffi.loader")
 
@@ -353,6 +354,7 @@ local record tecs
     log: log
     mcp: mcp
     net: net
+    regex: regex
     sequence: sequence
     system: system
     time: time
@@ -445,6 +447,7 @@ local SURFACE <const>: {string: Namespace} = {
     log = {module = "tecs.log"},
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net", within = {http = {module = "tecs.net.http"}}},
+    regex = {module = "tecs.regex"},
     sequence = {module = "tecs.sequence"},
     system = {module = "tecs.platform.system"},
     time = {module = "tecs.platform.time"},

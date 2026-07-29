@@ -136,10 +136,11 @@ Vulkan headers (Apache-2.0).
 
 The static native archive includes `clap` for CLI parsing, `image` for PNG and
 JPEG decoding and PNG encoding, `reqwest` with Rustls for HTTP, `rmcp` for the
-official MCP protocol and Streamable HTTP server, and `rapier2d` for physics.
-It also owns the host lifecycle, worker channels, logging, dialogs, Lua module
-registration, LuaJIT's machine-code arena, and the single-file payload loader.
-SDL still owns the application loop and LuaJIT still owns game execution.
+official MCP protocol and Streamable HTTP server, `rapier2d` for physics, and
+`regex` for compiled regular expressions. It also owns the host lifecycle,
+worker channels, logging, dialogs, Lua module registration, LuaJIT's
+machine-code arena, and the single-file payload loader. SDL still owns the
+application loop and LuaJIT still owns game execution.
 
 The exact versions and declared SPDX expressions are pinned in
 `native/rust/Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
@@ -154,7 +155,7 @@ The complete Cargo package inventory is below. It is generated from the lock
 file as part of the notice audit; target-specific entries are named because a
 release for that target compiles them:
 
-`adler2`, `allocator-api2`, `anstyle`, `approx`, `arrayvec`,
+`adler2`, `aho-corasick`, `allocator-api2`, `anstyle`, `approx`, `arrayvec`,
 `async-compression`, `atomic-waker`, `autocfg`, `base64`, `bincode`,
 `bitflags`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`, `cc`, `cfg-if`,
 `clap`, `clap_builder`, `clap_derive`, `clap_lex`, `combine`,
@@ -175,7 +176,8 @@ release for that target compiles them:
 `num-rational`, `num-traits`, `once_cell`, `openssl-probe`, `ordered-float`,
 `parry2d`, `percent-encoding`, `pin-project-lite`, `png`, `potential_utf`,
 `proc-macro2`, `profiling`, `profiling-procmacros`, `pxfm`, `quote`,
-`rapier2d`, `rawpointer`, `rayon`, `rayon-core`, `reqwest`, `ring`, `robust`,
+`rapier2d`, `rawpointer`, `rayon`, `rayon-core`, `regex`, `regex-automata`,
+`regex-syntax`, `reqwest`, `ring`, `robust`,
 `rustc_version`, `rustls`, `rustls-native-certs`, `rustls-pki-types`,
 `rustls-platform-verifier`, `rustls-platform-verifier-android`,
 `rustls-webpki`, `rustversion`, `safe_arch`, `same-file`, `schannel`,

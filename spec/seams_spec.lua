@@ -191,14 +191,15 @@ local REACH = {
     },
     {
         bucket = "direct",
-        reason = "Rapier, Rust standard networking, and rmcp are pinned Rust "
-            .. "services built for every target this engine covers, so there "
-            .. "is no platform seam to be on the far side of.",
+        reason = "Rapier, Rust regex, Rust standard networking, and rmcp are "
+            .. "pinned Rust services built for every target this engine "
+            .. "covers, so there is no platform seam to be on the far side of.",
         modules = {
             "tecs/physics/TaskPool.lua",
             "tecs/physics/World.lua",
             "tecs/mcp/transport.lua",
             "tecs/net.lua",
+            "tecs/regex.lua",
         },
     },
     {

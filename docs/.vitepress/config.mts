@@ -165,6 +165,7 @@ export default defineConfig({
                         ],
                     },
                     { text: "tecs.physics", link: "/modules/physics" },
+                    { text: "tecs.regex", link: "/modules/regex" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.time", link: "/modules/time" },

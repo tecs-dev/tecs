@@ -813,6 +813,23 @@ messages are zlib's own, so `spec/compress_spec.lua` asserts that each of those
 raises and never which sentence it raised; pinning a suite to one
 implementation's strings is what makes the next swap expensive.
 
+## Compiled regular expressions
+
+Regular expressions are `tecs.regex`, their own public module rather than a
+section of `tecs.data`. The distinction is lifetime: a data transform consumes
+one whole byte string and answers another, while a regex is compiled state a
+caller deliberately keeps and applies many times. Filing it under data would
+make a stateful text matcher read like another encoder.
+
+Rust's `regex::bytes::Regex` is the implementation because a Lua string is a
+byte string, not a promise of UTF-8. Patterns are still UTF-8 Rust regex syntax,
+with flags written inline, while a subject may contain any bytes and every
+returned position is a Lua-style 1-based inclusive byte index. The surface
+stops at compilation, testing, finding and captures. Mirroring `RegexBuilder`
+would create two configuration languages for flags the pattern already carries;
+replacement and iteration wait until a use settles the ownership and allocation
+shape they should promise.
+
 ## Sound
 
 `app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
@@ -3427,6 +3444,7 @@ src/tecs/net.tl           nonblocking TCP and UDP transport
 src/tecs/net/http/        requests, and the clients the loop turns
 src/tecs/random.tl        seeded streams and Perlin noise
 src/tecs/data.tl          JSON, zlib and raw DEFLATE, and three hashes
+src/tecs/regex.tl         compiled Rust regular expressions over byte strings
 assets/                   shaders, materials and fonts, globbed at build time
 spec/                     busted suite
 bench/                    where the numbers in this file come from
@@ -3444,8 +3462,8 @@ archive, and owns the final link. That keeps a single-file build single: Cargo,
 the crate graph, and the archive are build inputs, not files a game needs at
 run time. Every Rust archive build first runs `rustfmt --check` and Clippy with
 warnings denied. The same archive owns image decoding, networking, HTTP, the
-RMCP Streamable HTTP server, physics, and Clap parsing while Teal retains the
-public API and command implementations.
+RMCP Streamable HTTP server, physics, regular expressions, and Clap parsing
+while Teal retains the public API and command implementations.
 
 ```
 make presets        list the platform matrix
