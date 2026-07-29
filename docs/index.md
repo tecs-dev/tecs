@@ -218,7 +218,7 @@ entry file runs, so no require line. Alphabetical, ignoring case, because that i
 [Modules](/modules/) carries the same list, and [the generated reference](/modules/) carries what is
 behind each one.
 
-<div class="module-columns">
+::: module-columns
 
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
@@ -257,7 +257,7 @@ On `tecs` itself, because no one module owns them:
 - [`tecs.Transform`](/ecs/builtins#transform) - where an entity is, and the one component every subsystem moves
 - [`tecs.version`](/modules/) - the version of this build, as a string
 
-</div>
+:::
 
 ## tecs.ecs
 
@@ -266,7 +266,7 @@ Worlds, components, queries, systems, events and resources. One table with two w
 aggregator that pulls every engine module in and a module `tecs` exports cannot also depend on `tecs`. These
 are the concepts behind the names.
 
-<div class="module-columns">
+::: module-columns
 
 - [Overview](/ecs/) - the model, in one page
 - [Archetypes](/ecs/archetype) - cache-friendly storage for millions of entities
@@ -287,29 +287,4 @@ are the concepts behind the names.
 - [Systems](/ecs/systems) - phase scheduling, dependencies and run conditions
 - [World](/ecs/world) - entities, resources and the state stack
 
-</div>
-
-<style>
-.module-columns {
-  margin-top: 1.5rem;
-}
-
-.module-columns ul {
-  columns: 2;
-  column-gap: 3rem;
-  margin: 0;
-  padding-left: 1.25rem;
-}
-
-.module-columns li {
-  break-inside: avoid;
-  margin: 0.25rem 0;
-  line-height: 1.5;
-}
-
-@media (max-width: 640px) {
-  .module-columns ul {
-    columns: 1;
-  }
-}
-</style>
+:::

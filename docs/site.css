@@ -1,9 +1,11 @@
 /* The site's own palette and display face, over tealdoc's defaults.
  *
- * Only the documented `--tealdoc-*` tokens are set, so the theme survives a
+ * Mostly the documented `--tealdoc-*` tokens, so the theme survives a
  * generator update: a rule written against a class would not. The two halves
  * of each pair are the light and the dark value, and tealdoc picks between
- * them from the reader's system setting and from the theme toggle. */
+ * them from the reader's system setting and from the theme toggle. What is
+ * written against a class instead is the wordmark and the column layout the
+ * home page asks for, and those are the parts to check after an update. */
 
 @import url("https://fonts.googleapis.com/css2?family=Jersey+15&display=swap");
 
@@ -15,6 +17,7 @@
     --tealdoc-light-background-elv: #e0ddd8;
     --tealdoc-light-border: #cdc8c0;
     --tealdoc-light-code-background: #e0ddd8;
+    --tealdoc-light-sidebar-background: #d5d0c8;
     --tealdoc-light-text: #302d29;
     --tealdoc-light-text-muted: #565047;
     --tealdoc-light-text-faint: #756d60;
@@ -24,6 +27,7 @@
     --tealdoc-dark-background-elv: #2a2724;
     --tealdoc-dark-border: #3a3730;
     --tealdoc-dark-code-background: #17141c;
+    --tealdoc-dark-sidebar-background: #1d1d1d;
     --tealdoc-dark-text: #d9d2c3;
     --tealdoc-dark-text-muted: #b6ad9e;
     --tealdoc-dark-text-faint: #8f8677;
@@ -38,15 +42,49 @@
     --tealdoc-dark-accent-soft: #86779529;
     --tealdoc-dark-accent-contrast: #110f0d;
 
-    /* Headings only. Body text stays in the reading face. */
+    /* A link is not the accent: purple headings and purple links in one column
+     * read as one thing. Tan on paper, the logo red in the dark. */
+    --tealdoc-light-link: #7f6f54;
+    --tealdoc-light-link-hover: #675941;
+    --tealdoc-dark-link: #da6f66;
+    --tealdoc-dark-link-hover: #f08980;
+
+    /* The bar is black in both themes, which is the oldest piece of the
+     * identity and the reason the wordmark below is a badge. */
+    --tealdoc-header-background: #000000;
+    --tealdoc-header-color: #ffffff;
+    --tealdoc-header-muted-color: #d9d2c3;
+    --tealdoc-header-border: #3d3748;
+    --tealdoc-header-control-background: #16141b;
+
+    /* The display face, on headings and on the two navigations. Body text
+     * stays in the reading face, which is what a paragraph is set in. */
     --tealdoc-font-heading: "Jersey 15", sans-serif;
     --tealdoc-heading-font-weight: 400;
+    --tealdoc-sidebar-font-family: var(--tealdoc-font-heading);
+    --tealdoc-outline-font-family: var(--tealdoc-font-heading);
+    --tealdoc-sidebar-font-size: 0.85rem;
+    --tealdoc-sidebar-heading-font-size: 0.85rem;
+    --tealdoc-sidebar-font-weight: 400;
+    --tealdoc-sidebar-active-font-weight: 400;
+    --tealdoc-outline-font-size: 0.78rem;
+    --tealdoc-outline-nested-font-size: 0.72rem;
+
+    /* Square corners on the code, which is the one place this site is a
+     * terminal rather than a page. */
+    --tealdoc-code-block-radius: 0;
+
+    /* The hero name is set in the display face, which carries more weight per
+     * point than a text face, so it takes fewer of them. */
+    --tealdoc-hero-name-size: clamp(2rem, 5vw, 2.9rem);
+    --tealdoc-hero-name-size-narrow: clamp(2rem, 9vw, 2.9rem);
+    --tealdoc-hero-text-size: clamp(1.1rem, 2vw, 1.6rem);
 }
 
-/* The wordmark. A black badge with the logo red on it and a purple rule
- * under, which is the one piece of the identity that is a drawing rather than
- * a colour, so it is written against tealdoc's classes rather than its tokens
- * and is the part to check after a generator update. */
+/* The wordmark. A black badge with the logo red on it and a purple rule under,
+ * which is the one piece of the identity that is a drawing rather than a
+ * colour, so it is written against tealdoc's classes rather than its tokens.
+ * No `logo` is configured, so this is the whole mark. */
 .tealdoc-brand-name {
     display: inline-flex;
     align-items: center;
@@ -55,19 +93,13 @@
     padding: 0 12px;
     background: #000;
     color: #da6f66;
+    font-family: var(--tealdoc-font-heading);
+    font-size: 1.5rem;
+    font-weight: 400;
     text-decoration: underline;
     text-decoration-color: #a192b1;
     text-decoration-thickness: 2px;
     text-underline-offset: 5px;
-}
-
-.tealdoc-logo {
-    box-sizing: border-box;
-    height: 40px;
-    width: 40px;
-    padding: 4px;
-    background: #000;
-    object-fit: contain;
 }
 
 /* Headings carry the accent, which is what makes a page of them read as this
@@ -82,4 +114,25 @@
 .tealdoc-content h4,
 .tealdoc-content h5 {
     color: var(--tealdoc-accent-hover);
+}
+
+/* A home page layout, which is the page's own and not the generator's: a list
+ * of module names reads down two columns rather than along one tall one. */
+.module-columns ul {
+    columns: 2;
+    column-gap: 3rem;
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.module-columns li {
+    margin: 0.25rem 0;
+    break-inside: avoid;
+    line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+    .module-columns ul {
+        columns: 1;
+    }
 }

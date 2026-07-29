@@ -680,7 +680,8 @@ return {
             title = "Tecs",
             description = "Typed entity component system and game engine for Lua.",
             site_url = "https://tecs.dev",
-            logo = "/images/logo.svg",
+            -- No logo: the wordmark in `docs/site.css` is the mark, and an
+            -- image beside it would say the name twice.
             favicon = "/images/logo.svg",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
