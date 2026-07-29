@@ -205,8 +205,7 @@ are declarations and nothing else, and anything a binding does not need stays in
 
 Do not write `_Static_assert` layout checks. `cargo xtask abi-check` already does the stronger version: it
 generates a C program comparing LuaJIT's view of every record against the compiler's, checking size,
-alignment and every field offset across 219 records. A static assert only checks a header against
-itself.
+alignment and every field offset. A static assert only checks a header against itself.
 
 ### Testing
 
