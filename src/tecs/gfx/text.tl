@@ -1338,6 +1338,9 @@ local function build(
     local z <const> = transform.z
     local layer <const> = transform.layer as integer
     local viewCulled <const> = layersModule.viewCulled(layer)
+    -- Every glyph sits on the text's own layer, so the band is the block's and
+    -- not the glyph's: resolved here and spent per glyph below.
+    local bandBase <const>, bandSort <const> = layersModule.bandOf(layer)
 
     -- Material and parameter share one float: the integer part selects and the
     -- fraction carries the parameter, which is a ratio in 0..1.
@@ -1379,7 +1382,7 @@ local function build(
         instances[base] = rotation
         instances[base + 1] = scaleX
         instances[base + 2] = scaleY
-        instances[base + 3] = layersModule.depthOf(layer, z, x, y)
+        instances[base + 3] = layersModule.depthIn(bandBase, bandSort, z, x, y)
 
         instances[base + 4] = x
         instances[base + 5] = y

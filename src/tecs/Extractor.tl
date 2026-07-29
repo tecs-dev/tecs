@@ -98,6 +98,13 @@ local RESERVE_FULL <const> = 2
 local RESERVE_FLOOR <const> = 1
 local RESERVE_NONE <const> = 0
 
+--- A layer no row carries, for the band cache a run starts empty.
+---
+--- `Transform.layer` is an `int32_t`, so anything outside that width is a
+--- value the first row can never match and the cache is always cold on the
+--- first comparison rather than on a flag tested once a row.
+local NO_LAYER <const> = 2 ^ 31
+
 --- Something that draws instances without owning entities.
 ---
 --- Text is the reason this exists. A glyph is a textured quad like any other,
@@ -405,6 +412,16 @@ local function writeRun(
     local previous = archetype:get(components.PreviousTransform)
     local alpha <const> = self._alpha
 
+    -- What the layer decides, resolved when the layer changes rather than
+    -- once a row. A layer is a Transform field and so a row's own, but an
+    -- archetype is a set of components and a game moves whole archetypes
+    -- between layers rather than single rows: a run almost always resolves
+    -- this once and the rows after it pay one comparison.
+    local bandLayer = NO_LAYER
+    local bandBase = 0.0
+    local bandSort = 0
+    local bandCulled = true
+
     for row = 1, length do
         local transform = transforms[row]
         local tint = tints[row]
@@ -487,6 +504,12 @@ local function writeRun(
         end
 
         local entityLayer <const> = transform.layer as integer
+        if entityLayer ~= bandLayer then
+            bandLayer = entityLayer
+            bandBase, bandSort = layers.bandOf(entityLayer)
+            bandCulled = layers.viewCulled(entityLayer)
+        end
+
         local angle = transform.rotation
         local scaleX = transform.scaleX
         local scaleY = transform.scaleY
@@ -576,7 +599,7 @@ local function writeRun(
         -- which is the whole reason a pivot at the feet is worth having: two
         -- characters standing on the same line sort together however tall
         -- either drawing is.
-        floats[base + 3] = layers.depthOf(entityLayer, transform.z, originX, originY)
+        floats[base + 3] = layers.depthIn(bandBase, bandSort, transform.z, originX, originY)
 
         floats[base + 4] = centerX
         floats[base + 5] = centerY
@@ -595,7 +618,7 @@ local function writeRun(
 
         local ex: number
         local ey: number
-        if not layers.viewCulled(entityLayer) then
+        if not bandCulled then
             -- The layer draws its contents somewhere the view rectangle does
             -- not describe, so a world bound would cull what is on screen. A
             -- bound no view can be outside of hands the decision to the layer.
