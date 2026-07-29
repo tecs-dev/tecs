@@ -63,9 +63,10 @@ particles drain. `pause` holds the schedule and live field. `clear` kills the
 field without changing emission. `restart` resets schedule and randomness.
 `burst` queues a count for the next step.
 
-`finished` derives its answer from the schedule and maximum lifetime.
-`estimatedCount` predicts a count and may differ after overflow or a truncated
-burst. Game code cannot inspect, move, kill, or count individual particles.
+`finished` derives its answer from the schedule and the longest lifetime.
+`estimatedCount` integrates the schedule over the mean lifetime, and may differ
+after overflow or a truncated burst. Game code cannot inspect, move, kill, or
+count individual particles.
 
 ## Pool and snapshots
 
@@ -277,7 +278,8 @@ end
 --- A property that takes either a constant or a range. `300` and
 --- `{ min = 180, max = 420 }` are both accepted everywhere one of these is,
 --- and cost the same: the shader draws between two bounds either way, and
---- equal bounds are a constant.
+--- equal bounds are a constant. Bounds the wrong way round are swapped rather
+--- than refused, and a non-finite bound raises with the field named.
 local type Value = number | Range
 
 --- Stores a curve over normalized age as a compiled lookup table.
@@ -296,8 +298,9 @@ local record Gradient
     samples: {number}
 end
 
---- A color, as `#rrggbb`, `#rrggbbaa`, `0xrrggbbaa`, or four numbers in zero
---- to one.
+--- A color, as `#rrggbb`, `#rrggbbaa`, `0xrrggbbaa`, or up to four numbers in
+--- zero to one. A channel the list leaves out reads as one, so `{1, 0, 0}` is
+--- opaque red, and a string that is neither six nor eight hex digits raises.
 local type Color = string | number | {number}
 
 --- One key of a curve or a gradient. Heterogeneous by design: the first entry
@@ -309,61 +312,67 @@ local type CurveKey = {any}
 --- Configures where particles spawn.
 local record SpawnOptions
     --- Caller-writable. Selects `"point"`, `"line"`, `"rectangle"`,
-    --- `"rectangleEdge"`, `"disc"`, `"ring"`, or
-    --- "cone". Defaults to "point".
+    --- `"rectangleEdge"`, `"disc"`, `"ring"`, or `"cone"`. Defaults to
+    --- `"point"`, and anything else raises.
     shape: string
     --- Caller-writable. Sets width for a line or rectangle and radius for a
-    --- disc, ring, or cone.
+    --- disc, ring, or cone. Defaults to zero.
     width: number
     --- Caller-writable. Sets height for a rectangle. Every other shape ignores
-    --- it.
+    --- it. Defaults to zero.
     height: number
     --- Caller-writable. Sets the sampled sector of a disc, ring, or cone in
-    --- radians. It defaults to a full
-    --- turn.
+    --- radians. Defaults to a full turn.
     arc: number
-    --- Caller-writable. Rotates the sampled area independently of launch
-    --- direction.
+    --- Caller-writable. Rotates the sampled area in radians, independently of
+    --- launch direction. Defaults to zero.
     rotation: number
-    --- Caller-writable. Selects `"uniform"` or `"normal"` sampling. A gaussian spread makes a column read as
-    --- a column rather than as a slab. Defaults to "uniform".
+    --- Caller-writable. Selects `"uniform"` or `"normal"` sampling. A gaussian
+    --- spread makes a column read as a column rather than as a slab. Defaults to
+    --- `"uniform"`, and anything else raises.
     distribution: string
     --- Caller-writable. Sets the launch direction in radians and centers the
-    --- full cone on it, so a
-    --- particle leaves within plus or minus half of `spread`. Half-angle is the
-    --- other plausible reading of `spread` and a mismatch is silent, so it is
-    --- said here.
+    --- full cone on it, so a particle leaves within plus or minus half of
+    --- `spread`. Half-angle is the other plausible reading of `spread` and a
+    --- mismatch is silent, so it is said here. Defaults to zero.
     direction: number
-    --- Caller-writable. Sets the full cone width in radians.
+    --- Caller-writable. Sets the full cone width in radians. Defaults to zero,
+    --- which launches every particle along `direction`.
     spread: number
-    --- Caller-writable. Launches along the shape's outward normal rather than along `direction`.
-    --- Meaningful for the shapes that have one: disc, ring, cone and a
-    --- rectangle's edge.
+    --- Caller-writable. Launches along the shape's outward normal rather than
+    --- along `direction`. Meaningful for the shapes that have one: disc, ring,
+    --- cone and a rectangle's edge. Defaults to false.
     outward: boolean
-    --- Caller-writable. Selects `"local"` or `"world"` space. Local particles follow the emitter's transform for
-    --- their whole life; world particles read it once, at spawn, and then move
-    --- independently. Neither is a good universal default, so it is explicit
-    --- and defaults to "world".
+    --- Caller-writable. Selects `"local"` or `"world"` space. Local particles
+    --- follow the emitter's transform for their whole life; world particles read
+    --- it once, at spawn, and then move independently. Neither is a good
+    --- universal default, so it is explicit and defaults to `"world"`. Anything
+    --- else raises.
     space: string
-    --- Caller-writable. Sets how much emitter velocity a particle inherits in
-    --- world space, from zero to one.
+    --- Caller-writable. Sets how much emitter velocity a particle inherits, from
+    --- zero to one. Defaults to zero, and world space is the only space it means
+    --- anything in: a local particle is already carried by the emitter, so
+    --- inheriting would carry it twice.
     inheritVelocity: number
 end
 
 --- Configures when particles emit.
 local record ScheduleOptions
     --- Caller-writable. Sets the continuous emission rate in particles per
-    --- second.
+    --- second. Defaults to zero, which emits only what `bursts` asks for.
     rate: number
-    --- Caller-writable. Sets the emission cycle duration in seconds. Zero
-    --- means unbounded.
+    --- Caller-writable. Sets the emission cycle duration in seconds. Defaults to
+    --- zero, which leaves the cycle open.
     duration: number
-    --- Caller-writable. Controls whether the emission cycle repeats.
+    --- Caller-writable. Controls whether the emission cycle repeats. Defaults to
+    --- false.
     looping: boolean
     --- Caller-writable. Sets the delay before emission starts in seconds.
+    --- Defaults to zero.
     delay: number
     --- Caller-writable. Defines at most four timed burst counts measured from
     --- the start of the cycle. A muzzle flash is one burst at time zero.
+    --- Defaults to none, and a fifth raises.
     bursts: {ScheduleBurst}
 end
 
@@ -377,23 +386,27 @@ end
 
 --- Configures a particle's initial properties.
 local record InitialOptions
-    --- Caller-writable. Sets particle lifetime in seconds.
+    --- Caller-writable. Sets particle lifetime in seconds. Defaults to one, and
+    --- its upper bound is the effect's `maxLifetime`.
     lifetime: Value
-    --- Caller-writable. Sets initial speed in world units per second.
+    --- Caller-writable. Sets initial speed in world units per second. Defaults to
+    --- zero.
     speed: Value
-    --- Caller-writable. Sets initial size in world units.
+    --- Caller-writable. Sets initial size in world units. Defaults to one.
     size: Value
-    --- Caller-writable. Sets initial rotation in radians.
+    --- Caller-writable. Sets initial rotation in radians. Defaults to zero.
     rotation: Value
     --- Caller-writable. Sets initial angular velocity in radians per second.
+    --- Defaults to zero.
     angularVelocity: Value
     --- Caller-writable. Sets constant horizontal acceleration. Independent axes
-    --- make a plume drift apart instead of translating as a block.
+    --- make a plume drift apart instead of translating as a block. Defaults to
+    --- zero.
     accelerationX: Value
-    --- Caller-writable. Sets constant vertical acceleration.
+    --- Caller-writable. Sets constant vertical acceleration. Defaults to zero.
     accelerationY: Value
-    --- Caller-writable. Sets the color every particle starts with, multiplied by the gradient and by
-    --- the emitter's tint.
+    --- Caller-writable. Sets the color every particle starts with, multiplied by
+    --- the gradient and by the emitter's tint. Defaults to opaque white.
     color: Color
 end
 
@@ -401,62 +414,75 @@ end
 local record UpdateOptions
     --- Caller-writable. Sets damping in units of one over seconds, applied as
     --- `velocity = velocity / (1 + drag * dt)`, so it composes with any step.
+    --- Defaults to zero.
     drag: number
-    --- Caller-writable. Sets acceleration away from the emitter.
-    --- are the difference between a fountain and a vortex.
+    --- Caller-writable. Sets acceleration away from the emitter. This and
+    --- `tangentialAcceleration` are the difference between a fountain and a
+    --- vortex. Defaults to zero.
     radialAcceleration: Value
     --- Caller-writable. Sets acceleration at right angles to the emitter.
+    --- Defaults to zero.
     tangentialAcceleration: Value
-    --- Caller-writable. Multiplies each particle's size over its life.
+    --- Caller-writable. Multiplies each particle's size over its life. An absent
+    --- curve multiplies by one, so leaving it out costs nothing.
     size: Curve
-    --- Caller-writable. Multiplies each particle's color over its life. The
-    --- opaque particle lane ignores alpha.
+    --- Caller-writable. Multiplies each particle's color over its life. An absent
+    --- gradient multiplies by white, so leaving it out costs nothing. The opaque
+    --- particle lane ignores alpha.
     color: Gradient
 end
 
 --- Configures how particles draw.
 local record RenderOptions
     --- Caller-writable. Selects the material that shades the quad by name. An
-    --- absent value samples the image array
-    --- and covers the whole quad.
+    --- absent value samples the image array and covers the whole quad.
     material: string
-    --- Caller-writable. Passes a value from zero to one to the material.
+    --- Caller-writable. Passes one number to the material, clamped to zero
+    --- through `0.999` and ignored unless `material` names one. The instance
+    --- carries the material as `id + param` in one float, and the vertex shader
+    --- reads the integer part as the selector and the fraction as the
+    --- parameter, so `1.0` would arrive as the next material's id with a
+    --- parameter of zero. Defaults to zero.
     materialParam: number
     --- Caller-writable. Selects a registered image from `Renderer:sprite`. An
     --- absent value draws a white quad.
     sprite: Sprite
     --- Caller-writable. Selects a sheet to animate instead of a still region.
-    --- The cycle is
-    --- played exactly once over each particle's own life and clamps at the
-    --- end, so a randomized lifetime randomizes the playback speed.
+    --- The cycle is played exactly once over each particle's own life and clamps
+    --- at the end, so a randomized lifetime randomizes the playback speed.
     ---
     --- Uses the same frame table an animated entity does, so per-frame
     --- durations, reverse and pingpong all arrive already spent.
     sheet: Sheet
-    --- Caller-writable. Selects the sheet tag to animate.
+    --- Caller-writable. Selects the sheet tag to animate. An absent value
+    --- animates the whole sheet, and so does a name the sheet does not carry,
+    --- which is the sheet's own answer for an unknown tag rather than a raise.
     tag: string
     --- Caller-writable. Selects the render layer from one to `layers.MAX`.
+    --- Defaults to one, and anything outside the range raises.
     layer: integer
     --- Caller-writable. Sets the horizontal pivot as a fraction of the
-    --- frame from its top left. Defaults to the middle.
+    --- frame from its top left. Defaults to `0.5`, the middle.
     pivotX: number
     --- Caller-writable. Sets the vertical pivot as a fraction of the frame
-    --- from its top edge. It defaults to the middle.
+    --- from its top edge. Defaults to `0.5`, the middle.
     pivotY: number
     --- Caller-writable. Selects `"fixed"` or `"velocity"` alignment. Velocity
     --- alignment adds the path's angle to the particle's own rotation, so a
-    --- spinning spark aligned to its path still spins.
+    --- spinning spark aligned to its path still spins. Defaults to `"fixed"`,
+    --- and anything else raises.
     alignment: string
     --- Caller-writable. Multiplies the along-path axis when aligned to
-    --- velocity.
+    --- velocity. Defaults to one.
     stretch: number
     --- Caller-writable. Selects a blend mode. Tecs currently accepts, logs
     --- once, and ignores it because no particle reaches the
     --- forward blended lane, so an effect authored with one today draws opaque
-    --- and will draw as written once the simulate pass can pick that lane.
+    --- and will draw as written once the simulate pass can pick that lane. The
+    --- log carries the note once per name rather than once per effect.
     blend: string
     --- Caller-writable. Selects the clip region that contains the fragments.
-    --- Zero disables clipping.
+    --- Defaults to zero, which is no clipping.
     clip: integer
 end
 
@@ -465,24 +491,30 @@ local record EffectOptions
     --- Caller-writable. Sets the required process-wide unique effect name.
     --- Snapshots use this name to identify the effect.
     name: string
-    --- Caller-writable. Sets how many live particles one emitter can hold. A
-    --- steady-state emitter needs at least `rate * maxLifetime`; otherwise Tecs
-    --- drops emissions and logs a warning.
+    --- Caller-writable. Sets how many live particles one emitter can hold.
+    --- Defaults to 256, and under one raises. A steady-state emitter needs at
+    --- least `rate * maxLifetime`; a smaller capacity registers, drops the
+    --- emissions that find no slot, and logs a warning saying so, because a
+    --- spray thinner than the one authored is otherwise found by eye.
     capacity: integer
-    --- Caller-writable. Selects `"drop"` or `"replace"` when an emission
-    --- arrives with no
-    --- free slot: give way, or take the oldest live particle's. Defaults to
-    --- "replace".
+    --- Caller-writable. Selects `"drop"` or `"replace"` when an emission arrives
+    --- with no free slot: give way, or take the oldest live particle's. Defaults
+    --- to `"replace"`, and anything else raises.
     overflow: string
-    --- Caller-writable. Configures when the effect emits particles.
+    --- Caller-writable. Configures when the effect emits particles. An absent
+    --- section takes every default below it.
     schedule: ScheduleOptions
-    --- Caller-writable. Configures where the effect spawns particles.
+    --- Caller-writable. Configures where the effect spawns particles. An absent
+    --- section takes every default below it.
     spawn: SpawnOptions
-    --- Caller-writable. Configures each particle's initial properties.
+    --- Caller-writable. Configures each particle's initial properties. An absent
+    --- section takes every default below it.
     initial: InitialOptions
-    --- Caller-writable. Configures how particles change over their lifetime.
+    --- Caller-writable. Configures how particles change over their lifetime. An
+    --- absent section leaves a particle on its launch velocity.
     update: UpdateOptions
-    --- Caller-writable. Configures how particles draw.
+    --- Caller-writable. Configures how particles draw. An absent section draws
+    --- white quads on layer one.
     render: RenderOptions
 end
 
@@ -498,9 +530,14 @@ local record Effect
     index: integer
     --- Read-only. Reports how many live particles one emitter can hold.
     capacity: integer
-    --- Read-only. Reports the longest particle lifetime, which decides when an emitter
-    --- that has stopped emitting has finished.
+    --- Read-only. Reports the longest particle lifetime in seconds, which decides when an
+    --- emitter that has stopped emitting has finished.
     maxLifetime: number
+    --- Read-only. Reports the mean particle lifetime in seconds, halfway between the bounds
+    --- `initial.lifetime` was authored with. This is the window
+    --- `estimatedCount` integrates the schedule over, and it is the steady-state
+    --- live count divided by the emission rate.
+    meanLifetime: number
     --- Read-only. Reports seconds from `play` to the last emission, or -1 for an effect that
     --- never stops emitting.
     emitFor: number
@@ -861,6 +898,11 @@ local function newEffect(options: EffectOptions): Effect
 
     -- Rendering.
     if render.material ~= nil then
+        -- The selector and its parameter share one float, so the parameter is
+        -- the fraction: `instance.vert.glsl` reads the id back with `floor` and
+        -- the parameter with `fract`. One is not a value the fraction can hold,
+        -- and left alone it would carry to the integer part and select the next
+        -- material instead, so the top of the range stops short of it.
         local param = render.materialParam or 0.0
         if param < 0.0 then
             param = 0.0
@@ -935,6 +977,12 @@ local function newEffect(options: EffectOptions): Effect
     end
 
     local maxLifetime <const> = fields[EFFECT.LIFETIME_MAX]
+    -- Halfway between the bounds, which is the mean of the uniform draw the
+    -- spawn pass makes between them, so a constant lifetime has a mean equal to
+    -- itself. `estimatedCount` integrates over this and the check below uses
+    -- the longest, because a prediction wants the average and a capacity wants
+    -- the worst case.
+    local meanLifetime <const> = (fields[EFFECT.LIFETIME_MIN] + maxLifetime) * 0.5
     -- Checked here, where every number is in hand, rather than left to be
     -- discovered as a spray that is thinner than it was authored to be. A CPU
     -- system drops the emission with no diagnostic and that is the single most
@@ -963,6 +1011,7 @@ local function newEffect(options: EffectOptions): Effect
         index = #registry + 1,
         capacity = capacity,
         maxLifetime = maxLifetime,
+        meanLifetime = meanLifetime,
         emitFor = emitFor,
         rate = rate,
         delay = fields[EFFECT.DELAY],
@@ -1067,7 +1116,12 @@ local record ParticleEmitter is ecs.Component
     --- slot range is the effect's capacity, and changing it would mean
     --- reallocating. Despawn and spawn again, which is cheap.
     effect: Effect
-    --- Caller-writable. Controls whether the emitter plays, pauses, or stops.
+    --- Caller-writable. Reports whether the emitter plays, pauses, or stops. Set
+    --- it through `play`, `pause` and `stop` rather than by assignment: those
+    --- move the cycle's start step and the random generation with it, and a bare
+    --- write leaves both where the previous state left them, so an emitter
+    --- written back to `"playing"` resumes part way through its schedule instead
+    --- of starting it again.
     state: EmitterState
     --- Caller-writable. Selects the random sequence. Two emitters with one seed
     --- produce one field.
@@ -1109,10 +1163,10 @@ local record ParticleEmitter is ecs.Component
     --- next step boundary that passes.
     _burst: number
     --- Engine-owned. Stores the world step when the pool last saw this emitter.
-    --- Ordinary game code should ignore this field.
-    --- question asked between frames answers against the frame it saw, and the
-    --- fixed step in seconds as it stood then, so `finished` can convert its
-    --- own clock without holding a world.
+    --- Ordinary game code should ignore this field. A question asked between
+    --- frames answers against the frame the pool saw, and against the fixed step
+    --- in seconds as it stood then, so `finished` converts its own clock without
+    --- holding a world.
     _worldStep: number
     --- Engine-owned. Stores the fixed-step duration last seen by the emitter.
     --- Ordinary game code should ignore this field.
@@ -1242,18 +1296,24 @@ end
 
 --- Returns an estimate of how many particles remain alive.
 ---
---- Integrates the schedule over the latest lifetime and subtracts expired
---- emissions. The result is exact when no burst truncates and no overflow
---- occurs. Reading the exact GPU count would stall the pipeline.
+--- Integrates the schedule over the effect's `meanLifetime` and treats every
+--- emission older than that as expired. An effect whose `initial.lifetime` is
+--- one number has a mean equal to that lifetime, so the answer is exact but for
+--- the step the emitter is part way through; a lifetime range makes it an
+--- expectation, because the host does not know which particles drew the short
+--- lifetimes. A truncated burst or an overflow replacement moves it either way.
+--- Reading the exact count back from the GPU would stall the pipeline.
 function ParticleEmitter:estimatedCount(): integer
     local effect <const> = self.effect
     if effect == nil then
         return 0
     end
     local now <const> = (self._clock - self._startStep) * self._stepSeconds * self.timeScale
-    -- Averaged rather than the longest, since half the particles emitted a
-    -- lifetime ago are gone and half are not.
-    local mean <const> = effect.maxLifetime * 0.5
+    -- The mean rather than the longest, because a particle emitted a mean
+    -- lifetime ago is as likely to be gone as still alive, so each emission is
+    -- counted once on average. Half the longest would be the mean only for an
+    -- effect whose shortest lifetime is zero.
+    local mean <const> = effect.meanLifetime
     local alive <const> = emittedBy(self, effect, now) - emittedBy(self, effect, now - mean)
 
     if alive <= 0.0 then
@@ -1294,19 +1354,22 @@ end
 --- [`ParticleEmitter`](tealdoc:tecs.gfx.particles.ParticleEmitter). Requires
 --- only `effect`.
 local record EmitterOptions
-    --- Caller-writable. Selects the required effect.
+    --- Caller-writable. Selects the required effect. An absent one raises.
     effect: Effect
-    --- Caller-writable. Sets the initial playback state.
+    --- Caller-writable. Sets the initial playback state. Defaults to `"playing"`,
+    --- and anything outside the three raises.
     state: EmitterState
-    --- Caller-writable. Sets the random seed.
+    --- Caller-writable. Sets the random seed. Defaults to one.
     seed: number
-    --- Caller-writable. Multiplies the effect's emission rate.
+    --- Caller-writable. Multiplies the effect's emission rate. Defaults to one.
     rateScale: number
-    --- Caller-writable. Multiplies every particle's size.
+    --- Caller-writable. Multiplies every particle's size. Defaults to one.
     sizeScale: number
-    --- Caller-writable. Multiplies the speed of the effect clock.
+    --- Caller-writable. Multiplies the speed of the effect clock. Defaults to
+    --- one.
     timeScale: number
-    --- Caller-writable. Multiplies every particle's color.
+    --- Caller-writable. Multiplies every particle's color. Defaults to none,
+    --- which multiplies by opaque white.
     tint: Color
 end
 
@@ -1911,16 +1974,17 @@ end
 
 --- Configures the particle pool installed by `plugin`.
 local record PoolOptions
-    --- Caller-writable. Selects the renderer whose instance buffer the pool
-    --- uses and whose
-    --- device its buffers and pipelines are built on.
+    --- Caller-writable. Selects the renderer whose instance buffer the pool uses
+    --- and whose device its buffers and pipelines are built on. Required, and an
+    --- absent one raises.
     renderer: Renderer
     --- Caller-writable. Sets how many live particles the pool holds across the
-    --- world. The value remains fixed
-    --- at install: changing it would move the run, and moving the run lays out
-    --- the whole scene again.
+    --- world. Defaults to 16384. The value remains fixed at install: changing it
+    --- would move the run, and moving the run lays out the whole scene again.
     capacity: integer
-    --- Caller-writable. Sets how many emitters the pool holds at once.
+    --- Caller-writable. Sets how many emitters the pool holds at once. Defaults
+    --- to 256. An emitter that arrives past the limit draws nothing and logs the
+    --- refusal.
     maxEmitters: integer
 end
 

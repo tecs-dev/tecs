@@ -729,12 +729,40 @@ describe("tecs.gfx.particles", function()
         frames(world, renderer, 70)
         local item = world:get(entity, ParticleEmitter)
 
-        -- Sixty a second for half a mean lifetime, which is the window the
-        -- prediction integrates over. A prediction and not a measurement, so
-        -- the assertion is a band rather than a number.
+        -- One lifetime, because a constant lifetime is its own mean, so sixty a
+        -- second holds sixty. Banded rather than exact only because the emitter
+        -- is part way through a step; a window of half the longest lifetime
+        -- would answer thirty and fail here.
+        assert.are.equal(1.0, effect.meanLifetime, "a constant lifetime is its own mean")
         local estimate = item:estimatedCount()
-        assert.is_true(estimate > 20, "a steady emitter should be predicted to hold a field")
+        assert.is_true(
+            estimate >= 55 and estimate <= 65,
+            "sixty a second for one lifetime holds sixty, not " .. estimate
+        )
         assert.is_true(estimate <= effect.capacity, "and never more than its own capacity")
+        renderer:destroy()
+    end)
+
+    it("integrates a lifetime range over its mean rather than over half its longest", function()
+        local world, renderer = newScene(true)
+        local effect = particles.effect({
+            name = effectName(),
+            capacity = 256,
+            -- Mean one second, longest one and a half. Half the longest would be
+            -- 0.75 and answer forty-five, which is the reading this pins shut.
+            schedule = { rate = 60, looping = true },
+            initial = { lifetime = { min = 0.5, max = 1.5 }, speed = 0, size = 4 },
+            render = { layer = 1 },
+        })
+        local entity = newEmitter(world, effect)
+
+        frames(world, renderer, 120)
+        local item = world:get(entity, ParticleEmitter)
+
+        assert.are.equal(1.5, effect.maxLifetime, "the longest lifetime is the upper bound")
+        assert.are.equal(1.0, effect.meanLifetime, "and the mean sits halfway between the bounds")
+        local estimate = item:estimatedCount()
+        assert.is_true(estimate >= 55 and estimate <= 65, "the mean window holds sixty, not " .. estimate)
         renderer:destroy()
     end)
 
