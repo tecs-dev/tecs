@@ -237,10 +237,7 @@ describe("shaderpack", function()
         assert.are.equal(encoded, shaderpack.encode(reversed))
         -- The first body field is the target. Its length is an explicit
         -- little-endian uint32, rather than a native-size LuaJIT table field.
-        assert.are.equal(
-            string.char(#built.target, 0, 0, 0) .. built.target,
-            encoded:sub(8, 11 + #built.target)
-        )
+        assert.are.equal(string.char(#built.target, 0, 0, 0) .. built.target, encoded:sub(8, 11 + #built.target))
     end)
 
     it("matches the portable format's golden bytes", function()

@@ -30,12 +30,7 @@ describe("ffi.loader", function()
         -- A unique registry key bypasses the earlier cache. Under Busted no
         -- host registry exists, so this executes ffi.load and the extra
         -- LoadLibraryA reference that deliberately survives lua_close.
-        local sdl, path = loader.library(
-            "SDL3",
-            "sdl3",
-            "TECS_SDL3_PATH",
-            "windows-loader-pin-spec"
-        )
+        local sdl, path = loader.library("SDL3", "sdl3", "TECS_SDL3_PATH", "windows-loader-pin-spec")
         assert.is_truthy(path:lower():match("sdl3%.dll$"))
         collectgarbage("collect")
         assert.is_not_nil(sdl.SDL_GetError)
