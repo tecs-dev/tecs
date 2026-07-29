@@ -5,7 +5,7 @@ outline: [2, 3]
 
 # tecs.Application
 
-`tecs.Application` is the lifecycle the C host drives. An entry file ends with `return tecs.newApplication(config)`,
+`tecs.Application` is the lifecycle the Rust host drives. An entry file ends with `return tecs.newApplication(config)`,
 and the host calls into the returned object to initialize, for each event, for each iteration, and to shut down.
 
 It is not a function that runs until done. A platform that never hands control back has no loop to block in, so

@@ -132,7 +132,6 @@ export default defineConfig({
                     },
                     { text: "tecs.assets", link: "/modules/assets" },
                     { text: "tecs.audio", link: "/modules/audio" },
-                    { text: "tecs.box2d", link: "/modules/box2d" },
                     { text: "tecs.data", link: "/modules/data" },
                     { text: "tecs.events", link: "/modules/events" },
                     {
@@ -165,6 +164,7 @@ export default defineConfig({
                             { text: "tecs.net.http", link: "/modules/net/http" },
                         ],
                     },
+                    { text: "tecs.physics", link: "/modules/physics" },
                     { text: "tecs.sequence", link: "/modules/sequence" },
                     { text: "tecs.system", link: "/modules/system" },
                     { text: "tecs.time", link: "/modules/time" },

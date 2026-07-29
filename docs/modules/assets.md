@@ -17,9 +17,9 @@ will live. Turning a decoded image into something drawable is [`Renderer`](/modu
 decoded clip into something audible is [`Audio`](/modules/audio).
 
 ::: info An image is a PNG or a JPEG
-SDL_image offers eighteen formats and the build turns off every other one, because each is a codec a shipped
-binary carries whether or not it loads one. An atlas in any other format is converted at build time, not
-enabled at configure time. Sound is the other way round: whatever the mixer's decoders can read loads, and
+The Rust image decoder is built with only its PNG and JPEG features, because each additional codec is code a
+shipped binary carries whether or not it loads one. An atlas in any other format is converted at build time,
+not enabled in the runtime. Sound is the other way round: whatever the mixer's decoders can read loads, and
 `Audio.decoders()` reports what the mixer actually linked.
 :::
 

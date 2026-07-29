@@ -6,10 +6,10 @@ Tecs is a typed entity component system and the game engine built around it, wri
 were separate projects and are now one: the ECS knows what the GPU reads, and the engine is not a layer bolted on
 top of a renderer-agnostic core.
 
-SDL owns the loop. An entry file returns an application and a C host drives it through `SDL_AppInit`,
+SDL owns the loop. An entry file returns an application and a Rust host drives it through `SDL_AppInit`,
 `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. Everything below Lua is reached through the FFI against
-generated bindings; the only native code is that host, plus a worker thread runner, a log sink, and the thread
-pool Box2D solves across.
+generated bindings. Rust owns the host and engine support services; generated C linker glue and a small
+SPIRV-Cross wrapper remain.
 
 Entities are the interface. Anything that renders or updates per frame is an entity in a world.
 
@@ -19,7 +19,7 @@ Primary entry point:
 
 ## Key Commands
 
-CMake is canonical and Make wraps it, so there is one description of how the tree is assembled.
+CMake owns final assembly, Cargo owns the Rust archive, and Make wraps both.
 
 ```bash
 make build          # Build the selected preset
@@ -43,8 +43,7 @@ make deps           # Install development dependencies (Homebrew)
 
 `PRESET=` selects the target and defaults to `macos-arm64-dev`. A development preset resolves dependencies from
 the system, which is convenient and not shippable. A packaged preset builds pinned revisions from source, and
-`make check-package` is the gate on the difference, and only a packaged install can pass it. A packaged preset also
-needs a Python with `jinja2` and `jsonschema` on the build host, which Mbed TLS generates sources with.
+`make check-package` is the gate on the difference, and only a packaged install can pass it.
 
 `macos-arm64-sanitize` and `linux-x64-sanitize` are development presets with AddressSanitizer and
 UndefinedBehaviorSanitizer under the C. Run the host through them, which is `make run` or any of the
@@ -60,11 +59,11 @@ tecs/
 │   ├── types.tl
 │   ├── internal/          # ECS implementation
 │   ├── utils/
-│   ├── ffi/               # Generated bindings: SDL3, SDL3_mixer, Box2D, shaderc, SPIRV-Cross
+│   ├── ffi/               # Generated bindings plus the Rust runtime ABI
 │   ├── gpu/               # Device, pipelines, buffers, pass graph, shaders
 │   ├── gfx/               # Camera, layers, distance-field text
 │   ├── platform/          # window, input, audio, events, time, files, the OS
-│   ├── box2d/             # Box2D 3
+│   ├── physics/           # Rapier world integration
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── mcp/               # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
@@ -165,19 +164,17 @@ hazards of the callee, not the caller: calling _into_ a cast function pointer fr
 compiles fine. What breaks is C calling back while a trace is running, which is exactly what
 happens when the C call sits in a loop hot enough to compile.
 
-That is why the two places this tree already needs a callback are C rather than Lua, and each says
-so at the top of its file. `native/logsink.c` takes SDL's log output function because SDL logs from
-threads it created, the audio device thread and the async IO pool among them. `native/worker.c`
-owns the thread entry point for the same reason, and `src/tecs/workers.tl` states the rule from the
-other side: raw thread creation is deliberately not exposed, because a thread entry written in Lua
-is precisely that mistake. `box2d/TaskPool.tl` takes its two callbacks from C through
-`tecsTaskPoolEnqueueCallback` rather than casting Lua ones.
+That is why callbacks retained by SDL live in Rust rather than Lua. The Rust
+log sink and dialog bridge copy results into synchronized state, and the Rust
+worker owns the thread entry point. `src/tecs/workers.tl` states the rule from
+the other side: raw thread creation is deliberately not exposed, because a
+thread entry written in Lua is precisely that mistake.
 
 So, in order of preference:
 
 1. **Let the library write into memory instead.** Many callback APIs have a buffer or a queue form,
    and it is worth looking for one before writing a callback at all.
-2. **Put the callback in C**, in `native/`, and hand results across a queue the Lua side drains.
+2. **Put the callback in Rust**, and hand results across a queue the Lua side drains.
    This is what the three cases above do.
 3. **If a Lua callback is genuinely unavoidable**, keep the C call that triggers it off any path
    that compiles, and say in a comment why it cannot compile. This is fragile: a loop that was cold
@@ -196,8 +193,8 @@ else.
 
 `CMAKE_C_EXTENSIONS` is left at its default, which is `gnu99` rather than `c99`, and that is load
 bearing on Linux. `-std=c99` defines `__STRICT_ANSI__`, glibc's `features.h` then leaves
-`_DEFAULT_SOURCE` and `_GNU_SOURCE` undefined, and `native/mcodearena.c` reaches for `MAP_ANONYMOUS`
-and `dladdr`, both of which those macros gate. Moving to `c99` means writing feature-test macros
+`_DEFAULT_SOURCE` and `_GNU_SOURCE` undefined, and native POSIX code may reach
+for APIs those macros gate. Moving to `c99` means writing feature-test macros
 into every file that touches a POSIX header, which buys nothing the standard pin does not already
 buy.
 

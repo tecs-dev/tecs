@@ -10,8 +10,8 @@ and sends whole UDP datagrams. It does not add a message protocol: a TCP stream 
 those bytes into messages belongs to the game.
 
 A protocol built on that is a namespace one level down, and [`tecs.net.http`](/modules/net/http) is the one there
-is. Naming this module loads no protocol: HTTP resolves libcurl when it is read, so a program that only opens a
-socket never links one.
+is. Naming this module loads no protocol: HTTP starts its Reqwest runtime only when a client is built, so a
+program that only opens a socket starts no HTTP workers.
 
 The surface follows the game loop rather than hiding one:
 
@@ -876,7 +876,7 @@ Begins connecting to a resolved address.
 <pre><code v-pre><a href="#tecs.net.http">tecs.net.http</a>: http
 </code></pre>
 
-HTTP and HTTPS, over libcurl. The one protocol namespace here: this
+HTTP and HTTPS, over Reqwest and Rustls. The one protocol namespace here: this
 module is the transport, and framing bytes into messages is what a
 protocol above it does.
 

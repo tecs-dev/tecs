@@ -1,11 +1,11 @@
 # tecs
 
 A typed entity component system and the game engine built around it, in Teal
-for LuaJIT, on SDL3, SDL_GPU and Box2D 3. The two were separate projects and
+for LuaJIT, on SDL3, SDL_GPU and Rapier. The two were separate projects and
 are now one: the ECS knows what the GPU reads. Entities are the interface,
 so anything that renders or updates per frame is an entity in a world.
 
-SDL owns the loop. An entry file returns an application and a C host drives it
+SDL owns the loop. An entry file returns an application and a Rust host drives it
 from `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate`, and `SDL_AppQuit`:
 
 ```lua
@@ -26,26 +26,23 @@ return tecs.newApplication({
 That shape is not a preference. iOS never hands control back for a blocking
 loop to sit in, so a host that cannot be entered by callback cannot run there
 at all. The same shape works on desktop, so there is one lifecycle rather than
-one per platform. The host's calls into Lua are C reaching Lua through the Lua
-C API, not FFI callbacks, which are a trace barrier and unsafe from a thread
+one per platform. The host's calls into Lua use the Lua C API, not FFI
+callbacks, which are a trace barrier and unsafe from a thread
 the VM did not create.
 
-Everything below Lua is reached through the FFI. What C there is under
-`native/` is mostly there because something below Lua needs an address a Lua
-function cannot safely be: a host that owns `main`, a worker thread runner, a
-log sink, the thread pool Box2D solves across, the file dialogs, the HTTP
-response buffers, the machine-code arena, a shared-object stub for SPIRV-Cross,
-and the table of function pointers a target without `dlopen` reaches its
-libraries through. The host itself is never called from Lua. The one Lua C
-module is lua-cjson, compiled in and announced through `package.preload` rather
-than found on a search path, for the reason that table of pointers exists.
+Everything below Lua is reached through the FFI. Rust owns the host, worker
+runner, log sink, dialogs, HTTP client, physics, image codec, machine-code
+arena, payload loader, and registry installation. The remaining first-party C
+is generated linker glue and the small shared-object wrapper over SPIRV-Cross.
+The host itself is never called from Lua. lua-cjson remains compiled in and
+announced through `package.preload` rather than found on a search path.
 
 ## Status
 
 Working today:
 
-- Generated FFI bindings for SDL3, SDL3_image, SDL3_mixer, SDL3_net, Box2D 3,
-  shaderc, SPIRV-Cross, libcurl and zlib, verified against the C ABI
+- Generated FFI bindings for SDL3, SDL3_mixer, SDL3_net, shaderc,
+  SPIRV-Cross and zlib, plus a checked Rust ABI for engine services
 - A window, a Metal/Vulkan/D3D12 GPU device, and a swapchain render loop
 - GLSL compiled at runtime to SPIR-V and translated to MSL, with resource
   bindings reflected and remapped for the backend
@@ -62,12 +59,9 @@ Working today:
   PointLight, Clip, Occluder, DropShadow and Renderable components, with a sync
   that walks archetype columns straight into mapped GPU staging, and a
   depth-tested G-buffer
-- Physics in the world: a RigidBody component holding a value-typed Box2D
-  handle, stepped in the fixed phases, solved across a native thread pool, and
-  written back from the movement Box2D reports rather than by asking per body.
-  A despawn destroys the body; a snapshot carries the `Body`, `Collider` and
-  `Motion` columns instead of the handle, and the fixed-step reconcile rebuilds
-  the body from them on load
+- Physics in the world through Rapier: a RigidBody component holding a
+  generational handle, fixed-phase stepping with parallel solving, collision
+  events, and full native snapshot/restore
 - Input in three tiers behind a layer stack, latched for fixed steps, with
   per-device gamepads, text input bound to a layer, touch and pen
 - Worker threads with serialized channels, and asset loading that decodes on
@@ -677,7 +671,7 @@ area and runs entirely interpreted. Measured on one hot numeric loop, a worker
 took 27.8 seconds against the main state's 20.3 milliseconds, and
 `jit.status()` answered true throughout.
 
-So `native/mcodearena.c` holds 24MB of that window from the host's first
+So the Rust machine-code arena holds 24MB of that window from the host's first
 instruction and gives it back once initialization returns. Everything mapped in
 between goes elsewhere, because the block is already there, and what is
 released is free address space in reach that nothing else has taken. The same
@@ -698,27 +692,13 @@ slowly. `TECS_TRACEPROF=1` makes each worker report its trace aborts when it
 stops, which is how that is told apart from a worker that is merely busy: the
 failure reads as tens of thousands of `failed to allocate mcode memory`.
 
-Asset loading rides on that. Decoding a PNG is milliseconds of pure CPU work
-with no GPU involvement, so it happens on a worker and the main thread only
-uploads. The worker returns the _address_ of a decoded surface rather than its
-pixels: surfaces live in process memory, so the pointer is valid in either
-state, and passing it avoids copying an image through a serialized message
-only to copy it again into staging. Ownership transfers with the address.
-
-An image is a PNG or a JPEG, and nothing else. SDL_image offers eighteen
-formats and `cmake/Pinned.cmake` turns off every one of the other sixteen,
-because each is a codec that a statically linked game carries whether or not it
-loads one: WebP, AVIF, TIFF and JPEG XL between them cost several megabytes,
-and libavif reaches dav1d and aom behind it for about five more. Two backend
-options go with them. `SDLIMAGE_BACKEND_IMAGEIO` is off because with it on
-`IMG_Load` is not SDL_image's function at all on Apple platforms: CoreGraphics
-answers it and reads WebP, AVIF, TIFF, BMP and GIF whatever the format options
-say, which would mean a game shipping an atlas that works on macOS and fails
-everywhere else. `SDLIMAGE_BACKEND_WIC` is off for the same reason in the
-small. What is left decodes identically on every target: libpng for PNG, and
-the bundled stb_image for JPEG, which is why keeping JPEG costs no libjpeg. An
-asset in any other format is converted when it is built, not enabled when the
-engine is configured.
+Asset loading rides on that. Decoding a PNG or JPEG is pure CPU work, so it
+happens on a worker and the main thread only uploads. Rust's `image` crate
+decodes from bytes supplied through the storage seam into a tightly packed
+RGBA8 allocation. The worker returns the allocation's address rather than
+serializing its pixels; ownership transfers with that address and Rust frees
+it after upload. Only PNG and JPEG features are compiled, so the accepted
+formats are identical on every target and carry no platform image framework.
 
 Sound takes the same route. A clip is read and decoded on the worker by
 SDL_mixer and handed back as the address of a `MIX_Audio`, so a file that turns
@@ -806,9 +786,8 @@ be a rename that every caller is rechecked against rather than a silent change
 of meaning. `data.adler32` is there for the format that specifies it.
 
 `data.inflate` reads zlib streams and `data.inflateRaw` reads the
-DEFLATE inside them. zlib decodes both: it is pinned, bound, carried through the
-ABI check and already in the process because libcurl needs it to answer a
-`Content-Encoding`, so a decoder written in Lua beside it would be a second
+DEFLATE inside them. zlib decodes both: it is pinned, bound, and carried
+through the ABI check, so a decoder written in Lua beside it would be a second
 implementation of the format to keep correct, and the slower one. Both entry
 points go through `inflate` over a `z_stream` rather than `uncompress`, because
 `uncompress` wants the decompressed size up front and treats a wrong one as a
@@ -981,54 +960,16 @@ back where it left off is something a game can build without either cost.
 
 ## Physics threads
 
-Box2D 3 solves across threads when a world is given a task system, and solves
-on one when it is not. Handing it one is worth the whole of the difference: a
-step is most of a frame in a scene where the bodies stay awake, and no amount
-of work moved off the main thread elsewhere touches it.
-
-The executor is native for the same reason worker threads are. Box2D calls the
-task function from whichever thread picks the work up, so an `enqueueTask`
-written in Lua would be an FFI callback invoked from a thread the VM did not
-create. `native/taskpool.c` is a fixed set of threads over one queue of chunks,
-and Lua's part is to install two function pointers, a context and the worker
-count into `b2WorldDef` before the world is created. The count is there for the
-same reason the pointers are: Box2D indexes per-worker state by it, so a
-definition naming more workers than the pool started would have the solver
-address state that does not exist.
-
-Worker slot zero is the thread that called `b2World_Step`, which drains the
-queue while it waits instead of idling; every other slot belongs to one thread
-for that thread's lifetime, which is what Box2D means when it says a worker
-exists on one thread at a time. So a pool of one worker starts no threads and
-runs every task inline, which is exactly a world with no executor.
-
-Claiming is oldest chunk first, and that is a correctness property rather than
-a fairness preference. Box2D puts one task per worker in flight and the first
-of them drives the rest through the solver's stages while they wait on it, so
-an order that could leave that one queued while the others occupied every
-thread would hang. FIFO puts it on a running thread before any of them starts.
-Enqueuing never blocks and never waits for a free slot: more tasks outstanding
-than the pool has room for means the task runs in the calling thread, which
-Box2D accounts for through a null result.
-
-The count defaults to the machine's performance cores where the platform will
-say which those are, falling back to its logical cores, because the workers wait
-on each other between stages and the slowest core sets the pace of the step. It
-is capped at eight whatever the machine has, since the solver's stages are short
-enough that past a handful of workers the coordination costs more than the work,
-and a spinning worker on a core the stepping thread needs takes more than it
-contributes. Adding workers does not change the answer either way: the solver
-colors its constraint graph so no color holds two constraints sharing a body,
-and `spec/taskpool_spec.lua` steps a 256-body pile for 120 steps and asserts it
-lands bit-exactly where one worker left it whether two, three, four or eight
-solved it.
+Rapier is compiled with its parallel solver and enhanced determinism features.
+It uses Rayon's process-global executor and never calls Lua from a solver
+thread, so the old custom callback pool and its C bridge are gone. The first
+physics world sizes Rayon's executor from `workerCount`; later worlds share that
+pool and reject a different size rather than silently ignoring it.
 
 ## A body's lifetime
 
-A `RigidBody` is three integers naming a body Box2D owns, so the component and
-the thing it names have separate lifetimes and every place they can come apart
-is a place where nothing announces the difference. There are three, and each is
-answered here rather than left to a game.
+A `RigidBody` is a generational handle naming a body Rapier owns, so the
+component and native body have separate lifetimes.
 
 **A despawn destroys the body.** Nothing else knows the entity is gone, so
 without this the body keeps being solved for the rest of the session: the
@@ -1036,22 +977,17 @@ entity's collider stays in the pile, pushing bodies that are still on screen,
 and the memory it holds is never returned. The physics plugin observes the
 built-in `OnDespawn`, which fires while the row is still readable, and destroys
 whatever handle it finds. It reaches the world named in the handle rather than
-whichever world the plugin was last given, and it asks Box2D whether the handle
+whichever world the plugin was last given, and it asks Rapier whether the handle
 is live first, so a row that never had a body and a row whose world has already
 been destroyed both pass through it safely.
 
-**A snapshot does not carry the handle.** Box2D keeps `index1` dense and hands
-a slot to the next body the moment the one holding it is destroyed, so a saved
-handle names whichever body the loading run happens to have put there. Restoring
-one verbatim writes that body's pose into this entity's `Transform`, every step,
-with no error and nothing out of place to notice. So `RigidBody` is transient.
-The stable declaration lives in `Body` and `Collider`, while `Motion` stores the
-live velocity immediately before a save. After load the ordinary fixed-step
-reconcile path rebuilds the body from those columns and restores its motion. A
-loaded body therefore takes the same path as one created by `spawn`,
-`batchSpawn`, or the world tools.
+**A snapshot carries the native physics world.** Rapier's serializable state
+includes bodies, colliders, islands, broad and narrow phases, joints, CCD,
+integration parameters and contact state. Restore then reconnects transient
+entity handles by entity id. The persisted handler key remains
+`"tecs.physics"` so the namespace is an external compatibility surface.
 
-**`Paused` holds a body rather than hiding it.** Box2D steps a world rather than
+**`Paused` holds a body rather than hiding it.** Rapier steps a world rather than
 a body, and disabling one removes its support from the broad phase. Physics
 instead stores its linear and angular velocity in `Motion`, changes it to
 static, and leaves it solid and immovable. Removing `Paused` restores the
@@ -1091,7 +1027,7 @@ payload was left unread is worse than an unknown one, because the caller has
 every reason to trust it, so text, composition, candidates, drops, the
 clipboard, sensors, gamepad touchpads, displays, windows, pinches and user
 events all convert their payloads. Several of those carry pointers into memory
-SDL recycles as soon as the callback returns, so the C host copies those bytes
+SDL recycles as soon as the callback returns, so the Rust host copies those bytes
 into a batch it owns and frees them with that batch. Retaining the pointer is a
 use-after-free that reads as an occasional garbled string.
 
@@ -1319,7 +1255,7 @@ round: `SDL_SetClipboardData` takes no copy, retaining a callback it calls when
 some other application asks for the bytes, which may be long after the call
 returned and is a moment this process does not choose. In Lua that is an FFI
 callback pinned for the lifetime of the offer and entered from wherever SDL
-fulfils the request, and [`box2d/TaskPool.tl`](src/tecs/box2d/TaskPool.tl)
+fulfils the request, and [`physics/TaskPool.tl`](src/tecs/physics/TaskPool.tl)
 already records why this engine keeps its callbacks native rather than take
 that bet. Reading an arbitrary mime type carries none of it, so `mimeTypes`,
 `hasData` and `data` are here and the offer side is not.
@@ -1379,7 +1315,7 @@ module is the seam and the public name is the surface.
 
 File and folder dialogs are the exception to "one SDL call and return". SDL
 retains a callback and may enter it from a thread the VM did not create, so
-`native/dialogs.c` owns that callback, copies its answer behind a mutex, and
+the Rust dialog bridge owns that callback, copies its answer behind a mutex, and
 `tecs.system` polls it into a `Future` on the main thread. A Lua `ffi.cast`
 callback would be shorter and would make the program undefined on exactly the
 platform path the dialog exists to use.
@@ -1488,7 +1424,7 @@ for a fallback value.
 
 **A `Source` is the whole driver interface.** Two functions carry it: `poll`,
 which takes whatever is ready, and `advance(ms)`, which blocks for up to that
-long and takes whatever arrives. That is all a worker channel is and all a curl
+long and takes whatever arrives. That is all a worker channel is and all an HTTP
 multi handle is, so the same hook covers a decode, a subprocess and a transfer.
 `poll` is what the loop calls once a frame, and `wait` spends its budget inside
 `advance` rather than spinning. A third, `cancel`, is optional and is the honest
@@ -1546,9 +1482,9 @@ re-tracks it under the same key.
 Every HTTP request is a future, which is the easy half. The two questions worth
 recording are who drives the transfer and what a body is.
 
-**A game never pumps.** libcurl's multi interface has to be turned for a
-transfer to move, and the first shape of this made a game call `client:pump()`
-once a frame. That is engine work in a game's hands, and it is the same work
+**A game never pumps.** Reqwest runs transfers on a bounded Tokio runtime, but
+their results still have to enter Lua on the SDL thread. That is engine work,
+and it is the same work
 `assets.update` and `proc.update` already do in the loop for the same reason: a
 decode that finished has finished, a child that exited has exited, a transfer
 that completed has completed, and nothing else in a frame is obliged to ask.
@@ -1556,9 +1492,9 @@ The reason it was not simply a third line in `Application` is that `assets` and
 `proc` are module singletons and a client is an object a game constructs, maybe
 several of. So the clients come to the loop: building one registers it on the
 list `tecs.net.http.pumpClients` turns, `close` takes it off, and the
-application turns whatever is on the list. That list is a module with no FFI in
-it, because `tecs.net.http` loads libcurl the moment it is required and a game
-with no HTTP in it must not link one. It holds its clients strongly, so a request whose
+application turns whatever is on the list. Native workers send bounded chunk,
+completion and error messages to a queue; the frame pump drains it without any
+Rust callback entering Lua. The list holds its clients strongly, so a request whose
 future is the only thing a game kept still lands; the price is that `close` is
 what ends a client rather than losing the last reference to it, and the
 alternative -- a weak list -- is a fire-and-forget request that stops moving
@@ -1571,26 +1507,18 @@ its `path` was not. All of them answer one question, so they became one type. A
 when something can know one.
 
 What the type is for is `into`, which existed so a 500 MB download would not be
-a 500 MB Lua string and was exactly that. Now the native response buffer holds
+a 500 MB Lua string and was exactly that. Now the bounded Rust queue holds
 what has arrived, the pump hands it to the destination and consumes it, and the
 next pump starts from empty, so a body bound for a file is held for a frame.
 That needed the storage seam to be able to open a file rather than only take
-one whole, and it needed the C buffer to be able to give bytes back; the
-running total the ceiling is measured against is what keeps `maxBytes` meaning
-the same thing whether or not something is draining.
+one whole. The running total the ceiling is measured against is what keeps
+`maxBytes` meaning the same thing whether or not something is draining.
 
-**A request body is not streamed, and the asymmetry is the callback rule.** A
-destination is written _between_ calls into libcurl, where Lua may do anything.
-Feeding a body happens _inside_ one, through a read callback libcurl calls, and
-a Lua callback anywhere in a pump makes the loop around it uncompilable, which
-is the whole reason the response callbacks are in C. So a file or a handle given
-as a body is read at `send` and libcurl copies it, and an upload costs twice its
-size while it runs. Streaming one is a request buffer in `native/http.c` beside
-the response one, with a C read callback serving bytes Lua tops up each pump and
-returning `CURL_READFUNC_PAUSE` rather than 0 when it runs dry, since 0 is how a
-read callback says the body ended. That is a pause protocol across two
-languages, and it is not worth writing before something needs to upload
-something large. The bound in the meantime is stated rather than implied.
+**A request body is not streamed.** A string, file, or handle is read at
+`send`, copied into Rust-owned request storage, and handed to Reqwest whole.
+That keeps Lua out of foreign-thread callbacks and makes ownership explicit.
+Streaming upload can be added as a bounded Rust channel when a real use needs
+it; the size bound in the meantime is stated rather than implied.
 
 A body is deliberately not a stream in the other sense either. It is only ever
 handed over settled, over a string that is complete or a file that is closed,
@@ -1801,7 +1729,7 @@ can be read against each other rather than taken on trust.
 
 The spec cannot be that precise, and the reason is worth writing down. Under
 Busted the engine runs on a plain `luajit`, which does not reserve the
-machine-code arena `native/mcodearena.c` reserves at startup, so LuaJIT cannot
+machine-code arena the Rust host reserves at startup, so LuaJIT cannot
 place mcode near the interpreter, flushes its whole trace cache every few dozen
 frames, and starts again: three flushes in a hundred and twenty frames, and a
 frame the engine's own binary reads in hundreds of bytes reading thousands
@@ -3308,7 +3236,7 @@ and a port supplies these and touches nothing above them:
  events      Typed events, produced directly            adapter.events
  input       Devices, rumble, cursor modes, text input  adapter.input
  audio       A mixer, tracks, gain, tags                adapter.audio
- static FFI  Function pointers taken at build time      native/registry.c
+ static FFI  Function pointers taken at build time      Rust registry installer
  storage     Content and writable roots, and how a      adapter.basePath/prefPath
              file under one is reached                  and adapter.storage
  shaders     A pack in the platform's own format        adapter.shaderFormat
@@ -3423,29 +3351,12 @@ library is linked into the executable and loading one by name at run time is
 not permitted. A target like that can still call C, but the addresses have to
 be taken at build time.
 
-So the build emits, for each library, a struct of typed function pointers and
-one C file that fills it by taking the address of each function. The host
-installs those tables into every Lua state, including every worker state, before
-any Lua runs. A worker resolving its own libraries would reintroduce the
-dependency on dynamic loading in the place it is hardest to notice, since a
-worker that fails to start looks like a worker that had nothing to do.
-
-```
- sdl3       1231 functions
- box2d       421
- spvc        169
- sdl3image   102
- sdl3mixer    94
- curl         81
- zlib         81
- shaderc      45
- sdl3net      34
- worker       10
- dialogs      10
- http          8
- taskpool      7
- logsink       3
-```
+So the build emits, for each native namespace, a struct of typed function
+pointers and generated linker glue that takes each address. Rust installs
+those tables into every Lua state, including every worker state, before any
+Lua runs. The registry covers SDL, SDL_mixer, SDL_net, shaderc, SPIRV-Cross,
+zlib, and the Rust services for images, HTTP, physics, workers, dialogs,
+logging, CLI parsing, and payloads.
 
 Signatures come from the generated cdef rather than being parsed again, so the
 pointer table cannot disagree with the bindings. Both are generated with the
@@ -3482,15 +3393,14 @@ declared against SDL's.
 
 Header-only `static inline` helpers have no symbol to bind and are
 reimplemented in Lua. That is usually faster anyway, since the JIT can inline
-Lua where it cannot inline across an FFI call. `World.getAngle` converting a
-`b2Rot` cosine/sine pair is the current example.
+Lua where it cannot inline across an FFI call.
 
 ## Layout
 
 ```
-native/host.c             process entry, the event batches, the lifecycle hooks
-native/registry.c         function pointers, for a target without `dlopen`
-native/                   worker runner, log sink, task pool, dialogs, HTTP
+native/rust/runtime/      host, services, image, HTTP, physics, and CLI parsing
+native/rust.h             the C-compatible ABI LuaJIT reaches
+native/                   headers, generated linker glue, SPIRV-Cross wrapper
 scripts/gencdef.py        header -> cdef + constants generator
 scripts/abicheck.py       cdef vs C compiler layout verification
 src/tecs/init.tl          the public API: one module per name, ECS and engine
@@ -3507,7 +3417,7 @@ src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
 src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
 src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/audio.tl         clips, voices, groups, and the Sound component
-src/tecs/box2d/           Box2D binding and its world plugin
+src/tecs/physics/         Rapier binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
 src/tecs/mcp/             the debug server: transport, tools, sandbox
 src/tecs/assets.tl        images and clips, decoded on a worker
@@ -3533,11 +3443,8 @@ selects the Rust target that matches its own preset, asks Cargo for one static
 archive, and owns the final link. That keeps a single-file build single: Cargo,
 the crate graph, and the archive are build inputs, not files a game needs at
 run time. Every Rust archive build first runs `rustfmt --check` and Clippy with
-warnings denied. The image decode/encode ABI is present as build foundation,
-but the Teal image, screenshot, and window modules still use SDL_image until
-that runtime migration lands. A `clap` schema likewise describes the current
-public CLI and can render its help, but the host still hands arguments to the
-existing Teal dispatcher until the CLI migration lands.
+warnings denied. The same archive owns image decoding, HTTP, physics, and Clap
+parsing while Teal retains the public API and command implementations.
 
 ```
 make presets        list the platform matrix
@@ -3558,12 +3465,9 @@ convenient and not shippable: it links the build machine's libraries by
 absolute path. A packaged preset builds pinned revisions from source, so a
 release is reproducible and carries no path from the machine that made it.
 
-A packaged preset asks two things of the build host that a development one does
-not. Mbed TLS generates part of its own source when it is built from a git
-revision rather than a release archive, so the Python the configure finds needs
-`jinja2` and `jsonschema`; the configure says so rather than letting the build
-fail inside a dependency a quarter of an hour later. And LuaJIT's Makefile
-refuses to guess a deployment target on Apple, so the macOS presets name one.
+A packaged preset also builds the pinned LuaJIT and SDL family. LuaJIT's
+Makefile refuses to guess a deployment target on Apple, so the macOS presets
+name one.
 
 `make check-package` is the gate on that distinction. It inspects the installed
 binaries for search paths and absolute references that leave the package, and it
@@ -3581,7 +3485,7 @@ unpacks it.
 
 `make test-package` is the other half of the same idea. `make test` runs the
 suite against a build tree, which on a development preset means against the
-machine's own SDL, Box2D and libcurl; against an installed packaged tree it is
+machine's own SDL family and zlib; against an installed packaged tree it is
 the only thing that exercises the revisions a release actually ships. It sets a
 path per library, because `loader.library` tries a library's plain soname
 before any directory it was told about, so `ffi.load("SDL3")` otherwise reaches
@@ -3600,20 +3504,20 @@ a real window to completion.
 
 ## Requirements
 
-CMake 3.24+, Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU), SDL3_image,
-SDL3_mixer, SDL3_net, Box2D 3.x, shaderc, SPIRV-Cross, libcurl, zlib, and Teal
+CMake 3.24+, Rust/Cargo 1.97.1, LuaJIT, SDL3 (3.4, for SDL_GPU),
+SDL3_mixer, SDL3_net, shaderc, SPIRV-Cross, zlib, and Teal
 (`tl`). `rust-toolchain.toml` selects the Rust toolchain. The configure requires
-every one of them. `make deps` installs the ones Homebrew supplies; libcurl and
-zlib are not among them, because a development preset finds the host's.
+every one of them. `make deps` installs the ones Homebrew supplies; zlib is not
+among them, because a development preset finds the host's.
 
 A version is a requirement rather than a floor. The spec suite runs against
 whatever a development preset resolved, so a suite run against a different SDL,
-SDL_image, SDL_mixer, SDL_net, LuaJIT or shaderc than `cmake/Revisions.cmake`
+SDL_mixer, SDL_net, LuaJIT or shaderc than `cmake/Revisions.cmake`
 names is not testing what a release ships, and the configure fails on the
 difference rather than leaving it to be found as a spec that passes on one
 machine and not another. `-DTECS_ALLOW_VERSION_DRIFT=ON` proceeds anyway, which
-is for working on a dependency before its revision is raised. Box2D,
-SPIRV-Cross, libcurl and zlib are unchecked, and `cmake/SystemVersions.cmake`
+is for working on a dependency before its revision is raised. SPIRV-Cross and
+zlib are unchecked, and `cmake/SystemVersions.cmake`
 says why each is.
 
 A development build takes SDL_mixer from the system, and a system build is
@@ -3622,12 +3526,8 @@ name at `MIX_Init`, so a developer's machine may well have the LGPL ones
 available where a package built from `cmake/Pinned.cmake` does not.
 `Audio.decoders()` is how to tell which build is running.
 
-The same gap runs the other way for images, and it is the sharper one because
-there is no runtime call that reports it. A development build takes SDL_image
-from the system, and a packager's build reads everything: a WebP that loads on
-a developer's machine is refused by a package built from `cmake/Pinned.cmake`,
-where PNG and JPEG are the whole list. Test an unfamiliar format against a
-packaged preset before shipping an asset in it.
+Image decoding does not have that development/package split: the same pinned
+Rust `image` crate with only PNG and JPEG enabled is linked in every build.
 
 ### Licenses
 
@@ -3648,9 +3548,8 @@ be the one compliance failure this engine could commit on its own, so
 `make check-package` fails an install that is missing it.
 
 Dependencies are found through pkg-config rather than a package manager's paths,
-which is what lets the same build description cross-compile. Two are found by
-hand and each for its own reason: Box2D ships no pkg-config file at all, and
-SDL3_net ships one whose `includedir` and `libdir` are `/include` and `/lib`,
+which is what lets the same build description cross-compile. SDL3_net is found
+by hand because its `.pc` file reports `/include` and `/lib`,
 which CMake rejects when it builds an imported target out of them. Its `.pc`
 file is still consulted for the version, which is the one thing that answer is
 good for.

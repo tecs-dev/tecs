@@ -258,10 +258,10 @@ directions, readers inflating existing chunks while tooling, save formats and ne
 compatible ones.
 
 zlib does both. It is pinned, generated into bindings, carried through the ABI check and loaded the way every
-other native library is, because libcurl needs it to answer a `Content-Encoding`. Once it is in the process for
-that, an implementation written here would be a second copy of the format to keep correct, and the slower
-one. It loads on a worker the same way, so a [worker](/modules/workers) that requires this module gets the
-bindings there rather than inheriting anything from the thread that spawned it.
+other native library is. HTTP compression belongs to Reqwest now; this copy remains because `tecs.data` exposes
+zlib and raw DEFLATE as a public binary-format API. It loads on a worker the same way, so a
+[worker](/modules/workers) that requires this module gets the bindings there rather than inheriting anything
+from the thread that spawned it.
 
 ## inflate
 

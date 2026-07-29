@@ -145,7 +145,7 @@ the string is a compatibility surface.
 The camelCase rule is about identifiers this tree declares, and a vendored
 library's own names are not among them. `tecs.data` passes lua-cjson's
 `encode_escape_forward_slash` through spelled the way lua-cjson spells it, for
-the same reason `tecs.box2d` does not rename Box2D's concepts: a renamed key
+the same reason `tecs.physics` does not rename Rapier's concepts: a renamed key
 is a name that matches nothing the library's own documentation says.
 
 ## Bindings

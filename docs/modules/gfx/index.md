@@ -569,7 +569,7 @@ Subsystems register components of their own, and they are documented with the su
 | `Text`                | [`text`](/modules/gfx/)                          | A run of distance-field text.                         |
 | `ParticleEmitter`     | [`particles`](/modules/gfx/particles)            | An emitter, whose particles are not entities.         |
 | `Sound`               | [`Audio`](/modules/audio)                        | A voice attached to an entity.                        |
-| `RigidBody`           | [`box2d`](/modules/box2d)                        | The body an entity is.                                |
+| `RigidBody`           | [`physics`](/modules/physics)                    | The body an entity is.                                |
 | `TweenTrackingTarget` | [`sequence`](/modules/sequence#tracking-sources) | Selects the entity a tracking tween chases.           |
 
 ## The renderer

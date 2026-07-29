@@ -602,9 +602,8 @@ A ready future carries `paths`, `filter`, and `canceled`. `filter` is one-based,
 Closing the picker without choosing is a successful result with `canceled = true` and an empty path list;
 failure means the platform could not complete the dialog.
 
-SDL retains a callback for these pickers and may invoke it from a thread LuaJIT did not create.
-`native/dialogs.c` therefore copies its answer behind a mutex, and `Application` settles the future on the main
-thread.
+SDL retains a callback for these pickers and may invoke it from a thread LuaJIT did not create. The Rust dialog
+bridge therefore copies its answer behind a mutex, and `Application` settles the future on the main thread.
 
 ### updateDialogs
 

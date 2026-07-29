@@ -44,20 +44,18 @@ Most of what follows is zlib licensed or public domain and asks nothing of a
 binary distribution. These are the ones that do, so a distribution that is short
 of time gets these right first:
 
-- **MIT**: Box2D, lua-cjson, LuaJIT and the PUC-Rio Lua notice inside it,
-  SPIRV-Headers, stb_image and stb_vorbis if MIT is the arm elected. MIT's "in
-  all copies or substantial portions" has no source-only carve-out.
+- **MIT**: lua-cjson, LuaJIT and the PUC-Rio Lua notice inside it,
+  SPIRV-Headers, and stb_vorbis if MIT is the arm elected. MIT's "in all
+  copies or substantial portions" has no source-only carve-out.
 - **BSD-3-Clause**: libogg, Opus, opusfile, WavPack, and SDL3's vendored
   yuv2rgb. Each requires the copyright notice, the list of conditions and the
   disclaimer to appear in the documentation or other materials of a binary
   distribution, which is what this file is.
 - **Apache-2.0**: SPIRV-Cross, shaderc, SPIRV-Tools. A distribution carries a
   copy of the licence and keeps the notices; nothing here modifies them.
-- **Apache-2.0 and MIT**: the Rust standard library and the Rust image crate
-  graph described below. This distribution elects one arm for each dual-
-  licensed crate and carries both licence texts.
-- **The curl licence**, when libcurl lands: "in all copies", again with no
-  carve-out.
+- **Apache-2.0 and MIT**: the Rust standard library and Cargo graph described
+  below. This distribution elects one arm for each dual-licensed crate and
+  carries both licence texts.
 - **David Gay's notice**, below, which asks for the entire notice rather than a
   line of it.
 
@@ -112,7 +110,7 @@ their code.
 
 ### SDL
 
-**SDL3**, **SDL3_image**, **SDL3_net** and **SDL3_mixer**, all zlib licensed,
+**SDL3**, **SDL3_net** and **SDL3_mixer**, all zlib licensed,
 copyright Sam Lantinga. The zlib licence binds source distribution rather than
 binary, so strictly it asks nothing of a shipped game; the notice is reproduced
 anyway.
@@ -136,64 +134,69 @@ Vulkan headers (Apache-2.0).
 
 SDL3_net vendors nothing.
 
-### What SDL3_image decodes
-
-PNG and JPEG, and nothing else. SDL_image offers eighteen formats and
-`cmake/Pinned.cmake` turns off the other sixteen, because each is a codec a
-statically linked game carries whether or not it loads one.
-
-Enabled:
-
-- **libpng** with **zlib**, for PNG. libpng is under the PNG Reference Library
-  License version 2 and zlib under the zlib licence. Neither compels anything of
-  a binary, and both notices are shipped; libpng's names five sets of copyright
-  holders (the PNG Reference Library Authors, Cosmin Truta, Glenn
-  Randers-Pehrson, Andreas Dilger, and Guy Eric Schalnat with Group 42), and all
-  five travel together. libpng is what reads APNG and what `IMG_SavePNG` writes
-  through.
-- **stb_image**, bundled inside SDL_image as `src/stb_image.h`, for JPEG. MIT or
-  public domain at the recipient's choice. Keeping JPEG therefore links no
-  libjpeg at all.
-- **tiny_jpeg**, bundled as `src/tiny_jpeg.h`, which is what `IMG_SaveJPG`
-  writes through. Public domain, so it asks nothing, but it is compiled in and
-  is named for that reason.
-
-Disabled, and every one of them on by default upstream: **libavif** with
-**dav1d** and **aom** behind it, **libjxl**, **libtiff**, **libwebp** with
-libwebpdemux, libwebpmux and libsharpyuv, and SDL_image's own readers for ANI,
-BMP, GIF, LBM, PCX, PNM, QOI, SVG, TGA, XCF, XPM and XV. None of them is LGPL;
-they are off because they are bytes, and because a format that is enabled is a
-format a game ships assets in and every platform port then has to keep working.
-The vendored headers behind the disabled ones, `qoi.h` (MIT) and NanoSVG (zlib),
-are not compiled in and so need no notice.
-
-Two backend options go with them, and the first is what makes the rest mean
-anything. `SDLIMAGE_BACKEND_IMAGEIO` is off because with it on `IMG_Load` is not
-SDL_image's function at all on Apple platforms: CoreGraphics answers it and
-reads WebP, AVIF, JPEG XL, TIFF, BMP and GIF whatever the format options say.
-`SDLIMAGE_BACKEND_WIC` is off for the same reason in the small on Windows.
-
 ### Rust native build foundation
 
-The static native archive includes Rust's `image` crate with only its PNG and
-JPEG features. The existing Teal modules do not call this ABI yet; SDL3_image
-remains linked during the staged migration. Cargo still links the Rust code
-into the native registry, so its notices belong to the binary now rather than
-only after the call sites move.
+The static native archive includes `clap` for CLI parsing, `image` for PNG and
+JPEG decoding and PNG encoding, `reqwest` with Rustls for HTTP, and `rapier2d`
+for physics. It also owns the host lifecycle, worker channels, logging,
+dialogs, Lua module registration, LuaJIT's machine-code arena, and the
+single-file payload loader. SDL still owns the application loop and LuaJIT
+still owns game execution.
 
-The archive also includes `clap` and a schema for the current command surface.
-The Teal dispatcher still owns command execution during this staged migration;
-the Rust schema is compiled, linked, and tested without changing that behavior.
+The exact versions and declared SPDX expressions are pinned in
+`native/rust/Cargo.lock` and Cargo metadata. The graph is permissive: MIT,
+Apache-2.0, ISC, BSD-3-Clause, Zlib, Unicode-3.0, CDLA-Permissive-2.0,
+Unlicense, and 0BSD. The build selects Ring as Rustls' crypto provider; it does
+not compile AWS-LC or OpenSSL. `LICENSE-APACHE` and `LICENSE-MIT` travel with
+the embedded payload and with an installed package. Crates whose selected
+licence has an additional notice retain it below or in their packaged source
+metadata.
 
-The exact versions are pinned in `native/rust/Cargo.lock`. This distribution
-elects **Apache-2.0** for the Rust standard library and for `adler2`, `anstyle`,
-`autocfg`, `bitflags`, `bytemuck`, `cfg-if`, `clap`, `clap_builder`,
-`clap_derive`, `clap_lex`, `crc32fast`, `fdeflate`, `flate2`, `heck`, `image`,
-`miniz_oxide`, `moxcms`, `num-traits`, `png`, `proc-macro2`, `pxfm`, `quote`,
-`syn`, `unicode-ident`, `zune-core`, and `zune-jpeg`. It elects **MIT** for
-`byteorder-lite` and `simd-adler32`, whose other available arms do not include
-Apache-2.0. `LICENSE-APACHE` and `LICENSE-MIT` travel with the embedded payload
-and with an installed package.
+The complete Cargo package inventory is below. It is generated from the lock
+file as part of the notice audit; target-specific entries are named because a
+release for that target compiles them:
+
+`adler2`, `allocator-api2`, `anstyle`, `approx`, `arrayvec`,
+`async-compression`, `atomic-waker`, `autocfg`, `base64`, `bincode`,
+`bitflags`, `bumpalo`, `bytemuck`, `byteorder-lite`, `bytes`, `cc`, `cfg-if`,
+`clap`, `clap_builder`, `clap_derive`, `clap_lex`, `combine`,
+`compression-codecs`, `compression-core`, `core-foundation`,
+`core-foundation-sys`, `crc32fast`, `crossbeam-deque`, `crossbeam-epoch`,
+`crossbeam-utils`, `displaydoc`, `downcast-rs`, `either`, `ena`, `equivalent`,
+`fdeflate`, `find-msvc-tools`, `flate2`, `foldhash`, `form_urlencoded`,
+`futures-channel`, `futures-core`, `futures-io`, `futures-macro`,
+`futures-sink`, `futures-task`, `futures-util`, `getrandom`, `glam`, `glamx`,
+`hashbrown`, `heck`, `http`, `http-body`, `http-body-util`, `httparse`,
+`hyper`, `hyper-rustls`, `hyper-util`, `icu_collections`, `icu_locale_core`,
+`icu_normalizer`, `icu_normalizer_data`, `icu_properties`,
+`icu_properties_data`, `icu_provider`, `idna`, `idna_adapter`, `image`,
+`indexmap`, `ipnet`, `itoa`, `jni`, `jni-macros`, `jni-sys`,
+`jni-sys-macros`, `js-sys`, `libc`, `libm`, `litemap`, `log`,
+`matrixmultiply`, `memchr`, `miniz_oxide`, `mio`, `moxcms`, `nalgebra`,
+`nalgebra-macros`, `num-bigint`, `num-complex`, `num-derive`, `num-integer`,
+`num-rational`, `num-traits`, `once_cell`, `openssl-probe`, `ordered-float`,
+`parry2d`, `percent-encoding`, `pin-project-lite`, `png`, `potential_utf`,
+`proc-macro2`, `profiling`, `profiling-procmacros`, `pxfm`, `quote`,
+`rapier2d`, `rawpointer`, `rayon`, `rayon-core`, `reqwest`, `ring`, `robust`,
+`rustc_version`, `rustls`, `rustls-native-certs`, `rustls-pki-types`,
+`rustls-platform-verifier`, `rustls-platform-verifier-android`,
+`rustls-webpki`, `rustversion`, `safe_arch`, `same-file`, `schannel`,
+`sdl3-sys`, `security-framework`, `security-framework-sys`, `semver`, `serde`,
+`serde_arrays`, `serde_core`, `serde_derive`, `shlex`, `simba`,
+`simd-adler32`, `simd_cesu8`, `simdutf8`, `slab`, `smallvec`, `socket2`,
+`spade`, `stable_deref_trait`, `static_assertions`, `subtle`, `syn`,
+`sync_wrapper`, `synstructure`, `thiserror`, `thiserror-impl`, `tinystr`,
+`tokio`, `tokio-rustls`, `tokio-util`, `tower`, `tower-http`, `tower-layer`,
+`tower-service`, `tracing`, `tracing-core`, `try-lock`, `typenum`,
+`unicode-ident`, `untrusted`, `url`, `utf8_iter`, `walkdir`, `want`, `wasi`,
+`wasm-bindgen`, `wasm-bindgen-futures`, `wasm-bindgen-macro`,
+`wasm-bindgen-macro-support`, `wasm-bindgen-shared`, `wasm-streams`, `web-sys`,
+`webpki-root-certs`, `wide`, `winapi-util`, `windows-link`, `windows-sys`,
+`windows-targets`, `windows_aarch64_gnullvm`, `windows_aarch64_msvc`,
+`windows_i686_gnu`, `windows_i686_gnullvm`, `windows_i686_msvc`,
+`windows_x86_64_gnu`, `windows_x86_64_gnullvm`, `windows_x86_64_msvc`,
+`writeable`, `yoke`, `yoke-derive`, `zerofrom`, `zerofrom-derive`, `zeroize`,
+`zerotrie`, `zerovec`, `zerovec-derive`, `zune-core`, and `zune-jpeg`.
 
 `unicode-ident` is also under the Unicode License v3, so that notice is required
 in addition to the Apache-2.0 arm elected above:
@@ -267,13 +270,6 @@ described, and it is off only because nothing here plays a module.
 rather than silently drop its format, and `Audio.decoders()` reports what a
 running build actually has, which is the answer to check against this list.
 
-### Box2D
-
-**Box2D 3**, MIT licensed, copyright 2022 Erin Catto. MIT's obligation is not
-source-only, so the copyright notice and permission notice travel with a binary.
-Box2D's own vendored `glad` and `jsmn` are behind its samples and unit tests,
-neither of which this build enables, so neither is here.
-
 ### SPIRV-Cross
 
 **SPIRV-Cross**, dual licensed **Apache-2.0 OR MIT** at the recipient's option.
@@ -332,74 +328,17 @@ the first is not compliance:
 ### zlib
 
 Compression, under the zlib licence. Reached through the FFI for DEFLATE and
-for the Adler-32 a zlib stream carries in its trailer, and linked by libcurl to
-answer a `Content-Encoding`. Nothing is strictly required of a binary; the
-notice ships anyway.
+for the Adler-32 a zlib stream carries in its trailer. Nothing is strictly
+required of a binary; the notice ships anyway.
 
     Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
 
     This software is provided 'as-is', without any express or implied warranty.
-
-### libcurl
-
-HTTP and HTTPS, under the **curl** licence, which is its own SPDX identifier
-and is not MIT. It requires the copyright notice and the permission notice in
-all copies, with no source-only carve-out, so a binary distribution reproduces
-`COPYING` in full.
-
-    Copyright (c) 1996 - 2026, Daniel Stenberg, <daniel@haxx.se>, and many
-    contributors, see the THANKS file.
-
-It also compiles in ISC-licensed `inet_pton` and `inet_ntop` unconditionally,
-so the ISC notice goes with it.
-
-How it is built matters more than its own licence, and its defaults are against
-the rule here. Both of these are refused in `cmake/Pinned.cmake` and denied by
-`spec/licenses_spec.lua`, because absence by luck is not absence:
-
-- **libidn2** is dual GPL-2.0-or-later or LGPL-3.0-or-later, so even its better
-  arm is disqualifying, and it is auto-detected on. `USE_LIBIDN2` is OFF, and
-  the spelling is the point: curl names this option without its own prefix, and
-  the prefixed one this tree set for a while was an option curl has never
-  defined, so libidn2 was detected and linked while a cache variable nothing
-  read said otherwise.
-- **libpsl** is the quiet one. libpsl is MIT, but curl's configure fails without
-  it unless it is refused, and libpsl's own runtime resolves to libidn2 and
-  libunistring on Linux, putting back exactly what refusing libidn2 removed. Its
-  Public Suffix List data is MPL-2.0 besides. `CURL_USE_LIBPSL` is OFF.
-
-International domain names, if they are ever needed, route through the platform
-rather than through either.
-
-### Mbed TLS
-
-curl's TLS backend, offered as Apache-2.0 or GPL-2.0-or-later at the user's
-choice. **This distribution elects Apache-2.0**, and a tri-licensed dependency
-left unelected in a shipped artifact is the thing that election avoids.
-
-    Copyright The Mbed TLS Contributors
-    SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
-
-Apache-2.0 requires the licence, the NOTICE file if one is present, and a
-statement of changes if any are made. None are made here.
-
-The backends that were available and were not chosen are recorded because the
-reasoning is worth keeping: **OpenSSL 3.x**, **BoringSSL** and **AWS-LC** are
-Apache-2.0, **LibreSSL** is ISC with the older OpenSSL and SSLeay terms,
-**Rustls** is Apache-2.0, ISC or MIT, and **Schannel** on Windows costs nothing
-to ship because it is part of the target. Excluded on the rule: **GnuTLS**,
-LGPL-2.1-or-later and reaching LGPL-3.0 nettle and gmp behind it, and
-**wolfSSL**, GPL-3.0-or-later with no linking exception, which would put a whole
-game under GPLv3 unless a commercial licence were bought.
-
-Apple is worth stating plainly because the obvious answer is stale: Secure
-Transport was removed from curl in 8.15.0 and there is no macOS-native TLS
-backend any more. What remains is platform certificate verification bolted onto
-one of the backends above, so an Apple build still chooses one of them.
 
 ## Where the list comes from
 
 `cmake/Revisions.cmake` is the pinned revision of each dependency and
 `cmake/Pinned.cmake` is how each is obtained and configured. Those two are what
 to work from when assembling notices for a distribution; this file is checked
-against the first of them by `spec/licenses_spec.lua`.
+against the first of them by `spec/licenses_spec.lua`. Cargo dependencies are
+pinned in `native/rust/Cargo.lock` and checked by the same spec.

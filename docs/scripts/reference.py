@@ -67,11 +67,9 @@ Every function and type this module carries, rendered from {sources}."""
 # public name `src/tecs/init.tl` types by that module's own record rather than
 # by a second copy of it.
 #
-# `tecs.version` is a string and has no source to render. `tecs.net.http` and
-# `tecs.box2d` are left out on purpose: the first is being rewritten and the
-# second is a stub whose module is mid-replacement, so a rendered reference
-# would describe something that is about to move. Both come back here when they
-# settle.
+# `tecs.version` is a string and has no source to render. `tecs.net.http` is
+# left out while its implementation and public declarations are being
+# rewritten; it comes back here when they settle.
 MODULES = [
     ("docs/ecs/index.md", [("src/tecs/ecs.tl", "tecs.ecs")]),
     ("docs/modules/Application.md", [("src/tecs/Application.tl", "tecs.Application")]),
@@ -109,6 +107,7 @@ MODULES = [
     ("docs/modules/log.md", [("src/tecs/log.tl", "tecs.log")]),
     ("docs/modules/mcp.md", [("src/tecs/mcp/init.tl", "tecs.mcp")]),
     ("docs/modules/net/index.md", [("src/tecs/net.tl", "tecs.net")]),
+    ("docs/modules/physics.md", [("src/tecs/physics/init.tl", "tecs.physics")]),
     ("docs/modules/sequence.md", [("src/tecs/sequence/init.tl", "tecs.sequence")]),
     ("docs/modules/system.md", [("src/tecs/platform/system.tl", "tecs.system")]),
     ("docs/modules/time.md", [("src/tecs/platform/time.tl", "tecs.time")]),

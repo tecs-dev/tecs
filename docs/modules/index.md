@@ -33,7 +33,6 @@ and checked against a fresh render so it cannot drift.
 | ----------------------------------------- | -------------------------------------------------------------------------- |
 | [`tecs.assets`](/modules/assets)          | loading content, cached and off the main thread                            |
 | [`tecs.audio`](/modules/audio)            | clips, voices, groups, limits, the `Sound` component, and devices          |
-| [`tecs.box2d`](/modules/box2d)            | rigid-body simulation on Box2D 3                                           |
 | [`tecs.data`](/modules/data)              | JSON, DEFLATE and hashes over byte strings                                 |
 | [`tecs.ecs`](/ecs/)                       | worlds, components, queries, systems, events and resources                 |
 | [`tecs.events`](/modules/events)          | platform events, typed once and routed                                     |
@@ -43,6 +42,7 @@ and checked against a fresh render so it cannot drift.
 | [`tecs.log`](/modules/log)                | SDL's logging, per platform, with a named logger as the unit of filtering  |
 | [`tecs.mcp`](/modules/mcp)                | the debug server: transport, tools, sandbox                                |
 | [`tecs.net`](/modules/net/)               | nonblocking TCP streams and UDP datagrams                                  |
+| [`tecs.physics`](/modules/physics)        | rigid-body simulation on Rapier 2D                                         |
 | [`tecs.sequence`](/modules/sequence)      | the sequencer, with the tween runtime inside it                            |
 | [`tecs.system`](/modules/system)          | capabilities, the clipboard, child processes, and what the desktop offers  |
 | [`tecs.time`](/modules/time)              | monotonic time                                                             |
@@ -107,9 +107,10 @@ What follows are the concepts behind those names, which are pages rather than na
 ## What loads when
 
 `tecs.ecs` loads with `tecs`, because it reaches nothing below Lua. Every other module is named on `tecs` for
-its types and resolved on first field access, because each of them reaches SDL, Box2D or a worker library
-through the FFI, and loading them up front would make a test, a server or a tool demand a graphics stack it
-never asked for. Reading `tecs.gfx` loads it; requiring `tecs` does not.
+its types and resolved on first field access, because each is engine functionality a headless ECS-only tool may
+not need, and many reach SDL, a Rust native service or a worker through the FFI. Loading them up front would make
+a test, a server or a tool demand a graphics stack it never asked for. Reading `tecs.gfx` loads it; requiring
+`tecs` does not.
 
 A name that is not a module answers nil rather than raising, and the modules are written out in `init.tl`
 rather than derived from a module path, so `tecs.cmaera` is nil where it is written instead of an error out of

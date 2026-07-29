@@ -45,8 +45,7 @@ nothing vendored or pinned is held to it. Locally the warnings are warnings.
 CI configures with `-DTECS_WERROR=ON`, which makes them errors, and it does that
 only for the first-party targets for the same reason the set is scoped that way:
 a compiler newer than a pinned revision turns that project's warning into this
-project's build failure, which is the problem Mbed TLS already needed
-`MBEDTLS_FATAL_WARNINGS OFF` to get out of.
+project's build failure.
 
 So a change that adds a warning is a change that fails CI. Fix the site rather
 than suppressing the check, and where a site is genuinely fine, write the cast
@@ -65,7 +64,7 @@ PRESET=macos-arm64-sanitize make bench-physics
 
 Both presets are `RelWithDebInfo`, like every other preset here. They are not a
 performance measurement: AddressSanitizer takes the address space
-`native/mcodearena.c` reserves for LuaJIT's machine code, so states created
+the Rust host reserves for LuaJIT's machine code, so states created
 after startup compile fewer traces than they would otherwise, and the arena
 reports that by returning false rather than by failing.
 

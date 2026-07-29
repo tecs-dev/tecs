@@ -27,7 +27,7 @@ features:
     details: An <a href="/ecs/archetype">archetype-based ECS</a> with FFI components, contiguous columns, and a dirty model the GPU reads.
     icon: ⚡
   - title: Batteries included
-    details: <a href="/modules/box2d">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/gfx/particles">particles</a>, <a href="/modules/gfx/">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/gfx/animation">sprite sheets</a> and hot reload ship in the box, sharing one data model.
+    details: <a href="/modules/physics">Physics</a>, <a href="/modules/audio">audio</a>, <a href="/modules/gfx/particles">particles</a>, <a href="/modules/gfx/">text</a>, <a href="/modules/sequence">sequencing</a>, <a href="/modules/gfx/animation">sprite sheets</a> and hot reload ship in the box, sharing one data model.
     icon: 🔋
   - title: Static typing
     details: Catch errors at compile time, not runtime. Tecs is designed from the ground up for static typing with <a href="https://github.com/teal-language/tl"><u>Teal</u></a>.
@@ -69,7 +69,7 @@ The command is not on this branch yet. [Tecs CLI](/cli/) records the shape it is
 ## Entities are the interface
 
 Anything that renders or updates per frame is an entity in a world. SDL owns the loop: an entry file returns an
-application and a C host drives it, so nothing in a game blocks and nothing drives frames itself.
+application and a Rust host drives it, so nothing in a game blocks and nothing drives frames itself.
 
 ```teal
 local Transform <const> = tecs.Transform
@@ -222,7 +222,6 @@ behind each one.
 
 - [`tecs.assets`](/modules/assets) - loading content, cached and off the main thread
 - [`tecs.audio`](/modules/audio) - voices, groups, keyed limits, fades, pitch, loop points, streaming, devices
-- [`tecs.box2d`](/modules/box2d) - Box2D 3, solved across a shared thread pool
 - [`tecs.data`](/modules/data) - JSON, DEFLATE and hashes over byte strings
 - [`tecs.ecs`](/ecs/) - worlds, components, queries, systems, events and resources
 - [`tecs.events`](/modules/events) - typed once, routed, never an SDL union downstream
@@ -232,6 +231,7 @@ behind each one.
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
+- [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.sequence`](/modules/sequence) - timelines with the tween runtime inside them
 - [`tecs.system`](/modules/system) - capabilities, the clipboard, child processes, and what the desktop offers
 - [`tecs.time`](/modules/time) - monotonic time

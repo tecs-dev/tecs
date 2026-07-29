@@ -92,16 +92,15 @@ are the worked examples of why:
   starts.
 - **`tecs.gfx.Text`** saves the authored fields and the font by name. A font never loaded in this process
   leaves the restored text without one, which lays out nothing rather than failing the load.
-- **`tecs.box2d.RigidBody`** serializes to nothing at all and restores as the null handle, because a Box2D
-  handle is dense and reused, so a saved one would name whichever body the loading run happened to put in that
-  slot, and the sync would write a stranger's pose into this entity's `Transform` with nothing to signal it.
-  The null handle is inert rather than merely wrong: the write-back reads no movement for it, and the impulse
-  and velocity calls refuse it instead of indexing off the front of Box2D's body array. So an entity that
-  simulated before a load does not simulate after it until something attaches a body again. The description
-  does survive, in the `Body` and `Collider` components, and `physics.hasBody` is how to tell an entity whose
-  body is gone from one that never had one. See [physics](/modules/box2d).
+- **`tecs.physics.RigidBody`** is a transient Rapier arena handle and serializes to nothing as a component. A
+  bare arena index is dense and reused, so carrying one into another simulation would silently name a stranger.
+  The physics snapshot handler instead writes Rapier's complete, versioned state under the compatibility key
+  `"tecs.physics"`. Restore installs that state and reconnects transient body and collider handles by entity,
+  retaining sleeping islands and contact state rather than rebuilding only from `Body` and `Collider`.
+  `physics.hasBody` reports whether that reconnection produced a live body. See [physics](/modules/physics).
 
-The pattern behind all five: a name is durable and an index is not.
+The pattern behind all five: a name is durable and a bare process-local index is not. Physics preserves the
+versioned state that gives its indices meaning rather than persisting the indices on their own.
 
 Snapshots also survive component changes across game updates. Every FFI component carries a canonical
 fingerprint of the form `field1:type1,field2:type2,...|sizeBytes`. Save embeds it and load compares it against

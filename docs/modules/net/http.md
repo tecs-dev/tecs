@@ -74,8 +74,9 @@ partial body, not nothing. The future is `"failed"` and says why, so the answer 
 future rather than the file.
 
 A request body is the other way round: a file or a handle given as `body` is read whole when `send` is called,
-and libcurl copies it, so sending one costs twice its size until it completes. Uploading something large is the
-case that is not served yet, and it needs the read side moved into C beside the buffering.
+then copied into Rust-owned memory before the asynchronous request starts. Sending one therefore costs twice its
+size until it completes. Streaming uploads are not served yet; they need a bounded read queue like the response
+side already has.
 
 `maxBytes` counts every byte a body has been, drained or not, so a destination is not a way around the ceiling.
 
@@ -99,10 +100,10 @@ still lands.
 | `connectTimeoutMs`      | `number`           | `10000` | Milliseconds getting a socket is given, inside that.                                                            |
 | `stallTimeoutMs`        | `number`           | `0`     | Milliseconds a transfer may make no progress before it fails. `0` never gives up on a quiet connection.         |
 | `maxRedirects`          | `integer`          | `5`     | Redirects followed. `0` follows none.                                                                           |
-| `maxConnections`        | `integer`          | `16`    | Sockets kept open across every host.                                                                            |
-| `maxConnectionsPerHost` | `integer`          | `6`     | Sockets kept open to any one host. Requests past it are held, not refused.                                      |
+| `maxConnections`        | `integer`          | `16`    | Transfers allowed to run across every host. Requests past it wait in Rust.                                      |
+| `maxConnectionsPerHost` | `integer`          | `6`     | Transfers allowed to run against one host. Requests past it wait in Rust.                                       |
 | `maxBytes`              | `integer`          | `0`     | Bytes a response body may reach before the transfer fails. `0` is unbounded.                                    |
-| `compressed`            | `boolean`          | `true`  | Offer the content encodings libcurl was built with.                                                             |
+| `compressed`            | `boolean`          | `true`  | Offer and decode gzip and deflate content encodings.                                                            |
 | `insecureHosts`         | `{string}`         | none    | Host names whose certificates are not verified. Each logs a warning.                                            |
 | `proxy`                 | `string`           | none    | Proxy URL, as `http://host:3128` or `socks5h://host:1080`. See below.                                           |
 | `noProxy`               | `string`           | none    | Hosts the proxy is not used for, comma separated. `*` disables it entirely.                                     |
@@ -147,10 +148,10 @@ client:send({ url = url, into = "downloads/patch.bin" })
 | `url`     | `string`           | The URL that actually answered, after any redirects.                                       |
 | `ok()`    | `boolean`          | Whether `status` is a 2xx.                                                                 |
 
-Response bodies and raw headers are buffered in C, because libcurl's callbacks cannot be Lua ones without
-costing the pump loop its compilation. Two things follow that a caller can see: `headers` are the final
-response's only, so a redirect's or an interim response's never appear in them, and they have an allocation cap
-of their own that a hostile peer cannot talk past.
+Reqwest runs on a two-thread Tokio runtime and writes body chunks and completion records into a bounded Rust
+queue. Lua drains that queue from the SDL loop, so no Rust thread enters LuaJIT. Two things follow that a caller
+can see: `headers` are the final response's only, so a redirect's or an interim response's never appear in them,
+and they have an allocation cap of their own that a hostile peer cannot talk past.
 
 `send` raises when the call itself is malformed: no URL, or an `into` that is a string in memory rather than
 somewhere bytes can go. Everything only the network can judge settles the future instead, since a URL out of a
@@ -185,8 +186,8 @@ for two seconds, which is a question a boolean never prompts.
 
 ## TLS verification is on
 
-Peer and host verification are set explicitly on every handle, and the protocol set is narrowed to `http` and
-`https` for the request and for anything it redirects to.
+Rustls verifies peers and host names through the platform verifier, and requests are narrowed to `http` and
+`https`.
 
 There is no `insecure = true`. What exists is `insecureHosts`, an explicit list of host names whose certificates
 are not checked, each of which logs a warning when the client is built. No wildcard, port, scheme or URL is
@@ -196,13 +197,14 @@ accepted in that list.
 local client <const> = tecs.net.http.newClient({ insecureHosts = { "dev.example.com" } })
 ```
 
-A self-signed development server is a real need and this serves it. Pinning a development CA through libcurl's own
-`CURLOPT_CAINFO` is better still and is what to reach for when the host is not on a developer's own machine.
+A self-signed development server is a real need and this serves it. Installing a development CA into the host's
+trust store is better when the server is not on a developer's own machine.
 
 ## Proxies
 
-Unset, libcurl reads `http_proxy` and `https_proxy` from the environment, which is what a developer behind one
-expects. `proxy` overrides that, and `proxy = ""` is how a game ignores the environment and talks direct.
+Unset, the client reads `http_proxy`, `https_proxy` and their upper-case forms from the environment, which is
+what a developer behind one expects. `proxy` overrides that, and `proxy = ""` is how a game ignores the
+environment and talks direct. HTTP and SOCKS proxy URLs are supported.
 
 ```teal
 tecs.net.http.newClient({ proxy = "http://cache.internal:3128", noProxy = "localhost,127.0.0.1" })

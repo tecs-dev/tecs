@@ -80,7 +80,7 @@ return {
 
 ## The entry file
 
-SDL owns the loop. An entry file does not run until done; it returns an application, and a C host drives it
+SDL owns the loop. An entry file does not run until done; it returns an application, and a Rust host drives it
 through `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. A platform that never hands control
 back has no loop to block in, which is why the shape is this and not a `run()`.
 

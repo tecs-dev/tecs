@@ -20,7 +20,7 @@ excluded component. This callback _does not_ fire when an entity moves between a
 
 ```teal{3}
 world:query({
-    include = {tecs.Transform, tecs.box2d.RigidBody},
+    include = {tecs.Transform, tecs.physics.RigidBody},
     onEntitiesAdded = function(
         archetype: tecs.ecs.Archetype,
         firstRow: integer,
@@ -28,7 +28,7 @@ world:query({
         count: integer
     )
         local transforms = archetype:get(tecs.Transform)
-        local bodies = archetype:get(tecs.box2d.RigidBody)
+        local bodies = archetype:get(tecs.physics.RigidBody)
         for row = firstRow, lastRow do
             local transform = transforms[row]
             local body = bodies[row]
@@ -51,7 +51,7 @@ are removed from archetypes, so the rows in the range are still readable.
 
 ```teal{9}
 world:query({
-    include = {tecs.Transform, tecs.box2d.RigidBody},
+    include = {tecs.Transform, tecs.physics.RigidBody},
     onEntitiesRemoved = function(
         archetype: tecs.ecs.Archetype,
         firstRow: integer,
@@ -59,7 +59,7 @@ world:query({
         count: integer
     )
         local transforms = archetype:get(tecs.Transform)
-        local bodies = archetype:get(tecs.box2d.RigidBody)
+        local bodies = archetype:get(tecs.physics.RigidBody)
         for row = firstRow, lastRow do
             local transform = transforms[row]
             local body = bodies[row]
