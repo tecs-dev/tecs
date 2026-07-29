@@ -28,9 +28,9 @@ end
 ```
 
 Read columns through `archetype:get`. Write through `getMut` so dirty-gated
-systems can find the change. See [Worlds](/ecs/world),
-[Components](/ecs/components/), [Queries](/ecs/queries/), and
-[Systems](/ecs/systems) for the complete ECS model.
+systems can find the change. See [Worlds](/modules/ecs/world),
+[Components](/modules/ecs/components/), [Queries](/modules/ecs/queries/), and
+[Systems](/modules/ecs/systems) for the complete ECS model.
 ]=]
 
 -- Implementation details:
@@ -164,28 +164,28 @@ local record ecs
     -- a save format. Moving one of these fields does not move the string it
     -- is registered under, and neither may be changed casually.
 
-    --- Read-only. [`Transform`](/ecs/#tecs.ecs.Transform) positions everything a
+    --- Read-only. [`Transform`](/modules/ecs/#tecs.ecs.Transform) positions everything a
     --- world holds. Hierarchy, physics, sequencing, and rendering all use it.
     Transform: builtins.Transform
 
     --- Read-only.
-    --- [`RelativeTransform`](/ecs/#tecs.ecs.RelativeTransform) expresses a
-    --- pose relative to a [`ChildOf`](/ecs/#tecs.ecs.ChildOf) parent. The
+    --- [`RelativeTransform`](/modules/ecs/#tecs.ecs.RelativeTransform) expresses a
+    --- pose relative to a [`ChildOf`](/modules/ecs/#tecs.ecs.ChildOf) parent. The
     --- hierarchy system composes it with the parent's
-    --- [`Transform`](/ecs/#tecs.ecs.Transform), so a game writes this component
+    --- [`Transform`](/modules/ecs/#tecs.ecs.Transform), so a game writes this component
     --- and reads the world-space transform.
     RelativeTransform: builtins.RelativeTransform
 
-    --- Read-only. [`ChildOf`](/ecs/#tecs.ecs.ChildOf) links a parent and child.
+    --- Read-only. [`ChildOf`](/modules/ecs/#tecs.ecs.ChildOf) links a parent and child.
     --- It stores edges sparsely and cascade-deletes children with their parent.
     ChildOf: Relationship
 
-    --- Read-only. [`Name`](/ecs/#tecs.ecs.Name) stores an entity label as a
+    --- Read-only. [`Name`](/modules/ecs/#tecs.ecs.Name) stores an entity label as a
     --- raw string. It does not enforce uniqueness. Use
-    --- [`EntityKey`](/ecs/#tecs.ecs.EntityKey) for durable unique lookup.
+    --- [`EntityKey`](/modules/ecs/#tecs.ecs.EntityKey) for durable unique lookup.
     Name: ScalarComponent<string>
 
-    --- Read-only. [`EntityKey`](/ecs/#tecs.ecs.EntityKey) stores a durable
+    --- Read-only. [`EntityKey`](/modules/ecs/#tecs.ecs.EntityKey) stores a durable
     --- unique lookup key for `world:byKey`. It supports hot reload, authored
     --- references, tooling, and save-compatible lookup.
     ---
@@ -193,19 +193,19 @@ local record ecs
     --- `ecs.Key` names typed context keys.
     EntityKey: ScalarComponent<string>
 
-    --- Read-only. [`TTL`](/ecs/#tecs.ecs.TTL) despawns an entity when its time
+    --- Read-only. [`TTL`](/modules/ecs/#tecs.ecs.TTL) despawns an entity when its time
     --- to live reaches zero. The engine counts it down in `FixedUpdate` through
-    --- a logic query, so a [`Paused`](/ecs/#tecs.ecs.Paused) entity does not
+    --- a logic query, so a [`Paused`](/modules/ecs/#tecs.ecs.Paused) entity does not
     --- burn through it.
     TTL: builtins.TTL
 
-    --- Read-only. [`Disabled`](/ecs/#tecs.ecs.Disabled) excludes an entity
+    --- Read-only. [`Disabled`](/modules/ecs/#tecs.ecs.Disabled) excludes an entity
     --- from queries that do not ask for it.
     Disabled: Component
 
-    --- Read-only. [`Paused`](/ecs/#tecs.ecs.Paused) excludes an entity from
+    --- Read-only. [`Paused`](/modules/ecs/#tecs.ecs.Paused) excludes an entity from
     --- logic queries while keeping it visible.
-    --- [`Disabled`](/ecs/#tecs.ecs.Disabled) excludes both logic and rendering
+    --- [`Disabled`](/modules/ecs/#tecs.ecs.Disabled) excludes both logic and rendering
     --- queries.
     Paused: Component
 

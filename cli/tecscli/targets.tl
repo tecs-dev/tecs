@@ -61,7 +61,8 @@ function targets.all(): {targets.Target}
     local windows <const> = host == "Windows"
     local linux <const> = host == "Linux"
 
-    local appleReason <const> = "needs a macOS host: the Xcode SDK cannot be redistributed, so no other machine may ship a toolchain for it"
+    local appleReason <const> = "needs a macOS host: the Xcode SDK cannot be redistributed, so no other machine may"
+        .. " ship a toolchain for it"
 
     return {
         {

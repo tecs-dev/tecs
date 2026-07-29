@@ -7,7 +7,7 @@ outline: deep
 
 An archetype stores entities with one component signature. Adding or removing
 a component moves an entity to another archetype. Most game code reaches these
-storage groups through a [query](/ecs/queries/).
+storage groups through a [query](/modules/ecs/queries/).
 
 ## Rows and columns
 
@@ -60,7 +60,7 @@ archetype and row.
 Sparse relationships, including `ChildOf`, keep targets in a world-owned
 store. Resolve them through `world:getFirstRelationship`, `world:targets`,
 `world:traverse`, or `world:walkUp`. See
-[Relationships](/ecs/relationships/).
+[Relationships](/modules/ecs/relationships/).
 
 ## Dirty consumers
 
@@ -72,7 +72,7 @@ Spawn placement, archetype movement, swap-pop, `getMut`, and `set` maintain
 dirty state automatically. Call explicit markers only after a write through a
 path Tecs cannot observe, such as direct FFI cdata obtained through `get`.
 
-[Dirty tracking](/ecs/components/dirty-tracking) covers the complete write
+[Dirty tracking](/modules/ecs/components/dirty-tracking) covers the complete write
 contract.
 
 ## Lifecycle reactions
@@ -81,7 +81,7 @@ An archetype observer can react to contiguous additions, removals, row moves,
 activation, deactivation, and destruction. It remains attached for that
 archetype's lifetime and cannot unsubscribe.
 
-Prefer [query callbacks](/ecs/queries/callbacks) when the reaction belongs to
+Prefer [query callbacks](/modules/ecs/queries/callbacks) when the reaction belongs to
 a component filter. Queries discover current and future matching archetypes
 and attach the necessary observers. Use a direct archetype observer only when
 the storage object itself matters.

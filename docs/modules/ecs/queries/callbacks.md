@@ -58,7 +58,7 @@ A temporary query cannot define either callback.
 Moving between two archetypes that both match does not run the callback. The
 entity never left the query.
 
-Use [`requires`](/ecs/components/#auto-dependencies-with-requires) when one
+Use [`requires`](/modules/ecs/components/#auto-dependencies-with-requires) when one
 component always implies another. Use a callback when matching should trigger
 work in an external system or allocate a resource.
 
@@ -95,7 +95,7 @@ A callback may stage more work. The next wave applies that work:
 A finite callback cascade settles through later waves. Tecs stops an unbounded
 cascade with an error after 64 waves.
 
-The [mutation model](/ecs/mutation-model#commit-drain) defines the complete
+The [mutation model](/modules/ecs/mutation-model#commit-drain) defines the complete
 ordering and visibility contract.
 
 ## Archetype-local observers

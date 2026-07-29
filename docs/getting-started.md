@@ -113,7 +113,7 @@ Keep three rules visible when writing systems:
 - Run `query:iter()` to exhaustion. Use `query:cursor()` and close it when a
   loop may stop early.
 
-The [mutation model](/ecs/mutation-model) covers deferred changes and dirty
+The [mutation model](/modules/ecs/mutation-model) covers deferred changes and dirty
 tracking.
 
 ## Game modules
@@ -137,6 +137,6 @@ The host adds the project content root to `package.path`, so
 
 ## Next pages
 
-- [tecs.ecs](/ecs/) introduces worlds, components, queries, and systems.
+- [tecs.ecs](/modules/ecs/) introduces worlds, components, queries, and systems.
 - [Modules](/modules/) lists every public engine module.
 - [Tecs CLI](/cli/) covers project commands and the offline reference.

@@ -39,7 +39,7 @@ world:set(follower, Follows.new({
 }))
 ```
 
-Use [`newRelationship`](/ecs/relationships/) for a target-only edge or a
+Use [`newRelationship`](/modules/ecs/relationships/) for a target-only edge or a
 payload that needs strings, tables, functions, or other Lua values.
 
 ## Struct layout
@@ -97,14 +97,14 @@ table to the hook's positional arguments. A custom `__call` replaces the
 generated constructor and does not run `init`. Call shared initialization
 explicitly from that hook.
 
-[Component construction](/ecs/components/construction) covers the shared
+[Component construction](/modules/ecs/components/construction) covers the shared
 constructor rules.
 
 ## Relationship behavior
 
 FFI relationships support `exclusive`, `sparse`, `reverseIndex`, and
 `cascadeDelete` with the same rules as
-[other relationships](/ecs/relationships/). Storage changes the payload
+[other relationships](/modules/ecs/relationships/). Storage changes the payload
 layout, not query or lifecycle behavior.
 
 Snapshots write `target` and every declared field, then restore the edge

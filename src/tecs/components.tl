@@ -1,9 +1,9 @@
 --[=[
 Entity components that describe a rendered scene.
 
-[`Transform`](/ecs/#tecs.ecs.Transform) places an entity, graphics components
+[`Transform`](/modules/ecs/#tecs.ecs.Transform) places an entity, graphics components
 describe its appearance, and [`Renderable`](tealdoc:tecs.components.Renderable)
-admits it to rendering. [`Transform`](/ecs/#tecs.ecs.Transform),
+admits it to rendering. [`Transform`](/modules/ecs/#tecs.ecs.Transform),
 [`Tint`](tealdoc:tecs.components.Tint), and
 [`Renderable`](tealdoc:tecs.components.Renderable) form the minimum drawable set:
 
@@ -27,7 +27,7 @@ tint.a = 0.5
 [`DropShadow`](tealdoc:tecs.components.DropShadow) describe deferred lighting and
 shadows.
 
-[`Transform`](/ecs/#tecs.ecs.Transform) remains at `tecs.Transform` because
+[`Transform`](/modules/ecs/#tecs.ecs.Transform) remains at `tecs.Transform` because
 physics, hierarchy, sequencing, and graphics share it. Other render components
 live under `tecs.gfx`.
 
@@ -38,7 +38,7 @@ field.
 
 [`PreviousTransform`](tealdoc:tecs.components.PreviousTransform) stores the pose
 before the current fixed step. The renderer interpolates it toward
-[`Transform`](/ecs/#tecs.ecs.Transform) for presentation without changing
+[`Transform`](/modules/ecs/#tecs.ecs.Transform) for presentation without changing
 simulation state.
 ]=]
 -- Implementation details:
@@ -489,7 +489,7 @@ ecs.newFFIComponent(
 )
 
 --- Marks an entity as contributing geometry. Without it, a
---- [`Transform`](/ecs/#tecs.ecs.Transform) represents only a position.
+--- [`Transform`](/modules/ecs/#tecs.ecs.Transform) represents only a position.
 local record Renderable is Component
 end
 
@@ -545,7 +545,7 @@ local record components
 
     --- Read-only. Exposes the point-light component resolved by deferred
     --- lighting and positioned by the entity's
-    --- [`Transform`](/ecs/#tecs.ecs.Transform). `height` is above the
+    --- [`Transform`](/modules/ecs/#tecs.ecs.Transform). `height` is above the
     --- surface plane and at 0 the light contributes nothing at all;
     --- `radius` is its reach in world units; `r`, `g`, `b` and `intensity`
     --- default to white at 1.
@@ -571,7 +571,7 @@ local record components
 
     --- Read-only. Exposes the renderable tag, which marks an entity as
     --- contributing geometry. The tag costs a column of nothing; without it a
-    --- [`Transform`](/ecs/#tecs.ecs.Transform) is only a position, which
+    --- [`Transform`](/modules/ecs/#tecs.ecs.Transform) is only a position, which
     --- is what most entities in a world are.
     Renderable: Renderable
 

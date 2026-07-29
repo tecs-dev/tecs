@@ -113,5 +113,5 @@ Export component and event types beside the plugin function when other modules
 need them. Keep one purpose per plugin, then group related plugins with another
 plugin.
 
-World construction installs the [builtin plugin](/ecs/builtins#builtin-plugin)
+World construction installs the [builtin plugin](/modules/ecs/builtins#builtin-plugin)
 automatically.

@@ -27,7 +27,7 @@ systems.
 
 [`Application`](/modules/Application) calls `world:startup()` once,
 `world:update(dt)` every iteration, and `world:shutdown()` at teardown. Events
-do not occupy a phase; see [Observer timing](/ecs/events#observer-timing).
+do not occupy a phase; see [Observer timing](/modules/ecs/events#observer-timing).
 
 ## Lifecycle groups
 
@@ -105,7 +105,7 @@ group.
 
 Systems within one phase follow insertion order unless `before` or `after`
 names another system. The engine table above supplies the names and boundaries
-that game plugins commonly order around; [Systems](/ecs/systems) covers those
+that game plugins commonly order around; [Systems](/modules/ecs/systems) covers those
 constraints.
 
 Concrete phases expose `position` for inspection. The world assigns it, and
@@ -142,8 +142,8 @@ Disabling `FixedUpdateGroup` stops its systems but not the fixed clock.
 Disabling `RenderGroup` also stops `RenderFirst`, so extraction stops updating
 the frame packet. GPU submission still draws the last packet because it runs
 outside the phase tree. To pause gameplay while presentation continues, use
-the [state stack](/ecs/states) and logic
-[queries](/ecs/queries/#paused-entities).
+the [state stack](/modules/ecs/states) and logic
+[queries](/modules/ecs/queries/#paused-entities).
 
 ## Direct phase execution
 

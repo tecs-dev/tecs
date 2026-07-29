@@ -201,7 +201,7 @@ never discards work.
 Inside a scope, spawns, despawns, component additions, and component removals
 remain invisible until drain. A value update to an existing component may
 write through immediately while that entity has no staged structural change.
-The [mutation model](/ecs/mutation-model) defines the complete contract.
+The [mutation model](/modules/ecs/mutation-model) defines the complete contract.
 
 An archetype query loop must run to exhaustion. A loop that may stop early
 uses `query:cursor()` and calls `cursor:close()`, or it leaves the world
@@ -230,21 +230,21 @@ world:addPlugin(spinPlugin)
 Callers own resource values and may replace them. Tecs owns resource-key
 identity. Always name keys so hot reload, tooling, `findKey`, and `listKeys`
 can find the same key. Snapshots omit `world.resources`; register a
-[snapshot handler](/ecs/save-games#snapshot-handlers) for durable resource
+[snapshot handler](/modules/ecs/save-games#snapshot-handlers) for durable resource
 state.
 
 ## World subsystems
 
 The world exposes the shared entry points for:
 
-- [Components](/ecs/components/) and [relationships](/ecs/relationships/).
-- [Bundles](/ecs/components/bundles).
-- [Queries](/ecs/queries/) and hierarchy traversal.
-- [Systems](/ecs/systems), [phases](/ecs/phases), and
-  [plugins](/ecs/plugins).
-- [States](/ecs/states).
-- [Events](/ecs/events).
-- [Snapshots](/ecs/save-games).
+- [Components](/modules/ecs/components/) and [relationships](/modules/ecs/relationships/).
+- [Bundles](/modules/ecs/components/bundles).
+- [Queries](/modules/ecs/queries/) and hierarchy traversal.
+- [Systems](/modules/ecs/systems), [phases](/modules/ecs/phases), and
+  [plugins](/modules/ecs/plugins).
+- [States](/modules/ecs/states).
+- [Events](/modules/ecs/events).
+- [Snapshots](/modules/ecs/save-games).
 
 Those pages own their interaction rules; generated Teal reference owns
 individual method signatures and records.

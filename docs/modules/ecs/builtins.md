@@ -66,7 +66,7 @@ world:despawn(parent) -- also despawns child
 ```
 
 Tecs owns the relationship target field; callers treat it as read-only and
-replace the edge through `world:set`. [Relationships](/ecs/relationships/)
+replace the edge through `world:set`. [Relationships](/modules/ecs/relationships/)
 covers storage and traversal.
 
 ## Transform {#transform}
@@ -152,7 +152,7 @@ world:remove(entity, tecs.ecs.Disabled)
 `type = "logic"` excludes the tag. Render queries and untyped queries continue
 to match it unless they list `Paused` under `exclude`.
 
-The [state stack](/ecs/states) manages this tag for a state whose `onBlur`
+The [state stack](/modules/ecs/states) manages this tag for a state whose `onBlur`
 policy equals `"pause"`. Games may also add or remove it directly.
 
 ## Events {#events}
@@ -181,7 +181,7 @@ commit.
 `ArchetypeCreated` carries a newly created archetype at address `0`. Tecs owns
 the `archetype` field and callers treat it as read-only. Queries consume this
 event internally; game code should use
-[query callbacks](/ecs/queries/callbacks) for match-set changes.
+[query callbacks](/modules/ecs/queries/callbacks) for match-set changes.
 
 ### State transition events {#state-transition-events}
 
@@ -196,7 +196,7 @@ snapshot work at address `0`. Their engine-owned payloads expose functions for
 adding data, excluding derived entities, and subscribing to keyed load data.
 Callers may invoke those functions but must not replace them.
 
-[Save games](/ecs/save-games) covers the lifecycle and recommends named
+[Save games](/modules/ecs/save-games) covers the lifecycle and recommends named
 snapshot handlers for ordinary subsystem state.
 
 ## Builtin plugin {#builtin-plugin}

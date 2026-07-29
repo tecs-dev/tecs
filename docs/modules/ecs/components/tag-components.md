@@ -70,5 +70,5 @@ world:batchRemove(stunnedEnemies, Stunned)
 explicitly includes that tag. `Paused` remains visible to render work;
 `type = "logic"` excludes it.
 
-The [state stack](/ecs/states) creates a tag for each named state and adds the
+The [state stack](/modules/ecs/states) creates a tag for each named state and adds the
 current top state's tag to new entities.

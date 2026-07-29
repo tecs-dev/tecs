@@ -37,7 +37,7 @@ methods, and other container fields without copying them onto every instance.
 Callers own the instance fields and may mutate them through `getMut`. Tecs owns
 the metatable and component metadata; callers should treat those as read-only.
 
-Use [FFI components](/ecs/components/ffi) for fixed-size primitive fields that
+Use [FFI components](/modules/ecs/components/ffi) for fixed-size primitive fields that
 hot loops or native code read from contiguous memory.
 
 ## Field construction
@@ -152,20 +152,20 @@ local sparks <const> = ParticleEmitter({effect = "sparks"})
 
 Tecs applies the component metatable to the table returned by `new`.
 
-[Component construction](/ecs/components/construction) covers the rules shared
+[Component construction](/modules/ecs/components/construction) covers the rules shared
 with FFI components and relationships.
 
 ## Lifecycle reactions
 
 Table components support in-place writes, so a value change does not pass
-through a setter. Use [dirty tracking](/ecs/components/dirty-tracking) when a
+through a setter. Use [dirty tracking](/modules/ecs/components/dirty-tracking) when a
 consumer needs to find changed columns.
 
-Use [query callbacks](/ecs/queries/callbacks) when code must react to a
+Use [query callbacks](/modules/ecs/queries/callbacks) when code must react to a
 component entering or leaving a matching signature. Query callbacks operate on
 contiguous row ranges and can match several components at once.
 
 Snapshots serialize declared fields by default. Use custom
 `serialize`/`deserialize` functions for process-local values, or set
 `transient = true` for state that should not enter a snapshot. See
-[Component serialization](/ecs/components/serialization).
+[Component serialization](/modules/ecs/components/serialization).

@@ -356,7 +356,7 @@ local record text
     --- @param item A [`Text`](tealdoc:tecs.gfx.text.Text) value to read. It need
     ---     not belong to an entity.
     --- @return Width at `item.size`, before
-    ---     [`Transform`](/ecs/#tecs.ecs.Transform) scale. Returns zero for a missing
+    ---     [`Transform`](/modules/ecs/#tecs.ecs.Transform) scale. Returns zero for a missing
     ---     item, font, or string.
     --- @return Height on the same terms, counting complete line boxes.
     measureText: function(item: Text): number, number

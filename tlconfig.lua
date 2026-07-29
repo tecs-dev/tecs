@@ -185,9 +185,9 @@ local function modulePages()
     return pages
 end
 
--- The pages, in the order the site reads them: the introduction, the tool, the
--- modules, then the ECS. A route ending in a slash is a section and is written
--- in that section's `index.md`; every other route is a file beside it.
+-- The pages, in the order the site reads them: the introduction, the tool, and
+-- the modules. A route ending in a slash is a section and is written in that
+-- section's `index.md`; every other route is a file beside it.
 --
 -- A page's description is not here. It is the `description:` in the page's own
 -- frontmatter, read in `before_build`, so the one copy of it lives where the
@@ -204,7 +204,6 @@ local PAGES = {
         hero_actions = {
             { text = "Get started", path = "getting-started", theme = "brand" },
             { text = "Modules", path = "modules", theme = "alt" },
-            { text = "tecs.ecs", path = "ecs", theme = "alt" },
         },
         features = {
             {
@@ -215,8 +214,8 @@ local PAGES = {
             },
             {
                 title = "ECS built for LuaJIT",
-                details = "An [archetype-based ECS](/ecs/archetype) with FFI components, contiguous columns, and a"
-                    .. " dirty model the GPU reads.",
+                details = "An [archetype-based ECS](/modules/ecs/archetype) with FFI components,"
+                    .. " contiguous columns, and a dirty model the GPU reads.",
                 icon = "⚡",
             },
             {
@@ -248,38 +247,50 @@ for _, page in ipairs(modulePages()) do
 end
 
 for _, page in ipairs({
-    { route = "ecs/", title = "tecs.ecs", public = "tecs.ecs", api = { "tecs.ecs" } },
-    { route = "ecs/archetype", title = "Archetypes" },
-    { route = "ecs/builtins", title = "Builtins" },
-    { route = "ecs/components/", title = "Components" },
-    { route = "ecs/components/bundles", title = "Component Bundles" },
-    { route = "ecs/components/construction", title = "Component Construction" },
-    { route = "ecs/components/dirty-tracking", title = "Dirty Tracking" },
-    { route = "ecs/components/ffi", title = "FFI Components" },
-    { route = "ecs/components/scalar-components", title = "Scalar Components" },
-    { route = "ecs/components/serialization", title = "Component Serialization" },
-    { route = "ecs/components/table-components", title = "Table Components" },
-    { route = "ecs/components/tag-components", title = "Tag Components" },
-    { route = "ecs/events", title = "Events" },
-    { route = "ecs/mutation-model", title = "Mutation model" },
-    { route = "ecs/phases", title = "Phases" },
-    { route = "ecs/plugins", title = "Plugins" },
-    { route = "ecs/profiling", title = "Profiling" },
-    { route = "ecs/queries/", title = "Queries" },
-    { route = "ecs/queries/callbacks", title = "Query callbacks" },
-    { route = "ecs/queries/grouping", title = "Query grouping" },
     {
-        route = "ecs/random",
+        route = "modules/ecs/",
+        title = "tecs.ecs",
+        public = "tecs.ecs",
+        api = {
+            "tecs.ecs",
+            {
+                module = "tecs.types",
+                public = "tecs",
+                include = { "World", "Query", "System", "Plugin" },
+            },
+        },
+    },
+    { route = "modules/ecs/archetype", title = "Archetypes" },
+    { route = "modules/ecs/builtins", title = "Builtins" },
+    { route = "modules/ecs/components/", title = "Components" },
+    { route = "modules/ecs/components/bundles", title = "Component Bundles" },
+    { route = "modules/ecs/components/construction", title = "Component Construction" },
+    { route = "modules/ecs/components/dirty-tracking", title = "Dirty Tracking" },
+    { route = "modules/ecs/components/ffi", title = "FFI Components" },
+    { route = "modules/ecs/components/scalar-components", title = "Scalar Components" },
+    { route = "modules/ecs/components/serialization", title = "Component Serialization" },
+    { route = "modules/ecs/components/table-components", title = "Table Components" },
+    { route = "modules/ecs/components/tag-components", title = "Tag Components" },
+    { route = "modules/ecs/events", title = "Events" },
+    { route = "modules/ecs/mutation-model", title = "Mutation model" },
+    { route = "modules/ecs/phases", title = "Phases" },
+    { route = "modules/ecs/plugins", title = "Plugins" },
+    { route = "modules/ecs/profiling", title = "Profiling" },
+    { route = "modules/ecs/queries/", title = "Queries" },
+    { route = "modules/ecs/queries/callbacks", title = "Query callbacks" },
+    { route = "modules/ecs/queries/grouping", title = "Query grouping" },
+    {
+        route = "modules/ecs/random",
         title = "tecs.ecs.random",
         public = "tecs.ecs.random",
         api = { "tecs.random" },
     },
-    { route = "ecs/relationships/", title = "Relationships" },
-    { route = "ecs/relationships/ffi", title = "FFI Relationships" },
-    { route = "ecs/save-games", title = "Save games" },
-    { route = "ecs/states", title = "State stack" },
-    { route = "ecs/systems", title = "Systems" },
-    { route = "ecs/world", title = "World" },
+    { route = "modules/ecs/relationships/", title = "Relationships" },
+    { route = "modules/ecs/relationships/ffi", title = "FFI Relationships" },
+    { route = "modules/ecs/save-games", title = "Save games" },
+    { route = "modules/ecs/states", title = "State stack" },
+    { route = "modules/ecs/systems", title = "Systems" },
+    { route = "modules/ecs/world", title = "World" },
 }) do
     table.insert(PAGES, page)
 end
@@ -337,6 +348,56 @@ local SIDEBAR = {
             { text = "tecs.assets", path = "modules/assets" },
             { text = "tecs.audio", path = "modules/audio" },
             { text = "tecs.data", path = "modules/data" },
+            {
+                text = "tecs.ecs",
+                path = "modules/ecs",
+                items = {
+                    { text = "Archetypes", path = "modules/ecs/archetype" },
+                    { text = "Builtins", path = "modules/ecs/builtins" },
+                    {
+                        text = "Components",
+                        path = "modules/ecs/components",
+                        collapsed = true,
+                        items = {
+                            { text = "Bundles", path = "modules/ecs/components/bundles" },
+                            { text = "Construction", path = "modules/ecs/components/construction" },
+                            { text = "Dirty tracking", path = "modules/ecs/components/dirty-tracking" },
+                            { text = "FFI components", path = "modules/ecs/components/ffi" },
+                            { text = "Scalar components", path = "modules/ecs/components/scalar-components" },
+                            { text = "Serialization", path = "modules/ecs/components/serialization" },
+                            { text = "Table components", path = "modules/ecs/components/table-components" },
+                            { text = "Tag components", path = "modules/ecs/components/tag-components" },
+                        },
+                    },
+                    { text = "Events", path = "modules/ecs/events" },
+                    { text = "Mutation model", path = "modules/ecs/mutation-model" },
+                    { text = "Phases", path = "modules/ecs/phases" },
+                    { text = "Plugins", path = "modules/ecs/plugins" },
+                    { text = "Profiling", path = "modules/ecs/profiling" },
+                    {
+                        text = "Queries",
+                        path = "modules/ecs/queries",
+                        collapsed = true,
+                        items = {
+                            { text = "Callbacks", path = "modules/ecs/queries/callbacks" },
+                            { text = "Grouping", path = "modules/ecs/queries/grouping" },
+                        },
+                    },
+                    { text = "tecs.ecs.random", path = "modules/ecs/random" },
+                    {
+                        text = "Relationships",
+                        path = "modules/ecs/relationships",
+                        collapsed = true,
+                        items = {
+                            { text = "FFI relationships", path = "modules/ecs/relationships/ffi" },
+                        },
+                    },
+                    { text = "Save games", path = "modules/ecs/save-games" },
+                    { text = "States", path = "modules/ecs/states" },
+                    { text = "Systems", path = "modules/ecs/systems" },
+                    { text = "World", path = "modules/ecs/world" },
+                },
+            },
             { text = "tecs.events", path = "modules/events" },
             {
                 text = "tecs.filesystem",
@@ -375,59 +436,6 @@ local SIDEBAR = {
             { text = "tecs.workers", path = "modules/workers" },
         },
     },
-    -- The concept pages, under the module that holds the ECS rather than under
-    -- an invented category. `tecs.ecs` is one table: an engine module requires
-    -- it, a game reads it off `tecs`, and both reach what is listed here.
-    {
-        text = "tecs.ecs",
-        path = "ecs",
-        items = {
-            { text = "Archetypes", path = "ecs/archetype" },
-            { text = "Builtins", path = "ecs/builtins" },
-            {
-                text = "Components",
-                path = "ecs/components",
-                collapsed = true,
-                items = {
-                    { text = "Bundles", path = "ecs/components/bundles" },
-                    { text = "Construction", path = "ecs/components/construction" },
-                    { text = "Dirty tracking", path = "ecs/components/dirty-tracking" },
-                    { text = "FFI components", path = "ecs/components/ffi" },
-                    { text = "Scalar components", path = "ecs/components/scalar-components" },
-                    { text = "Serialization", path = "ecs/components/serialization" },
-                    { text = "Table components", path = "ecs/components/table-components" },
-                    { text = "Tag components", path = "ecs/components/tag-components" },
-                },
-            },
-            { text = "Events", path = "ecs/events" },
-            { text = "Mutation model", path = "ecs/mutation-model" },
-            { text = "Phases", path = "ecs/phases" },
-            { text = "Plugins", path = "ecs/plugins" },
-            { text = "Profiling", path = "ecs/profiling" },
-            {
-                text = "Queries",
-                path = "ecs/queries",
-                collapsed = true,
-                items = {
-                    { text = "Callbacks", path = "ecs/queries/callbacks" },
-                    { text = "Grouping", path = "ecs/queries/grouping" },
-                },
-            },
-            { text = "Random", path = "ecs/random" },
-            {
-                text = "Relationships",
-                path = "ecs/relationships",
-                collapsed = true,
-                items = {
-                    { text = "FFI relationships", path = "ecs/relationships/ffi" },
-                },
-            },
-            { text = "Save games", path = "ecs/save-games" },
-            { text = "States", path = "ecs/states" },
-            { text = "Systems", path = "ecs/systems" },
-            { text = "World", path = "ecs/world" },
-        },
-    },
 }
 
 -- Every group starts closed, and tealdoc opens the ones that hold the page
@@ -447,6 +455,13 @@ local function collapseGroups(items)
 end
 
 collapseGroups(SIDEBAR)
+
+-- Public modules normally resolve through `SURFACE`. `tecs.ecs.random` is the
+-- exception: `tecs.ecs` owns it directly because engine modules also require
+-- that same table, so it never passes through the root resolver.
+local DIRECT_PUBLIC_MODULES = {
+    ["tecs.ecs.random"] = true,
+}
 
 --- The value fields of `record tecs`, in the three groups a listing presents
 --- them in: the modules a game reaches directly, the modules that sit inside
@@ -498,6 +513,10 @@ local function publicNames()
             end
         end
     end
+    for name in pairs(DIRECT_PUBLIC_MODULES) do
+        local public = name:gsub("^tecs%.", "")
+        table.insert(sub, public)
+    end
     return ordered(top), ordered(sub), ordered(root)
 end
 
@@ -545,13 +564,6 @@ local BANNED_HEADING_TITLES = {
     Related = true,
     Submodule = true,
     Submodules = true,
-}
-
--- Public modules normally resolve through `SURFACE`. `tecs.ecs.random` is the
--- exception: `tecs.ecs` owns it directly because engine modules also require
--- that same table, so it never passes through the root resolver.
-local DIRECT_PUBLIC_MODULES = {
-    ["tecs.ecs.random"] = true,
 }
 
 --- Rejects writing patterns that have no place in the public documentation.
@@ -635,7 +647,8 @@ local function checkPages(context)
             documented[page.public] = true
             route[page.public] = page.path
         end
-        for _, module in ipairs(page.api or {}) do
+        for _, api in ipairs(page.api or {}) do
+            local module = type(api) == "table" and api.module or api
             if not context.env.registry["$" .. module] then
                 error("/" .. page.path .. " names a module nothing read: " .. module, 0)
             end
@@ -763,7 +776,8 @@ end
 local sources = {}
 local staged = {}
 for _, page in ipairs(pages) do
-    for _, module in ipairs(page.api or {}) do
+    for _, api in ipairs(page.api or {}) do
+        local module = type(api) == "table" and api.module or api
         if not staged[module] then
             staged[module] = true
             table.insert(sources, (moduleFile((module:gsub("%.init$", "")))))
@@ -823,7 +837,6 @@ return {
             nav = {
                 { text = "Get started", path = "getting-started" },
                 { text = "Modules", path = "modules" },
-                { text = "tecs.ecs", path = "ecs" },
                 { text = "CLI", path = "cli" },
             },
             -- The display face, asked for here rather than through an

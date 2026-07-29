@@ -43,12 +43,12 @@ around those values.
 
 ## Storage choices
 
-| Kind                                        | Use                                                          |
-| ------------------------------------------- | ------------------------------------------------------------ |
-| [Table](/ecs/components/table-components)   | Strings, nested tables, opaque handles, and other Lua values |
-| [FFI](/ecs/components/ffi)                  | Fixed-size numeric fields in contiguous C structs            |
-| [Scalar](/ecs/components/scalar-components) | One `number`, `boolean`, or `string` per entity              |
-| [Tag](/ecs/components/tag-components)       | Presence with no per-entity value                            |
+| Kind                                                | Use                                                          |
+| --------------------------------------------------- | ------------------------------------------------------------ |
+| [Table](/modules/ecs/components/table-components)   | Strings, nested tables, opaque handles, and other Lua values |
+| [FFI](/modules/ecs/components/ffi)                  | Fixed-size numeric fields in contiguous C structs            |
+| [Scalar](/modules/ecs/components/scalar-components) | One `number`, `boolean`, or `string` per entity              |
+| [Tag](/modules/ecs/components/tag-components)       | Presence with no per-entity value                            |
 
 The engine uses the same factories. `Transform`, `Sprite`, `Tint`, `Material`,
 `Clip`, and `PointLight` use FFI storage; `Renderable` uses table-component
@@ -100,12 +100,12 @@ world:remove(entity, tecs.ecs.Name)
 
 `world:has(entity, Component)` tests presence. Relationship containers and
 instances add any-target and specific-target checks; see
-[Relationships](/ecs/relationships/).
+[Relationships](/modules/ecs/relationships/).
 
 Adding or removing a component changes the entity's archetype. Query
 iteration, query callbacks, explicit `world:defer()` scopes, and batch
 callbacks stage that structural change until the outermost scope closes.
-[Deferred operations](/ecs/world#deferred-operations) covers the visibility
+[Deferred operations](/modules/ecs/world#deferred-operations) covers the visibility
 rules.
 
 ## Component dependencies {#auto-dependencies-with-requires}
@@ -143,7 +143,7 @@ and both relationship factories accept the option.
 `tecs.ecs.RelativeTransform` requires `tecs.Transform`, so a relative
 transform and the world transform it feeds enter the same archetype together.
 
-Use [query callbacks](/ecs/queries/callbacks) for work that must run when a
+Use [query callbacks](/modules/ecs/queries/callbacks) for work that must run when a
 signature starts or stops matching.
 
 ## Transient state
@@ -154,5 +154,5 @@ keep their entities. Rebuild the omitted values from durable components after
 load.
 
 `transient` and a custom `serialize` function conflict, so registration rejects
-that combination. [Component serialization](/ecs/components/serialization)
+that combination. [Component serialization](/modules/ecs/components/serialization)
 covers codecs and migrations.

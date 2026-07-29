@@ -100,7 +100,7 @@ end
 ```
 
 The drain applies despawns, spawns, and archetype moves after iterator
-exhaustion. The [mutation model](/ecs/mutation-model) defines visibility and
+exhaustion. The [mutation model](/modules/ecs/mutation-model) defines visibility and
 ordering.
 
 ### Early exit {#breaking-out-early}
@@ -147,8 +147,8 @@ end
 ```
 
 A temporary query cannot define `onEntitiesAdded` or `onEntitiesRemoved`.
-[Query callbacks](/ecs/queries/callbacks) cover persistent match-set
-reactions. [Grouping](/ecs/queries/grouping) sorts matching archetypes under
+[Query callbacks](/modules/ecs/queries/callbacks) cover persistent match-set
+reactions. [Grouping](/modules/ecs/queries/grouping) sorts matching archetypes under
 integer keys.
 
 ## Disabled entities {#disabled-entities}
