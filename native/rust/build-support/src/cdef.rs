@@ -445,7 +445,12 @@ fn evaluate_macros(
     prologue.extend([
         "#include <stdio.h>".to_owned(),
         "#include <stdint.h>".to_owned(),
-        "#define TECS_KIND(x) _Generic((x) + 0, char *: 4, const char *: 4, _Bool: 1, char: 1, signed char: 1, short: 1, int: 1, long: 1, long long: 1, unsigned char: 2, unsigned short: 2, unsigned int: 2, unsigned long: 2, unsigned long long: 2, float: 3, double: 3, long double: 5, default: 0)".to_owned(),
+        "static void tecsString(const char *name, const char *value) { printf(\"%s\\tS\\t%s\\n\", name, value); }".to_owned(),
+        "static void tecsSigned(const char *name, long long value) { printf(\"%s\\tI\\t%lld\\n\", name, value); }".to_owned(),
+        "static void tecsUnsigned(const char *name, unsigned long long value) { printf(\"%s\\tU\\t%llu\\n\", name, value); }".to_owned(),
+        "static void tecsFloat(const char *name, double value) { printf(\"%s\\tF\\t%.17g\\n\", name, value); }".to_owned(),
+        "static void tecsSkip(const char *name, ...) { (void)name; }".to_owned(),
+        "#define TECS_PRINT(name, x) _Generic((x) + 0, char *: tecsString, const char *: tecsString, _Bool: tecsSigned, char: tecsSigned, signed char: tecsSigned, short: tecsSigned, int: tecsSigned, long: tecsSigned, long long: tecsSigned, unsigned char: tecsUnsigned, unsigned short: tecsUnsigned, unsigned int: tecsUnsigned, unsigned long: tecsUnsigned, unsigned long long: tecsUnsigned, float: tecsFloat, double: tecsFloat, default: tecsSkip)(name, (x))".to_owned(),
     ]);
     prologue.extend(std::iter::repeat_n(String::new(), padding));
     prologue.push(format!("static void {function}(void) {{"));
@@ -469,11 +474,7 @@ fn evaluate_macros(
         }
         let body: Vec<_> = active
             .iter()
-            .map(|name| {
-                format!(
-                    "    if (TECS_KIND({name}) == 4) printf(\"{name}\\tS\\t%s\\n\", (const char *)(intptr_t)({name})); else if (TECS_KIND({name}) == 1) printf(\"{name}\\tI\\t%lld\\n\", (long long)({name})); else if (TECS_KIND({name}) == 2) printf(\"{name}\\tU\\t%llu\\n\", (unsigned long long)({name})); else if (TECS_KIND({name}) == 3) printf(\"{name}\\tF\\t%.17g\\n\", (double)({name}));"
-                )
-            })
+            .map(|name| format!("    TECS_PRINT(\"{name}\", {name});"))
             .collect();
         let program = prologue
             .iter()
@@ -634,6 +635,7 @@ mod tests {
              #define TEST_PI 3.14159265358979323846\n\
              #define TEST_GRAVITY 9.80665\n\
              #define TEST_MAX_UINT64 UINT64_MAX\n\
+             #define TEST_STRING \"exact string\"\n\
              #define TEST_LONG_DOUBLE 1.0L\n",
         )
         .unwrap();
@@ -665,6 +667,10 @@ mod tests {
             assert_eq!(value.parse::<f64>().unwrap(), expected);
         }
         assert_eq!(constants["TEST_MAX_UINT64"], Constant::Unsigned(u64::MAX));
+        assert_eq!(
+            constants["TEST_STRING"],
+            Constant::String("exact string".to_owned())
+        );
         assert!(!constants.contains_key("TEST_LONG_DOUBLE"));
     }
 }
