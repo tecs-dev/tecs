@@ -233,6 +233,32 @@ describe("reserved instance runs", function()
         end
     end
 
+    -- A run apiece for as many archetypes as a scene wants. Sixteen slots is
+    -- the floor a compaction reserves each of them, and five hundred and
+    -- twelve slots is the least it will rewrite the scene to reclaim, so a
+    -- buffer only wide enough for the rows themselves takes more than
+    -- thirty-two runs to arrive at. Forty-one is the first round number past
+    -- that with one left over to drift the extent with.
+    local TAGS = {}
+    for index = 1, 41 do
+        local container = {}
+        ecs.newComponent({
+            name = "PacketRunTag" .. index,
+            container = container,
+            fields = { "value" },
+            defaults = { 0 },
+        })
+        TAGS[index] = container
+    end
+
+    local function scatterTagged(world, tag, count)
+        local ids = {}
+        for _ = 1, count do
+            ids[#ids + 1] = world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), TAGS[tag](1), Renderable())
+        end
+        return ids
+    end
+
     it("charges a spawn the archetype it spawned into and no other", function()
         local world, _, packet = newExtraction(true)
         scatter(world, 40, false)
@@ -371,6 +397,33 @@ describe("reserved instance runs", function()
 
         world:update(1 / 60)
         assert.are.equal(116, packet.count)
+        assert.are.equal(0, packet.rewritten, "and a compaction cannot ask for another one")
+    end)
+
+    it("reclaims one a compaction would lay out below its widest reservation", function()
+        -- Forty-one runs in a buffer with no room for a reservation apiece, so
+        -- a compaction gives up the slack and lays the rows out packed. What
+        -- the runs would like is therefore not what they would get, and
+        -- measuring the extent against the wider of the two says a compaction
+        -- would make things worse: the gap reads as negative and the voluntary
+        -- reclaim never fires, leaving the cull dispatched over an extent two
+        -- and a half times the rows in it for as long as the scene lasts.
+        local world, _, packet = newExtraction(true, 1024)
+        for tag = 1, 40 do
+            scatterTagged(world, tag, 10)
+        end
+        local drifting = scatterTagged(world, 41, 600)
+        world:update(1 / 60)
+        assert.are.equal(1000, packet.count, "no room for slack, so the rows and nothing else")
+
+        for _, id in ipairs(drifting) do
+            world:despawn(id)
+        end
+        world:update(1 / 60)
+        assert.are.equal(400, packet.count, "the rows that are left occupy what they need")
+
+        world:update(1 / 60)
+        assert.are.equal(400, packet.count)
         assert.are.equal(0, packet.rewritten, "and a compaction cannot ask for another one")
     end)
 
