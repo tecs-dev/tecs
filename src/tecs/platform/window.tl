@@ -394,12 +394,6 @@ end
 -- Creation and destruction
 -------------------------------------------------------------------------------
 
---- Creates a window. Requires `SDL_Init(SDL_INIT_VIDEO)` to have run.
----
---- Flags that SDL only accepts at creation are taken from `options` and set
---- here; everything else in `options` is applied straight afterwards, and has
---- a setter of its own, so nothing is reachable at creation that is not
---- reachable later.
 function window.newWindow(options: Window.Options): Window
     local flags = 0
     if options.resizable ~= false then

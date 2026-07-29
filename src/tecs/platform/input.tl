@@ -1035,10 +1035,6 @@ function Input:textInputLayer(): Layer
     return self._textLayer
 end
 
---- Tells the platform where the edited text sits, in window coordinates.
----
---- Worth calling as the caret moves, not only at the start: the platform
---- places its candidate window against the most recent rectangle it was given.
 function Input:setTextInputArea(area: TextArea): boolean
     return self._backend.setTextInputArea(self._window, area.x, area.y, area.width, area.height, area.cursor or 0)
 end

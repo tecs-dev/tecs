@@ -247,12 +247,17 @@ tests prose. The only defense is the person making the change, at the time they 
 - A page that cannot be verified against the code should not be written. A gap is honest; a
   confident wrong answer is not.
 
-`cargo xtask docs-check` is the gate, and it holds four things: every page carries a one-line
+Tealdoc renders the site from `tealdoc.site` in `tlconfig.lua`, which holds the settings, the
+navigation, the sidebar and one entry per page. A page's prose is everything above its
+`<!-- @generated` marker and its reference is rendered from the modules the page names, so nothing
+below that marker is written into the tree and a signature has no second copy to drift from.
+
+`cargo xtask docs-check` is the gate, and it holds three things: every page carries a one-line
 `description:`; the module list matches `src/tecs/init.tl` in three listings at once
-(`docs/index.md`, `docs/modules/index.md` and the sidebar in `docs/.vitepress/config.mts`), in
-one order, with one page per public name and no page outliving its module; every link and anchor
-resolves; and each page's generated reference section matches a fresh render. That last one is
-why a page is never hand-edited below its `@generated` marker: run `cargo xtask docs-reference`.
+(`docs/index.md`, `docs/modules/index.md` and `SIDEBAR` in `tlconfig.lua`), in one order, with one
+page per public name and no page outliving its module; and every link and anchor in the built site
+resolves. The first is `scripts/check-docs-descriptions.sh`; the other two are the render itself,
+through the site's `before_build` hook and tealdoc's own link validation.
 
 ### Docblocks
 

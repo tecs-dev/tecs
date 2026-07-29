@@ -3499,9 +3499,13 @@ cargo xtask single        build out/single/bin/tecs
 cargo xtask deps          install development dependencies (Homebrew)
 ```
 
-The single executable also carries the Markdown reference used by the
-documentation site. `tecs docs` lists it, and queries such as `physics` or
-`tecs.physics.attach` search it without a project or a network connection.
+The single executable also carries the documentation site's pages. `tecs docs`
+lists them, and a query such as `physics` finds one without a project or a
+network connection. It carries the prose and not the reference: a page's
+signatures are rendered from `src` when the site is built rather than written
+into the tree, so a name like `tecs.physics.attach` is not something a copy of
+the pages can be asked about. Staging the rendered site instead of its sources
+is what would put those back, and it costs the product build a site render.
 
 `--preset` selects the target; when omitted it selects the host development
 preset. Presets come in two kinds. A development preset resolves dependencies
@@ -3542,6 +3546,45 @@ allowed to borrow from its machine.
 
 `TECS_FRAMES=N cargo xtask run` exits after N frames, so an automated run can drive
 a real window to completion.
+
+## One program owns both halves of a documentation page
+
+The site and the thing that knows the API used to be different programs, and
+every documentation defect came out of that gap. A reference generator that
+held one module path per page could not see a module nested inside another. A
+page checker learned what a subordinate module is three separate times. A link
+checker resolved routes the site rejected. A dedented example inside a docblock
+became an unclosed tag and broke the build forty lines from where it was
+written. Four scripts, about a thousand lines, existed to hold two programs in
+step.
+
+Tealdoc renders the site now, from `tealdoc.site` in `tlconfig.lua`. It reads a
+page's Markdown, stops at the `<!-- @generated` marker, and appends the
+reference it renders from the modules the page names, which is the page format
+this tree already wrote. So the prose carried over untouched, the four scripts
+are gone, and so are the seventeen thousand lines of reference Markdown they
+committed: a signature cannot drift from its page when there is no second copy
+of it.
+
+What the retired checker held is a `before_build` hook in the same file. Every
+public name in `src/tecs/init.tl` has a page, no page outlives the module it
+documents, both listings of the modules agree with the declaration and with
+each other, and the sidebar has one row per page. It fails the build rather
+than a separate command, because a page lost to a rename is exactly what that
+check has caught before. The pages themselves are derived from `SURFACE` rather
+than transcribed beside it, so a renamed module is a failure where the rename
+is rather than a page that quietly stops describing anything.
+
+A page's reference comes from a list of modules rather than one, because a
+public name is a namespace and a module is a file and the two do not have to
+agree. `tecs.gfx` is assembled from four files, `tecs.input` from three and
+`tecs.gfx.animation` from two. Every entry in that list goes away the day its
+namespace is one module, which is what `AGENTS.md` already asks for.
+
+The cost is paid by the offline reference. `tecs docs` carries the pages, and
+the pages no longer carry their signatures, so it answers about a page rather
+than about a name. Putting those back means staging the rendered site rather
+than its sources, and a site render is twelve seconds every product build.
 
 ## Requirements
 

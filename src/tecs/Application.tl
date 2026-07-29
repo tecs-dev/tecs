@@ -268,8 +268,49 @@ local record Application
     --- Iterations completed.
     frame: integer
 
-    --- Declared here because `_init` wires the debug server and the file
-    --- watcher to it before it is defined. Its contract is at the definition.
+    -- Declared here because `_init` wires the debug server and the file
+    -- watcher to it before it is defined.
+
+    --- Another frame to look at and a chance to reload; the world may be
+    --- inconsistent, reload before trusting it.
+    ---
+    --- That sentence is the whole contract, and the name is deliberately not
+    --- `recover` or `retry`: this is a debugging affordance, not fault
+    --- tolerance. What the guard put back are the engine's invariants, which
+    --- are the ones it can name: the command buffer is resolved, the passes
+    --- are ended, the world is applying mutations again. A game's invariants
+    --- are not restored and cannot be, because a system that threw halfway
+    --- through its query left some entities updated and some not, and nothing
+    --- here knows which half or what either half meant. So the frame after
+    --- this is a frame to read, and the way to get back to a world worth
+    --- trusting is to reload the scene.
+    ---
+    --- Two gates, and they are different kinds of thing.
+    ---
+    --- The first is whether this build is a development one at all, which is
+    --- `debug`, `mcpPort` or `watch` in the config. A watcher counts because
+    --- it is the configuration that most wants this: a game running one is
+    --- being edited, and reloading the file that threw is exactly the way
+    --- back. A shipped build has none of the three, latches on the first crash
+    --- and stays latched, which is the right shipped behavior: there is nobody
+    --- there to read the frame, and carrying on with a world that is provably
+    --- inconsistent is how one bug becomes a corrupted save.
+    ---
+    --- The second is severity, and it is narrower rather than a judgment about
+    --- how bad the throw looked. Recovery reports whether it had to force-end
+    --- a pass or cancel a frame instead of submitting it, and in either case
+    --- the device is not in the state the engine intended. Those do not
+    --- resume, at any setting, because the next frame would be recorded
+    --- against a device nobody can describe.
+    ---
+    --- The callers are the debug server's `clear_crash` tool and the file
+    --- watcher's reloads. Both mean the same thing: something about the run
+    --- has changed, try it again.
+    ---
+    --- Physics resumability is a separate and open question: a solver stepped
+    --- out of is not obviously a solver that can be stepped again.
+    ---
+    --- @return Whether the loop resumed, and why it did not.
     clearCrash: function(self: Application): boolean, string
 
     _config: Application.Config
@@ -1014,44 +1055,6 @@ function Application:crashed(): string
     return self._crashed
 end
 
---- Another frame to look at and a chance to reload; the world may be
---- inconsistent, reload before trusting it.
----
---- That sentence is the whole contract, and the name is deliberately not
---- `recover` or `retry`: this is a debugging affordance, not fault tolerance.
---- What the guard put back are the engine's invariants, which are the ones it
---- can name: the command buffer is resolved, the passes are ended, the world
---- is applying mutations again. A game's invariants are not restored and
---- cannot be, because a system that threw halfway through its query left some
---- entities updated and some not, and nothing here knows which half or what
---- either half meant. So the frame after this is a frame to read, and the way
---- to get back to a world worth trusting is to reload the scene.
----
---- Two gates, and they are different kinds of thing.
----
---- The first is whether this build is a development one at all, which is
---- `debug`, `mcpPort` or `watch` in the config. A watcher counts because it is
---- the configuration that most wants this: a game running one is being edited,
---- and reloading the file that threw is exactly the way back. A shipped build
---- has none of the three, latches on the first crash and stays latched, which
---- is the right shipped behavior:
---- there is nobody there to read the frame, and carrying on with a world that
---- is provably inconsistent is how one bug becomes a corrupted save.
----
---- The second is severity, and it is narrower rather than a judgment about
---- how bad the throw looked. Recovery reports whether it had to force-end a
---- pass or cancel a frame instead of submitting it, and in either case the
---- device is not in the state the engine intended; see `_recover`. Those do
---- not resume, at any setting, because the next frame would be recorded
---- against a device nobody can describe.
----
---- The callers are the debug server's `clear_crash` tool and the file
---- watcher's reloads. Both mean the same thing: something about the run has
---- changed, try it again.
----
---- Physics resumability is a separate and open question: a solver stepped out
---- of is not obviously a solver that can be stepped again.
---- @return Whether the loop resumed, and why it did not.
 function Application:clearCrash(): boolean, string
     if self._crashed == nil then
         return true

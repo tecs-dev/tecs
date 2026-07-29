@@ -10,12 +10,12 @@ Thanks for your interest in contributing!
   done until its page says so. Prose is the one thing no test can check, so the
   only defense is the person making the change. `cargo xtask docs-dev` serves the site
   with hot reload.
-- **`cargo xtask docs-check` must pass.** It holds the module list against
-  `src/tecs/init.tl` in three listings at once, resolves every link and anchor,
-  requires a `description:` on every page, and diffs each page's generated
-  reference against a fresh render. Regenerate with
-  `cargo xtask docs-reference` rather than editing below the `@generated`
-  marker.
+- **`cargo xtask docs-check` must pass.** It requires a `description:` on every
+  page, then renders the site, which is where the rest of the gate is: the
+  `before_build` hook in `tlconfig.lua` holds the pages to `src/tecs/init.tl`,
+  and tealdoc resolves every link and anchor over the HTML it just wrote. A
+  page's reference is rendered at build time from the modules the page names,
+  so nothing below the `@generated` marker is written into the tree.
 - **Public docblocks carry `@param` and `@return`**, and they say what the
   signature cannot: units, coordinate spaces, what nil means, what happens at a
   boundary. A tag that restates the parameter's name is worse than none.

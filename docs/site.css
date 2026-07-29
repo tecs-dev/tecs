@@ -1,0 +1,44 @@
+/* The site's own palette and display face, over tealdoc's defaults.
+ *
+ * Only the documented `--tealdoc-*` tokens are set, so the theme survives a
+ * generator update: a rule written against a class would not. The two halves
+ * of each pair are the light and the dark value, and tealdoc picks between
+ * them from the reader's system setting and from the theme toggle. */
+
+@import url("https://fonts.googleapis.com/css2?family=Jersey+15&display=swap");
+
+:root {
+    /* Paper and ink. Warm rather than white, because a page of signatures is
+     * read for minutes at a time. */
+    --tealdoc-light-background: #e8e4dc;
+    --tealdoc-light-background-alt: #e0dcd4;
+    --tealdoc-light-background-elv: #e0ddd8;
+    --tealdoc-light-border: #cdc8c0;
+    --tealdoc-light-code-background: #e0ddd8;
+    --tealdoc-light-text: #302d29;
+    --tealdoc-light-text-muted: #565047;
+    --tealdoc-light-text-faint: #756d60;
+
+    --tealdoc-dark-background: #110f0d;
+    --tealdoc-dark-background-alt: #110f0d;
+    --tealdoc-dark-background-elv: #2a2724;
+    --tealdoc-dark-border: #3a3730;
+    --tealdoc-dark-code-background: #17141c;
+    --tealdoc-dark-text: #d9d2c3;
+    --tealdoc-dark-text-muted: #b6ad9e;
+    --tealdoc-dark-text-faint: #8f8677;
+
+    /* Purple on paper, lavender in the dark. */
+    --tealdoc-light-accent: #372455;
+    --tealdoc-light-accent-hover: #4a3570;
+    --tealdoc-light-accent-soft: #37245524;
+    --tealdoc-light-accent-contrast: #ffffff;
+    --tealdoc-dark-accent: #a192b1;
+    --tealdoc-dark-accent-hover: #b5a6c5;
+    --tealdoc-dark-accent-soft: #86779529;
+    --tealdoc-dark-accent-contrast: #110f0d;
+
+    /* Headings only. Body text stays in the reading face. */
+    --tealdoc-font-heading: "Jersey 15", sans-serif;
+    --tealdoc-heading-font-weight: 400;
+}

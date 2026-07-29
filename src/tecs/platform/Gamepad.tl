@@ -93,8 +93,12 @@ local record Gamepad
     --- is the one thing that changes them.
     _labels: {integer: string}
 
-    --- Declared here because opening a device calls it, and the definition
-    --- reads more naturally beside the rest of the lifetime.
+    -- Declared here because opening a device calls it, and the definition
+    -- reads more naturally beside the rest of the lifetime.
+
+    --- Reloads the device's own description. Run at open and whenever the
+    --- platform reports a remap, which is the only other moment the answers
+    --- change.
     _readInfo: function(self: Gamepad)
 end
 
@@ -142,8 +146,6 @@ function Gamepad.openGamepad(backend: Backend, gate: Gate, id: number): Gamepad
     return self
 end
 
---- Reloads the device's own description. Run at open and whenever the platform
---- reports a remap, which is the only other moment the answers change.
 function Gamepad:_readInfo()
     local handle = live(self)
     if handle == nil then

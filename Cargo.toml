@@ -32,7 +32,6 @@ tempfile = "3.27"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.9"
-unicode-normalization = "0.1"
 walkdir = "2.5"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 

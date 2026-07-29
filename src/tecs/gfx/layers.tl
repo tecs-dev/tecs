@@ -45,6 +45,7 @@ local record layers
     virtualWidth: number
     virtualHeight: number
 
+    --- What decides the order of a layer's contents within its own band.
     enum Sort
         --- Lower on the screen draws in front, with z breaking ties. What a
         --- top-down or side-on game wants: a character below a crate is in

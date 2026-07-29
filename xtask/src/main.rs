@@ -98,13 +98,14 @@ enum Task {
         #[arg(long)]
         teal_types: Option<PathBuf>,
     },
-    /// Verify documentation metadata, pages, links, and generated references.
+    /// Verify documentation metadata, pages, and links by rendering the site.
     DocsCheck,
-    /// Regenerate documentation reference sections from Teal declarations.
-    DocsReference,
-    /// Serve the documentation site with hot reload.
-    DocsDev,
-    /// Build the documentation site.
+    /// Serve the documentation site, rebuilding it on a change.
+    DocsDev {
+        #[arg(long, default_value_t = 5173)]
+        port: u16,
+    },
+    /// Build the documentation site into out/docs.
     DocsBuild,
     /// Internal deterministic generators used by the product build.
     Generate {
@@ -282,20 +283,12 @@ fn main() -> Result<()> {
             allow_compiler,
             teal_types: teal_types.as_deref(),
         })?,
-        Task::DocsCheck => {
-            docs::check_descriptions(&root)?;
-            command::run("bash", ["docs/scripts/checkpages.sh"], &root)?;
-            docs::check_links(&root.join("docs"))?;
-            docs::references(&root, true)?;
-        }
-        Task::DocsReference => docs::references(&root, false)?,
-        Task::DocsDev => {
-            ensure_node_modules(&root)?;
-            command::run("npm", ["run", "docs:dev"], &root.join("docs"))?;
-        }
+        Task::DocsCheck => docs::check(&root)?,
+        Task::DocsDev { port } => docs::serve(&root, port)?,
         Task::DocsBuild => {
-            ensure_node_modules(&root)?;
-            command::run("npm", ["run", "docs:build"], &root.join("docs"))?;
+            let output = root.join(docs::OUTPUT);
+            docs::build(&root, &output)?;
+            println!("built {}", output.display());
         }
         Task::Generate { generator } => match generator {
             Generator::Cdef {
@@ -386,12 +379,4 @@ fn install_dev_tools(root: &std::path::Path) -> Result<()> {
     } else {
         anyhow::bail!("development tool installation exited with {status}")
     }
-}
-
-fn ensure_node_modules(root: &std::path::Path) -> Result<()> {
-    let docs = root.join("docs");
-    if !docs.join("node_modules").is_dir() {
-        command::run("npm", ["install"], &docs)?;
-    }
-    Ok(())
 }
