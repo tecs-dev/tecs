@@ -62,6 +62,7 @@ local data <const> = require("tecs.data")
 local log <const> = require("tecs.log")
 
 local type Renderer = require("tecs.Renderer")
+local type Future = require("tecs.Future")
 
 local type Component = ecs.Component
 local type World = types.World
@@ -165,7 +166,7 @@ local record Atlas
     --- reads from its parameter.
     param: number
     --- The decode in flight, nil once it has been uploaded.
-    handle: assets.Handle
+    pending: Future<assets.Image>
     --- Set once the atlas has failed, so a broken path is reported once
     --- rather than every frame.
     failed: boolean
@@ -481,7 +482,7 @@ local function residency(known: {Font: Atlas}, font: Font, renderer: Renderer): 
                 u = resident.u1,
                 v = resident.v1,
                 param = font.distanceRange * resident.u1 / font.atlasWidth,
-                handle = nil,
+                pending = nil,
                 failed = false,
             }
             known[font] = atlas
@@ -494,30 +495,31 @@ local function residency(known: {Font: Atlas}, font: Font, renderer: Renderer): 
             assets.install()
         end
         atlas = {
-            image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0, handle = assets.loadImage(font.atlas), failed = false
+            image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0, pending = assets.loadImage(font.atlas), failed = false
         }
         known[font] = atlas
     end
 
-    if atlas.handle == nil then
+    local decoding = atlas.pending
+    if decoding == nil then
         if atlas.failed then
             return nil
         end
         return atlas
     end
-    if atlas.handle.status == "loading" then
+    if decoding.status == "pending" then
         return nil
     end
 
-    if atlas.handle.status ~= "ready" then
-        logger:error("cannot load the font atlas '%s': %s", font.atlas, atlas.handle.error or atlas.handle.status)
-        atlas.handle = nil
+    if decoding.status ~= "ready" then
+        logger:error("cannot load the font atlas '%s': %s", font.atlas, decoding.error or decoding.status)
+        atlas.pending = nil
         atlas.failed = true
         return nil
     end
 
-    local sprite, region = renderer:registerImage(atlas.handle)
-    atlas.handle = nil
+    local sprite, region = renderer:registerImage(decoding.value)
+    atlas.pending = nil
     atlas.image = sprite.image
     atlas.slot = sprite.slot
     atlas.u = region.u1
@@ -1097,11 +1099,17 @@ local function evict(install: Install, font: Font)
     if atlas == nil then
         return
     end
-    -- A decode still in flight is reachable through this record and through
-    -- nothing else, so what the worker answers with has to be given back before
-    -- the record goes.
-    if atlas.handle ~= nil then
-        atlas.handle:release()
+    -- A decode reached through this record and through nothing else, so it has
+    -- to be given back before the record goes. Which half of a load that is
+    -- falls on the status line: before it lands the decode is canceled, and
+    -- after it lands the pixels nobody uploaded are what has to be released.
+    local decoding = atlas.pending
+    if decoding ~= nil then
+        if decoding.status == "ready" then
+            decoding.value:release()
+        else
+            decoding:cancel()
+        end
     end
     install.known[font] = nil
 end
