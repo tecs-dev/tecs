@@ -29,10 +29,10 @@ whose operations consume one whole byte string and answer another without keepin
 `tecs.regex` also describes the vocabulary a game already uses: `compile`, `isMatch`, `find` and `captures`
 are about regular expressions rather than an invented text-processing category.
 
-The first surface is intentionally smaller than `RegexBuilder`. Flags live in the pattern, where Rust regex
-syntax already defines them, and the common operations are methods on the compiled value. Replacement and
-iteration are absent until a use settles their result and allocation shape; repeatedly calling `find` with
-its optional start position covers code that needs explicit control today.
+The surface is intentionally smaller than `RegexBuilder`. Flags live in the pattern, where Rust regex syntax
+already defines them, and the common operations are methods on the compiled value. Explicit match iteration
+is absent; repeatedly calling `find` with its optional start position gives code control over empty matches
+and advancement rather than hiding those decisions in a stateful iterator.
 
 ## Byte strings and positions
 
@@ -67,6 +67,26 @@ lies because a trailing group was absent.
 Every `Match` carries its copied `value`, `first`, `last`, zero- or one-based `index`, and optional `name`.
 The native call itself borrows the subject only while it searches; no returned value keeps a pointer into a
 Lua string.
+
+## Replacement
+
+`replace` changes the first match and `replaceAll` changes every non-overlapping match. Replacement strings
+use Rust regex capture syntax: `$0` is the whole match, `$1` is the first explicit group, `$name` and
+`${name}` select a named group, and `$$` writes one dollar sign. An unknown or unmatched group expands to an
+empty string.
+
+```teal
+local name <const> = tecs.regex.compile([[(?<last>[A-Za-z]+),\s+([A-Za-z]+)]])
+local display <const> = name:replace("Dowling, Michael", "$2 $last")
+-- display is "Michael Dowling"
+
+local digits <const> = tecs.regex.compile([[\d+]])
+local redacted <const> = digits:replaceAll("room 12, floor 3", "#")
+-- redacted is "room #, floor #"
+```
+
+When nothing matches, both methods return the original subject unchanged. Subjects and replacements remain
+arbitrary byte strings. Only the replacement template syntax is interpreted.
 
 ## Lifetime
 
@@ -207,6 +227,13 @@ Source pattern, unchanged.
 
 Whether any part of a subject matches.
 
+```teal
+local imageName <const> = tecs.regex.compile([[\.(png|jpg)$]])
+if imageName:isMatch(path) then
+loadImage(path)
+end
+```
+
 #### Parameters
 
 | Type                                                     | Name                       | Description                                                   |
@@ -228,6 +255,14 @@ Whether any part of a subject matches.
 </code></pre>
 
 Finds the first match at or after a byte position.
+
+```teal
+local number <const> = tecs.regex.compile([[\d+]])
+local found <const> = number:find("hp=100")
+if found ~= nil then
+print(found.value, found.first, found.last) -- "100", 4, 6
+end
+```
 
 #### Parameters
 
@@ -251,6 +286,10 @@ Finds the first match at or after a byte position.
 </code></pre>
 
 Finds the first match and every capture group it populated.
+
+`groups` may contain holes when optional groups do not participate;
+iterate through `groupCount`, not `#groups`. A named entry aliases
+the same `Match` stored at its numbered index.
 
 #### Parameters
 
@@ -279,6 +318,12 @@ Capture references in the replacement are expanded: `$0` is the whole match, `$1
 first group, `$name` and `${name}` select a named group, and `$$` writes one dollar
 sign. A reference the pattern does not declare expands to an empty string.
 
+```teal
+local assignment <const> = tecs.regex.compile([[(\w+)=(\d+)]])
+local text <const> = assignment:replace("hp=100 mp=50", "$1: $2")
+-- text is "hp: 100 mp=50"
+```
+
 #### Parameters
 
 | Type                                                     | Name                           | Description                                                              |
@@ -301,6 +346,12 @@ sign. A reference the pattern does not declare expands to an empty string.
 </code></pre>
 
 Replaces every non-overlapping match.
+
+```teal
+local digits <const> = tecs.regex.compile([[\d+]])
+local redacted <const> = digits:replaceAll("room 12, floor 3", "#")
+-- redacted is "room #, floor #"
+```
 
 #### Parameters
 
@@ -329,6 +380,9 @@ Compilation raises on malformed syntax or a pattern that is not UTF-8.
 Rust's Unicode character classes are enabled by default; use inline
 flags to change the expression, such as `(?i)` for case-insensitive
 matching or `(?-u:.)` for one arbitrary byte.
+
+Keep the returned object and reuse it. Its native allocation is released
+automatically when Lua collects it.
 
 #### Parameters
 

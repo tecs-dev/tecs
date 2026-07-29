@@ -15,6 +15,45 @@ local loader <const> = require("tecs.ffi.loader")
 
 local C <const> = binding.C
 
+--- Compiled regular expressions over Lua byte strings.
+---
+--- ## Compile once
+---
+--- `compile` builds the automaton once. Keep the returned `Regex` and reuse it
+--- for every subject rather than compiling inside a frame loop:
+---
+--- ```teal
+--- local assignment <const> = tecs.regex.compile([[(?<name>[a-z]+)=(\d+)]])
+--- local captures <const> = assignment:captures("health=100")
+--- if captures ~= nil then
+---     print(captures.named.name.value) -- "health"
+---     print(captures.groups[2].value)  -- "100"
+--- end
+--- ```
+---
+--- Patterns use Rust `regex` syntax. Inline flags such as `(?i)` and `(?m)`
+--- configure them; look-around and backreferences are deliberately unsupported
+--- so searches remain linear in the pattern and subject sizes.
+---
+--- ## Byte strings and positions
+---
+--- Subjects may contain arbitrary bytes, including invalid UTF-8. `first` and
+--- `last` are 1-based inclusive byte positions, matching `string.find`; an
+--- empty match has `last == first - 1`. Patterns themselves must be UTF-8.
+--- Disable Unicode for a pattern fragment that intentionally matches arbitrary
+--- bytes, for example `(?-u:.)`.
+---
+--- ## Replacement
+---
+--- `replace` changes the first match and `replaceAll` changes every
+--- non-overlapping match. Replacement strings expand `$0`, `$1`, `$name`,
+--- `${name}`, and `$$`:
+---
+--- ```teal
+--- local name <const> = tecs.regex.compile([[(?<last>[A-Za-z]+),\s+([A-Za-z]+)]])
+--- local display <const> = name:replace("Dowling, Michael", "$2 $last")
+--- -- display is "Michael Dowling"
+--- ```
 local record regex
     --- One matched byte range.
     record Match
@@ -54,11 +93,26 @@ local record regex
 
         --- Whether any part of a subject matches.
         ---
+        --- ```teal
+        --- local imageName <const> = tecs.regex.compile([[\.(png|jpg)$]])
+        --- if imageName:isMatch(path) then
+        ---     loadImage(path)
+        --- end
+        --- ```
+        ---
         --- @param subject Arbitrary bytes. Unlike the pattern, these need not be UTF-8.
         --- @return True when the expression matches at least once.
         isMatch: function(self: Regex, subject: string): boolean
 
         --- Finds the first match at or after a byte position.
+        ---
+        --- ```teal
+        --- local number <const> = tecs.regex.compile([[\d+]])
+        --- local found <const> = number:find("hp=100")
+        --- if found ~= nil then
+        ---     print(found.value, found.first, found.last) -- "100", 4, 6
+        --- end
+        --- ```
         ---
         --- @param subject Arbitrary bytes.
         --- @param init First byte considered, under `string.find`'s rules: 1 by default, a negative
@@ -67,6 +121,10 @@ local record regex
         find: function(self: Regex, subject: string, init?: integer): Match
 
         --- Finds the first match and every capture group it populated.
+        ---
+        --- `groups` may contain holes when optional groups do not participate;
+        --- iterate through `groupCount`, not `#groups`. A named entry aliases
+        --- the same `Match` stored at its numbered index.
         ---
         --- @param subject Arbitrary bytes.
         --- @param init First byte considered, under the same rules as `find`.
@@ -78,6 +136,13 @@ local record regex
         --- Capture references in the replacement are expanded: `$0` is the whole match, `$1` is the
         ---     first group, `$name` and `${name}` select a named group, and `$$` writes one dollar
         ---     sign. A reference the pattern does not declare expands to an empty string.
+        ---
+        --- ```teal
+        --- local assignment <const> = tecs.regex.compile([[(\w+)=(\d+)]])
+        --- local text <const> = assignment:replace("hp=100 mp=50", "$1: $2")
+        --- -- text is "hp: 100 mp=50"
+        --- ```
+        ---
         --- @param subject Arbitrary bytes.
         --- @param replacement Arbitrary bytes, with capture references interpreted as described above.
         --- @return A new string when something matched, or the original string unchanged when nothing
@@ -85,6 +150,12 @@ local record regex
         replace: function(self: Regex, subject: string, replacement: string): string
 
         --- Replaces every non-overlapping match.
+        ---
+        --- ```teal
+        --- local digits <const> = tecs.regex.compile([[\d+]])
+        --- local redacted <const> = digits:replaceAll("room 12, floor 3", "#")
+        --- -- redacted is "room #, floor #"
+        --- ```
         ---
         --- @param subject Arbitrary bytes.
         --- @param replacement The same capture-reference syntax as `replace`.
@@ -99,6 +170,9 @@ local record regex
     --- Rust's Unicode character classes are enabled by default; use inline
     --- flags to change the expression, such as `(?i)` for case-insensitive
     --- matching or `(?-u:.)` for one arbitrary byte.
+    ---
+    --- Keep the returned object and reuse it. Its native allocation is released
+    --- automatically when Lua collects it.
     ---
     --- @param pattern Rust regex syntax, with NUL bytes allowed where that syntax allows them.
     --- @return A compiled expression whose native allocation is released by the Lua collector.
