@@ -42,3 +42,44 @@
     --tealdoc-font-heading: "Jersey 15", sans-serif;
     --tealdoc-heading-font-weight: 400;
 }
+
+/* The wordmark. A black badge with the logo red on it and a purple rule
+ * under, which is the one piece of the identity that is a drawing rather than
+ * a colour, so it is written against tealdoc's classes rather than its tokens
+ * and is the part to check after a generator update. */
+.tealdoc-brand-name {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    margin-left: -12px;
+    padding: 0 12px;
+    background: #000;
+    color: #da6f66;
+    text-decoration: underline;
+    text-decoration-color: #a192b1;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 5px;
+}
+
+.tealdoc-logo {
+    box-sizing: border-box;
+    height: 40px;
+    width: 40px;
+    padding: 4px;
+    background: #000;
+    object-fit: contain;
+}
+
+/* Headings carry the accent, which is what makes a page of them read as this
+ * site rather than as the default. The first two take the strong tone and the
+ * rest the softer one, so depth is visible without another size step. */
+.tealdoc-content h1,
+.tealdoc-content h2 {
+    color: var(--tealdoc-accent);
+}
+
+.tealdoc-content h3,
+.tealdoc-content h4,
+.tealdoc-content h5 {
+    color: var(--tealdoc-accent-hover);
+}
