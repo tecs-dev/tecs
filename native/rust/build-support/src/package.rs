@@ -133,13 +133,25 @@ pub fn check(options: &Options<'_>) -> Result<()> {
     if binaries.is_empty() {
         anyhow::bail!("no binaries found under {}", prefix.display());
     }
-    let packaged_names: BTreeSet<_> = WalkDir::new(&prefix)
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|entry| entry.file_type().is_file() || entry.file_type().is_symlink())
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .collect();
+    let inspections = binaries
+        .iter()
+        .map(|binary| Ok((binary, references(binary, platform)?)))
+        .collect::<Result<Vec<_>>>()?;
+    let application_search_paths: Vec<_> = if platform == Platform::Macos {
+        inspections
+            .iter()
+            .filter(|(binary, _)| {
+                binary.parent() == Some(prefix.join("bin").as_path()) && !is_shared_library(binary)
+            })
+            .flat_map(|(binary, (rpaths, _))| {
+                rpaths
+                    .iter()
+                    .filter_map(|rpath| resolved_search_path(&prefix, binary, rpath))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut license_problems = Vec::new();
     for notice in REQUIRED_NOTICES {
@@ -151,11 +163,10 @@ pub fn check(options: &Options<'_>) -> Result<()> {
     }
 
     let mut problems = Vec::new();
-    for binary in &binaries {
-        let (rpaths, libraries) = references(binary, platform)?;
-        check_licenses(binary, &libraries, platform, &mut license_problems)?;
+    for (binary, (rpaths, libraries)) in &inspections {
+        check_licenses(binary, libraries, platform, &mut license_problems)?;
         for rpath in rpaths {
-            if !contained_search_path(&prefix, binary, &rpath) {
+            if !contained_search_path(&prefix, binary, rpath) {
                 problems.push(format!(
                     "{}: search path leaves the package: {rpath}",
                     display_name(binary)
@@ -163,33 +174,23 @@ pub fn check(options: &Options<'_>) -> Result<()> {
             }
         }
         for library in libraries {
-            if let Some(name) = library.strip_prefix("@rpath/") {
-                if !packaged_names.contains(name) {
-                    problems.push(format!(
-                        "{}: links {library}, but {name} is not in the package",
-                        display_name(binary)
-                    ));
-                }
-            } else if library.starts_with("@loader_path/")
-                || library.starts_with("@executable_path/")
-            {
-                if !contained_library_path(&prefix, binary, &library) {
-                    problems.push(format!(
-                        "{}: links {library}, which is missing or leaves the package",
-                        display_name(binary)
-                    ));
-                }
-            } else if library.starts_with('/') && !is_system_library(platform, &library) {
+            if library.starts_with('/') && !is_system_library(platform, library) {
                 problems.push(format!(
                     "{}: links an absolute path: {library}",
                     display_name(binary)
                 ));
-            } else if !library.contains('/')
-                && !is_system_library(platform, &library)
-                && !contains_packaged_name(&packaged_names, &library, platform)
+            } else if !is_system_library(platform, library)
+                && !dependency_is_reachable(
+                    &prefix,
+                    binary,
+                    rpaths,
+                    &application_search_paths,
+                    library,
+                    platform,
+                )
             {
                 problems.push(format!(
-                    "{}: links {library}, but it is neither a target system library nor in the package",
+                    "{}: links {library}, but no packaged loader search path reaches it",
                     display_name(binary)
                 ));
             }
@@ -535,17 +536,6 @@ fn display_name(path: &Path) -> &str {
         .unwrap_or("<binary>")
 }
 
-fn contains_packaged_name(names: &BTreeSet<String>, library: &str, platform: Platform) -> bool {
-    if platform == Platform::Windows {
-        let library = library.to_ascii_lowercase();
-        names
-            .iter()
-            .any(|name| name.to_ascii_lowercase() == library)
-    } else {
-        names.contains(library)
-    }
-}
-
 fn is_system_library(platform: Platform, library: &str) -> bool {
     match platform {
         Platform::Macos => MACOS_SYSTEM_PREFIXES
@@ -562,31 +552,75 @@ fn is_system_library(platform: Platform, library: &str) -> bool {
 }
 
 fn contained_search_path(prefix: &Path, binary: &Path, rpath: &str) -> bool {
+    resolved_search_path(prefix, binary, rpath).is_some()
+}
+
+fn resolved_search_path(prefix: &Path, binary: &Path, rpath: &str) -> Option<PathBuf> {
     let (base, relative) = if let Some(relative) = rpath.strip_prefix("$ORIGIN") {
         (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
     } else if let Some(relative) = rpath.strip_prefix("@loader_path") {
         (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
-    } else if let Some(relative) = rpath.strip_prefix("@executable_path") {
-        (prefix.join("bin"), relative)
     } else {
-        return false;
+        let relative = rpath.strip_prefix("@executable_path")?;
+        (prefix.join("bin"), relative)
     };
-    lexical_join_within(prefix, &base, relative)
+    lexical_path_within(prefix, &base, relative)
 }
 
-fn contained_library_path(prefix: &Path, binary: &Path, library: &str) -> bool {
-    let (base, relative) = if let Some(relative) = library.strip_prefix("@loader_path") {
-        (binary.parent().unwrap_or(prefix).to_path_buf(), relative)
-    } else if let Some(relative) = library.strip_prefix("@executable_path") {
-        (prefix.join("bin"), relative)
-    } else {
+fn dependency_is_reachable(
+    prefix: &Path,
+    binary: &Path,
+    rpaths: &[String],
+    application_search_paths: &[PathBuf],
+    library: &str,
+    platform: Platform,
+) -> bool {
+    if let Some(name) = library.strip_prefix("@rpath/") {
+        return rpaths
+            .iter()
+            .filter_map(|rpath| resolved_search_path(prefix, binary, rpath))
+            .chain(application_search_paths.iter().cloned())
+            .any(|directory| directory_contains(&directory, name, false));
+    }
+    if let Some(relative) = library.strip_prefix("@loader_path") {
+        return lexical_path_within(prefix, binary.parent().unwrap_or(prefix), relative)
+            .is_some_and(|path| path.exists());
+    }
+    if let Some(relative) = library.strip_prefix("@executable_path") {
+        return lexical_path_within(prefix, &prefix.join("bin"), relative)
+            .is_some_and(|path| path.exists());
+    }
+    if library.contains('/') {
         return false;
-    };
-    lexical_path_within(prefix, &base, relative).is_some_and(|path| path.exists())
+    }
+    match platform {
+        Platform::Macos | Platform::Linux => rpaths
+            .iter()
+            .filter_map(|rpath| resolved_search_path(prefix, binary, rpath))
+            .chain(
+                (platform == Platform::Macos)
+                    .then_some(application_search_paths.iter().cloned())
+                    .into_iter()
+                    .flatten(),
+            )
+            .any(|directory| directory_contains(&directory, library, false)),
+        Platform::Windows => directory_contains(&prefix.join("bin"), library, true),
+    }
 }
 
-fn lexical_join_within(prefix: &Path, base: &Path, relative: &str) -> bool {
-    lexical_path_within(prefix, base, relative).is_some()
+fn directory_contains(directory: &Path, name: &str, case_insensitive: bool) -> bool {
+    if !case_insensitive {
+        return directory.join(name).exists();
+    }
+    let expected = name.to_ascii_lowercase();
+    fs::read_dir(directory).is_ok_and(|entries| {
+        entries.filter_map(Result::ok).any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&expected)
+        })
+    })
 }
 
 fn lexical_path_within(prefix: &Path, base: &Path, relative: &str) -> Option<PathBuf> {
@@ -607,11 +641,13 @@ fn lexical_path_within(prefix: &Path, base: &Path, relative: &str) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::fs;
     use std::path::Path;
 
+    use tempfile::tempdir;
+
     use super::{
-        contains_packaged_name, is_shared_library, is_system_library, lexical_join_within,
+        dependency_is_reachable, is_shared_library, is_system_library, lexical_path_within,
         library_stem, platform_from_build_info, Platform,
     };
 
@@ -643,15 +679,24 @@ mod tests {
     }
 
     #[test]
-    fn compares_windows_package_names_without_case() {
-        let names = BTreeSet::from(["SDL3.dll".to_owned()]);
-        assert!(contains_packaged_name(
-            &names,
+    fn resolves_windows_dlls_from_bin_without_case() {
+        let prefix = tempdir().unwrap();
+        let bin = prefix.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("SDL3.dll"), b"dll").unwrap();
+        assert!(dependency_is_reachable(
+            prefix.path(),
+            &bin.join("tecs.exe"),
+            &[],
+            &[],
             "sdl3.DLL",
             Platform::Windows
         ));
-        assert!(!contains_packaged_name(
-            &names,
+        assert!(!dependency_is_reachable(
+            prefix.path(),
+            &bin.join("tecs.exe"),
+            &[],
+            &[],
             "SDL3_mixer.dll",
             Platform::Windows
         ));
@@ -672,15 +717,76 @@ mod tests {
     #[test]
     fn rejects_search_paths_that_escape_the_package() {
         let prefix = Path::new("/package");
-        assert!(lexical_join_within(
-            prefix,
-            Path::new("/package/bin"),
-            "../lib"
+        assert!(lexical_path_within(prefix, Path::new("/package/bin"), "../lib").is_some());
+        assert!(lexical_path_within(prefix, Path::new("/package/bin"), "../../outside").is_none());
+    }
+
+    #[test]
+    fn dependencies_must_be_in_a_modeled_search_directory() {
+        let prefix = tempdir().unwrap();
+        let bin = prefix.path().join("bin");
+        let lib = prefix.path().join("lib");
+        let unrelated = prefix.path().join("share/tecs");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::write(lib.join("libSDL3.so.0"), b"library").unwrap();
+        fs::write(unrelated.join("liborphan.so"), b"library").unwrap();
+        let binary = bin.join("tecs");
+        let rpaths = vec!["$ORIGIN/../lib".to_owned()];
+
+        assert!(dependency_is_reachable(
+            prefix.path(),
+            &binary,
+            &rpaths,
+            &[],
+            "libSDL3.so.0",
+            Platform::Linux
         ));
-        assert!(!lexical_join_within(
-            prefix,
-            Path::new("/package/bin"),
-            "../../outside"
+        assert!(!dependency_is_reachable(
+            prefix.path(),
+            &binary,
+            &rpaths,
+            &[],
+            "liborphan.so",
+            Platform::Linux
+        ));
+    }
+
+    #[test]
+    fn rpath_dependencies_resolve_through_declared_search_paths() {
+        let prefix = tempdir().unwrap();
+        let bin = prefix.path().join("bin");
+        let lib = prefix.path().join("lib");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("libworker.dylib"), b"library").unwrap();
+        let binary = bin.join("tecs");
+        let rpaths = vec!["@executable_path/../lib".to_owned()];
+
+        assert!(dependency_is_reachable(
+            prefix.path(),
+            &binary,
+            &rpaths,
+            &[],
+            "@rpath/libworker.dylib",
+            Platform::Macos
+        ));
+        assert!(!dependency_is_reachable(
+            prefix.path(),
+            &binary,
+            &rpaths,
+            &[],
+            "@rpath/libmissing.dylib",
+            Platform::Macos
+        ));
+        assert!(dependency_is_reachable(
+            prefix.path(),
+            &lib.join("libconsumer.dylib"),
+            &[],
+            std::slice::from_ref(&lib),
+            "@rpath/libworker.dylib",
+            Platform::Macos
         ));
     }
 

@@ -127,7 +127,6 @@ struct Package {
     includes: Vec<PathBuf>,
     compile_flags: Vec<OsString>,
     library_directories: Vec<PathBuf>,
-    libraries: Vec<String>,
     link_flags: Vec<OsString>,
 }
 
@@ -737,84 +736,117 @@ fn pinned_packages(
     let mut packages = BTreeMap::new();
     packages.insert(
         "sdl3",
-        Package {
-            name: "sdl3",
-            includes: vec![prefix.join("include")],
-            compile_flags: Vec::new(),
-            library_directories: vec![library.clone()],
-            libraries: vec!["SDL3".into()],
-            link_flags: Vec::new(),
-        },
+        pinned_package(
+            "sdl3",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec!["SDL3".into()],
+        ),
     );
     packages.insert(
         "sdl3mixer",
-        Package {
-            name: "sdl3mixer",
-            includes: vec![prefix.join("include")],
-            compile_flags: Vec::new(),
-            library_directories: vec![library.clone()],
-            libraries: vec!["SDL3_mixer".into()],
-            link_flags: Vec::new(),
-        },
+        pinned_package(
+            "sdl3mixer",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec!["SDL3_mixer".into()],
+        ),
     );
     packages.insert(
         "zlib",
-        Package {
-            name: "zlib",
-            includes: vec![prefix.join("include")],
-            compile_flags: Vec::new(),
-            library_directories: vec![library.clone()],
-            libraries: vec![if preset.rust_target.contains("windows") {
+        pinned_package(
+            "zlib",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec![if preset.rust_target.contains("windows") {
                 "zlib".into()
             } else {
                 "z".into()
             }],
-            link_flags: Vec::new(),
-        },
+        ),
     );
     packages.insert(
         "luajit",
-        Package {
-            name: "luajit",
-            includes: vec![prefix.join("include/luajit-2.1")],
-            compile_flags: Vec::new(),
-            library_directories: vec![library.clone()],
-            libraries: vec![if preset.rust_target.contains("windows") {
+        pinned_package(
+            "luajit",
+            vec![prefix.join("include/luajit-2.1")],
+            vec![library.clone()],
+            vec![if preset.rust_target.contains("windows") {
                 "lua51".into()
             } else {
                 "luajit-5.1".into()
             }],
-            link_flags: Vec::new(),
-        },
+        ),
     );
     packages.insert(
         "shaderc",
-        Package {
-            name: "shaderc",
-            includes: vec![prefix.join("include")],
-            compile_flags: Vec::new(),
-            library_directories: vec![library.clone()],
-            libraries: vec![if shared {
+        pinned_package(
+            "shaderc",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec![if shared {
                 "shaderc_shared".into()
             } else {
                 "shaderc_combined".into()
             }],
-            link_flags: Vec::new(),
-        },
+        ),
     );
     packages.insert(
         "spvc",
-        Package {
-            name: "spvc",
-            includes: vec![prefix.join("include/spirv_cross")],
-            compile_flags: Vec::new(),
-            library_directories: vec![library],
-            libraries: Vec::new(),
-            link_flags: Vec::new(),
-        },
+        pinned_package(
+            "spvc",
+            vec![prefix.join("include/spirv_cross")],
+            vec![library],
+            Vec::new(),
+        ),
     );
     let _ = root;
     Ok(packages)
+}
+
+fn pinned_package(
+    name: &'static str,
+    includes: Vec<PathBuf>,
+    library_directories: Vec<PathBuf>,
+    libraries: Vec<String>,
+) -> Package {
+    let mut compile_flags = Vec::new();
+    for include in &includes {
+        if std::env::consts::OS == "windows" {
+            compile_flags.push(format!("/I{}", include.display()).into());
+        } else {
+            compile_flags.push("-I".into());
+            compile_flags.push(include.as_os_str().to_owned());
+        }
+    }
+    let mut link_flags = Vec::new();
+    for directory in &library_directories {
+        link_flags.push(
+            if std::env::consts::OS == "windows" {
+                format!("/libpath:{}", directory.display())
+            } else {
+                format!("-L{}", directory.display())
+            }
+            .into(),
+        );
+    }
+    for library in &libraries {
+        link_flags.push(
+            if std::env::consts::OS == "windows" {
+                format!("{library}.lib")
+            } else {
+                format!("-l{library}")
+            }
+            .into(),
+        );
+    }
+    Package {
+        name,
+        includes,
+        compile_flags,
+        library_directories,
+        link_flags,
+    }
 }
 
 fn define_bool(name: &str, enabled: bool) -> OsString {
@@ -1409,43 +1441,49 @@ fn check_system_versions(preset: Preset) -> Result<()> {
 fn pkg_config(name: &'static str, package: &'static str) -> Result<Package> {
     let cflags = pkg_output(package, &["--cflags"])?;
     let flags = pkg_output(package, &["--libs"])?;
-    Ok(package_from_flags(name, &cflags, &flags))
+    package_from_flags(name, &cflags, &flags)
 }
 
-fn package_from_flags(name: &'static str, cflags: &str, flags: &str) -> Package {
-    let includes = cflags
-        .split_whitespace()
-        .filter_map(|flag| flag.strip_prefix("-I"))
-        .map(PathBuf::from)
-        .collect();
-    let compile_flags = cflags
-        .split_whitespace()
-        .filter(|flag| !flag.starts_with("-I"))
-        .map(OsString::from)
-        .collect();
-    let library_directories = flags
-        .split_whitespace()
-        .filter_map(|flag| flag.strip_prefix("-L"))
-        .map(PathBuf::from)
-        .collect();
-    let libraries = flags
-        .split_whitespace()
-        .filter_map(|flag| flag.strip_prefix("-l"))
-        .map(str::to_owned)
-        .collect();
-    let link_flags = flags
-        .split_whitespace()
-        .filter(|flag| !flag.starts_with("-L") && !flag.starts_with("-l"))
-        .map(OsString::from)
-        .collect();
-    Package {
+fn package_from_flags(name: &'static str, cflags: &str, flags: &str) -> Result<Package> {
+    let compile_flags = parse_shell_flags(cflags, &format!("{name} compiler flags"))?;
+    let link_flags = parse_shell_flags(flags, &format!("{name} linker flags"))?;
+    Ok(Package {
         name,
-        includes,
-        compile_flags,
-        library_directories,
-        libraries,
-        link_flags,
+        includes: flag_values(&compile_flags, "-I")
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        compile_flags: compile_flags.into_iter().map(OsString::from).collect(),
+        library_directories: flag_values(&link_flags, "-L")
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        link_flags: link_flags.into_iter().map(OsString::from).collect(),
+    })
+}
+
+fn parse_shell_flags(source: &str, description: &str) -> Result<Vec<String>> {
+    shlex::split(source).with_context(|| format!("pkg-config emitted malformed {description}"))
+}
+
+fn flag_values(flags: &[String], prefix: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < flags.len() {
+        if flags[index] == prefix {
+            if let Some(value) = flags.get(index + 1) {
+                values.push(value.clone());
+                index += 2;
+                continue;
+            }
+        } else if let Some(value) = flags[index].strip_prefix(prefix) {
+            if !value.is_empty() {
+                values.push(value.to_owned());
+            }
+        }
+        index += 1;
     }
+    values
 }
 
 fn pkg_output(package: &str, arguments: &[&str]) -> Result<String> {
@@ -2016,12 +2054,7 @@ fn compile_and_link(
     packages: &BTreeMap<&'static str, Package>,
     rust_archive: &Path,
 ) -> Result<()> {
-    let mut includes = vec![root.join("native"), paths.generated.clone()];
-    for package in packages.values() {
-        includes.extend(package.includes.clone());
-    }
-    includes.sort();
-    includes.dedup();
+    let includes = vec![root.join("native"), paths.generated.clone()];
     let compile_flags = package_compile_flags(packages);
 
     let cjson_objects = CJSON_SOURCES
@@ -2183,16 +2216,11 @@ fn compile_and_link_single(
         &payload_source,
     )?;
 
-    let mut includes = vec![
+    let includes = vec![
         root.join("native"),
         root.join("cli"),
         paths.generated.clone(),
     ];
-    for package in packages.values() {
-        includes.extend(package.includes.clone());
-    }
-    includes.sort();
-    includes.dedup();
     let compile_flags = package_compile_flags(packages);
 
     let cjson_objects = CJSON_SOURCES
@@ -2642,20 +2670,6 @@ fn package_link_flags(packages: &[&Package]) -> Vec<OsString> {
     let mut flags = Vec::new();
     for package in packages {
         let _ = package.name;
-        for directory in &package.library_directories {
-            flags.push(OsString::from(if std::env::consts::OS == "windows" {
-                format!("/libpath:{}", directory.display())
-            } else {
-                format!("-L{}", directory.display())
-            }));
-        }
-        for library in &package.libraries {
-            flags.push(OsString::from(if std::env::consts::OS == "windows" {
-                format!("{library}.lib")
-            } else {
-                format!("-l{library}")
-            }));
-        }
         flags.extend(package.link_flags.iter().cloned());
     }
     flags
@@ -2841,7 +2855,7 @@ fn run(command: &mut Command, description: &str) -> Result<()> {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::ffi::OsStr;
+    use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::process::Command;
@@ -2849,8 +2863,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        copy_dynamic_libraries, fetch_source_at, package_from_flags, Paths, GLSLANG_REVISION,
-        LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
+        copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags, Paths,
+        GLSLANG_REVISION, LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
         SPIRV_CROSS_REVISION, SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
     };
 
@@ -3137,29 +3151,47 @@ mod tests {
     }
 
     #[test]
-    fn pkg_config_preserves_non_path_flags() {
+    fn pkg_config_preserves_quoted_paths_and_exact_flag_order() {
         let package = package_from_flags(
             "sample",
-            "-I/opt/sample/include -pthread -DSAMPLE=1",
-            "-L/opt/sample/lib -lsample -pthread -Wl,-z,now",
-        );
+            "-I'/opt/sample include' -pthread -DSAMPLE=1",
+            "-L'/opt/sample lib' -Wl,--start-group -lone -ltwo -Wl,--end-group -pthread",
+        )
+        .unwrap();
 
         assert_eq!(
             package.includes,
-            [std::path::PathBuf::from("/opt/sample/include")]
+            [std::path::PathBuf::from("/opt/sample include")]
         );
-        assert_eq!(package.libraries, ["sample"]);
-        assert!(package
-            .compile_flags
-            .iter()
-            .any(|flag| flag == OsStr::new("-pthread")));
-        assert!(package
-            .compile_flags
-            .iter()
-            .any(|flag| flag == OsStr::new("-DSAMPLE=1")));
-        assert!(package
-            .link_flags
-            .iter()
-            .any(|flag| flag == OsStr::new("-Wl,-z,now")));
+        assert_eq!(
+            package.compile_flags,
+            [
+                OsString::from("-I/opt/sample include"),
+                OsString::from("-pthread"),
+                OsString::from("-DSAMPLE=1"),
+            ]
+        );
+        assert_eq!(
+            package.library_directories,
+            [std::path::PathBuf::from("/opt/sample lib")]
+        );
+        let expected = [
+            OsString::from("-L/opt/sample lib"),
+            OsString::from("-Wl,--start-group"),
+            OsString::from("-lone"),
+            OsString::from("-ltwo"),
+            OsString::from("-Wl,--end-group"),
+            OsString::from("-pthread"),
+        ];
+        assert_eq!(package.link_flags, expected);
+        assert_eq!(package_link_flags(&[&package]), expected);
+    }
+
+    #[test]
+    fn pkg_config_rejects_unclosed_shell_quotes() {
+        let error = package_from_flags("sample", "-I'unclosed", "-lsample").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("malformed sample compiler flags"));
     }
 }

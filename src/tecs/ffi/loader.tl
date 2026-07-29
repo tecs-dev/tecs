@@ -48,6 +48,8 @@ local ffi <const> = require("ffi")
 ffi.cdef([[
 void *dlopen(const char *path, int mode);
 char *dlerror(void);
+void *LoadLibraryA(const char *path);
+unsigned long GetLastError(void);
 ]])
 
 --- Load now, and never unmap.
@@ -66,6 +68,45 @@ char *dlerror(void);
 local RTLD_NOW <const> = 0x2
 local RTLD_NODELETE <const> = ffi.os == "OSX" and 0x80 or 0x1000
 local pinned <const>: {string: any} = {}
+local platformLoader <const>: any = ffi.os == "Windows" and ffi.load("kernel32") or ffi.C
+
+--- Takes a process-lifetime reference to a dynamically loaded library.
+local function pinLibrary(path: string)
+    if ffi.os == "Windows" then
+        -- Deliberately leaked. `ffi.load` releases its own LoadLibrary
+        -- reference when the namespace is collected; this second reference
+        -- remains until process exit, after every native thread has stopped.
+        local loadLibrary = (platformLoader as {string: any}).LoadLibraryA as function(string): any
+        local getLastError = (platformLoader as {string: any}).GetLastError as function(): integer
+        local handle = loadLibrary(path)
+        if handle == nil then
+            error(
+                ("tecs: loaded %s but could not pin it with LoadLibraryA: Windows error %d"):format(
+                    path, getLastError()
+                ),
+                3
+            )
+        end
+        pinned[path] = handle
+        return
+    end
+
+    local dlopen = (platformLoader as {string: any}).dlopen as function(string, integer): any
+    local dlerror = (platformLoader as {string: any}).dlerror as function(): any
+    dlerror()
+    local handle = dlopen(path, RTLD_NOW + RTLD_NODELETE)
+    if handle == nil then
+        local detailValue = dlerror()
+        local detail = detailValue ~= nil and ffi.string(detailValue as string) as string or ""
+        error(
+            ("tecs: loaded %s but could not pin it with dlopen: %s"):format(
+                path, detail ~= "" and detail or "unknown dynamic loader error"
+            ),
+            3
+        )
+    end
+    pinned[path] = handle
+end
 
 --- Resolves native libraries, installs their generated cdefs, and names the
 --- types a value crosses the FFI boundary as.
@@ -372,23 +413,7 @@ function loader.library(
             -- namespace without pinning it is not a safe partial success: the
             -- failure would surface later as executable code being unmapped
             -- during `lua_close`.
-            if ffi.os ~= "Windows" then
-                local dlopen = (ffi.C as {string: any}).dlopen as function(string, integer): any
-                local dlerror = (ffi.C as {string: any}).dlerror as function(): any
-                dlerror()
-                local handle = dlopen(path, RTLD_NOW + RTLD_NODELETE)
-                if handle == nil then
-                    local detailValue = dlerror()
-                    local detail = detailValue ~= nil and ffi.string(detailValue as string) as string or ""
-                    error(
-                        ("tecs: loaded %s but could not pin it with dlopen: %s"):format(
-                            path, detail ~= "" and detail or "unknown dynamic loader error"
-                        ),
-                        2
-                    )
-                end
-                pinned[path] = handle
-            end
+            pinLibrary(path)
             loaded[key] = namespace
             return namespace, path
         end
