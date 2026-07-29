@@ -420,7 +420,12 @@ local record RenderOptions
     --- absent value samples the image array
     --- and covers the whole quad.
     material: string
-    --- Caller-writable. Passes a value from zero to one to the material.
+    --- Caller-writable. Passes one number to the material, clamped to zero
+    --- through `0.999` and ignored unless `material` names one. The instance
+    --- carries the material as `id + param` in one float, and the vertex shader
+    --- reads the integer part as the selector and the fraction as the
+    --- parameter, so `1.0` would arrive as the next material's id with a
+    --- parameter of zero. Defaults to zero.
     materialParam: number
     --- Caller-writable. Selects a registered image from `Renderer:sprite`. An
     --- absent value draws a white quad.
@@ -860,6 +865,11 @@ local function newEffect(options: EffectOptions): Effect
 
     -- Rendering.
     if render.material ~= nil then
+        -- The selector and its parameter share one float, so the parameter is
+        -- the fraction: `instance.vert.glsl` reads the id back with `floor` and
+        -- the parameter with `fract`. One is not a value the fraction can hold,
+        -- and left alone it would carry to the integer part and select the next
+        -- material instead, so the top of the range stops short of it.
         local param = render.materialParam or 0.0
         if param < 0.0 then
             param = 0.0
