@@ -229,6 +229,7 @@ behind each one.
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
 - [`tecs.log`](/modules/log) - SDL's logging, per platform
+- [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool

@@ -156,10 +156,21 @@ done < <(grep -rl '^::: warning This page is pending$' --include='*.md' docs/mod
 # Fields of `record tecs` that are not modules: a function, a string, or a type
 # the root carries because it crosses subsystems. The discriminator is the one
 # already used for subordinate modules, and for the same reason: a module is
-# luacase and is declared as the type of its own name (`assets: assets`), while
+# luacase and is declared as the type imported from a module ending in its own
+# name. Usually the alias is the same (`assets: assets`); `math: vectorMath`
+# avoids shadowing Lua's standard `math` table and still imports `tecs.math`.
 # `newApplication: function(...)`, `version: string` and `Transform:
 # ecs.Transform` are none of those things.
 rootnames=$(awk '
+    /^local type [a-z][A-Za-z0-9_]* = require\("tecs\.[A-Za-z0-9_.]+"\)$/ {
+        alias = $3
+        path = $5
+        sub(/^require\("tecs\./, "", path)
+        sub(/"\)$/, "", path)
+        count = split(path, parts, ".")
+        module[alias] = parts[count]
+        next
+    }
     /^local record tecs$/ { intecs = 1; next }
     intecs && /^end$/ { intecs = 0; next }
     intecs && /^    [A-Za-z_][A-Za-z0-9_]*: / {
@@ -168,7 +179,7 @@ rootnames=$(awk '
         sub(/^ +/, "", name)
         declared = halves[2]
         for (i = 3; i <= length(halves); i++) { declared = declared ": " halves[i] }
-        if (name ~ /^[a-z]/ && declared == name) { next }
+        if (name ~ /^[a-z]/ && (declared == name || module[declared] == name)) { next }
         print name
     }
 ' "$init")

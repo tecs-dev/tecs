@@ -42,6 +42,7 @@ local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
 local type physics = require("tecs.physics")
 local type log = require("tecs.log")
+local type vectorMath = require("tecs.math")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")
 local type system = require("tecs.platform.system")
@@ -351,6 +352,7 @@ local record tecs
     gfx: gfx
     input: input
     log: log
+    math: vectorMath
     mcp: mcp
     net: net
     sequence: sequence
@@ -443,6 +445,7 @@ local SURFACE <const>: {string: Namespace} = {
     },
     input = {module = "tecs.platform.input"},
     log = {module = "tecs.log"},
+    math = {module = "tecs.math"},
     mcp = {module = "tecs.mcp"},
     net = {module = "tecs.net", within = {http = {module = "tecs.net.http"}}},
     sequence = {module = "tecs.sequence"},

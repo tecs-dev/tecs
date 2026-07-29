@@ -104,6 +104,10 @@ const REFERENCE_PAGES: &[ReferencePage] = &[
         &[source("src/tecs/log.tl", "tecs.log")],
     ),
     reference(
+        "docs/modules/math.md",
+        &[source("src/tecs/math.tl", "tecs.math")],
+    ),
+    reference(
         "docs/modules/mcp.md",
         &[source("src/tecs/mcp/init.tl", "tecs.mcp")],
     ),
