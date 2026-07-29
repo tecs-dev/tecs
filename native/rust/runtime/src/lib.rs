@@ -1,3 +1,9 @@
+//! Root of the Rust runtime and its shared image, byte-buffer, and error ABI.
+//!
+//! The crate collects the host services behind generated FFI tables. Teal
+//! reaches the image codec through `tecs.assets`, `tecs.platform.window`, and
+//! `tecs.gfx.screenshot`; the other services live in their modules below.
+
 use std::cell::RefCell;
 use std::ffi::{c_char, CString};
 use std::ptr;

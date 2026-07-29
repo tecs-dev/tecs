@@ -1,3 +1,8 @@
+//! Mirrors SDL log output into a newline-delimited JSON file.
+//!
+//! `tecs.log` calls this through the generated `logsink` FFI table to install
+//! the sink, register Teal logger names, and restore SDL's previous output.
+
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::fs::File;
 use std::io::Write;

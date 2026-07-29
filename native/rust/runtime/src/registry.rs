@@ -1,3 +1,8 @@
+//! Installs build-generated native function tables into each Lua state.
+//!
+//! Host and worker bootstrap call this before Teal runs. `tecs.ffi.loader`
+//! reads the resulting `__tecsRegistry`; Teal does not call this ABI directly.
+
 use std::ffi::{c_char, c_int, c_void};
 use std::slice;
 

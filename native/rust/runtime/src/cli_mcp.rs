@@ -5,6 +5,7 @@
 //! while this module forwards the game's current tool surface between them.
 //! A failed call drops the HTTP client and discovers again, so restarting a
 //! game does not require restarting the invoking agent.
+//! `cli/tecscli/arguments.tl` enters it through `tecsCliMcp` for `tecs mcp`.
 
 use std::env;
 use std::time::Duration;

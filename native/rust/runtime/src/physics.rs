@@ -3,6 +3,8 @@
 //! LuaJIT owns no Rust allocation and receives no callbacks. A world is an
 //! opaque allocation, bodies and colliders are generational arena handles,
 //! and events are drained from contiguous buffers after each fixed step.
+//! `tecs.physics.World` and `TaskPool` call the ABI through the generated Rust
+//! FFI table.
 
 use std::collections::BTreeMap;
 use std::ptr;

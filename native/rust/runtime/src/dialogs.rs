@@ -1,3 +1,8 @@
+//! Owns asynchronous SDL file and folder dialogs and their callback results.
+//!
+//! `tecs.platform.system` calls this through the generated `dialogs` FFI table
+//! and polls each opaque dialog; no SDL callback enters Teal.
+
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
 use std::sync::{Mutex, MutexGuard};

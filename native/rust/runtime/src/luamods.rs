@@ -1,3 +1,8 @@
+//! Registers statically linked Lua C modules in each state's `package.preload`.
+//!
+//! The host and worker bootstrap call this before Teal runs. `tecs.data` then
+//! reaches the linked lua-cjson implementation with `require("cjson")`.
+
 use std::ffi::{c_char, c_int, c_void};
 
 type LuaState = c_void;

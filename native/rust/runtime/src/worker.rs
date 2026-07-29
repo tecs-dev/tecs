@@ -1,3 +1,8 @@
+//! Owns byte channels and worker threads, each with a fresh LuaJIT state.
+//!
+//! `tecs.workers` calls the channel and spawn/join ABI through generated FFI;
+//! Teal owns message serialization and the source executed by each worker.
+
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
 use std::slice;

@@ -1,3 +1,8 @@
+//! Defines and parses the embedded `tecs` command line with Clap.
+//!
+//! `cli/tecscli/arguments.tl` calls `tecsCliParse` through the generated Rust
+//! FFI table, then implements the normalized command in Teal.
+
 use std::ffi::{c_char, CStr, OsString};
 use std::path::PathBuf;
 use std::slice;

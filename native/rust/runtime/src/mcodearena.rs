@@ -1,3 +1,8 @@
+//! Preserves nearby virtual address space for LuaJIT worker machine code.
+//!
+//! The host reserves the arena before application initialization and releases
+//! it afterward; `tecs.workers` benefits when its later Lua states compile.
+
 #[cfg(unix)]
 mod platform {
     use std::ffi::c_void;

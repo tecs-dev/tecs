@@ -1,3 +1,8 @@
+//! Reads the build-generated compressed archive carried inside an executable.
+//!
+//! The host installs it as `tecs.payload` and prefers its carried entry chunk.
+//! The embedded Teal CLI then reads the archive with `require("tecs.payload")`.
+
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::io::Read;
 use std::ptr;

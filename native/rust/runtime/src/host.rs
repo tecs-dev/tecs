@@ -1,3 +1,8 @@
+//! Hosts a Tecs application in LuaJIT behind SDL's callback-style main loop.
+//!
+//! SDL, not Teal, calls the exported `SDL_App*` functions. They load the entry
+//! file and dispatch lifecycle methods on the application table it returns.
+
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
