@@ -225,18 +225,10 @@ local REACH = {
             "tecs/gpu/shaders.lua",
         },
     },
-    {
-        bucket = "bypass",
-        reason = "Polls SDL_GetPathInfo directly, keeping its own scratch "
-            .. "SDL_PathInfo, rather than asking filesystem.info. It watches "
-            .. "content paths, so on a target where content is not a "
-            .. "filesystem it watches nothing.",
-        modules = { "tecs/platform/watch.lua" },
-    },
 }
 
 -- Modules that name one of the storage symbols, and what each is doing with
--- it. Everything here that is not the backend is a bypass: the seam exists, is
+-- it. Everything here that is outside a seam is a bypass: the seam exists, is
 -- reachable, and this went around it.
 local STORAGE = {
     ["tecs/platform/storagebackend.lua"] = {
@@ -284,13 +276,6 @@ local STORAGE = {
         symbols = { "SDL_GlobDirectory" },
         reason = "The same enumeration for shader sources. Owned by the " .. "render tree.",
     },
-    ["tecs/platform/watch.lua"] = {
-        bucket = "bypass",
-        symbols = { "SDL_GetPathInfo" },
-        reason = "Stats every watched path itself. Development only, so it "
-            .. "affects no shipped build, which is why it is a bypass worth "
-            .. "recording rather than one worth hurrying.",
-    },
     ["tecs/assets.lua"] = {
         bucket = "bypass",
         symbols = { "MIX_LoadAudio" },
@@ -321,9 +306,10 @@ local STDIO = {
     },
     ["tecs/mcp/tools.lua"] = {
         bucket = "bypass",
-        reason = "The debug server reads a file the agent named. Development "
-            .. "only, and the same module writes a screenshot around the seam "
-            .. "the other way.",
+        reason = "The debug server pages the engine's own log file, seeking to "
+            .. "the offset the agent left off at and asking how long the file "
+            .. "is now. A `Reader` reads forward and closes, so neither "
+            .. "question can be put to the seam. Development only.",
     },
     ["tecs/internal/snapshot.lua"] = {
         bucket = "bypass",
