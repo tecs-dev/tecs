@@ -149,6 +149,34 @@ local record layers
     --- @return Whether extraction should write this row's real world bound.
     viewCulled: function(layer: integer): boolean
 
+    --- The two terms `depthIn` takes, resolved once for a layer.
+    ---
+    --- What `depthOf` works out before it looks at an entity at all, and what
+    --- a caller writing many depths on one layer should work out once instead
+    --- of once a row: the band's near edge, and which sort decides where in
+    --- the band a row lands.
+    --- @param layer One to `MAX`. Outside that range this resolves the nearest
+    ---     layer whole, exactly as `depthOf` does, so the sort answered here is
+    ---     the clamped layer's and not what `sortOf` answers for the same
+    ---     argument.
+    --- @return The band's near edge, then the sort identifier.
+    bandOf: function(layer: integer): number, integer
+
+    --- Depth for one entity on a band `bandOf` already resolved.
+    ---
+    --- The per-row half of `depthOf`, split out so a caller writing a run of
+    --- rows on one layer pays the band lookup once. Bit for bit what `depthOf`
+    --- answers for the layer the two terms came from.
+    --- @param base The band's near edge, from `bandOf`.
+    --- @param sort The sort identifier, from `bandOf`.
+    --- @param z Height in the sort, against `maxZ`. Read by every sort mode.
+    --- @param x World x, read only by the isometric sort, against `maxY`.
+    --- @param y World y, read by the topdown and isometric sorts, against
+    ---     `maxY`. Larger is lower on screen and so nearer.
+    --- @return A depth inside the band, held to zero and one the same way
+    ---     `depthOf` holds its own.
+    depthIn: function(base: number, sort: integer, z: number, x: number, y: number): number
+
     --- Depth for one entity, in zero to one with zero nearest.
     ---
     --- Exact ties carry no tie-breaker. Instances are drawn in index order and
@@ -328,7 +356,7 @@ function layers.viewCulled(layer: integer): boolean
     return culled
 end
 
-function layers.depthOf(layer: integer, z: number, x: number, y: number): number
+function layers.bandOf(layer: integer): number, integer
     -- The band is picked from a layer held inside the range there are bands
     -- for. A depth is the only thing that reaches the shader, and the shader
     -- reads the layer back out of it, so an entity outside the range has to
@@ -341,21 +369,29 @@ function layers.depthOf(layer: integer, z: number, x: number, y: number): number
     end
 
     local band <const> = 1.0 / layers.MAX
-    local base <const> = (layers.MAX - index) * band
-    local sort <const> = sorts[index] or SORT_TOPDOWN
+    return (layers.MAX - index) * band, sorts[index] or SORT_TOPDOWN
+end
+
+function layers.depthIn(base: number, sort: integer, z: number, x: number, y: number): number
+    local band <const> = 1.0 / layers.MAX
     local nz <const> = saturate(z / layers.maxZ)
 
     local within: number
     if sort == SORT_Z then
         within = (1.0 - nz) * band * BAND_FILL
     elseif sort == SORT_ISOMETRIC then
-        local nx <const> = saturate((x + layers.maxY) / (2.0 * layers.maxY))
-        local ny <const> = saturate((y + layers.maxY) / (2.0 * layers.maxY))
+        -- Read once for the two terms that normalize against it rather than
+        -- through the module table for each of them.
+        local maxY <const> = layers.maxY
+        local extent <const> = 2.0 * maxY
+        local nx <const> = saturate((x + maxY) / extent)
+        local ny <const> = saturate((y + maxY) / extent)
         -- Every term is already inside zero and one, so their sum is inside
         -- zero and the range and wants no clamp of its own.
         within = (1.0 - (nx + ny + nz) / ISOMETRIC_RANGE) * band * BAND_FILL
     else
-        local ny <const> = saturate((y + layers.maxY) / (2.0 * layers.maxY))
+        local maxY <const> = layers.maxY
+        local ny <const> = saturate((y + maxY) / (2.0 * maxY))
         within = (1.0 - (nz * TOPDOWN_Z_SHARE + ny * TOPDOWN_Y_SHARE)) * band * BAND_FILL
     end
 
@@ -367,6 +403,11 @@ function layers.depthOf(layer: integer, z: number, x: number, y: number): number
         return 0.999
     end
     return depth
+end
+
+function layers.depthOf(layer: integer, z: number, x: number, y: number): number
+    local base <const>, sort <const> = layers.bandOf(layer)
+    return layers.depthIn(base, sort, z, x, y)
 end
 
 function layers.depthResolution(): number
