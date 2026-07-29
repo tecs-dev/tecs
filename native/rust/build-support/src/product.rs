@@ -214,7 +214,49 @@ pub fn shaders(root: &Path, preset: Preset) -> Result<()> {
 pub fn abi_check(root: &Path, preset: Preset) -> Result<()> {
     build(root, preset)?;
     let paths = Paths::new(root, preset);
-    crate::abi::check(root, &paths.lua.join("tecs/ffi")).map(|_| ())
+    let include_directories = if matches!(preset.dependencies, DependencyMode::System) {
+        system_packages(preset)?
+            .into_iter()
+            .map(|(name, package)| (name, package.includes))
+            .collect()
+    } else {
+        let include = paths.dependencies.join("prefix/include");
+        BTreeMap::from([
+            ("sdl3", vec![include.clone()]),
+            ("sdl3mixer", vec![include.clone()]),
+            ("shaderc", vec![include.clone()]),
+            ("spvc", vec![include.join("spirv_cross")]),
+            ("zlib", vec![include]),
+        ])
+    };
+    let mut compiler_arguments = Vec::new();
+    if std::env::consts::OS == "macos" {
+        compiler_arguments.extend([
+            OsString::from("-arch"),
+            OsString::from(target_arch(preset)),
+            OsString::from(format!(
+                "-mmacosx-version-min={}",
+                preset
+                    .deployment_target
+                    .context("macOS preset has no deployment target")?
+            )),
+        ]);
+    }
+    crate::abi::check_with_options(
+        root,
+        &paths.lua.join("tecs/ffi"),
+        &crate::abi::Options {
+            include_directories: &include_directories,
+            compiler: if std::env::consts::OS == "windows" {
+                "cl"
+            } else {
+                "cc"
+            },
+            compiler_arguments: &compiler_arguments,
+            msvc: std::env::consts::OS == "windows",
+        },
+    )
+    .map(|_| ())
 }
 
 pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
