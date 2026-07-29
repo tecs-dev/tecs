@@ -106,6 +106,20 @@ local NEVER_ENABLED = {
     CURL_USE_LIBSSH = "GPL-2.0-or-later",
 }
 
+-- Revisions that pin development tooling rather than anything a product ships,
+-- so no notice covers them and this check skips them. `staging.rs` is what
+-- decides that, and it enumerates rather than globs: teal and cerulean do ship,
+-- as the Lua a packaged CLI compiles with, and it copies their own license files
+-- beside them into `tecstools/licenses` rather than describing them here.
+-- Tealdoc and Scintillua ship nothing at all, no code and no license, because
+-- both run only while this repository builds its documentation site.
+local TOOLING_ONLY = {
+    TEAL = true,
+    CERULEAN = true,
+    TEALDOC = true,
+    SCINTILLUA = true,
+}
+
 -- What each pinned revision is called in the notices. Kept explicit rather than
 -- derived from the variable name, because `TECS_SPVC_TAG` is SPIRV-Cross and no
 -- rule turns one into the other.
@@ -207,7 +221,7 @@ describe("the license position", function()
     it("names every pinned dependency in the notices", function()
         local missing = {}
         for tag in product:gmatch("pub const ([%w_]+)_REVISION") do
-            if tag ~= "TEAL" and tag ~= "CERULEAN" and tag ~= "TEALDOC" then
+            if not TOOLING_ONLY[tag] then
                 local name = NOTICE_NAMES[tag]
                 assert.is_true(
                     name ~= nil,
