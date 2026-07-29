@@ -61,13 +61,16 @@ function EpochArena.new<T>(ffiType: string, initialPageSize?: integer): EpochAre
     if pageAllocSize < 1 or pageAllocSize > ROW_CAPACITY then
         error("EpochArena.new: initialPageSize must be between 1 and " .. ROW_CAPACITY)
     end
-    return setmetatable({
-        pages = {},
-        currentPage = 0,
-        usedPages = 0,
-        ffiType = ffiType .. "[?]",
-        pageAllocSize = pageAllocSize,
-    }, ARENA_MT)
+    return setmetatable(
+        {
+            pages = {},
+            currentPage = 0,
+            usedPages = 0,
+            ffiType = ffiType .. "[?]",
+            pageAllocSize = pageAllocSize,
+        },
+        ARENA_MT
+    )
 end
 
 function EpochArena:clear()

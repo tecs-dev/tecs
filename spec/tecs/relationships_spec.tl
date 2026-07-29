@@ -15,13 +15,15 @@ describe(
                 it(
                     "should cascade delete when parent is despawned",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship({
-                            name = "ChildOfCascadeTest",
-                            exclusive = true,
-                            sparse = true,
-                            reverseIndex = true,
-                            cascadeDelete = true,
-                        })
+                        local ChildOf = tecs.ecs.newRelationship(
+                            {
+                                name = "ChildOfCascadeTest",
+                                exclusive = true,
+                                sparse = true,
+                                reverseIndex = true,
+                                cascadeDelete = true,
+                            }
+                        )
 
                         local parent = world:spawn()
                         local child1 = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -65,27 +67,35 @@ describe(
                             b: number
                             metamethod __call: function(self, r: number, g: number, b: number): Tint
                         end
-                        local MarkerComp = tecs.ecs.newTagComponent({
-                            name = "CascadeMarker" .. math.random(1, 1000000),
-                            container = Marker,
-                        })
-                        local PosComp: Pos = tecs.ecs.newComponent({
-                            name = "CascadePos" .. math.random(1, 1000000),
-                            container = Pos,
-                            fields = {"x", "y"},
-                        })
-                        local TintComp: Tint = tecs.ecs.newComponent({
-                            name = "CascadeTint" .. math.random(1, 1000000),
-                            container = Tint,
-                            fields = {"r", "g", "b"},
-                        })
-                        local ChildOf = tecs.ecs.newRelationship({
-                            name = "CascadeChildOf" .. math.random(1, 1000000),
-                            exclusive = true,
-                            sparse = true,
-                            reverseIndex = true,
-                            cascadeDelete = true,
-                        })
+                        local MarkerComp = tecs.ecs.newTagComponent(
+                            {
+                                name = "CascadeMarker" .. math.random(1, 1000000),
+                                container = Marker,
+                            }
+                        )
+                        local PosComp: Pos = tecs.ecs.newComponent(
+                            {
+                                name = "CascadePos" .. math.random(1, 1000000),
+                                container = Pos,
+                                fields = {"x", "y"},
+                            }
+                        )
+                        local TintComp: Tint = tecs.ecs.newComponent(
+                            {
+                                name = "CascadeTint" .. math.random(1, 1000000),
+                                container = Tint,
+                                fields = {"r", "g", "b"},
+                            }
+                        )
+                        local ChildOf = tecs.ecs.newRelationship(
+                            {
+                                name = "CascadeChildOf" .. math.random(1, 1000000),
+                                exclusive = true,
+                                sparse = true,
+                                reverseIndex = true,
+                                cascadeDelete = true,
+                            }
+                        )
 
                         local parent = world:spawn(PosComp(1, 2), TintComp(0.5, 0.5, 0.5), MarkerComp)
                         local labels: {integer} = {}
@@ -116,10 +126,12 @@ describe(
                 it(
                     "should not cascade delete when relationship is just removed",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship({
-                            name = "ChildOfNoCascadeTest",
-                            exclusive = true,
-                        })
+                        local ChildOf = tecs.ecs.newRelationship(
+                            {
+                                name = "ChildOfNoCascadeTest",
+                                exclusive = true,
+                            }
+                        )
 
                         local parent = world:spawn()
                         local child = world:spawn(ChildOf(parent) as tecs.ecs.Component)
@@ -149,10 +161,12 @@ describe(
                 it(
                     "should not cascade delete when reparenting",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship({
-                            name = "ChildOfReparentTest",
-                            exclusive = true,
-                        })
+                        local ChildOf = tecs.ecs.newRelationship(
+                            {
+                                name = "ChildOfReparentTest",
+                                exclusive = true,
+                            }
+                        )
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
@@ -227,9 +241,9 @@ describe(
                         it(
                             "should support exclusive option",
                             function()
-                                local ExclusiveTag = components.newRelationship({
-                                    name = "ExclusiveTag", exclusive = true
-                                })
+                                local ExclusiveTag = components.newRelationship(
+                                    {name = "ExclusiveTag", exclusive = true}
+                                )
 
                                 luassert.is_true(ExclusiveTag.exclusiveRelationship)
                             end
@@ -261,11 +275,13 @@ describe(
                                     power: integer
                                 end
 
-                                local FFIRel = components.newFFIRelationship({
-                                    name = "FFIRel",
-                                    container = TestFFIRel,
-                                    fields = {{"delay", "float"}, {"power", "int32_t"}},
-                                })
+                                local FFIRel = components.newFFIRelationship(
+                                    {
+                                        name = "FFIRel",
+                                        container = TestFFIRel,
+                                        fields = {{"delay", "float"}, {"power", "int32_t"}},
+                                    }
+                                )
 
                                 luassert.is_not_nil(FFIRel)
                                 luassert.is_equal("FFIRel", FFIRel.componentName)
@@ -281,12 +297,14 @@ describe(
                                     value: integer
                                 end
 
-                                local FFIRel = components.newFFIRelationship({
-                                    name = "ExclusiveFFIRel",
-                                    container = ExclusiveFFIRel,
-                                    fields = {{"value", "int32_t"}},
-                                    exclusive = true,
-                                })
+                                local FFIRel = components.newFFIRelationship(
+                                    {
+                                        name = "ExclusiveFFIRel",
+                                        container = ExclusiveFFIRel,
+                                        fields = {{"value", "int32_t"}},
+                                        exclusive = true,
+                                    }
+                                )
 
                                 luassert.is_true(FFIRel.exclusiveRelationship)
 
@@ -308,17 +326,19 @@ describe(
                                     doubled: integer
                                 end
 
-                                local FFIRel = components.newFFIRelationship({
-                                    name = "CustomCallFFIRel",
-                                    container = CustomCallFFIRel,
-                                    fields = {{"value", "int32_t"}, {"doubled", "int32_t"}},
-                                    __call = function(instance: CustomCallFFIRel, target: integer, value: integer)
-                                        callCount = callCount + 1
-                                        instance.target = target
-                                        instance.value = value
-                                        instance.doubled = value * 2
-                                    end,
-                                })
+                                local FFIRel = components.newFFIRelationship(
+                                    {
+                                        name = "CustomCallFFIRel",
+                                        container = CustomCallFFIRel,
+                                        fields = {{"value", "int32_t"}, {"doubled", "int32_t"}},
+                                        __call = function(instance: CustomCallFFIRel, target: integer, value: integer)
+                                            callCount = callCount + 1
+                                            instance.target = target
+                                            instance.value = value
+                                            instance.doubled = value * 2
+                                        end,
+                                    }
+                                )
 
                                 local inst = FFIRel(world:spawn(), 21) as CustomCallFFIRel
                                 luassert.is_equal(1, callCount)
@@ -338,16 +358,18 @@ describe(
                                     __index = {bonus = function(self: MetaFFIRel): integer return self.value + 5 end}
                                 }
 
-                                local FFIRel = components.newFFIRelationship({
-                                    name = "MetaFFIRel",
-                                    container = MetaFFIRel,
-                                    fields = {{"value", "int32_t"}},
-                                    metatable = mt,
-                                    init = function(instance: MetaFFIRel, target: integer, value: integer)
-                                        instance.target = target
-                                        instance.value = value
-                                    end,
-                                })
+                                local FFIRel = components.newFFIRelationship(
+                                    {
+                                        name = "MetaFFIRel",
+                                        container = MetaFFIRel,
+                                        fields = {{"value", "int32_t"}},
+                                        metatable = mt,
+                                        init = function(instance: MetaFFIRel, target: integer, value: integer)
+                                            instance.target = target
+                                            instance.value = value
+                                        end,
+                                    }
+                                )
 
                                 local inst = FFIRel(world:spawn(), 9) as any
                                 luassert.is_equal(14, inst:bonus())
@@ -368,9 +390,9 @@ describe(
                                     value: number
                                 end
 
-                                local FFIDataRel = components.newFFIRelationship({
-                                    name = "PerfFFIDataRel", container = DataFFIRel, fields = {{"value", "double"}}
-                                })
+                                local FFIDataRel = components.newFFIRelationship(
+                                    {name = "PerfFFIDataRel", container = DataFFIRel, fields = {{"value", "double"}}}
+                                )
 
                                 local TableRel = components.newRelationship({name = "PerfTableRel"})
 
@@ -627,9 +649,9 @@ describe(
                 it(
                     "should return correct target after reparenting",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship({
-                            name = "ChildOfGetFirstReparentTest", exclusive = true
-                        })
+                        local ChildOf = tecs.ecs.newRelationship(
+                            {name = "ChildOfGetFirstReparentTest", exclusive = true}
+                        )
 
                         local parent1 = world:spawn()
                         local parent2 = world:spawn()
@@ -709,13 +731,15 @@ describe(
                 it(
                     "cascade-deletes children of a high-generation parent",
                     function()
-                        local ChildOf = tecs.ecs.newRelationship({
-                            name = "ChildOfHighGen",
-                            exclusive = true,
-                            sparse = true,
-                            reverseIndex = true,
-                            cascadeDelete = true,
-                        })
+                        local ChildOf = tecs.ecs.newRelationship(
+                            {
+                                name = "ChildOfHighGen",
+                                exclusive = true,
+                                sparse = true,
+                                reverseIndex = true,
+                                cascadeDelete = true,
+                            }
+                        )
 
                         local parent = churnHighGenEntity()
                         luassert.is_true(parent > 2 ^ 31, "churn should drive the parent id past the int32 boundary")
@@ -739,11 +763,13 @@ describe(
                     amount: number
                 end
 
-                local Owes = tecs.ecs.newRelationship({
-                    name = "DenseRelIdOwes",
-                    container = OwesRec,
-                    fields = {"amount"},
-                })
+                local Owes = tecs.ecs.newRelationship(
+                    {
+                        name = "DenseRelIdOwes",
+                        container = OwesRec,
+                        fields = {"amount"},
+                    }
+                )
 
                 it(
                     "allocates a distinct id per instance",
@@ -811,11 +837,13 @@ describe(
                             return {target = (value as {string: any}).target as integer}
                         end
                         local myD = function(_w: tecs.World, data: {string: any}): any return data end
-                        local Rel = tecs.ecs.newRelationship({
-                            name = "RedirectForward" .. testId,
-                            serialize = (myS as any),
-                            deserialize = (myD as any),
-                        })
+                        local Rel = tecs.ecs.newRelationship(
+                            {
+                                name = "RedirectForward" .. testId,
+                                serialize = (myS as any),
+                                deserialize = (myD as any),
+                            }
+                        )
 
                         luassert.equals(
                             myS,

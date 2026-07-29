@@ -15,16 +15,20 @@
 local tecs <const> = require("tecs")
 local internal <const> = require("tecs.internal.types")
 
-local Pos = tecs.ecs.newComponent({
-    name = "ComponentDirtySpecPos",
-    container = {},
-    fields = {"x", "y"},
-})
-local Vel = tecs.ecs.newComponent({
-    name = "ComponentDirtySpecVel",
-    container = {},
-    fields = {"dx", "dy"},
-})
+local Pos = tecs.ecs.newComponent(
+    {
+        name = "ComponentDirtySpecPos",
+        container = {},
+        fields = {"x", "y"},
+    }
+)
+local Vel = tecs.ecs.newComponent(
+    {
+        name = "ComponentDirtySpecVel",
+        container = {},
+        fields = {"dx", "dy"},
+    }
+)
 local Tag = tecs.ecs.newTagComponent({name = "ComponentDirtySpecTag"})
 
 local function clearDirty(arch: tecs.ecs.Archetype)
@@ -35,20 +39,22 @@ local function findArchetype(world: tecs.World, components: {tecs.ecs.Component}
     -- forEachArchetype to avoid leaking a query scope (see
     -- project_query_iter_scope_trap memory).
     local match: tecs.ecs.Archetype = nil
-    world:forEachArchetype(function(arch: tecs.ecs.Archetype)
-        if match ~= nil then
-            return
-        end
-        if ((arch as {string: any}).entities as {integer})[0] == 0 then
-            return
-        end
-        for i = 1, #components do
-            if (arch as {string: any}):get(components[i]) == nil then
+    world:forEachArchetype(
+        function(arch: tecs.ecs.Archetype)
+            if match ~= nil then
                 return
             end
+            if ((arch as {string: any}).entities as {integer})[0] == 0 then
+                return
+            end
+            for i = 1, #components do
+                if (arch as {string: any}):get(components[i]) == nil then
+                    return
+                end
+            end
+            match = arch
         end
-        match = arch
-    end)
+    )
     return match
 end
 

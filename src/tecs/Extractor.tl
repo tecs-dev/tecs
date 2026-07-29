@@ -1232,46 +1232,56 @@ function Extractor:install(world: types.World, packet: FramePacket, published: f
     -- Snapshotting before anything in the step moves is what makes the pair a
     -- pair: taken later, the two would be the same value and every frame would
     -- draw the entity where the step left it.
-    local interpolated = world:query({
-        include = {Transform, components.PreviousTransform},
-    })
-    world:addSystem({
-        name = "tecs.SnapshotTransforms",
-        phase = ecs.phases.FixedFirst,
-        run = function()
-            for archetype, length in interpolated:iter() do
-                local transforms = archetype:get(Transform)
-                -- Mutable, because this writes every row it visits: the whole
-                -- column is what the next frame interpolates from.
-                local before = archetype:getMut(components.PreviousTransform)
-                for row = 1, length do
-                    local transform = transforms[row]
-                    local target = before[row]
-                    target.x = transform.x
-                    target.y = transform.y
-                    target.rotation = transform.rotation
+    local interpolated = world:query(
+        {
+            include = {Transform, components.PreviousTransform},
+        }
+    )
+    world:addSystem(
+        {
+            name = "tecs.SnapshotTransforms",
+            phase = ecs.phases.FixedFirst,
+            run = function()
+                for archetype, length in interpolated:iter() do
+                    local transforms = archetype:get(Transform)
+                    -- Mutable, because this writes every row it visits: the whole
+                    -- column is what the next frame interpolates from.
+                    local before = archetype:getMut(components.PreviousTransform)
+                    for row = 1, length do
+                        local transform = transforms[row]
+                        local target = before[row]
+                        target.x = transform.x
+                        target.y = transform.y
+                        target.rotation = transform.rotation
+                    end
                 end
-            end
-        end,
-    })
+            end,
+        }
+    )
 
-    self._renderables = world:query({
-        include = {Transform, components.Tint, components.Renderable},
-    })
-    self._lightSources = world:query({
-        include = {Transform, components.PointLight},
-    })
+    self._renderables = world:query(
+        {
+            include = {Transform, components.Tint, components.Renderable},
+        }
+    )
+    self._lightSources = world:query(
+        {
+            include = {Transform, components.PointLight},
+        }
+    )
 
-    world:addSystem({
-        name = "tecs.SyncRenderState",
-        phase = ecs.phases.RenderFirst,
-        run = function()
-            self:extract(packet)
-            if published ~= nil then
-                published()
-            end
-        end,
-    })
+    world:addSystem(
+        {
+            name = "tecs.SyncRenderState",
+            phase = ecs.phases.RenderFirst,
+            run = function()
+                self:extract(packet)
+                if published ~= nil then
+                    published()
+                end
+            end,
+        }
+    )
 end
 
 --- Seconds the last extraction took, or zero when nothing is being measured.

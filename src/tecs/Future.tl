@@ -856,12 +856,15 @@ local function sourceFor(inputs: {Future<any>}): Source
     if count == 1 then
         return distinct[1]
     end
-    return setmetatable({
-        sources = distinct,
-        at = 0,
-        sliceMs = distinct[1].sliceMs,
-        defaultWaitMs = distinct[1].defaultWaitMs,
-    } as RoundRobin, RoundRobinMT) as Source
+    return setmetatable(
+        {
+            sources = distinct,
+            at = 0,
+            sliceMs = distinct[1].sliceMs,
+            defaultWaitMs = distinct[1].defaultWaitMs,
+        } as RoundRobin,
+        RoundRobinMT
+    ) as Source
 end
 
 function Future.all<U>(inputs: {Future<U>}): Future<{U}>
@@ -955,14 +958,16 @@ function Future.track<U>(world: World, entity: integer, key: string, future: Fut
     end
 
     byEntity[key] = watched
-    watched:onSettle(function()
-        -- Only if this is still the future under that key: tracking a second
-        -- one replaces the first, and the first settling afterwards must not
-        -- erase its successor.
-        if byEntity[key] == watched then
-            byEntity[key] = nil
+    watched:onSettle(
+        function()
+            -- Only if this is still the future under that key: tracking a second
+            -- one replaces the first, and the first settling afterwards must not
+            -- erase its successor.
+            if byEntity[key] == watched then
+                byEntity[key] = nil
+            end
         end
-    end)
+    )
 end
 
 -- The provider name a program writes into `sequence.await`, so it is reached

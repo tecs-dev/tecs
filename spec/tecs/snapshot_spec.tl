@@ -43,21 +43,27 @@ describe(
         local PositionComp: Position
         local HealthComp: Health
 
-        before_each(function()
-            local testId = math.random(1, 1000000)
-            local posContainer: Position = {}
-            PositionComp = tecs.ecs.newComponent({
-                name = "SnapPosition" .. testId,
-                container = posContainer,
-                fields = {"x", "y"},
-            })
-            local hpContainer: Health = {}
-            HealthComp = tecs.ecs.newComponent({
-                name = "SnapHealth" .. testId,
-                container = hpContainer,
-                fields = {"hp"},
-            })
-        end)
+        before_each(
+            function()
+                local testId = math.random(1, 1000000)
+                local posContainer: Position = {}
+                PositionComp = tecs.ecs.newComponent(
+                    {
+                        name = "SnapPosition" .. testId,
+                        container = posContainer,
+                        fields = {"x", "y"},
+                    }
+                )
+                local hpContainer: Health = {}
+                HealthComp = tecs.ecs.newComponent(
+                    {
+                        name = "SnapHealth" .. testId,
+                        container = hpContainer,
+                        fields = {"hp"},
+                    }
+                )
+            end
+        )
 
         it(
             "round-trips components with preserved entity IDs",
@@ -129,17 +135,19 @@ describe(
                     metamethod __call: function(self, x: number, y: number, layer: integer): FFIStruct
                 end
                 local ffiContainer: FFIStruct = {}
-                local FFIComp: FFIStruct = tecs.ecs.newFFIComponent({
-                    name = "SnapFFI" .. testId,
-                    container = ffiContainer,
-                    fields = {
-                        {"x", "float"},
-                        {"y", "float"},
-                        {"layer", "int32_t"},
-                        {"gpuSlot", "int32_t"},
-                    },
-                    defaults = {0, 0, 1, -1},
-                })
+                local FFIComp: FFIStruct = tecs.ecs.newFFIComponent(
+                    {
+                        name = "SnapFFI" .. testId,
+                        container = ffiContainer,
+                        fields = {
+                            {"x", "float"},
+                            {"y", "float"},
+                            {"layer", "int32_t"},
+                            {"gpuSlot", "int32_t"},
+                        },
+                        defaults = {0, 0, 1, -1},
+                    }
+                )
 
                 local record Cell is tecs.ecs.Component
                     col: integer
@@ -148,11 +156,13 @@ describe(
                     metamethod __call: function(self, c: integer, r: integer, k: integer): Cell
                 end
                 local cellContainer: Cell = {}
-                local CellComp: Cell = tecs.ecs.newComponent({
-                    name = "SnapCell" .. testId,
-                    container = cellContainer,
-                    fields = {"col", "row", "colorIdx"},
-                })
+                local CellComp: Cell = tecs.ecs.newComponent(
+                    {
+                        name = "SnapCell" .. testId,
+                        container = cellContainer,
+                        fields = {"col", "row", "colorIdx"},
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local a = world:spawn(FFIComp(100, 200, 3), CellComp(4, 5, 7))
@@ -199,22 +209,24 @@ describe(
                     metamethod __call: function(self, x: number, y: number, z: number): Vec3
                 end
                 local vec3Container: Vec3 = {}
-                local Vec3Comp: Vec3 = tecs.ecs.newFFIComponent({
-                    name = "SnapMetaVec3" .. testId,
-                    container = vec3Container,
-                    fields = {
-                        {"x", "double"},
-                        {"y", "double"},
-                        {"z", "double"},
-                    },
-                    metatable = {
-                        __index = {
-                            length = function(self: Vec3): number
-                                return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
-                            end,
+                local Vec3Comp: Vec3 = tecs.ecs.newFFIComponent(
+                    {
+                        name = "SnapMetaVec3" .. testId,
+                        container = vec3Container,
+                        fields = {
+                            {"x", "double"},
+                            {"y", "double"},
+                            {"z", "double"},
                         },
-                    },
-                })
+                        metatable = {
+                            __index = {
+                                length = function(self: Vec3): number
+                                    return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+                                end,
+                            },
+                        },
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(Vec3Comp(3, 4, 12))
@@ -421,20 +433,22 @@ describe(
                     skip: number
                 end
                 local SkippyComp: Skippy
-                SkippyComp = tecs.ecs.newComponent({
-                    name = "SnapSkippy" .. testId,
-                    container = {} as Skippy,
-                    fields = {"v", "skip"},
-                    serialize = function(value: Skippy): {string: any}
-                        if value.skip == 1 then
-                            return nil
-                        end
-                        return {v = value.v, skip = value.skip}
-                    end,
-                    deserialize = function(_world: tecs.World, data: {string: any}): Skippy
-                        return SkippyComp(data.v as number, data.skip as number)
-                    end,
-                })
+                SkippyComp = tecs.ecs.newComponent(
+                    {
+                        name = "SnapSkippy" .. testId,
+                        container = {} as Skippy,
+                        fields = {"v", "skip"},
+                        serialize = function(value: Skippy): {string: any}
+                            if value.skip == 1 then
+                                return nil
+                            end
+                            return {v = value.v, skip = value.skip}
+                        end,
+                        deserialize = function(_world: tecs.World, data: {string: any}): Skippy
+                            return SkippyComp(data.v as number, data.skip as number)
+                        end,
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local e1 = world:spawn(SkippyComp(111, 1), HealthComp(10))
@@ -464,23 +478,27 @@ describe(
                     a: number
                     metamethod __call: function(self, a: number): HalfCustom
                 end
-                local HalfCustomComp: HalfCustom = tecs.ecs.newFFIComponent({
-                    name = "SnapHalfCustom" .. testId,
-                    container = {} as HalfCustom,
-                    fields = {{"a", "float"}},
-                    -- Custom serialize only: the raw byte codec must disengage in
-                    -- BOTH directions or the binary stream desyncs.
-                    serialize = function(value: HalfCustom): {string: any} return {a = value.a} end,
-                })
+                local HalfCustomComp: HalfCustom = tecs.ecs.newFFIComponent(
+                    {
+                        name = "SnapHalfCustom" .. testId,
+                        container = {} as HalfCustom,
+                        fields = {{"a", "float"}},
+                        -- Custom serialize only: the raw byte codec must disengage in
+                        -- BOTH directions or the binary stream desyncs.
+                        serialize = function(value: HalfCustom): {string: any} return {a = value.a} end,
+                    }
+                )
                 local record PlainFFI is tecs.ecs.Component
                     b: number
                     metamethod __call: function(self, b: number): PlainFFI
                 end
-                local PlainFFIComp: PlainFFI = tecs.ecs.newFFIComponent({
-                    name = "SnapPlainFFI" .. testId,
-                    container = {} as PlainFFI,
-                    fields = {{"b", "float"}},
-                })
+                local PlainFFIComp: PlainFFI = tecs.ecs.newFFIComponent(
+                    {
+                        name = "SnapPlainFFI" .. testId,
+                        container = {} as PlainFFI,
+                        fields = {{"b", "float"}},
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local ids: {integer} = {}
@@ -586,21 +604,25 @@ describe(
                 local NeedsWorldComp: NeedsWorld
 
                 local needsWorldContainer: NeedsWorld = {}
-                NeedsWorldComp = tecs.ecs.newComponent({
-                    name = "SparseSnapNeedsWorld" .. testId,
-                    container = needsWorldContainer,
-                    fields = {"value"},
-                    deserialize = function(worldArg: tecs.World, data: {string: any}): NeedsWorld
-                        luassert.is_not_nil(worldArg, "binary sparse deserialize should receive world")
-                        return NeedsWorldComp(data.value as integer)
-                    end,
-                })
+                NeedsWorldComp = tecs.ecs.newComponent(
+                    {
+                        name = "SparseSnapNeedsWorld" .. testId,
+                        container = needsWorldContainer,
+                        fields = {"value"},
+                        deserialize = function(worldArg: tecs.World, data: {string: any}): NeedsWorld
+                            luassert.is_not_nil(worldArg, "binary sparse deserialize should receive world")
+                            return NeedsWorldComp(data.value as integer)
+                        end,
+                    }
+                )
 
-                local SparseTagRel = tecs.ecs.newRelationship({
-                    name = "SparseSnapDeserialize" .. testId,
-                    sparse = true,
-                    exclusive = true,
-                })
+                local SparseTagRel = tecs.ecs.newRelationship(
+                    {
+                        name = "SparseSnapDeserialize" .. testId,
+                        sparse = true,
+                        exclusive = true,
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn()
@@ -623,11 +645,13 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local SparseMaybeRel = tecs.ecs.newRelationship({
-                    name = "SparseSnapMissingValue" .. testId,
-                    sparse = true,
-                    exclusive = true,
-                })
+                local SparseMaybeRel = tecs.ecs.newRelationship(
+                    {
+                        name = "SparseSnapMissingValue" .. testId,
+                        sparse = true,
+                        exclusive = true,
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn()
@@ -731,21 +755,23 @@ describe(
                 local order: {string} = {}
                 local finishPrelude: tecs.ecs.SnapshotPrelude | nil
 
-                world:addSnapshotHandler({
-                    name = "spec.snapshotHandler",
-                    save = function(_world: tecs.World): any
-                        table.insert(order, "save")
-                        return {value = sourceValue}
-                    end,
-                    load = function(_world: tecs.World, value: any)
-                        table.insert(order, "load")
-                        loadedValue = (value as {string: integer}).value
-                    end,
-                    finish = function(_world: tecs.World, prelude: tecs.ecs.SnapshotPrelude)
-                        table.insert(order, "finish")
-                        finishPrelude = prelude
-                    end,
-                })
+                world:addSnapshotHandler(
+                    {
+                        name = "spec.snapshotHandler",
+                        save = function(_world: tecs.World): any
+                            table.insert(order, "save")
+                            return {value = sourceValue}
+                        end,
+                        load = function(_world: tecs.World, value: any)
+                            table.insert(order, "load")
+                            loadedValue = (value as {string: integer}).value
+                        end,
+                        finish = function(_world: tecs.World, prelude: tecs.ecs.SnapshotPrelude)
+                            table.insert(order, "finish")
+                            finishPrelude = prelude
+                        end,
+                    }
+                )
 
                 local snap = saveTableSnapshot(world)
                 sourceValue = 99
@@ -768,11 +794,13 @@ describe(
                 world:commit()
 
                 local loaded = false
-                world:addSnapshotHandler({
-                    name = "spec.nilSnapshotHandler",
-                    save = function(_world: tecs.World): any return nil end,
-                    load = function(_world: tecs.World, _value: any) loaded = true end,
-                })
+                world:addSnapshotHandler(
+                    {
+                        name = "spec.nilSnapshotHandler",
+                        save = function(_world: tecs.World): any return nil end,
+                        load = function(_world: tecs.World, _value: any) loaded = true end,
+                    }
+                )
 
                 world:loadSnapshot(saveTableSnapshot(world))
                 luassert.is_false(loaded)
@@ -784,12 +812,17 @@ describe(
             function()
                 local world = tecs.ecs.newWorld()
 
-                luassert.has_error(function()
-                    world:addSnapshotHandler({
-                        name = "",
-                        save = function(_world: tecs.World): any return true end,
-                    })
-                end, "snapshot handler requires a non-empty name")
+                luassert.has_error(
+                    function()
+                        world:addSnapshotHandler(
+                            {
+                                name = "",
+                                save = function(_world: tecs.World): any return true end,
+                            }
+                        )
+                    end,
+                    "snapshot handler requires a non-empty name"
+                )
             end
         )
 
@@ -808,20 +841,24 @@ describe(
                     metamethod __call: function(self, value: integer): DurableData
                 end
 
-                local RuntimeComp = tecs.ecs.newComponent({
-                    name = "SnapRuntime" .. testId,
-                    container = {} as RuntimeData,
-                    fields = {"slot"},
-                    defaults = {0},
-                    transient = true,
-                })
+                local RuntimeComp = tecs.ecs.newComponent(
+                    {
+                        name = "SnapRuntime" .. testId,
+                        container = {} as RuntimeData,
+                        fields = {"slot"},
+                        defaults = {0},
+                        transient = true,
+                    }
+                )
 
-                local DurableComp = tecs.ecs.newComponent({
-                    name = "SnapDurable" .. testId,
-                    container = {} as DurableData,
-                    fields = {"value"},
-                    requires = {RuntimeComp},
-                })
+                local DurableComp = tecs.ecs.newComponent(
+                    {
+                        name = "SnapDurable" .. testId,
+                        container = {} as DurableData,
+                        fields = {"value"},
+                        requires = {RuntimeComp},
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(DurableComp(42), RuntimeComp(99))
@@ -849,29 +886,35 @@ describe(
             function()
                 local testId = math.random(1, 1000000)
 
-                local TransientTag = tecs.ecs.newTagComponent({
-                    name = "SnapTransientTag" .. testId,
-                    transient = true,
-                })
+                local TransientTag = tecs.ecs.newTagComponent(
+                    {
+                        name = "SnapTransientTag" .. testId,
+                        transient = true,
+                    }
+                )
 
-                local TransientScalar = tecs.ecs.newScalarComponent({
-                    name = "SnapTransientScalar" .. testId,
-                    kind = "number",
-                    default = 0,
-                    transient = true,
-                })
+                local TransientScalar = tecs.ecs.newScalarComponent(
+                    {
+                        name = "SnapTransientScalar" .. testId,
+                        kind = "number",
+                        default = 0,
+                        transient = true,
+                    }
+                )
 
                 local record TransientFFI is tecs.ecs.Component
                     value: integer
                     metamethod __call: function(self, value: integer): TransientFFI
                 end
 
-                local TransientFFIComp = tecs.ecs.newFFIComponent({
-                    name = "SnapTransientFFI" .. testId,
-                    container = {} as TransientFFI,
-                    fields = {{"value", "int32_t"}},
-                    transient = true,
-                })
+                local TransientFFIComp = tecs.ecs.newFFIComponent(
+                    {
+                        name = "SnapTransientFFI" .. testId,
+                        container = {} as TransientFFI,
+                        fields = {{"value", "int32_t"}},
+                        transient = true,
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local id = world:spawn(PositionComp(1, 1), TransientTag, TransientScalar(12), TransientFFIComp(34))
@@ -905,12 +948,14 @@ describe(
                     metamethod __call: function(self, target: integer, weight: integer): Link
                 end
 
-                local LinkRel = tecs.ecs.newRelationship({
-                    name = "SnapTransientLink" .. testId,
-                    container = {} as Link,
-                    fields = {"weight"},
-                    transient = true,
-                })
+                local LinkRel = tecs.ecs.newRelationship(
+                    {
+                        name = "SnapTransientLink" .. testId,
+                        container = {} as Link,
+                        fields = {"weight"},
+                        transient = true,
+                    }
+                )
 
                 local world = tecs.ecs.newWorld()
                 local target = world:spawn(PositionComp(1, 1))
@@ -940,15 +985,19 @@ describe(
                     metamethod __call: function(self, value: integer): BadTable
                 end
 
-                local okTable = pcall(function()
-                    tecs.ecs.newComponent({
-                        name = "BadTransientTable" .. testId,
-                        container = {} as BadTable,
-                        fields = {"value"},
-                        transient = true,
-                        serialize = function(_inst: BadTable): {string: any} return {value = 1} end,
-                    })
-                end)
+                local okTable = pcall(
+                    function()
+                        tecs.ecs.newComponent(
+                            {
+                                name = "BadTransientTable" .. testId,
+                                container = {} as BadTable,
+                                fields = {"value"},
+                                transient = true,
+                                serialize = function(_inst: BadTable): {string: any} return {value = 1} end,
+                            }
+                        )
+                    end
+                )
                 luassert.is_false(okTable)
 
                 local record BadFFI is tecs.ecs.Component
@@ -956,15 +1005,19 @@ describe(
                     metamethod __call: function(self, value: integer): BadFFI
                 end
 
-                local okFFI = pcall(function()
-                    tecs.ecs.newFFIComponent({
-                        name = "BadTransientFFI" .. testId,
-                        container = {} as BadFFI,
-                        fields = {{"value", "int32_t"}},
-                        transient = true,
-                        serialize = function(_inst: BadFFI): {string: any} return {value = 1} end,
-                    })
-                end)
+                local okFFI = pcall(
+                    function()
+                        tecs.ecs.newFFIComponent(
+                            {
+                                name = "BadTransientFFI" .. testId,
+                                container = {} as BadFFI,
+                                fields = {{"value", "int32_t"}},
+                                transient = true,
+                                serialize = function(_inst: BadFFI): {string: any} return {value = 1} end,
+                            }
+                        )
+                    end
+                )
                 luassert.is_false(okFFI)
 
                 local record BadRel is tecs.ecs.Relationship
@@ -972,15 +1025,19 @@ describe(
                     metamethod __call: function(self, target: integer, value: integer): BadRel
                 end
 
-                local okRel = pcall(function()
-                    tecs.ecs.newRelationship({
-                        name = "BadTransientRel" .. testId,
-                        container = {} as BadRel,
-                        fields = {"value"},
-                        transient = true,
-                        serialize = function(_inst: BadRel): {string: any} return {value = 1} end,
-                    })
-                end)
+                local okRel = pcall(
+                    function()
+                        tecs.ecs.newRelationship(
+                            {
+                                name = "BadTransientRel" .. testId,
+                                container = {} as BadRel,
+                                fields = {"value"},
+                                transient = true,
+                                serialize = function(_inst: BadRel): {string: any} return {value = 1} end,
+                            }
+                        )
+                    end
+                )
                 luassert.is_false(okRel)
             end
         )
@@ -1182,11 +1239,13 @@ describe(
                     metamethod __call: function(self, x: number, y: number, z: number): V3
                 end
                 local v3Container: V3 = {}
-                local Comp: V3 = tecs.ecs.newFFIComponent({
-                    name = compName,
-                    container = v3Container,
-                    fields = {{"x", "double"}, {"y", "double"}, {"z", "double"}},
-                })
+                local Comp: V3 = tecs.ecs.newFFIComponent(
+                    {
+                        name = compName,
+                        container = v3Container,
+                        fields = {{"x", "double"}, {"y", "double"}, {"z", "double"}},
+                    }
+                )
 
                 -- Craft a synthetic buffer that claims fingerprint "x:double,y:double|16"
                 -- (no z), with one entity carrying x=3.14 y=2.71.
@@ -1243,11 +1302,13 @@ describe(
                     metamethod __call: function(self, x: number): V1
                 end
                 local v1Container: V1 = {}
-                local Comp: V1 = tecs.ecs.newFFIComponent({
-                    name = compName,
-                    container = v1Container,
-                    fields = {{"x", "double"}},
-                })
+                local Comp: V1 = tecs.ecs.newFFIComponent(
+                    {
+                        name = compName,
+                        container = v1Container,
+                        fields = {{"x", "double"}},
+                    }
+                )
 
                 -- Synthetic buffer claiming saved schema "x:double,y:double|16".
                 local buffer = require("string.buffer")
@@ -1303,16 +1364,18 @@ describe(
                 end
                 local seenPayload: {string: any} = nil
                 local Comp: CV
-                Comp = tecs.ecs.newFFIComponent({
-                    name = compName,
-                    container = {} as CV,
-                    fields = {{"a", "double"}, {"b", "double"}},
-                    serialize = function(value: CV): {string: any} return {a = value.a} end,
-                    deserialize = function(_world: tecs.World, data: {string: any}): CV
-                        seenPayload = data
-                        return Comp(data.a as number, 42)
-                    end,
-                })
+                Comp = tecs.ecs.newFFIComponent(
+                    {
+                        name = compName,
+                        container = {} as CV,
+                        fields = {{"a", "double"}, {"b", "double"}},
+                        serialize = function(value: CV): {string: any} return {a = value.a} end,
+                        deserialize = function(_world: tecs.World, data: {string: any}): CV
+                            seenPayload = data
+                            return Comp(data.a as number, 42)
+                        end,
+                    }
+                )
 
                 local buffer = require("string.buffer")
                 local ffi = require("ffi")

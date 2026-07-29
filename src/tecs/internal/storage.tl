@@ -189,10 +189,12 @@ function storage.syncMetadataToFFI(s: Storage, container: Component)
 
     -- Closed framework behavior metadata is attached to relationship
     -- containers after construction. Mirror only the typed metadata fields.
-    for _, key in ipairs({
-        "frameworkBehavior",
-        "frameworkBehaviorBits",
-    }) do
+    for _, key in ipairs(
+        {
+            "frameworkBehavior",
+            "frameworkBehaviorBits",
+        }
+    ) do
         if containerAny[key] ~= nil then
             setMetadata(s, key, containerAny[key])
         end

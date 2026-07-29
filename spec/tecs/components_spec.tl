@@ -52,16 +52,18 @@ describe(
                             name: string
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "MyComponent3",
-                            container = MyComponent3,
-                            fields = {"name"},
-                            init = function(instance: MyComponent3, name: string)
-                                luassert.is_not_nil(name, "MyComponent3 init should have a name")
-                                luassert.is_equal(name, "hello", "MyComponent3 init should have the correct name")
-                                instance.name = name
-                            end,
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "MyComponent3",
+                                container = MyComponent3,
+                                fields = {"name"},
+                                init = function(instance: MyComponent3, name: string)
+                                    luassert.is_not_nil(name, "MyComponent3 init should have a name")
+                                    luassert.is_equal(name, "hello", "MyComponent3 init should have the correct name")
+                                    instance.name = name
+                                end,
+                            }
+                        )
 
                         local instance = MyComponent3("hello")
 
@@ -78,10 +80,11 @@ describe(
                         local container2 = {}
                         tecs.ecs.newComponent({name = "Hi__World", container = container1})
 
-                        luassert.error_matches(function()
-                            tecs.ecs.newComponent({name = "Hi__World", container = container2})
-                        end, "Component Hi__World already registered",
-                        nil) -- TODO: Why do the types want nil here?
+                        luassert.error_matches(
+                            function() tecs.ecs.newComponent({name = "Hi__World", container = container2}) end,
+                            "Component Hi__World already registered",
+                            nil
+                        ) -- TODO: Why do the types want nil here?
                     end
                 )
             end
@@ -98,11 +101,13 @@ describe(
                             y: number
                             z: number
                         end
-                        local comp = tecs.ecs.newComponent({
-                            name = "FieldsNewTest",
-                            container = FieldComp as tecs.ecs.Component,
-                            fields = {"x", "y", "z"},
-                        })
+                        local comp = tecs.ecs.newComponent(
+                            {
+                                name = "FieldsNewTest",
+                                container = FieldComp as tecs.ecs.Component,
+                                fields = {"x", "y", "z"},
+                            }
+                        )
                         local inst = (comp as any).new({x = 1, y = 2, z = 3}) as {string: number}
                         luassert.is_equal(inst.x, 1)
                         luassert.is_equal(inst.y, 2)
@@ -117,21 +122,23 @@ describe(
                             radius: number
                             cookie: integer
                         end
-                        local comp = tecs.ecs.newComponent({
-                            name = "ConfigNewTest",
-                            container = ConfigComp as tecs.ecs.Component,
-                            fields = {"radius"},
-                            init = function(instance: ConfigComp, radius?: number)
-                                instance.radius = radius or 100
-                                instance.cookie = 0
-                            end,
-                            new = function(data: {string: any}): ConfigComp
-                                return {
-                                    radius = data.radius as number or 100,
-                                    cookie = data.cookie as integer or 0,
-                                }
-                            end,
-                        })
+                        local comp = tecs.ecs.newComponent(
+                            {
+                                name = "ConfigNewTest",
+                                container = ConfigComp as tecs.ecs.Component,
+                                fields = {"radius"},
+                                init = function(instance: ConfigComp, radius?: number)
+                                    instance.radius = radius or 100
+                                    instance.cookie = 0
+                                end,
+                                new = function(data: {string: any}): ConfigComp
+                                    return {
+                                        radius = data.radius as number or 100,
+                                        cookie = data.cookie as integer or 0,
+                                    }
+                                end,
+                            }
+                        )
                         -- Positional: cookie defaults to 0 (no table handling in ctor).
                         local pos = (comp as any)(42) as {string: any}
                         luassert.is_equal(pos.radius, 42)
@@ -151,15 +158,17 @@ describe(
                             first: any
                             second: number
                         end
-                        local comp = tecs.ecs.newComponent({
-                            name = "PosOnlyTest",
-                            container = PosOnly as tecs.ecs.Component,
-                            fields = {"first", "second"},
-                            init = function(instance: PosOnly, first?: any, second?: number)
-                                instance.first = first
-                                instance.second = second or 0
-                            end,
-                        })
+                        local comp = tecs.ecs.newComponent(
+                            {
+                                name = "PosOnlyTest",
+                                container = PosOnly as tecs.ecs.Component,
+                                fields = {"first", "second"},
+                                init = function(instance: PosOnly, first?: any, second?: number)
+                                    instance.first = first
+                                    instance.second = second or 0
+                                end,
+                            }
+                        )
                         -- Passing a table to __call lands in positional arg #1, not
                         -- unpacked into (first=..., second=...). The ctor author can
                         -- choose to handle it, but the framework no longer silently
@@ -176,14 +185,19 @@ describe(
                         local record Broken is tecs.ecs.Component
                             value: number
                         end
-                        luassert.error_matches(function()
-                            tecs.ecs.newComponent({
-                                name = "BrokenCtorOnlyTest",
-                                container = Broken as tecs.ecs.Component,
-                                init = function(instance: Broken, v: number) instance.value = v end,
-                            })
-                        end, "requires either `fields`",
-                        nil)
+                        luassert.error_matches(
+                            function()
+                                tecs.ecs.newComponent(
+                                    {
+                                        name = "BrokenCtorOnlyTest",
+                                        container = Broken as tecs.ecs.Component,
+                                        init = function(instance: Broken, v: number) instance.value = v end,
+                                    }
+                                )
+                            end,
+                            "requires either `fields`",
+                            nil
+                        )
                     end
                 )
 
@@ -194,15 +208,17 @@ describe(
                             value: number
                             validated: boolean
                         end
-                        local comp = tecs.ecs.newComponent({
-                            name = "MixedFieldsCtorTest",
-                            container = Mixed as tecs.ecs.Component,
-                            fields = {"value"},
-                            init = function(instance: Mixed, value: number)
-                                instance.value = value
-                                instance.validated = true
-                            end,
-                        })
+                        local comp = tecs.ecs.newComponent(
+                            {
+                                name = "MixedFieldsCtorTest",
+                                container = Mixed as tecs.ecs.Component,
+                                fields = {"value"},
+                                init = function(instance: Mixed, value: number)
+                                    instance.value = value
+                                    instance.validated = true
+                                end,
+                            }
+                        )
                         -- __call runs the custom init (sets validated = true).
                         local pos = (comp as any)(10) as {string: any}
                         luassert.is_equal(pos.value, 10)
@@ -226,20 +242,22 @@ describe(
                             label: string
                         end
 
-                        local comp = tecs.ecs.newComponent({
-                            name = "FancyTableCallTest",
-                            container = FancyTable as tecs.ecs.Component,
-                            fields = {"x", "y"},
-                            defaults = {3, 7},
-                            __call = function(instance: FancyTable, label: string)
-                                callCalls = callCalls + 1
-                                luassert.is_equal(3, instance.x)
-                                luassert.is_equal(7, instance.y)
-                                instance.label = label
-                                instance.x = instance.x + 1
-                            end,
-                            init = function(_instance: FancyTable, _label: string) initCalls = initCalls + 1 end,
-                        })
+                        local comp = tecs.ecs.newComponent(
+                            {
+                                name = "FancyTableCallTest",
+                                container = FancyTable as tecs.ecs.Component,
+                                fields = {"x", "y"},
+                                defaults = {3, 7},
+                                __call = function(instance: FancyTable, label: string)
+                                    callCalls = callCalls + 1
+                                    luassert.is_equal(3, instance.x)
+                                    luassert.is_equal(7, instance.y)
+                                    instance.label = label
+                                    instance.x = instance.x + 1
+                                end,
+                                init = function(_instance: FancyTable, _label: string) initCalls = initCalls + 1 end,
+                            }
+                        )
 
                         local inst = (comp as any)("ok") as {string: any}
                         luassert.is_equal(1, callCalls)
@@ -261,23 +279,25 @@ describe(
                             y: integer
                         end
 
-                        local comp = tecs.ecs.newFFIComponent({
-                            name = "FancyFFICallTest",
-                            container = FancyFFI as tecs.ecs.Component,
-                            fields = {
-                                {"x", "int32_t"},
-                                {"y", "int32_t"},
-                            },
-                            defaults = {2, 5},
-                            __call = function(instance: FancyFFI, delta: integer)
-                                callCalls = callCalls + 1
-                                luassert.is_equal(2, instance.x)
-                                luassert.is_equal(5, instance.y)
-                                instance.x = instance.x + delta
-                                instance.y = instance.y + delta
-                            end,
-                            init = function(_instance: FancyFFI, _delta: integer) initCalls = initCalls + 1 end,
-                        })
+                        local comp = tecs.ecs.newFFIComponent(
+                            {
+                                name = "FancyFFICallTest",
+                                container = FancyFFI as tecs.ecs.Component,
+                                fields = {
+                                    {"x", "int32_t"},
+                                    {"y", "int32_t"},
+                                },
+                                defaults = {2, 5},
+                                __call = function(instance: FancyFFI, delta: integer)
+                                    callCalls = callCalls + 1
+                                    luassert.is_equal(2, instance.x)
+                                    luassert.is_equal(5, instance.y)
+                                    instance.x = instance.x + delta
+                                    instance.y = instance.y + delta
+                                end,
+                                init = function(_instance: FancyFFI, _delta: integer) initCalls = initCalls + 1 end,
+                            }
+                        )
 
                         local inst = (comp as any)(10) as {string: any}
                         luassert.is_equal(1, callCalls)
@@ -300,10 +320,11 @@ describe(
 
                         components.registerComponent(container1)
 
-                        luassert.error_matches(function()
-                            components.registerComponent(container1)
-                        end, "Component MyComponent5 already registered",
-                        nil) -- TODO: Why do the types want nil here?
+                        luassert.error_matches(
+                            function() components.registerComponent(container1) end,
+                            "Component MyComponent5 already registered",
+                            nil
+                        ) -- TODO: Why do the types want nil here?
                     end
                 )
 
@@ -370,15 +391,17 @@ describe(
                             speed: number
                         end
 
-                        local rel = tecs.ecs.newRelationship({
-                            name = "Attachment",
-                            container = Attachment,
-                            fields = {"speed"},
-                            init = function(instance: Attachment, target: integer, speed?: number)
-                                instance.target = target
-                                instance.speed = speed or 0
-                            end,
-                        }) as function(i: integer, n?: number): Attachment
+                        local rel = tecs.ecs.newRelationship(
+                            {
+                                name = "Attachment",
+                                container = Attachment,
+                                fields = {"speed"},
+                                init = function(instance: Attachment, target: integer, speed?: number)
+                                    instance.target = target
+                                    instance.speed = speed or 0
+                                end,
+                            }
+                        ) as function(i: integer, n?: number): Attachment
 
                         local instance = rel(3, 100)
 
@@ -434,13 +457,20 @@ describe(
                     "rejects init without container",
                     function()
                         -- Should error if init is provided without container
-                        luassert.has_error(function()
-                            tecs.ecs.newRelationship({
-                                name = "BadRelationship",
-                                fields = {},
-                                init = function(instance: tecs.ecs.Relationship, id: integer) instance.target = id end,
-                            })
-                        end, "Cannot provide init for relationship without a container")
+                        luassert.has_error(
+                            function()
+                                tecs.ecs.newRelationship(
+                                    {
+                                        name = "BadRelationship",
+                                        fields = {},
+                                        init = function(instance: tecs.ecs.Relationship, id: integer)
+                                            instance.target = id
+                                        end,
+                                    }
+                                )
+                            end,
+                            "Cannot provide init for relationship without a container"
+                        )
                     end
                 )
 
@@ -452,11 +482,13 @@ describe(
                             offset: number
                         end
 
-                        local rel = tecs.ecs.newRelationship({
-                            name = "AttachFields",
-                            container = AttachFields,
-                            fields = {"speed", "offset"},
-                        }) as function(id: integer, speed: number, offset: number): AttachFields
+                        local rel = tecs.ecs.newRelationship(
+                            {
+                                name = "AttachFields",
+                                container = AttachFields,
+                                fields = {"speed", "offset"},
+                            }
+                        ) as function(id: integer, speed: number, offset: number): AttachFields
 
                         local instance = rel(5, 100, 25)
                         luassert.is_equal(instance.target, 5)
@@ -474,12 +506,14 @@ describe(
                             drag: number
                         end
 
-                        local rel = tecs.ecs.newRelationship({
-                            name = "AttachDefaults",
-                            container = AttachDefaults,
-                            fields = {"speed", "drag"},
-                            defaults = {0, 1},
-                        }) as function(id: integer, speed?: number, drag?: number): AttachDefaults
+                        local rel = tecs.ecs.newRelationship(
+                            {
+                                name = "AttachDefaults",
+                                container = AttachDefaults,
+                                fields = {"speed", "drag"},
+                                defaults = {0, 1},
+                            }
+                        ) as function(id: integer, speed?: number, drag?: number): AttachDefaults
 
                         -- All defaults
                         local instance1 = rel(10)
@@ -504,14 +538,19 @@ describe(
                 it(
                     "rejects relationship init without fields or new",
                     function()
-                        luassert.error_matches(function()
-                            tecs.ecs.newRelationship({
-                                name = "BadRelCtorOnly",
-                                container = {},
-                                init = function(_instance: tecs.ecs.Relationship, id: integer) end,
-                            })
-                        end, "requires either `fields`",
-                        nil)
+                        luassert.error_matches(
+                            function()
+                                tecs.ecs.newRelationship(
+                                    {
+                                        name = "BadRelCtorOnly",
+                                        container = {},
+                                        init = function(_instance: tecs.ecs.Relationship, id: integer) end,
+                                    }
+                                )
+                            end,
+                            "requires either `fields`",
+                            nil
+                        )
                     end
                 )
 
@@ -522,15 +561,17 @@ describe(
                             speed: number
                             validated: boolean
                         end
-                        local rel = tecs.ecs.newRelationship({
-                            name = "MixedRelFieldsCtor",
-                            container = RelData as tecs.ecs.Relationship,
-                            fields = {"speed"},
-                            init = function(instance: RelData, _id: integer, speed: number)
-                                instance.speed = speed or 10
-                                instance.validated = true
-                            end,
-                        })
+                        local rel = tecs.ecs.newRelationship(
+                            {
+                                name = "MixedRelFieldsCtor",
+                                container = RelData as tecs.ecs.Relationship,
+                                fields = {"speed"},
+                                init = function(instance: RelData, _id: integer, speed: number)
+                                    instance.speed = speed or 10
+                                    instance.validated = true
+                                end,
+                            }
+                        )
                         -- positional goes through init
                         local inst = (rel as any)(1, 5) as {string: any}
                         luassert.is_equal(inst.speed, 5)
@@ -545,13 +586,18 @@ describe(
                 it(
                     "rejects defaults without fields on relationships",
                     function()
-                        luassert.has_error(function()
-                            tecs.ecs.newRelationship({
-                                name = "BadRelDefaults",
-                                container = {},
-                                defaults = {0},
-                            })
-                        end, "Relationship BadRelDefaults: `defaults` requires `fields`")
+                        luassert.has_error(
+                            function()
+                                tecs.ecs.newRelationship(
+                                    {
+                                        name = "BadRelDefaults",
+                                        container = {},
+                                        defaults = {0},
+                                    }
+                                )
+                            end,
+                            "Relationship BadRelDefaults: `defaults` requires `fields`"
+                        )
                     end
                 )
 
@@ -585,15 +631,17 @@ describe(
                                     delay: number
                                 end
 
-                                local Follows = tecs.ecs.newRelationship({
-                                    name = "FollowsTargeting2",
-                                    container = FollowsType,
-                                    fields = {"delay"},
-                                    init = function(instance: FollowsType, id: integer, delay?: number)
-                                        instance.target = id
-                                        instance.delay = delay or 1.0
-                                    end,
-                                })
+                                local Follows = tecs.ecs.newRelationship(
+                                    {
+                                        name = "FollowsTargeting2",
+                                        container = FollowsType,
+                                        fields = {"delay"},
+                                        init = function(instance: FollowsType, id: integer, delay?: number)
+                                            instance.target = id
+                                            instance.delay = delay or 1.0
+                                        end,
+                                    }
+                                )
 
                                 local targetEntity = 99
                                 local result = Follows:targeting(targetEntity)
@@ -647,15 +695,17 @@ describe(
                                     delay: number
                                 end
 
-                                local Follows = tecs.ecs.newRelationship({
-                                    name = "FollowsTargeting4",
-                                    container = FollowsType,
-                                    fields = {"delay"},
-                                    init = function(instance: FollowsType, id: integer, delay?: number)
-                                        instance.target = id
-                                        instance.delay = delay or 1.0
-                                    end,
-                                })
+                                local Follows = tecs.ecs.newRelationship(
+                                    {
+                                        name = "FollowsTargeting4",
+                                        container = FollowsType,
+                                        fields = {"delay"},
+                                        init = function(instance: FollowsType, id: integer, delay?: number)
+                                            instance.target = id
+                                            instance.delay = delay or 1.0
+                                        end,
+                                    }
+                                )
 
                                 local target = world:spawn()
                                 local entity = world:spawn(
@@ -774,9 +824,10 @@ describe(
                         it(
                             "should reject layer 0 as invalid",
                             function()
-                                luassert.has_error(function()
-                                    tecs.Transform(10, 20, 30, 0)
-                                end, "Transform layer must be greater than 0, got: 0")
+                                luassert.has_error(
+                                    function() tecs.Transform(10, 20, 30, 0) end,
+                                    "Transform layer must be greater than 0, got: 0"
+                                )
                             end
                         )
 
@@ -794,18 +845,20 @@ describe(
                         it(
                             "should reject negative layer values",
                             function()
-                                luassert.has_error(function()
-                                    tecs.Transform(0, 0, 0, -1)
-                                end, "Transform layer must be greater than 0, got: -1")
+                                luassert.has_error(
+                                    function() tecs.Transform(0, 0, 0, -1) end,
+                                    "Transform layer must be greater than 0, got: -1"
+                                )
                             end
                         )
 
                         it(
                             "should reject negative layer values with table argument",
                             function()
-                                luassert.has_error(function()
-                                    tecs.Transform.new({x = 0, y = 0, z = 0, layer = -5})
-                                end, "Transform layer must be greater than 0, got: -5")
+                                luassert.has_error(
+                                    function() tecs.Transform.new({x = 0, y = 0, z = 0, layer = -5}) end,
+                                    "Transform layer must be greater than 0, got: -5"
+                                )
                             end
                         )
 
@@ -825,9 +878,10 @@ describe(
                         it(
                             "should reject layer 0 with table argument",
                             function()
-                                luassert.has_error(function()
-                                    tecs.Transform.new({x = 50, y = 60, z = 70, layer = 0})
-                                end, "Transform layer must be greater than 0, got: 0")
+                                luassert.has_error(
+                                    function() tecs.Transform.new({x = 50, y = 60, z = 70, layer = 0}) end,
+                                    "Transform layer must be greater than 0, got: 0"
+                                )
                             end
                         )
 
@@ -924,11 +978,13 @@ describe(
                             metamethod __call: function(self, x: number, y: number): FieldsComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "FieldsComp",
-                            container = FieldsComp,
-                            fields = {"x", "y"},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "FieldsComp",
+                                container = FieldsComp,
+                                fields = {"x", "y"},
+                            }
+                        )
 
                         local instance = FieldsComp(10, 20)
                         luassert.is_equal(instance.x, 10)
@@ -946,11 +1002,13 @@ describe(
                             metamethod __call: function(self, a: number, b: number): FieldsNilComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "FieldsNilComp",
-                            container = FieldsNilComp,
-                            fields = {"a", "b"},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "FieldsNilComp",
+                                container = FieldsNilComp,
+                                fields = {"a", "b"},
+                            }
+                        )
 
                         local instance = FieldsNilComp(nil, 5)
                         luassert.is_nil(instance.a)
@@ -973,12 +1031,14 @@ describe(
                             metamethod __call: function(self, x?: number, y?: number, z?: number): DefaultsComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "DefaultsComp",
-                            container = DefaultsComp,
-                            fields = {"x", "y", "z"},
-                            defaults = {0, 0, 0},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "DefaultsComp",
+                                container = DefaultsComp,
+                                fields = {"x", "y", "z"},
+                                defaults = {0, 0, 0},
+                            }
+                        )
 
                         local instance = DefaultsComp()
                         luassert.is_equal(instance.x, 0)
@@ -996,12 +1056,14 @@ describe(
                             metamethod __call: function(self, a?: number, b?: number): OverrideComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "OverrideComp",
-                            container = OverrideComp,
-                            fields = {"a", "b"},
-                            defaults = {10, 20},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "OverrideComp",
+                                container = OverrideComp,
+                                fields = {"a", "b"},
+                                defaults = {10, 20},
+                            }
+                        )
 
                         local instance = OverrideComp(99, 88)
                         luassert.is_equal(instance.a, 99)
@@ -1019,12 +1081,14 @@ describe(
                             metamethod __call: function(self, x?: number, y?: number, z?: number): PartialComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "PartialComp",
-                            container = PartialComp,
-                            fields = {"x", "y", "z"},
-                            defaults = {1, 2, 3},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "PartialComp",
+                                container = PartialComp,
+                                fields = {"x", "y", "z"},
+                                defaults = {1, 2, 3},
+                            }
+                        )
 
                         local instance = PartialComp(100)
                         luassert.is_equal(instance.x, 100)
@@ -1042,12 +1106,14 @@ describe(
                             metamethod __call: function(self, mode: string, alpha?: string): HolesComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "HolesComp",
-                            container = HolesComp,
-                            fields = {"mode", "alpha"},
-                            defaults = {nil, "alphamultiply"},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "HolesComp",
+                                container = HolesComp,
+                                fields = {"mode", "alpha"},
+                                defaults = {nil, "alphamultiply"},
+                            }
+                        )
 
                         local instance = HolesComp("add")
                         luassert.is_equal(instance.mode, "add")
@@ -1071,12 +1137,14 @@ describe(
                             metamethod __call: function(self, label?: string): StrDefComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "StrDefComp",
-                            container = StrDefComp,
-                            fields = {"label"},
-                            defaults = {"untitled"},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "StrDefComp",
+                                container = StrDefComp,
+                                fields = {"label"},
+                                defaults = {"untitled"},
+                            }
+                        )
 
                         luassert.is_equal(StrDefComp().label, "untitled")
                         luassert.is_equal(StrDefComp("hello").label, "hello")
@@ -1086,13 +1154,18 @@ describe(
                 it(
                     "errors when defaults provided without fields",
                     function()
-                        luassert.has_error(function()
-                            tecs.ecs.newComponent({
-                                name = "BadDefaultsComp",
-                                container = {},
-                                defaults = {0, 0},
-                            })
-                        end, "Component BadDefaultsComp: `defaults` requires `fields`")
+                        luassert.has_error(
+                            function()
+                                tecs.ecs.newComponent(
+                                    {
+                                        name = "BadDefaultsComp",
+                                        container = {},
+                                        defaults = {0, 0},
+                                    }
+                                )
+                            end,
+                            "Component BadDefaultsComp: `defaults` requires `fields`"
+                        )
                     end
                 )
 
@@ -1104,12 +1177,14 @@ describe(
                             metamethod __call: function(self, value?: number): MetaComp
                         end
 
-                        tecs.ecs.newComponent({
-                            name = "MetaComp",
-                            container = MetaComp,
-                            fields = {"value"},
-                            defaults = {42},
-                        })
+                        tecs.ecs.newComponent(
+                            {
+                                name = "MetaComp",
+                                container = MetaComp,
+                                fields = {"value"},
+                                defaults = {42},
+                            }
+                        )
 
                         local instance = MetaComp()
                         luassert.is_equal(instance.value, 42)
@@ -1129,10 +1204,12 @@ describe(
                         local record Follows is tecs.ecs.Relationship
                             metamethod __call: function(self, target: integer): Follows
                         end
-                        local FollowsContainer: Follows = tecs.ecs.newRelationship({
-                            name = "SerFollows",
-                            exclusive = false,
-                        }) as Follows
+                        local FollowsContainer: Follows = tecs.ecs.newRelationship(
+                            {
+                                name = "SerFollows",
+                                exclusive = false,
+                            }
+                        ) as Follows
 
                         local inst = FollowsContainer(42) as tecs.ecs.Relationship
                         local data = FollowsContainer.serialize(inst)
@@ -1150,12 +1227,14 @@ describe(
                         local record Parent is tecs.ecs.Relationship
                             metamethod __call: function(self, target: integer): Parent
                         end
-                        local ParentOf: Parent = tecs.ecs.newRelationship({
-                            name = "SerParentOf",
-                            exclusive = true,
-                            sparse = true,
-                            reverseIndex = true,
-                        }) as Parent
+                        local ParentOf: Parent = tecs.ecs.newRelationship(
+                            {
+                                name = "SerParentOf",
+                                exclusive = true,
+                                sparse = true,
+                                reverseIndex = true,
+                            }
+                        ) as Parent
 
                         local w = tecs.ecs.newWorld()
                         local parent = w:spawn()
@@ -1185,12 +1264,14 @@ describe(
                             flag: boolean
                             n: number
                         end
-                        local FlagComp: Flags = tecs.ecs.newComponent({
-                            name = "FalseDefaultComp" .. math.random(1, 1000000),
-                            container = {} as Flags,
-                            fields = {"flag", "n"},
-                            defaults = {false, 5},
-                        })
+                        local FlagComp: Flags = tecs.ecs.newComponent(
+                            {
+                                name = "FalseDefaultComp" .. math.random(1, 1000000),
+                                container = {} as Flags,
+                                fields = {"flag", "n"},
+                                defaults = {false, 5},
+                            }
+                        )
 
                         local a = FlagComp()
                         luassert.equals(false, a.flag, "an omitted argument must take the false default, not nil")

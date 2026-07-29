@@ -459,58 +459,62 @@ local record animation
     sheetRevision: function(): integer
 end
 
-ecs.newFFIComponent({
-    name = "Animation",
-    container = Animation,
-    fields = {
-        {"sheet", "int32_t"},
-        {"tag", "int32_t"},
-        {"speed", "float"},
-        {"time", "float"},
-        {"frame", "int32_t"},
-        {"loop", "bool"},
-        {"playing", "bool"},
-    },
-    defaults = {0, 0, DEFAULT_SPEED, 0, 0, true, true},
-    -- A sheet id and a tag id are this process's answers, decided by the
-    -- order sheets were built in. What crosses a save is the pair of names,
-    -- resolved again on the way back in. The frame is deliberately dropped:
-    -- zero makes the first step rewrite the Sprite's region, so a restored
-    -- entity does not depend on the region its Sprite was saved holding.
-    serialize = function(instance: Animation): {string: any}
-        local source = sheet.byId(instance.sheet as integer)
-        local name: string = nil
-        local tag: string = nil
-        if source ~= nil then
-            name = source.name
-            tag = source:tagName(instance.tag as integer)
-        end
-        return {
-            sheet = name,
-            tag = tag,
-            speed = instance.speed,
-            time = instance.time,
-            loop = instance.loop,
-            playing = instance.playing,
-        }
-    end,
-    deserialize = function(_world: World, data: {string: any}): Animation
-        local source = sheet.byName(data.sheet as string)
-        local id, tag = 0, 0
-        if source ~= nil then
-            id = source.id
-            tag = source:tagId(data.tag as string)
-        end
-        return Animation(
-            id, tag, data.speed as number, data.time as number, 0, data.loop as boolean, data.playing as boolean
-        )
-    end,
-})
+ecs.newFFIComponent(
+    {
+        name = "Animation",
+        container = Animation,
+        fields = {
+            {"sheet", "int32_t"},
+            {"tag", "int32_t"},
+            {"speed", "float"},
+            {"time", "float"},
+            {"frame", "int32_t"},
+            {"loop", "bool"},
+            {"playing", "bool"},
+        },
+        defaults = {0, 0, DEFAULT_SPEED, 0, 0, true, true},
+        -- A sheet id and a tag id are this process's answers, decided by the
+        -- order sheets were built in. What crosses a save is the pair of names,
+        -- resolved again on the way back in. The frame is deliberately dropped:
+        -- zero makes the first step rewrite the Sprite's region, so a restored
+        -- entity does not depend on the region its Sprite was saved holding.
+        serialize = function(instance: Animation): {string: any}
+            local source = sheet.byId(instance.sheet as integer)
+            local name: string = nil
+            local tag: string = nil
+            if source ~= nil then
+                name = source.name
+                tag = source:tagName(instance.tag as integer)
+            end
+            return {
+                sheet = name,
+                tag = tag,
+                speed = instance.speed,
+                time = instance.time,
+                loop = instance.loop,
+                playing = instance.playing,
+            }
+        end,
+        deserialize = function(_world: World, data: {string: any}): Animation
+            local source = sheet.byName(data.sheet as string)
+            local id, tag = 0, 0
+            if source ~= nil then
+                id = source.id
+                tag = source:tagId(data.tag as string)
+            end
+            return Animation(
+                id, tag, data.speed as number, data.time as number, 0, data.loop as boolean, data.playing as boolean
+            )
+        end,
+    }
+)
 
-ecs.newComponent({
-    name = "AnimationEvents",
-    container = AnimationEvents,
-})
+ecs.newComponent(
+    {
+        name = "AnimationEvents",
+        container = AnimationEvents,
+    }
+)
 
 animation.Animation = Animation
 animation.Completed = Completed
@@ -1127,15 +1131,19 @@ function animation.plugin(world: World)
         -- holding, and one that has never been encoded still has to be
         -- encoded. Which of the two it is decides the rate, so they are two
         -- queries rather than one and a test per row.
-        local running <const> = world:query({
-            name = "tecs.EncodedSprites",
-            include = {Animation, Sprite},
-            exclude = {ecs.Paused},
-        })
-        local paused <const> = world:query({
-            name = "tecs.EncodedPausedSprites",
-            include = {Animation, Sprite, ecs.Paused},
-        })
+        local running <const> = world:query(
+            {
+                name = "tecs.EncodedSprites",
+                include = {Animation, Sprite},
+                exclude = {ecs.Paused},
+            }
+        )
+        local paused <const> = world:query(
+            {
+                name = "tecs.EncodedPausedSprites",
+                include = {Animation, Sprite, ecs.Paused},
+            }
+        )
 
         -- The step count each update began on, which is the count the last one
         -- ended at because nothing between two updates moves it.
@@ -1144,11 +1152,13 @@ function animation.plugin(world: World)
         -- `PostUpdate` rather than a render phase, so this lands before
         -- extraction whatever order the renderer and this plugin were
         -- installed in.
-        world:addSystem({
-            name = "tecs.EncodeAnimation",
-            phase = ecs.phases.PostUpdate,
-            run = function() encode(world, running, false, began); encode(world, paused, true, began) end,
-        })
+        world:addSystem(
+            {
+                name = "tecs.EncodeAnimation",
+                phase = ecs.phases.PostUpdate,
+                run = function() encode(world, running, false, began); encode(world, paused, true, began) end,
+            }
+        )
 
         -- Beside the encoder rather than in the fixed phases, because what says
         -- whether an entity crossed its cycle is the encoding, and the encoding
@@ -1156,35 +1166,43 @@ function animation.plugin(world: World)
         -- window of steps rather than one step: an update that ran several
         -- fixed steps reports one crossing over all of them, which is the
         -- contract `Looped` already had.
-        local subscribed <const> = world:query({
-            name = "tecs.AnimationSubscribers",
-            include = {Animation, Sprite, AnimationEvents},
-        })
-        world:addSystem({
-            name = "tecs.ReportAnimation",
-            phase = ecs.phases.PostUpdate,
-            run = function()
-                local clock <const> = world:fixedStepCount()
-                if clock ~= began then
-                    report(world, subscribed, began, clock)
-                    began = clock
-                end
-            end,
-        })
+        local subscribed <const> = world:query(
+            {
+                name = "tecs.AnimationSubscribers",
+                include = {Animation, Sprite, AnimationEvents},
+            }
+        )
+        world:addSystem(
+            {
+                name = "tecs.ReportAnimation",
+                phase = ecs.phases.PostUpdate,
+                run = function()
+                    local clock <const> = world:fixedStepCount()
+                    if clock ~= began then
+                        report(world, subscribed, began, clock)
+                        began = clock
+                    end
+                end,
+            }
+        )
         return
     end
 
-    local animated <const> = world:query({
-        name = "tecs.AnimatedSprites",
-        type = "logic",
-        include = {Animation, Sprite},
-    })
+    local animated <const> = world:query(
+        {
+            name = "tecs.AnimatedSprites",
+            type = "logic",
+            include = {Animation, Sprite},
+        }
+    )
 
-    world:addSystem({
-        name = "tecs.AdvanceAnimation",
-        phase = ecs.phases.FixedPostUpdate,
-        run = function(dt: number) advance(world, animated, dt) end,
-    })
+    world:addSystem(
+        {
+            name = "tecs.AdvanceAnimation",
+            phase = ecs.phases.FixedPostUpdate,
+            run = function(dt: number) advance(world, animated, dt) end,
+        }
+    )
 end
 
 return animation

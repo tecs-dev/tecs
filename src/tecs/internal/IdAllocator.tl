@@ -23,13 +23,15 @@ Slot 0 is reserved as the "null entity" sentinel: never allocated, always dead. 
 
 local C <const> = require("ffi")
 
-C.cdef([[
+C.cdef(
+    [[
 typedef struct TecsEntitySlot {
     uint32_t generation;
     uint32_t archetypeId;
     uint32_t row;
 } TecsEntitySlot;
-]])
+]]
+)
 
 local SLOT_ARRAY_T <const> = C.typeof("TecsEntitySlot[?]")
 local UINT32_ARRAY_T <const> = C.typeof("uint32_t[?]")

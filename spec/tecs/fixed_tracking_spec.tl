@@ -3,20 +3,24 @@ require("busted")
 local tecs <const> = require("tecs")
 local fixedtracking <const> = require("tecs.internal.fixedtracking")
 
-local Position = tecs.ecs.newFFIComponent({
-    name = "FixedTrackingSpecPosition",
-    container = {},
-    fields = {{"x", "float"}},
-    defaults = {0},
-})
+local Position = tecs.ecs.newFFIComponent(
+    {
+        name = "FixedTrackingSpecPosition",
+        container = {},
+        fields = {{"x", "float"}},
+        defaults = {0},
+    }
+)
 
 local function findArchetype(world: tecs.World): tecs.ecs.Archetype
     local match: tecs.ecs.Archetype = nil
-    world:forEachArchetype(function(arch: tecs.ecs.Archetype)
-        if arch:get(Position) ~= nil and ((arch as {string: any}).entities as {integer})[0] > 0 then
-            match = arch
+    world:forEachArchetype(
+        function(arch: tecs.ecs.Archetype)
+            if arch:get(Position) ~= nil and ((arch as {string: any}).entities as {integer})[0] > 0 then
+                match = arch
+            end
         end
-    end)
+    )
     return match
 end
 
@@ -44,10 +48,15 @@ describe(
                     end
                 )
 
-                world:addSystem({
-                    phase = tecs.ecs.phases.FixedUpdate,
-                    run = function() local positions = arch:getMut(Position); positions[1].x = positions[1].x + 1 end,
-                })
+                world:addSystem(
+                    {
+                        phase = tecs.ecs.phases.FixedUpdate,
+                        run = function()
+                            local positions = arch:getMut(Position)
+                            positions[1].x = positions[1].x + 1
+                        end,
+                    }
+                )
 
                 world:update(0.025)
 
@@ -70,15 +79,17 @@ describe(
                 fixedtracking.afterStep(
                     world, function() wrote[#wrote + 1] = fixedtracking.wroteThisStep(world, arch, Position) end
                 )
-                world:addSystem({
-                    phase = tecs.ecs.phases.FixedUpdate,
-                    run = function()
-                        if not shouldWrite then
-                            return
-                        end
-                        arch:getMut(Position)[1].x = 1
-                    end,
-                })
+                world:addSystem(
+                    {
+                        phase = tecs.ecs.phases.FixedUpdate,
+                        run = function()
+                            if not shouldWrite then
+                                return
+                            end
+                            arch:getMut(Position)[1].x = 1
+                        end,
+                    }
+                )
 
                 world:update(0.01)
                 shouldWrite = false
@@ -96,14 +107,18 @@ describe(
                 world:spawn(Position(0))
                 local arch = findArchetype(world)
 
-                world:addSystem({
-                    phase = tecs.ecs.phases.FixedUpdate,
-                    run = function() arch:getMut(Position)[1].x = 1 end,
-                })
-                world:addSystem({
-                    phase = tecs.ecs.phases.Update,
-                    run = function() arch:getMut(Position)[1].x = 2 end,
-                })
+                world:addSystem(
+                    {
+                        phase = tecs.ecs.phases.FixedUpdate,
+                        run = function() arch:getMut(Position)[1].x = 1 end,
+                    }
+                )
+                world:addSystem(
+                    {
+                        phase = tecs.ecs.phases.Update,
+                        run = function() arch:getMut(Position)[1].x = 2 end,
+                    }
+                )
 
                 world:update(0.01)
 

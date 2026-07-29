@@ -108,7 +108,8 @@ end
 -- Per-slot working state. One flat struct so a whole playback's state is a
 -- single contiguous allocation the evaluation loop indexes rather than a
 -- table per slot.
-ffi.cdef([[
+ffi.cdef(
+    [[
     typedef struct {
         double init;
         double applied;
@@ -122,7 +123,8 @@ ffi.cdef([[
         double d3;
         double d4;
     } TweenSlotState;
-]])
+]]
+)
 
 local record TweenSlotState
     init: number
@@ -716,13 +718,16 @@ local function newTarget(component: Component, fields: {string}, mode?: TargetMo
     for i = 1, #fields do
         parts = parts .. "." .. fields[i]
     end
-    local t: TargetImpl = setmetatable({
-        id = id or parts,
-        component = component,
-        componentName = component.componentName,
-        fields = fields,
-        mode = mode or (#fields == 2 and "field2" or "field"),
-    }, TARGET_MT)
+    local t: TargetImpl = setmetatable(
+        {
+            id = id or parts,
+            component = component,
+            componentName = component.componentName,
+            fields = fields,
+            mode = mode or (#fields == 2 and "field2" or "field"),
+        },
+        TARGET_MT
+    )
     t.init = function(
         world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
     ): (number, number, number, number, number, number, number, number)
@@ -897,12 +902,14 @@ local BUILTIN_TARGETS: {TargetName: TargetImpl} = {
     ["color.rgba"] = targets.color as TargetImpl,
 }
 
-tweeneval.TrackingTarget = ecs.newComponent({
-    name = "TweenTrackingTarget",
-    container = TrackingTarget,
-    fields = {"entity", "key"},
-    defaults = {0, ""},
-})
+tweeneval.TrackingTarget = ecs.newComponent(
+    {
+        name = "TweenTrackingTarget",
+        container = TrackingTarget,
+        fields = {"entity", "key"},
+        defaults = {0, ""},
+    }
+)
 
 -------------------------------------------------------------------------------
 -- Authoring resolution and the target/source codec
@@ -1072,16 +1079,19 @@ function tweeneval.deserializeTimeline(data: {string: any}): TimelineImpl
             }
         end
     end
-    return setmetatable({
-        slots = slots,
-        runs = runs,
-        emits = data.emits as {EmitSlot},
-        totalDuration = (data.totalDuration as number) or 0,
-        stateSize = (data.stateSize as integer) or #slots,
-        channel = data.channel as string,
-        presetName = data.presetName as string,
-        pinned = data.pinned == true,
-    } as TimelineImpl, TIMELINE_MT)
+    return setmetatable(
+        {
+            slots = slots,
+            runs = runs,
+            emits = data.emits as {EmitSlot},
+            totalDuration = (data.totalDuration as number) or 0,
+            stateSize = (data.stateSize as integer) or #slots,
+            channel = data.channel as string,
+            presetName = data.presetName as string,
+            pinned = data.pinned == true,
+        } as TimelineImpl,
+        TIMELINE_MT
+    )
 end
 
 -------------------------------------------------------------------------------

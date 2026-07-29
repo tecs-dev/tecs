@@ -47,12 +47,14 @@ local ffi <const> = require("ffi")
 -- Enough of dlfcn to pin a library in memory. Declared here rather than
 -- generated, because it is the C library's own interface and exists on every
 -- target that can load one at all.
-ffi.cdef([[
+ffi.cdef(
+    [[
 void *dlopen(const char *path, int mode);
 char *dlerror(void);
 void *LoadLibraryA(const char *path);
 unsigned long GetLastError(void);
-]])
+]]
+)
 
 --- Load now, and never unmap.
 ---
@@ -242,13 +244,15 @@ end
 
 -- Then the system, where a dependency such as SDL lives. Homebrew installs
 -- outside the default linker path, hence the prefixes.
-for _, path in ipairs({
-    "/opt/homebrew/lib/",
-    "/opt/homebrew/opt/%s/lib/",
-    "/usr/local/lib/",
-    "/usr/local/opt/%s/lib/",
-    "/usr/lib/",
-}) do
+for _, path in ipairs(
+    {
+        "/opt/homebrew/lib/",
+        "/opt/homebrew/opt/%s/lib/",
+        "/usr/local/lib/",
+        "/usr/local/opt/%s/lib/",
+        "/usr/lib/",
+    }
+) do
     loader.searchPaths[#loader.searchPaths + 1] = path
 end
 

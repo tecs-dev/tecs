@@ -492,74 +492,77 @@ local resolve: function(spec: Namespace): any
 --- the module that owns the name.
 local function namespace(spec: Namespace): {string: any}
     local resolved: {string: any} = {}
-    return setmetatable({} as {string: any}, {
-        __index = function(_self: {string: any}, name: string): any
-            local member: any = resolved[name]
-            if member ~= nil then
-                return member
-            end
-            if spec.within ~= nil and spec.within[name] ~= nil then
-                member = resolve(spec.within[name])
-            end
-            if member == nil and spec.beside ~= nil then
-                for _, path in ipairs(spec.beside) do
-                    member = (require(path) as {string: any})[name]
-                    if member ~= nil then
-                        break
+    return setmetatable(
+        {} as {string: any},
+        {
+            __index = function(_self: {string: any}, name: string): any
+                local member: any = resolved[name]
+                if member ~= nil then
+                    return member
+                end
+                if spec.within ~= nil and spec.within[name] ~= nil then
+                    member = resolve(spec.within[name])
+                end
+                if member == nil and spec.beside ~= nil then
+                    for _, path in ipairs(spec.beside) do
+                        member = (require(path) as {string: any})[name]
+                        if member ~= nil then
+                            break
+                        end
                     end
                 end
-            end
-            if member == nil and spec.module ~= nil then
-                member = (require(spec.module) as {string: any})[name]
-            end
-            if member == nil then
-                return nil
-            end
-            resolved[name] = member
-            return member
-        end,
+                if member == nil and spec.module ~= nil then
+                    member = (require(spec.module) as {string: any})[name]
+                end
+                if member == nil then
+                    return nil
+                end
+                resolved[name] = member
+                return member
+            end,
 
-        --- Sends a write to whichever module answers the name.
-        ---
-        --- A namespace stands in front of several modules, and a module
-        --- value can be assigned rather than called: a write parked on
-        --- this table would then be a write the module that reads the
-        --- name back never sees, with nothing to raise. Ownership is
-        --- decided the way a read decides it, and a name no module below
-        --- answers is the namespace's own.
-        ---
-        --- Only a namespace needs this. A name backed by one module
-        --- answers with the module, so a write to it is a write on the
-        --- table that owns the name and there is nothing to route.
-        ---
-        --- What was resolved earlier is dropped rather than replaced, so
-        --- the next read asks the owner again instead of trusting a copy
-        --- taken before the write.
-        __newindex = function(_self: {string: any}, name: string, value: any)
-            local owner: {string: any} = nil
-            if spec.beside ~= nil then
-                for _, path in ipairs(spec.beside) do
-                    local module = require(path) as {string: any}
+            --- Sends a write to whichever module answers the name.
+            ---
+            --- A namespace stands in front of several modules, and a module
+            --- value can be assigned rather than called: a write parked on
+            --- this table would then be a write the module that reads the
+            --- name back never sees, with nothing to raise. Ownership is
+            --- decided the way a read decides it, and a name no module below
+            --- answers is the namespace's own.
+            ---
+            --- Only a namespace needs this. A name backed by one module
+            --- answers with the module, so a write to it is a write on the
+            --- table that owns the name and there is nothing to route.
+            ---
+            --- What was resolved earlier is dropped rather than replaced, so
+            --- the next read asks the owner again instead of trusting a copy
+            --- taken before the write.
+            __newindex = function(_self: {string: any}, name: string, value: any)
+                local owner: {string: any} = nil
+                if spec.beside ~= nil then
+                    for _, path in ipairs(spec.beside) do
+                        local module = require(path) as {string: any}
+                        if module[name] ~= nil then
+                            owner = module
+                            break
+                        end
+                    end
+                end
+                if owner == nil and spec.module ~= nil then
+                    local module = require(spec.module) as {string: any}
                     if module[name] ~= nil then
                         owner = module
-                        break
                     end
                 end
-            end
-            if owner == nil and spec.module ~= nil then
-                local module = require(spec.module) as {string: any}
-                if module[name] ~= nil then
-                    owner = module
+                if owner == nil then
+                    resolved[name] = value
+                    return
                 end
-            end
-            if owner == nil then
-                resolved[name] = value
-                return
-            end
-            owner[name] = value
-            resolved[name] = nil
-        end,
-    })
+                owner[name] = value
+                resolved[name] = nil
+            end,
+        }
+    )
 end
 
 --- Hangs the names one level down off the module that carries them.

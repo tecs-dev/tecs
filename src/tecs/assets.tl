@@ -316,10 +316,12 @@ function assets.install(luaPath?: string)
     if worker ~= nil then
         return
     end
-    worker = workers.spawn({
-        source = DECODER,
-        luaPath = luaPath or package.path,
-    })
+    worker = workers.spawn(
+        {
+            source = DECODER,
+            luaPath = luaPath or package.path,
+        }
+    )
 end
 
 function assets.installed(): boolean
@@ -389,14 +391,17 @@ local function settleResult(result: {string: any}): boolean
     end
 
     if entry.kind == "sound" then
-        local sound = setmetatable({
-            path = entry.path,
-            resident = result.resident as boolean,
-            durationMs = result.durationMs as integer,
-            -- One holder, because sound does not dedupe: this future has one
-            -- caller and no link of the caller's can add another.
-            _refs = 1,
-        } as Sound, SoundMT)
+        local sound = setmetatable(
+            {
+                path = entry.path,
+                resident = result.resident as boolean,
+                durationMs = result.durationMs as integer,
+                -- One holder, because sound does not dedupe: this future has one
+                -- caller and no link of the caller's can add another.
+                _refs = 1,
+            } as Sound,
+            SoundMT
+        )
         if sound.resident then
             -- Ownership arrived with the address, exactly as it does for a
             -- surface. The mixer allocated this, so the mixer frees it.
@@ -409,18 +414,21 @@ local function settleResult(result: {string: any}): boolean
     -- Ownership arrived with the address. The image stays alive until the last
     -- caller releases it, because the pixels are what they came for.
     local allocation = ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue
-    local image = setmetatable({
-        path = entry.path,
-        _image = allocation,
-        pixels = RUST.tecsImagePixels(allocation) as loader.CValue,
-        width = result.width as integer,
-        height = result.height as integer,
-        pitch = result.pitch as integer,
-        -- Zero, and counted up by each surviving caller's own link below. A
-        -- caller that canceled first never runs one, which is what makes this
-        -- exact rather than optimistic.
-        _refs = 0,
-    } as Image, ImageMT)
+    local image = setmetatable(
+        {
+            path = entry.path,
+            _image = allocation,
+            pixels = RUST.tecsImagePixels(allocation) as loader.CValue,
+            width = result.width as integer,
+            height = result.height as integer,
+            pitch = result.pitch as integer,
+            -- Zero, and counted up by each surviving caller's own link below. A
+            -- caller that canceled first never runs one, which is what makes this
+            -- exact rather than optimistic.
+            _refs = 0,
+        } as Image,
+        ImageMT
+    )
     root:complete(image)
     return true
 end
@@ -548,12 +556,15 @@ function Loader:cancel(future: Future<any>)
     end
 end
 
-local pump <const> = setmetatable({
-    -- Both live here rather than in `Future`, which is what lets a decode keep
-    -- a shorter default than a child process without a second convention.
-    sliceMs = SLICE_MS,
-    defaultWaitMs = DEFAULT_WAIT_MS,
-} as Loader, LoaderMT)
+local pump <const> = setmetatable(
+    {
+        -- Both live here rather than in `Future`, which is what lets a decode keep
+        -- a shorter default than a child process without a second convention.
+        sliceMs = SLICE_MS,
+        defaultWaitMs = DEFAULT_WAIT_MS,
+    } as Loader,
+    LoaderMT
+)
 
 local source <const> = pump as Future.Source
 
@@ -665,13 +676,15 @@ function assets.loadSound(path: string, mode: string, streamMs: integer): Future
     -- handed out as it is: canceling it takes the count to zero and abandons
     -- the decode, which is what the only caller giving up should do.
     root._watchers = 1
-    worker:send({
-        id = id,
-        kind = "sound",
-        path = path,
-        mode = mode,
-        streamMs = streamMs,
-    })
+    worker:send(
+        {
+            id = id,
+            kind = "sound",
+            path = path,
+            mode = mode,
+            streamMs = streamMs,
+        }
+    )
     return root as Future<Sound>
 end
 

@@ -34,16 +34,19 @@ end
 local ARCHETYPE_INDEX_MT <const>: metatable<ArchetypeIndex> = {__index = ArchetypeIndex}
 
 function ArchetypeIndex.new(dirtySet?: {Archetype: boolean}): ArchetypeIndex
-    local self: ArchetypeIndex = setmetatable({
-        componentIndex = {},
-        dirtySet = dirtySet,
-        relationshipStoreGetter = nil,
-        onNewArchetype = nil,
-        emptyArchetype = nil as Archetype,
-        maxId = 0,
-        freeIds = {},
-        freeIdCount = 0,
-    }, ARCHETYPE_INDEX_MT)
+    local self: ArchetypeIndex = setmetatable(
+        {
+            componentIndex = {},
+            dirtySet = dirtySet,
+            relationshipStoreGetter = nil,
+            onNewArchetype = nil,
+            emptyArchetype = nil as Archetype,
+            maxId = 0,
+            freeIds = {},
+            freeIdCount = 0,
+        },
+        ARCHETYPE_INDEX_MT
+    )
 
     -- Eagerly create the empty archetype.
     do

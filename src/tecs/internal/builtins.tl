@@ -275,13 +275,15 @@ end
 --- Setup relationships
 -------------------------------------------------------------------------------
 
-builtins.ChildOf = components.newRelationship({
-    name = "ChildOf",
-    exclusive = true,
-    sparse = true,
-    reverseIndex = true,
-    cascadeDelete = true,
-})
+builtins.ChildOf = components.newRelationship(
+    {
+        name = "ChildOf",
+        exclusive = true,
+        sparse = true,
+        reverseIndex = true,
+        cascadeDelete = true,
+    }
+)
 
 -------------------------------------------------------------------------------
 --- Setup events
@@ -333,15 +335,19 @@ events.newEvent(builtins.FinishSnapshotLoad)
 --- Setup components
 -------------------------------------------------------------------------------
 
-builtins.Name = components.newScalarComponent({
-    name = "Name",
-    kind = "string",
-}) as types.components.ScalarComponent<string>
+builtins.Name = components.newScalarComponent(
+    {
+        name = "Name",
+        kind = "string",
+    }
+) as types.components.ScalarComponent<string>
 
-builtins.Key = components.newScalarComponent({
-    name = "Key",
-    kind = "string",
-}) as types.components.ScalarComponent<string>
+builtins.Key = components.newScalarComponent(
+    {
+        name = "Key",
+        kind = "string",
+    }
+) as types.components.ScalarComponent<string>
 
 do
     local Key <const> = builtins.Key as Component
@@ -350,70 +356,76 @@ do
     keyI.frameworkBehaviorBits = behavior.keyBits()
 end
 
-components.newFFIComponent({
-    name = "Transform",
-    container = builtins.Transform,
-    fields = {
-        {"x", "float"},
-        {"y", "float"},
-        {"z", "float"},
-        {"layer", "int32_t"},
-        {"rotation", "float"},
-        {"scaleX", "float"},
-        {"scaleY", "float"},
-    },
-    defaults = {0, 0, 0, 1, 0, 1, 1},
-    init = function(instance: builtins.Transform)
-        if instance.layer < 1 then
-            error("Transform layer must be greater than 0, got: " .. tostring(instance.layer))
-        end
-    end,
-})
+components.newFFIComponent(
+    {
+        name = "Transform",
+        container = builtins.Transform,
+        fields = {
+            {"x", "float"},
+            {"y", "float"},
+            {"z", "float"},
+            {"layer", "int32_t"},
+            {"rotation", "float"},
+            {"scaleX", "float"},
+            {"scaleY", "float"},
+        },
+        defaults = {0, 0, 0, 1, 0, 1, 1},
+        init = function(instance: builtins.Transform)
+            if instance.layer < 1 then
+                error("Transform layer must be greater than 0, got: " .. tostring(instance.layer))
+            end
+        end,
+    }
+)
 
 local function percentComplete(self: builtins.TTL): number
     return 1 - (self.remaining / self.startingTime)
 end
 
-components.newComponent({
-    name = "TTL",
-    container = builtins.TTL,
-    fields = {"remaining", "startingTime"},
-    init = function(instance: builtins.TTL, remaining: number, startingTime?: number)
-        assert(remaining > 0, "TTL must be greater than 0")
-        if startingTime ~= nil then
-            assert(startingTime > 0, "TTL startingTime must be greater than 0")
-            assert(startingTime >= remaining, "TTL startingTime must be >= remaining")
-        end
-        instance.remaining = remaining
-        instance.startingTime = startingTime or remaining
-        instance.percentComplete = percentComplete
-    end,
-})
+components.newComponent(
+    {
+        name = "TTL",
+        container = builtins.TTL,
+        fields = {"remaining", "startingTime"},
+        init = function(instance: builtins.TTL, remaining: number, startingTime?: number)
+            assert(remaining > 0, "TTL must be greater than 0")
+            if startingTime ~= nil then
+                assert(startingTime > 0, "TTL startingTime must be greater than 0")
+                assert(startingTime >= remaining, "TTL startingTime must be >= remaining")
+            end
+            instance.remaining = remaining
+            instance.startingTime = startingTime or remaining
+            instance.percentComplete = percentComplete
+        end,
+    }
+)
 
 builtins.Disabled = components.newTagComponent({name = "Disabled"})
 
 builtins.Paused = components.newTagComponent({name = "Paused"})
 
-components.newFFIComponent({
-    name = "RelativeTransform",
-    container = builtins.RelativeTransform,
-    fields = {
-        {"x", "float"},
-        {"y", "float"},
-        {"z", "float"},
-        {"rotation", "float"},
-        {"scaleX", "float"},
-        {"scaleY", "float"},
-        {"originX", "float"},
-        {"originY", "float"},
-    },
-    defaults = {0, 0, 0, 0, 1, 1, 0, 0},
-    -- RelativeTransform auto-adds Transform via the declarative
-    -- `requires` trait. ChildOf is required by convention (the
-    -- composition system errors downstream if absent); users should
-    -- add it explicitly alongside RelativeTransform.
-    requires = {builtins.Transform},
-})
+components.newFFIComponent(
+    {
+        name = "RelativeTransform",
+        container = builtins.RelativeTransform,
+        fields = {
+            {"x", "float"},
+            {"y", "float"},
+            {"z", "float"},
+            {"rotation", "float"},
+            {"scaleX", "float"},
+            {"scaleY", "float"},
+            {"originX", "float"},
+            {"originY", "float"},
+        },
+        defaults = {0, 0, 0, 0, 1, 1, 0, 0},
+        -- RelativeTransform auto-adds Transform via the declarative
+        -- `requires` trait. ChildOf is required by convention (the
+        -- composition system errors downstream if absent); users should
+        -- add it explicitly alongside RelativeTransform.
+        requires = {builtins.Transform},
+    }
+)
 
 -------------------------------------------------------------------------------
 --- Plugin implementation
@@ -455,22 +467,24 @@ function builtins.plugin(w: types.World)
     -- Handle despawning entities with TTLs.
     do
         local ttlQuery = w:query({include = {TTL}, type = "logic"})
-        w:addSystem({
-            name = "ttl",
-            phase = phases.FixedUpdate,
-            run = function(dt: number)
-                for archetype, len, entities in ttlQuery:iter() do
-                    local ttls = archetype:getMut(TTL)
-                    for row = 1, len do
-                        local ttl = ttls[row]
-                        ttl.remaining = ttl.remaining - dt
-                        if ttl.remaining <= 0 then
-                            w:despawn(entities[row])
+        w:addSystem(
+            {
+                name = "ttl",
+                phase = phases.FixedUpdate,
+                run = function(dt: number)
+                    for archetype, len, entities in ttlQuery:iter() do
+                        local ttls = archetype:getMut(TTL)
+                        for row = 1, len do
+                            local ttl = ttls[row]
+                            ttl.remaining = ttl.remaining - dt
+                            if ttl.remaining <= 0 then
+                                w:despawn(entities[row])
+                            end
                         end
                     end
-                end
-            end,
-        })
+                end,
+            }
+        )
     end
 
     -- Relative transform system
@@ -542,10 +556,12 @@ function builtins.plugin(w: types.World)
             }
         )
 
-        local hierarchyQuery = w:query({
-            name = "RelativeTransform",
-            include = {RelativeTransform, ChildOf, Transform},
-        })
+        local hierarchyQuery = w:query(
+            {
+                name = "RelativeTransform",
+                include = {RelativeTransform, ChildOf, Transform},
+            }
+        )
 
         local wImpl <const> = w as internal.WorldImpl
         local function hierarchyStateDirty(): boolean
@@ -568,36 +584,40 @@ function builtins.plugin(w: types.World)
         -- them. Sample at frame end and carry the result into the next
         -- frame's gate.
         local pendingHierarchyDirty = false
-        w:addSystem({
-            name = "RelativeTransformDirtySampler",
-            phase = phases.RenderLast,
-            run = function() pendingHierarchyDirty = hierarchyStateDirty() end,
-        })
+        w:addSystem(
+            {
+                name = "RelativeTransformDirtySampler",
+                phase = phases.RenderLast,
+                run = function() pendingHierarchyDirty = hierarchyStateDirty() end,
+            }
+        )
 
-        w:addSystem({
-            name = "RelativeTransform",
-            phase = phases.PostUpdate,
-            run = function()
-                -- Dirty-skip: recompute only when an archetype carrying
-                -- hierarchy state changed this frame or at the end of
-                -- the previous one. Sparse ChildOf retargets mark the
-                -- container column at commit, so they open this gate too.
-                if not pendingHierarchyDirty and not hierarchyStateDirty() then
-                    return
-                end
-                pendingHierarchyDirty = false
-
-                table_clear(worldTransformCache)
-                for _archetype, len, entities in hierarchyQuery:iter() do
-                    -- The resolver writes world transforms in place and
-                    -- marks Transform dirty per changed entity.
-                    for row = 1, len do
-                        -- Access triggers __index, which recursively resolves the parent chain
-                        local _ = worldTransformCache[entities[row]]
+        w:addSystem(
+            {
+                name = "RelativeTransform",
+                phase = phases.PostUpdate,
+                run = function()
+                    -- Dirty-skip: recompute only when an archetype carrying
+                    -- hierarchy state changed this frame or at the end of
+                    -- the previous one. Sparse ChildOf retargets mark the
+                    -- container column at commit, so they open this gate too.
+                    if not pendingHierarchyDirty and not hierarchyStateDirty() then
+                        return
                     end
-                end
-            end,
-        })
+                    pendingHierarchyDirty = false
+
+                    table_clear(worldTransformCache)
+                    for _archetype, len, entities in hierarchyQuery:iter() do
+                        -- The resolver writes world transforms in place and
+                        -- marks Transform dirty per changed entity.
+                        for row = 1, len do
+                            -- Access triggers __index, which recursively resolves the parent chain
+                            local _ = worldTransformCache[entities[row]]
+                        end
+                    end
+                end,
+            }
+        )
     end
 end
 
