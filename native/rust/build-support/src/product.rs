@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -18,16 +18,20 @@ use crate::{staging, tooling};
 pub const TEAL_REVISION: &str = "1326d829790b92e23defe69fcf40460103b60d1d";
 pub const CERULEAN_REVISION: &str = "a09b6d734a55d58489e16498bd83387d39c4cafe";
 pub const TEALDOC_REVISION: &str = "198a81c9ebf81b79cebd671e16aec9da8649e9e4";
-pub const SDL3_REVISION: &str = "release-3.4.12";
-pub const SDL3_MIXER_REVISION: &str = "release-3.2.4";
+pub const BUSTED_VERSION: &str = "2.2.0-1";
+pub const SDL3_VERSION: &str = "3.4.12";
+pub const SDL3_REVISION: &str = "f87239e71e42da91ca317a12eefb82cfbf3393eb";
+pub const SDL3_MIXER_VERSION: &str = "3.2.4";
+pub const SDL3_MIXER_REVISION: &str = "72a81869b45e249e8e67102db4e98dd2441f05a1";
 pub const LUAJIT_REVISION: &str = "871db2c84ecefd70a850e03a6c340214a81739f0";
 pub const LUAJIT_ROLLING: &str = "2.1.1753364724";
-pub const SHADERC_REVISION: &str = "v2026.3";
+pub const SHADERC_VERSION: &str = "2026.3";
+pub const SHADERC_REVISION: &str = "2c8cae778eec0283b44acbe7ed1a386865d78799";
 pub const GLSLANG_REVISION: &str = "168d452a4f460d24b588fed08477a81c44ee27a1";
 pub const SPIRV_TOOLS_REVISION: &str = "b707790a898e44038547df54580022fc1cf89c3d";
 pub const SPIRV_HEADERS_REVISION: &str = "29981f65241605e08b0ede4cfeb999fe3b723c6a";
-pub const SPIRV_CROSS_REVISION: &str = "vulkan-sdk-1.4.313.0";
-pub const ZLIB_REVISION: &str = "v1.3.2";
+pub const SPIRV_CROSS_REVISION: &str = "2275d0efc4f2fa46851035d9d3c67c105bc8b99e";
+pub const ZLIB_REVISION: &str = "da607da739fa6047df13e66a2af6b8bec7c2a498";
 
 const C_WARNINGS: &[&str] = &[
     "-Wall",
@@ -88,7 +92,8 @@ impl Paths {
         }
     }
 
-    fn create(&self) -> Result<()> {
+    fn prepare(&self) -> Result<()> {
+        fs::create_dir_all(&self.out)?;
         for path in [
             &self.lua,
             &self.teal,
@@ -97,11 +102,20 @@ impl Paths {
             &self.objects,
             &self.library,
             &self.binary,
-            &self.cargo,
             &self.notices,
-            &self.dependencies,
         ] {
+            if path.exists() {
+                fs::remove_dir_all(path)?;
+            }
             fs::create_dir_all(path)?;
+        }
+        for path in [&self.cargo, &self.dependencies] {
+            fs::create_dir_all(path)?;
+        }
+        for path in [self.out.join("build-info.txt"), self.out.join("main.lua")] {
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
         }
         Ok(())
     }
@@ -111,14 +125,21 @@ impl Paths {
 struct Package {
     name: &'static str,
     includes: Vec<PathBuf>,
+    compile_flags: Vec<OsString>,
     library_directories: Vec<PathBuf>,
-    libraries: Vec<String>,
+    link_flags: Vec<OsString>,
+}
+
+struct CompileOptions<'a> {
+    defines: &'a [&'a str],
+    flags: &'a [OsString],
+    warnings: bool,
 }
 
 pub fn build(root: &Path, preset: Preset) -> Result<PathBuf> {
     let paths = Paths::new(root, preset);
-    paths.create()?;
     preflight(root, preset)?;
+    paths.prepare()?;
     match preset.dependencies {
         DependencyMode::System => build_system(root, preset, &paths),
         DependencyMode::Packaged | DependencyMode::Single => build_pinned(root, preset, &paths),
@@ -159,13 +180,19 @@ pub fn run_demo(root: &Path, preset: Preset, arguments: &[OsString]) -> Result<(
 }
 
 pub fn test(root: &Path, preset: Preset) -> Result<()> {
+    let mut rust = Command::new("cargo");
+    rust.args(["test", "--locked", "--workspace", "--all-targets"])
+        .current_dir(root);
+    run(&mut rust, "Rust workspace tests")?;
+
     build(root, preset)?;
     let paths = Paths::new(root, preset);
+    check_product_abi(root, preset, &paths)?;
     for arguments in [
         ["--pattern", "headless_spec"],
         ["--exclude-pattern", "headless_spec"],
     ] {
-        let mut command = Command::new("busted");
+        let mut command = Command::new(root.join("vendor/bin/busted"));
         command.args(arguments).current_dir(root);
         apply_development_environment(&mut command, &paths);
         run(&mut command, "Busted spec suite")?;
@@ -187,7 +214,53 @@ pub fn shaders(root: &Path, preset: Preset) -> Result<()> {
 pub fn abi_check(root: &Path, preset: Preset) -> Result<()> {
     build(root, preset)?;
     let paths = Paths::new(root, preset);
-    crate::abi::check(root, &paths.lua.join("tecs/ffi")).map(|_| ())
+    check_product_abi(root, preset, &paths)
+}
+
+fn check_product_abi(root: &Path, preset: Preset, paths: &Paths) -> Result<()> {
+    let include_directories = if matches!(preset.dependencies, DependencyMode::System) {
+        system_packages(preset)?
+            .into_iter()
+            .map(|(name, package)| (name, package.includes))
+            .collect()
+    } else {
+        let include = paths.dependencies.join("prefix/include");
+        BTreeMap::from([
+            ("sdl3", vec![include.clone()]),
+            ("sdl3mixer", vec![include.clone()]),
+            ("shaderc", vec![include.clone()]),
+            ("spvc", vec![include.join("spirv_cross")]),
+            ("zlib", vec![include]),
+        ])
+    };
+    let mut compiler_arguments = Vec::new();
+    if std::env::consts::OS == "macos" {
+        compiler_arguments.extend([
+            OsString::from("-arch"),
+            OsString::from(target_arch(preset)),
+            OsString::from(format!(
+                "-mmacosx-version-min={}",
+                preset
+                    .deployment_target
+                    .context("macOS preset has no deployment target")?
+            )),
+        ]);
+    }
+    crate::abi::check_with_options(
+        root,
+        &paths.lua.join("tecs/ffi"),
+        &crate::abi::Options {
+            include_directories: &include_directories,
+            compiler: if std::env::consts::OS == "windows" {
+                "cl"
+            } else {
+                "cc"
+            },
+            compiler_arguments: &compiler_arguments,
+            msvc: std::env::consts::OS == "windows",
+        },
+    )
+    .map(|_| ())
 }
 
 pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
@@ -222,8 +295,14 @@ pub fn install_package(root: &Path, preset: Preset) -> Result<PathBuf> {
         paths.binary.join(executable_name()),
         prefix.join("bin").join(executable_name()),
     )?;
-    copy_dynamic_libraries(&paths.library, &prefix.join("lib"))?;
-    copy_runtime_dependencies(&paths.dependencies.join("prefix/lib"), &prefix.join("lib"))?;
+    let runtime = if preset.rust_target.contains("windows") {
+        prefix.join("bin")
+    } else {
+        prefix.join("lib")
+    };
+    copy_dynamic_libraries(&paths.library, &runtime)?;
+    copy_runtime_dependencies(&paths.dependencies.join("prefix/lib"), &runtime)?;
+    copy_runtime_dependencies(&paths.dependencies.join("prefix/bin"), &runtime)?;
     copy_tree(&paths.lua, &prefix.join("share/tecs/lua"), false)?;
     copy_tree(&paths.teal, &prefix.join("share/tecs/teal"), false)?;
     copy_tree(&paths.notices, &prefix.join("share/tecs"), false)?;
@@ -253,10 +332,11 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
     crate::package::check(&crate::package::Options {
         prefix: &prefix,
         allow_compiler: false,
+        teal_compiler: &root.join("vendor/bin/tl"),
         teal_types: Some(&root.join("vendor/share/lua/5.1")),
     })?;
 
-    let mut specs = Command::new("busted");
+    let mut specs = Command::new(root.join("vendor/bin/busted"));
     specs
         .args(["--pattern", "headless_spec"])
         .current_dir(root)
@@ -322,10 +402,11 @@ fn copy_dynamic_libraries_if(
             continue;
         }
         let name = entry.file_name().to_string_lossy();
-        if (name.ends_with(".dylib")
-            || name.ends_with(".so")
-            || name.contains(".so.")
-            || name.ends_with(".dll"))
+        let lowered = name.to_ascii_lowercase();
+        if (lowered.ends_with(".dylib")
+            || lowered.ends_with(".so")
+            || lowered.contains(".so.")
+            || lowered.ends_with(".dll"))
             && wanted(&name)
         {
             let target = destination.join(entry.file_name());
@@ -387,6 +468,14 @@ fn apply_development_environment(command: &mut Command, paths: &Paths) {
         .env("TECS_LIB", &paths.library)
         .env("TECS_ASSETS", &paths.lua)
         .env("TECS_SPEC", &paths.spec);
+    if std::env::consts::OS == "windows" {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut directories = vec![paths.library.clone()];
+        directories.extend(std::env::split_paths(&path));
+        if let Ok(path) = std::env::join_paths(directories) {
+            command.env("PATH", path);
+        }
+    }
 }
 
 fn preflight(root: &Path, preset: Preset) -> Result<()> {
@@ -464,7 +553,15 @@ fn pinned_packages(
     let source_root = paths.dependencies.join("src");
     let build_root = paths.dependencies.join("build");
     let prefix = paths.dependencies.join("prefix");
+    for path in [&source_root, &build_root, &prefix] {
+        validate_owned_path(&paths.out, path, false)?;
+    }
     fs::create_dir_all(&source_root)?;
+    for path in [&build_root, &prefix] {
+        if path.exists() {
+            fs::remove_dir_all(path)?;
+        }
+    }
     fs::create_dir_all(&build_root)?;
     fs::create_dir_all(&prefix)?;
 
@@ -481,6 +578,7 @@ fn pinned_packages(
         SDL3_MIXER_REVISION,
     )?;
     update_submodules(
+        &source_root,
         &mixer,
         &[
             "external/ogg",
@@ -508,16 +606,19 @@ fn pinned_packages(
         SHADERC_REVISION,
     )?;
     fetch_source_at(
+        &source_root,
         &shaderc.join("third_party/glslang"),
         "https://github.com/KhronosGroup/glslang.git",
         GLSLANG_REVISION,
     )?;
     fetch_source_at(
+        &source_root,
         &shaderc.join("third_party/spirv-tools"),
         "https://github.com/KhronosGroup/SPIRV-Tools.git",
         SPIRV_TOOLS_REVISION,
     )?;
     fetch_source_at(
+        &source_root,
         &shaderc.join("third_party/spirv-tools/external/spirv-headers"),
         "https://github.com/KhronosGroup/SPIRV-Headers.git",
         SPIRV_HEADERS_REVISION,
@@ -635,72 +736,117 @@ fn pinned_packages(
     let mut packages = BTreeMap::new();
     packages.insert(
         "sdl3",
-        Package {
-            name: "sdl3",
-            includes: vec![prefix.join("include")],
-            library_directories: vec![library.clone()],
-            libraries: vec!["SDL3".into()],
-        },
+        pinned_package(
+            "sdl3",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec!["SDL3".into()],
+        ),
     );
     packages.insert(
         "sdl3mixer",
-        Package {
-            name: "sdl3mixer",
-            includes: vec![prefix.join("include")],
-            library_directories: vec![library.clone()],
-            libraries: vec!["SDL3_mixer".into()],
-        },
+        pinned_package(
+            "sdl3mixer",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec!["SDL3_mixer".into()],
+        ),
     );
     packages.insert(
         "zlib",
-        Package {
-            name: "zlib",
-            includes: vec![prefix.join("include")],
-            library_directories: vec![library.clone()],
-            libraries: vec![if preset.rust_target.contains("windows") {
+        pinned_package(
+            "zlib",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec![if preset.rust_target.contains("windows") {
                 "zlib".into()
             } else {
                 "z".into()
             }],
-        },
+        ),
     );
     packages.insert(
         "luajit",
-        Package {
-            name: "luajit",
-            includes: vec![prefix.join("include/luajit-2.1")],
-            library_directories: vec![library.clone()],
-            libraries: vec![if preset.rust_target.contains("windows") {
+        pinned_package(
+            "luajit",
+            vec![prefix.join("include/luajit-2.1")],
+            vec![library.clone()],
+            vec![if preset.rust_target.contains("windows") {
                 "lua51".into()
             } else {
                 "luajit-5.1".into()
             }],
-        },
+        ),
     );
     packages.insert(
         "shaderc",
-        Package {
-            name: "shaderc",
-            includes: vec![prefix.join("include")],
-            library_directories: vec![library.clone()],
-            libraries: vec![if shared {
+        pinned_package(
+            "shaderc",
+            vec![prefix.join("include")],
+            vec![library.clone()],
+            vec![if shared {
                 "shaderc_shared".into()
             } else {
                 "shaderc_combined".into()
             }],
-        },
+        ),
     );
     packages.insert(
         "spvc",
-        Package {
-            name: "spvc",
-            includes: vec![prefix.join("include/spirv_cross")],
-            library_directories: vec![library],
-            libraries: Vec::new(),
-        },
+        pinned_package(
+            "spvc",
+            vec![prefix.join("include/spirv_cross")],
+            vec![library],
+            Vec::new(),
+        ),
     );
     let _ = root;
     Ok(packages)
+}
+
+fn pinned_package(
+    name: &'static str,
+    includes: Vec<PathBuf>,
+    library_directories: Vec<PathBuf>,
+    libraries: Vec<String>,
+) -> Package {
+    let mut compile_flags = Vec::new();
+    for include in &includes {
+        if std::env::consts::OS == "windows" {
+            compile_flags.push(format!("/I{}", include.display()).into());
+        } else {
+            compile_flags.push("-I".into());
+            compile_flags.push(include.as_os_str().to_owned());
+        }
+    }
+    let mut link_flags = Vec::new();
+    for directory in &library_directories {
+        link_flags.push(
+            if std::env::consts::OS == "windows" {
+                format!("/libpath:{}", directory.display())
+            } else {
+                format!("-L{}", directory.display())
+            }
+            .into(),
+        );
+    }
+    for library in &libraries {
+        link_flags.push(
+            if std::env::consts::OS == "windows" {
+                format!("{library}.lib")
+            } else {
+                format!("-l{library}")
+            }
+            .into(),
+        );
+    }
+    Package {
+        name,
+        includes,
+        compile_flags,
+        library_directories,
+        link_flags,
+    }
 }
 
 fn define_bool(name: &str, enabled: bool) -> OsString {
@@ -709,43 +855,340 @@ fn define_bool(name: &str, enabled: bool) -> OsString {
 
 fn fetch_source(root: &Path, name: &str, repository: &str, revision: &str) -> Result<PathBuf> {
     let destination = root.join(name);
-    fetch_source_at(&destination, repository, revision)?;
+    fetch_source_at(root, &destination, repository, revision)?;
     Ok(destination)
 }
 
-fn fetch_source_at(destination: &Path, repository: &str, revision: &str) -> Result<()> {
-    let marker = destination.join(".tecs-revision");
-    if fs::read_to_string(&marker).ok().as_deref() == Some(revision) {
-        return Ok(());
+fn fetch_source_at(
+    source_cache: &Path,
+    destination: &Path,
+    repository: &str,
+    revision: &str,
+) -> Result<()> {
+    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!(
+            "{repository} is pinned to {revision:?}, not an immutable 40-character commit"
+        );
+    }
+    validate_owned_path(source_cache, destination, true)?;
+    if destination.exists() && !destination.join(".git").exists() {
+        fs::remove_dir_all(destination)?;
     }
     fs::create_dir_all(destination)?;
-    if !destination.join(".git").is_dir() {
+    if !destination.join(".git").exists() {
         command::run("git", ["init"], destination)?;
         command::run("git", ["remote", "add", "origin", repository], destination)?;
+    } else {
+        command::run(
+            "git",
+            ["remote", "set-url", "origin", repository],
+            destination,
+        )?;
     }
-    let mut fetch = Command::new("git");
-    fetch
-        .args(["fetch", "--depth", "1", "origin", revision])
-        .current_dir(destination);
-    run(&mut fetch, &format!("fetching {repository} at {revision}"))?;
-    command::run("git", ["checkout", "--detach", "FETCH_HEAD"], destination)?;
-    fs::write(marker, revision)?;
+
+    if git_output(destination, &["rev-parse", "HEAD"])
+        .ok()
+        .as_deref()
+        != Some(revision)
+    {
+        let mut fetch = Command::new("git");
+        fetch
+            .args(["fetch", "--depth", "1", "origin", revision])
+            .current_dir(destination);
+        run(&mut fetch, &format!("fetching {repository} at {revision}"))?;
+        command::run(
+            "git",
+            ["checkout", "--force", "--detach", "FETCH_HEAD"],
+            destination,
+        )?;
+    }
+    command::run("git", ["reset", "--hard", revision], destination)?;
+    command::run("git", ["clean", "-ffdx"], destination)?;
+
+    let head = git_output(destination, &["rev-parse", "HEAD"])?;
+    if head != revision {
+        anyhow::bail!(
+            "{} resolved {revision} to {head}; refusing a mutable or unexpected checkout",
+            destination.display()
+        );
+    }
+    let status = git_output(
+        destination,
+        &[
+            "status",
+            "--ignore-submodules=all",
+            "--porcelain",
+            "--untracked-files=all",
+        ],
+    )?;
+    if !status.is_empty() {
+        anyhow::bail!(
+            "{} is dirty after restoring {revision}:\n{status}",
+            destination.display()
+        );
+    }
+    let residue = git_output(destination, &["clean", "-nffdx"])?;
+    if !residue.is_empty() {
+        anyhow::bail!(
+            "{} retains ignored or untracked files after restoring {revision}:\n{residue}",
+            destination.display()
+        );
+    }
     Ok(())
 }
 
-fn update_submodules(source: &Path, submodules: &[&str]) -> Result<()> {
-    let marker = source.join(".tecs-submodules");
-    if fs::read_to_string(&marker).ok().as_deref() == Some("ready") {
+fn validate_owned_path(root: &Path, destination: &Path, reject_git_file: bool) -> Result<()> {
+    let root_metadata = fs::symlink_metadata(root)
+        .with_context(|| format!("reading dependency source cache {}", root.display()))?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        anyhow::bail!(
+            "dependency source cache {} is not a real directory",
+            root.display()
+        );
+    }
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("resolving dependency source cache {}", root.display()))?;
+    let relative = destination.strip_prefix(root).with_context(|| {
+        format!(
+            "dependency source {} is outside its owned cache {}",
+            destination.display(),
+            root.display()
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        anyhow::bail!(
+            "dependency source {} cannot be the cache root itself",
+            destination.display()
+        );
+    }
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::Normal(name) => current.push(name),
+            Component::CurDir => continue,
+            _ => {
+                anyhow::bail!(
+                    "dependency source {} escapes its owned cache {}",
+                    destination.display(),
+                    root.display()
+                );
+            }
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "dependency source path {} is a symbolic link",
+                    current.display()
+                );
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                anyhow::bail!(
+                    "dependency source path {} is not a directory",
+                    current.display()
+                );
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    if destination.exists() {
+        let canonical_destination = destination
+            .canonicalize()
+            .with_context(|| format!("resolving dependency source {}", destination.display()))?;
+        if !canonical_destination.starts_with(&canonical_root) {
+            anyhow::bail!(
+                "dependency source {} resolves outside its owned cache {}",
+                destination.display(),
+                root.display()
+            );
+        }
+    }
+    if reject_git_file {
+        match fs::symlink_metadata(destination.join(".git")) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                anyhow::bail!(
+                    "dependency source {} has a .git file or link; linked worktrees are not owned caches",
+                    destination.display()
+                );
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn update_submodules(source_cache: &Path, source: &Path, submodules: &[&str]) -> Result<()> {
+    for submodule in submodules {
+        let directory = source.join(submodule);
+        validate_owned_path(source_cache, &directory, false)?;
+        validate_submodule_git_directory(source, &directory)?;
+    }
+    let fingerprint = submodule_fingerprint(source, submodules)?;
+    let git_directory = git_output(source, &["rev-parse", "--git-dir"])?;
+    let git_directory = if Path::new(&git_directory).is_absolute() {
+        PathBuf::from(git_directory)
+    } else {
+        source.join(git_directory)
+    };
+    let marker = git_directory.join("tecs-submodules");
+    if fs::read_to_string(&marker).ok().as_deref() == Some(fingerprint.as_str())
+        && submodules_are_ready(source, submodules)?
+    {
         return Ok(());
     }
     let mut command = Command::new("git");
     command
-        .args(["submodule", "update", "--init", "--depth", "1", "--"])
+        .args([
+            "submodule",
+            "update",
+            "--init",
+            "--force",
+            "--depth",
+            "1",
+            "--",
+        ])
         .args(submodules)
         .current_dir(source);
     run(&mut command, "fetching SDL_mixer decoder sources")?;
-    fs::write(marker, "ready")?;
+    for submodule in submodules {
+        let directory = source.join(submodule);
+        validate_owned_path(source_cache, &directory, false)?;
+        validate_submodule_git_directory(source, &directory)?;
+        let expected = git_output(source, &["rev-parse", &format!("HEAD:{submodule}")])?;
+        command::run("git", ["reset", "--hard", &expected], &directory)?;
+        command::run("git", ["clean", "-ffdx"], &directory)?;
+    }
+    if !submodules_are_ready(source, submodules)? {
+        anyhow::bail!(
+            "{} has incomplete or mismatched pinned submodules",
+            source.display()
+        );
+    }
+    fs::write(marker, fingerprint)?;
     Ok(())
+}
+
+fn validate_submodule_git_directory(source: &Path, submodule: &Path) -> Result<()> {
+    let metadata = match fs::symlink_metadata(submodule.join(".git")) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "dependency submodule {} has a symbolic-link .git directory",
+            submodule.display()
+        );
+    }
+    if metadata.is_dir() {
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        anyhow::bail!(
+            "dependency submodule {} has an invalid .git entry",
+            submodule.display()
+        );
+    }
+
+    let contents = fs::read_to_string(submodule.join(".git"))
+        .with_context(|| format!("reading submodule metadata in {}", submodule.display()))?;
+    let git_directory = contents
+        .trim()
+        .strip_prefix("gitdir:")
+        .map(str::trim)
+        .context("submodule .git file has no gitdir target")?;
+    let git_directory = Path::new(git_directory);
+    let git_directory = if git_directory.is_absolute() {
+        git_directory.to_path_buf()
+    } else {
+        submodule.join(git_directory)
+    };
+    let git_directory = git_directory.canonicalize().with_context(|| {
+        format!(
+            "resolving submodule Git directory {}",
+            git_directory.display()
+        )
+    })?;
+    let source_git = source
+        .join(".git")
+        .canonicalize()
+        .with_context(|| format!("resolving dependency Git directory {}", source.display()))?;
+    if !git_directory.starts_with(source_git.join("modules")) {
+        anyhow::bail!(
+            "dependency submodule {} points its .git file outside the owned checkout",
+            submodule.display()
+        );
+    }
+    Ok(())
+}
+
+fn submodule_fingerprint(source: &Path, submodules: &[&str]) -> Result<String> {
+    let mut fingerprint = git_output(source, &["rev-parse", "HEAD"])?;
+    for submodule in submodules {
+        fingerprint.push('\n');
+        fingerprint.push_str(submodule);
+        fingerprint.push('=');
+        fingerprint.push_str(&git_output(
+            source,
+            &["rev-parse", &format!("HEAD:{submodule}")],
+        )?);
+    }
+    Ok(fingerprint)
+}
+
+fn submodules_are_ready(source: &Path, submodules: &[&str]) -> Result<bool> {
+    for submodule in submodules {
+        let directory = source.join(submodule);
+        if !directory.join(".git").exists() {
+            return Ok(false);
+        }
+        let expected = git_output(source, &["rev-parse", &format!("HEAD:{submodule}")])?;
+        if git_output(&directory, &["rev-parse", "HEAD"])
+            .ok()
+            .as_deref()
+            != Some(&expected)
+        {
+            return Ok(false);
+        }
+        if !git_output(
+            &directory,
+            &["status", "--porcelain", "--untracked-files=all"],
+        )?
+        .is_empty()
+        {
+            return Ok(false);
+        }
+        if !git_output(&directory, &["clean", "-nffdx"])?.is_empty() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn git_output(directory: &Path, arguments: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .output()
+        .with_context(|| format!("starting git in {}", directory.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed in {}:\n{}",
+            arguments.join(" "),
+            directory.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8(output.stdout)
+        .context("git emitted non-UTF-8 output")?
+        .trim()
+        .to_owned())
 }
 
 fn configure_cmake(
@@ -951,21 +1394,18 @@ fn system_packages(preset: Preset) -> Result<BTreeMap<&'static str, Package>> {
 
 fn check_system_versions(preset: Preset) -> Result<()> {
     let mut requirements = vec![
-        ("SDL3", "sdl3", SDL3_REVISION, false),
-        ("SDL3_mixer", "sdl3-mixer", SDL3_MIXER_REVISION, false),
+        ("SDL3", "sdl3", SDL3_VERSION, false),
+        ("SDL3_mixer", "sdl3-mixer", SDL3_MIXER_VERSION, false),
         ("LuaJIT", "luajit", LUAJIT_ROLLING, false),
     ];
     if matches!(preset.shaders, ShaderMode::Runtime) {
-        requirements.push(("shaderc", "shaderc", SHADERC_REVISION, true));
+        requirements.push(("shaderc", "shaderc", SHADERC_VERSION, true));
     }
     let mut drift = Vec::new();
     for (name, package, revision, prefix) in requirements {
         let found = pkg_output(package, &["--modversion"])?;
         let found = found.trim();
-        let expected = revision
-            .strip_prefix("release-")
-            .or_else(|| revision.strip_prefix('v'))
-            .unwrap_or(revision);
+        let expected = revision;
         let matches = if prefix {
             found.starts_with(expected)
         } else {
@@ -999,29 +1439,51 @@ fn check_system_versions(preset: Preset) -> Result<()> {
 }
 
 fn pkg_config(name: &'static str, package: &'static str) -> Result<Package> {
-    let cflags = pkg_output(package, &["--cflags-only-I"])?;
-    let includes = cflags
-        .split_whitespace()
-        .filter_map(|flag| flag.strip_prefix("-I"))
-        .map(PathBuf::from)
-        .collect();
+    let cflags = pkg_output(package, &["--cflags"])?;
     let flags = pkg_output(package, &["--libs"])?;
-    let library_directories = flags
-        .split_whitespace()
-        .filter_map(|flag| flag.strip_prefix("-L"))
-        .map(PathBuf::from)
-        .collect();
-    let libraries = flags
-        .split_whitespace()
-        .filter_map(|flag| flag.strip_prefix("-l"))
-        .map(str::to_owned)
-        .collect();
+    package_from_flags(name, &cflags, &flags)
+}
+
+fn package_from_flags(name: &'static str, cflags: &str, flags: &str) -> Result<Package> {
+    let compile_flags = parse_shell_flags(cflags, &format!("{name} compiler flags"))?;
+    let link_flags = parse_shell_flags(flags, &format!("{name} linker flags"))?;
     Ok(Package {
         name,
-        includes,
-        library_directories,
-        libraries,
+        includes: flag_values(&compile_flags, "-I")
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        compile_flags: compile_flags.into_iter().map(OsString::from).collect(),
+        library_directories: flag_values(&link_flags, "-L")
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+        link_flags: link_flags.into_iter().map(OsString::from).collect(),
     })
+}
+
+fn parse_shell_flags(source: &str, description: &str) -> Result<Vec<String>> {
+    shlex::split(source).with_context(|| format!("pkg-config emitted malformed {description}"))
+}
+
+fn flag_values(flags: &[String], prefix: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < flags.len() {
+        if flags[index] == prefix {
+            if let Some(value) = flags.get(index + 1) {
+                values.push(value.clone());
+                index += 2;
+                continue;
+            }
+        } else if let Some(value) = flags[index].strip_prefix(prefix) {
+            if !value.is_empty() {
+                values.push(value.to_owned());
+            }
+        }
+        index += 1;
+    }
+    values
 }
 
 fn pkg_output(package: &str, arguments: &[&str]) -> Result<String> {
@@ -1592,12 +2054,8 @@ fn compile_and_link(
     packages: &BTreeMap<&'static str, Package>,
     rust_archive: &Path,
 ) -> Result<()> {
-    let mut includes = vec![root.join("native"), paths.generated.clone()];
-    for package in packages.values() {
-        includes.extend(package.includes.clone());
-    }
-    includes.sort();
-    includes.dedup();
+    let includes = vec![root.join("native"), paths.generated.clone()];
+    let compile_flags = package_compile_flags(packages);
 
     let cjson_objects = CJSON_SOURCES
         .iter()
@@ -1608,8 +2066,11 @@ fn compile_and_link(
                 paths,
                 &root.join(source),
                 &includes,
-                &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
-                false,
+                CompileOptions {
+                    defines: &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
+                    flags: &compile_flags,
+                    warnings: false,
+                },
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1635,7 +2096,20 @@ fn compile_and_link(
     }
     let registry_objects = registry_sources
         .iter()
-        .map(|source| compile_c(root, preset, paths, source, &includes, &[], true))
+        .map(|source| {
+            compile_c(
+                root,
+                preset,
+                paths,
+                source,
+                &includes,
+                CompileOptions {
+                    defines: &[],
+                    flags: &compile_flags,
+                    warnings: true,
+                },
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     let registry_archive = paths.out.join("libtecs_registry.a");
     archive(&registry_archive, &registry_objects)?;
@@ -1661,8 +2135,11 @@ fn compile_and_link(
         paths,
         &paths.generated.join("worker_anchor.c"),
         &includes,
-        &[],
-        true,
+        CompileOptions {
+            defines: &[],
+            flags: &compile_flags,
+            warnings: true,
+        },
     )?;
     let worker = paths.library.join(shared_name("tecsworker"));
     let mut worker_flags = vec![
@@ -1686,8 +2163,11 @@ fn compile_and_link(
         paths,
         &paths.generated.join("sdl_main.c"),
         &includes,
-        &[],
-        true,
+        CompileOptions {
+            defines: &[],
+            flags: &compile_flags,
+            warnings: true,
+        },
     )?;
     let executable = paths.binary.join(executable_name());
     let worker_link = if std::env::consts::OS == "windows" {
@@ -1736,16 +2216,12 @@ fn compile_and_link_single(
         &payload_source,
     )?;
 
-    let mut includes = vec![
+    let includes = vec![
         root.join("native"),
         root.join("cli"),
         paths.generated.clone(),
     ];
-    for package in packages.values() {
-        includes.extend(package.includes.clone());
-    }
-    includes.sort();
-    includes.dedup();
+    let compile_flags = package_compile_flags(packages);
 
     let cjson_objects = CJSON_SOURCES
         .iter()
@@ -1756,8 +2232,11 @@ fn compile_and_link_single(
                 paths,
                 &root.join(source),
                 &includes,
-                &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
-                false,
+                CompileOptions {
+                    defines: &["USE_INTERNAL_FPCONV", "MULTIPLE_THREADS"],
+                    flags: &compile_flags,
+                    warnings: false,
+                },
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1781,7 +2260,20 @@ fn compile_and_link_single(
     }
     let registry_objects = registry_sources
         .iter()
-        .map(|source| compile_c(root, preset, paths, source, &includes, &[], true))
+        .map(|source| {
+            compile_c(
+                root,
+                preset,
+                paths,
+                source,
+                &includes,
+                CompileOptions {
+                    defines: &[],
+                    flags: &compile_flags,
+                    warnings: true,
+                },
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     let registry_archive = paths.out.join("libtecs_registry.a");
     archive(&registry_archive, &registry_objects)?;
@@ -1792,10 +2284,24 @@ fn compile_and_link_single(
         paths,
         &paths.generated.join("sdl_main.c"),
         &includes,
-        &["TECS_PAYLOAD=1"],
-        true,
+        CompileOptions {
+            defines: &["TECS_PAYLOAD=1"],
+            flags: &compile_flags,
+            warnings: true,
+        },
     )?;
-    let payload_object = compile_c(root, preset, paths, &payload_source, &includes, &[], true)?;
+    let payload_object = compile_c(
+        root,
+        preset,
+        paths,
+        &payload_source,
+        &includes,
+        CompileOptions {
+            defines: &[],
+            flags: &compile_flags,
+            warnings: true,
+        },
+    )?;
     let mut flags = vec![
         registry_archive.into_os_string(),
         cjson_archive.into_os_string(),
@@ -1854,8 +2360,7 @@ fn compile_c(
     paths: &Paths,
     source: &Path,
     includes: &[PathBuf],
-    defines: &[&str],
-    warnings: bool,
+    options: CompileOptions<'_>,
 ) -> Result<PathBuf> {
     let relative = source
         .strip_prefix(root)
@@ -1890,11 +2395,17 @@ fn compile_c(
     if preset.sanitize {
         command.args(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]);
     }
-    if warnings {
+    if options.warnings {
         if std::env::consts::OS == "windows" {
             command.arg("/W4");
+            if std::env::var_os("TECS_WERROR").is_some() {
+                command.arg("/WX");
+            }
         } else {
             command.args(C_WARNINGS);
+            if std::env::var_os("TECS_WERROR").is_some() {
+                command.arg("-Werror");
+            }
         }
     }
     for include in includes {
@@ -1904,7 +2415,7 @@ fn compile_c(
             command.arg("-I").arg(include);
         }
     }
-    for define in defines {
+    for define in options.defines {
         command.arg(format!(
             "{}{define}",
             if std::env::consts::OS == "windows" {
@@ -1914,6 +2425,7 @@ fn compile_c(
             }
         ));
     }
+    command.args(options.flags);
     run(
         &mut command,
         &format!("C compilation of {}", source.display()),
@@ -2085,8 +2597,11 @@ fn link_spirv_cross(
         paths,
         &paths.generated.join("spvc_anchor.c"),
         includes,
-        &[],
-        true,
+        CompileOptions {
+            defines: &[],
+            flags: &package_compile_flags(packages),
+            warnings: true,
+        },
     )?;
     let package = package(packages, "spvc")?;
     let directory = package
@@ -2155,22 +2670,16 @@ fn package_link_flags(packages: &[&Package]) -> Vec<OsString> {
     let mut flags = Vec::new();
     for package in packages {
         let _ = package.name;
-        for directory in &package.library_directories {
-            flags.push(OsString::from(if std::env::consts::OS == "windows" {
-                format!("/libpath:{}", directory.display())
-            } else {
-                format!("-L{}", directory.display())
-            }));
-        }
-        for library in &package.libraries {
-            flags.push(OsString::from(if std::env::consts::OS == "windows" {
-                format!("{library}.lib")
-            } else {
-                format!("-l{library}")
-            }));
-        }
+        flags.extend(package.link_flags.iter().cloned());
     }
     flags
+}
+
+fn package_compile_flags(packages: &BTreeMap<&'static str, Package>) -> Vec<OsString> {
+    packages
+        .values()
+        .flat_map(|package| package.compile_flags.iter().cloned())
+        .collect()
 }
 
 fn force_load(archive: &Path) -> Vec<OsString> {
@@ -2346,12 +2855,18 @@ fn run(command: &mut Command, description: &str) -> Result<()> {
 
 #[cfg(all(test, unix))]
 mod tests {
+    use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::symlink;
+    use std::process::Command;
 
     use tempfile::tempdir;
 
-    use super::copy_dynamic_libraries;
+    use super::{
+        copy_dynamic_libraries, fetch_source_at, package_from_flags, package_link_flags, Paths,
+        GLSLANG_REVISION, LUAJIT_REVISION, SDL3_MIXER_REVISION, SDL3_REVISION, SHADERC_REVISION,
+        SPIRV_CROSS_REVISION, SPIRV_HEADERS_REVISION, SPIRV_TOOLS_REVISION, ZLIB_REVISION,
+    };
 
     #[test]
     fn packaged_library_aliases_remain_symlinks() {
@@ -2371,5 +2886,312 @@ mod tests {
             fs::read_link(alias).unwrap(),
             std::path::PathBuf::from("libSDL3.0.dylib")
         );
+    }
+    #[test]
+    fn preparing_a_build_removes_outputs_but_preserves_caches() {
+        let root = tempdir().unwrap();
+        let preset = "macos-arm64-dev".parse().unwrap();
+        let paths = Paths::new(root.path(), preset);
+        for path in [
+            &paths.lua,
+            &paths.teal,
+            &paths.spec,
+            &paths.generated,
+            &paths.objects,
+            &paths.library,
+            &paths.binary,
+            &paths.notices,
+            &paths.cargo,
+            &paths.dependencies,
+        ] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("stale"), b"stale").unwrap();
+        }
+        fs::write(paths.out.join("build-info.txt"), b"stale").unwrap();
+        fs::write(paths.out.join("main.lua"), b"stale").unwrap();
+
+        paths.prepare().unwrap();
+
+        for path in [
+            &paths.lua,
+            &paths.teal,
+            &paths.spec,
+            &paths.generated,
+            &paths.objects,
+            &paths.library,
+            &paths.binary,
+            &paths.notices,
+        ] {
+            assert!(path.is_dir());
+            assert!(!path.join("stale").exists());
+        }
+        assert!(paths.cargo.join("stale").is_file());
+        assert!(paths.dependencies.join("stale").is_file());
+        assert!(!paths.out.join("build-info.txt").exists());
+        assert!(!paths.out.join("main.lua").exists());
+    }
+
+    #[test]
+    fn native_dependencies_are_pinned_to_commits() {
+        for revision in [
+            SDL3_REVISION,
+            SDL3_MIXER_REVISION,
+            LUAJIT_REVISION,
+            SHADERC_REVISION,
+            GLSLANG_REVISION,
+            SPIRV_TOOLS_REVISION,
+            SPIRV_HEADERS_REVISION,
+            SPIRV_CROSS_REVISION,
+            ZLIB_REVISION,
+        ] {
+            assert_eq!(revision.len(), 40);
+            assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn source_fetch_restores_the_exact_clean_commit() {
+        let origin = tempdir().unwrap();
+        git(origin.path(), &["init"]);
+        fs::write(origin.path().join("tracked"), b"original").unwrap();
+        git(origin.path(), &["add", "tracked"]);
+        let status = Command::new("git")
+            .args(["commit", "-m", "Initial"])
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .current_dir(origin.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let revision = git_output_for_test(origin.path(), &["rev-parse", "HEAD"]);
+
+        let source_cache = tempdir().unwrap();
+        let checkout = source_cache.path().join("source");
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
+        fs::write(checkout.join("tracked"), b"modified").unwrap();
+        fs::write(checkout.join("untracked"), b"untracked").unwrap();
+
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(checkout.join("tracked")).unwrap(), b"original");
+        assert!(!checkout.join("untracked").exists());
+        assert_eq!(
+            git_output_for_test(&checkout, &["rev-parse", "HEAD"]).trim(),
+            revision.trim()
+        );
+        assert!(git_output_for_test(
+            &checkout,
+            &["status", "--porcelain", "--untracked-files=all"]
+        )
+        .trim()
+        .is_empty());
+    }
+
+    #[test]
+    fn source_fetch_removes_ignored_files() {
+        let origin = tempdir().unwrap();
+        git(origin.path(), &["init"]);
+        fs::write(origin.path().join(".gitignore"), b"ignored\n").unwrap();
+        fs::write(origin.path().join("tracked"), b"original").unwrap();
+        git(origin.path(), &["add", ".gitignore", "tracked"]);
+        commit(origin.path());
+        let revision = git_output_for_test(origin.path(), &["rev-parse", "HEAD"]);
+        let source_cache = tempdir().unwrap();
+        let checkout = source_cache.path().join("source");
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
+        fs::write(checkout.join("ignored"), b"residue").unwrap();
+
+        fetch_source_at(
+            source_cache.path(),
+            &checkout,
+            origin.path().to_str().unwrap(),
+            revision.trim(),
+        )
+        .unwrap();
+
+        assert!(!checkout.join("ignored").exists());
+        assert!(git_output_for_test(&checkout, &["clean", "-nffdx"])
+            .trim()
+            .is_empty());
+    }
+
+    #[test]
+    fn source_fetch_rejects_symlink_destinations_without_touching_targets() {
+        let source_cache = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("protected"), b"outside").unwrap();
+        let destination = source_cache.path().join("source");
+        symlink(outside.path(), &destination).unwrap();
+
+        let error = fetch_source_at(
+            source_cache.path(),
+            &destination,
+            "unused",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("symbolic link"));
+        assert_eq!(
+            fs::read(outside.path().join("protected")).unwrap(),
+            b"outside"
+        );
+    }
+
+    #[test]
+    fn source_fetch_rejects_linked_worktree_git_files() {
+        let source_cache = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("protected"), b"outside").unwrap();
+        let destination = source_cache.path().join("source");
+        fs::create_dir(&destination).unwrap();
+        fs::write(
+            destination.join(".git"),
+            format!("gitdir: {}\n", outside.path().join("git").display()),
+        )
+        .unwrap();
+        fs::write(destination.join("protected"), b"inside").unwrap();
+
+        let error = fetch_source_at(
+            source_cache.path(),
+            &destination,
+            "unused",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(".git file"));
+        assert_eq!(fs::read(destination.join("protected")).unwrap(), b"inside");
+        assert_eq!(
+            fs::read(outside.path().join("protected")).unwrap(),
+            b"outside"
+        );
+    }
+
+    #[test]
+    fn source_fetch_rejects_paths_outside_the_owned_cache() {
+        let parent = tempdir().unwrap();
+        let source_cache = parent.path().join("cache");
+        fs::create_dir(&source_cache).unwrap();
+        let outside = parent.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("protected"), b"outside").unwrap();
+        let destination = source_cache.join("../outside");
+
+        let error = fetch_source_at(
+            &source_cache,
+            &destination,
+            "unused",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("escapes its owned cache"));
+        assert_eq!(fs::read(outside.join("protected")).unwrap(), b"outside");
+    }
+
+    #[test]
+    fn source_fetch_rejects_mutable_references() {
+        let source_cache = tempdir().unwrap();
+        let checkout = source_cache.path().join("source");
+        let error = fetch_source_at(source_cache.path(), &checkout, "unused", "v1.0").unwrap_err();
+        assert!(error.to_string().contains("not an immutable"));
+    }
+
+    fn commit(directory: &std::path::Path) {
+        let status = Command::new("git")
+            .args(["commit", "-m", "Initial"])
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .current_dir(directory)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    fn git(directory: &std::path::Path, arguments: &[&str]) {
+        assert!(Command::new("git")
+            .args(arguments)
+            .current_dir(directory)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    fn git_output_for_test(directory: &std::path::Path, arguments: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(directory)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn pkg_config_preserves_quoted_paths_and_exact_flag_order() {
+        let package = package_from_flags(
+            "sample",
+            "-I'/opt/sample include' -pthread -DSAMPLE=1",
+            "-L'/opt/sample lib' -Wl,--start-group -lone -ltwo -Wl,--end-group -pthread",
+        )
+        .unwrap();
+
+        assert_eq!(
+            package.includes,
+            [std::path::PathBuf::from("/opt/sample include")]
+        );
+        assert_eq!(
+            package.compile_flags,
+            [
+                OsString::from("-I/opt/sample include"),
+                OsString::from("-pthread"),
+                OsString::from("-DSAMPLE=1"),
+            ]
+        );
+        assert_eq!(
+            package.library_directories,
+            [std::path::PathBuf::from("/opt/sample lib")]
+        );
+        let expected = [
+            OsString::from("-L/opt/sample lib"),
+            OsString::from("-Wl,--start-group"),
+            OsString::from("-lone"),
+            OsString::from("-ltwo"),
+            OsString::from("-Wl,--end-group"),
+            OsString::from("-pthread"),
+        ];
+        assert_eq!(package.link_flags, expected);
+        assert_eq!(package_link_flags(&[&package]), expected);
+    }
+
+    #[test]
+    fn pkg_config_rejects_unclosed_shell_quotes() {
+        let error = package_from_flags("sample", "-I'unclosed", "-lsample").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("malformed sample compiler flags"));
     }
 }

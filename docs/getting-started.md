@@ -43,6 +43,7 @@ presets build pinned dependencies from source:
 
 ```bash
 cargo xtask presets
+cargo xtask test   # run Rust, ABI, and Lua/Teal tests
 cargo xtask package --preset macos-arm64
 cargo xtask check-package out/package
 ```

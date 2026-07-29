@@ -19,6 +19,7 @@ const DROP_TOKENS: &[&str] = &[
     "SDLCALL",
 ];
 const PROBE_NAME: &str = "tecsconsts";
+const LUA_EXACT_INTEGER: u64 = 1_u64 << 53;
 
 #[derive(Debug)]
 pub struct Options<'a> {
@@ -104,13 +105,21 @@ pub fn generate(options: &Options<'_>) -> Result<()> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Constant {
     Integer(i64),
+    Unsigned(u64),
+    Float(String),
     String(String),
 }
 
 impl Constant {
     fn lua(&self) -> String {
         match self {
-            Self::Integer(value) => value.to_string(),
+            // LuaJIT's LL suffix preserves integers that its default double
+            // literal would round.
+            Self::Integer(value) if value.unsigned_abs() <= LUA_EXACT_INTEGER => value.to_string(),
+            Self::Integer(value) => format!("{value}LL"),
+            Self::Unsigned(value) if *value <= LUA_EXACT_INTEGER => value.to_string(),
+            Self::Unsigned(value) => format!("{value}ULL"),
+            Self::Float(value) => value.clone(),
             Self::String(value) => format!(
                 "\"{}\"",
                 value
@@ -436,7 +445,12 @@ fn evaluate_macros(
     prologue.extend([
         "#include <stdio.h>".to_owned(),
         "#include <stdint.h>".to_owned(),
-        "#define TECS_KIND(x) _Generic((x) + 0, char *: 2, const char *: 2, _Bool: 1, short: 1, unsigned short: 1, int: 1, unsigned int: 1, long: 1, unsigned long: 1, long long: 1, unsigned long long: 1, float: 1, double: 1, long double: 1, default: 0)".to_owned(),
+        "static void tecsString(const char *name, const char *value) { printf(\"%s\\tS\\t%s\\n\", name, value); }".to_owned(),
+        "static void tecsSigned(const char *name, long long value) { printf(\"%s\\tI\\t%lld\\n\", name, value); }".to_owned(),
+        "static void tecsUnsigned(const char *name, unsigned long long value) { printf(\"%s\\tU\\t%llu\\n\", name, value); }".to_owned(),
+        "static void tecsFloat(const char *name, double value) { printf(\"%s\\tF\\t%.17g\\n\", name, value); }".to_owned(),
+        "static void tecsSkip(const char *name, ...) { (void)name; }".to_owned(),
+        "#define TECS_PRINT(name, x) _Generic((x) + 0, char *: tecsString, const char *: tecsString, _Bool: tecsSigned, char: tecsSigned, signed char: tecsSigned, short: tecsSigned, int: tecsSigned, long: tecsSigned, long long: tecsSigned, unsigned char: tecsUnsigned, unsigned short: tecsUnsigned, unsigned int: tecsUnsigned, unsigned long: tecsUnsigned, unsigned long long: tecsUnsigned, float: tecsFloat, double: tecsFloat, default: tecsSkip)(name, (x))".to_owned(),
     ]);
     prologue.extend(std::iter::repeat_n(String::new(), padding));
     prologue.push(format!("static void {function}(void) {{"));
@@ -460,11 +474,7 @@ fn evaluate_macros(
         }
         let body: Vec<_> = active
             .iter()
-            .map(|name| {
-                format!(
-                    "    if (TECS_KIND({name}) == 2) printf(\"{name}\\tS\\t%s\\n\", (const char *)(intptr_t)({name})); else if (TECS_KIND({name}) == 1) printf(\"{name}\\tI\\t%lld\\n\", (long long)({name}));"
-                )
-            })
+            .map(|name| format!("    TECS_PRINT(\"{name}\", {name});"))
             .collect();
         let program = prologue
             .iter()
@@ -521,8 +531,16 @@ fn evaluate_macros(
                 if !value.contains(PROBE_NAME) {
                     found.insert(name.to_owned(), Constant::String(value.to_owned()));
                 }
-            } else if let Ok(value) = value.parse() {
-                found.insert(name.to_owned(), Constant::Integer(value));
+            } else if kind == "I" {
+                if let Ok(value) = value.parse() {
+                    found.insert(name.to_owned(), Constant::Integer(value));
+                }
+            } else if kind == "U" {
+                if let Ok(value) = value.parse() {
+                    found.insert(name.to_owned(), Constant::Unsigned(value));
+                }
+            } else if kind == "F" && value.parse::<f64>().is_ok_and(|number| number.is_finite()) {
+                found.insert(name.to_owned(), Constant::Float(value.to_owned()));
             }
         }
         return Ok(found);
@@ -559,9 +577,14 @@ fn write(path: &Path, contents: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use regex::Regex;
+    use std::fs;
 
-    use super::{clean, declared_names, statements, strip_balanced};
+    use regex::Regex;
+    use tempfile::tempdir;
+
+    use super::{
+        clean, declared_names, extract_defines, statements, strip_balanced, Constant, Options,
+    };
 
     #[test]
     fn strips_nested_attributes() {
@@ -590,5 +613,64 @@ mod tests {
         let result =
             clean("static inline int helper(void) { return 1; }\nextern int api(void);").unwrap();
         assert_eq!(result, "extern int api(void);\n");
+    }
+
+    #[test]
+    fn renders_integers_without_losing_precision() {
+        assert_eq!(Constant::Integer(1_i64 << 54).lua(), "18014398509481984LL");
+        assert_eq!(
+            Constant::Unsigned(u64::MAX).lua(),
+            "18446744073709551615ULL"
+        );
+        assert_eq!(Constant::Unsigned(42).lua(), "42");
+    }
+
+    #[test]
+    fn preserves_floating_and_unsigned_macros() {
+        let directory = tempdir().unwrap();
+        fs::write(
+            directory.path().join("constants.h"),
+            "#include <stdint.h>\n\
+             #define TEST_EPSILON 1.1920928955078125e-7F\n\
+             #define TEST_PI 3.14159265358979323846\n\
+             #define TEST_GRAVITY 9.80665\n\
+             #define TEST_MAX_UINT64 UINT64_MAX\n\
+             #define TEST_STRING \"exact string\"\n\
+             #define TEST_LONG_DOUBLE 1.0L\n",
+        )
+        .unwrap();
+        let headers = vec!["constants.h".to_owned()];
+        let includes = vec![directory.path().to_owned()];
+        let prefixes = vec!["TEST_".to_owned()];
+        let output = directory.path().join("unused.lua");
+        let constants = extract_defines(&Options {
+            compiler: "cc",
+            headers: &headers,
+            include_directories: &includes,
+            defines: &[],
+            keeps: &[],
+            needed: &[],
+            define_prefixes: &prefixes,
+            constants_output: None,
+            output: &output,
+        })
+        .unwrap();
+
+        for (name, expected) in [
+            ("TEST_EPSILON", 1.1920928955078125e-7),
+            ("TEST_PI", std::f64::consts::PI),
+            ("TEST_GRAVITY", 9.80665),
+        ] {
+            let Constant::Float(value) = &constants[name] else {
+                panic!("{name} was not extracted as a floating-point value");
+            };
+            assert_eq!(value.parse::<f64>().unwrap(), expected);
+        }
+        assert_eq!(constants["TEST_MAX_UINT64"], Constant::Unsigned(u64::MAX));
+        assert_eq!(
+            constants["TEST_STRING"],
+            Constant::String("exact string".to_owned())
+        );
+        assert!(!constants.contains_key("TEST_LONG_DOUBLE"));
     }
 }

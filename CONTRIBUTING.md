@@ -4,7 +4,9 @@ Thanks for your interest in contributing!
 
 ## Mandatory requirements
 
-- `cargo xtask test` must pass.
+- `cargo xtask test` must pass. It runs the Rust workspace tests, checks the
+  generated FFI layouts against the C compiler, then runs the Lua and Teal
+  spec suites, so this one command is the canonical test gate.
 - Add tests for new features, bug fixes, or edge cases when reasonable.
 - **Update the generated reference for any user-facing change.** Module
   introductions and examples live in long Teal doc comments; declaration
@@ -43,10 +45,10 @@ hand-written binding.
 
 Every first-party target compiles with a strict warning set, scoped so that
 nothing vendored or pinned is held to it. Locally the warnings are warnings.
-CI configures with `-DTECS_WERROR=ON`, which makes them errors, and it does that
-only for the first-party targets for the same reason the set is scoped that way:
-a compiler newer than a pinned revision turns that project's warning into this
-project's build failure.
+CI sets `TECS_WERROR=1`, which makes them errors, and it does that only for the
+first-party targets for the same reason the set is scoped that way: a compiler
+newer than a pinned revision turns that project's warning into this project's
+build failure.
 
 So a change that adds a warning is a change that fails CI. Fix the site rather
 than suppressing the check, and where a site is genuinely fine, write the cast

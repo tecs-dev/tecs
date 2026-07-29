@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,7 +12,7 @@ use tempfile::tempdir;
 struct Library {
     name: &'static str,
     headers: &'static [&'static str],
-    package: &'static str,
+    include_key: Option<&'static str>,
     requires: &'static [&'static str],
 }
 
@@ -19,28 +20,71 @@ const LIBRARIES: &[Library] = &[
     Library {
         name: "sdl3",
         headers: &["SDL3/SDL.h"],
-        package: "sdl3",
+        include_key: Some("sdl3"),
         requires: &[],
     },
     Library {
         name: "sdl3mixer",
         headers: &["SDL3_mixer/SDL_mixer.h"],
-        package: "sdl3-mixer",
+        include_key: Some("sdl3mixer"),
         requires: &["sdl3"],
     },
     Library {
         name: "shaderc",
         headers: &["shaderc/shaderc.h"],
-        package: "shaderc",
+        include_key: Some("shaderc"),
+        requires: &[],
+    },
+    Library {
+        name: "spvc",
+        headers: &["spirv_cross_c.h"],
+        include_key: Some("spvc"),
         requires: &[],
     },
     Library {
         name: "zlib",
         headers: &["zlib.h"],
-        package: "zlib",
+        include_key: Some("zlib"),
+        requires: &[],
+    },
+    Library {
+        name: "worker",
+        headers: &["worker.h"],
+        include_key: None,
+        requires: &[],
+    },
+    Library {
+        name: "logsink",
+        headers: &["logsink.h"],
+        include_key: None,
+        requires: &[],
+    },
+    Library {
+        name: "dialogs",
+        headers: &["dialogs.h"],
+        include_key: None,
+        requires: &[],
+    },
+    Library {
+        name: "http",
+        headers: &["http.h"],
+        include_key: None,
+        requires: &[],
+    },
+    Library {
+        name: "rust",
+        headers: &["rust.h"],
+        include_key: None,
         requires: &[],
     },
 ];
+
+pub struct Options<'a> {
+    pub include_directories: &'a BTreeMap<&'static str, Vec<PathBuf>>,
+    pub compiler: &'a str,
+    pub compiler_arguments: &'a [OsString],
+    pub msvc: bool,
+}
 
 #[derive(Clone, Debug)]
 struct Record {
@@ -58,6 +102,29 @@ struct Layout {
 }
 
 pub fn check(root: &Path, generated: &Path) -> Result<usize> {
+    let mut include_directories = BTreeMap::new();
+    for (name, package) in [
+        ("sdl3", "sdl3"),
+        ("sdl3mixer", "sdl3-mixer"),
+        ("shaderc", "shaderc"),
+        ("spvc", "spirv-cross-c"),
+        ("zlib", "zlib"),
+    ] {
+        include_directories.insert(name, package_include_directories(package)?);
+    }
+    check_with_options(
+        root,
+        generated,
+        &Options {
+            include_directories: &include_directories,
+            compiler: if cfg!(windows) { "cl" } else { "cc" },
+            compiler_arguments: &[],
+            msvc: cfg!(windows),
+        },
+    )
+}
+
+pub fn check_with_options(root: &Path, generated: &Path, options: &Options<'_>) -> Result<usize> {
     let mut total = 0;
     let mut mismatches = Vec::new();
     for library in LIBRARIES {
@@ -67,39 +134,27 @@ pub fn check(root: &Path, generated: &Path) -> Result<usize> {
             println!("{}: no records found", library.name);
             continue;
         }
-        let includes = include_directories(library.package);
-        let from_c = c_report(library.headers, &includes, &records)?;
-        let from_lua = lua_report(root, generated, library.name, &records, library.requires)?;
-        let mut checked = 0;
-        for record in &records {
-            let (Some(c), Some(lua)) = (from_c.get(&record.name), from_lua.get(&record.name))
-            else {
-                continue;
-            };
-            checked += 1;
-            if c.size != lua.size {
-                mismatches.push(format!(
-                    "{}.{}: sizeof C={} lua={}",
-                    library.name, record.name, c.size, lua.size
-                ));
-            }
-            if c.align != lua.align {
-                mismatches.push(format!(
-                    "{}.{}: alignof C={} lua={}",
-                    library.name, record.name, c.align, lua.align
-                ));
-            }
-            for field in &record.fields {
-                if let (Some(c), Some(lua)) = (c.fields.get(field), lua.fields.get(field)) {
-                    if c != lua {
-                        mismatches.push(format!(
-                            "{}.{}.{}: offset C={} lua={}",
-                            library.name, record.name, field, c, lua
-                        ));
-                    }
-                }
-            }
+        let mut includes = vec![root.join("native")];
+        if let Some(key) = library.include_key {
+            includes.extend(
+                options
+                    .include_directories
+                    .get(key)
+                    .with_context(|| format!("ABI includes are missing package {key}"))?
+                    .iter()
+                    .cloned(),
+            );
         }
+        let from_c = c_report(
+            library.headers,
+            &includes,
+            &records,
+            options.compiler,
+            options.compiler_arguments,
+            options.msvc,
+        )?;
+        let from_lua = lua_report(root, generated, library.name, &records, library.requires)?;
+        let checked = compare_reports(library.name, &records, &from_c, &from_lua, &mut mismatches);
         total += checked;
         println!("{}: {checked} records verified", library.name);
     }
@@ -116,31 +171,85 @@ pub fn check(root: &Path, generated: &Path) -> Result<usize> {
     Ok(total)
 }
 
-fn include_directories(package: &str) -> Vec<PathBuf> {
+fn package_include_directories(package: &str) -> Result<Vec<PathBuf>> {
     let output = Command::new("pkg-config")
         .args(["--cflags-only-I", package])
-        .output();
-    if let Ok(output) = output {
-        if output.status.success() {
-            let found: Vec<_> = String::from_utf8_lossy(&output.stdout)
-                .split_whitespace()
-                .filter_map(|flag| flag.strip_prefix("-I"))
-                .map(PathBuf::from)
-                .collect();
-            if !found.is_empty() {
-                return found;
+        .output()
+        .with_context(|| format!("starting pkg-config for {package}"))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "pkg-config could not resolve {package}:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let found = String::from_utf8(output.stdout)?
+        .split_whitespace()
+        .filter_map(|flag| flag.strip_prefix("-I"))
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    Ok(found)
+}
+
+fn compare_reports(
+    library: &str,
+    records: &[Record],
+    from_c: &HashMap<String, Layout>,
+    from_lua: &HashMap<String, Layout>,
+    mismatches: &mut Vec<String>,
+) -> usize {
+    let mut checked = 0;
+    for record in records {
+        let Some(c) = from_c.get(&record.name) else {
+            mismatches.push(format!(
+                "{library}.{}: record missing from C ABI report",
+                record.name
+            ));
+            continue;
+        };
+        let Some(lua) = from_lua.get(&record.name) else {
+            mismatches.push(format!(
+                "{library}.{}: record missing from LuaJIT ABI report",
+                record.name
+            ));
+            continue;
+        };
+        checked += 1;
+        if c.size != lua.size {
+            mismatches.push(format!(
+                "{library}.{}: sizeof C={} lua={}",
+                record.name, c.size, lua.size
+            ));
+        }
+        if c.align != lua.align {
+            mismatches.push(format!(
+                "{library}.{}: alignof C={} lua={}",
+                record.name, c.align, lua.align
+            ));
+        }
+        for field in &record.fields {
+            let Some(c_offset) = c.fields.get(field) else {
+                mismatches.push(format!(
+                    "{library}.{}.{field}: field missing from C ABI report",
+                    record.name
+                ));
+                continue;
+            };
+            let Some(lua_offset) = lua.fields.get(field) else {
+                mismatches.push(format!(
+                    "{library}.{}.{field}: field missing from LuaJIT ABI report",
+                    record.name
+                ));
+                continue;
+            };
+            if c_offset != lua_offset {
+                mismatches.push(format!(
+                    "{library}.{}.{field}: offset C={} lua={}",
+                    record.name, c_offset, lua_offset
+                ));
             }
         }
     }
-    [
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/usr/include",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .filter(|path| path.is_dir())
-    .collect()
+    checked
 }
 
 fn read_cdef(generated: &Path, name: &str) -> Result<String> {
@@ -235,6 +344,9 @@ fn c_report(
     headers: &[&str],
     include_directories: &[PathBuf],
     records: &[Record],
+    compiler_name: &str,
+    compiler_arguments: &[OsString],
+    msvc: bool,
 ) -> Result<HashMap<String, Layout>> {
     let includes = headers
         .iter()
@@ -244,7 +356,7 @@ fn c_report(
     let mut lines = Vec::new();
     for record in records {
         lines.push(format!(
-            "    printf(\"{{\\\"name\\\":\\\"{}\\\",\\\"size\\\":%zu,\\\"align\\\":%zu,\\\"fields\\\":{{\", sizeof({}), _Alignof({}));",
+            "    printf(\"{{\\\"name\\\":\\\"{}\\\",\\\"size\\\":%zu,\\\"align\\\":%zu,\\\"fields\\\":{{\", sizeof({}), TECS_ALIGNOF({}));",
             record.name, record.name, record.name
         ));
         for (index, field) in record.fields.iter().enumerate() {
@@ -257,20 +369,35 @@ fn c_report(
         lines.push("    printf(\"}}\\n\");".to_owned());
     }
     let program = format!(
-        "{includes}\n#include <stdio.h>\n#include <stddef.h>\nint main(void) {{\n{}\n    return 0;\n}}\n",
+        "{includes}\n#include <stdio.h>\n#include <stddef.h>\n\
+         #ifdef _MSC_VER\n#define TECS_ALIGNOF(type_) __alignof(type_)\n\
+         #else\n#define TECS_ALIGNOF(type_) __alignof__(type_)\n#endif\n\
+         int main(void) {{\n{}\n    return 0;\n}}\n",
         lines.join("\n")
     );
     let directory = tempdir()?;
     let source = directory.path().join("abi.c");
-    let executable = directory.path().join("abi");
+    let executable = directory.path().join(if msvc { "abi.exe" } else { "abi" });
     fs::write(&source, program)?;
-    let mut compiler = Command::new("cc");
-    compiler
-        .args(["-std=c11", "-w", "-o"])
-        .arg(&executable)
-        .arg(&source);
+    let mut compiler = Command::new(compiler_name);
+    compiler.args(compiler_arguments);
+    if msvc {
+        compiler
+            .args(["/nologo", "/std:c11", "/W0"])
+            .arg(format!("/Fe:{}", executable.display()))
+            .arg(&source);
+    } else {
+        compiler
+            .args(["-std=gnu99", "-w", "-o"])
+            .arg(&executable)
+            .arg(&source);
+    }
     for include in include_directories {
-        compiler.arg("-I").arg(include);
+        if msvc {
+            compiler.arg(format!("/I{}", include.display()));
+        } else {
+            compiler.arg("-I").arg(include);
+        }
     }
     let build = compiler.output().context("starting ABI probe compiler")?;
     if !build.status.success() {
@@ -285,6 +412,16 @@ fn c_report(
     let run = Command::new(executable)
         .output()
         .context("running ABI probe")?;
+    if !run.status.success() {
+        anyhow::bail!(
+            "ABI probe exited with {}:\n{}",
+            run.status,
+            String::from_utf8_lossy(&run.stderr)
+                .chars()
+                .take(3000)
+                .collect::<String>()
+        );
+    }
     parse_json_report(&run.stdout)
 }
 
@@ -403,7 +540,9 @@ fn parse_lua_report(output: &[u8]) -> Result<HashMap<String, Layout>> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_records;
+    use std::collections::{BTreeMap, HashMap};
+
+    use super::{compare_reports, parse_records, Layout};
 
     #[test]
     fn parses_typedef_and_tagged_records() {
@@ -424,5 +563,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(records[0].fields, ["visible"]);
+    }
+
+    #[test]
+    fn reports_missing_records_and_fields() {
+        let records = parse_records("typedef struct { int present; int absent; } Item;").unwrap();
+        let c = HashMap::from([(
+            "Item".to_owned(),
+            Layout {
+                name: "Item".to_owned(),
+                size: 8,
+                align: 4,
+                fields: BTreeMap::from([("present".to_owned(), 0), ("absent".to_owned(), 4)]),
+            },
+        )]);
+        let lua = HashMap::from([(
+            "Item".to_owned(),
+            Layout {
+                name: "Item".to_owned(),
+                size: 8,
+                align: 4,
+                fields: BTreeMap::from([("present".to_owned(), 0)]),
+            },
+        )]);
+        let mut mismatches = Vec::new();
+        assert_eq!(
+            compare_reports("test", &records, &c, &lua, &mut mismatches),
+            1
+        );
+        assert_eq!(
+            mismatches,
+            ["test.Item.absent: field missing from LuaJIT ABI report"]
+        );
+
+        mismatches.clear();
+        assert_eq!(
+            compare_reports("test", &records, &c, &HashMap::new(), &mut mismatches),
+            0
+        );
+        assert_eq!(
+            mismatches,
+            ["test.Item: record missing from LuaJIT ABI report"]
+        );
     }
 }

@@ -5,6 +5,7 @@ set -eu
 : "${TL_REF:?Run this through make dev-tools}"
 : "${CERULEAN_REF:?Run this through make dev-tools}"
 : "${TEALDOC_REF:?Run this through make dev-tools}"
+: "${BUSTED_VERSION:?Run this through cargo xtask dev-tools}"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 vendor="$repo/vendor"
@@ -47,3 +48,9 @@ install -m 0644 "$scratch/tealdoc/LICENSE" "$licenses/tealdoc/LICENSE"
     cd "$scratch/tealdoc"
     luarocks make --tree="$vendor" --lua-version=5.1 tealdoc-dev-1.rockspec
 )
+
+luarocks install \
+    --tree="$vendor" \
+    --lua-version=5.1 \
+    busted \
+    "$BUSTED_VERSION"

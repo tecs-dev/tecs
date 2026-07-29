@@ -1,11 +1,9 @@
 # Check, test and build on every platform this game can be packaged for.
 #
-# The matrix is three machines rather than one, and that is not thoroughness:
-# it is the only way a solo developer ships to five targets. A macOS host can
-# build for macOS and iOS and no other host can, because the Xcode SDK cannot
-# be redistributed. A Windows game needs MSVC, which needs Windows. So the
-# matrix is where cross-compilation would have been, and `tecs info` on any one
-# machine lists what that machine can and cannot produce, with a reason.
+# The matrix is three machines because native SDKs are part of the build. A
+# macOS host can produce both macOS architectures, but no other host can carry
+# the Xcode SDK. A Windows game needs MSVC, which needs Windows. `tecs info` on
+# any one machine lists what that machine can and cannot produce, with a reason.
 name: ci
 
 on:
