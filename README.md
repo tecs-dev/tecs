@@ -2002,6 +2002,12 @@ which is the shape of most games:
  reserved      0.092 ms     0.270 ms       32 mean,      64 peak
 ```
 
+That shape is what the `spawner` regime of `cargo xtask bench sprites` builds:
+a still field spread over archetypes a spawner cannot reach, and a wave of
+sprites rising and falling in one of its own. The regimes that hold every
+sprite in a single archetype cannot tell the two layouts apart, which is not a
+gap in them but the same fact stated from the other side.
+
 What it costs is the slack. The cull is dispatched over the extent rather than
 over the rows, so that scene dispatches 217,000 threads where the packed one
 dispatches 200,000, and a hidden slot costs a bounds read and a lane in the
