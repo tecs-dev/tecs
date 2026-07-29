@@ -5,6 +5,20 @@
 --- within that band and never against another one. Higher layers are nearer,
 --- so a HUD on layer 8 covers a world on layer 1 whatever the two contain.
 ---
+--- ```teal
+--- tecs.gfx.layers.configure(1, {sort = "topdown", parallax = 0.4})
+--- tecs.gfx.layers.configure(8, {sort = "z", screenSpace = true, unlit = true})
+---
+--- world:spawn(
+---     tecs.Transform(16, 16, 0, 8, 0, 96, 24),
+---     tecs.gfx.Tint(1.0, 1.0, 1.0, 1.0),
+---     tecs.gfx.Renderable()
+--- )
+--- ```
+---
+--- A layer is named by the fourth argument to `tecs.Transform`, so what a layer
+--- is configured with reaches an entity through the number it sits on.
+---
 --- The band formula is fixed rather than configurable. Content is authored
 --- against what it produces: change how a layer maps to depth and every scene
 --- built on it re-sorts, which is a change nobody can see coming from the diff.

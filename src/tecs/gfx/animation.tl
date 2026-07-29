@@ -3,6 +3,24 @@
 --- An `Animation` says which tag of a sheet is playing, how fast, whether it
 --- repeats, whether it is running, and where in the tag it has got to.
 ---
+--- ```teal
+--- local hero <const> = tecs.gfx.animation.grid({
+---     name = "hero",
+---     imageWidth = 256, imageHeight = 32,
+---     frameWidth = 32, frameHeight = 32,
+---     tags = {idle = {from = 1, to = 4}, run = {from = 5, to = 8}},
+--- })
+--- hero:bind(app.renderer:sprite("hero.png"))
+--- world:addPlugin(tecs.gfx.animation.plugin)
+---
+--- world:spawn(
+---     tecs.Transform(64, 64, 0, 1, 0, 32, 32),
+---     hero:sprite(),
+---     tecs.gfx.animation.of(hero, "run"),
+---     tecs.gfx.Renderable()
+--- )
+--- ```
+---
 --- There are two paths from that to a picture and `useGPU` chooses between them.
 --- On, which is the default, `tecs.EncodeAnimation` writes which playback the
 --- entity is on into its `Sprite` and the vertex shader resolves the frame, so a

@@ -5,6 +5,23 @@
 --- the frame: a slot is handed out once, at spawn, and held until the particle
 --- expires. What crosses back is nothing at all.
 ---
+--- ```teal
+--- local sparks <const> = tecs.gfx.particles.effect({
+---     name = "sparks",
+---     capacity = 256,
+---     schedule = {rate = 120, duration = 0.3},
+---     spawn = {shape = "disc", width = 4, outward = true},
+---     initial = {lifetime = {min = 0.2, max = 0.5}, speed = {min = 40, max = 120}, size = 3},
+---     update = {drag = 2.0, size = tecs.gfx.particles.curve({{0.0, 1.0}, {1.0, 0.0}})},
+--- })
+---
+--- world:addPlugin(tecs.gfx.particles.plugin({renderer = app.renderer, capacity = 4096}))
+--- world:spawn(
+---     tecs.Transform(120, 80, 0, 1, 0, 1, 1),
+---     tecs.gfx.particles.ParticleEmitter({effect = sparks})
+--- )
+--- ```
+---
 --- Three things share the work. An `Effect` is immutable data describing how
 --- particles spawn and evolve, registered once under a name and shared by every
 --- emitter naming it. A `ParticleEmitter` component names an effect and carries

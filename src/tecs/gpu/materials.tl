@@ -5,6 +5,20 @@
 --- same fragment shader, its `material` function renamed, and a generated
 --- dispatch selects between them by an id carried on the instance.
 ---
+--- ```teal
+--- tecs.gfx.materials.addRoot("game/materials/")
+---
+--- world:spawn(
+---     tecs.Transform(120, 80, 0, 1, 0, 64, 64),
+---     tecs.gfx.Material(tecs.gfx.materials.id("rounded"), 0.25),
+---     tecs.gfx.Tint(0.2, 0.6, 1.0, 1.0),
+---     tecs.gfx.Renderable()
+--- )
+--- ```
+---
+--- A game's own root is added before anything asks for an id, since the search
+--- happens once and the id is what the instance carries.
+---
 --- One shader rather than one per material, because the alternative is a
 --- pipeline and a draw call per material, and the whole point of the unified
 --- batch is that the scene is one draw. What it costs is fragment divergence
