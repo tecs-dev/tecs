@@ -63,9 +63,10 @@ particles drain. `pause` holds the schedule and live field. `clear` kills the
 field without changing emission. `restart` resets schedule and randomness.
 `burst` queues a count for the next step.
 
-`finished` derives its answer from the schedule and maximum lifetime.
-`estimatedCount` predicts a count and may differ after overflow or a truncated
-burst. Game code cannot inspect, move, kill, or count individual particles.
+`finished` derives its answer from the schedule and the longest lifetime.
+`estimatedCount` integrates the schedule over the mean lifetime, and may differ
+after overflow or a truncated burst. Game code cannot inspect, move, kill, or
+count individual particles.
 
 ## Pool and snapshots
 
@@ -503,9 +504,14 @@ local record Effect
     index: integer
     --- Read-only. Reports how many live particles one emitter can hold.
     capacity: integer
-    --- Read-only. Reports the longest particle lifetime, which decides when an emitter
-    --- that has stopped emitting has finished.
+    --- Read-only. Reports the longest particle lifetime in seconds, which decides when an
+    --- emitter that has stopped emitting has finished.
     maxLifetime: number
+    --- Read-only. Reports the mean particle lifetime in seconds, halfway between the bounds
+    --- `initial.lifetime` was authored with. This is the window
+    --- `estimatedCount` integrates the schedule over, and it is the steady-state
+    --- live count divided by the emission rate.
+    meanLifetime: number
     --- Read-only. Reports seconds from `play` to the last emission, or -1 for an effect that
     --- never stops emitting.
     emitFor: number
@@ -944,6 +950,12 @@ local function newEffect(options: EffectOptions): Effect
     end
 
     local maxLifetime <const> = fields[EFFECT.LIFETIME_MAX]
+    -- Halfway between the bounds, which is the mean of the uniform draw the
+    -- spawn pass makes between them, so a constant lifetime has a mean equal to
+    -- itself. `estimatedCount` integrates over this and the check below uses
+    -- the longest, because a prediction wants the average and a capacity wants
+    -- the worst case.
+    local meanLifetime <const> = (fields[EFFECT.LIFETIME_MIN] + maxLifetime) * 0.5
     -- Checked here, where every number is in hand, rather than left to be
     -- discovered as a spray that is thinner than it was authored to be. A CPU
     -- system drops the emission with no diagnostic and that is the single most
@@ -972,6 +984,7 @@ local function newEffect(options: EffectOptions): Effect
         index = #registry + 1,
         capacity = capacity,
         maxLifetime = maxLifetime,
+        meanLifetime = meanLifetime,
         emitFor = emitFor,
         rate = rate,
         delay = fields[EFFECT.DELAY],
@@ -1251,18 +1264,24 @@ end
 
 --- Returns an estimate of how many particles remain alive.
 ---
---- Integrates the schedule over the latest lifetime and subtracts expired
---- emissions. The result is exact when no burst truncates and no overflow
---- occurs. Reading the exact GPU count would stall the pipeline.
+--- Integrates the schedule over the effect's `meanLifetime` and treats every
+--- emission older than that as expired. An effect whose `initial.lifetime` is
+--- one number has a mean equal to that lifetime, so the answer is exact but for
+--- the step the emitter is part way through; a lifetime range makes it an
+--- expectation, because the host does not know which particles drew the short
+--- lifetimes. A truncated burst or an overflow replacement moves it either way.
+--- Reading the exact count back from the GPU would stall the pipeline.
 function ParticleEmitter:estimatedCount(): integer
     local effect <const> = self.effect
     if effect == nil then
         return 0
     end
     local now <const> = (self._clock - self._startStep) * self._stepSeconds * self.timeScale
-    -- Averaged rather than the longest, since half the particles emitted a
-    -- lifetime ago are gone and half are not.
-    local mean <const> = effect.maxLifetime * 0.5
+    -- The mean rather than the longest, because a particle emitted a mean
+    -- lifetime ago is as likely to be gone as still alive, so each emission is
+    -- counted once on average. Half the longest would be the mean only for an
+    -- effect whose shortest lifetime is zero.
+    local mean <const> = effect.meanLifetime
     local alive <const> = emittedBy(self, effect, now) - emittedBy(self, effect, now - mean)
 
     if alive <= 0.0 then
