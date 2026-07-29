@@ -12,8 +12,8 @@
 --
 --  * Every option in the declaration is set in `Pinned.cmake` to the value the
 --    declaration requires. Flipping one fails here.
---  * Every `SDLMIXER_` and `SDLIMAGE_` option `Pinned.cmake` sets appears in
---    the declaration. Those are the two families where one option decides
+--  * Every `SDLMIXER_` option `Pinned.cmake` sets appears in
+--    the declaration. This is the family where one option decides
 --    which codec gets linked, so adding one means writing down its license
 --    rather than only its value.
 --  * A denylist of option names that must never appear enabled, whichever
@@ -30,12 +30,11 @@
 -- What this cannot catch, stated plainly, because a guard that overstates
 -- itself is worse than none:
 --
---  * It reads a declaration, not a build. `set(SDLIMAGE_FOO OFF CACHE BOOL ""
---    FORCE)` on an option upstream renamed creates an unused cache variable
+--  * It reads a declaration, not a build. Setting an option upstream renamed
+--    creates an unused cache variable
 --    and configures cleanly, and this check is exactly as happy with it. Only
 --    configuring the real thing and reading what it produced tells those
---    apart, which is how the SDL_image block was verified and what
---    `make check-package` does to binaries.
+--    apart, which is what `make check-package` does to binaries.
 --  * It cannot read a license out of a binary, because nothing can. The
 --    licenses below are what a person read in each project's own license file
 --    at the pinned revision. A revision bump that changed the terms passes
@@ -77,53 +76,20 @@ local REQUIRED = {
     SDLMIXER_DEPS_SHARED = { "OFF", "n/a", "links them rather than loading them by name" },
     SDLMIXER_TESTS = { "OFF", "n/a", "not shipped" },
     SDLMIXER_EXAMPLES = { "OFF", "n/a", "not shipped" },
-
-    -- SDL_image. None of these is LGPL; every one of them is bytes, and two of
-    -- the backends decide whether the format options mean anything at all.
-    SDLIMAGE_PNG = { "ON", "libpng-2.0", "the format every texture in this engine is" },
-    SDLIMAGE_PNG_LIBPNG = { "ON", "libpng-2.0", "libpng and zlib, the only decoder that reads APNG" },
-    SDLIMAGE_PNG_SAVE = { "ON", "libpng-2.0", "IMG_SavePNG, which writes the debug screenshots" },
-    SDLIMAGE_JPG = { "ON", "MIT OR Unlicense", "stb_image decodes it, so it links no libjpeg" },
-    SDLIMAGE_BACKEND_STB = { "ON", "MIT OR Unlicense", "what decodes JPEG" },
-    SDLIMAGE_BACKEND_IMAGEIO = { "OFF", "n/a", "on, CoreGraphics answers IMG_Load and these decide nothing" },
-    SDLIMAGE_BACKEND_WIC = { "OFF", "n/a", "the same in the small on Windows" },
-    SDLIMAGE_ANI = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_AVIF = { "OFF", "BSD-2-Clause", "libavif, with dav1d and aom behind it: five megabytes" },
-    SDLIMAGE_BMP = { "OFF", "n/a", "not decoded here; SDL_LoadBMP is still there for a tool" },
-    SDLIMAGE_GIF = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_JXL = { "OFF", "BSD-3-Clause", "libjxl, the largest at about two megabytes" },
-    SDLIMAGE_LBM = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_PCX = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_PNM = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_QOI = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_SVG = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_TGA = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_TIF = { "OFF", "libtiff", "libtiff, half a megabyte, and no place in a game" },
-    SDLIMAGE_WEBP = { "OFF", "BSD-3-Clause", "libwebp, demux, mux and sharpyuv: half a megabyte" },
-    SDLIMAGE_XCF = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_XPM = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_XV = { "OFF", "n/a", "not a format this engine decodes" },
-    SDLIMAGE_VENDORED = { "ON", "libpng-2.0", "builds libpng from a pinned source, not from the machine" },
-    SDLIMAGE_STRICT = { "ON", "n/a", "a libpng that cannot be found fails the configure" },
-    SDLIMAGE_DEPS_SHARED = { "OFF", "n/a", "links libpng, so a binary's link table shows it" },
-    SDLIMAGE_SAMPLES = { "OFF", "n/a", "not shipped" },
-    SDLIMAGE_TESTS = { "OFF", "n/a", "not shipped" },
 }
 
 -- Options that must never appear enabled, whoever introduces them. Most belong
 -- to libraries this repository does not build yet, and they are here so that
 -- whoever adds one meets the answer rather than finding it afterwards.
 --
--- libcurl is the live case, and its defaults are against you. GnuTLS is LGPL,
+-- For any future native client, GnuTLS is LGPL,
 -- and nettle and gmp behind it are LGPLv3-or-GPLv2 again. wolfSSL is GPL-3.0
 -- with no linking exception, so linking it without the commercial license puts
 -- the whole game under GPLv3. libidn2 is dual GPL-2.0-or-later or
 -- LGPL-3.0-or-later, which means its best arm is still disqualifying, and it is
 -- auto-detected on, so it links wherever the build host happens to have it.
--- libpsl is the quiet one: libpsl itself is MIT, but curl's configure fails
--- without it unless it is refused explicitly, and its runtime resolves to
--- libidn2 and libunistring on Linux, which puts back exactly what turning
--- libidn2 off took out.
+-- libpsl is the quiet one: it is MIT, but it may resolve to libidn2 and
+-- libunistring on Linux, putting those non-permissive dependencies back.
 --
 -- SDL's own is `SDL_LIBICONV`, which prefers GNU libiconv over the C library's.
 -- It is off upstream and stays off.
@@ -144,10 +110,8 @@ local NEVER_ENABLED = {
 -- rule turns one into the other.
 local NOTICE_NAMES = {
     SDL3 = "SDL3",
-    SDL3_IMAGE = "SDL3_image",
     SDL3_NET = "SDL3_net",
     SDL3_MIXER = "SDL3_mixer",
-    BOX2D = "Box2D",
     LUAJIT = "LuaJIT",
     SHADERC = "shaderc",
     -- shaderc's own three, pinned here rather than left to the script that
@@ -157,8 +121,6 @@ local NOTICE_NAMES = {
     SPIRV_HEADERS = "SPIRV-Headers",
     SPVC = "SPIRV-Cross",
     ZLIB = "zlib",
-    CURL = "libcurl",
-    MBEDTLS = "Mbed TLS",
 }
 
 describe("the license position", function()
@@ -191,7 +153,7 @@ describe("the license position", function()
 
     it("declares every decoder option it sets", function()
         for option in pairs(settings) do
-            if option:match("^SDLMIXER_") or option:match("^SDLIMAGE_") then
+            if option:match("^SDLMIXER_") then
                 assert.is_true(
                     REQUIRED[option] ~= nil,
                     ("cmake/Pinned.cmake sets %s, which this file does not declare. "):format(option)

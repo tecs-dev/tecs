@@ -210,9 +210,9 @@ def referencedNames(statement: str) -> set:
 def recoverTypes(rejected: str, alreadyDeclared: set, needed) -> str:
     """Declarations for types the kept headers use and do not declare.
 
-    curl's headers are written against the platform's, so a binding built from
-    them alone refers to `time_t` and `struct sockaddr` without ever declaring
-    either, and LuaJIT rejects the result. Those declarations are recovered
+    Some headers are written against platform headers, so a binding built from
+    them alone may refer to types it never declares, and LuaJIT rejects the
+    result. Those declarations are recovered
     from the same preprocessor output rather than written by hand here: a
     hand-written one is an ABI claim nothing checks, and the layout it claims
     differs between the targets this tree builds for.

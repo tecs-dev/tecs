@@ -2,7 +2,7 @@
 ---
 --- **The compiler is a pinned commit compiled into the binary, not a rock
 --- resolved on a user's machine.** `cmake/Revisions.cmake` names it beside SDL
---- and Box2D, because it is a dependency in the same sense: a project checked
+--- and Rapier, because it is a dependency in the same sense: a project checked
 --- by one revision and formatted by another is a project whose CI disagrees
 --- with its editor, and the failure is silent in the direction that matters.
 ---

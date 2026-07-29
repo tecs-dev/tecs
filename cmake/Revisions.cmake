@@ -7,11 +7,8 @@
 # against this list so the convenience does not quietly become a difference.
 
 set(TECS_SDL3_TAG "release-3.4.12" CACHE STRING "SDL3 revision")
-set(TECS_SDL3_IMAGE_TAG "release-3.4.4" CACHE STRING "SDL3_image revision")
 set(TECS_SDL3_NET_TAG "release-3.2.0" CACHE STRING "SDL3_net revision")
 set(TECS_SDL3_MIXER_TAG "release-3.2.4" CACHE STRING "SDL3_mixer revision")
-set(TECS_BOX2D_TAG "v3.1.1" CACHE STRING "Box2D revision")
-
 # LuaJIT has published no release on v2.1 since 2017 and does not intend to.
 # What it has instead is a rolling version, whose number is the committer
 # timestamp of the commit built. So there is no tag to name here: v2.1 is a
@@ -53,8 +50,6 @@ set(TECS_SPIRV_HEADERS_TAG
 
 set(TECS_SPVC_TAG "vulkan-sdk-1.4.313.0" CACHE STRING "SPIRV-Cross revision")
 set(TECS_ZLIB_TAG "v1.3.2" CACHE STRING "zlib revision")
-set(TECS_CURL_TAG "curl-8_21_0" CACHE STRING "libcurl revision")
-set(TECS_MBEDTLS_TAG "mbedtls-4.1.1" CACHE STRING "Mbed TLS revision, curl's TLS backend")
 
 # The type checker and the formatter, which are dependencies in the same sense
 # as the rest of this file even though neither is linked. Both are pure Lua,

@@ -774,7 +774,7 @@ end
 -------------------------------------------------------------------------------
 
 --- SDL retains the file-dialog callback and may enter it from a thread LuaJIT
---- did not create. `native/dialogs.c` owns that callback and copies its answer;
+--- did not create. The Rust dialog bridge owns that callback and copies its answer;
 --- this source polls the copied result and settles futures on the main thread.
 
 local record DialogEntry

@@ -17,7 +17,7 @@ local ecs <const> = require("tecs.ecs")
 -- arrive through the metatable further down.
 --
 -- Loading them here instead would end headless use. The engine reaches SDL,
--- Box2D and the worker library through the FFI, and those load when the module
+-- Rapier and the worker library through the FFI, and those load when the module
 -- that declares them loads, so a plain `require("tecs")` would demand a
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
@@ -40,7 +40,7 @@ local type particles = require("tecs.gfx.particles")
 local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
-local type box2d = require("tecs.box2d")
+local type physics = require("tecs.physics")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type data = require("tecs.data")
@@ -344,7 +344,7 @@ local record tecs
 
     assets: assets
     audio: audio
-    box2d: box2d
+    physics: physics
     data: data
     events: events
     filesystem: filesystem
@@ -403,7 +403,7 @@ end
 --- What every public name resolves to, described once and used at both levels.
 ---
 --- Everything here is resolved on first use: the engine, which reaches SDL,
---- Box2D and the worker library through the FFI, JSON, whose parser is C, and
+--- Rapier and the worker library through the FFI, JSON, whose parser is C, and
 --- the byte facilities, which cost nothing to skip and which most programs
 --- never ask for. A tool that names none of them loads none of them, and that
 --- holds a level down too: reading `tecs.gfx.layers` loads layers and nothing
@@ -423,7 +423,7 @@ local SURFACE <const>: {string: Namespace} = {
     newApplication = {module = "tecs.Application", member = "newApplication"},
     assets = {module = "tecs.assets"},
     audio = {module = "tecs.audio"},
-    box2d = {module = "tecs.box2d"},
+    physics = {module = "tecs.physics"},
     data = {module = "tecs.data"},
     events = {module = "tecs.platform.events"},
     filesystem = {

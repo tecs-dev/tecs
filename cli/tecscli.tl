@@ -89,7 +89,14 @@ local function unpack(payload: {string: any}, directory: string): boolean, strin
         return false, "the payload could not be read"
     end
 
-    local staging = ("%s.%d"):format(directory, math.floor(os.time() % 1000000))
+    -- `os.time` alone gives every process started in the same second the same
+    -- staging path. `os.tmpname` asks the platform for a process-safe unique
+    -- token; only its name is needed because the staging directory must remain
+    -- beside the destination for the final rename to be atomic.
+    local token = os.tmpname()
+    os.remove(token)
+    token = token:gsub("[^%w]", "")
+    local staging = ("%s.%s"):format(directory, token)
     shellSucceeded("rm -rf " .. quote(staging))
 
     -- Every directory in one call. A `mkdir` per file would be a process per
@@ -130,7 +137,7 @@ end
 --- The content root, unpacking the payload first where there is one.
 local function contentRoot(): string
     -- Named indirectly, because the module exists only in a single-file
-    -- build: it is installed from C by cli/payload.c, has no .tl beside it,
+    -- build: Rust installs it from the embedded payload, has no .tl beside it,
     -- and a literal require would be a module the type checker cannot find.
     local carried, payload = pcall(require, "tecs." .. "payload")
     if carried then

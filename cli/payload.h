@@ -1,6 +1,6 @@
 /* The content root carried inside the executable.
  *
- * Two of these are called from native/host.c, which is compiled with
+ * Two of these are called from the Rust host, which is compiled with
  * TECS_PAYLOAD only in a single-file build. Every other configuration has a
  * directory beside the binary and this file is not compiled at all.
  */

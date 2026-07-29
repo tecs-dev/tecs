@@ -1,10 +1,8 @@
 --- zlib binding.
 ---
---- zlib is in this process either way: SDL3_image reads PNG through it. What
---- changed is that it is now a dependency this tree names, pins and builds,
---- rather than one it inherits from whatever the machine had. libcurl needs it
---- to answer a `Content-Encoding`, and once it is pinned for that, everything
---- else it can do is reachable at no further cost.
+--- zlib is a dependency this tree names, pins and builds rather than one it
+--- inherits from whatever the machine had. The engine exposes it as a public
+--- DEFLATE service.
 ---
 --- The surface is the whole library, because zlib is small enough that
 --- selecting from it would be more description than the thing described. What

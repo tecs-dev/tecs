@@ -59,8 +59,8 @@ def declarations(cdef: str, prefix: str):
         body = " ".join(statement.split())
 
         # Declaration keywords vary by library: SDL spells them with `extern`,
-        # Box2D with a macro that expands to nothing. Matching the shape rather
-        # than a keyword covers both.
+        # while others may use a macro that expands to nothing. Matching the
+        # shape rather than a keyword covers both.
         if not body or body.startswith(NOT_A_FUNCTION):
             continue
         body = body.removeprefix("extern ").strip()

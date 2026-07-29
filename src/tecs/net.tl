@@ -8,9 +8,8 @@
 --- duplicated or reordered by the network.
 ---
 --- A protocol built on that is a namespace one level down, and `http` is the
---- one there is. Reading this module's name loads no protocol: `tecs.net.http`
---- resolves libcurl when it is read, and a program that only opens a socket
---- never reads it.
+--- one there is. Reading this module's name loads no protocol: the Reqwest
+--- runtime starts only when `tecs.net.http` is read.
 ---
 --- Resolution and client connection are asynchronous and return
 --- [`Future`](Future) values. Call `net.poll` once per frame while either is
@@ -26,7 +25,7 @@ local binding <const> = require("tecs.ffi.sdl3net")
 local loader <const> = require("tecs.ffi.loader")
 local Future <const> = require("tecs.Future")
 
--- Type-only, so nothing loads here and libcurl is not resolved by a program
+-- Type-only, so nothing loads here and HTTP is not initialized by a program
 -- that only opens a socket: the field below declares the name and `tecs.init`
 -- fills it in on the first read of it. The edge runs this way round and only
 -- this way. Nothing under `http` requires this module, which is what keeps
@@ -53,7 +52,7 @@ local DEFAULT_WAIT_MS <const> = 5000
 local WAIT_SLICE_MS <const> = 16
 
 local record net
-    --- HTTP and HTTPS, over libcurl. The one protocol namespace here: this
+    --- HTTP and HTTPS, over Reqwest and Rustls. The one protocol namespace here: this
     --- module is the transport, and framing bytes into messages is what a
     --- protocol above it does.
     http: http

@@ -214,7 +214,7 @@ function plugin.install(world: World, options?: Options)
     -- this frame looks at it, and a response that settled between the two is
     -- already a component when the systems that read one run. The transfers
     -- themselves are turned by the application, outside any phase: a system
-    -- that pumped would be a second turn of the same multi handle.
+    -- that pumped would recursively drain the client while listeners settle.
     world:addSystem({
         name = "tecs.http.Drive",
         phase = ecs.phases.First,

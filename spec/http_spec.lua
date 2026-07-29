@@ -4,14 +4,12 @@
 -- without one and, worse, fail intermittently on a machine with a bad one. So
 -- the other end is a listener this process starts: `tecs.mcp.transport` is a
 -- non-blocking HTTP server over SDL3_net, so the request and the response both
--- stay inside this test. `spec/curl_spec.lua` established the pattern and this
--- follows it, including why `file://` is not the shortcut it looks like: the
--- pinned build disables it, so a spec resting on it would pass against a
--- system libcurl and fail against a packaged one, and it completes inside
--- `curl_multi_perform`, which would prove nothing about non-blocking.
+-- stay inside this test. `file://` is not a shortcut: it bypasses Reqwest and
+-- cannot prove that work moved to Tokio while futures still settle only when
+-- the SDL thread pumps their event queue.
 --
--- Both halves are non-blocking, so a transfer and the server that answers it
--- are one loop on one thread rather than two threads.
+-- The server stays on this thread and Reqwest uses its own workers. This loop
+-- coordinates them by draining futures only from the calling thread.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -22,7 +20,7 @@ local net = require("tecs.ffi.sdl3net")
 local transport = require("tecs.mcp.transport")
 local http = require("tecs.net.http")
 
-local BODY = "the multi interface drove this without blocking\n"
+local BODY = "the rust worker drove this without blocking\n"
 
 -- Ports are a shared resource on the machine running the suite, so this takes
 -- the first free one rather than insisting on a number, and never hands the
@@ -60,7 +58,7 @@ describe("http.newClient", function()
     -- one connection at a time and several tests here deliberately leave one
     -- unanswered, so a shared listener carries an accept queue from each test
     -- into the next: the next test's listener answers the previous test's
-    -- connection, into a socket whose curl handle is gone, while its own waits
+    -- connection, into a request the old client no longer owns, while its own waits
     -- behind it. That reads as a client that stopped working and is really a
     -- fixture that is one request behind. Building the listener per test is
     -- what makes the suite deterministic rather than usually right.
@@ -144,6 +142,31 @@ describe("http.newClient", function()
         assert.are.equal("ready", pending.status)
         assert.are.equal("/still-running", seen.path)
         assert.are.equal(0, client:pending())
+    end)
+
+    it("settles only when the SDL thread drains the Rust queue", function()
+        local pending = client:send({ url = url("/queued") })
+        local seen
+        for turn = 1, 2000 do
+            server:poll(turn * 0.05, function(request)
+                seen = request
+                server:respond(200, "OK", BODY, "text/plain")
+            end)
+            if seen ~= nil then
+                break
+            end
+            sdl.C.SDL_Delay(1)
+        end
+        assert.is_not_nil(seen, "Reqwest never reached the local server")
+
+        -- Tokio may finish the transfer, but it can only enqueue ordinary
+        -- data. A worker never calls Lua or settles this future itself.
+        sdl.C.SDL_Delay(50)
+        assert.are.equal("pending", pending.status)
+
+        drive(pending, nil)
+        assert.are.equal("ready", pending.status)
+        assert.are.equal(BODY, pending.value.body:text())
     end)
 
     it("settles a completed body, its status and its headers", function()
@@ -245,10 +268,9 @@ describe("http.newClient", function()
     end)
 
     it("writes into a handle as the bytes arrive, never assembling them", function()
-        -- `into` streams. The native buffer holds what has arrived, the pump
-        -- hands it to the handle and consumes it, and the next pump starts
-        -- from empty, so there is no point at which the whole body is either a
-        -- Lua string or a whole allocation in C.
+        -- `into` streams. Rust's bounded queue holds what has arrived, the pump
+        -- hands each chunk to the handle, and the worker cannot outrun that
+        -- bound. The whole body is never assembled in Lua or native memory.
         local path = os.tmpname()
         local file = assert(io.open(path, "wb"))
         local pending = client:send({
@@ -272,10 +294,9 @@ describe("http.newClient", function()
     end)
 
     it("counts a streamed body against maxBytes, though it holds none of it", function()
-        -- A destination is not a way around the ceiling. The native buffer is
-        -- drained and consumed every pump, and what it has handed over still
-        -- counts, so the limit means the same thing whether the body is going
-        -- to a string or to a file.
+        -- A destination is not a way around the ceiling. Rust counts chunks
+        -- before queueing them, so the limit means the same thing whether the
+        -- body is going to a string or to a file.
         local path = os.tmpname()
         local file = assert(io.open(path, "wb"))
         local pending = client:send({
@@ -294,11 +315,9 @@ describe("http.newClient", function()
     end)
 
     it("sends a body read from a file", function()
-        -- The asymmetry, stated: a destination is written between calls into
-        -- libcurl, where Lua may do anything, and a body is fed from inside
-        -- one. Feeding one as libcurl asks would be a Lua read callback, which
-        -- is the thing the native buffering exists to avoid, so this is read
-        -- at `send`.
+        -- The asymmetry, stated: a destination is written when Lua drains a
+        -- Rust event, while a request body has to cross into the background
+        -- task before it starts. The source is therefore read at `send`.
         local path = os.tmpname()
         local upload = assert(io.open(path, "wb"))
         upload:write(BODY)
@@ -321,8 +340,8 @@ describe("http.newClient", function()
 
     it("reports a refused connection as a failure", function()
         -- Port 1 on loopback with nothing on it, so this fails without ever
-        -- leaving the machine. libcurl reports a transport error on the multi
-        -- handle's message queue, which is the only place it reports one.
+        -- leaving the machine. Reqwest reports the transport error through the
+        -- same queue as completions.
         local pending = client:send({ url = "http://127.0.0.1:1/" })
         drive(pending, nil)
 
@@ -380,7 +399,7 @@ describe("http.newClient", function()
         assert.are.equal(0, client:pending())
 
         -- Gone rather than merely ignored. The listener is driven and allowed
-        -- to answer, because on loopback curl may already have written the
+        -- to answer, because on loopback Reqwest may already have written the
         -- request before the cancel landed; what has to be true is that the
         -- answer settles nothing and reaches nobody.
         local settled = 0
@@ -414,10 +433,9 @@ describe("http.newClient", function()
 
     it("refuses to be pumped from inside its own pump", function()
         -- `wait` advances this client's source and settling runs listeners, so
-        -- a listener that waits or pumps would re-enter the multi handle.
-        -- libcurl does not define that, so it is refused rather than left to
-        -- chance. The pcall is the listener's own: `Future` logs a listener
-        -- that raises rather than propagating it.
+        -- a listener that waits or pumps would recursively drain the same
+        -- queue. It is refused rather than given order-dependent behavior. The
+        -- pcall is the listener's own: `Future` logs a listener that raises.
         local pumped, waited
         local pending = client:send({ url = url("/reentrant") })
         -- A second transfer, because `wait` on a future that has just settled
@@ -444,11 +462,9 @@ describe("http.newClient", function()
     end)
 
     it("fails a body larger than maxBytes", function()
-        -- Two halves, and this exercises the cheaper one: the listener
-        -- declares a `Content-Length`, so `CURLOPT_MAXFILESIZE_LARGE` refuses
-        -- the transfer before a byte of the body arrives. The native buffer
-        -- is the other half, for a server that declares nothing, and it fails
-        -- the same way with the ceiling named in the message.
+        -- The listener declares Content-Length, so the worker can refuse the
+        -- transfer before queueing a body chunk. A chunked response is counted
+        -- as it arrives and fails with the same ceiling.
         local pending = client:send({ url = url("/too-big"), maxBytes = 8 })
         drive(pending, function()
             server:respond(200, "OK", BODY, "text/plain")
@@ -487,17 +503,10 @@ describe("http.newClient", function()
     end)
 
     it("still settles transfers after the pump loop has been compiled", function()
-        -- The one property no single-request test can have. LuaJIT traces a
-        -- loop after fifty-six turns. The response callbacks are C so the pump
-        -- may compile, while the variadic option helpers remain interpreted
-        -- because compiled calls pass their arguments by the wrong ABI on this
-        -- platform. This crosses the threshold twice and checks that every
-        -- transfer still settles with its body intact.
-        --
-        -- Before the refusal this failed from about the sixtieth transfer on,
-        -- with the transfer completing inside libcurl and its future never
-        -- settling, because the tag identifying it came back with a bit set
-        -- that was never in it.
+        -- The one property no single-request test can have. LuaJIT traces this
+        -- loop after fifty-six turns. Rust never calls into Lua; the traced
+        -- pump only pulls ordinary data from the C ABI queue. This crosses the
+        -- threshold twice and checks that every transfer still settles.
         local completed = 0
         for request = 1, 120 do
             local pending = client:send({ url = url("/compiled") })

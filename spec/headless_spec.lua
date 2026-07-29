@@ -110,8 +110,8 @@ describe("tecs headless", function()
                 require("tecs")
                 local engine = {
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
-                    "tecs.assets", "tecs.box2d", "tecs.mcp",
-                    "tecs.gpu.Device", "tecs.ffi.sdl3", "tecs.ffi.box2d",
+                    "tecs.assets", "tecs.physics", "tecs.mcp",
+                    "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.platform.system",
                     "tecs.platform.filesystem", "tecs.platform.watch",
                     "tecs.net", "tecs.net.http", "tecs.net.http.client",
@@ -184,9 +184,9 @@ describe("tecs headless", function()
                 local watch = tecs.filesystem.watch
 
                 -- The same shape one protocol down: naming the transport must
-                -- not resolve libcurl, which is what `tecs.net.http` links.
+                -- not initialize the HTTP runtime.
                 local net = tecs.net
-                local curl = package.loaded["tecs.net.http"] ~= nil
+                local http = package.loaded["tecs.net.http"] ~= nil
 
                 print(("%s %s %s %s %s %s"):format(
                     tostring(rawequal(filesystem, require("tecs.platform.filesystem"))),
@@ -194,7 +194,7 @@ describe("tecs headless", function()
                     tostring(rawequal(watch, require("tecs.platform.watch"))),
                     tostring(tecs.filesystem.nosuchthing),
                     tostring(rawequal(net, require("tecs.net"))),
-                    tostring(curl)))
+                    tostring(http)))
             ]],
                 false
             )
@@ -228,12 +228,12 @@ describe("tecs headless", function()
                 [[
                 local tecs = require("tecs")
                 local world = tecs.ecs.newWorld()
-                world:addPlugin(tecs.box2d.plugin({
+                world:addPlugin(tecs.physics.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))
                 local Transform = tecs.Transform
                 local entity = world:spawn(Transform(0, 0, 0, 1, 0, 10, 10))
-                tecs.box2d.attach(world, entity, {
+                tecs.physics.attach(world, entity, {
                     type = "dynamic", halfWidth = 5, halfHeight = 5,
                     density = 1.0,
                 })

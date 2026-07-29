@@ -1,6 +1,6 @@
 -- Physics driven from the world.
 --
--- The handle round trip is the part worth pinning: a Box2D body id is stored
+-- The handle round trip is the part worth pinning: a Rapier body id is stored
 -- as three integers in an archetype column and rebuilt on every sync. If any
 -- field were truncated or reordered the handle would still look plausible and
 -- would address the wrong body, or none.
@@ -13,18 +13,18 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
-local box2d = require("tecs.box2d")
+local physics = require("tecs.physics")
 
 local Transform = tecs.Transform
 
 -- Every world built here, so teardown can shut all of them down. The
--- simulation is per world now, so a world nobody shuts down keeps its Box2D
+-- simulation is per world now, so a world nobody shuts down keeps its Rapier
 -- world and its hold on the solver's thread pool for the rest of the run.
 local built = {}
 
 local function newWorld(gravity)
     local world = tecs.ecs.newWorld()
-    world:addPlugin(box2d.plugin({ gravity = gravity or { 0, 980 } }))
+    world:addPlugin(physics.plugin({ gravity = gravity or { 0, 980 } }))
     built[#built + 1] = world
     return world
 end
@@ -36,11 +36,11 @@ after_each(function()
     built = {}
 end)
 
-describe("ecs.box2d", function()
+describe("ecs.physics", function()
     it("leaves a static body where it was placed", function()
         local world = newWorld()
         local entity = world:spawn(Transform(100, 200, 0, 1, 0, 32, 32))
-        box2d.attach(world, entity, { type = "static", halfWidth = 16, halfHeight = 16 })
+        physics.attach(world, entity, { type = "static", halfWidth = 16, halfHeight = 16 })
 
         for _ = 1, 60 do
             world:update(1 / 60)
@@ -54,7 +54,7 @@ describe("ecs.box2d", function()
     it("accelerates a dynamic body and writes it back to the transform", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        box2d.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
         for _ = 1, 60 do
             world:update(1 / 60)
@@ -71,10 +71,10 @@ describe("ecs.box2d", function()
     it("rests a falling body on a static one", function()
         local world = newWorld()
         local ground = world:spawn(Transform(100, 600, 0, 1, 0, 400, 32))
-        box2d.attach(world, ground, { type = "static", halfWidth = 200, halfHeight = 16 })
+        physics.attach(world, ground, { type = "static", halfWidth = 200, halfHeight = 16 })
 
         local ball = world:spawn(Transform(100, 50, 0, 1, 0, 16, 16))
-        box2d.attach(world, ball, {
+        physics.attach(world, ball, {
             type = "dynamic",
             radius = 8,
             density = 1,
@@ -96,8 +96,8 @@ describe("ecs.box2d", function()
         local world = newWorld()
         local high = world:spawn(Transform(50, 0, 0, 1, 0, 16, 16))
         local low = world:spawn(Transform(150, 200, 0, 1, 0, 16, 16))
-        box2d.attach(world, high, { type = "dynamic", radius = 8, density = 1 })
-        box2d.attach(world, low, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(world, high, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(world, low, { type = "dynamic", radius = 8, density = 1 })
 
         for _ = 1, 30 do
             world:update(1 / 60)
@@ -113,7 +113,7 @@ describe("ecs.box2d", function()
     it("holds rotation fixed when asked", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 32, 8))
-        box2d.attach(
+        physics.attach(
             world,
             entity,
             { type = "dynamic", halfWidth = 16, halfHeight = 4, density = 1, fixedRotation = true }
@@ -127,7 +127,7 @@ describe("ecs.box2d", function()
     end)
 end)
 
-describe("ecs.box2d write-back", function()
+describe("ecs.physics write-back", function()
     -- The sync takes a transform column mutable only for a body the step
     -- actually moved. Everything downstream is gated on that bit, so a world
     -- whose bodies have settled must stop re-uploading them; taking the column
@@ -135,10 +135,10 @@ describe("ecs.box2d write-back", function()
     it("stops dirtying transforms once a body has settled", function()
         local world = newWorld()
         local ground = world:spawn(Transform(0, 400, 0, 1, 0, 2000, 40))
-        box2d.attach(world, ground, { type = "static", halfWidth = 1000, halfHeight = 20 })
+        physics.attach(world, ground, { type = "static", halfWidth = 1000, halfHeight = 20 })
 
         local entity = world:spawn(Transform(0, 100, 0, 1, 0, 20, 20))
-        box2d.attach(world, entity, {
+        physics.attach(world, entity, {
             type = "dynamic",
             halfWidth = 10,
             halfHeight = 10,
@@ -147,7 +147,7 @@ describe("ecs.box2d write-back", function()
             restitution = 0.0,
         })
 
-        local query = world:query({ include = { Transform, box2d.RigidBody } })
+        local query = world:query({ include = { Transform, physics.RigidBody } })
 
         -- Sampled from inside the frame, because the dirty bits clear at the
         -- end of every update and a check afterwards reads false whatever
@@ -176,7 +176,7 @@ describe("ecs.box2d write-back", function()
         end
         assert.is_true(dirty)
 
-        -- Box2D puts a resting body to sleep, and a sleeping body reports no
+        -- Rapier puts a resting body to sleep, and a sleeping body reports no
         -- movement, so the column stops being taken mutable at all.
         for _ = 1, 600 do
             step()
@@ -187,7 +187,7 @@ describe("ecs.box2d write-back", function()
     it("writes a moving body every step it moves", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 20, 20))
-        box2d.attach(world, entity, {
+        physics.attach(world, entity, {
             type = "dynamic",
             halfWidth = 10,
             halfHeight = 10,

@@ -1,12 +1,11 @@
 --- Asynchronous asset loading.
 ---
---- **The formats an image may be in are PNG and JPEG.** SDL_image offers
---- eighteen and `cmake/Pinned.cmake` turns off every other one, because each is
---- a codec a shipped binary carries: WebP, AVIF, TIFF and JPEG XL between them
---- are several megabytes for formats nothing here reads. That is a decision the
---- engine makes on a game's behalf, so it is stated here rather than met as a
---- failed load: an atlas in any other format is converted at build time, not
---- enabled at configure time. Sound is the other way round, and
+--- **The formats an image may be in are PNG and JPEG.** Rust's `image` crate
+--- is built with only those two decoders, because every enabled codec becomes
+--- code a shipped binary carries. That is a decision the engine makes on a
+--- game's behalf, so it is stated here rather than met as a failed load: an
+--- atlas in any other format is converted at build time, not enabled at
+--- compile time. Sound is the other way round, and
 --- `Audio.decoders()` reports what the mixer actually linked.
 ---
 --- Decoding a PNG is milliseconds of pure CPU work with no GPU involvement,
@@ -15,12 +14,11 @@
 --- something else until it is not. Sound takes the same route for the same
 --- reason: reading a file is a syscall a frame should not wait on.
 ---
---- The worker hands back the address of an `SDL_Surface` rather than the
---- pixels themselves. Surfaces live in process memory, so the pointer is
---- valid in either state, and passing it avoids copying a decoded image
---- through a serialized message only to copy it again into staging. Ownership
---- transfers with it: whoever receives the address destroys the surface. A
---- loaded sound crosses the same way, as the address of its `MIX_Audio`.
+--- The worker hands back the address of a Rust-owned image rather than copying
+--- its pixels through a serialized message only to copy them again into
+--- staging. Ownership transfers with it: whoever receives the address destroys
+--- the image through the Rust ABI. A loaded sound crosses the same way, as the
+--- address of its `MIX_Audio`.
 ---
 --- Nothing here creates a GPU resource. Decoding and residency are separate
 --- decisions: the renderer knows what layout its textures need, and an asset
@@ -52,53 +50,55 @@
 --- worker and a second list would be a second answer to the same question.
 
 local ffi <const> = require("ffi")
-local sdl <const> = require("tecs.ffi.sdl3")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
+local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local workers <const> = require("tecs.workers")
 local time <const> = require("tecs.platform.time")
 local filesystem <const> = require("tecs.platform.filesystem")
 
-local C <const> = sdl.C
 local MIX <const> = sdl3mixer.C
+local RUST <const> = rust.C
 
 --- Runs on the worker. Decodes to a normalized layout and returns an address.
 local DECODER <const> = [==[
 local ffi = require("ffi")
-local sdl = require("tecs.ffi.sdl3")
-local image = require("tecs.ffi.sdl3image")
 local mixer = require("tecs.ffi.sdl3mixer")
+local rust = require("tecs.ffi.rust")
+local loader = require("tecs.ffi.loader")
+local filesystem = require("tecs.platform.filesystem")
 local workers = require("tecs.workers")
 
-local C = sdl.C
-local IMG = image.C
 local MIX = mixer.C
-
--- SDL_PIXELFORMAT_RGBA32 is a byte-order alias resolved by the preprocessor,
--- so it never reaches the cdef. On a little-endian host it is ABGR8888.
-local RGBA32 = C.SDL_PIXELFORMAT_ABGR8888
+local RUST = rust.C
 
 local self = workers.current()
 
 local function decodeImage(task)
-    local surface = IMG.IMG_Load(task.path)
-    if surface == nil then
+    local bytes = filesystem.read(task.path, "image")
+    if bytes == nil then
         return { id = task.id, error = "cannot decode " .. task.path }
     end
 
-    -- Normalizing here means the upload path handles exactly one layout,
-    -- and the conversion cost lands off the main thread with the decode.
-    local converted = C.SDL_ConvertSurface(surface, RGBA32)
-    C.SDL_DestroySurface(surface)
-    if converted == nil then
-        return { id = task.id, error = "cannot convert " .. task.path }
+    local decoded = RUST.tecsImageDecode(
+        ffi.cast("const uint8_t *", bytes),
+        #bytes
+    )
+    if decoded == nil then
+        local reason = loader.toString(RUST.tecsRustError())
+        return {
+            id = task.id,
+            error = "cannot decode " .. task.path .. ": " .. reason,
+        }
     end
+    local width = tonumber(RUST.tecsImageWidth(decoded))
+    local height = tonumber(RUST.tecsImageHeight(decoded))
     return {
         id = task.id,
-        surface = tonumber(ffi.cast("uintptr_t", converted)),
-        width = converted.w,
-        height = converted.h,
-        pitch = converted.pitch,
+        image = tonumber(ffi.cast("uintptr_t", decoded)),
+        width = width,
+        height = height,
+        pitch = width * 4,
     }
 end
 
@@ -211,9 +211,9 @@ local record Handle
     --- status, including "released".
     error: string
 
-    --- Private. The `SDL_Surface` the pixels belong to, owned here and destroyed by
-    --- `release`. Images only.
-    _surface: loader.CValue
+    --- Private. The Rust image allocation the pixels belong to, owned here and
+    --- destroyed by `release`. Images only.
+    _image: loader.CValue
     --- Id the worker answers with, so a release can find this in the queue.
     _id: integer
     --- Callers sharing this decode. One decode serves every load of a path
@@ -450,8 +450,8 @@ local function complete(result: {string: any}): boolean
     -- with the address, so what arrived is destroyed here rather than left for
     -- a handle nobody is holding any more.
     if handle.status == "released" then
-        if result.surface ~= nil then
-            C.SDL_DestroySurface(ffi.cast("SDL_Surface *", ffi.cast("uintptr_t", result.surface)) as loader.CValue)
+        if result.image ~= nil then
+            RUST.tecsImageDestroy(ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue)
         end
         if result.audio ~= nil then
             MIX.MIX_DestroyAudio(ffi.cast("MIX_Audio *", ffi.cast("uintptr_t", result.audio)) as loader.CValue)
@@ -477,11 +477,11 @@ local function complete(result: {string: any}): boolean
         return true
     end
 
-    -- Ownership arrived with the address. The surface stays alive until the
+    -- Ownership arrived with the address. The image stays alive until the
     -- handle is released, because the pixels are what the caller came for.
-    local surface = ffi.cast("SDL_Surface *", ffi.cast("uintptr_t", result.surface)) as loader.CValue
-    handle._surface = surface
-    handle.pixels = surface.pixels as loader.CValue
+    local image = ffi.cast("TecsImage *", ffi.cast("uintptr_t", result.image)) as loader.CValue
+    handle._image = image
+    handle.pixels = RUST.tecsImagePixels(image) as loader.CValue
     handle.width = result.width as integer
     handle.height = result.height as integer
     handle.pitch = result.pitch as integer
@@ -526,11 +526,11 @@ function Handle:release()
         self.audio = nil
         self.resident = false
     end
-    if self._surface == nil then
+    if self._image == nil then
         return
     end
-    C.SDL_DestroySurface(self._surface)
-    self._surface = nil
+    RUST.tecsImageDestroy(self._image)
+    self._image = nil
     self.pixels = nil
 end
 

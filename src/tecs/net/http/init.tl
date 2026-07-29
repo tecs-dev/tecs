@@ -1,4 +1,4 @@
---- HTTP, over libcurl's multi interface.
+--- Asynchronous HTTP over Reqwest and rustls.
 ---
 ---     tecs.net.http.newClient({userAgent = "mygame/1.0"})
 ---         :send({url = "https://example.com/manifest.json"})
@@ -24,8 +24,8 @@ local DataStream <const> = require("tecs.net.http.DataStream")
 local type Options = client.Options
 
 local record http
-    --- A pool of transfers over one libcurl multi handle, and the
-    --- `Future.Source` behind every future it hands out.
+    --- A Reqwest connection pool and the `Future.Source` behind every future
+    --- it hands out. Rust drives sockets on Tokio; the SDL loop drains results.
     type Client = client.Client
 
     --- How a client behaves for every request it sends. Named for the client

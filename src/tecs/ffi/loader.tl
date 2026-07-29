@@ -18,14 +18,10 @@
 --- site rather than of a binding, and both are silent. They are written down
 --- here because this is where a binding's conventions are read.
 ---
---- **A variadic C function.** `curl_easy_setopt` set to 59 and read back as
---- 0x1_0000003b, on macOS arm64, once the loop containing the call had been
---- traced; `luajit -joff` never reproduces it. The call reports success and
---- delivers a different value, so the failure surfaces wherever that value is
---- next used rather than at the boundary. Not every variadic call is affected:
---- `SDL_LogMessage` in `tecs.log` survives four hundred turns of the same
---- loop. The rule to follow is therefore the measured one rather than a theory
---- about which arguments make it through.
+--- **A variadic C function.** A call can report success and deliver a
+--- corrupted value once its loop is traced. `SDL_LogMessage` in `tecs.log`
+--- survives the same stress, so the rule is based on the measured call rather
+--- than a theory about which arguments make it through.
 ---
 --- **A function that calls back into Lua.** LuaJIT cannot enter an FFI
 --- callback from a compiled trace and does not raise an error anything could
@@ -41,10 +37,8 @@
 ---
 --- The remedy for a variadic call is `jit.off(fn)` on the calling function,
 --- which makes a trace abort where it would have recorded the call.
---- `tecs.http.client` keeps every variadic call behind a named helper so there
---- is a finite set of functions to mark. Its libcurl callbacks instead live
---- in C, which lets the pump itself compile; prefer that for any callback on a
---- hot path.
+--- Keep every variadic call behind a named helper so there is a finite set of
+--- functions to mark. Prefer a native queue over any callback on a hot path.
 
 local ffi <const> = require("ffi")
 

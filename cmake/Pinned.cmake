@@ -17,12 +17,12 @@ include(${CMAKE_CURRENT_LIST_DIR}/Revisions.cmake)
 # name, so the default is shared and a static archive would leave every way of
 # running this tree that is not the host with nothing to load. TECS_SINGLE_FILE
 # is the configuration that gives that up deliberately: under the host the FFI
-# reaches a library through native/registry.c, which holds addresses taken at
+# reaches a library through the registry, which holds addresses taken at
 # build time, so nothing is loaded by name and there is nothing to leave behind.
 #
 # Two spellings of the same answer, because these projects disagree about which
 # variable decides. Most read BUILD_SHARED_LIBS; SDL and its satellites, Mbed
-# TLS and curl each name their own.
+# Rustls and Reqwest are pinned by Cargo instead.
 if(TECS_SINGLE_FILE)
     set(TECS_DEPS_SHARED OFF)
     set(TECS_DEPS_STATIC ON)
@@ -37,102 +37,11 @@ endif()
 # platforms where that happens to be the default.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Where the zlib fetched below lands. Named here because SDL_image's
-# declaration reads it and comes first; FetchContent puts a dependency's
-# checkout at <base>/<name>-src, and the base is the cache variable it defines
-# when it is included.
-set(TECS_ZLIB_SOURCE "${FETCHCONTENT_BASE_DIR}/zlib-src")
-
 FetchContent_Declare(
     SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG ${TECS_SDL3_TAG}
     GIT_SHALLOW TRUE
-)
-# SDL_image's formats are separate options as well, and every one of them is on
-# by default. Four of them reach out to a codec library of their own, so the
-# defaults cost a shipped binary megabytes for formats nothing here reads.
-#
-# On: PNG and JPEG. That is what a game built on this engine can decode, and it
-# is the whole list. Off: every other format the pinned revision offers. AVIF,
-# JXL, TIFF and WebP are the expensive ones, each carrying an external codec.
-# The rest are readers SDL_image implements itself and cost little more than
-# their own code, and they are off all the same: a format that is on is a format
-# a game ships assets in, and then every platform port has to keep it working.
-#
-# JPEG decodes through SDLIMAGE_BACKEND_STB, so keeping it links no libjpeg.
-# PNG keeps libpng rather than falling back to stb_image, because libpng is the
-# only decoder here that reads APNG and IMG_SavePNG is what the debug server
-# writes a screenshot with.
-#
-# BACKEND_IMAGEIO is off, and it is the option that makes the rest of this block
-# mean anything on Apple. With it on, `IMG_Load` is not SDL_image's own at all:
-# `src/IMG.c` compiles its entry point out under `__APPLE__` and `IMG_ImageIO.m`
-# hands the file to CoreGraphics, which reads WebP, AVIF, JPEG XL, TIFF, BMP and
-# GIF whatever these options say. Measured on release-3.4.4, over one sample of
-# each format in its own test suite: with everything below off and ImageIO on,
-# eight of the thirteen disabled formats still load, WebP and AVIF among them.
-# Leaving it on would be worse than not trimming, because a game would ship a
-# WebP atlas that works on macOS and fails everywhere. BACKEND_WIC is off for the
-# smaller version of the same reason: it is per-format rather than wholesale,
-# but it would still mean PNG and JPEG decoded by a different implementation on
-# Windows than everywhere else.
-#
-# STRICT and DEPS_SHARED are set for the reasons the mixer sets them. Without
-# STRICT a libpng that cannot be found silently drops PNG, which is every
-# texture this engine loads. DEPS_SHARED off links libpng rather than loading it
-# by name at run time, which also makes it visible: `make check-package` reads a
-# binary's link table, and a dlopen of a bare name appears in no link table.
-set(SDLIMAGE_STRICT ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_BACKEND_STB ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_BACKEND_IMAGEIO OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_BACKEND_WIC OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNG ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNG_LIBPNG ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNG_SAVE ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_JPG ON CACHE BOOL "" FORCE)
-set(SDLIMAGE_ANI OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_AVIF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_BMP OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_GIF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_JXL OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_LBM OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_PCX OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNM OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_QOI OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_SVG OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_TGA OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_TIF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_WEBP OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_XCF OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_XPM OFF CACHE BOOL "" FORCE)
-set(SDLIMAGE_XV OFF CACHE BOOL "" FORCE)
-
-# VENDORED is the one that decides whether any of the above describes a shipped
-# binary. Without it SDL_image resolves libpng with `find_package(PNG)` against
-# the build machine, and on this one that found a header inside
-# /Library/Frameworks/Mono.framework declaring libpng 1.4.12 and linked
-# Homebrew's 1.6.58 beside it. That configures, builds, links an absolute path
-# out of the package, warns at run time that the two disagree, and then
-# corrupts memory: `png_struct` is not the same shape in the two versions.
-#
-# With it on, libpng comes from SDL_image's own submodule at the revision the
-# pinned SDL_image names, and is static, so it ends up inside libSDL3_image
-# rather than beside it. Only that one submodule is fetched; the zlib beside it
-# is replaced by the patch step with the revision this file pins, for the
-# reason written at the zlib declaration below.
-set(SDLIMAGE_VENDORED ON CACHE BOOL "" FORCE)
-
-FetchContent_Declare(
-    SDL3_image
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
-    GIT_TAG ${TECS_SDL3_IMAGE_TAG}
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES "external/libpng"
-    PATCH_COMMAND ${CMAKE_COMMAND} -E copy_directory "${TECS_ZLIB_SOURCE}" "<SOURCE_DIR>/external/zlib"
 )
 FetchContent_Declare(
     SDL3_net
@@ -190,212 +99,18 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
     GIT_SUBMODULES "external/ogg;external/opus;external/opusfile;external/wavpack"
 )
-# Box2D. Its samples pull in a windowing toolkit and an immediate-mode UI, and
-# its benchmarks and unit tests are programs nothing here runs.
-set(BOX2D_SAMPLES OFF CACHE BOOL "" FORCE)
-set(BOX2D_BENCHMARKS OFF CACHE BOOL "" FORCE)
-set(BOX2D_DOCS OFF CACHE BOOL "" FORCE)
-set(BOX2D_PROFILE OFF CACHE BOOL "" FORCE)
-set(BOX2D_UNIT_TESTS OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(
-    box2d
-    GIT_REPOSITORY https://github.com/erincatto/box2d.git
-    GIT_TAG ${TECS_BOX2D_TAG}
-    GIT_SHALLOW TRUE
-)
-
-# zlib. Pinned rather than borrowed: libcurl needs it to answer a
-# Content-Encoding, and SDL3_image needs it under libpng. A shipped build gets
-# the one named here instead of whichever copy the machine happens to have.
-#
-# Both kinds, because two things want it differently. The engine reaches it
-# through the FFI, which loads a library rather than links one, so there has to
-# be a shared object; libpng goes inside libSDL3_image, so that copy is static
-# and leaves no second zlib beside it. The tests build example programs that
-# nothing runs.
+# zlib is a public FFI service and the implementation behind its public module.
+# It is pinned rather than borrowed so a packaged build does not inherit the
+# build machine's copy. Tests and upstream install rules are disabled because
+# this file installs the one library the package carries itself.
 set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(ZLIB_BUILD_SHARED ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
-# No install rules of its own. The package installs the one component it names,
-# and zlib's export set is not exportable from where SDL_image adds it: the
-# include directory it is given there is inside another project's tree.
 set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
 
-# Fetched here, and added by SDL_image rather than here.
-#
-# SDL_image vendors zlib itself, out of a submodule, and its CMakeLists adds it
-# whenever it vendors libpng, with no test for whether the target already
-# exists. zlib's own CMakeLists creates `zlib` and `zlibstatic` unconditionally,
-# so a tree that adds zlib and then adds SDL_image defines both twice and does
-# not configure. There is no option either way round: SDL_image treats a
-# vendored libpng without a vendored zlib as an internal error.
-#
-# So there is one add, and this decides what it adds. The submodule is not
-# fetched, the source below is copied into its place by SDL_image's patch step,
-# and what comes out is one zlib at TECS_ZLIB_TAG: shared for the FFI and
-# libcurl, static inside libpng.
-#
-# SOURCE_SUBDIR names a directory with no CMakeLists.txt in it, which is how
-# FetchContent is asked to fetch something and add nothing.
-FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG ${TECS_ZLIB_TAG}
-    GIT_SHALLOW TRUE
-    SOURCE_SUBDIR tecs-added-by-sdl-image
-)
+FetchContent_Declare(zlib GIT_REPOSITORY https://github.com/madler/zlib.git GIT_TAG ${TECS_ZLIB_TAG} GIT_SHALLOW TRUE)
 
-# Mbed TLS, which is libcurl's TLS backend here.
-#
-# Using the platform's own was never really on the table. curl removed its
-# Secure Transport backend in 8.15.0, because from mid-2025 it requires every
-# backend it keeps to implement TLS 1.3 and that one never did; Apple had
-# deprecated the framework in 2019 and offers no successor curl can use. So on
-# Apple there is no native backend to pick, and there is none on Linux or
-# Android either. Native would mean Schannel on Windows and a pinned library
-# everywhere else, which is not one stack but two.
-#
-# That left OpenSSL, and Mbed TLS wins on every axis that was measured. On this
-# machine it builds in 9 seconds against OpenSSL's 65 and adds 1.0 MB of
-# library against OpenSSL's 5.5 MB. curl's own comparison grades both as
-# supported, with only rustls marked experimental, and a curl built on either
-# reports the same protocols and the same features.
-#
-# What that costs is HTTP/3, which needs a QUIC-capable backend and which Mbed
-# TLS is not. Nothing here speaks HTTP/2 either, since that needs nghttp2 and
-# nothing has asked for it; if either is ever wanted, the backend is the pin
-# that changes.
-#
-# 4.1 rather than 3.6 for the support window: 3.6 is an LTS that ends in March
-# 2027 and 4.1 is the one that follows it, to March 2029. 4.x is also where the
-# crypto moved into TF-PSA-Crypto and the PSA interface became the supported
-# one, so anything built on this reaches for `psa_hash_compute` rather than the
-# legacy `mbedtls_sha256`, and does not have to be written twice.
-#
-# Building 4.x from a tag rather than a release tarball generates sources on the
-# way, so the build host needs Python with `jinja2` and `jsonschema`. Without
-# them the failure is a missing module in the middle of a dependency's build,
-# which reads as nothing in particular.
-#
-# Pinning a TLS library means owning its advisories: a shipped game carries the
-# revision named here, so a fix is a new build of every target rather than an
-# operating system update someone else ships. Mbed TLS published 3 advisories
-# in 2021 and 31 in the first half of 2026, arriving in release-day batches, so
-# the real shape of this is a few forced upgrades a year rather than a stream.
-set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
-set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(USE_SHARED_MBEDTLS_LIBRARY ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
-set(USE_STATIC_MBEDTLS_LIBRARY ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
-# Mbed TLS compiles itself with warnings as errors, which makes a compiler
-# newer than the pin a build failure in a dependency rather than a warning.
-set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
-
-# Asked here rather than left to be discovered. Mbed TLS generates part of its
-# own source and needs those two modules to do it, and without them the build
-# fails a quarter of an hour in, inside a dependency, as an import error naming
-# neither Mbed TLS nor this project. The same interpreter is what the build
-# generates bindings with, so finding it once here settles both.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} -c "import jinja2, jsonschema"
-    RESULT_VARIABLE tecsMbedtlsPythonModules
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
-if(NOT tecsMbedtlsPythonModules EQUAL 0)
-    message(
-        FATAL_ERROR
-        "tecs: ${Python3_EXECUTABLE} cannot import jinja2 and jsonschema, and Mbed TLS "
-        "generates sources with them when it is built from a git revision rather than "
-        "a release archive.\n\n"
-        "Install both for that interpreter, or point Python3_EXECUTABLE at one that has "
-        "them: python3 -m venv <dir> && <dir>/bin/pip install jinja2 jsonschema, then "
-        "configure with -DPython3_EXECUTABLE=<dir>/bin/python."
-    )
-endif()
-
-FetchContent_Declare(
-    mbedtls
-    GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
-    GIT_TAG ${TECS_MBEDTLS_TAG}
-    GIT_SHALLOW TRUE
-    GIT_SUBMODULES_RECURSE TRUE
-)
-
-# libcurl, for HTTP. Its defaults speak protocols this engine never will, and
-# every one of them is parsing code inside the process that renders the game.
-#
-# Off, and why:
-#   FTP, FILE, TFTP, DICT, GOPHER, TELNET, SMB
-#                 file transfer this engine does not do. Local files go through
-#                 tecs.platform.filesystem, which is not a URL fetch.
-#   IMAP, POP3, SMTP
-#                 mail
-#   LDAP, LDAPS   directory lookups, and on Apple the LDAP backend is another
-#                 deprecated system framework
-#   MQTT, RTSP    messaging and streaming, neither asked for
-#   NTLM, Kerberos and Negotiate authentication
-#                 enterprise single sign-on, which pulls in a GSSAPI
-#                 implementation for a case a game client does not have
-#   libssh2, libssh, librtmp, libidn2, libpsl, brotli, zstd, c-ares
-#                 each is another dependency to pin, and none serves HTTP over
-#                 TLS with a zlib Content-Encoding, which is the requirement
-#   nghttp2       HTTP/2, which nothing has asked for and which is another pin
-#
-# On: HTTP, HTTPS, and the WebSocket upgrade that rides on them, with zlib for
-# Content-Encoding and Mbed TLS for the transport. The command line tool, the
-# tests, the examples and the manual are all off, since this build wants the
-# library.
-set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
-set(BUILD_STATIC_LIBS ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
-set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
-set(CURL_USE_MBEDTLS ON CACHE BOOL "" FORCE)
-set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
-set(CURL_ZLIB ON CACHE BOOL "" FORCE)
-set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
-set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
-set(CURL_USE_GSSAPI OFF CACHE BOOL "" FORCE)
-# USE_LIBIDN2, not CURL_USE_LIBIDN2. curl names this one without its own
-# prefix, and the difference is not cosmetic: the prefixed spelling is an
-# option curl has never defined, so what it made was a cache variable nothing
-# read, while libidn2 was auto-detected on and linked from the build machine.
-set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBSSH OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
-set(ENABLE_ARES OFF CACHE BOOL "" FORCE)
-set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
-set(CURL_DISABLE_DICT ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_FILE ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_FTP ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_GOPHER ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_IMAP ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_KERBEROS_AUTH ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_LDAPS ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_MQTT ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_NEGOTIATE_AUTH ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_POP3 ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_RTSP ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_SMTP ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_TELNET ON CACHE BOOL "" FORCE)
-set(CURL_DISABLE_TFTP ON CACHE BOOL "" FORCE)
-# NTLM and SMB are the two curl spells as enables rather than disables, and
-# both are off by default at this revision. Named anyway, because a default is
-# a decision somebody else gets to change.
-set(CURL_ENABLE_NTLM OFF CACHE BOOL "" FORCE)
-set(CURL_ENABLE_SMB OFF CACHE BOOL "" FORCE)
-# No exported CMake package. Nothing here consumes one, and an export set has
-# to name every target its members link, which curl cannot do for a zlib built
-# beside it in the same tree.
-set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG ${TECS_CURL_TAG} GIT_SHALLOW TRUE)
-
-# SPIRV-Cross ships static archives, which native/spirvcross.c links whole into
+# SPIRV-Cross ships static archives, which the generated wrapper links whole into
 # one shared object the FFI can load. So its own install rules have nothing to
 # contribute, and its command line tool and tests are not built.
 set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
@@ -411,51 +126,21 @@ FetchContent_Declare(
 
 message(STATUS "tecs: fetching pinned dependencies")
 
-# Box2D and libcurl take their library kind from BUILD_SHARED_LIBS, and the
-# engine reaches both through the FFI, which loads a library by name rather
-# than linking one. A static archive would link into the host and leave every
-# other way of running this tree, a spec under a plain interpreter among them,
-# with nothing to load. A single-file build gives that up on purpose; see the
-# reasoning at the top of this file.
-set(BUILD_SHARED_LIBS ${TECS_DEPS_SHARED})
-
-# SDL and its three satellites each decide for themselves rather than reading
+# SDL and its two satellites each decide for themselves rather than reading
 # BUILD_SHARED_LIBS, so each is told. Static SDL on Apple carries the frameworks
 # it needs as interface link libraries, so nothing here has to name them.
 set(SDL_SHARED ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 set(SDL_STATIC ${TECS_DEPS_STATIC} CACHE BOOL "" FORCE)
-set(SDLIMAGE_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 set(SDLMIXER_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 set(SDLNET_BUILD_SHARED_LIBS ${TECS_DEPS_SHARED} CACHE BOOL "" FORCE)
 
-# zlib first and alone. It is only fetched here, and it has to be on disk
-# before SDL_image is, because SDL_image's patch step copies it into place.
-FetchContent_MakeAvailable(zlib)
 FetchContent_MakeAvailable(
     SDL3
-    SDL3_image
     SDL3_net
     SDL3_mixer
-    box2d
+    zlib
     SPIRV-Cross
-    mbedtls
 )
-
-# curl is asked separately, because it has to be told which Mbed TLS this is.
-# Its FindMbedTLS looks the library up on the machine unless all four of these
-# are already set, and a pinned TLS backend that a build then resolves from
-# Homebrew is the exact failure this whole file exists to prevent: it linked
-# 3.6.3 from /opt/homebrew beside the 4.1.1 sitting unused in the build tree.
-#
-# The three libraries are named as targets rather than as paths, so link order
-# and include directories come from the targets themselves. 4.x is where the
-# crypto moved into TF-PSA-Crypto, which is why the third is not mbedcrypto.
-set(MBEDTLS_INCLUDE_DIR "${mbedtls_SOURCE_DIR}/include" CACHE STRING "" FORCE)
-set(MBEDTLS_LIBRARY mbedtls CACHE STRING "" FORCE)
-set(MBEDX509_LIBRARY mbedx509 CACHE STRING "" FORCE)
-set(MBEDCRYPTO_LIBRARY tfpsacrypto CACHE STRING "" FORCE)
-
-FetchContent_MakeAvailable(curl)
 
 # ------------------------------------------------------------------- LuaJIT
 
@@ -663,11 +348,8 @@ function(tecs_pinned_library name)
 endfunction()
 
 tecs_pinned_library(sdl3 SDL3::SDL3 SDL3::SDL3-static)
-tecs_pinned_library(sdl3image SDL3_image::SDL3_image SDL3_image::SDL3_image-static)
 tecs_pinned_library(sdl3mixer SDL3_mixer::SDL3_mixer SDL3_mixer::SDL3_mixer-static)
 tecs_pinned_library(sdl3net SDL3_net::SDL3_net SDL3_net::SDL3_net-static)
-tecs_pinned_library(box2d box2d)
-tecs_pinned_library(curl CURL::libcurl CURL::libcurl_static)
 tecs_pinned_library(zlib ZLIB::ZLIB zlibstatic)
 tecs_pinned_library(shaderc shaderc_shared shaderc)
 
@@ -677,15 +359,10 @@ tecs_pinned_library(shaderc shaderc_shared shaderc)
 # across the checkout and the build directory wherever one of them is
 # generated, which is why several of these name both.
 set(TECS_SDL3_INCLUDE_DIRS "${sdl3_SOURCE_DIR}/include" "${sdl3_BINARY_DIR}/include")
-set(TECS_SDL3_IMAGE_INCLUDE_DIRS "${sdl3_image_SOURCE_DIR}/include")
 set(TECS_SDL3_NET_INCLUDE_DIRS "${sdl3_net_SOURCE_DIR}/include")
 set(TECS_SDL3_MIXER_INCLUDE_DIRS "${sdl3_mixer_SOURCE_DIR}/include")
-set(TECS_BOX2D_INCLUDE_DIRS "${box2d_SOURCE_DIR}/include")
 set(TECS_SPVC_INCLUDE_DIRS "${spirv-cross_SOURCE_DIR}")
-set(TECS_CURL_INCLUDE_DIRS "${curl_SOURCE_DIR}/include")
-# zlib is configured where SDL_image added it, so its generated zconf.h is
-# under that build rather than under one of its own.
-set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl3_image_SOURCE_DIR}/external/zlib")
+set(TECS_ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
 
 # ---------------------------------------------- what a packaged tree carries
 
@@ -699,7 +376,7 @@ set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl
 # license for.
 #
 # Everything absent is absent for a reason worth knowing. SPIRV-Cross, glslang,
-# SPIRV-Tools, libpng and SDL_mixer's four decoders are static, and are inside
+# SPIRV-Tools and SDL_mixer's four decoders are static, and are inside
 # the libraries above rather than beside them. LuaJIT is installed further up,
 # by name, because its build is not one of these.
 #
@@ -709,18 +386,7 @@ set(TECS_ZLIB_INCLUDE_DIRS "${sdl3_image_BINARY_DIR}/external/zlib-build" "${sdl
 # and `tecs info --licenses` is where they are read.
 if(NOT TECS_SINGLE_FILE)
     install(
-        TARGETS
-            SDL3-shared
-            SDL3_image-shared
-            SDL3_mixer-shared
-            SDL3_net-shared
-            box2d
-            libcurl_shared
-            zlib
-            mbedtls
-            mbedx509
-            tfpsacrypto
-            shaderc_shared
+        TARGETS SDL3-shared SDL3_mixer-shared SDL3_net-shared zlib shaderc_shared
         LIBRARY DESTINATION lib COMPONENT tecs
     )
 endif()

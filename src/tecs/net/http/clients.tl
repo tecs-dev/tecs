@@ -1,20 +1,20 @@
 --- Every open HTTP client in this process, and the one call that turns them.
 ---
---- A transfer only moves when something drives libcurl, and deciding what that
---- something is was the whole question. `assets` and `proc` are module
---- singletons, so the loop names them and calls them. A client is not: a game
---- constructs it, may construct several, and may keep none of them anywhere
---- the loop could reach. So the clients come to the loop instead. Building one
---- registers it here, closing one takes it off, and `tecs.Application` turns
---- whatever is on the list once a frame. A game calls nothing.
+--- Reqwest moves sockets on Rust's Tokio threads, but a future may settle only
+--- when the SDL thread drains its client's event queue. `assets` and `proc`
+--- are module singletons, so the loop names them and calls them. A client is
+--- not: a game constructs it, may construct several, and may keep none of them
+--- anywhere the loop could reach. So the clients come to the loop instead.
+--- Building one registers it here, closing one takes it off, and
+--- `tecs.Application` turns whatever is on the list once a frame.
 ---
 --- ## Why this is a module of its own
 ---
---- The loop has to reach the list without loading libcurl. `tecs.net.http`
---- resolves the library when it is required, so an `Application` that required
---- it would make every game depend on libcurl being present at startup,
---- including the ones that never make a request. This module names no library
---- and costs a table.
+--- The loop has to reach the list without starting the HTTP runtime.
+--- `tecs.net.http` resolves the native boundary when it is required, so an
+--- `Application` that required it would make every game start HTTP machinery,
+--- including ones that never make a request. This module names no library and
+--- costs a table.
 ---
 --- It is also why the list is of a small record rather than of `Client`:
 --- naming that type here would be a require in the wrong direction, and Teal

@@ -2,17 +2,16 @@
 ---
 --- Readback is synchronous: a screenshot asks for the frame that has already
 --- been submitted, so the CPU waits for those pixels before libpng can read
---- them. The resulting bytes go through `filesystem`, which keeps writing
---- behind the platform storage seam rather than handing SDL_image a host path.
+--- them. The Rust encoder returns an owned byte allocation, which is copied
+--- into Lua before Rust releases it. The resulting bytes go through
+--- `filesystem`, keeping writes behind the platform storage seam.
 
-local sdl <const> = require("tecs.ffi.sdl3")
-local image <const> = require("tecs.ffi.sdl3image")
+local rust <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
 local Texture <const> = require("tecs.gpu.Texture")
 local filesystem <const> = require("tecs.platform.filesystem")
 
-local C <const> = sdl.C
-local IMG <const> = image.C
+local RUST <const> = rust.C
 
 local record screenshot
 end
@@ -33,39 +32,15 @@ function screenshot.encode(texture: Texture): string, string
     end
     local pixels = value as loader.CArray
     local width, height = texture.width, texture.height
-    local surface = C.SDL_CreateSurfaceFrom(width, height, C.SDL_PIXELFORMAT_XBGR8888, pixels, width * 4)
-    if surface == nil then
-        return nil, "SDL_CreateSurfaceFrom failed: " .. sdl.error()
+    local encoded = RUST.tecsImageEncodePngRgbx(pixels as loader.CValue, width * height * 4, width, height, width * 4)
+    if encoded == nil then
+        return nil, "PNG encode failed: " .. loader.toString(RUST.tecsRustError())
     end
-
-    local output = C.SDL_IOFromDynamicMem()
-    if output == nil then
-        C.SDL_DestroySurface(surface)
-        return nil, "SDL_IOFromDynamicMem failed: " .. sdl.error()
-    end
-
-    local saved = IMG.IMG_SavePNG_IO(surface, output, false) as boolean
-    C.SDL_DestroySurface(surface)
-    if not saved then
-        local reason = "IMG_SavePNG_IO failed: " .. sdl.error()
-        C.SDL_CloseIO(output)
-        return nil, reason
-    end
-
-    local size = tonumber(C.SDL_GetIOSize(output)) as integer
-    if size < 0 or tonumber(C.SDL_SeekIO(output, 0, C.SDL_IO_SEEK_SET)) < 0 then
-        local reason = "reading encoded PNG failed: " .. sdl.error()
-        C.SDL_CloseIO(output)
-        return nil, reason
-    end
-
-    local bytes = loader.newArray("uint8_t[?]", size)
-    local read = tonumber(C.SDL_ReadIO(output, bytes, size)) as integer
-    C.SDL_CloseIO(output)
-    if read ~= size then
-        return nil, ("reading encoded PNG stopped after %d of %d bytes"):format(read, size)
-    end
-    return loader.toBytes(bytes as loader.CValue, size)
+    local bytes = loader.toBytes(
+        RUST.tecsBytesData(encoded) as loader.CValue, tonumber(RUST.tecsBytesLength(encoded)) as integer
+    )
+    RUST.tecsBytesDestroy(encoded)
+    return bytes
 end
 
 --- Encodes `texture` and writes it through the installed storage backend.

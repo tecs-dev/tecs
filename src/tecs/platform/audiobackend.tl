@@ -16,7 +16,7 @@
 --- also why no callback appears in this contract, in either direction.
 --- SDL_mixer offers one for a track that stopped, and it runs on the audio
 --- thread. A Lua function invoked from a thread the VM did not create is the
---- unsafe case that keeps raw thread creation unexposed (see `native/worker.c`),
+--- unsafe case that keeps raw thread creation unexposed (see the Rust worker),
 --- so the answer is polled instead.
 ---
 --- Exactly one thing writes each gain. The master is the mixer's own number

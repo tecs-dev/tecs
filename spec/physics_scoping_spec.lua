@@ -1,10 +1,10 @@
 -- Where a simulation lives.
 --
 -- The simulation is per world, so two worlds each installing the plugin get a
--- Box2D world each and neither sees the other's bodies. The solver's thread
+-- Rapier world each and neither sees the other's bodies. The solver's thread
 -- pool goes the other way and is shared, because threads are the machine.
 --
--- This file runs after the other box2d suites, which is deliberate: the
+-- This file runs after the other physics suites, which is deliberate: the
 -- thread count it asserts is zero catches a world any of them built and never
 -- shut down.
 
@@ -16,19 +16,19 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local tecs = require("tecs")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
-local box2d = require("tecs.box2d")
-local TaskPool = require("tecs.box2d.TaskPool")
+local physics = require("tecs.physics")
+local TaskPool = require("tecs.physics.TaskPool")
 
 local Transform = tecs.Transform
 
 -- Every world built here, so teardown can shut all of them down. A world
--- nobody shuts down keeps its Box2D world and its hold on the solver's thread
+-- nobody shuts down keeps its Rapier world and its hold on the solver's thread
 -- pool for the rest of the run.
 local built = {}
 
 local function newWorld(options)
     local world = tecs.ecs.newWorld()
-    world:addPlugin(box2d.plugin(options or { gravity = { 0, 980 } }))
+    world:addPlugin(physics.plugin(options or { gravity = { 0, 980 } }))
     built[#built + 1] = world
     return world
 end
@@ -40,9 +40,9 @@ after_each(function()
     built = {}
 end)
 
-describe("ecs.box2d world scoping", function()
+describe("ecs.physics world scoping", function()
     it("reports no simulation for a world that has none", function()
-        assert.is_nil(box2d.of(tecs.ecs.newWorld()))
+        assert.is_nil(physics.of(tecs.ecs.newWorld()))
     end)
 
     -- The key's name is the published part, because `listKeys` reverse-maps
@@ -59,17 +59,17 @@ describe("ecs.box2d world scoping", function()
         local first = newWorld()
         local second = newWorld()
 
-        assert.is_not_nil(box2d.of(first))
-        assert.is_not_nil(box2d.of(second))
-        assert.is_not.equal(box2d.of(first), box2d.of(second))
+        assert.is_not_nil(physics.of(first))
+        assert.is_not_nil(physics.of(second))
+        assert.is_not.equal(physics.of(first), physics.of(second))
 
-        local before = box2d.of(second):bodyCount()
+        local before = physics.of(second):bodyCount()
         local entity = first:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        box2d.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(first, entity, { type = "dynamic", radius = 8, density = 1 })
         first:update(1 / 60)
 
-        assert.equal(1, box2d.of(first):bodyCount())
-        assert.equal(before, box2d.of(second):bodyCount(), "a body must land in its own world's simulation")
+        assert.equal(1, physics.of(first):bodyCount())
+        assert.equal(before, physics.of(second):bodyCount(), "a body must land in its own world's simulation")
     end)
 
     it("keeps two worlds' bodies apart as they step", function()
@@ -78,8 +78,8 @@ describe("ecs.box2d world scoping", function()
 
         local a = slow:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         local b = fast:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
-        box2d.attach(slow, a, { type = "dynamic", radius = 8, density = 1 })
-        box2d.attach(fast, b, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(slow, a, { type = "dynamic", radius = 8, density = 1 })
+        physics.attach(fast, b, { type = "dynamic", radius = 8, density = 1 })
 
         for _ = 1, 30 do
             slow:update(1 / 60)
@@ -104,11 +104,11 @@ describe("ecs.box2d world scoping", function()
     -- release goes.
     it("destroys the simulation on shutdown", function()
         local world = tecs.ecs.newWorld()
-        world:addPlugin(box2d.plugin({ gravity = { 0, 980 } }))
-        assert.is_not_nil(box2d.of(world))
+        world:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
+        assert.is_not_nil(physics.of(world))
 
         world:shutdown()
-        assert.is_nil(box2d.of(world))
+        assert.is_nil(physics.of(world))
         -- Twice, because an application that shut down twice must not join a
         -- pool it has already given back.
         world:shutdown()
@@ -121,9 +121,9 @@ describe("ecs.box2d world scoping", function()
         local before = TaskPool.liveThreadCount()
 
         local first = tecs.ecs.newWorld()
-        first:addPlugin(box2d.plugin({ gravity = { 0, 980 }, workerCount = 4 }))
+        first:addPlugin(physics.plugin({ gravity = { 0, 980 }, workerCount = 4 }))
         local second = tecs.ecs.newWorld()
-        second:addPlugin(box2d.plugin({ gravity = { 0, 980 } }))
+        second:addPlugin(physics.plugin({ gravity = { 0, 980 } }))
 
         -- One pool, shared, however many simulations hold it: threads are the
         -- machine and there is one of those.
@@ -139,12 +139,12 @@ describe("ecs.box2d world scoping", function()
     -- the second install says so rather than being silently ignored.
     it("raises when a second install asks for a different worker count", function()
         local first = newWorld({ gravity = { 0, 980 }, workerCount = 2 })
-        assert.is_not_nil(box2d.of(first))
+        assert.is_not_nil(physics.of(first))
 
         local second = tecs.ecs.newWorld()
         assert.has_error(function()
-            second:addPlugin(box2d.plugin({ gravity = { 0, 980 }, workerCount = 3 }))
+            second:addPlugin(physics.plugin({ gravity = { 0, 980 }, workerCount = 3 }))
         end)
-        assert.is_nil(box2d.of(second))
+        assert.is_nil(physics.of(second))
     end)
 end)

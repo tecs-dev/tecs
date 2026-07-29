@@ -23,6 +23,7 @@
 --- all of them work from any directory inside it.
 
 local tecs <const> = require("tecs")
+local arguments <const> = require("tecscli.arguments")
 local builder <const> = require("tecscli.builder")
 local files <const> = require("tecscli.files")
 local formatting <const> = require("tecscli.formatting")
@@ -36,27 +37,6 @@ local testing <const> = require("tecscli.testing")
 
 local record run
 end
-
-local USAGE <const> = [[
-tecs — a typed entity component system and the engine around it
-
-usage: tecs <command> [arguments]
-
-  new <directory>   Scaffold a project. --force overwrites.
-  check [paths]     Type-check. Defaults to the project's source directory.
-  format [paths]    Format in place. --check reports and writes nothing.
-  test              Compile and run spec/
-  build             Compile src/, stage assets, write build/
-  run               Build, then launch the game
-  clean             Remove build/
-  info              Versions, pinned tool revisions, project, targets
-
-  --version         Print the version and exit
-  --help            This
-
-A project is a directory holding tecs.lua. Every command searches upward for
-it, so all of them work from anywhere inside a project.
-]]
 
 --- Writes a line to standard output.
 local function say(line: string)
@@ -75,26 +55,8 @@ local function noProject(reason: string): integer
     return 1
 end
 
---- Whether `flag` is among the arguments, removing it if so.
-local function takeFlag(args: {string}, flag: string): boolean
-    for index, argument in ipairs(args) do
-        if argument == flag then
-            table.remove(args, index)
-            return true
-        end
-    end
-    return false
-end
-
 --- `tecs new <directory>`
-local function commandNew(paths: layout, args: {string}): integer
-    local force = takeFlag(args, "--force")
-    local directory = args[1]
-    if directory == nil then
-        complain("tecs new: name a directory to create")
-        return 1
-    end
-
+local function commandNew(paths: layout, directory: string, force: boolean): integer
     -- The project's name is the last segment of the path, which is what a
     -- developer typed and what they will call it.
     local name = directory:match("([^/\\]+)/?$") or directory
@@ -139,8 +101,7 @@ local function commandCheck(paths: layout, args: {string}): integer
 end
 
 --- `tecs format [--check] [paths]`
-local function commandFormat(args: {string}): integer
-    local check = takeFlag(args, "--check")
+local function commandFormat(check: boolean, _paths: {string}): integer
     local found, reason = project.find()
     if found == nil then
         return noProject(reason)
@@ -294,18 +255,18 @@ end
 function run.main(root: string)
     local paths <const> = layout.resolve(root)
 
-    local args <const> = layout.arguments()
-    local command = args[1]
-    table.remove(args, 1)
+    local invocation <const> = arguments.parse(layout.arguments())
+    if invocation.kind == "exit" then
+        if invocation.stderr then
+            io.stderr:write(invocation.output)
+        else
+            io.write(invocation.output)
+        end
+        os.exit(invocation.code)
+    end
 
-    if command == nil or command == "help" or command == "--help" or command == "-h" then
-        io.write(USAGE)
-        os.exit(command == nil and 1 or 0)
-    end
-    if command == "--version" or command == "version" then
-        say(tecs.version)
-        os.exit(0)
-    end
+    local command <const> = invocation.command
+    local args <const> = invocation.values
 
     -- Not a command: the Teal compiler, run in a child so its own `os.exit`
     -- lands on a process with nothing left to do.
@@ -316,11 +277,15 @@ function run.main(root: string)
 
     local code: integer
     if command == "new" then
-        code = commandNew(paths, args)
+        code = commandNew(paths, args[1], args[2] == "true")
     elseif command == "check" then
         code = commandCheck(paths, args)
     elseif command == "format" then
-        code = commandFormat(args)
+        local formatPaths: {string} = {}
+        for index = 2, #args do
+            formatPaths[#formatPaths + 1] = args[index]
+        end
+        code = commandFormat(args[1] == "true", formatPaths)
     elseif command == "build" then
         code = commandBuild(paths)
     elseif command == "run" then
@@ -332,9 +297,8 @@ function run.main(root: string)
     elseif command == "info" then
         code = commandInfo(paths)
     else
-        complain(("tecs: no such command: %s"):format(command))
-        io.write(USAGE)
-        code = 1
+        complain(("tecs: Rust returned an unknown command: %s"):format(command))
+        code = 2
     end
 
     os.exit(code)

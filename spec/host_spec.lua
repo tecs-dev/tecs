@@ -1,6 +1,6 @@
 -- The C host, driven as the executable it is.
 --
--- Everything under test here is in `native/host.c` and none of it is reachable
+-- Everything under test here is in the Rust host and none of it is reachable
 -- from an `Application` built in this process. The host is the program SDL
 -- calls, its four callbacks are what SDL enters, and two of the three
 -- properties only happen when SDL dispatches an event into a frame that is

@@ -1,7 +1,7 @@
--- The thread pool Box2D solves across.
+-- The thread pool Rapier solves across.
 --
 -- Two things are worth pinning. The first is that adding workers does not
--- change the answer: Box2D's graph coloring makes the solve independent of
+-- change the answer: Rapier's graph coloring makes the solve independent of
 -- how the work was split, and a pool that handed out overlapping ranges or
 -- reused a worker slot on two threads at once would break that quietly rather
 -- than crash. The second is that shutdown joins, which is asked of the pool
@@ -12,8 +12,8 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local World = require("tecs.box2d.World")
-local TaskPool = require("tecs.box2d.TaskPool")
+local World = require("tecs.physics.World")
+local TaskPool = require("tecs.physics.TaskPool")
 
 -- A pile rather than a column of loose bodies: stacked contacts are what the
 -- solver spreads over graph colors, so this is the scene where the workers
@@ -64,7 +64,7 @@ local function simulate(workerCount, steps)
     return poses
 end
 
-describe("box2d.TaskPool", function()
+describe("physics.TaskPool", function()
     it("reports a worker count derived from the machine", function()
         local count = TaskPool.defaultWorkerCount()
         assert.is_true(count >= 1, ("expected at least one worker, got %d"):format(count))
@@ -130,7 +130,7 @@ describe("box2d.TaskPool", function()
         local steps = 120
         local single = simulate(1, steps)
 
-        -- Bit-exact, not within a tolerance. Box2D solves its constraint
+        -- Bit-exact, not within a tolerance. Rapier solves its constraint
         -- graph color by color and each color holds no two constraints
         -- that share a body, so the arithmetic every body sees is the same
         -- sequence of operations whichever worker performs it. A tolerance

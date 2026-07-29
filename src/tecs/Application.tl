@@ -896,9 +896,8 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- transfer reach a deadline it had no reason to.
     --
     -- Costs an integer compare on a process that has never built a client.
-    -- This module is what makes that true: `tecs.net.http` loads libcurl
-    -- when it is required, and the list of live clients deliberately does not,
-    -- so a game with no HTTP in it does not link one.
+    -- This module is what makes that true: the list of live clients does not
+    -- initialize Reqwest, so a game with no HTTP in it starts no HTTP runtime.
     httpClients.pump()
 
     -- Outside the suspension and crash guards, for the reason above and one

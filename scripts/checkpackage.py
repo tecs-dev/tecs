@@ -70,14 +70,10 @@ LINKED_LIBRARIES = (
     (r"tecs\w*", "MIT OR Apache-2.0", "the engine's own"),
     (r"spirvcrossc", "Apache-2.0 OR MIT", "the shared object the FFI needs over SPIRV-Cross's archives"),
     (r"cjson", "MIT", "lua-cjson, vendored under vendor/cjson"),
-    (r"SDL3(_image|_mixer|_net)?", "Zlib", "SDL and its three satellites"),
+    (r"SDL3(_mixer|_net)?", "Zlib", "SDL and its audio and network satellites"),
     (r"luajit", "MIT", "the VM, carrying PUC-Rio Lua's own notice inside it"),
-    (r"box2d", "MIT", "the physics solver"),
     (r"shaderc(_shared)?", "Apache-2.0", "a development build's shader compiler; a release links none"),
-    (r"png\d*", "libpng-2.0", "PNG decoding under SDL3_image"),
-    (r"z", "Zlib", "the deflate libpng reads through"),
-    (r"curl", "curl", "HTTP and HTTPS"),
-    (r"(mbedtls|mbedx509|tfpsacrypto)", "Apache-2.0", "Mbed TLS, curl's TLS backend, with Apache-2.0 elected"),
+    (r"z", "Zlib", "the public deflate service"),
     (r"(ogg|opus|opusfile)", "BSD-3-Clause", "SDL_mixer's Opus decoder and its container"),
     (r"wavpack", "BSD-3-Clause", "SDL_mixer's WavPack decoder"),
 )
@@ -227,9 +223,9 @@ def main():
 
     # Kept apart from the list below for the same reason the type check is: what
     # a development install borrows from its machine is allowed to differ, but
-    # the license position does not change with the preset. A Homebrew SDL3_image
-    # is still SDL3_image, and holding both kinds to this is what makes the
-    # check run today rather than only when someone builds a packaged preset.
+    # the license position does not change with the preset. Holding both kinds
+    # to this is what makes the check run today rather than only when someone
+    # builds a packaged preset.
     licenseProblems = []
     for notice in REQUIRED_NOTICES:
         if not (prefix / notice).exists():

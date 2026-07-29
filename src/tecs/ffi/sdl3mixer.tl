@@ -16,6 +16,8 @@
 
 local loader <const> = require("tecs.ffi.loader")
 
+-- The mixer cdef names SDL_AudioSpec and SDL_AudioDeviceID from SDL's cdef.
+loader.declare("sdl3")
 loader.declare("sdl3mixer")
 
 local namespace <const>, libraryPath <const> = loader.library(

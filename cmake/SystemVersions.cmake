@@ -5,8 +5,8 @@
 # only honest while the two agree. The spec suite runs against whatever is
 # installed here, and a spec that asserts on a library's behavior proves
 # nothing about the library a release carries once the two have drifted: the
-# renderer specs read back pixels through SDL's GPU API, and the physics specs
-# assert positions out of Box2D's solver.
+# renderer specs read back pixels through SDL's GPU API. Rust-owned services
+# are pinned by Cargo.lock and do not participate in this system-library check.
 #
 # Drift is therefore a configure failure rather than something discovered later
 # as a spec that passes on one machine and not another. Set
@@ -49,7 +49,6 @@ function(tecs_check_version name found tag mode)
 endfunction()
 
 tecs_check_version("SDL3" "${SDL3_VERSION}" "${TECS_SDL3_TAG}" EXACT)
-tecs_check_version("SDL3_image" "${SDL3_IMAGE_VERSION}" "${TECS_SDL3_IMAGE_TAG}" EXACT)
 tecs_check_version("SDL3_mixer" "${SDL3_MIXER_VERSION}" "${TECS_SDL3_MIXER_TAG}" EXACT)
 tecs_check_version("SDL3_net" "${SDL3_NET_VERSION}" "${TECS_SDL3_NET_TAG}" EXACT)
 # Against the rolling version rather than the commit, because that is the one
@@ -58,29 +57,13 @@ tecs_check_version("SDL3_net" "${SDL3_NET_VERSION}" "${TECS_SDL3_NET_TAG}" EXACT
 tecs_check_version("LuaJIT" "${LUAJIT_VERSION}" "${TECS_LUAJIT_ROLLING}" EXACT)
 tecs_check_version("shaderc" "${SHADERC_VERSION}" "${TECS_SHADERC_TAG}" PREFIX)
 
-# Four are unchecked, for two different reasons.
+# Two are unchecked, for two different reasons.
 #
 # SPIRV-Cross is pinned at a Vulkan SDK tag while its pkg-config file reports a
 # library version of its own, and the two numbering schemes have no mapping
-# between them that this can compute. Box2D ships neither a pkg-config file nor
-# a version macro in its headers, so a build resolving it by find_library has
-# nothing to ask. Its solver decides what the physics specs assert, which makes
-# it the one this most wants. Both are gaps rather than exemptions.
-#
-# libcurl and zlib are different: they disagree on purpose and cannot be made
-# to agree. A package manager ships the copy the platform builds, and on Apple
-# that is a libcurl whose TLS backend curl itself removed in 8.15.0. So there
-# is no version of these to install that would match, and holding a build to
-# one would fail every configure over a difference nobody can close.
-#
-# What that costs is named rather than hidden: a development preset speaks TLS
-# through a different library than a release does, and cmake/Pinned.cmake says
-# so where the revisions are chosen. Nothing the bindings see depends on it,
-# because the cdef is generated per build from whichever headers are present,
-# and curl.version() and zlib.version() report which answered. A spec that
-# rests on a protocol or a compression level being available on both is the
-# thing this cannot catch, which is why the curl spec drives a loopback
-# listener rather than a URL scheme a build might not have.
+# between them that this can compute. zlib intentionally differs: development
+# uses the platform package while a release builds the pinned source. Its
+# public version function reports which implementation answered.
 
 if(TECS_VERSION_DRIFT AND NOT TECS_ALLOW_VERSION_DRIFT)
     string(REPLACE ";" "\n" drift "${TECS_VERSION_DRIFT}")

@@ -92,6 +92,7 @@
 --- `newWindow` is the exception and raises, since a window that could not be
 --- created is not a question with a sensible answer.
 
+local ffi <const> = require("ffi")
 local bit <const> = require("bit")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
@@ -362,15 +363,30 @@ end
 --- an option applied at construction and a setter called later are the same
 --- work and only one of them can be written first.
 local function applyIcon(handle: loader.CPtr, path: string): boolean
-    -- Required here rather than at the top of the file so that a process which
-    -- only asks a window about itself does not load an image decoder.
-    local sdl3image <const> = require("tecs.ffi.sdl3image")
-    local surface = sdl3image.C.IMG_Load(path)
+    -- Required here rather than at the top of the file so a process which only
+    -- asks a window about itself does not load an image decoder.
+    local content <const> = require("tecs.platform.content")
+    local rust <const> = require("tecs.ffi.rust")
+    local bytes <const> = content.read(path, "image")
+    if bytes == nil then
+        return false
+    end
+    local decoded = rust.C.tecsImageDecode(ffi.cast("const uint8_t *", bytes), #bytes)
+    if decoded == nil then
+        return false
+    end
+    local width <const> = tonumber(rust.C.tecsImageWidth(decoded)) as integer
+    local height <const> = tonumber(rust.C.tecsImageHeight(decoded)) as integer
+    local surface = C.SDL_CreateSurfaceFrom(
+        width, height, C.SDL_PIXELFORMAT_ABGR8888, ffi.cast("void *", rust.C.tecsImagePixels(decoded)), width * 4
+    )
     if surface == nil then
+        rust.C.tecsImageDestroy(decoded)
         return false
     end
     local set = C.SDL_SetWindowIcon(handle, surface) as boolean
     C.SDL_DestroySurface(surface)
+    rust.C.tecsImageDestroy(decoded)
     return set
 end
 

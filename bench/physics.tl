@@ -22,7 +22,7 @@ end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
-local box2d <const> = require("tecs.box2d")
+local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
 local time <const> = require("tecs.platform.time")
@@ -94,7 +94,7 @@ local function buildContainer(world: tecs.World)
         local entity = world:spawn(
             Transform(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2), Tint(0.18, 0.18, 0.22, 1.0), Renderable()
         )
-        box2d.attach(
+        physics.attach(
             world,
             entity,
             {
@@ -135,7 +135,7 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
             round and Material(circleId, 0) or Material(0, 0),
             Renderable()
         )
-        box2d.attach(
+        physics.attach(
             world,
             entity,
             {
@@ -189,7 +189,7 @@ return tecs.newApplication({
 
         -- The A/B knob for the solver's thread pool. One worker starts no
         -- threads and runs every task inline, which is the no-executor path.
-        world:addPlugin(box2d.plugin({
+        world:addPlugin(physics.plugin({
             gravity = {0.0, 900.0},
             workerCount = math.floor(tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
         }))
@@ -236,7 +236,7 @@ return tecs.newApplication({
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
         local blown = world:query({
-            include = {Transform, box2d.RigidBody},
+            include = {Transform, physics.RigidBody},
         })
 
         world:addSystem({
@@ -250,11 +250,11 @@ return tecs.newApplication({
                 local push = BLOWER_FORCE / 60.0
                 for archetype, length in blown:iter() do
                     -- Read rather than getMut: the blowers change velocity
-                    -- through Box2D, and the transform is written back by the
+                    -- through Rapier, and the transform is written back by the
                     -- physics sync. Taking it mutable here would mark the
                     -- column dirty every frame and defeat the gate.
                     local transforms = archetype:get(Transform)
-                    local bodies = archetype:get(box2d.RigidBody)
+                    local bodies = archetype:get(physics.RigidBody)
                     for row = 1, length do
                         local transform = transforms[row]
                         for index = 1, #blowers do
@@ -268,7 +268,7 @@ return tecs.newApplication({
                                 -- snapped into it.
                                 local falloff = 1.0 - distanceSq / radiusSq
                                 local strength = push * falloff
-                                box2d.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
+                                physics.applyImpulseTo(bodies[row], blower[3] * strength, blower[4] * strength)
                                 break
                             end
                         end

@@ -28,7 +28,7 @@ set(TECS_RUST_TARGET "" CACHE STRING "Rust target triple. Inferred from the CMak
 # Two things happen together and neither is useful alone: every dependency is
 # linked as an archive rather than loaded as a library, and the whole content
 # root is deflated into an array compiled in. The first is possible because the
-# engine already never calls `ffi.load` under its own host: native/registry.c
+# engine already never calls `ffi.load` under its own host: the registry
 # installs a table of function pointers taken at build time and
 # src/tecs/ffi/loader.tl prefers it, so static linking here is a link
 # configuration rather than a design change.
@@ -84,7 +84,6 @@ if(NOT TECS_SYSTEM_DEPS)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
-    pkg_check_modules(SDL3_IMAGE REQUIRED IMPORTED_TARGET sdl3-image)
     pkg_check_modules(SDL3_MIXER REQUIRED IMPORTED_TARGET sdl3-mixer)
     # Found by hand rather than through its .pc file: Homebrew's sdl3-net.pc
     # sets includedir to /include and libdir to /lib, which CMake rejects when
@@ -101,15 +100,7 @@ else()
     pkg_check_modules(LUAJIT REQUIRED IMPORTED_TARGET luajit)
     pkg_check_modules(SHADERC REQUIRED IMPORTED_TARGET shaderc)
     pkg_check_modules(SPIRV_CROSS REQUIRED spirv-cross-c)
-    pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
     pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
-
-    # Box2D ships no pkg-config or CMake config, so it is located directly.
-    find_path(BOX2D_INCLUDE_DIR box2d/box2d.h)
-    find_library(BOX2D_LIBRARY NAMES box2d)
-    if(NOT BOX2D_INCLUDE_DIR OR NOT BOX2D_LIBRARY)
-        message(FATAL_ERROR "Box2D 3 not found. Set BOX2D_INCLUDE_DIR and BOX2D_LIBRARY.")
-    endif()
 
     include(cmake/SystemVersions.cmake)
 
@@ -117,10 +108,8 @@ else()
     # located by hand get a target built around them, so a consumer links a
     # library the same way whichever way it was found.
     add_library(tecs::sdl3 ALIAS PkgConfig::SDL3)
-    add_library(tecs::sdl3image ALIAS PkgConfig::SDL3_IMAGE)
     add_library(tecs::sdl3mixer ALIAS PkgConfig::SDL3_MIXER)
     add_library(tecs::luajit ALIAS PkgConfig::LUAJIT)
-    add_library(tecs::curl ALIAS PkgConfig::CURL)
     add_library(tecs::zlib ALIAS PkgConfig::ZLIB)
 
     add_library(tecs_sdl3net INTERFACE)
@@ -128,25 +117,17 @@ else()
     target_include_directories(tecs_sdl3net INTERFACE ${SDL3_NET_INCLUDE_DIR})
     add_library(tecs::sdl3net ALIAS tecs_sdl3net)
 
-    add_library(tecs_box2d INTERFACE)
-    target_link_libraries(tecs_box2d INTERFACE ${BOX2D_LIBRARY})
-    target_include_directories(tecs_box2d INTERFACE ${BOX2D_INCLUDE_DIR})
-    add_library(tecs::box2d ALIAS tecs_box2d)
-
     if(TECS_RUNTIME_SHADERS)
         add_library(tecs::shaderc ALIAS PkgConfig::SHADERC)
     endif()
 
     set(TECS_SDL3_INCLUDE_DIRS ${SDL3_INCLUDE_DIRS})
-    set(TECS_SDL3_IMAGE_INCLUDE_DIRS ${SDL3_IMAGE_INCLUDE_DIRS})
     set(TECS_SDL3_NET_INCLUDE_DIRS ${SDL3_NET_INCLUDE_DIR})
     set(TECS_SDL3_MIXER_INCLUDE_DIRS ${SDL3_MIXER_INCLUDE_DIRS})
-    set(TECS_BOX2D_INCLUDE_DIRS ${BOX2D_INCLUDE_DIR})
     set(TECS_LUAJIT_INCLUDE_DIRS ${LUAJIT_INCLUDE_DIRS})
     set(TECS_SHADERC_INCLUDE_DIRS ${SHADERC_INCLUDE_DIRS})
     set(TECS_SPVC_INCLUDE_DIRS ${SPIRV_CROSS_INCLUDE_DIRS})
     set(TECS_SPVC_LIBRARY_DIRS ${SPIRV_CROSS_LIBRARY_DIRS})
-    set(TECS_CURL_INCLUDE_DIRS ${CURL_INCLUDE_DIRS})
     set(TECS_ZLIB_INCLUDE_DIRS ${ZLIB_INCLUDE_DIRS})
 endif()
 
@@ -180,8 +161,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS_SYSTEM_DEPS})
 #
 # Warnings stop at the boundary because a warning is a conversation between a
 # compiler and the person who wrote the line, and nobody here wrote lua_cjson or
-# dtoa. Mbed TLS already needed MBEDTLS_FATAL_WARNINGS OFF for the mirror image
-# of this: a compiler newer than a pinned revision turns that project's warning
+# dtoa. A compiler newer than a pinned revision can turn that project's warning
 # into this project's build failure. Pointing the same gun the other way, at
 # vendored sources, would be the same mistake with the same fix.
 #
@@ -319,8 +299,17 @@ else()
     set(TECS_CARGO_PROFILE "release")
     set(TECS_CARGO_PROFILE_ARGS "--release")
 endif()
+if(TECS_SINGLE_FILE)
+    set(TECS_CARGO_FEATURE_ARGS --features payload)
+else()
+    set(TECS_CARGO_FEATURE_ARGS "")
+endif()
 
 set(TECS_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo")
+set(TECS_CARGO_ENV CARGO_TARGET_DIR=${TECS_CARGO_TARGET_DIR} TECS_CONTENT=${TECS_CONTENT} TECS_ENTRY=${TECS_ENTRY})
+if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+    list(APPEND TECS_CARGO_ENV MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET})
+endif()
 if(WIN32)
     set(TECS_RUST_ARCHIVE "${TECS_CARGO_TARGET_DIR}/${TECS_RUST_TARGET}/${TECS_CARGO_PROFILE}/tecs_native.lib")
 else()
@@ -332,13 +321,13 @@ add_custom_command(
     OUTPUT "${TECS_RUST_ARCHIVE}"
     COMMAND ${CARGO_EXECUTABLE} fmt --all --check
     COMMAND
-        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${TECS_CARGO_TARGET_DIR} ${CARGO_EXECUTABLE} clippy --workspace
-        --all-targets --locked --manifest-path "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml" --target ${TECS_RUST_TARGET}
-        ${TECS_CARGO_PROFILE_ARGS} -- -D warnings
-    COMMAND
-        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${TECS_CARGO_TARGET_DIR} ${CARGO_EXECUTABLE} build --locked
+        ${CMAKE_COMMAND} -E env ${TECS_CARGO_ENV} ${CARGO_EXECUTABLE} clippy --workspace --all-targets --locked
         --manifest-path "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml" --target ${TECS_RUST_TARGET}
-        ${TECS_CARGO_PROFILE_ARGS}
+        ${TECS_CARGO_PROFILE_ARGS} ${TECS_CARGO_FEATURE_ARGS} -- -D warnings
+    COMMAND
+        ${CMAKE_COMMAND} -E env ${TECS_CARGO_ENV} ${CARGO_EXECUTABLE} build --locked --manifest-path
+        "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml" --target ${TECS_RUST_TARGET} ${TECS_CARGO_PROFILE_ARGS}
+        ${TECS_CARGO_FEATURE_ARGS}
     DEPENDS
         ${TECS_RUST_SOURCES}
         "${CMAKE_SOURCE_DIR}/native/rust/Cargo.toml"
@@ -353,6 +342,12 @@ add_custom_target(tecs_rust_build DEPENDS "${TECS_RUST_ARCHIVE}")
 add_library(tecs_rust STATIC IMPORTED GLOBAL)
 set_target_properties(tecs_rust PROPERTIES IMPORTED_LOCATION "${TECS_RUST_ARCHIVE}")
 add_dependencies(tecs_rust tecs_rust_build)
+if(APPLE)
+    target_link_libraries(
+        tecs_rust
+        INTERFACE "-framework Security" "-framework SystemConfiguration" "-framework CoreFoundation" iconv
+    )
+endif()
 
 # Worker threads and channels. Native because a LuaJIT FFI callback invoked
 # from a thread the VM did not create is unsafe, so a thread entry point cannot
@@ -396,33 +391,37 @@ else()
     set(TECS_LIBRARY_KIND SHARED)
 endif()
 
-add_library(
-    tecs_worker
-    ${TECS_LIBRARY_KIND}
-    native/worker.c
-    native/logsink.c
-    native/taskpool.c
-    native/dialogs.c
-    native/http.c
-    native/luamods.c
+# A loadable library is still needed when LuaJIT is not running under the host.
+# Its implementation is the Rust archive; this generated symbol only gives the
+# shared-library linker a translation unit to create the container around.
+set(TECS_WORKER_ANCHOR "${CMAKE_BINARY_DIR}/generated/worker_anchor.c")
+file(
+    WRITE "${TECS_WORKER_ANCHOR}"
+    "/* Generated build glue. The tecsworker implementation is Rust. */\n"
+    "void tecsWorkerLibraryAnchor(void);\n"
+    "void tecsWorkerLibraryAnchor(void) {}\n"
 )
+add_library(tecs_worker ${TECS_LIBRARY_KIND} "${TECS_WORKER_ANCHOR}")
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit tecs::curl)
-# Box2D's headers, for the task callback types the pool is declared with. No
-# Box2D symbol is referenced: the solver calls in, through pointers it was
-# given, so this links nothing.
-target_include_directories(tecs_worker PRIVATE ${TECS_BOX2D_INCLUDE_DIRS})
+target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit "$<LINK_LIBRARY:WHOLE_ARCHIVE,tecs_rust>")
 tecs_warnings(tecs_worker)
 tecs_instrument(tecs_worker)
 
 # SPIRV-Cross ships static archives only, and the FFI needs a shared object.
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
-# from this stub, so without it the linker would discard all of them.
+# from the generated anchor, so without it the linker would discard all of them.
 #
 # A single-file build needs no shared object, because the FFI reaches the C API
 # through the registry rather than through a handle it had to resolve. The stub
 # collapses into the executable and the whole-archive options move with it.
-add_library(tecs_spirvcross ${TECS_LIBRARY_KIND} native/spirvcross.c)
+set(TECS_SPVC_ANCHOR "${CMAKE_BINARY_DIR}/generated/spvc_anchor.c")
+file(
+    WRITE "${TECS_SPVC_ANCHOR}"
+    "/* Generated build glue. The implementation is SPIRV-Cross. */\n"
+    "void tecsSpirvCrossLibraryAnchor(void);\n"
+    "void tecsSpirvCrossLibraryAnchor(void) {}\n"
+)
+add_library(tecs_spirvcross ${TECS_LIBRARY_KIND} "${TECS_SPVC_ANCHOR}")
 set_target_properties(
     tecs_spirvcross
     PROPERTIES OUTPUT_NAME spirvcrossc LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -477,9 +476,18 @@ else()
 endif()
 set_target_properties(tecs_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
 
-# The application host. SDL owns the loop, so this implements SDL's callback
-# entry points and reaches Lua through the Lua C API.
-add_executable(tecs native/host.c native/luamods.c native/mcodearena.c)
+# SDL_main.h is a platform-specific entry-point generator. The application
+# callbacks and all host state are Rust; this generated translation unit only
+# instantiates SDL's required main/WinMain/UIApplicationMain glue.
+set(TECS_MAIN_SOURCE "${CMAKE_BINARY_DIR}/generated/sdl_main.c")
+file(
+    WRITE "${TECS_MAIN_SOURCE}"
+    "/* Generated SDL platform entry glue. The host is implemented in Rust. */\n"
+    "#define SDL_MAIN_USE_CALLBACKS 1\n"
+    "#include <SDL3/SDL.h>\n"
+    "#include <SDL3/SDL_main.h>\n"
+)
+add_executable(tecs "${TECS_MAIN_SOURCE}")
 
 # Where content sits relative to the executable, in the tree this build
 # installs. The host resolves its entry chunk and the engine resolves assets
@@ -498,11 +506,11 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
 endif()
 
 # A single-file build needs no whole-archive option anywhere, and the reason is
-# the registry. `-all_load` exists on the shared stub because native/spirvcross.c
-# references none of the C API's symbols, so a linker resolving normally would
+# the registry. `-all_load` exists on the shared wrapper because its generated
+# anchor references none of the C API's symbols, so a linker resolving normally would
 # discard all of them. Here the generated `spvcapi.c` takes the address of every
 # one by name, which is exactly the reference ordinary archive resolution needs.
-# The same holds for SDL, Box2D, curl and the rest: the registry is what makes
+# The same holds for SDL, the Rust services, and the rest: the registry makes
 # them reachable, and it is what makes them linkable.
 
 # ------------------------------------------------------- generated bindings
@@ -524,9 +532,7 @@ if(TECS_BUILD_LUA)
     # Include directories come from dependency discovery rather than from a
     # hardcoded package-manager prefix, which is what lets this cross-compile.
     # Types a library's headers use and do not declare, recovered by the
-    # generator from the headers they include. Read here rather than passed,
-    # because only curl needs any and every other call site would carry an
-    # empty argument for it. Reset after the call that sets it.
+    # generator from the headers they include.
     set(TECS_CDEF_NEED "")
 
     function(tecs_cdef name header keep prefix)
@@ -568,14 +574,6 @@ if(TECS_BUILD_LUA)
     endfunction()
 
     tecs_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${TECS_SDL3_INCLUDE_DIRS})
-    tecs_cdef(
-        sdl3image
-        SDL3_image/SDL_image.h
-        /SDL3_image/
-        IMG_
-        ${TECS_SDL3_IMAGE_INCLUDE_DIRS}
-        ${TECS_SDL3_INCLUDE_DIRS}
-    )
     tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_ ${TECS_SDL3_NET_INCLUDE_DIRS} ${TECS_SDL3_INCLUDE_DIRS})
     tecs_cdef(
         sdl3mixer
@@ -585,7 +583,6 @@ if(TECS_BUILD_LUA)
         ${TECS_SDL3_MIXER_INCLUDE_DIRS}
         ${TECS_SDL3_INCLUDE_DIRS}
     )
-    tecs_cdef(box2d box2d/box2d.h /box2d/ B2_ ${TECS_BOX2D_INCLUDE_DIRS})
     tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_ ${TECS_SHADERC_INCLUDE_DIRS})
     # The header is named without a directory, because that is how it is
     # reached from both layouts: an installed SPIRV-Cross puts it in a
@@ -601,30 +598,10 @@ if(TECS_BUILD_LUA)
     tecs_cdef(zlib zlib.h "/zlib.h;/zconf.h" Z ${TECS_ZLIB_INCLUDE_DIRS})
     set(TECS_CDEF_NEED "")
 
-    # curl's public headers, named one at a time rather than by their directory,
-    # so mprintf.h stays out. It declares curl's own printf family, which
-    # nothing here calls and which would pull the platform's `FILE` and every
-    # struct inside it into a binding the whole engine shares.
-    #
-    # What is left still refers to four types curl's headers use and do not
-    # declare, since they belong to the platform. The generator recovers those
-    # from the same preprocessor output rather than having them written here,
-    # because a hand-written layout is an ABI claim nothing checks.
-    set(TECS_CDEF_NEED socklen_t time_t fd_set "struct sockaddr")
-    tecs_cdef(
-        curl
-        curl/curl.h
-        "/curl/curl.h;/curl/easy.h;/curl/multi.h;/curl/system.h;/curl/urlapi.h;/curl/options.h;/curl/header.h;/curl/websockets.h"
-        CURL
-        ${TECS_CURL_INCLUDE_DIRS}
-    )
-    set(TECS_CDEF_NEED "")
-
     # The engine's own native API. Generated the same way as a third-party
     # header so the binding cannot drift from the C even though both live here.
     tecs_cdef(worker worker.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
-    tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(dialogs dialogs.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(http http.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(rust rust.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
@@ -658,18 +635,14 @@ if(TECS_BUILD_LUA)
     endfunction()
 
     tecs_registry(sdl3 TecsSdl3Api SDL_ SDL3/SDL.h)
-    tecs_registry(sdl3image TecsSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
     tecs_registry(sdl3net TecsSdl3NetApi NET_ SDL3_net/SDL_net.h)
     tecs_registry(sdl3mixer TecsSdl3MixerApi MIX_ SDL3_mixer/SDL_mixer.h)
-    tecs_registry(box2d TecsBox2dApi b2 box2d/box2d.h)
-    tecs_registry(curl TecsCurlApi curl_ curl/curl.h)
     # zlib names its functions after what they do rather than after itself, so
     # there is no prefix to filter on. Nothing else is in its binding, since
     # only its own two headers are kept, so exporting all of it is exact.
     tecs_registry(zlib TecsZlibApi "" zlib.h)
     tecs_registry(worker TecsWorkerApi tecs worker.h)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
-    tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
     tecs_registry(dialogs TecsDialogsApi tecs dialogs.h)
     tecs_registry(http TecsHttpApi tecs http.h)
     tecs_registry(rust TecsRustApi tecs rust.h)
@@ -701,7 +674,36 @@ if(TECS_BUILD_LUA)
         "${TECS_REGISTRY_ENTRIES}"
     )
 
-    add_library(tecs_registry STATIC native/registry.c ${TECS_REGISTRY_SOURCES})
+    # The dependency-specific function addresses must be named in C because
+    # their tables are generated C structs. The installation and Lua stack
+    # work are Rust; this generated file is only the typed linker glue between
+    # those tables and `tecsRegistryInstallTables`.
+    set(TECS_REGISTRY_INSTALL "${CMAKE_BINARY_DIR}/generated/registry_install.c")
+    file(
+        WRITE "${TECS_REGISTRY_INSTALL}"
+        "/* Generated build glue. Registry installation is implemented in Rust. */\n"
+        "#include <stddef.h>\n"
+        "#include \"registry.h\"\n"
+        "#define TECS_API(name, struct_) extern const void *tecs_##name##_api(void);\n"
+        "#include \"registry_entries.h\"\n"
+        "#undef TECS_API\n"
+        "extern void tecsRegistryInstallTables(struct lua_State *, size_t, const char *const *, const void *const *);\n"
+        "void tecsRegistryInstall(struct lua_State *L)\n"
+        "{\n"
+        "    const char *names[] = {\n"
+        "#define TECS_API(name, struct_) #name,\n"
+        "#include \"registry_entries.h\"\n"
+        "#undef TECS_API\n"
+        "    };\n"
+        "    const void *tables[] = {\n"
+        "#define TECS_API(name, struct_) tecs_##name##_api(),\n"
+        "#include \"registry_entries.h\"\n"
+        "#undef TECS_API\n"
+        "    };\n"
+        "    tecsRegistryInstallTables(L, sizeof(names) / sizeof(names[0]), names, tables);\n"
+        "}\n"
+    )
+    add_library(tecs_registry STATIC "${TECS_REGISTRY_INSTALL}" ${TECS_REGISTRY_SOURCES})
     target_include_directories(tecs_registry PUBLIC "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
     # The generated tables are first-party too: they are this repository's
     # generator writing them, so a warning in one is a bug in scripts/.
@@ -709,16 +711,7 @@ if(TECS_BUILD_LUA)
     tecs_instrument(tecs_registry)
     target_link_libraries(
         tecs_registry
-        PUBLIC
-            tecs::sdl3
-            tecs::sdl3image
-            tecs::sdl3mixer
-            tecs::sdl3net
-            tecs::luajit
-            tecs::curl
-            tecs::zlib
-            tecs::box2d
-            tecs_rust
+        PUBLIC tecs::sdl3 tecs::sdl3mixer tecs::sdl3net tecs::luajit tecs::zlib tecs_rust
     )
 
     # Taking the address of a shader compiler's functions means linking it.
@@ -730,11 +723,9 @@ if(TECS_BUILD_LUA)
     target_include_directories(
         tecs_registry
         PRIVATE
-            ${TECS_BOX2D_INCLUDE_DIRS}
             ${TECS_SDL3_NET_INCLUDE_DIRS}
             ${TECS_SHADERC_INCLUDE_DIRS}
             ${TECS_SPVC_INCLUDE_DIRS}
-            ${TECS_CURL_INCLUDE_DIRS}
             ${TECS_ZLIB_INCLUDE_DIRS}
     )
 
@@ -743,7 +734,15 @@ if(TECS_BUILD_LUA)
     # The host also links the worker library, because its table holds the
     # addresses of that library's functions.
     target_link_libraries(tecs PRIVATE tecs_registry tecs_worker tecs_cjson)
-    target_link_libraries(tecs_worker PRIVATE tecs_registry tecs_cjson)
+    if(TECS_SINGLE_FILE)
+        # The static worker and registry meet in the executable. Repeating the
+        # registry on the worker's transitive link line makes Apple warn about
+        # the same archive twice and adds no symbols.
+        target_link_libraries(tecs_worker PRIVATE tecs_cjson)
+    else()
+        # A shared worker must resolve its own registry installer.
+        target_link_libraries(tecs_worker PRIVATE tecs_registry tecs_cjson)
+    endif()
     if(APPLE AND TECS_SINGLE_FILE)
         # Apple's classic linker can assert while merging Rust's unwind records
         # into this unusually large all-static executable. Rust release code
@@ -759,17 +758,13 @@ if(TECS_BUILD_LUA)
         DEPENDS
             "${GEN}/workercdef.lua"
             "${GEN}/logsinkcdef.lua"
-            "${GEN}/taskpoolcdef.lua"
             "${GEN}/httpcdef.lua"
             "${GEN}/rustcdef.lua"
             "${GEN}/sdl3cdef.lua"
-            "${GEN}/sdl3imagecdef.lua"
             "${GEN}/sdl3netcdef.lua"
             "${GEN}/sdl3mixercdef.lua"
-            "${GEN}/box2dcdef.lua"
             "${GEN}/shaderccdef.lua"
             "${GEN}/spvccdef.lua"
-            "${GEN}/curlcdef.lua"
             "${GEN}/zlibcdef.lua"
     )
 
@@ -999,10 +994,9 @@ if(TECS_BUILD_LUA)
             COMMENT "Packing the content root"
             VERBATIM
         )
-        target_sources(tecs PRIVATE "${TECS_PAYLOAD_SOURCE}" "${CMAKE_SOURCE_DIR}/cli/payload.c")
-        target_include_directories(tecs PRIVATE "${CMAKE_SOURCE_DIR}/cli" ${TECS_ZLIB_INCLUDE_DIRS})
+        target_sources(tecs PRIVATE "${TECS_PAYLOAD_SOURCE}")
+        target_include_directories(tecs PRIVATE "${CMAKE_SOURCE_DIR}/cli")
         target_compile_definitions(tecs PRIVATE TECS_PAYLOAD=1)
-        target_link_libraries(tecs PRIVATE tecs::zlib)
     endif()
 
     # Specs written in Teal, compiled the same way. The ECS suites are written
@@ -1053,7 +1047,7 @@ endif()
 # component and nothing else. A pinned build adds ten other projects to this
 # tree, each with install rules of its own, and taking the default would ship
 # their headers, their pkg-config files, their CMake package definitions and in
-# curl's case a shell script, none of which a game unpacks this to use.
+# any dependency build helpers, none of which a game unpacks this to use.
 #
 # The point is not the size. It is that a package then holds exactly what
 # something here asked for by name, so "carries its own dependencies" is a list

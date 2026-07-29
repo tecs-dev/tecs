@@ -23,19 +23,11 @@ LIBRARIES = [
     # `requires` names bindings that must be declared first. SDL_mixer's
     # header is written against SDL's types, so its cdef does not parse alone.
     {"name": "sdl3mixer", "headers": ["SDL3_mixer/SDL_mixer.h"], "module": "sdl3-mixer", "requires": ["sdl3"]},
-    {"name": "box2d", "headers": ["box2d/box2d.h"], "module": None},
     {"name": "shaderc", "headers": ["shaderc/shaderc.h"], "module": "shaderc"},
     {"name": "zlib", "headers": ["zlib.h"], "module": "zlib"},
-    # curl's binding carries four platform types its headers use and do not
-    # declare, recovered from the headers they include. Those are exactly the
-    # declarations a hand-written prelude would have guessed at, so the records
-    # built on them are checked here alongside curl's own.
-    {"name": "curl", "headers": ["curl/curl.h"], "module": "libcurl"},
 ]
 
 # A record body opening, whether it is typedef'd or named only by its tag.
-# curl declares most of its structs the second way, and one of them embeds a
-# platform type the binding recovered, which is the layout most worth checking.
 RECORD_START_RE = re.compile(r"\b(typedef\s+)?(struct|union)\s+(\w+)?\s*\{")
 # The typedef name that closes it: `} Name;`
 RECORD_END_RE = re.compile(r"\s*(\w+)\s*;")
@@ -59,8 +51,6 @@ def includeDirs(module):
         except Exception:
             pass
 
-    # Box2D ships no pkg-config file, and a fallback keeps the common case
-    # working without configuration.
     for candidate in ("/opt/homebrew/include", "/usr/local/include", "/usr/include"):
         if Path(candidate).is_dir():
             return [candidate]

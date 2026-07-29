@@ -7,6 +7,17 @@ use image::codecs::png::PngEncoder;
 use image::{ImageEncoder, ImageError};
 
 mod cli;
+mod dialogs;
+mod host;
+mod http;
+mod logsink;
+mod luamods;
+mod mcodearena;
+#[cfg(feature = "payload")]
+mod payload;
+mod physics;
+mod registry;
+mod worker;
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> =
@@ -281,6 +292,9 @@ pub unsafe extern "C" fn tecsBytesDestroy(bytes: *mut TecsBytes) {
 
 #[cfg(test)]
 mod tests {
+    use image::codecs::jpeg::JpegEncoder;
+    use image::{ExtendedColorType, ImageEncoder};
+
     use super::{decode, encode_png_rgbx};
 
     #[test]
@@ -299,5 +313,22 @@ mod tests {
         let encoded = encode_png_rgbx(&input, 1, 2, 8).unwrap();
         let decoded = decode(&encoded.bytes).unwrap();
         assert_eq!(&*decoded.pixels, &[1, 2, 3, 255, 5, 6, 7, 255]);
+    }
+
+    #[test]
+    fn jpeg_decodes_to_owned_rgba_pixels() {
+        let mut encoded = Vec::new();
+        JpegEncoder::new_with_quality(&mut encoded, 100)
+            .write_image(&[240, 20, 10, 240, 20, 10], 2, 1, ExtendedColorType::Rgb8)
+            .unwrap();
+
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 1));
+        for pixel in decoded.pixels.chunks_exact(4) {
+            assert!(pixel[0] > 200);
+            assert!(pixel[1] < 60);
+            assert!(pixel[2] < 50);
+            assert_eq!(pixel[3], 255);
+        }
     }
 }

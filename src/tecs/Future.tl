@@ -101,8 +101,8 @@ local record Future<T>
     --- Every source in this tree is something that can be told to block for up
     --- to N milliseconds and hand over whatever arrived, which is the whole of
     --- what a future needs from the work behind it. An asset decode and a child
-    --- process are a worker channel; an HTTP transfer is a curl multi handle,
-    --- whose `curl_multi_poll` is the same shape.
+    --- process are a worker channel; an HTTP transfer is a Reqwest task whose
+    --- bounded event queue has the same shape.
     record Source
         --- Takes everything ready and settles what it belongs to.
         ---

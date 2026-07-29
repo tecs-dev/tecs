@@ -37,7 +37,7 @@ local filesystem = require("tecs.platform.filesystem")
 -- and types libraries rather than being one, and the engine's own native code
 -- reached through it -- the worker channels, the log sink, the solver pool --
 -- ships with the engine on every target and is not a portability question.
-local BINDINGS = { "box2d", "sdl3", "sdl3image", "sdl3mixer", "sdl3net", "shaderc", "spvc" }
+local BINDINGS = { "rust", "sdl3", "sdl3mixer", "sdl3net", "shaderc", "spvc" }
 
 -- Every SDL entry point that reaches content, and the decoders that take a
 -- path instead of a stream. This is the bug class: the storage seam covers
@@ -86,11 +86,7 @@ local STORAGE_SYMBOLS = {
     "SDL_GetStoragePathInfo",
     "SDL_GetStorageSpaceRemaining",
     "SDL_GlobStorageDirectory",
-    -- Decoders handed a path. Their `_IO` twins read a stream and are fine.
-    "IMG_Load",
-    "IMG_SavePNG",
-    "IMG_SaveJPG",
-    "IMG_SaveAVIF",
+    -- The audio decoder handed a path. Its `_IO` twin reads a stream.
     "MIX_LoadAudio",
 }
 
@@ -195,12 +191,12 @@ local REACH = {
     },
     {
         bucket = "direct",
-        reason = "Box2D and SDL_net are built from source for every target "
+        reason = "Rapier and SDL_net are built from source for every target "
             .. "this engine is built for, so there is no seam to be on the "
             .. "far side of.",
         modules = {
-            "tecs/box2d/World.lua",
-            "tecs/box2d/init.lua",
+            "tecs/physics/TaskPool.lua",
+            "tecs/physics/World.lua",
             "tecs/mcp/transport.lua",
             "tecs/net.lua",
         },
@@ -294,20 +290,11 @@ local STORAGE = {
             .. "affects no shipped build, which is why it is a bypass worth "
             .. "recording rather than one worth hurrying.",
     },
-    ["tecs/platform/window.lua"] = {
-        bucket = "bypass",
-        symbols = { "IMG_Load" },
-        reason = "Loads the window icon from a path. IMG_Load_IO over bytes "
-            .. "from filesystem.read is the shape that closes it.",
-    },
     ["tecs/assets.lua"] = {
         bucket = "bypass",
-        symbols = { "IMG_Load", "MIX_LoadAudio" },
-        reason = "The worker decoder is handed a path and opens it itself, so "
-            .. "every image and every clip a game loads is read outside the "
-            .. "seam. The largest of these by what it covers, and the one "
-            .. "that needs the read moved onto the worker rather than the "
-            .. "decode moved off it.",
+        symbols = { "MIX_LoadAudio" },
+        reason = "The worker sound decoder is handed a path and opens it "
+            .. "itself, so clips are read outside the storage seam.",
     },
 }
 

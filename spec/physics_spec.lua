@@ -1,4 +1,4 @@
--- Physics binding behavior. Verifies that Box2D 3's value handles survive
+-- Physics binding behavior. Verifies that Rapier's arena handles survive
 -- the FFI round trip and that the solver produces the motion it should, which
 -- together catch a mis-generated cdef in a way a smoke test would not.
 
@@ -8,9 +8,9 @@
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
-local World = require("tecs.box2d.World")
+local World = require("tecs.physics.World")
 
-describe("box2d.World", function()
+describe("physics.World", function()
     local world
 
     before_each(function()
@@ -24,8 +24,6 @@ describe("box2d.World", function()
     end)
 
     it("creates a world with a resolvable library", function()
-        local box2d = require("tecs.ffi.box2d")
-        assert.is_string(box2d.path)
         assert.is_not_nil(world.handle)
     end)
 
@@ -107,5 +105,37 @@ describe("box2d.World", function()
         end
 
         assert.is_true(math.abs(World.getAngle(body)) < 1e-3)
+    end)
+
+    it("continues bit-exactly after restoring native solver state", function()
+        local body = world:createBody({
+            type = "dynamic",
+            position = { x = 2, y = 30 },
+        })
+        World.addCircle(body, 0.5, { density = 1, restitution = 0.2 })
+
+        for _ = 1, 37 do
+            world:step(1 / 60)
+        end
+        local snapshot = world:snapshot()
+
+        for _ = 1, 23 do
+            world:step(1 / 60)
+        end
+        local expectedX, expectedY = World.getPosition(body)
+        local expectedVx, expectedVy = World.getVelocity(body)
+
+        world:restore(snapshot)
+        for _ = 1, 23 do
+            world:step(1 / 60)
+        end
+        local actual = world:bodyByEntity(0)
+        local actualX, actualY = World.getPosition(actual)
+        local actualVx, actualVy = World.getVelocity(actual)
+
+        assert.equal(expectedX, actualX)
+        assert.equal(expectedY, actualY)
+        assert.equal(expectedVx, actualVx)
+        assert.equal(expectedVy, actualVy)
     end)
 end)

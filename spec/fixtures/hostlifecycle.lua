@@ -1,6 +1,6 @@
 -- An application the host spec drives, run by the real `tecs` executable.
 --
--- Everything under test lives in `native/host.c`, and none of it is reachable
+-- Everything under test lives in the Rust host, and none of it is reachable
 -- from an `Application` built in process: the host is the executable, its
 -- callbacks are what SDL enters, and most of what is being checked only happens
 -- when SDL dispatches an event into a frame that is already running. So this is

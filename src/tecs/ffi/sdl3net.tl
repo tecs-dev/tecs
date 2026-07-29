@@ -11,6 +11,8 @@
 
 local loader <const> = require("tecs.ffi.loader")
 
+-- The network cdef uses SDL's fixed-width and boolean declarations.
+loader.declare("sdl3")
 loader.declare("sdl3net")
 
 local namespace <const>, libraryPath <const> = loader.library("SDL3_net", "sdl3_net", "TECS_SDL3NET_PATH", "sdl3net")

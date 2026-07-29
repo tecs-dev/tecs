@@ -26,7 +26,7 @@
 --- **Nothing runs on an audio thread.** SDL_mixer can call back when a track
 --- stops, and that callback fires on a thread the Lua VM did not create. A Lua
 --- function invoked from such a thread is the unsafe case that keeps raw thread
---- creation unexposed (see `native/worker.c`), so no callback is installed and
+--- creation unexposed (see the Rust worker), so no callback is installed and
 --- `update` asks each sounding voice whether it is still playing instead. The
 --- cost is that a voice is reaped on the frame after it ended rather than the
 --- instant it did, which nothing here needs to be sooner.

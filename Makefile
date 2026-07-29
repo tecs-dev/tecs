@@ -65,11 +65,8 @@ PACKAGE_LIB := $(PACKAGE)/lib
 PACKAGE_ENV  = TECS_LUA=$(PACKAGE_LUA) TECS_LIB=$(PACKAGE_LIB) \
                TECS_ASSETS=$(PACKAGE_LUA) TECS_SPEC=$(CURDIR)/$(OUT)/spec \
                TECS_SDL3_PATH=$(PACKAGE_LIB)/libSDL3.dylib \
-               TECS_SDL3IMAGE_PATH=$(PACKAGE_LIB)/libSDL3_image.dylib \
                TECS_SDL3MIXER_PATH=$(PACKAGE_LIB)/libSDL3_mixer.dylib \
                TECS_SDL3NET_PATH=$(PACKAGE_LIB)/libSDL3_net.dylib \
-               TECS_BOX2D_PATH=$(PACKAGE_LIB)/libbox2d.dylib \
-               TECS_CURL_PATH=$(PACKAGE_LIB)/libcurl.dylib \
                TECS_ZLIB_PATH=$(PACKAGE_LIB)/libz.dylib \
                TECS_SHADERC_PATH=$(PACKAGE_LIB)/libshaderc_shared.dylib \
                TECS_SPVC_PATH=$(PACKAGE_LIB)/libspirvcrossc.dylib
@@ -103,7 +100,7 @@ presets: ## List available CMake presets
 	@cmake --list-presets
 
 deps: ## Install development dependencies (macOS/Homebrew)
-	brew install cmake pkg-config sdl3 sdl3_image sdl3_mixer sdl3_net box2d \
+	brew install cmake pkg-config sdl3 sdl3_mixer sdl3_net \
 	  shaderc spirv-cross luajit \
 	  clang-format stylua ruff gersemi prettier luarocks
 	@$(MAKE) dev-tools
@@ -249,8 +246,8 @@ single: ## Build the one-file command line tool into out/single/bin/tecs
 	@ls -l $(SINGLE_OUT)/bin/tecs
 
 # The suite against an installed tree. `make test` runs against a build tree,
-# which on a development preset means against the machine's own SDL, Box2D and
-# libcurl rather than against the revisions a release ships. This is what runs
+# which on a development preset means against the machine's own SDL family and
+# zlib rather than against the revisions a release ships. This is what runs
 # it against those, and it needs a packaged preset to be worth anything:
 # PRESET=macos-arm64 make test-package.
 test-package: package ## Run the spec suite against out/package

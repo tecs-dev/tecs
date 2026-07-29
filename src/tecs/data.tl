@@ -51,7 +51,7 @@
 ---
 --- **zlib does both.** It is pinned, generated into `tecs.ffi.zlib`, carried
 --- through the ABI check and loaded the same way every other native library is,
---- because libcurl needs it to answer a `Content-Encoding`. Once it is in the
+--- because the engine exposes DEFLATE as a public byte service. Once it is in the
 --- process for that, a decoder written here would be a second implementation of
 --- the format to keep correct, and the slower one. It loads on a worker the way
 --- every other binding does: `loader.declare` installs the cdef once per

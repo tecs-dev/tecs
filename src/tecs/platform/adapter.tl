@@ -134,7 +134,7 @@ local sdlPlatform <const>: adapter.Platform = {
         return sdl.K.SDL_GPU_SHADERFORMAT_SPIRV
     end,
 
-    -- Nil: the C host drains SDL's queue and hands it over, so there is
+    -- Nil: the Rust host drains SDL's queue and hands it over, so there is
     -- nothing for a platform hook to do.
     events = nil,
 

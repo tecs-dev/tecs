@@ -1,19 +1,13 @@
---- Box2D 3 as part of the world.
+--- Rapier 2D as part of the world.
 ---
---- Named for the library rather than for the subject, because Box2D's model is
---- part of the contract: `Body`, `Collider`, the filter bits, the substep
---- count and the solver's tolerances are all its vocabulary rather than a
---- rigid-body vocabulary this module invented and could re-implement over
---- something else. A game reading Box2D's own documentation is reading this
---- module's documentation, and a name that hid that would be promising a
---- portability nothing here intends to keep.
+--- The name is the subject rather than the implementation: the entity and
+--- component surface stays engine-owned while Rapier owns the solve.
 ---
 --- A body is four components. `Body` and `Collider` are the declaration, what
 --- a game asked for; `Motion` is the one piece of simulation state that has to
---- survive a body being taken out of the solve; `RigidBody` is the live Box2D
---- handle. Box2D 3 handles are small value structs rather than pointers to C++
---- objects, so the handle lives directly in an archetype column: no userdata,
---- no finalizers, and no boundary crossing to read one back.
+--- survive a body being taken out of the solve; `RigidBody` is the live
+--- Rapier arena handle. The raw index and generation live directly in an
+--- archetype column; Rust keeps every allocation and solver structure.
 ---
 --- The description is in columns rather than in a side table keyed by entity,
 --- for four reasons that a side table gives up. The snapshot writer already
@@ -26,43 +20,39 @@
 --- keyed by entity is the defect class the engine is working its way out of,
 --- not one to add to.
 ---
---- Four components rather than one, because the fields have different Box2D
---- surfaces (`b2Body_*` against `b2Shape_*`), different owners, and different
---- lifetimes, and because one body can eventually carry more than one shape.
+--- Four components rather than one, because body and collider fields have
+--- different owners and lifetimes, and one body may carry several shapes.
 ---
---- Stepping happens in FixedUpdate. Box2D's solver is not robust to a varying
---- timestep and a variable one makes replay diverge, so the fixed phase is not
---- a preference here, it is a requirement.
+--- Stepping happens in FixedUpdate. A fixed timestep is what makes replay and
+--- snapshot continuation deterministic.
 ---
---- The simulation is per world, reached through `box2d.of`. Two worlds each
---- installing the plugin get a Box2D world each and neither sees the other's
+--- The simulation is per world, reached through `physics.of`. Two worlds each
+--- installing the plugin get a Rapier world each and neither sees the other's
 --- bodies. The solver's thread pool goes the other way and is shared: threads
 --- are the machine, and worlds step serially on the game thread.
 
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local loader <const> = require("tecs.ffi.loader")
-local World <const> = require("tecs.box2d.World")
-local binding <const> = require("tecs.ffi.box2d")
+local World <const> = require("tecs.physics.World")
+local type Handle = World.Handle
 local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
 local table_clear <const> = require("table.clear")
 
 local atan2 <const> = math.atan2
 
-local B <const> = binding.C
 local Transform <const> = ecs.Transform
 
 local type Component = ecs.Component
 
 --- Pixels per simulated meter.
 ---
---- Box2D is tuned for objects roughly 0.1 to 10 units across, so simulating
---- directly in pixels puts every body far outside the range its solver
---- tolerances were chosen for.
+--- The conversion keeps game coordinates in pixels and solver coordinates in
+--- meter-sized values.
 local PIXELS_PER_METER <const> = 32.0
 
---- Body kinds, matching Box2D's `b2BodyType` and `World.tl`'s own map.
+--- Body kinds, matching the Rust bridge and `World.tl`'s own map.
 ---
 --- The integer is what the column holds. The string form stays on the options
 --- table a game writes, so a query over bodies never compares strings.
@@ -77,7 +67,7 @@ local BODY_NAMES <const>: {integer: string} = {
     [2] = "dynamic",
 }
 
---- What a game asked a body to be: the fields Box2D applies through `b2Body_*`.
+--- What a game asked a body to be.
 ---
 --- Requiring `Transform` is what makes a body without a pose unrepresentable
 --- rather than a nil test. The pose has to come from somewhere, and the sync
@@ -99,16 +89,13 @@ local record Body is Component
     angularDamping: number
 end
 
---- A body's geometry and surface: the fields Box2D applies through `b2Shape_*`.
+--- A body's geometry and surface.
 ---
 --- One record with a shape discriminant rather than a record per shape,
 --- because a component per shape would make "anything with a collider" a union
 --- across three archetypes.
 ---
---- The filter bits are 32 wide here and 64 wide in Box2D's `b2Filter`. A
---- 64-bit column does not survive the table snapshot format, which carries a
---- field as a Lua number, and thirty-two categories is what a game can express
---- through a number anyway.
+--- Rapier collision groups and the component column are both 32 bits wide.
 local record Collider is Component
     --- 0 box, 1 circle, 2 capsule.
     shape: number
@@ -141,7 +128,7 @@ local COLLIDER_SHAPES <const>: {string: integer} = {
 --- A store, not a mirror. It is written at two moments, a pause and a save,
 --- and read at two, a resume and a load. Nothing writes it per step, so
 --- reading it mid-frame gives whatever the last of those four events left
---- there. `box2d.velocity` is the live read and stays the only way to ask
+--- there. `physics.velocity` is the live read and stays the only way to ask
 --- what a body is doing right now.
 ---
 --- Mirroring it per step is the one large per-frame cost this design could
@@ -200,7 +187,7 @@ ecs.newFFIComponent({
         {"groupIndex", "int32_t"},
         {"isSensor", "uint8_t"},
     },
-    -- The material defaults are Box2D's own, from `b2DefaultShapeDef`.
+    -- The material defaults preserve the previous public surface.
     defaults = {
         COLLIDER_SHAPES.box,
         8.0,
@@ -221,8 +208,7 @@ ecs.newFFIComponent({
 
 --- A body in the simulation.
 ---
---- The three fields are Box2D's own handle layout. They are written by
---- `attach` and read back by the sync; nothing else should touch them.
+--- The raw Rapier arena index, owning world id, and arena generation.
 local record RigidBody is Component
     index1: number
     world0: number
@@ -235,7 +221,7 @@ ecs.newFFIComponent({
     fields = {
         {"index1", "int32_t"},
         {"world0", "uint16_t"},
-        {"generation", "uint16_t"},
+        {"generation", "uint32_t"},
     },
     defaults = {0, 0, 0},
     transient = true,
@@ -263,7 +249,7 @@ ecs.newFFIComponent({
     fields = {
         {"index1", "int32_t"},
         {"world0", "uint16_t"},
-        {"generation", "uint16_t"},
+        {"generation", "uint32_t"},
     },
     defaults = {0, 0, 0},
     transient = true,
@@ -301,16 +287,16 @@ local record BodyOptions
     --- extents, so there is no way to ask for a box and a radius together.
     --- Required, and positive, when `capsuleLength` is given.
     radius: number
-    --- Mass per unit area. Defaults to Box2D's 1.0. Zero leaves a dynamic body
-    --- with no mass, and Box2D reads no mass as infinite mass: it stops
+    --- Mass per unit area. Defaults to Rapier's 1.0. Zero leaves a dynamic body
+    --- with no mass, and Rapier reads no mass as infinite mass: it stops
     --- falling and stops answering impulses, which looks like a static body
     --- that was declared dynamic.
     density: number
-    --- Coulomb friction, defaulting to Box2D's 0.6. A contact takes the
+    --- Coulomb friction, defaulting to Rapier's 0.6. A contact takes the
     --- geometric mean of the two shapes', so zero on either one is a
     --- frictionless slide however rough the other is.
     friction: number
-    --- Bounce, defaulting to Box2D's 0.0. One is a perfectly elastic bounce,
+    --- Bounce, defaulting to Rapier's 0.0. One is a perfectly elastic bounce,
     --- and above one a body gains energy on every contact. A contact takes the
     --- larger of the two shapes', so the bouncier surface decides and a
     --- deadened one cannot damp it.
@@ -333,7 +319,7 @@ local record BodyOptions
     --- between two steps. Defaults to false, because it costs more to solve.
     isBullet: boolean
     --- The categories this shape belongs to, defaulting to 1. Thirty-two bits
-    --- here against Box2D's sixty-four: a wider column does not survive the
+    --- here against Rapier's sixty-four: a wider column does not survive the
     --- table snapshot format, which carries a field as a Lua number.
     categoryBits: number
     --- The categories this shape collides with, defaulting to all of them. Two
@@ -426,13 +412,13 @@ local record SensorEnd is ecs.Event
     visitor: integer
 end
 
---- What `box2d.plugin` is built with. Every field is optional.
+--- What `physics.plugin` is built with. Every field is optional.
 local record PhysicsOptions
     --- Gravity as x then y, in pixels per second squared, matching world
     --- units. Defaults to 980 downward, which is roughly Earth at this
     --- module's 32 pixels to the meter. Positive y is down, like `Transform`.
     gravity: {number}
-    --- Solver substeps per step, defaulting to Box2D's 4. More costs time
+    --- Solver substeps per step, defaulting to Rapier's 4. More costs time
     --- linearly and buys stability in stacks and fast contacts; fewer makes a
     --- tall stack sink into itself.
     subStepCount: integer
@@ -446,7 +432,7 @@ local record PhysicsOptions
     workerCount: integer
 end
 
-local record box2d
+local record physics
     RigidBody: RigidBody
     Body: Body
     Collider: Collider
@@ -471,7 +457,7 @@ local record box2d
     --- would cost a lookup per body per frame.
     ---
     --- @param row A row read straight off a `RigidBody` column. The null row a
-    ---     snapshot load leaves behind is ignored rather than passed on: Box2D
+    ---     snapshot load leaves behind is ignored rather than passed on: Rapier
     ---     indexes its body array from the slot without checking it, so a null
     ---     handle reads off the front of that array.
     --- @param x Pixel-scaled impulse along x. Dividing it by the body's mass in
@@ -481,17 +467,17 @@ local record box2d
     applyImpulseTo: function(row: RigidBody, x: number, y: number)
 end
 
-box2d.RigidBody = RigidBody
-box2d.Body = Body
-box2d.Collider = Collider
-box2d.ColliderOf = ColliderOf
-box2d.Motion = Motion
-box2d.ContactBegin = ContactBegin
-box2d.ContactEnd = ContactEnd
-box2d.ContactHit = ContactHit
-box2d.SensorBegin = SensorBegin
-box2d.SensorEnd = SensorEnd
-box2d.pixelsPerMeter = PIXELS_PER_METER
+physics.RigidBody = RigidBody
+physics.Body = Body
+physics.Collider = Collider
+physics.ColliderOf = ColliderOf
+physics.Motion = Motion
+physics.ContactBegin = ContactBegin
+physics.ContactEnd = ContactEnd
+physics.ContactHit = ContactHit
+physics.SensorBegin = SensorBegin
+physics.SensorEnd = SensorEnd
+physics.pixelsPerMeter = PIXELS_PER_METER
 
 ContactBegin.init = function(event: ContactBegin, a: integer, b: integer) event.entityA, event.entityB = a, b end
 ContactEnd.init = function(event: ContactEnd, a: integer, b: integer) event.entityA, event.entityB = a, b end
@@ -517,7 +503,7 @@ ecs.newEvent(SensorEnd)
 
 --- The simulation installed into a world, or nil when none has been.
 ---
---- Module-private, because `box2d.of` is the door: an accessor reads better
+--- Module-private, because `physics.of` is the door: an accessor reads better
 --- than a table index, and one door is what lets this module change how it
 --- stores the simulation later. What is published is the name, because
 --- `Context.listKeys` reverse-maps names to ids, so a debug tool can answer
@@ -529,7 +515,7 @@ local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 
 --- The simulation installed into `world`, or nil when none has been.
 ---
---- What lets something holding only the ECS world reach the Box2D one, which
+--- What lets something holding only the ECS world reach the Rapier one, which
 --- is what the debug tools have and what a game writing its own systems often
 --- has too.
 ---
@@ -539,7 +525,7 @@ local simulationKey <const> = ecs.newKey("tecs.physics", nil as World)
 --- @return The world's own live simulation, not a copy, so stepping or
 ---     destroying what comes back acts on the one the plugin's systems drive.
 ---     Nil before the plugin is added and again after `Shutdown` has run.
-function box2d.of(world: types.World): World
+function physics.of(world: types.World): World
     return world.resources[simulationKey]
 end
 
@@ -583,9 +569,9 @@ end
 ---
 --- Creation happens at the next fixed step. Keeping it declarative makes the
 --- same path work for spawn, batch spawn, snapshots and debug tools, and no
---- raw Box2D handle escapes the module.
+--- raw Rapier handle escapes the module.
 ---
---- @param world Raises when `box2d.plugin` was never added to it, because a
+--- @param world Raises when `physics.plugin` was never added to it, because a
 ---     body declared into a world with no simulation is components nothing
 ---     will ever read.
 --- @param entity Gains `Body` and `Collider`, and `Transform` and `Motion`
@@ -595,11 +581,11 @@ end
 ---     `Body` or `Collider`, which the fixed step reapplies to the live body.
 ---     An unrecognized `type` raises, and so does a `capsuleLength` without a
 ---     positive `radius`; both blame the caller's line rather than this one.
-function box2d.attach(world: types.World, entity: integer, options: BodyOptions)
+function physics.attach(world: types.World, entity: integer, options: BodyOptions)
     options = options or {}
 
-    if box2d.of(world) == nil then
-        error("tecs: this world has no physics simulation; add box2d.plugin to it first", 2)
+    if physics.of(world) == nil then
+        error("tecs: this world has no physics simulation; add physics.plugin to it first", 2)
     end
 
     local kind = BODY_KINDS[options.type or "dynamic"]
@@ -639,7 +625,7 @@ end
 --- @param options Only the shape, material, filter and offset fields are read.
 ---     `type`, damping, gravity and the sleep and bullet flags belong to the
 ---     body and are ignored here.
-function box2d.attachCollider(world: types.World, entity: integer, body: integer, options: BodyOptions)
+function physics.attachCollider(world: types.World, entity: integer, body: integer, options: BodyOptions)
     options = options or {}
     if world:get(body, Body) == nil then
         error("tecs: ColliderOf target has no Body", 2)
@@ -658,38 +644,23 @@ end
 --- @param entity Loses `Body` only. `Collider`, `Motion` and `Transform` stay,
 ---     so what the body was is still readable and `attach` can declare it
 ---     again. Not an error for an entity that never had a body.
-function box2d.detach(world: types.World, entity: integer)
+function physics.detach(world: types.World, entity: integer)
     world:remove(entity, Body)
 end
 
 -- One handle for the lifetime of the process. The sync rebuilds a handle per
 -- body per step, so allocating here would put a GC allocation in the hottest
 -- loop physics has.
-local scratchHandle <const> = loader.newStruct("b2BodyId")
-local scratchFields <const> = scratchHandle as loader.CStruct
-
---- Rebuilds a Box2D handle from a stored RigidBody row.
----
---- The returned handle is reused between calls; it is passed straight to
---- Box2D and never retained.
-local function handleOf(row: RigidBody): loader.CValue
-    scratchFields.index1 = row.index1
-    scratchFields.world0 = row.world0
-    scratchFields.generation = row.generation
-    return scratchHandle
+--- Rebuilds a Rapier handle from a stored RigidBody row.
+local function handleOf(row: RigidBody): Handle
+    return World.wrapHandle((row.index1 as integer) - 1, row.generation as integer, row.world0 as integer)
 end
 
-local scratchShape <const> = loader.newStruct("b2ShapeId")
-local scratchShapeFields <const> = scratchShape as loader.CStruct
-
-local function shapeOf(row: ColliderShape): loader.CValue
-    scratchShapeFields.index1 = row.index1
-    scratchShapeFields.world0 = row.world0
-    scratchShapeFields.generation = row.generation
-    return scratchShape
+local function shapeOf(row: ColliderShape): Handle
+    return World.wrapHandle((row.index1 as integer) - 1, row.generation as integer, row.world0 as integer)
 end
 
---- Whether `entity` has a body Box2D is still solving.
+--- Whether `entity` has a body Rapier is still solving.
 ---
 --- False for an entity whose RigidBody came out of a snapshot. A load
 --- restores the row as the null handle rather than a body id this run never
@@ -704,21 +675,21 @@ end
 ---     acts on it, so this is not a way to check a declaration landed. False
 ---     too for a handle whose world has since been destroyed, because the
 ---     check covers the generation and the world as well as the slot.
-function box2d.hasBody(world: types.World, entity: integer): boolean
+function physics.hasBody(world: types.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return false
     end
-    -- Box2D's own check, which covers the generation and the world as well
+    -- Rapier's own check, which covers the generation and the world as well
     -- as the slot, so a handle left over from a destroyed world answers
     -- false rather than addressing whatever took its place.
-    return B.b2Body_IsValid(handleOf(row)) as boolean
+    return World.isBodyValid(handleOf(row))
 end
 
 --- Pushes a body once, at its center of mass.
 ---
 --- An impulse rather than a force, so the effect does not depend on how long
---- the step happened to be. Wakes the body: Box2D lets a resting island sleep,
+--- the step happened to be. Wakes the body: Rapier lets a resting island sleep,
 --- and pushing a sleeping body without waking it does nothing.
 ---
 --- @param world The world holding the entity.
@@ -730,27 +701,22 @@ end
 --- @param y The same along y, positive downward. Applied at the center of
 ---     mass, so neither component imparts spin; `applyImpulseAt` is the one
 ---     that does.
-function box2d.applyImpulse(world: types.World, entity: integer, x: number, y: number)
+function physics.applyImpulse(world: types.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil then
         return
     end
-    box2d.applyImpulseTo(row, x, y)
+    physics.applyImpulseTo(row, x, y)
 end
 
-function box2d.applyImpulseTo(row: RigidBody, x: number, y: number)
-    -- The null handle is what a snapshot load leaves behind, and Box2D
+function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
+    -- The null handle is what a snapshot load leaves behind, and Rapier
     -- indexes its body array from the slot without checking it, so passing
     -- one through would read off the front of that array.
     if row.index1 == 0 then
         return
     end
-    local body = handleOf(row)
-    local impulse = loader.newStruct("b2Vec2")
-    local fields = impulse as loader.CStruct
-    fields.x = toMeters(x)
-    fields.y = toMeters(y)
-    B.b2Body_ApplyLinearImpulseToCenter(body, impulse, true)
+    World.applyImpulse(handleOf(row), toMeters(x), toMeters(y))
 end
 
 --- Applies an impulse at a world-space point, so it spins the body as well as
@@ -765,7 +731,7 @@ end
 ---     the impulse becomes spin and the less becomes travel.
 --- @param pointY The same along y. A point at the center of mass makes this
 ---     exactly `applyImpulse`.
-function box2d.applyImpulseAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function physics.applyImpulseAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -773,11 +739,11 @@ function box2d.applyImpulseAt(world: types.World, entity: integer, x: number, y:
     World.applyImpulseAt(handleOf(row), toMeters(x), toMeters(y), toMeters(pointX), toMeters(pointY))
 end
 
---- Reads a body's velocity, live from Box2D, in pixels per second.
+--- Reads a body's velocity, live from Rapier, in pixels per second.
 ---
 --- Pixels, like every other number this module takes and returns: the extents
 --- and radius `attach` is given, the impulse components, and the plugin's
---- gravity. A caller that wants meters divides by `box2d.pixelsPerMeter`.
+--- gravity. A caller that wants meters divides by `physics.pixelsPerMeter`.
 ---
 --- This rather than the `Motion` column is what a body is doing right now.
 --- `Motion` is a store written at a pause and a save, not a mirror.
@@ -788,8 +754,8 @@ end
 ---     rest; `hasBody` is what tells them apart.
 --- @return X in pixels per second, then y, positive downward. Linear only: a
 ---     body that is only spinning reads zero on both, and
----     `box2d.angularVelocity` is where that shows.
-function box2d.velocity(world: types.World, entity: integer): number, number
+---     `physics.angularVelocity` is where that shows.
+function physics.velocity(world: types.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0, 0.0
@@ -801,17 +767,17 @@ end
 --- Sets a body's velocity, in pixels per second, and wakes it.
 ---
 --- Does nothing for an entity with no live body, which is the same answer
---- `box2d.velocity` gives for one: a null handle indexes Box2D's body array
---- without being checked, so it never reaches Box2D.
+--- `physics.velocity` gives for one: a null handle indexes Rapier's body array
+--- without being checked, so it never reaches Rapier.
 ---
 --- @param world The world holding the entity.
 --- @param entity Does nothing for one with no live body.
 --- @param vx Pixels per second along x, set outright rather than added to.
----     Discarded by Box2D for a static body, which reads back zero.
+---     Discarded by Rapier for a static body, which reads back zero.
 --- @param vy The same along y, positive downward. Angular velocity is left
 ---     alone, and the `Motion` column is not written: it is a store for pauses
 ---     and saves, so it still holds whatever the last of those left.
-function box2d.setVelocity(world: types.World, entity: integer, vx: number, vy: number)
+function physics.setVelocity(world: types.World, entity: integer, vx: number, vy: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -821,7 +787,7 @@ end
 
 --- Applies a continuous force at the body's center and wakes it.
 ---
---- Cleared by Box2D at the end of every step, so holding a body up against
+--- Cleared by Rapier at the end of every step, so holding a body up against
 --- gravity means calling this every fixed step rather than once.
 ---
 --- @param world The world holding the entity.
@@ -830,7 +796,7 @@ end
 ---     kilograms gives the acceleration in pixels per second squared.
 --- @param y The same along y, positive downward. Applied at the center of
 ---     mass, so neither component imparts spin.
-function box2d.applyForce(world: types.World, entity: integer, x: number, y: number)
+function physics.applyForce(world: types.World, entity: integer, x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -850,7 +816,7 @@ end
 ---     the body's frame. Off the center of mass it produces torque as well as
 ---     acceleration.
 --- @param pointY The same along y.
-function box2d.applyForceAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
+function physics.applyForceAt(world: types.World, entity: integer, x: number, y: number, pointX: number, pointY: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -864,12 +830,12 @@ end
 ---
 --- @param world The world holding the entity.
 --- @param entity Does nothing for one with no live body.
---- @param torque Newton-meters, in Box2D's own units. This is the one quantity
+--- @param torque Newton-meters, in Rapier's own units. This is the one quantity
 ---     the module passes through unscaled, because a torque is a force times a
----     distance and so would need `box2d.pixelsPerMeter` squared rather than the
+---     distance and so would need `physics.pixelsPerMeter` squared rather than the
 ---     single factor everything else takes. Positive raises the body's angular
 ---     velocity, and so the `Transform.rotation` the sync writes.
-function box2d.applyTorque(world: types.World, entity: integer, torque: number)
+function physics.applyTorque(world: types.World, entity: integer, torque: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -879,15 +845,15 @@ end
 
 --- Reads angular velocity in radians per second.
 ---
---- Radians need no conversion, so this is the same number Box2D holds, unlike
+--- Radians need no conversion, so this is the same number Rapier holds, unlike
 --- the linear velocity beside it.
 ---
 --- @param world The world holding the entity.
 --- @param entity An entity with no live body reads as not spinning rather than
 ---     raising.
 --- @return Radians per second, in the direction a rising `Transform.rotation`
----     turns. Live from Box2D, not the `Motion` column.
-function box2d.angularVelocity(world: types.World, entity: integer): number
+---     turns. Live from Rapier, not the `Motion` column.
+function physics.angularVelocity(world: types.World, entity: integer): number
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return 0.0
@@ -900,10 +866,10 @@ end
 --- @param world The world holding the entity.
 --- @param entity Does nothing for one with no live body.
 --- @param omega Radians per second, set outright rather than added to.
----     Discarded by Box2D for a static body and for one declared with
+---     Discarded by Rapier for a static body and for one declared with
 ---     `fixedRotation`, so those two read back zero rather than the value just
 ---     written.
-function box2d.setAngularVelocity(world: types.World, entity: integer, omega: number)
+function physics.setAngularVelocity(world: types.World, entity: integer, omega: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -911,7 +877,7 @@ function box2d.setAngularVelocity(world: types.World, entity: integer, omega: nu
     World.setAngularVelocity(handleOf(row), omega)
 end
 
---- Whether Box2D currently considers the body awake.
+--- Whether Rapier currently considers the body awake.
 ---
 --- @param world The world holding the entity.
 --- @param entity Any entity. One with no live body answers false rather than
@@ -919,7 +885,7 @@ end
 --- @return Whether the body is still being solved. Bodies sleep as an island
 ---     rather than one at a time, so a body at rest touching a moving one
 ---     stays awake.
-function box2d.isAwake(world: types.World, entity: integer): boolean
+function physics.isAwake(world: types.World, entity: integer): boolean
     local row = world:get(entity, RigidBody)
     return row ~= nil and row.index1 ~= 0 and World.isAwake(handleOf(row))
 end
@@ -931,7 +897,7 @@ end
 --- @param awake True wakes it. False puts it to sleep at once rather than
 ---     waiting for it to come to rest, so a body still moving stops where it
 ---     is until something touches it or it is woken again.
-function box2d.setAwake(world: types.World, entity: integer, awake: boolean)
+function physics.setAwake(world: types.World, entity: integer, awake: boolean)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -962,7 +928,7 @@ end
 ---     which is what makes this usable as a move that does not turn anything.
 ---     Nothing sweeps the gap: a body put across a wall is through it, and a
 ---     bullet body does not catch that.
-function box2d.teleport(world: types.World, entity: integer, x: number, y: number, angle: number)
+function physics.teleport(world: types.World, entity: integer, x: number, y: number, angle: number)
     local row = world:get(entity, RigidBody)
     if row == nil or row.index1 == 0 then
         return
@@ -989,10 +955,10 @@ end
 --- @return The nearest hit along the segment, or nil when the ray met nothing.
 ---     A fresh table each call, so it is the caller's to keep, and a cast in a
 ---     per-frame loop allocates one per call.
-function box2d.raycast(
+function physics.raycast(
     world: types.World, x1: number, y1: number, x2: number, y2: number, options: QueryOptions
 ): RaycastHit
-    local simulation = box2d.of(world)
+    local simulation = physics.of(world)
     if simulation == nil then
         return nil
     end
@@ -1016,14 +982,14 @@ end
 --- Installs the simulation and its sync.
 ---
 --- @param options May be nil, which takes Earth-like gravity downward and
----     Box2D's own substep count. Read when the plugin is built rather than
+---     Rapier's own substep count. Read when the plugin is built rather than
 ---     when it is added, so one plugin added to two worlds sizes both alike.
 --- @return A plugin to hand to `world:addPlugin`. Adding it to a second world
----     gives that world a Box2D world of its own, and neither sees the other's
+---     gives that world a Rapier world of its own, and neither sees the other's
 ---     bodies; the solver's threads go the other way and are shared, so a
 ---     second world naming a `workerCount` the first did not raises rather
 ---     than resizing the pool.
-function box2d.plugin(options: PhysicsOptions): function(types.World)
+function physics.plugin(options: PhysicsOptions): function(types.World)
     options = options or {}
     local gravity = options.gravity or {0.0, 980.0}
 
@@ -1041,7 +1007,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
         })
         world.resources[simulationKey] = simulation
 
-        local function addShape(body: loader.CValue, entity: integer, collider: Collider): loader.CValue
+        local function addShape(body: Handle, entity: integer, collider: Collider): Handle
             local shapeSettings = World.shapeOptions(
                 collider.density,
                 collider.friction,
@@ -1065,7 +1031,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
 
         local function createBody(
             entity: integer, transform: Transform, declared: Body, collider: Collider
-        ): loader.CValue
+        ): Handle
             local body = simulation:createBody({
                 type = BODY_NAMES[declared.kind as integer] or "dynamic",
                 position = {x = toMeters(transform.x), y = toMeters(transform.y)},
@@ -1137,7 +1103,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
         })
         local createQueue: {PendingCreation} = {}
         local shapeQueue: {PendingShape} = {}
-        local createdBodies: {integer: loader.CValue} = {}
+        local createdBodies: {integer: Handle} = {}
 
         local bodies = world:query({
             name = "tecs.SimulatedBodies",
@@ -1150,7 +1116,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
             exclude = {PhysicsHeld},
         })
 
-        -- A body outlives its entity otherwise. Box2D owns it until something
+        -- A body outlives its entity otherwise. Rapier owns it until something
         -- says so, and nothing else knows the entity is gone, so it keeps
         -- being solved for the rest of the session.
         world:observe(
@@ -1160,8 +1126,8 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                 local colliderShape = world:get(event.entity, ColliderShape)
                 if colliderShape ~= nil and colliderShape.index1 ~= 0 then
                     local shape = shapeOf(colliderShape)
-                    if B.b2Shape_IsValid(shape) as boolean then
-                        B.b2DestroyShape(shape, true)
+                    if World.isShapeValid(shape) then
+                        World.destroyShape(shape)
                     end
                 end
                 local row = world:get(event.entity, RigidBody)
@@ -1174,10 +1140,10 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                 -- The validity check is what makes a row restored from a
                 -- snapshot, or one whose world has been destroyed, safe to
                 -- meet here.
-                if not (B.b2Body_IsValid(body) as boolean) then
+                if not World.isBodyValid(body) then
                     return
                 end
-                B.b2DestroyBody(body)
+                World.destroyBody(body)
             end
         )
 
@@ -1199,8 +1165,8 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                     local rows = archetype:get(RigidBody)
                     for row = 1, length do
                         local body = handleOf(rows[row])
-                        if B.b2Body_IsValid(body) as boolean then
-                            B.b2DestroyBody(body)
+                        if World.isBodyValid(body) then
+                            World.destroyBody(body)
                         end
                         world:remove(entities[row], RigidBody)
                     end
@@ -1209,8 +1175,8 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                     local rows = archetype:get(RigidBody)
                     for row = 1, length do
                         local body = handleOf(rows[row])
-                        if B.b2Body_IsValid(body) as boolean then
-                            B.b2DestroyBody(body)
+                        if World.isBodyValid(body) then
+                            World.destroyBody(body)
                         end
                         world:remove(entities[row], RigidBody)
                     end
@@ -1244,10 +1210,16 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                     createdBodies[pending.entity] = native
                     World.setVelocity(native, toMeters(pending.motion.vx), toMeters(pending.motion.vy))
                     World.setAngularVelocity(native, pending.motion.omega)
-                    local handle = native as loader.CStruct
+                    local wrapped = native as {string: any}
+                    local handle = wrapped.native as loader.CStruct
+                    local nativeWorld = wrapped.world as {string: any}
                     world:set(
                         pending.entity,
-                        RigidBody(handle.index1 as number, handle.world0 as number, handle.generation as number)
+                        RigidBody(
+                            (handle.index as number) + 1,
+                            nativeWorld._id as number,
+                            handle.generation as number
+                        )
                     )
                     world:set(
                         pending.entity,
@@ -1285,10 +1257,16 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                     if owner == nil then
                         owner = handleOf(world:get(pending.owner, RigidBody))
                     end
-                    local shape = addShape(owner, pending.entity, pending.collider) as loader.CStruct
+                    local wrapped = addShape(owner, pending.entity, pending.collider) as {string: any}
+                    local shape = wrapped.native as loader.CStruct
+                    local nativeWorld = wrapped.world as {string: any}
                     world:set(
                         pending.entity,
-                        ColliderShape(shape.index1 as number, shape.world0 as number, shape.generation as number)
+                        ColliderShape(
+                            (shape.index as number) + 1,
+                            nativeWorld._id as number,
+                            shape.generation as number
+                        )
                     )
                 end
                 table_clear(shapeQueue)
@@ -1311,7 +1289,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                         motions[row].omega = World.angularVelocity(body)
                         World.setVelocity(body, 0.0, 0.0)
                         World.setAngularVelocity(body, 0.0)
-                        B.b2Body_SetType(body, 0)
+                        World.setBodyType(body, 0)
                         world:set(entities[row], PhysicsHeld)
                     end
                 end
@@ -1328,7 +1306,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                     local motions = archetype:get(Motion)
                     for row = 1, length do
                         local body = handleOf(rows[row])
-                        B.b2Body_SetType(body, declarations[row].kind)
+                        World.setBodyType(body, declarations[row].kind as integer)
                         World.setVelocity(body, toMeters(motions[row].vx), toMeters(motions[row].vy))
                         World.setAngularVelocity(body, motions[row].omega)
                         world:remove(entities[row], PhysicsHeld)
@@ -1358,11 +1336,13 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                         local rows = archetype:getMut(ColliderShape)
                         for row = 1, length do
                             local old = shapeOf(rows[row])
-                            local body = B.b2Shape_GetBody(old) as loader.CValue
-                            B.b2DestroyShape(old, true)
-                            local shape = addShape(body, entities[row], collidersInArchetype[row]) as loader.CStruct
-                            rows[row].index1 = shape.index1 as number
-                            rows[row].world0 = shape.world0 as number
+                            local body = World.bodyOfShape(old)
+                            World.destroyShape(old)
+                            local wrapped = addShape(body, entities[row], collidersInArchetype[row]) as {string: any}
+                            local shape = wrapped.native as loader.CStruct
+                            local nativeWorld = wrapped.world as {string: any}
+                            rows[row].index1 = (shape.index as number) + 1
+                            rows[row].world0 = nativeWorld._id as number
                             rows[row].generation = shape.generation as number
                         end
                     end
@@ -1381,13 +1361,16 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                         for row = 1, length do
                             local declared = declarations[row]
                             local body = handleOf(rows[row])
-                            B.b2Body_SetType(body, declared.kind)
-                            B.b2Body_SetLinearDamping(body, declared.linearDamping)
-                            B.b2Body_SetAngularDamping(body, declared.angularDamping)
-                            B.b2Body_SetGravityScale(body, declared.gravityScale)
-                            B.b2Body_SetFixedRotation(body, declared.fixedRotation ~= 0)
-                            B.b2Body_SetBullet(body, declared.isBullet ~= 0)
-                            B.b2Body_EnableSleep(body, declared.sleepEnabled ~= 0)
+                            World.applyBodyDefinition(
+                                body,
+                                declared.kind as integer,
+                                declared.fixedRotation ~= 0,
+                                declared.isBullet ~= 0,
+                                declared.sleepEnabled ~= 0,
+                                declared.gravityScale,
+                                declared.linearDamping,
+                                declared.angularDamping
+                            )
                         end
                     end
                 end
@@ -1401,7 +1384,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                 for archetype, length, entities in disabledBodies:iter() do
                     local rows = archetype:get(RigidBody)
                     for row = 1, length do
-                        B.b2Body_Disable(handleOf(rows[row]))
+                        World.setEnabled(handleOf(rows[row]), false)
                         world:set(entities[row], PhysicsDisabled)
                     end
                 end
@@ -1415,7 +1398,7 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                 for archetype, length, entities in enabledBodies:iter() do
                     local rows = archetype:get(RigidBody)
                     for row = 1, length do
-                        B.b2Body_Enable(handleOf(rows[row]))
+                        World.setEnabled(handleOf(rows[row]), true)
                         world:remove(entities[row], PhysicsDisabled)
                     end
                 end
@@ -1433,68 +1416,19 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                 -- driving it runs at another.
                 simulation:step((world:getFixedTiming()))
 
-                -- Box2D returns contiguous event buffers valid until the next
-                -- step. Draining them here is callback-safe and gives gameplay
-                -- observers the fixed-step result before FixedPostUpdate.
-                local contacts = B.b2World_GetContactEvents(simulation.handle) as loader.CStruct
-                local begins = contacts.beginEvents as {integer: loader.CStruct}
-                for index = 0, (contacts.beginCount as integer) - 1 do
-                    local event = begins[index]
-                    world:emit(
-                        0,
-                        ContactBegin,
-                        World.entityOfShape(event.shapeIdA as loader.CValue),
-                        World.entityOfShape(event.shapeIdB as loader.CValue)
-                    )
-                end
-                local ends = contacts.endEvents as {integer: loader.CStruct}
-                for index = 0, (contacts.endCount as integer) - 1 do
-                    local event = ends[index]
-                    world:emit(
-                        0,
-                        ContactEnd,
-                        World.entityOfShape(event.shapeIdA as loader.CValue),
-                        World.entityOfShape(event.shapeIdB as loader.CValue)
-                    )
-                end
-                local hits = contacts.hitEvents as {integer: loader.CStruct}
-                for index = 0, (contacts.hitCount as integer) - 1 do
-                    local event = hits[index]
-                    local point = event.point as loader.CStruct
-                    local normal = event.normal as loader.CStruct
-                    world:emit(
-                        0,
-                        ContactHit,
-                        World.entityOfShape(event.shapeIdA as loader.CValue),
-                        World.entityOfShape(event.shapeIdB as loader.CValue),
-                        toPixels(point.x as number),
-                        toPixels(point.y as number),
-                        normal.x as number,
-                        normal.y as number,
-                        toPixels(event.approachSpeed as number)
-                    )
-                end
-
-                local sensors = B.b2World_GetSensorEvents(simulation.handle) as loader.CStruct
-                local sensorBegins = sensors.beginEvents as {integer: loader.CStruct}
-                for index = 0, (sensors.beginCount as integer) - 1 do
-                    local event = sensorBegins[index]
-                    world:emit(
-                        0,
-                        SensorBegin,
-                        World.entityOfShape(event.sensorShapeId as loader.CValue),
-                        World.entityOfShape(event.visitorShapeId as loader.CValue)
-                    )
-                end
-                local sensorEnds = sensors.endEvents as {integer: loader.CStruct}
-                for index = 0, (sensors.endCount as integer) - 1 do
-                    local event = sensorEnds[index]
-                    world:emit(
-                        0,
-                        SensorEnd,
-                        World.entityOfShape(event.sensorShapeId as loader.CValue),
-                        World.entityOfShape(event.visitorShapeId as loader.CValue)
-                    )
+                -- Rapier's narrow phase is drained through a native buffer, so
+                -- no Rust callback ever enters LuaJIT.
+                simulation:beginPairEvents()
+                for index = 0, simulation:pairEventCount() - 1 do
+                    local entityA, entityB, collisionStarted, sensor, hit, x, y, nx, ny, speed =
+                        simulation:pairEvent(index)
+                    if hit then
+                        world:emit(0, ContactHit, entityA, entityB, toPixels(x), toPixels(y), nx, ny, toPixels(speed))
+                    elseif sensor then
+                        world:emit(0, collisionStarted and SensorBegin or SensorEnd, entityA, entityB)
+                    else
+                        world:emit(0, collisionStarted and ContactBegin or ContactEnd, entityA, entityB)
+                    end
                 end
                 timing.finish(STEP, started)
             end,
@@ -1554,9 +1488,54 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
                     end
                 end
                 return {
+                    engine = "rapier2d-0.34",
+                    state = simulation:snapshot(),
                     workerCount = simulation.taskPool.workerCount,
                     subStepCount = simulation.subStepCount,
                 }
+            end,
+            load = function(_world: types.World, value: any)
+                local saved = value as {string: any}
+                if saved.engine ~= "rapier2d-0.34" or saved.state == nil then
+                    return
+                end
+                simulation:restore(saved.state as string)
+                world:defer()
+                for _, length, entities in pendingBodies:iter() do
+                    for row = 1, length do
+                        local entity = entities[row]
+                        local wrapped = simulation:bodyByEntity(entity) as {string: any}
+                        if wrapped ~= nil then
+                            local handle = wrapped.native as loader.CStruct
+                            world:set(
+                                entity,
+                                RigidBody(
+                                    (handle.index as number) + 1,
+                                    simulation._id as number,
+                                    handle.generation as number
+                                )
+                            )
+                        end
+                    end
+                end
+                for _, length, entities in pendingSecondary:iter() do
+                    for row = 1, length do
+                        local entity = entities[row]
+                        local wrapped = simulation:colliderByEntity(entity) as {string: any}
+                        if wrapped ~= nil then
+                            local handle = wrapped.native as loader.CStruct
+                            world:set(
+                                entity,
+                                ColliderShape(
+                                    (handle.index as number) + 1,
+                                    simulation._id as number,
+                                    handle.generation as number
+                                )
+                            )
+                        end
+                    end
+                end
+                world:commit()
             end,
         })
 
@@ -1578,4 +1557,4 @@ function box2d.plugin(options: PhysicsOptions): function(types.World)
     end
 end
 
-return box2d
+return physics
