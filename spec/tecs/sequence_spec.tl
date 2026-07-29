@@ -3,6 +3,7 @@ require("busted")
 local luassert <const> = require("luassert")
 local tecs <const> = require("tecs")
 local sequence <const> = require("tecs.sequence")
+local time <const> = require("tecs.platform.time")
 
 -- Programs are process-global and keyed by name, so every test uses a unique
 -- name to keep versions from leaking between cases.
@@ -385,6 +386,52 @@ describe(
                         luassert.equals(0, calls)
                         stepWorld(world, 1)
                         luassert.equals(1, calls)
+                    end
+                )
+
+                it(
+                    "converts a presentation wait through the frame dt, not the fixed step",
+                    function()
+                        -- The presentation clock ticks once per frame, so a
+                        -- one-second wait on it is one second of frames. A
+                        -- world whose fixed step is not the frame dt is what
+                        -- tells the two conversions apart.
+                        local frameDt <const> = time.nominal
+                        local fixedDt <const> = 1 / 50
+                        local frames <const> = math.floor(1.0 / frameDt + 0.5)
+                        local fixedSteps <const> = math.floor(1.0 / fixedDt + 0.5)
+                        luassert.not_equals(
+                            fixedSteps, frames, "the two conversions must differ or this proves nothing"
+                        )
+
+                        local slow <const> = tecs.ecs.newWorld({timestep = fixedDt})
+                        slow:addPlugin(sequence.plugin)
+                        slow:startup()
+
+                        local calls = 0
+                        sequence.registerAction(slow, "spec.count", function() calls = calls + 1 end)
+                        local prog = sequence.define(
+                            uniqueName(),
+                            {
+                                sequence.wait(1.0),
+                                sequence.call("spec.count"),
+                            },
+                            {clock = "presentation"}
+                        )
+                        sequence.play(slow, prog)
+
+                        -- The first frame runs the playback as far as the wait,
+                        -- so the wait's own ticks are counted from there.
+                        for _ = 1, fixedSteps + 1 do
+                            slow:update(frameDt)
+                        end
+                        luassert.equals(0, calls, "the world's fixed step is not what a presentation wait counts")
+                        for _ = fixedSteps + 2, frames do
+                            slow:update(frameDt)
+                        end
+                        luassert.equals(0, calls, "one second of frames has not gone by yet")
+                        slow:update(frameDt)
+                        luassert.equals(1, calls, "one second of frames is the whole wait")
                     end
                 )
 

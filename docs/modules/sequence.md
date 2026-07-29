@@ -70,8 +70,8 @@ A program is scheduled against exactly one clock, and its waits are counted in t
 | `"presentation"` | In the `Update` phase, once per frame with the frame's own `dt` | Continuous evaluation that has to look smooth at the display's rate rather than the simulation's.                 |
 
 Seconds are authored and a clock counts ticks, so `wait` converts: the fixed clock uses the world's fixed
-timestep and the frame clock uses the loop's nominal frame `dt`, which is what keeps the same program waiting
-the same wall-clock time on either.
+timestep, and the frame and presentation clocks both tick once per frame and use the loop's nominal frame `dt`.
+That is what keeps the same program waiting the same wall-clock time on all three.
 
 ### defineData
 
@@ -176,9 +176,9 @@ function sequence.wait(seconds: number): Node
 ```
 
 Converted to whole ticks when the instruction runs, rounded to nearest, with any non-zero duration waiting at
-least one tick: a frame-clock program converts with the loop's nominal frame `dt` and every other program with
-the world's fixed timestep. Programs therefore stay independent of any one world's timestep. A negative
-duration raises at authoring time.
+least one tick: a fixed-clock program converts with the world's fixed timestep, and a frame-clock or
+presentation-clock program with the loop's nominal frame `dt`, since both of those tick once per frame.
+Programs therefore stay independent of any one world's timestep. A negative duration raises at authoring time.
 
 ### waitSteps
 

@@ -85,15 +85,29 @@ local function resolveArgs(world: World, state: WorldState, cursor: Cursor, inde
     return out
 end
 
--- Seconds are authored; a clock counts ticks. The fixed clock converts with
--- the world's timestep, the frame clock with the loop's nominal frame dt, so
--- the same program waits the same wall-clock time on either. The nominal dt is
--- the platform timer's to own, including what it is before the loop sets it.
+-- Seconds are authored; a clock counts ticks. `fixed` is the only clock whose
+-- tick is a fixed step, so it is the only one converted with the world's
+-- timestep: `frame` and `presentation` both advance once per frame and convert
+-- with the loop's nominal frame dt. The same program then waits the same
+-- wall-clock time whichever clock it is on. The condition names `fixed` rather
+-- than the two per-frame clocks so that a clock whose tick is not a fixed step
+-- cannot reach the fixed step's length by falling through.
+--
+-- Nominal rather than the frame's measured dt because a wake is a tick number
+-- fixed when the wait runs and never revisited: dividing by whatever one frame
+-- happened to cost would make the same wait a different number of ticks on
+-- every machine and every frame it started on. The nominal dt is the platform
+-- timer's to own, including what it is before the loop sets it.
 local function secondsToSteps(world: World, clockId: seqtypes.ClockId, seconds: number): integer
     if seconds <= 0 then
         return 0
     end
-    local timestep = clockId == "frame" and platformtime.nominal or world:getFixedTiming()
+    local timestep: number
+    if clockId == "fixed" then
+        timestep = world:getFixedTiming()
+    else
+        timestep = platformtime.nominal
+    end
     if not timestep or timestep <= 0 then
         return 1
     end
