@@ -86,7 +86,7 @@ no handling. An explicit physical id stays on that device until this `Audio` is 
 | Field       | Type      | Description                                                                                                           |
 | ----------- | --------- | --------------------------------------------------------------------------------------------------------------------- |
 | `available` | `boolean` | Whether an output opened. `false` on a machine with no sound, where every call here still works and nothing is heard. |
-| `Sound`     | `Sound`   | The component type, also reachable as `tecs.audio.Sound`. See [the Sound component](#sound-component).            |
+| `Sound`     | `Sound`   | The component type, also reachable as `tecs.audio.Sound`. See [the Sound component](#sound-component).                |
 
 ### install
 
