@@ -1086,7 +1086,7 @@ fn stage_content(
     run(&mut cli, "Teal CLI compilation")?;
 
     copy_tree(&root.join("assets"), &paths.lua, false)?;
-    stage_offline_docs(&root.join("docs"), &paths.lua.join("tecsdocs"))?;
+    stage_offline_docs(root, &paths.lua.join("tecsdocs"))?;
     copy_tree(
         &root.join("cli/tecscli/templates"),
         &paths.lua.join("tecscli/templates"),
@@ -1167,7 +1167,51 @@ fn copy_tree(source: &Path, destination: &Path, clean: bool) -> Result<()> {
     Ok(())
 }
 
-fn stage_offline_docs(source: &Path, destination: &Path) -> Result<()> {
+/// Stages the documentation `tecs docs` reads offline.
+///
+/// The pages under `docs/` carry prose and no reference: the generator renders
+/// every `### tecs.*` entry at build time, so a page on disk holds none of the
+/// 1,000-odd symbols the command looks up. What it needs is the composed
+/// Markdown a site build writes beside each page, which is prose and reference
+/// together.
+///
+/// A site build takes about thirteen seconds, which is not a price every
+/// `build` and `test` should pay, so it runs only when a page or a source file
+/// is newer than the last one. The fingerprint is a modification time rather
+/// than a hash because the inputs are thousands of files and the question is
+/// only whether anything moved.
+fn stage_offline_docs(root: &Path, destination: &Path) -> Result<()> {
+    let composed = root.join(crate::docs::OUTPUT);
+    if docs_are_stale(root, &composed)? {
+        crate::docs::build(root, &composed)?;
+    }
+    stage_markdown(&composed, destination)
+}
+
+/// Whether a page or a Teal source is newer than the composed Markdown.
+fn docs_are_stale(root: &Path, composed: &Path) -> Result<bool> {
+    let built = match fs::metadata(composed.join("index.md")) {
+        Ok(metadata) => metadata.modified()?,
+        Err(_) => return Ok(true),
+    };
+    for directory in [root.join("docs"), root.join("src")] {
+        for path in source_files(&directory, |path| {
+            let extension = path.extension().and_then(|value| value.to_str());
+            let is_input = extension == Some("md") || extension == Some("tl");
+            is_input
+                && !path
+                    .components()
+                    .any(|part| part.as_os_str() == "node_modules")
+        })? {
+            if fs::metadata(&path)?.modified()? > built {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn stage_markdown(source: &Path, destination: &Path) -> Result<()> {
     if destination.exists() {
         fs::remove_dir_all(destination)?;
     }
