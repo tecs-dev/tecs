@@ -6,8 +6,8 @@ opened. Spelling each of those as its own field is how an HTTP API ends up
 with `body`, `bodyBytes`, `bodyLength`, `into` and a response whose `body`
 is nil whenever its `path` is not. This is the one value all of them
 become: it knows where its bytes are, it reports a length when it can know
-one, and it is read a piece at a time so a 500 MB download is never also a
-500 MB string.
+one, and a response destination receives pieces without first becoming one
+large Lua string.
 
     tecs.net.http.newClient():send({
         url = "https://example.com/upload",
@@ -29,31 +29,32 @@ is one field whatever was asked for. `text()` is how it becomes a string,
 which for a body that was never written anywhere costs nothing: the string
 is already what is behind it.
 
-## Length is a claim, not a promise
+## Request and response memory
 
-`length` is the number of bytes when something knows it before they are
-read: a string knows, a buffer was given one, a file is asked for its size.
-A handle does not, unless whoever opened it says so. That is what decides
-whether a request carries a `Content-Length` or is sent chunked, which is
-why it is a field a caller can set rather than something inferred at the
-last moment.
+An `into` file or handle is written as response pieces arrive. A request body
+is different today: `send` reads the complete source into one Lua string before
+starting the native transfer. A file or handle used as a request source is
+therefore not a bounded-memory upload.
+
+`length` reports the number of bytes when the source can know it: a string
+knows, a buffer is given one, and a file is asked for its size. A handle does
+not unless whoever opened it supplies the value. The HTTP client does not use
+this field to choose chunked transfer or a `Content-Length`; the native
+transport receives the materialized request string and sends its actual size.
 
 ## Files go through the storage seam and handles do not
 
 `ofFile` reads and writes through `tecs.filesystem`, so a port that
-replaced storage gets it, and it streams wherever the backend supplies
-`openRead` and `openWrite`. `ofHandle` is the other case on purpose: a
-caller that opened its own file is already outside the storage abstraction
-and has said so, and it streams everywhere because nothing between it and
-the bytes has an opinion.
+replaced storage gets it. A response destination uses `openWrite`, while a
+request source uses the whole-file `read` operation described above.
+`ofHandle` is the other case on purpose: a caller that opened its own file is
+already outside the storage abstraction and has said so.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local filesystem <const> = require("tecs.platform.filesystem")
 
---- Bytes asked for in one read when nothing says otherwise. Large enough that
---- a file of any size is a small number of turns, small enough that a body
---- being uploaded is not resident.
+--- Bytes asked for in one directional read when nothing says otherwise.
 local CHUNK <const> = 64 * 1024
 
 local record DataStream
@@ -99,8 +100,7 @@ local record DataStream
     ---     that is not a string raises.
     --- @param contentType Optional. Nil sends no `Content-Type` rather than
     ---     guessing one.
-    --- @return A source only. `length` is known here, so a request carrying it
-    ---     is sent with a `Content-Length`.
+    --- @return A source only. `length` reports the string's byte count.
     ofString: function(text: string, contentType?: string): DataStream
 
     --- A stream over an FFI buffer, which the caller keeps alive for the send.
@@ -136,7 +136,7 @@ local record DataStream
     ---
     --- Nothing here closes it: whoever opened it decides when it is done with,
     --- which is the whole difference between this and `ofFile`. Give `length`
-    --- when it is known, or the request is sent chunked.
+    --- when callers need the metadata; it does not control HTTP framing.
     ---
     --- A `tecs.net.http.plugin.Request` cannot snapshot this stream. The live
     --- handle has no stable ownership or position to restore, so both snapshot
@@ -144,11 +144,11 @@ local record DataStream
     ---
     --- @param handle An open file handle. Nil raises. Reading starts wherever it
     ---     is positioned rather than at the beginning.
-    --- @param length Optional, and nothing verifies it. Left out, a request is
-    ---     sent chunked rather than with a `Content-Length`.
+    --- @param length Optional, and nothing verifies it. The HTTP client does
+    ---     not use it to select transfer framing.
     --- @param contentType Optional, as `ofString` takes it.
-    --- @return A source and a destination both, streaming on every platform
-    ---     because nothing between it and the bytes has an opinion.
+    --- @return A source and a destination both. A response destination receives
+    ---     pieces, while a request source is read to one string before sending.
     ofHandle: function(handle: FILE, length?: integer, contentType?: string): DataStream
 
     --- Whether `value` is one of these.
