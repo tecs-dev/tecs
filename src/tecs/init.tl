@@ -364,7 +364,7 @@ local record tecs
     window: window
     workers: workers
 
-    --- Version of this build.
+    --- Read-only. Version of this build.
     version: string
 end
 
