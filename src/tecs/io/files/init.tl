@@ -34,10 +34,13 @@ Every operation runs synchronously. Send large tree walks to
 the whole asset tree.
 ]=]
 
+local ffi <const> = require("ffi")
 local adapter <const> = require("tecs.platform.adapter")
+local buffer <const> = require("tecs.io.buffer")
+local type loader = require("tecs.ffi.loader")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
-local type iotypes = require("tecs.io.types")
+local type types = require("tecs.io.types")
 
 local record files
     --- Caller-writable. The caller sets `organization` before
@@ -63,11 +66,11 @@ local record files
 
     --- `Writer` accepts a write in pieces. This compatibility alias names
     --- [`tecs.io.Writer`](tealdoc:tecs.io.Writer).
-    type Writer = iotypes.Writer
+    type Writer = types.Writer
 
     --- `Reader` returns a read in pieces. This compatibility alias names
     --- [`tecs.io.Reader`](tealdoc:tecs.io.Reader).
-    type Reader = iotypes.Reader
+    type Reader = types.Reader
 end
 
 local type Info = files.Info
@@ -75,6 +78,7 @@ local type UserFolder = files.UserFolder
 local type GlobOptions = files.GlobOptions
 local type Writer = files.Writer
 local type Reader = files.Reader
+local type IOBuffer = types.Buffer
 
 --- Raises when a required string argument is missing.
 ---
@@ -360,13 +364,29 @@ local function bufferedWriter(backend: storagebackend.Backend, path: string): Wr
         pieces[count] = bytes
         return true
     end
+    writer.writeFrom = function(
+        _self: Writer, sourceBuffer: IOBuffer, offset?: integer, length?: integer
+    ): integer, string
+        local bytes <const> = sourceBuffer:getString(offset, length)
+        local ok <const>, reason = writer:write(bytes)
+        if not ok then
+            return nil, reason
+        end
+        return #bytes
+    end
+    writer.flush = function(_self: Writer): boolean, string
+        if pieces == nil then
+            return false, "the writer is closed"
+        end
+        return backend.write(path, table.concat(pieces, "", 1, count))
+    end
     writer.close = function(_self: Writer): boolean, string
         if pieces == nil then
             return true
         end
-        local whole <const> = table.concat(pieces, "", 1, count)
+        local ok <const>, reason = writer:flush()
         pieces = nil
-        return backend.write(path, whole)
+        return ok, reason
     end
     return writer
 end
@@ -374,6 +394,7 @@ end
 --- A `Reader` over bytes already in memory, for the same reason.
 local function slicingReader(bytes: string): Reader
     local at = 1
+    local pointer <const> = ffi.cast("const uint8_t *", bytes) as loader.BytePointer
 
     local reader <const>: Reader = {}
     reader.read = function(_self: Reader, count: integer): string, string
@@ -384,6 +405,24 @@ local function slicingReader(bytes: string): Reader
         local piece <const> = bytes:sub(at, last)
         at = last + 1
         return piece
+    end
+    reader.readInto = function(_self: Reader, destination: IOBuffer, count: integer, offset?: integer): integer, string
+        if type(count) ~= "number" or count ~= math.floor(count) or count < 0 then
+            error("tecs: Reader:readInto count must be a non-negative integer", 2)
+        end
+        offset = offset or 0
+        if type(offset) ~= "number" or offset ~= math.floor(offset) or offset < 0 then
+            error("tecs: Reader:readInto offset must be a non-negative integer", 2)
+        end
+        if count == 0 or at > #bytes then
+            return 0
+        end
+        local taking <const> = math.min(count, #bytes - at + 1)
+        local output <const>, previousLength = buffer.prepareWrite(destination, offset, taking)
+        ffi.copy(output as ffi.CData, (pointer + (at - 1)) as ffi.CData, taking)
+        buffer.commitWrite(destination, offset, taking, previousLength)
+        at = at + taking
+        return taking
     end
     reader.close = function(_self: Reader) at = #bytes + 1 end
     return reader
