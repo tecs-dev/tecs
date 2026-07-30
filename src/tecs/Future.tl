@@ -36,7 +36,9 @@ future. `recover` turns failure into a value. Canceled futures skip all three
 transforms except cancellation propagation.
 
 Listeners run in registration order. Registering a listener after settlement
-queues it for the next source drain instead of calling it inline.
+runs it before `onSettle` returns. A listener registered while another listener
+is running joins the current drain instead of growing the Lua stack, and the
+outermost drain delivers it before returning.
 
 ## Pumping and waiting
 
@@ -210,9 +212,10 @@ local record Future<T>
     --- Registers a dependent, and returns this future.
     ---
     --- The primitive the others are built on. A listener on a future that has
-    --- already settled runs on the next drain rather than inline, which is what
-    --- keeps a chain built one link at a time from growing the Lua stack. A
-    --- listener that raises writes to the log and does not stop the others.
+    --- already settled runs before this call returns. If a listener registers
+    --- another listener while delivery is in progress, the new delivery joins
+    --- the current drain instead of growing the Lua stack. A listener that
+    --- raises writes to the log and does not stop the others.
     ---
     --- @param self The future on which to register the listener.
     --- @param listener Called once, with this future, whichever of the three terminal
@@ -345,7 +348,8 @@ local record Future<T>
     ---
     --- @param value The value to store without copying.
     --- @return A future at "ready" with no source, so `wait` on it returns at once and
-    ---     `cancel` does nothing. A listener added to it still runs on the next drain.
+    ---     `cancel` does nothing. A listener added to it runs before `onSettle`
+    ---     returns, subject to the reentrant delivery rule documented there.
     settled: function<U>(value: U): Future<U>
 
     --- Creates a future that already carries a failure.
@@ -468,7 +472,8 @@ local FutureMT <const>: metatable<Future<any>> = {__index = futureIndex}
 -- fetch written as a recursive `flatMap` builds link N inside the settlement of
 -- link N-1, so its depth is the number of pages. Appending instead means the
 -- depth is two frames whatever the chain length, and it is why registering a
--- listener on an already-settled future queues rather than firing inline.
+-- listener on an already-settled future routes through this queue rather than
+-- invoking it directly.
 --
 -- It also makes re-entrancy legal by construction rather than by a rule a
 -- caller has to remember: a listener may settle, cancel or register on anything
@@ -577,9 +582,10 @@ local function listen(future: Future<any>, listener: function(Future<any>)): int
     future._listenerCount = at
     listeners[at] = listener
 
-    -- Already settled: the listener still runs, on the next turn of the drain
-    -- rather than from here. `_delivered` is what keeps the earlier listeners
-    -- from running a second time when this future comes round again.
+    -- Already settled: route the listener through the drain rather than calling
+    -- it directly. An idle drain runs before `listen` returns; a reentrant call
+    -- joins the active drain. `_delivered` keeps earlier listeners from running
+    -- a second time when this future comes round again.
     if future.status ~= "pending" then
         drain(future)
     end
