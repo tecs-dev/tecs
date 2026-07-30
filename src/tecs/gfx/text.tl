@@ -1,5 +1,5 @@
 --[=[
-Distance-field text as entities in the rendered world.
+Shaped SDF text as entities in the rendered world.
 
 A `Text` names a font and string. `Transform` places its top-left corner,
 `Tint` colors every glyph, and `Clip` clips it like any other drawable.
@@ -14,7 +14,9 @@ world:spawn(
     tecs.gfx.Tint(0.92, 0.96, 1.0, 1.0),
     tecs.gfx.Text.new({
         text = "tecs\n1200 entities",
-        font = tecs.gfx.defaultFont().value,
+        font = tecs.gfx.newTTF({
+            source = "fonts/JetBrainsMono-ExtraBold.ttf",
+        }).value,
         size = 28,
         align = "center",
     })
@@ -26,19 +28,19 @@ column clean and the displayed glyphs unchanged.
 
 ## Fonts and layout
 
-A `Font` holds metrics and an atlas path. `loadFont` returns a
-[`Future`](tealdoc:tecs.Future) that reads BMFont-style JSON metrics off the
-main thread. `defaultFont` loads the bundled font on the same terms. The metrics
-path gives each font its snapshot identity. Worlds and renderers may share a
-font.
+`newTTF` reads source font bytes off the main thread and returns a
+[`Future`](tealdoc:tecs.Future). SDL_ttf and HarfBuzz shape and lay out UTF-8.
+Tecs asks SDL_ttf for SDF glyph images lazily, caches each glyph once per
+renderer, and keeps its own one-instance-per-glyph producer.
 
-Layout applies glyph advances, kerning, explicit newlines, line spacing,
-tracking, and left, center, or right alignment within the widest line.
-`measureText` returns the same extent without touching an entity.
+The loaded point size is the field's raster resolution, not the only size the
+font can draw. `Text.size` scales the cached SDF geometry without regenerating
+glyphs. Choose a loaded size near the largest ordinary on-screen size and use
+separate fonts for materially different quality tiers.
 
-Text does not wrap to a width, shape complex scripts, anchor outside the
-top-left corner, or style individual glyphs. The `glyph` material draws text
-unlit.
+Text supports explicit newlines and left, center, or right alignment. It does
+not wrap to a width, anchor outside the top-left corner, or style individual
+glyphs. The `glyph` material draws text unlit.
 ]=]
 -- Implementation details:
 -- Glyphs are renderer instances rather than entities. Each text owns a span in
@@ -55,15 +57,17 @@ local type types = require("tecs.types")
 local files <const> = require("tecs.io.files")
 local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
+local sdl <const> = require("tecs.ffi.sdl3")
+local ttf <const> = require("tecs.ffi.sdl3ttf")
 local components <const> = require("tecs.components")
 local materials <const> = require("tecs.gpu.materials")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 local layersModule <const> = require("tecs.gfx.layers")
-local data <const> = require("tecs.data")
-local log <const> = require("tecs.log")
+local ffi <const> = require("ffi")
 
 local type Renderer = require("tecs.Renderer")
 local Future <const> = require("tecs.Future")
+local type TextureArray = require("tecs.gpu.TextureArray")
 
 local type Component = ecs.Component
 local type World = types.World
@@ -75,7 +79,6 @@ local Clip <const> = components.Clip
 local type TransformInstance = ecs.Transform
 local type TintInstance = components.Tint
 
-local byte <const> = string.byte
 local abs <const> = math.abs
 local cos <const> = math.cos
 local sin <const> = math.sin
@@ -84,8 +87,11 @@ local sin <const> = math.sin
 --- depends on which material files exist.
 local MATERIAL <const> = "glyph"
 
---- The font the engine ships, relative to the asset root.
-local DEFAULT_METRICS <const> = "fonts/jetbrainsmono-extrabold-msdf.json"
+local C <const> = sdl.C
+local TTF <const> = ttf.C
+--- SDL_PIXELFORMAT_RGBA32, whose macro resolves to ABGR8888 on little-endian
+--- targets. The generated constants table carries literal macros only.
+local RGBA32 <const> = 0x16762004
 
 local INSTANCE_FLOATS <const> = instancelayout.FLOATS
 local INSTANCE_BYTES <const> = instancelayout.BYTES
@@ -99,97 +105,28 @@ local packSlot <const> = instancelayout.packSlot
 --- doubles from.
 local MINIMUM_SLOTS <const> = 64
 
---- The logger name is a compatibility surface rather than an identifier, and
---- it stays what it is now that a game reaches this module as `tecs.gfx`. A
---- logger name is what `SDL_SetLogPriority` filters on, so it is configuration
---- a developer types into a shell rather than a name this tree can rename in
---- one commit.
-local logger <const> = log.get("tecs.text")
-
---- Describes one glyph in the units used to generate its atlas.
-local record GlyphMetrics
-    --- Read-only. Reports the glyph rectangle's left edge in atlas pixels.
-    x: number
-    --- Read-only. Reports the glyph rectangle's top edge in atlas pixels.
-    y: number
-    --- Read-only. Reports the glyph rectangle's width in atlas pixels.
-    width: number
-    --- Read-only. Reports the glyph rectangle's height in atlas pixels.
-    height: number
-    --- Read-only. Reports the horizontal offset from the pen to the glyph's
-    --- top-left corner.
-    xOffset: number
-    --- Read-only. Reports the vertical offset from the pen to the glyph's
-    --- top-left corner.
-    yOffset: number
-    --- Read-only. Reports how far the pen moves after this glyph.
-    xAdvance: number
-end
-
---- Represents a distance-field font through its atlas image and metrics.
+--- Represents a shaped TrueType or OpenType font rendered as SDF glyphs.
 ---
---- Data only. The metrics are read when the font is loaded, which is a few
---- kilobytes of JSON; the atlas is named rather than held, and a renderer
---- decodes and uploads it the first frame a text needs it.
+--- A font is immutable after its future settles. Its source bytes remain
+--- resident because SDL_ttf reads them lazily for the font's lifetime.
 local record Font
-    --- Read-only. Reports the path from which metrics were read. It provides
-    --- the font's identity and the value
-    --- a snapshot writes.
+    --- Read-only. Reports the caller-selected identity that snapshots store.
     name: string
-    --- Read-only. Reports the path from which the atlas image is read. The
-    --- renderer also uses it as the name
-    --- registered under.
-    atlas: string
-    --- Read-only. Reports the em size at which the metrics were generated.
-    --- Every other metric uses the
-    --- same units and scales by `Text.size / size`.
+    --- Read-only. Reports the source path passed to `newTTF`.
+    source: string
+    --- Read-only. Reports the point size at which SDL_ttf rasterizes SDFs.
     size: number
-    --- Read-only. Reports the distance from one baseline to the next.
-    lineHeight: number
-    --- Read-only. Reports the baseline offset from the top of a line box.
-    base: number
-    --- Read-only. Reports the atlas width in pixels.
-    atlasWidth: number
-    --- Read-only. Reports the atlas height in pixels.
-    atlasHeight: number
-    --- Read-only. Reports the width of the distance field in atlas pixels.
-    distanceRange: number
-    --- Read-only. Provides glyph metrics by codepoint.
-    glyphs: {integer: GlyphMetrics}
-    --- Read-only. Provides kerning by leading then trailing codepoint in font
-    --- units. The table remains empty when
-    --- the metrics carry none.
-    kernings: {integer: {integer: number}}
-
-    --- Engine-owned. Stores the fallback advance for codepoints without
-    --- metrics. Ordinary game code should ignore this field.
-    _fallbackAdvance: number
+    --- Engine-owned. Keeps the source allocation reachable. Ordinary game
+    --- code should ignore this field.
+    _bytes: string
+    --- Engine-owned. Stores the `TTF_Font`. Ordinary game code should ignore
+    --- this field.
+    _font: loader.CPtr
 end
 
---- Tracks where a font atlas sits on one renderer.
-local record Atlas
-    --- Engine-owned. Stores the interned atlas image index. Ordinary game code
-    --- should ignore this field.
-    image: number
-    --- Engine-owned. Stores the texture-array layer occupied by the atlas.
-    --- Ordinary game code should ignore this field.
-    slot: number
-    --- Engine-owned. Stores the horizontal fraction of a cell covered by the
-    --- atlas. Ordinary game code should ignore this field.
-    u: number
-    --- Engine-owned. Stores the vertical fraction of a cell covered by the
-    --- atlas. Ordinary game code should ignore this field.
-    v: number
-    --- Engine-owned. Stores the distance-field range as a fraction of a cell,
-    --- which the material
-    --- reads from its parameter.
-    param: number
-    --- Engine-owned. Holds the decode and the upload that consumes it, and it is
-    --- nil only for an atlas the renderer already had. The fields above are
-    --- meaningless until it reports `"ready"`, and it stays `"failed"` for a page
-    --- that would not decode, which is what reports a broken path once rather
-    --- than every frame. Ordinary game code should ignore this field.
-    pending: Future<components.Sprite>
+--- Stores one SDF glyph after it enters a renderer's texture array.
+local record Glyph
+    region: TextureArray.Region
 end
 
 --- Lays a string out into glyph instances.
@@ -214,10 +151,6 @@ local record Text is Component
     --- Caller-writable. Selects `"left"`, `"center"`, or `"right"` alignment
     --- within the block's widest line.
     align: string
-    --- Caller-writable. Multiplies the font's line height.
-    lineSpacing: number
-    --- Caller-writable. Adds advance between glyphs in world units.
-    tracking: number
 
     --- Engine-owned. Reports the width of the last layout in world units.
     --- Assigning it has no effect.
@@ -245,12 +178,15 @@ local record Text is Component
     --- Engine-owned. Stores the last laid-out alignment. Ordinary game code
     --- should ignore this field.
     _builtAlign: string
-    --- Engine-owned. Stores the last laid-out line spacing. Ordinary game code
+    --- Engine-owned. Stores SDL_ttf's reusable shaped text. Ordinary game
+    --- code should ignore this field.
+    _native: loader.CPtr
+    --- Engine-owned. Stores the font used by `_native`. Ordinary game code
     --- should ignore this field.
-    _builtSpacing: number
-    --- Engine-owned. Stores the last laid-out tracking. Ordinary game code
+    _nativeFont: Font
+    --- Engine-owned. Stores the string used by `_native`. Ordinary game code
     --- should ignore this field.
-    _builtTracking: number
+    _nativeText: string
     --- Engine-owned. Stores the last laid-out red channel. Ordinary game code
     --- should ignore this field.
     _builtR: number
@@ -289,74 +225,45 @@ local record Text is Component
     _builtClip: integer
 end
 
---- Configures a font loaded from metrics and an atlas.
-local record FontOptions
-    --- Caller-writable. Sets the path to the metrics JSON. Tecs resolves it
-    --- against the asset root when it is
-    --- not absolute.
-    metrics: string
-    --- Caller-writable. Sets the atlas image path. It defaults to the page
-    --- named in the metrics, resolved beside them.
-    atlas: string
+--- Configures a source font loaded by SDL_ttf.
+local record TTFOptions
+    --- Caller-writable. Sets a TrueType or OpenType path. Relative paths are
+    --- resolved against the asset root.
+    source: string
+    --- Caller-writable. Sets the snapshot identity. It defaults to `source`.
+    name: string
+    --- Caller-writable. Sets the SDF raster point size. It defaults to 48.
+    size: number
 end
 
 --- Configures the text layout plugin.
 local record TextOptions
-    --- Caller-writable. Selects the renderer that receives font atlases and
-    --- glyph instances.
+    --- Caller-writable. Selects the renderer that receives glyph SDFs and
+    --- instances.
     renderer: Renderer
 end
 
 local record text
     --- Represents a loaded font named by `Text`.
     type Font = Font
-    --- Describes one entry of a font's `glyphs` in the units used to generate
-    --- the atlas.
-    type GlyphMetrics = GlyphMetrics
-    --- Configures `loadFont`.
-    type FontOptions = FontOptions
+    --- Configures `newTTF`.
+    type TTFOptions = TTFOptions
     --- Configures `textPlugin`.
     type TextOptions = TextOptions
 
     --- Read-only. Exposes the text component.
     Text: Text
 
-    --- Starts loading a font's metrics and names its atlas.
+    --- Starts loading and opening a source font with SDL_ttf.
     ---
-    --- Concurrent calls under the same metrics path share one read and parse
-    --- while receiving futures of their own, so canceling one does not cancel
-    --- the others. A call after settlement returns an already-ready future for
-    --- the shared font. The call reads `options` before returning.
-    --- @param options The caller must set `metrics`. `atlas` defaults to the
-    ---     first page in the metrics, resolved beside the metrics file, and
-    ---     applies only on the first load of a path.
-    --- @return Returns a [`Future`](tealdoc:tecs.Future) for the shared
-    ---     [`Font`](tealdoc:tecs.gfx.text.Font) for that path. A missing or
-    ---     malformed metrics document fails the future. The renderer still
-    ---     loads its atlas when a text first needs it.
-    loadFont: function(options: FontOptions): Future<Font>
-    --- Starts loading the bundled default font.
-    --- @return Returns a future for the same shared
-    ---     [`Font`](tealdoc:tecs.gfx.text.Font) on every call.
-    defaultFont: function(): Future<Font>
-    --- Returns a loaded font by its metrics path, or nil.
-    --- @param name The path exactly as passed to `loadFont`, before asset-root
-    ---     resolution.
-    --- @return The shared [`Font`](tealdoc:tecs.gfx.text.Font), or nil before a
-    ---     load of that path has settled successfully.
-    findFont: function(name: string): Font
-    --- Starts reloading a font's metrics while preserving the Font value.
-    ---
-    --- Existing [`Text`](tealdoc:tecs.gfx.text.Text) components keep the same
-    --- table and lay themselves out again. Reloading rejects metrics that
-    --- change the atlas dimensions.
-    --- @param path The metrics path passed to `loadFont`, or its resolved file
-    ---     path.
-    --- @return Returns a future for the same
-    ---     [`Font`](tealdoc:tecs.gfx.text.Font) table with its metrics updated.
-    ---     A read or parse failure fails the future and leaves the font
-    ---     unchanged.
-    reloadFont: function(path: string): Future<Font>
+    --- The file read happens on the asset worker. The future settles only
+    --- after SDL_ttf has opened the bytes, enabled SDF rendering, and verified
+    --- the requested point size.
+    --- @param options The caller must set `source`. `name` defaults to that
+    ---     path and `size` defaults to 48 points.
+    --- @return Returns a [`Future`](tealdoc:tecs.Future) for an immutable
+    ---     [`Font`](tealdoc:tecs.gfx.text.Font).
+    newTTF: function(options: TTFOptions): Future<Font>
     --- Returns a text item's width and height in world units.
     ---
     --- Uses the same layout as the plugin without adding or changing an
@@ -384,8 +291,8 @@ local record text
     --- placement.
     --- @param world The world that contains the text entity.
     --- @param entity An entity carrying [`Text`](tealdoc:tecs.gfx.text.Text).
-    --- @param index A one-based produced-glyph index. Newlines, spaces, and
-    ---     missing codepoints move the pen without taking an index.
+    --- @param index A one-based produced-glyph index. Layout operations with
+    ---     no drawable rectangle, including spaces and newlines, take no index.
     --- @return World x of the glyph center, or nil when no glyph exists.
     --- @return World y of the glyph center, or nil with the first return.
     --- @return Glyph width in world units, or nil with the first return.
@@ -397,13 +304,9 @@ end
 -- Fonts
 -------------------------------------------------------------------------------
 
---- Every font loaded in this process, by the path its metrics came from. A
---- snapshot writes a name, so this is what one is resolved back through.
+--- Every loaded font by snapshot identity. A later font with the same name is
+--- the one a snapshot restores, while existing Text values keep their font.
 local fontsByName <const>: {string: Font} = {}
---- Loads still reading or parsing, by the same identity. The root belongs to
---- this module and callers receive derived links, so one caller's cancellation
---- is invisible to every other caller sharing the work.
-local fontLoads <const>: {string: Future<Font>} = {}
 
 --- Resolves a path against the asset root unless it already names one.
 local function resolve(path: string): string
@@ -413,187 +316,60 @@ local function resolve(path: string): string
     return files.assetPath(path)
 end
 
---- Everything up to and including the final separator, or the empty string.
-local function directoryOf(path: string): string
-    local cut = path:match("^.*()/")
-    if cut == nil then
-        return ""
-    end
-    return path:sub(1, cut as integer)
-end
-
---- The metrics document as a table, or an error naming the font.
----
---- The decoder raises on malformed input, and its message says where in the
---- text it gave up rather than which font asked. The name is the part a caller
---- can act on, so the raise is caught and replaced. Level zero because the
---- message locates itself and the frame that called this does not.
-local function decodeMetrics(document: string, name: string): {string: any}
-    local ok, root = pcall(data.decodeJSON, document)
-    if not ok or type(root) ~= "table" then
-        error(("tecs: '%s' is not a font metrics document"):format(name), 0)
-    end
-    return root as {string: any}
-end
-
---- Reads a BMFont-style metrics document into a Font.
-local function parseMetrics(document: string, name: string, atlas: string): Font
-    local root = decodeMetrics(document, name)
-
-    local info = root.info as {string: any}
-    local common = root.common as {string: any}
-    if info == nil or common == nil then
-        error(("tecs: '%s' carries no font metrics"):format(name), 0)
+--- Opens bytes only after the worker has delivered the complete source.
+local function openFont(bytes: string, options: TTFOptions): Font
+    if not ttf.init() then
+        sdl.fail("TTF_Init")
     end
 
-    local field = root.distanceField as {string: any}
-    if field == nil then
-        error(("tecs: '%s' is not a distance-field font"):format(name), 0)
+    local stream = C.SDL_IOFromConstMem(bytes, #bytes)
+    if stream == nil then
+        sdl.fail("SDL_IOFromConstMem")
+    end
+    local handle = TTF.TTF_OpenFontIO(stream, true, options.size)
+    if handle == nil then
+        -- TTF_OpenFontIO owns the stream when closeio is true, including on a
+        -- failed open.
+        sdl.fail("TTF_OpenFontIO")
+    end
+    handle = ffi.gc(handle as ffi.CData, TTF.TTF_CloseFont as function(ffi.CData)) as loader.CPtr
+
+    if not TTF.TTF_SetFontSDF(handle, true) then
+        ffi.gc(handle as ffi.CData, nil)
+        TTF.TTF_CloseFont(handle)
+        sdl.fail("TTF_SetFontSDF")
     end
 
-    local self: Font = {
-        name = name,
-        atlas = atlas,
-        size = info.size as number,
-        lineHeight = common.lineHeight as number,
-        base = common.base as number,
-        atlasWidth = common.scaleW as number,
-        atlasHeight = common.scaleH as number,
-        distanceRange = field.distanceRange as number,
-        glyphs = {},
-        kernings = {},
-        _fallbackAdvance = 0,
+    local font <const>: Font = {
+        name = options.name,
+        source = options.source,
+        size = options.size,
+        _bytes = bytes,
+        _font = handle,
     }
-
-    local chars = root.chars as {{string: any}}
-    if chars == nil then
-        error(("tecs: '%s' lists no glyphs"):format(name), 0)
-    end
-    for index = 1, #chars do
-        local entry = chars[index]
-        self.glyphs[entry.id as integer] = {
-            x = entry.x as number,
-            y = entry.y as number,
-            width = entry.width as number,
-            height = entry.height as number,
-            xOffset = entry.xoffset as number,
-            yOffset = entry.yoffset as number,
-            xAdvance = entry.xadvance as number,
-        }
-    end
-
-    local kernings = root.kernings as {{string: any}}
-    if kernings ~= nil then
-        for index = 1, #kernings do
-            local entry = kernings[index]
-            local first = entry.first as integer
-            local trailing = self.kernings[first]
-            if trailing == nil then
-                trailing = {}
-                self.kernings[first] = trailing
-            end
-            trailing[entry.second as integer] = entry.amount as number
-        end
-    end
-
-    -- A codepoint the font has no metrics for still takes up room, and the
-    -- space is the least surprising width to give it.
-    local space = self.glyphs[32]
-    self._fallbackAdvance = space ~= nil and space.xAdvance or self.size * 0.5
-
-    return self
+    fontsByName[font.name] = font
+    return font
 end
 
---- Turns one metrics document into the process-wide font it describes.
-local function loadDocument(options: FontOptions, metricsPath: string, document: string): Font
-    local atlas = options.atlas
-    if atlas == nil then
-        local root = decodeMetrics(document, metricsPath)
-        local pages = root.pages as {string}
-        if pages == nil or pages[1] == nil then
-            error(("tecs: '%s' names no atlas page; pass `atlas`"):format(metricsPath), 0)
-        end
-        atlas = directoryOf(options.metrics) .. pages[1]
+function text.newTTF(options: TTFOptions): Future<Font>
+    if options == nil or options.source == nil or options.source == "" then
+        error("tecs: a TTF font needs a `source` path", 2)
     end
-    return parseMetrics(document, options.metrics, resolve(atlas))
-end
-
---- A caller's own link to one shared font load.
-local function linkFont(loading: Future<Font>): Future<Font>
-    return loading:map(function(font: Font): Font return font end)
-end
-
--- A metrics path identifies one process-wide font. Reusing the same path
--- returns a future for the existing table, and the renderer loads the named
--- atlas only when text first needs it.
-function text.loadFont(options: FontOptions): Future<Font>
-    if options == nil or options.metrics == nil then
-        error("tecs: a font needs a `metrics` path", 2)
-    end
-
-    local existing = fontsByName[options.metrics]
-    if existing ~= nil then
-        return Future.settled(existing)
-    end
-
-    local loading = fontLoads[options.metrics]
-    if loading ~= nil then
-        return linkFont(loading)
+    local requested <const>: TTFOptions = {
+        source = options.source,
+        name = options.name or options.source,
+        size = options.size or 48.0,
+    }
+    if requested.size <= 0.0 then
+        error("tecs: a TTF font `size` must be greater than zero", 2)
     end
 
     if not assets.installed() then
         assets.install()
     end
-
-    local name <const> = options.metrics
-    local metricsPath <const> = resolve(name)
-    local requested <const>: FontOptions = {
-        metrics = name,
-        atlas = options.atlas,
-    }
-    -- Named as a font, because the bytes are a document like any other and the
-    -- only thing that knows they are a font's metrics is the call that asked
-    -- for them. A watcher routes a change by that name.
-    loading = assets.loadString(metricsPath, "font"):map(function(document: string): Font
-        return loadDocument(requested, metricsPath, document)
+    return assets.loadString(resolve(requested.source), "font"):map(function(bytes: string): Font
+        return openFont(bytes, requested)
     end)
-    fontLoads[name] = loading
-    loading:onSettle(function(settled: Future<Font>)
-        if fontLoads[name] == settled then
-            fontLoads[name] = nil
-        end
-        if settled.status == "ready" and fontsByName[name] == nil then
-            fontsByName[name] = settled.value
-        end
-    end)
-    return linkFont(loading)
-end
-
-function text.defaultFont(): Future<Font>
-    return text.loadFont({metrics = DEFAULT_METRICS})
-end
-
-function text.findFont(name: string): Font
-    return fontsByName[name]
-end
-
---- The font loaded from `path`, by the name it was loaded under or by the file
---- that name resolves to.
----
---- Two spellings reach the same font. A game names it the way it asked for it,
---- which is commonly relative to the content root; a watcher names the file it
---- looked at, which is that name resolved. Both have to find the one font.
-local function fontAt(path: string): Font
-    local named = fontsByName[path]
-    if named ~= nil then
-        return named
-    end
-    for _, font in pairs(fontsByName) do
-        if resolve(font.name) == path then
-            return font
-        end
-    end
-    return nil
 end
 
 -------------------------------------------------------------------------------
@@ -644,7 +420,7 @@ local record Glyphs
     --- write after that rather than on the way out, so the table handed over
     --- stays valid while the renderer is reading it.
     _taken: boolean
-    --- Cancels atlas loads retained by the install that owns this producer.
+    --- Releases resources retained by the install that owns this producer.
     destroy: function(self: Glyphs)
 end
 
@@ -956,51 +732,16 @@ end
 -- Layout
 -------------------------------------------------------------------------------
 
---- Decodes one UTF-8 codepoint, answering it and the index after it.
----
---- A malformed byte is answered as itself, so a string that is not UTF-8 lays
---- out as Latin-1 rather than failing.
-local function codepointAt(source: string, index: integer): integer, integer
-    local first = byte(source, index)
-    if first < 0x80 then
-        return first, index + 1
-    end
-
-    local length: integer
-    local value: integer
-    if first >= 0xF0 then
-        length, value = 4, first - 0xF0
-    elseif first >= 0xE0 then
-        length, value = 3, first - 0xE0
-    elseif first >= 0xC0 then
-        length, value = 2, first - 0xC0
-    else
-        return first, index + 1
-    end
-
-    if index + length - 1 > #source then
-        return first, index + 1
-    end
-    for offset = 1, length - 1 do
-        local continuation = byte(source, index + offset)
-        if continuation < 0x80 or continuation > 0xBF then
-            return first, index + 1
-        end
-        value = value * 64 + (continuation - 0x80)
-    end
-    return value, index + length
-end
-
 --- The laid-out glyphs, four numbers each: center x and y, then width and
---- height, all in world units relative to the text's transform. Reused, so a
---- layout allocates nothing.
+--- height, all in loaded-font pixels. Reused across every text.
 local placements <const>: {number} = {}
---- Codepoint per placement, for addressing the atlas in the same order.
-local codepoints <const>: {integer} = {}
---- First and last placement of each line, and the line's width.
-local lineFirst <const>: {integer} = {}
-local lineLast <const>: {integer} = {}
-local lineWidth <const>: {number} = {}
+--- Native copy operation index per placement.
+local operations <const>: {integer} = {}
+--- Line index per UTF-8 byte offset. SDL_ttf's clusters fill this without a C
+--- query per glyph.
+local lineByOffset <const>: {integer: integer} = {}
+local lineShift <const>: {integer: number} = {}
+local lineRect <const> = loader.newArray("TTF_SubString[1]")
 
 --- How far a line moves within the block, as a fraction of the room left over.
 local ALIGNMENTS <const>: {string: number} = {
@@ -1009,99 +750,85 @@ local ALIGNMENTS <const>: {string: number} = {
     right = 1.0,
 }
 
---- Lays `item` out into `placements`, answering the glyph count and extent.
----
---- Explicit newlines break lines and nothing else does: there is no wrapping
---- and no anchor, so the block's top-left corner is the entity's position.
+--- Creates or updates SDL_ttf's reusable shaped text.
+local function updateNative(item: Text): loader.CPtr
+    local native = item._native
+    local changed = false
+    if native == nil or item._nativeFont ~= item.font then
+        if native ~= nil then
+            ffi.gc(native as ffi.CData, nil)
+            TTF.TTF_DestroyText(native)
+        end
+        native = TTF.TTF_CreateText(nil, item.font._font, item.text, #item.text)
+        if native == nil then
+            sdl.fail("TTF_CreateText")
+        end
+        item._native = ffi.gc(native as ffi.CData, TTF.TTF_DestroyText as function(ffi.CData)) as loader.CPtr
+        item._nativeFont = item.font
+        item._nativeText = item.text
+        changed = true
+    elseif item._nativeText ~= item.text then
+        if not TTF.TTF_SetTextString(native, item.text, #item.text) then
+            sdl.fail("TTF_SetTextString")
+        end
+        item._nativeText = item.text
+        changed = true
+    end
+    if changed and not TTF.TTF_UpdateText(item._native) then
+        sdl.fail("TTF_UpdateText")
+    end
+    return item._native
+end
+
+--- Reads shaped copy operations into the reusable placement arrays.
 local function layout(item: Text): integer, number, number
-    local font = item.font
-    local scale = item.size / font.size
-    local glyphs = font.glyphs
-    local kernings = font.kernings
-    local step = font.lineHeight * scale * item.lineSpacing
-    local tracking = item.tracking
-    local body = item.text
-    local length = #body
+    local native <const> = updateNative(item) as loader.CStruct
+    local internal <const> = native.internal as loader.CStruct
+    local scale <const> = item.size / item.font.size
+
+    for offset in pairs(lineByOffset) do
+        lineByOffset[offset] = nil
+    end
+    local clusters <const> = internal.clusters as loader.CArray
+    for index = 0, (internal.num_clusters as integer) - 1 do
+        local cluster <const> = clusters[index] as loader.CStruct
+        lineByOffset[cluster.offset as integer] = cluster.line_index as integer
+    end
+    for line in pairs(lineShift) do
+        lineShift[line] = nil
+    end
+    local weight <const> = ALIGNMENTS[item.align] or 0.0
+    if weight ~= 0.0 then
+        for line = 0, (native.num_lines as integer) - 1 do
+            if TTF.TTF_GetTextSubStringForLine(item._native, line, lineRect) then
+                local rect <const> = (lineRect[0] as loader.CStruct).rect as loader.CStruct
+                lineShift[line] = ((internal.w as number) - (rect.w as number)) * weight - (rect.x as number)
+            end
+        end
+    end
 
     local count = 0
-    local lines = 1
-    local blockWidth = 0.0
-    local pen = 0.0
-    local top = 0.0
-    local previous = 0
-    local index = 1
-    lineFirst[1] = 1
-
-    while index <= length do
-        local codepoint: integer
-        codepoint, index = codepointAt(body, index)
-
-        if codepoint == 10 then
-            lineLast[lines] = count
-            lineWidth[lines] = pen
-            if pen > blockWidth then
-                blockWidth = pen
-            end
-            lines = lines + 1
-            lineFirst[lines] = count + 1
-            pen = 0.0
-            top = top + step
-            previous = 0
-        elseif codepoint ~= 13 then
-            local glyph = glyphs[codepoint]
-            if glyph == nil then
-                pen = pen + font._fallbackAdvance * scale + tracking
-                previous = 0
-            else
-                if previous ~= 0 then
-                    local trailing = kernings[previous]
-                    if trailing ~= nil and trailing[codepoint] ~= nil then
-                        pen = pen + trailing[codepoint] * scale
-                    end
-                end
-
-                -- A space has an advance and no quad, so it moves the pen and
-                -- costs no slot.
-                if glyph.width > 0 and glyph.height > 0 then
-                    local width = glyph.width * scale
-                    local height = glyph.height * scale
-                    local base = count * 4
-                    count = count + 1
-                    placements[base + 1] = pen + glyph.xOffset * scale + width * 0.5
-                    placements[base + 2] = top + glyph.yOffset * scale + height * 0.5
-                    placements[base + 3] = width
-                    placements[base + 4] = height
-                    codepoints[count] = codepoint
-                end
-
-                pen = pen + glyph.xAdvance * scale + tracking
-                previous = codepoint
+    local ops <const> = internal.ops as loader.CArray
+    for index = 0, (internal.num_ops as integer) - 1 do
+        local op <const> = ops[index] as loader.CStruct
+        if op.cmd == 2 then
+            local copy <const> = op.copy as loader.CStruct
+            local dst <const> = copy.dst as loader.CStruct
+            if (dst.w as number) > 0 and (dst.h as number) > 0 then
+                local line <const> = lineByOffset[copy.text_offset as integer] or 0
+                local shift <const> = lineShift[line] or 0.0
+                local base <const> = count * 4
+                count = count + 1
+                placements[base + 1] = ((dst.x as number) + (dst.w as number) * 0.5 + shift) * scale
+                placements[base + 2] = ((dst.y as number) + (dst.h as number) * 0.5) * scale
+                placements[base + 3] = (dst.w as number) * scale
+                placements[base + 4] = (dst.h as number) * scale
+                operations[count] = index
             end
         end
     end
 
-    lineLast[lines] = count
-    lineWidth[lines] = pen
-    if pen > blockWidth then
-        blockWidth = pen
-    end
-
-    -- Alignment moves whole lines within the block, which is why it waits
-    -- until the widest one is known.
-    local weight = ALIGNMENTS[item.align] or 0.0
-    if weight ~= 0.0 then
-        for line = 1, lines do
-            local shift = (blockWidth - lineWidth[line]) * weight
-            if shift ~= 0.0 then
-                for placement = lineFirst[line], lineLast[line] do
-                    local base = (placement - 1) * 4
-                    placements[base + 1] = placements[base + 1] + shift
-                end
-            end
-        end
-    end
-
-    return count, blockWidth, lines * step
+    return count, (internal.w as number) * scale, (internal.h as number) * scale
 end
 
 -- This calls the same layout routine as the plugin, without producing
@@ -1124,25 +851,12 @@ local layoutCounts <const>: {World: integer} = setmetatable(
     {} as {World: integer}, {__mode = "k"} as metatable<{World: integer}>
 )
 
---- What the plugin holds on one world, for the same reason and on the same
---- terms: a reload is asked for from outside any frame and has to reach the run
---- the glyphs live in, the atlases this world's renderer resolved for them, and
---- the gate the layout system reads.
+--- What the plugin holds for one world and renderer.
 local record Install
     glyphs: Glyphs
-    --- Which texture-array layer each font's atlas landed on, which is this
-    --- renderer's answer and not the font's.
-    known: {Font: Atlas}
-    --- Set when the next layout has to look at every archetype rather than only
-    --- the dirty ones: an atlas that has just settled, or a font just re-read.
-    --- A text whose font had not arrived was left unbuilt with its archetype
-    --- clean, so nothing else says to look at it again.
-    waiting: boolean
-    --- Fonts re-read since the last layout, or nil when there are none. A
-    --- re-read keeps the font's table, so nothing a text holds differs
-    --- afterwards and nothing it is compared against does either; this is what
-    --- the layout pass consults instead of inferring from identity.
-    reloaded: {Font: boolean}
+    --- Cached SDF regions by native font address then glyph index. Fonts are
+    --- immutable, so their generation cannot invalidate a cache entry.
+    known: {number: {integer: Glyph}}
 end
 
 local installs <const>: {World: Install} = setmetatable(
@@ -1150,178 +864,47 @@ local installs <const>: {World: Install} = setmetatable(
 )
 
 -------------------------------------------------------------------------------
--- Resolving an atlas
+-- Resolving glyphs
 -------------------------------------------------------------------------------
 
---- Starts the decode of `font`'s atlas and answers the load that fills `atlas`.
----
---- The upload is the load's transform rather than something the layout pass
---- does when it next looks. Two things follow. An atlas reaches the shelf
---- packer from the loader's own drain, in the order the worker answered, and
---- one atlas is one link carrying one transform, so nothing reorders the
---- coordinates a `Sprite` ends up holding. And the layout pass has no reason to
---- pump the loader, because it no longer has a state machine of its own to
---- nudge: `Application` polls once a frame, ahead of the world's update, so an
---- atlas that arrives is registered before the pass that draws it runs.
----
---- The listener is the layout's wake, and one settlement is one call however
---- many texts name the font, so a page that will not decode is reported once
---- rather than every frame.
-local function startAtlas(install: Install, atlas: Atlas, font: Font, renderer: Renderer): Future<components.Sprite>
-    return assets.loadImage(font.atlas):map(function(image: assets.Image): components.Sprite
-        local sprite <const>, region <const> = renderer:registerImage(image)
-        atlas.image = sprite.image
-        atlas.slot = sprite.slot
-        atlas.u = region.u1
-        atlas.v = region.v1
-        -- The material scales the field by how many screen pixels its
-        -- range covers, and it measures that in cell fractions, so the
-        -- range has to arrive as one. An atlas smaller than a cell
-        -- covers less of it, which is what the region reports.
-        atlas.param = font.distanceRange * region.u1 / font.atlasWidth
-        return sprite
-    end):onSettle(function(settled: Future<components.Sprite>)
-        -- Reached for a raise inside the upload as well as for a page
-        -- the worker could not read, because `map` turns one into the
-        -- other rather than letting it escape into the frame.
-        if settled.status == "failed" then
-            logger:error("cannot load the font atlas '%s': %s", font.atlas, settled.error)
-        end
-        install.waiting = true
-    end)
-end
-
---- The font's atlas on this renderer, or nil while it decodes and after it fails.
-local function residency(install: Install, font: Font, renderer: Renderer): Atlas
-    local known <const> = install.known
-    local atlas = known[font]
-    if atlas == nil then
-        -- Already on the renderer answers without the worker. Re-reading a
-        -- font's metrics gives up this record and its derived fields, but the
-        -- atlas itself is untouched and still holds its layer, so decoding the
-        -- file again would end at `registerImage` handing back the region it
-        -- already had and releasing the fresh pixels undrawn. The text would
-        -- blank for the frames that took.
-        local resident <const> = renderer:regionOf(font.atlas)
-        if resident ~= nil then
-            local sprite <const> = renderer:sprite(font.atlas)
-            atlas = {
-                image = sprite.image,
-                slot = sprite.slot,
-                u = resident.u1,
-                v = resident.v1,
-                param = font.distanceRange * resident.u1 / font.atlasWidth,
-                pending = nil,
-            }
-            known[font] = atlas
-            return atlas
-        end
-
-        -- The worker is what decodes the atlas, and a game that only ever
-        -- draws text has no other reason to have started it.
-        if not assets.installed() then
-            assets.install()
-        end
-        -- Recorded before the load starts, and the load is what fills it. The
-        -- record is what makes this lazy resolve happen once: every later text
-        -- naming the font finds it here rather than starting a second decode.
-        atlas = {image = 0, slot = 0, u = 1.0, v = 1.0, param = 0.0, pending = nil}
-        known[font] = atlas
-        atlas.pending = startAtlas(install, atlas, font, renderer)
+--- Returns one renderer-resident SDF glyph, rasterizing and uploading it once.
+local function residency(install: Install, renderer: Renderer, copy: loader.CStruct): Glyph
+    local address <const> = tonumber(ffi.cast("uintptr_t", copy.glyph_font)) as number
+    local fontGlyphs = install.known[address]
+    if fontGlyphs == nil then
+        fontGlyphs = {}
+        install.known[address] = fontGlyphs
     end
 
-    local decoding <const> = atlas.pending
-    if decoding == nil or decoding.status == "ready" then
-        return atlas
-    end
-    return nil
-end
-
--------------------------------------------------------------------------------
--- Re-reading a font
--------------------------------------------------------------------------------
-
---- Gives up what a renderer resolved for `font`, so the next layout resolves it
---- again.
----
---- Everything in an `Atlas` is an answer to the metrics. The field's range
---- arrives as a fraction of a cell, computed from `distanceRange` and the atlas
---- size, and the load that filled it remembers a page that would not decode. A
---- re-read is exactly the event that makes both of those questions worth asking
---- again, and the second is the more interesting one: a font regenerated over a
---- page that was missing has to be able to come back.
-local function evict(install: Install, font: Font)
-    local atlas = install.known[font]
-    if atlas == nil then
-        return
-    end
-    -- A load reached through this record and through nothing else, so this
-    -- install's interest in it goes before the record does. One call covers both
-    -- halves: before the decode lands this gives it up, and the last install to
-    -- do so abandons it, while a load that already landed released its pixels
-    -- into the upload and cancel on it does nothing.
-    local decoding = atlas.pending
-    if decoding ~= nil then
-        decoding:cancel()
-    end
-    install.known[font] = nil
-end
-
--- Reload in place so Text values retain their Font identity. The explicit
--- reloaded set tells the layout pass which unchanged table contents need
--- rebuilding. Atlas dimensions remain fixed because existing glyph UVs depend
--- on them.
-function text.reloadFont(path: string): Future<Font>
-    if path == nil or path == "" then
-        error("tecs: a font re-read needs a metrics path", 2)
+    local index <const> = copy.glyph_index as integer
+    local glyph = fontGlyphs[index]
+    if glyph ~= nil then
+        return glyph
     end
 
-    local font = fontAt(path)
-    if font == nil then
-        error(("tecs: no font is loaded from '%s', so there is nothing to " .. "re-read"):format(path), 0)
+    if not TTF.TTF_GetFontSDF(copy.glyph_font) then
+        error("tecs: SDL_ttf selected a glyph font without SDF enabled", 0)
     end
-
-    if not assets.installed() then
-        assets.install()
+    -- SDL_ttf 3.2 labels FreeType's grayscale SDF surface as
+    -- TTF_IMAGE_ALPHA even though its alpha channel contains the field, so
+    -- the font mode is the authoritative check.
+    local surface = TTF.TTF_GetGlyphImageForIndex(copy.glyph_font, index, nil)
+    if surface == nil then
+        sdl.fail("TTF_GetGlyphImageForIndex")
     end
+    local converted = C.SDL_ConvertSurface(surface, RGBA32)
+    if converted == nil then
+        sdl.fail("SDL_ConvertSurface")
+    end
+    local pixels <const> = converted as loader.CStruct
+    local region <const> = renderer.images:addPacked(
+        pixels.pixels as loader.CValue, pixels.w as integer, pixels.h as integer, pixels.pitch as integer
+    )
+    C.SDL_DestroySurface(converted)
 
-    return assets.loadString(resolve(font.name), "font"):map(function(document: string): Font
-        -- Into a fresh table first. A malformed document raises part way
-        -- through parsing, and the font every text is holding has to end up
-        -- as the one it was or as the whole new one, never as half of each.
-        local fresh = parseMetrics(document, font.name, font.atlas)
-        if fresh.atlasWidth ~= font.atlasWidth or fresh.atlasHeight ~= font.atlasHeight then
-            error(
-                (
-                    "tecs: '%s' was loaded against a %dx%d atlas and now names one "
-                    .. "of %dx%d; a re-read keeps the size, because the glyphs already "
-                    .. "drawn hold rects measured against the old one"
-                ):format(font.name, font.atlasWidth, font.atlasHeight, fresh.atlasWidth, fresh.atlasHeight),
-                0
-            )
-        end
-
-        font.size = fresh.size
-        font.lineHeight = fresh.lineHeight
-        font.base = fresh.base
-        font.distanceRange = fresh.distanceRange
-        font.glyphs = fresh.glyphs
-        font.kernings = fresh.kernings
-        font._fallbackAdvance = fresh._fallbackAdvance
-
-        for _, install in pairs(installs) do
-            evict(install, font)
-            local reloaded = install.reloaded
-            if reloaded == nil then
-                reloaded = {}
-                install.reloaded = reloaded
-            end
-            reloaded[font] = true
-            install.waiting = true
-        end
-
-        return font
-    end)
+    glyph = {region = region}
+    fontGlyphs[index] = glyph
+    return glyph
 end
 
 -- This diagnostic counter verifies that clean text rows skip layout work.
@@ -1362,12 +945,10 @@ local function glyphMaterial(): integer
     return materialId
 end
 
---- Rewrites one text's glyph instances, or empties them until its font arrives.
+--- Rewrites one text's glyph instances, or empties them without a font.
 ---
---- A text left empty here keeps a stale build record, so the next pass that
---- looks at it builds it again. What says to look is the atlas's own settlement,
---- and a text with no font at all is never looked at again until something
---- writes one.
+--- A text with no font remains empty until game code writes one through the
+--- component's mutation path.
 local function build(
     renderer: Renderer,
     install: Install,
@@ -1378,8 +959,7 @@ local function build(
     clip: integer
 )
     local font = item.font
-    local atlas = font ~= nil and residency(install, font, renderer) or nil
-    if atlas == nil then
+    if font == nil then
         reserve(glyphs, item, 0)
         item.width = 0.0
         item.height = 0.0
@@ -1416,27 +996,15 @@ local function build(
     -- not the glyph's: resolved here and spent per glyph below.
     local bandBase <const>, bandSort <const> = layersModule.bandOf(layer)
 
-    -- Material and parameter share one float: the integer part selects and the
-    -- fraction carries the parameter, which is a ratio in 0..1.
-    local param = atlas.param
-    if param < 0.0 then
-        param = 0.0
-    elseif param > 0.999 then
-        param = 0.999
-    end
-    local material <const> = glyphMaterial() + param
-    -- The clip region rides above the texture-array layer in one float, packed
-    -- the way the renderer packs an entity's. Region zero packs to the layer
-    -- unchanged, so an unclipped text writes what it always wrote.
-    local slot <const> = packSlot(clip, atlas.slot)
-
-    -- Glyph rects are atlas pixels and the instance carries cell fractions,
-    -- and an atlas smaller than its cell does not reach the cell's edge.
-    local u <const> = atlas.u / font.atlasWidth
-    local v <const> = atlas.v / font.atlasHeight
-    local metrics <const> = font.glyphs
+    local material <const> = glyphMaterial()
+    local native <const> = item._native as loader.CStruct
+    local ops <const> = (native.internal as loader.CStruct).ops as loader.CArray
 
     for index = 1, count do
+        local copy <const> = (ops[operations[index]] as loader.CStruct).copy as loader.CStruct
+        local source <const> = copy.src as loader.CStruct
+        local glyph <const> = residency(install, renderer, copy)
+        local region <const> = glyph.region
         local place = (index - 1) * 4
         local offsetX = placements[place + 1] * blockX
         local offsetY = placements[place + 2] * blockY
@@ -1445,12 +1013,14 @@ local function build(
         local scaleX = placements[place + 3] * blockX
         local scaleY = placements[place + 4] * blockY
 
-        -- The metrics are BMFont pixels measured from the atlas's top left,
-        -- and the rect goes out in that order: a glyph is a sub-rect of an
-        -- image like any other sprite.
-        local glyph = metrics[codepoints[index]]
-        local u0, u1 = glyph.x * u, (glyph.x + glyph.width) * u
-        local v0, v1 = glyph.y * v, (glyph.y + glyph.height) * v
+        local u <const> = (region.u1 - region.u0) / region.width
+        local v <const> = (region.v1 - region.v0) / region.height
+        local u0 <const> = region.u0 + (source.x as number) * u
+        local v0 <const> = region.v0 + (source.y as number) * v
+        local u1 <const> = u0 + (source.w as number) * u
+        local v1 <const> = v0 + (source.h as number) * v
+        -- The clip region rides above the texture-array layer in one float.
+        local slot <const> = packSlot(clip, region.layer)
 
         local base = (span + index - 2) * INSTANCE_FLOATS
         instances[base] = rotation
@@ -1505,8 +1075,6 @@ local function build(
     item._builtFont = font
     item._builtSize = item.size
     item._builtAlign = item.align
-    item._builtSpacing = item.lineSpacing
-    item._builtTracking = item.tracking
     item._builtR, item._builtG = r, g
     item._builtB, item._builtA = b, a
     item._builtX, item._builtY, item._builtZ = originX, originY, z
@@ -1527,8 +1095,6 @@ local function stale(item: Text, transform: TransformInstance, tint: TintInstanc
         or item._builtFont ~= item.font
         or item._builtSize ~= item.size
         or item._builtAlign ~= item.align
-        or item._builtSpacing ~= item.lineSpacing
-        or item._builtTracking ~= item.tracking
     then
         return true
     end
@@ -1570,11 +1136,9 @@ function text.textPlugin(options: TextOptions): function(World)
         local install <const>: Install = {
             glyphs = newGlyphs(),
             known = {},
-            waiting = false,
-            reloaded = nil,
         }
         local glyphs <const> = install.glyphs
-        glyphs.destroy = function() for loadedFont in pairs(install.known) do evict(install, loadedFont) end end
+        glyphs.destroy = function() end
 
         installs[world] = install
         renderer:addProducer(glyphs as Renderer.InstanceProducer)
@@ -1584,28 +1148,12 @@ function text.textPlugin(options: TextOptions): function(World)
             phase = ecs.phases.PostUpdate,
             after = {"RelativeTransform"},
             run = function()
-                -- A font that has not arrived leaves its texts unbuilt and
-                -- their archetypes clean, so something other than a dirty
-                -- column has to say to look at them. The atlas's own
-                -- settlement is what says it, from the drain the application
-                -- already pumps; a font just re-read says it too, because its
-                -- atlas was given up and has to be resolved again.
-                local all = install.waiting
-                install.waiting = false
-                -- Read once and dropped, because clearing what it marks is the
-                -- text's own build record and that survives until a build
-                -- actually succeeds. An atlas that takes a few frames to come
-                -- back is retried on the record, not on this.
-                local reloaded <const> = install.reloaded
-                install.reloaded = nil
-
                 local built = 0
                 local live = 0
                 for archetype, length, entities in texts:iter() do
                     live = live + length
                     if
-                        all
-                        or archetype:isComponentDirty(text.Text)
+                        archetype:isComponentDirty(text.Text)
                         or archetype:isComponentDirty(Tint)
                         or archetype:isComponentDirty(Clip)
                         or archetype:isComponentDirty(Transform)
@@ -1623,16 +1171,6 @@ function text.textPlugin(options: TextOptions): function(World)
                             local clip = 0
                             if clips ~= nil then
                                 clip = clips[row].index as integer
-                            end
-                            -- The font this text holds was read again under it,
-                            -- so what its glyphs were built from is the table
-                            -- it still names and comparing the two says
-                            -- nothing. Forgetting the font is what makes the
-                            -- comparison fail, and it goes on failing until a
-                            -- build writes it back, which is what carries the
-                            -- text across the frames its atlas is decoding in.
-                            if reloaded ~= nil and reloaded[item.font] then
-                                item._builtFont = nil
                             end
                             if stale(item, transform, tint, clip) then
                                 built = built + 1
@@ -1704,8 +1242,6 @@ text.Text = ecs.newComponent({
         "font",
         "size",
         "align",
-        "lineSpacing",
-        "tracking",
     },
     init = function(item: Text)
         if item.text == nil then
@@ -1716,12 +1252,6 @@ text.Text = ecs.newComponent({
         end
         if item.align == nil then
             item.align = "left"
-        end
-        if item.lineSpacing == nil then
-            item.lineSpacing = 1.0
-        end
-        if item.tracking == nil then
-            item.tracking = 0.0
         end
         if ALIGNMENTS[item.align] == nil then
             error(("tecs: '%s' is not an alignment; use left, center or right"):format(tostring(item.align)), 3)
@@ -1739,8 +1269,6 @@ text.Text = ecs.newComponent({
             font = item.font ~= nil and item.font.name or nil,
             size = item.size,
             align = item.align,
-            lineSpacing = item.lineSpacing,
-            tracking = item.tracking,
         }
     end,
     deserialize = function(_world: World, stored: {string: any}): Text
@@ -1748,14 +1276,7 @@ text.Text = ecs.newComponent({
         -- without one, which lays out nothing rather than failing a load.
         local name = stored.font as string
         local font = name ~= nil and fontsByName[name] or nil
-        return text.Text(
-            stored.text as string,
-            font,
-            stored.size as number,
-            stored.align as string,
-            stored.lineSpacing as number,
-            stored.tracking as number
-        )
+        return text.Text(stored.text as string, font, stored.size as number, stored.align as string)
     end,
 })
 

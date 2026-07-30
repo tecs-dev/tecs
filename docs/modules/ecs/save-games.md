@@ -112,7 +112,8 @@ Custom codecs must turn process-local numbers into durable names:
   update encodes the playback the sprite carries from that phase.
 - `tecs.audio.Sound` saves the clip path and group name. Load starts a new
   voice instead of restoring playback progress.
-- `tecs.gfx.Text` saves authored fields and the font name. A missing font
+- `tecs.gfx.Text` saves authored fields and the font name. Load resolves only
+  fonts whose `newTTF` future already returned under that name; a missing font
   produces no layout.
 - `tecs.physics.RigidBody` saves no component value. The physics snapshot
   handler stores Rapier's complete versioned state under `"tecs.physics"` and

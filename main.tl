@@ -158,16 +158,18 @@ return tecs.newApplication({
         spawnLights(world, width, height)
         print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
 
-        -- Text is entities too. The plugin lays the string out into one child
-        -- entity per glyph, and each of those is an ordinary renderable that
-        -- the same cull and the same draw pick up.
+        -- Text is entities too. The plugin shapes the string and writes one
+        -- renderer instance per glyph into the same cull and draw.
         world:addPlugin(tecs.gfx.textPlugin({renderer = app.renderer}))
         world:spawn(
             Transform(24, 24, 0, 1),
             Tint(0.92, 0.96, 1.0, 1.0),
             tecs.gfx.Text.new({
                 text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
-                font = tecs.gfx.defaultFont().value,
+                font = tecs.gfx.newTTF({
+                    source = "fonts/JetBrainsMono-ExtraBold.ttf",
+                    size = 64,
+                }).value,
                 size = 28,
             })
         )

@@ -24,7 +24,6 @@ local Renderer <const> = require("tecs.Renderer")
 local audio <const> = require("tecs.audio")
 local Audio <const> = audio.Audio
 local assets <const> = require("tecs.assets")
-local text <const> = require("tecs.gfx.text")
 
 local C <const> = sdl.C
 
@@ -32,7 +31,7 @@ local C <const> = sdl.C
 ---
 --- Requiring this module registers its tools as a side effect; there is no
 --- install step. What is on the surface besides that is the two binders and
---- the four reloads, which the tools are thin wrappers over, so that an agent
+--- the three reloads, which the tools are thin wrappers over, so that an agent
 --- asking and the file watcher noticing a saved file are refused on identical
 --- terms rather than through two descriptions that can drift apart.
 ---
@@ -62,7 +61,7 @@ local record tools
     ---     than re-reading the sources to no visible effect.
     bindReload: function(rebuild: function())
 
-    --- The four reloads, as the functions the tools below are wrappers over.
+    --- The three reloads, as the functions the tools below are wrappers over.
     ---
     --- Each raises with the reason when it refuses, which is what the tool
     --- reports and what the file watcher logs. They are named here because the
@@ -73,7 +72,6 @@ local record tools
     reloadShaders: function(): {string}
     reloadImage: function(path: string): integer, integer, integer
     reloadSound: function(path: string): boolean
-    reloadFont: function(path: string): string, integer
 end
 
 local bound: Renderer = nil
@@ -640,44 +638,6 @@ function tools.reloadSound(path: string): boolean
     return clip ~= nil and clip.resident
 end
 
---- Re-reads a font's metrics over the font already loaded from them.
----
---- `text.reloadFont` is the half that owns the rules, the way `Audio:reload`
---- owns the mixer's: identity, the refusal on an atlas whose size moved, and
---- laying out again exactly the texts that draw this font. What is here is
---- turning a path into a refusal an agent can read and reporting what came
---- back. A timed-out wait cancels this reload before refusing, so the metrics
---- cannot land after the agent or watcher was told they did not.
----
---- @param path Path to the metrics file, which must be one a font is already
----     loaded from. Nil, empty, or a path nothing was loaded from raises, as
----     does a file whose atlas size moved, since the glyphs already laid out
----     could not be put right against a different atlas.
---- @return The name the font is loaded under. Carried over from the original
----     load rather than re-read, so a reload never changes it, and it is what
----     the path is resolved from rather than being the path.
---- @return How many glyphs it carries, counted after the reload.
-function tools.reloadFont(path: string): string, integer
-    if path == nil or path == "" then
-        error("path is required", 0)
-    end
-    local loading = text.reloadFont(path)
-    loading:wait()
-    if loading.status ~= "ready" then
-        local reason = loading.error
-        if loading.status == "pending" then
-            loading:cancel()
-        end
-        error(reason or "the font reload did not finish", 0)
-    end
-    local font = loading.value
-    local glyphs = 0
-    for _ in pairs(font.glyphs) do
-        glyphs = glyphs + 1
-    end
-    return font.name, glyphs
-end
-
 mcp.register({
     name = "reload_shaders",
     whenCrashed = true,
@@ -743,42 +703,9 @@ mcp.register({
     end,
 })
 
---- Re-reads a font's metrics over the font already loaded from them.
----
---- The one reload with something in the world to put right afterwards. An
---- image, a clip and a pipeline are each read through every frame, so replacing
---- one is picked up by the next frame and nothing has to be told. A glyph is
---- not: it is an instance laid out once from the metrics and left alone until
---- something about its text changes, and re-reading the metrics changes nothing
---- about its text. So this is also what lays those glyphs out again.
-mcp.register({
-    name = "reload_font",
-    whenCrashed = true,
-    description = "Re-reads a font's metrics over the font already loaded "
-        .. "from that path, and lays out every text drawing it again. Refuses "
-        .. "metrics that name an atlas of a different size. A timed-out read "
-        .. "is abandoned before the refusal is reported.",
-    destructive = true,
-    inputSchema = {
-        type = "object",
-        properties = {
-            path = {
-                type = "string",
-                description = "The path the font's metrics were loaded from.",
-            },
-        },
-        required = {"path"},
-    },
-    handler = function(args: {string: any}): {string: any}
-        local path = args.path as string
-        local name, glyphs = tools.reloadFont(path)
-        return {path = path, font = name, glyphs = glyphs}
-    end,
-})
-
 --- Turns the file watcher on and off, and drives it a poll at a time.
 ---
---- The watcher is what makes the four reloads above happen without being
+--- The watcher is what makes the three reloads above happen without being
 --- asked, so this is the switch over them rather than a fifth reload. Polling
 --- from here as well as from the loop is what lets an agent that has just
 --- written a file wait for the effect rather than for the interval.
@@ -786,7 +713,7 @@ mcp.register({
     name = "watch",
     whenCrashed = true,
     description = "Reports, starts, stops or steps the content file watcher, "
-        .. "which reloads shaders, images, sounds and fonts when their files "
+        .. "which reloads shaders, images and sounds when their files "
         .. "change.",
     destructive = true,
     inputSchema = {
