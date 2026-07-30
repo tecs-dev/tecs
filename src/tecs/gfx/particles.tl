@@ -1384,29 +1384,41 @@ end
 
 --- One emitter's place in the pool, as the pool remembers it.
 local record Holding
+    --- Engine-owned. Stores the emitter assigned to this allocation.
     item: ParticleEmitter
+    --- Engine-owned. Stores the reusable emitter index.
     index: integer
+    --- Engine-owned. Stores the first particle slot.
     base: integer
+    --- Engine-owned. Stores the number of particle slots.
     count: integer
-    --- The tint as it was last read, and what it parsed to. Parsing a color
-    --- string per emitter per frame would be the one allocation in a loop that
-    --- otherwise has none, and a tint changes rarely.
+    --- Engine-owned. Stores the tint as it was last read and what it parsed
+    --- to. Parsing a color string per emitter per frame would be the one
+    --- allocation in a loop that otherwise has none, and a tint changes
+    --- rarely.
     tint: Color
+    --- Engine-owned. Stores the parsed red tint channel.
     tintR: number
+    --- Engine-owned. Stores the parsed green tint channel.
     tintG: number
+    --- Engine-owned. Stores the parsed blue tint channel.
     tintB: number
+    --- Engine-owned. Stores the parsed alpha tint channel.
     tintA: number
 end
 
 --- A slot range whose emitter is gone, held until its last particle can no
 --- longer be alive.
 local record Draining
+    --- Engine-owned. Stores the first particle slot awaiting release.
     base: integer
+    --- Engine-owned. Stores the number of particle slots awaiting release.
     count: integer
+    --- Engine-owned. Stores the time when the slots become reusable.
     releaseAt: number
-    --- Whether the effect that held it blends. Carried rather than looked up,
-    --- because the emitter is gone and its effect went with it, and a draining
-    --- range's particles are still being drawn.
+    --- Engine-owned. Reports whether the effect that held this range blends.
+    --- The pool carries this value because the emitter and its effect are
+    --- gone while the range's particles are still being drawn.
     blended: boolean
 end
 

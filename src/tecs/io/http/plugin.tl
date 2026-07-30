@@ -67,11 +67,13 @@ local record plugin
     --- What a game spawns to make a request. The fields of a `Request`,
     --- because there is no second vocabulary for the same thing.
     record Request is Component
-        --- Absolute, with an `http` or `https` scheme.
+        --- Caller-writable. Sets an absolute URL with an `http` or `https`
+        --- scheme.
         url: string
-        --- "GET" by default.
+        --- Caller-writable. Sets the method. Defaults to `"GET"`.
         method: string
-        --- Merged over the client's, matched without case.
+        --- Caller-writable. Sets headers merged over the client's defaults
+        --- without regard to case.
         headers: {string: string}
         --- Caller-writable. Sets what to send. A snapshot rejects a
         --- `DataStream.ofHandle` here because its live handle cannot be
@@ -81,11 +83,14 @@ local record plugin
         --- as a string. A snapshot rejects a `DataStream.ofHandle` here
         --- because its live handle cannot be reconstructed.
         into: string | DataStream
-        --- Milliseconds this transfer is given, overriding the client's.
+        --- Caller-writable. Sets milliseconds for this transfer, overriding
+        --- the client's value.
         timeoutMs: number
-        --- Milliseconds of no progress it tolerates, overriding the client's.
+        --- Caller-writable. Sets tolerated milliseconds without progress,
+        --- overriding the client's value.
         stallTimeoutMs: number
-        --- Bytes its body may reach, overriding the client's.
+        --- Caller-writable. Sets the body byte limit, overriding the client's
+        --- value.
         maxBytes: integer
     end
 
@@ -95,16 +100,18 @@ local record plugin
     --- a system waits for and a failure is one of the ways it can finish.
     --- `error` is what says which.
     record Response is Component
-        --- The HTTP status code, or 0 when the transfer never got one.
+        --- Engine-owned. Reports the HTTP status code, or zero when the
+        --- transfer never received one.
         status: integer
-        --- Response headers, with lower-cased names.
+        --- Engine-owned. Reports response headers with lower-cased names.
         headers: {string: string}
-        --- The body, wherever it went.
+        --- Engine-owned. Provides the body wherever it went.
         body: DataStream
-        --- The URL that actually answered.
+        --- Engine-owned. Reports the URL that actually answered.
         url: string
-        --- Why the transfer did not complete, or nil when it did. A 404 is not
-        --- one of these: it is a `status` of 404 and no error.
+        --- Engine-owned. Reports why the transfer did not complete, or nil
+        --- when it did. A 404 is not one of these: it is a `status` of 404 and
+        --- no error.
         error: string
     end
 

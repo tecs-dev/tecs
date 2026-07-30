@@ -134,9 +134,13 @@ local DEFAULT_CELL <const> = 512
 --- whether its contents are placed by the camera, in screen pixels, or in
 --- virtual coordinates, and one rectangle is right for all three.
 local record ClipRegion
+    --- Caller-writable. Sets the left edge in target pixels.
     x: number
+    --- Caller-writable. Sets the top edge in target pixels.
     y: number
+    --- Caller-writable. Sets the width in target pixels.
     width: number
+    --- Caller-writable. Sets the height in target pixels.
     height: number
 end
 

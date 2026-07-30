@@ -19,9 +19,13 @@ local DEFAULT_FREQUENCY <const> = 48000
 local DEFAULT_CHANNELS <const> = 1
 
 local record Device
+    --- Read-only. Reports the platform's numeric device identifier.
     id: number
+    --- Read-only. Reports the platform's display name for the device.
     name: string
+    --- Read-only. Reports the device's preferred samples per second.
     frequency: integer
+    --- Read-only. Reports the device's preferred channels per frame.
     channels: integer
 end
 
@@ -32,10 +36,11 @@ end
 --- that stops asking leaves samples to pile up in SDL's buffer rather than
 --- losing them.
 local record Microphone
-    --- Samples per second, after SDL's conversion from whatever the device
-    --- actually runs at. The value asked for, not the device's own.
+    --- Read-only. Reports samples per second after SDL converts from whatever
+    --- the device actually runs at. This is the requested value, not the
+    --- device's own.
     frequency: integer
-    --- Interleaved channels per frame, again after conversion.
+    --- Read-only. Reports interleaved channels per frame after conversion.
     channels: integer
     _stream: loader.CPtr
     _destroyed: boolean
@@ -82,13 +87,13 @@ local record Microphone
 end
 
 local record MicrophoneConfig
-    --- Physical device id from `recordingDevices`. Omitted uses the current
-    --- system default.
+    --- Caller-writable. Selects a physical device id from `recordingDevices`.
+    --- Omitted uses the current system default.
     device: number
-    --- Samples per second after SDL converts the device input. Defaults to
-    --- 48000.
+    --- Caller-writable. Sets samples per second after SDL converts the device
+    --- input. Defaults to 48000.
     frequency: integer
-    --- Interleaved channels. Defaults to one.
+    --- Caller-writable. Sets interleaved channels. Defaults to one.
     channels: integer
 end
 

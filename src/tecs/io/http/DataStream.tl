@@ -70,16 +70,18 @@ local record DataStream
         "handle"
     end
 
-    --- Which of the four this is.
+    --- Read-only. Reports which of the four storage kinds this is.
     kind: Kind
-    --- Bytes long, or nil when nothing can know before they are read.
+    --- Read-only. Reports the byte length, or nil when it is not known before
+    --- the bytes are read.
     length: integer
-    --- What the bytes are, when whoever built this said. Sent as
-    --- `Content-Type`, and set from one on a response.
+    --- Read-only. Reports what the bytes are when their producer supplied a
+    --- type. Requests send it as `Content-Type`; responses copy that header.
     contentType: string
-    --- The path, on a "file". Nil on every other kind.
+    --- Read-only. Reports the path on a `"file"` and nil for every other kind.
     path: string
-    --- The handle, on a "handle". Nil on every other kind.
+    --- Read-only. Reports the handle on a `"handle"` and nil for every other
+    --- kind.
     handle: FILE
 
     --- The string, on a "string".

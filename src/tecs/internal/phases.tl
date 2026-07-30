@@ -143,6 +143,7 @@ local record phases
     record ShutdownGroup is Phase
     end
 
+    --- Read-only. Maps each lifecycle position to its phase definition.
     index: {Phase}
 end
 

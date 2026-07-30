@@ -42,66 +42,82 @@ local EVENT_FAILED <const> = 3
 local record client
     --- Settings copied when a client is built.
     record Options
-        --- Sent as `User-Agent` on every request.
+        --- Caller-writable. Sets `User-Agent` on every request.
         userAgent: string
-        --- Sent on every request and overridden case-insensitively per request.
+        --- Caller-writable. Sets headers sent on every request. Per-request
+        --- headers override these without regard to case.
         headers: {string: string}
-        --- Milliseconds allowed for a whole transfer. 30000 by default.
+        --- Caller-writable. Sets milliseconds allowed for a whole transfer.
+        --- Defaults to 30000.
         timeoutMs: number
-        --- Milliseconds allowed to establish a connection. 10000 by default.
+        --- Caller-writable. Sets milliseconds allowed to establish a
+        --- connection. Defaults to 10000.
         connectTimeoutMs: number
-        --- Milliseconds a response may make no progress. 0 disables it.
+        --- Caller-writable. Sets milliseconds a response may make no progress.
+        --- Zero disables this timeout.
         stallTimeoutMs: number
-        --- Redirects followed. 5 by default; 0 follows none.
+        --- Caller-writable. Sets redirects followed. Defaults to five; zero
+        --- follows none.
         maxRedirects: integer
-        --- Requests allowed to use sockets at once. 16 by default.
+        --- Caller-writable. Sets requests allowed to use sockets at once.
+        --- Defaults to 16.
         maxConnections: integer
-        --- Requests allowed to use sockets to one host. 6 by default.
+        --- Caller-writable. Sets requests allowed to use sockets to one host.
+        --- Defaults to six.
         maxConnectionsPerHost: integer
-        --- Maximum response-body bytes. 0 is unbounded.
+        --- Caller-writable. Sets maximum response-body bytes. Zero is
+        --- unbounded.
         maxBytes: integer
-        --- Whether gzip and deflate response compression is accepted.
-        --- True by default.
+        --- Caller-writable. Accepts gzip and deflate response compression when
+        --- true. Defaults to true.
         compressed: boolean
-        --- Host names whose TLS certificates are not verified.
+        --- Caller-writable. Lists host names whose TLS certificates are not
+        --- verified.
         insecureHosts: {string}
-        --- A proxy URL. Unset follows the environment; empty forces direct.
+        --- Caller-writable. Sets a proxy URL. Unset follows the environment;
+        --- empty forces a direct connection.
         proxy: string
-        --- Hosts excluded from an explicitly configured proxy.
+        --- Caller-writable. Lists hosts excluded from an explicitly configured
+        --- proxy.
         noProxy: string
-        --- Proxy credentials in `user:password` form.
+        --- Caller-writable. Sets proxy credentials in `user:password` form.
         proxyCredentials: string
     end
 
     --- One request. Only `url` is required.
     record Request
-        --- Absolute, with an `http` or `https` scheme.
+        --- Caller-writable. Sets an absolute URL with an `http` or `https`
+        --- scheme.
         url: string
-        --- The method. GET by default.
+        --- Caller-writable. Sets the method. Defaults to GET.
         method: string
-        --- Headers merged over the client's defaults.
+        --- Caller-writable. Sets headers merged over the client's defaults.
         headers: {string: string}
-        --- Bytes to send. A stream is read before `send` returns.
+        --- Caller-writable. Sets bytes to send. A stream is read before `send`
+        --- returns.
         body: string | DataStream
-        --- Where response chunks are written. A string is a file path.
+        --- Caller-writable. Sets where response chunks are written. A string
+        --- is a file path.
         into: string | DataStream
-        --- Whole-transfer timeout overriding the client's.
+        --- Caller-writable. Overrides the client's whole-transfer timeout.
         timeoutMs: number
-        --- No-progress timeout overriding the client's.
+        --- Caller-writable. Overrides the client's no-progress timeout.
         stallTimeoutMs: number
-        --- Body limit overriding the client's. 0 is unbounded.
+        --- Caller-writable. Overrides the client's body limit. Zero is
+        --- unbounded.
         maxBytes: integer
     end
 
     --- A completed HTTP response.
     record Response
-        --- Status after redirects.
+        --- Read-only. Reports the status after redirects.
         status: integer
-        --- Final response headers with lower-cased names.
+        --- Read-only. Reports final response headers with lower-cased names.
         headers: {string: string}
-        --- Response bytes, in memory or in the requested destination.
+        --- Read-only. Provides response bytes in memory or in the requested
+        --- destination.
         body: DataStream
-        --- Effective URL after redirects.
+        --- Read-only. Reports the effective URL after redirects.
         url: string
 
         --- Whether the status is in the 2xx range.

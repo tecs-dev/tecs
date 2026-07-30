@@ -53,8 +53,8 @@ local record http
     --- settles to regardless of status code.
     type Response = client.Response
 
-    --- Read-only. [`DataStream`](/modules/io/http/#tecs.io.http.DataStream) names bytes
-    --- stored in a string, borrowed buffer, path, or caller-opened handle.
+    --- Read-only. `DataStream` names bytes stored in a string, borrowed
+    --- buffer, path, or caller-opened handle.
     DataStream: DataStream
 
     --- Read-only. `plugin` exposes requests and responses as ECS components.

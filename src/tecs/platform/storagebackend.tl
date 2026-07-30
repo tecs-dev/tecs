@@ -81,13 +81,16 @@ end
 
 --- What a backend answered about one path.
 local record Info
+    --- Read-only. Identifies the resolved platform object's kind.
     kind: PathType
-    --- Size in bytes. Zero for a directory.
+    --- Read-only. Reports size in bytes. Zero for a directory.
     size: integer
-    --- Nanoseconds since the epoch, as a double. Zero where the platform or
-    --- the filesystem does not record a creation time.
+    --- Read-only. Reports nanoseconds since the epoch as a double. Zero means
+    --- the platform or filesystem does not record a creation time.
     createdAt: number
+    --- Read-only. Reports modification time in nanoseconds since the epoch.
     modifiedAt: number
+    --- Read-only. Reports access time in nanoseconds since the epoch.
     accessedAt: number
 end
 
@@ -108,9 +111,9 @@ end
 
 --- How a pattern is matched.
 local record GlobOptions
-    --- Match without regard to case. Defaults to false, which is a
-    --- case-sensitive match on every platform including the ones whose
-    --- filesystem is not.
+    --- Caller-writable. Matches without regard to case when true. Defaults to
+    --- false, which is a case-sensitive match on every platform including the
+    --- ones whose filesystem is not.
     caseInsensitive: boolean
 end
 
