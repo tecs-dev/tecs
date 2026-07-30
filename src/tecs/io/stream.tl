@@ -27,6 +27,10 @@ local type WritableStream = types.WritableStream
 local type ReadWriteStream = types.ReadWriteStream
 local type Source = Future.Source
 
+local floor <const> = math.floor
+local max <const> = math.max
+local min <const> = math.min
+
 local CHUNK <const> = 64 * 1024
 -- Application polling shares this operation budget across every transfer.
 -- A step reads or writes at most CHUNK bytes, so one call performs at most
@@ -186,7 +190,7 @@ local function getFiles(): Files
 end
 
 local function nonNegative(value: integer, what: string, level: integer): integer
-    if type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value > MAX_INTEGER then
+    if type(value) ~= "number" or value ~= floor(value) or value < 0 or value > MAX_INTEGER then
         error(("tecs: %s must be a non-negative integer"):format(what), level)
     end
     return value
@@ -342,11 +346,11 @@ function MemoryReader:read(count: integer): string, string
     if self._closed then
         return nil, "the reader is closed"
     end
-    local wanted <const> = math.max(1, count)
+    local wanted <const> = max(1, count)
     if self._at >= self._length then
         return ""
     end
-    local taking <const> = math.min(wanted, self._length - self._at)
+    local taking <const> = min(wanted, self._length - self._at)
     local result: string
     if self._text ~= nil then
         result = self._text:sub(self._at + 1, self._at + taking)
@@ -376,7 +380,7 @@ function MemoryReader:readInto(destination: IOBuffer, count: integer, offset?: i
     if count == 0 or self._at >= self._length then
         return 0
     end
-    local taking <const> = math.min(count, self._length - self._at)
+    local taking <const> = min(count, self._length - self._at)
     local source: loader.BytePointer
     if self._text ~= nil then
         source = ffi.cast("uint8_t *", self._text) as loader.BytePointer
@@ -457,7 +461,7 @@ function HandleReader:read(count: integer): string, string
     if self._closed then
         return nil, "the reader is closed"
     end
-    local piece <const>, reason = self._handle:read(math.max(1, count))
+    local piece <const>, reason = self._handle:read(max(1, count))
     if piece ~= nil then
         return piece
     end
@@ -618,7 +622,7 @@ end
 local function readStep(transfer: Transfer)
     local count = CHUNK
     if transfer.maximum ~= nil then
-        count = math.min(count, transfer.maximum - transfer.total + 1)
+        count = min(count, transfer.maximum - transfer.total + 1)
     end
     transfer.buffer:resize(transfer.total)
     local got <const>, reason = transfer.reader:readInto(transfer.buffer, count, transfer.total)
@@ -678,7 +682,7 @@ local function writeStep(transfer: Transfer)
             finish(transfer)
             return
         end
-        local nextOffset <const> = math.min(transfer.sourceOffset + CHUNK, transfer.sourceFinish)
+        local nextOffset <const> = min(transfer.sourceOffset + CHUNK, transfer.sourceFinish)
         local piece = transfer.text
         if transfer.sourceOffset ~= 0 or nextOffset ~= transfer.sourceFinish then
             piece = transfer.text:sub(transfer.sourceOffset + 1, nextOffset)
@@ -699,7 +703,7 @@ local function writeStep(transfer: Transfer)
         finish(transfer)
         return
     end
-    local requested <const> = math.min(CHUNK, transfer.sourceFinish - transfer.sourceOffset)
+    local requested <const> = min(CHUNK, transfer.sourceFinish - transfer.sourceOffset)
     local wrote <const>, reason = transfer.writer:writeFrom(transfer.buffer, transfer.sourceOffset, requested)
     if wrote == nil then
         fail(transfer, reason)
@@ -748,7 +752,7 @@ function Transfer:poll(): integer
 end
 
 function Transfer:advance(ms: number): integer
-    local deadline <const> = time.now() * 1000.0 + math.max(0, ms)
+    local deadline <const> = time.now() * 1000.0 + max(0, ms)
     local settled = safelyStep(self)
     while self.at ~= 0 and time.now() * 1000.0 < deadline do
         settled = settled + safelyStep(self)

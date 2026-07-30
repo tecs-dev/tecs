@@ -68,6 +68,8 @@ local buffer <const> = require("tecs.io.buffer")
 local type types = require("tecs.io.types")
 
 local C <const> = sdl.C
+local floor <const> = math.floor
+local max <const> = math.max
 
 local type Reader = types.Reader
 local type Writer = types.Writer
@@ -281,12 +283,12 @@ local function sdlWriter(path: string): Writer, string
         end
         offset = offset or 0
         local length <const> = sourceBuffer:length()
-        if type(offset) ~= "number" or offset ~= math.floor(offset) or offset < 0 or offset > length then
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 or offset > length then
             error("tecs: Writer:writeFrom offset is outside the buffer", 2)
         end
         if count == nil then
             count = length - offset
-        elseif type(count) ~= "number" or count ~= math.floor(count) or count < 0 or count > length - offset then
+        elseif type(count) ~= "number" or count ~= floor(count) or count < 0 or count > length - offset then
             error("tecs: Writer:writeFrom count is outside the buffer", 2)
         end
         if count == 0 then
@@ -341,7 +343,7 @@ local function sdlReader(path: string): Reader, string
         if stream == nil then
             return nil, "the reader is closed"
         end
-        local wanted <const> = math.max(1, count)
+        local wanted <const> = max(1, count)
         if wanted > capacity then
             scratch = loader.newArray("char[?]", wanted)
             capacity = wanted
@@ -362,10 +364,10 @@ local function sdlReader(path: string): Reader, string
             return nil, "the reader is closed"
         end
         offset = offset or 0
-        if type(offset) ~= "number" or offset ~= math.floor(offset) or offset < 0 then
+        if type(offset) ~= "number" or offset ~= floor(offset) or offset < 0 then
             error("tecs: Reader:readInto offset must be a non-negative integer", 2)
         end
-        if type(count) ~= "number" or count ~= math.floor(count) or count < 0 then
+        if type(count) ~= "number" or count ~= floor(count) or count < 0 then
             error("tecs: Reader:readInto count must be a non-negative integer", 2)
         end
         if count == 0 then
