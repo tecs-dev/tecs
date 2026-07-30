@@ -231,8 +231,10 @@ local record Backend
     --- color replaced. Swapped in place by `rebuildPipelines`, so nothing may
     --- hold it across a reload.
     pipeline: GraphicsPipeline
-    --- Draws the forward list over the composited image, with blending baked
-    --- in and the geometry pass's depth attached and not written.
+    --- Draws the forward list over the composited image, with premultiplied
+    --- blending baked in and the geometry pass's depth attached and not written.
+    --- One pipeline for both blend modes: the fragment shader chooses between
+    --- blending over and adding by what it writes into alpha.
     blendPipeline: GraphicsPipeline
     --- Nearest and clamped, and the only sampler the instance passes bind:
     --- every image shares one binding, so they share its filtering too.
@@ -626,8 +628,15 @@ end
 ---
 --- The same vertex shader the G-buffer pass uses, because a blended instance is
 --- placed exactly as an opaque one is and only its shading and its blend
---- differ. What differs here is one color target instead of two, straight
---- alpha instead of replace, and depth tested but not written.
+--- differ. What differs here is one color target instead of two, a blend instead
+--- of replace, and depth tested but not written.
+---
+--- Premultiplied rather than straight alpha, and one pipeline rather than two.
+--- The fragment shader scales its color by its own alpha either way; what it
+--- writes into alpha is what chooses the mode, so blending over and adding come
+--- out of this pipeline and are drawn in one indirect draw off one sorted list.
+--- Two pipelines would mean two draws, and an additive instance would then land
+--- after every alpha-blended one in the frame whatever their depths said.
 local function buildForward(self: Backend): GraphicsPipeline
     local device <const> = self._device
     local vertex = Shader.load(device, "instance.vert", {})
@@ -639,7 +648,7 @@ local function buildForward(self: Backend): GraphicsPipeline
             fragmentShader = fragment,
             colorFormat = self.deferred:forwardFormat(),
             depth = self.deferred:forwardDepth(),
-            blend = true,
+            blendMode = "premultiplied",
             name = "ecs.forward",
         }
     )

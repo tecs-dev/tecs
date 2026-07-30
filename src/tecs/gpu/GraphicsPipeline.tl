@@ -84,7 +84,16 @@ local record PipelineOptions
     blend: boolean
     --- Which blend to bake, for the cases a boolean cannot say.
     ---
-    --- `"alpha"` is what `blend = true` means. `"min"` and `"max"` take the
+    --- `"alpha"` is what `blend = true` means. `"premultiplied"` is the same
+    --- blend with the source factor left at one, so the fragment supplies a color
+    --- already scaled by its alpha. That is worth a mode of its own because it is
+    --- what lets one pipeline serve two looks: a fragment writing its scaled
+    --- color and its alpha blends over, and the same fragment writing that color
+    --- with an alpha of zero adds. A pass that wants both therefore needs one
+    --- pipeline and one draw rather than two of each, and the two interleave in
+    --- whatever order the pass draws in.
+    ---
+    --- `"min"` and `"max"` take the
     --- smaller or the larger of the fragment and what is already there, per
     --- channel, and both ignore the two factors entirely. They are what a
     --- target resolving by coverage rather than by order needs: the value in a
@@ -185,11 +194,20 @@ local BLEND_OP_MIN <const> = tonumber(C.SDL_GPU_BLENDOP_MIN) as integer
 local BLEND_OP_MAX <const> = tonumber(C.SDL_GPU_BLENDOP_MAX) as integer
 
 --- The op a named blend mode resolves overlap with, for the two that take the
---- fragment and the target as they are. Alpha is not here: it needs four
---- factors as well as an op, so it stays a branch rather than a table entry.
+--- fragment and the target as they are. The two alpha modes are not here: they
+--- need four factors as well as an op, so they stay a branch rather than a table
+--- entry.
 local EXTREME_OPS <const>: {string: integer} = {
     min = BLEND_OP_MIN,
     max = BLEND_OP_MAX,
+}
+
+--- The source color factor each alpha mode takes. The destination factor, both
+--- alpha factors and the op are the same for the two: what differs is only
+--- whether the fragment's color is scaled here or was scaled by whoever wrote it.
+local ALPHA_SOURCES <const>: {string: integer} = {
+    alpha = BLEND_FACTOR_SRC_ALPHA,
+    premultiplied = BLEND_FACTOR_ONE,
 }
 
 function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
@@ -212,10 +230,14 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
 
     local mode = options.blendMode or (options.blend and "alpha" or nil)
     local extreme: integer = nil
-    if mode ~= nil and mode ~= "alpha" then
-        extreme = EXTREME_OPS[mode]
-        if extreme == nil then
-            error(("tecs: unknown blend mode '%s'"):format(tostring(mode)), 2)
+    local source: integer = nil
+    if mode ~= nil then
+        source = ALPHA_SOURCES[mode]
+        if source == nil then
+            extreme = EXTREME_OPS[mode]
+            if extreme == nil then
+                error(("tecs: unknown blend mode '%s'"):format(tostring(mode)), 2)
+            end
         end
     end
 
@@ -240,7 +262,7 @@ function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions):
             blend.alpha_blend_op = extreme
         else
             blend.enable_blend = true
-            blend.src_color_blendfactor = BLEND_FACTOR_SRC_ALPHA
+            blend.src_color_blendfactor = source
             blend.dst_color_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
             blend.color_blend_op = BLEND_OP_ADD
             blend.src_alpha_blendfactor = BLEND_FACTOR_ONE

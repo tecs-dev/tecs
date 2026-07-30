@@ -83,6 +83,11 @@ layout(location = 6) flat out int vClip;
 // out: a negative scale mirrors the quad, and a mirrored surface faces the
 // other way.
 layout(location = 7) flat out vec4 vNormalBasis;
+// How the forward pass combines this instance with what it is drawn over, from
+// `origin.z`. Flat, because it is per instance, and written whichever pipeline
+// this shader is in: the G-buffer's fragment shader does not declare it and does
+// not need to, since an unconsumed vertex output costs the geometry pass nothing.
+layout(location = 8) flat out int vBlend;
 
 // Four distinct corners, visited through an index buffer. A non-indexed quad
 // runs the vertex shader six times for the four positions it actually has.
@@ -209,12 +214,13 @@ void main() {
     vColor = self.color;
     vLit = entry.w;
 
-    // The array layer, the clip region and the cast height share origin.z. Only
-    // the first two are read here: what a caster's height means is the mask
-    // pass's business and the drop-shadow pass's, and neither is this one.
+    // The array layer, the clip region, the cast height and the blend mode share
+    // origin.z. The height is not read here: what a caster's height means is the
+    // mask pass's business and the drop-shadow pass's, and neither is this one.
     float packedSlot = self.origin.z;
     float arrayLayer = slotLayer(packedSlot);
     vClip = slotClip(packedSlot);
+    vBlend = slotBlend(packedSlot);
 
     // A sheet bound to no image names no layer, and the instance keeps the one
     // it was written with.
