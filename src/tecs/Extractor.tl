@@ -169,6 +169,11 @@ local record InstanceProducer
         first: integer,
         last: integer
     )
+
+    --- Caller-writable. Releases work the producer owns. The renderer calls
+    --- this at most once, before releasing the device resources its instances
+    --- feed. The producer may omit it when it has nothing to release.
+    destroy: function(self: InstanceProducer) | nil
 end
 
 --- One archetype's contiguous run in the instance buffer.
@@ -430,6 +435,20 @@ end
 --- everything else goes through.
 function Extractor:addProducer(producer: InstanceProducer)
     self._producers[#self._producers + 1] = producer
+end
+
+--- Releases the producers retained by this extractor. Safe to call more than
+--- once.
+function Extractor:destroy()
+    local producers <const> = self._producers
+    self._producers = {}
+    for index = 1, #producers do
+        local producer <const> = producers[index]
+        if producer.destroy ~= nil then
+            local destroy <const> = producer.destroy as function(InstanceProducer)
+            destroy(producer)
+        end
+    end
 end
 
 --- Writes rows `first` through `last` of one archetype into its run, and answers

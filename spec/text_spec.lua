@@ -129,6 +129,27 @@ describe("gfx.text", function()
         assert.are.equal(0, font.glyphs[string.byte(" ")].width, "a space has an advance and no quad")
     end)
 
+    it("does not register an atlas after its renderer is destroyed", function()
+        local world, renderer = newScene()
+        local registerImage = renderer.registerImage
+        local registrations = 0
+        renderer.registerImage = function(self, image)
+            registrations = registrations + 1
+            return registerImage(self, image)
+        end
+        spawnText(world, 16, 16, "pending")
+
+        -- Layout starts the decode, but only the asset pump can deliver it.
+        world:update(1 / 60)
+        assert.is_true(assets.pending() > 0, "the atlas load did not start")
+        renderer:destroy()
+        assets.waitAll()
+        assets.update()
+
+        assert.are.equal(0, registrations, "a retained future reached the destroyed renderer")
+        assert.are.equal(0, assets.pending())
+    end)
+
     it("gives every glyph an instance owned by its text", function()
         local world, renderer = newScene()
         local entity = spawnText(world, 16, 16, "Hi there")

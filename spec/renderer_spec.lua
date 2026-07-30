@@ -2711,6 +2711,22 @@ describe("ecs.Renderer", function()
             assert.are.equal(4, renderer.count, "one entity plus three produced instances")
             renderer:destroy()
         end)
+
+        it("destroys a producer once before the backend", function()
+            local _, renderer = newScene()
+            local producer = stripe(1, 1.0, 1.0, 1.0)
+            local destroyed = 0
+            producer.destroy = function()
+                assert.is_false(renderer._backend._destroyed, "the backend went before its producer")
+                destroyed = destroyed + 1
+            end
+            renderer:addProducer(producer)
+
+            renderer:destroy()
+            renderer:destroy()
+
+            assert.are.equal(1, destroyed)
+        end)
     end)
 
     -- A clip region is a rectangle in target pixels and an index the instance

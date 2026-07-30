@@ -604,6 +604,8 @@ local record Glyphs
     --- write after that rather than on the way out, so the table handed over
     --- stays valid while the renderer is reading it.
     _taken: boolean
+    --- Cancels atlas loads retained by the install that owns this producer.
+    destroy: function(self: Glyphs)
 end
 
 local GlyphsMT <const>: metatable<Glyphs> = {__index = Glyphs}
@@ -1537,6 +1539,7 @@ function text.textPlugin(options: TextOptions): function(World)
             reloaded = nil,
         }
         local glyphs <const> = install.glyphs
+        glyphs.destroy = function() for loadedFont in pairs(install.known) do evict(install, loadedFont) end end
 
         installs[world] = install
         renderer:addProducer(glyphs as Renderer.InstanceProducer)

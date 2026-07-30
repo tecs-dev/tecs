@@ -378,7 +378,8 @@ end
 --- Adds a producer after archetype instances in registration order.
 ---
 --- @param producer The caller supplies a producer that the renderer retains
----     until `destroy`.
+---     until `destroy`, when it calls the producer's optional teardown hook
+---     before releasing backend resources.
 function Renderer:addProducer(producer: InstanceProducer)
     self._extractor:addProducer(producer)
 end
@@ -480,6 +481,7 @@ end
 
 --- Releases everything the renderer owns. Safe to call more than once.
 function Renderer:destroy()
+    self._extractor:destroy()
     self._backend:destroy()
 end
 
