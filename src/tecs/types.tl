@@ -146,7 +146,7 @@ local record types
 
         --- Shared options for creating different components.
         interface ContainerComponentOptions<C is Component> is BasicComponentOptions<C>
-            --- The component container/type to use (required).
+            --- Caller-writable. The component container/type to use (required).
             container: C
         end
 
