@@ -548,7 +548,7 @@ end
 --- reload installs cannot disagree with the one the backend started with.
 local function buildGeometry(self: Backend): GraphicsPipeline
     local device <const> = self._device
-    local albedoFormat, normalFormat, emissionFormat = self.deferred:geometryFormats()
+    local albedoFormat, normalFormat, ormFormat, emissionFormat = self.deferred:geometryFormats()
     local vertex = Shader.load(device, "instance.vert", {})
     local fragment = Shader.load(device, "instance.frag", {})
     local pipeline = GraphicsPipeline.create(
@@ -556,7 +556,7 @@ local function buildGeometry(self: Backend): GraphicsPipeline
         {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = {albedoFormat, normalFormat, emissionFormat},
+            colorFormats = {albedoFormat, normalFormat, ormFormat, emissionFormat},
             depth = self.deferred:geometryDepth(),
             name = "ecs.instances",
         }
@@ -628,7 +628,7 @@ end
 ---
 --- The same vertex shader the G-buffer pass uses, because a blended instance is
 --- placed exactly as an opaque one is and only its shading and its blend
---- differ. What differs here is one color target instead of three, a blend
+--- differ. What differs here is one color target instead of four, a blend
 --- instead of replace, and depth tested but not written.
 ---
 --- Premultiplied rather than straight alpha, and one pipeline rather than two.

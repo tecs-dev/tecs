@@ -42,6 +42,15 @@ struct MaterialOutput {
     // A sprite that really does want a normal per texel wants a normal map,
     // which is a sidecar image and a different piece of work.
     vec3 normal;
+    // Surface properties the lighting resolve reads: red is ambient
+    // occlusion, green is roughness, blue is metallic, and alpha is reserved.
+    //
+    // Ambient occlusion multiplies ambient light and nothing a point light
+    // contributes. Roughness and metallic are carried now for the
+    // Cook-Torrance term that consumes them; until that term lands they do not
+    // change the Lambert resolve. The neutral default is fully unoccluded,
+    // medium roughness and non-metallic.
+    vec4 orm;
     // Zero leaves the fragment out of the lighting pass entirely, so it draws
     // at its own color. Whether a thing takes light is what it is rather than
     // where it is, so the material answers here; the layer it sits on answers
@@ -70,12 +79,13 @@ struct MaterialOutput {
 // Every material begins here rather than declaring a bare `MaterialOutput`,
 // which is what lets the contract grow a field without every material in every
 // root having to learn about it on the same day. The albedo and the coverage
-// are placeholders a material is expected to overwrite; the normal, the lit flag
-// and the emission are answers in their own right.
+// are placeholders a material is expected to overwrite; the normal, ORM, the
+// lit flag and the emission are answers in their own right.
 MaterialOutput materialDefaults() {
     MaterialOutput result;
     result.albedo = vec4(1.0);
     result.normal = vec3(0.0, 0.0, 1.0);
+    result.orm = vec4(1.0, 0.5, 0.0, 1.0);
     result.lit = 1.0;
     result.emission = vec4(0.0);
     result.coverage = 1.0;

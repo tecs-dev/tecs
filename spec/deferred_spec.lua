@@ -31,7 +31,8 @@ local GRADIENT_GEOMETRY = [[
 #version 450
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
-layout(location = 2) out vec4 emission;
+layout(location = 2) out vec4 orm;
+layout(location = 3) out vec4 emission;
 layout(set = 3, binding = 0) uniform Size { vec4 target; } size;
 void main() {
     vec2 uv = gl_FragCoord.xy / size.target.xy;
@@ -40,6 +41,7 @@ void main() {
     // Written rather than left out. A shader that names fewer outputs than its
     // pipeline has attachments leaves the rest undefined, not cleared, so a
     // transport test that skipped this would compare a gradient against noise.
+    orm = vec4(1.0, 0.5, 0.0, 1.0);
     emission = vec4(0.0);
 }
 ]]
@@ -51,12 +53,31 @@ local EMISSIVE_GEOMETRY = [[
 #version 450
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
-layout(location = 2) out vec4 emission;
+layout(location = 2) out vec4 orm;
+layout(location = 3) out vec4 emission;
 layout(set = 3, binding = 0) uniform Emission { vec4 value; } emit;
 void main() {
     albedo = vec4(1.0, 1.0, 1.0, 1.0);
     normal = vec4(0.5, 0.5, 1.0, 1.0);
+    orm = vec4(1.0, 0.5, 0.0, 1.0);
     emission = emit.value;
+}
+]]
+
+-- White albedo under authored ambient occlusion. Roughness and metallic use
+-- conspicuous values too, so swapping the channels would make the test fail.
+local ORM_GEOMETRY = [[
+#version 450
+layout(location = 0) out vec4 albedo;
+layout(location = 1) out vec4 normal;
+layout(location = 2) out vec4 orm;
+layout(location = 3) out vec4 emission;
+layout(set = 3, binding = 0) uniform ORM { vec4 value; } surface;
+void main() {
+    albedo = vec4(1.0);
+    normal = vec4(0.5, 0.5, 1.0, 1.0);
+    orm = surface.value;
+    emission = vec4(0.0);
 }
 ]]
 
@@ -319,13 +340,13 @@ describe("deferred pipeline", function()
             end,
         })
 
-        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, ormFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", { name = "gbuffer.vert" })
         local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY, "fragment", { name = "gbuffer.frag" })
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat, emissionFormat },
+            colorFormats = { albedoFormat, normalFormat, ormFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
@@ -364,7 +385,7 @@ describe("deferred pipeline", function()
             end,
         })
 
-        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, ormFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
         local fragment = Shader.fromGLSL(
             device.handle,
@@ -372,10 +393,12 @@ describe("deferred pipeline", function()
 #version 450
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
-layout(location = 2) out vec4 emission;
+layout(location = 2) out vec4 orm;
+layout(location = 3) out vec4 emission;
 void main() {
     albedo = vec4(1.0, 1.0, 1.0, 1.0);
     normal = vec4(0.5, 0.5, 1.0, 1.0);
+    orm = vec4(1.0, 0.5, 0.0, 1.0);
     emission = vec4(0.0);
 }
 ]],
@@ -385,7 +408,7 @@ void main() {
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat, emissionFormat },
+            colorFormats = { albedoFormat, normalFormat, ormFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
@@ -430,13 +453,13 @@ void main() {
 
         assert.is_not_nil(pipeline.graph:formatOf("emission"), "the graph must own a target named emission")
 
-        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, ormFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
         local fragment = Shader.fromGLSL(device.handle, EMISSIVE_GEOMETRY, "fragment", {})
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat, emissionFormat },
+            colorFormats = { albedoFormat, normalFormat, ormFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
@@ -462,6 +485,53 @@ void main() {
             math.abs(half.g - 128) <= 3,
             ("half strength should arrive at about half, got %d"):format(half.g)
         )
+
+        geometryPipeline:destroy()
+        pipeline:destroy()
+    end)
+
+    it("takes ambient occlusion from the ORM attachment", function()
+        -- Ambient is the only light in this scene. Red is therefore observable
+        -- as occlusion now, while green and blue are merely transported for
+        -- the physically based term that consumes them.
+        local surface = require("tecs.ffi.loader").newArray("float[4]")
+
+        local geometryPipeline
+        local pipeline = Deferred.create(device.handle, FORMAT, {
+            ambient = { 1.0, 1.0, 1.0 },
+            geometry = function(context)
+                context.pass:bindPipeline(geometryPipeline.handle)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, surface, 16)
+                context.pass:draw(3)
+            end,
+        })
+
+        assert.is_not_nil(pipeline.graph:formatOf("orm"), "the graph must own a target named orm")
+
+        local albedoFormat, normalFormat, ormFormat, emissionFormat = pipeline:geometryFormats()
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
+        local fragment = Shader.fromGLSL(device.handle, ORM_GEOMETRY, "fragment", {})
+        geometryPipeline = GraphicsPipeline.create(device.handle, {
+            vertexShader = vertex,
+            fragmentShader = fragment,
+            colorFormats = { albedoFormat, normalFormat, ormFormat, emissionFormat },
+            depth = pipeline:geometryDepth(),
+        })
+        vertex:destroy()
+        fragment:destroy()
+
+        surface[0], surface[1], surface[2], surface[3] = 1.0, 0.0, 1.0, 0.0
+        assert.are.equal(255, screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2).r)
+
+        surface[0], surface[1], surface[2], surface[3] = 0.5, 1.0, 0.0, 1.0
+        local half = screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2)
+        assert.is_true(
+            math.abs(half.r - 128) <= 3,
+            ("half ambient occlusion should pass about half the ambient, got %d"):format(half.r)
+        )
+
+        surface[0], surface[1], surface[2], surface[3] = 0.0, 0.5, 0.5, 0.5
+        assert.are.equal(0, screen:getPixel(render(pipeline), SIZE / 2, SIZE / 2).r)
 
         geometryPipeline:destroy()
         pipeline:destroy()
@@ -507,13 +577,13 @@ void main() {
             end,
         })
 
-        local albedoFormat, normalFormat, emissionFormat = pipeline:geometryFormats()
+        local albedoFormat, normalFormat, ormFormat, emissionFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
         local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY, "fragment", {})
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormats = { albedoFormat, normalFormat, emissionFormat },
+            colorFormats = { albedoFormat, normalFormat, ormFormat, emissionFormat },
             depth = pipeline:geometryDepth(),
         })
         vertex:destroy()

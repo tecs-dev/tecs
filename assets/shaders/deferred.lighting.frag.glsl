@@ -28,21 +28,25 @@ layout(location = 0) out vec4 outColor;
 
 layout(set = 2, binding = 0) uniform sampler2D gAlbedo;
 layout(set = 2, binding = 1) uniform sampler2D gNormal;
+// Red is ambient occlusion, green roughness and blue metallic. The latter two
+// are carried for the physically based light term; the Lambert term below
+// consumes only occlusion.
+layout(set = 2, binding = 2) uniform sampler2D gORM;
 // What each surface gives off: rgb its color, alpha how much of it. Cleared to
 // zero, so a pixel nothing drew over and a surface that emits nothing read the
 // same and the term below costs them a multiply.
-layout(set = 2, binding = 2) uniform sampler2D gEmission;
+layout(set = 2, binding = 3) uniform sampler2D gEmission;
 
 #ifdef SHADOWS
 // Height in red, and green marking a pixel an occluder really covers rather
 // than one the blur spread a halo over.
-layout(set = 2, binding = 3) uniform sampler2D occluderMask;
+layout(set = 2, binding = 4) uniform sampler2D occluderMask;
 // One channel, half resolution: how much of all lighting reaches the ground
 // here, after every drop shadow thrown across it.
-layout(set = 2, binding = 4) uniform sampler2D dropShadowMask;
-#define LIGHT_BINDING 5
+layout(set = 2, binding = 5) uniform sampler2D dropShadowMask;
+#define LIGHT_BINDING 6
 #else
-#define LIGHT_BINDING 3
+#define LIGHT_BINDING 4
 #endif
 
 struct Light {
@@ -190,12 +194,16 @@ void main() {
     // Normals are stored biased into unsigned range, as the G-buffer format
     // has no signed representation.
     vec3 normal = normalize(encoded.xyz * 2.0 - 1.0);
+    vec4 orm = texture(gORM, vUV);
 
     // Target pixels from the top left, which is the space the view inverts
     // from and the one a readback names a pixel in.
     vec2 fragment = vUV * scene.viewport.xy;
     vec2 world = worldOf(fragment);
-    vec3 accumulated = scene.ambient.rgb;
+    // Authored occlusion reaches indirect light only. A point light is a
+    // directionally known contribution and is not hidden by a baked ambient
+    // term; its own shadowing is handled separately below.
+    vec3 accumulated = scene.ambient.rgb * orm.r;
 #ifdef SHADOWS
     float noise = dither(fragment);
 #endif

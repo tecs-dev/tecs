@@ -306,15 +306,19 @@ describe("shaderpack", function()
 
     it("carries the reflection SDL_GPU cannot recover from code", function()
         local pack = shaderbuild.build()
-        -- The lighting pass binds three G-buffer samplers for albedo, the normal
-        -- and emission, three storage buffers for the lights and the two halves
+        -- The lighting pass binds four G-buffer samplers for albedo, the normal,
+        -- ORM and emission, three storage buffers for the lights and the two halves
         -- of the tile grid, and one uniform block. Those numbers are arguments to
         -- shader creation, so a pack that dropped them would create a shader that
         -- binds nothing and draws black.
         local lighting = pack.shaders["deferred.lighting.frag"]
-        assert.are.equal(3, lighting.counts.samplers)
+        assert.are.equal(4, lighting.counts.samplers)
         assert.are.equal(3, lighting.counts.readOnlyStorageBuffers)
         assert.are.equal(1, lighting.counts.uniformBuffers)
+
+        local shadowed = pack.shaders["deferred.lighting.frag|SHADOWS=1"]
+        assert.are.equal(6, shadowed.counts.samplers)
+        assert.are.equal(3, shadowed.counts.readOnlyStorageBuffers)
 
         -- Workgroup size is declared in GLSL and is a pipeline argument, so it
         -- has to survive too.

@@ -12,7 +12,8 @@ layout(location = 6) flat in int vClip;
 layout(location = 7) flat in vec4 vNormalBasis;
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
-layout(location = 2) out vec4 emission;
+layout(location = 2) out vec4 orm;
+layout(location = 3) out vec4 emission;
 
 layout(set = 2, binding = 0) uniform sampler2DArray images;
 
@@ -81,6 +82,11 @@ void main() {
     // the layer have a say: the product is nonzero only where the two agree,
     // so either one asking to be left out is enough.
     normal = vec4(faced * 0.5 + 0.5, shaded.lit * vLit);
+
+    // Occlusion, roughness and metallic stay in their own target so the
+    // lighting pass can use them without taking channels from the albedo or
+    // normal. Alpha is reserved and carried unchanged.
+    orm = shaded.orm;
 
     // What the surface gives off, kept out of the albedo so the resolve can add
     // it after the lighting rather than multiply it by it, and so a later pass

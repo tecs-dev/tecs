@@ -1824,6 +1824,45 @@ describe("ecs.Renderer", function()
         materials.reset()
     end)
 
+    it("takes ambient occlusion from a material's ORM result", function()
+        -- The material-to-attachment half and the attachment-to-resolve half in
+        -- one scene. Roughness and metallic are deliberately non-default so a
+        -- shader that wrote one of those channels where occlusion belongs
+        -- would produce a visibly different answer.
+        materials.reset()
+        materials.define(
+            "spec.occluded",
+            [[
+            MaterialOutput material(MaterialInput frag) {
+                MaterialOutput result = materialDefaults();
+                result.albedo = vec4(1.0);
+                result.coverage = 1.0;
+                result.orm = vec4(frag.param, 0.9, 0.2, 1.0);
+                return result;
+            }
+        ]]
+        )
+
+        local world, renderer = newScene({ 1.0, 1.0, 1.0 })
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            components.Material(materials.id("spec.occluded"), 0.5),
+            Renderable()
+        )
+
+        local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.is_true(
+            math.abs(pixel.r - 128) <= 3,
+            ("half ambient occlusion should pass about half the ambient, got %d"):format(pixel.r)
+        )
+        assert.are.equal(pixel.r, pixel.g)
+        assert.are.equal(pixel.r, pixel.b)
+
+        renderer:destroy()
+        materials.reset()
+    end)
+
     describe("emission", function()
         -- Three materials over one dark quad. The dull one is the control and is
         -- what says the scene really has no light in it; the other two differ

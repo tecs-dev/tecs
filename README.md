@@ -2850,17 +2850,15 @@ A shape is taken to swell with itself, which makes the scale drop out.
 No attachment was added for this. The normal target already existed and was
 already being written, with a constant.
 
-### Emission is a third attachment, and a material's answer
+### Emission has an attachment of its own
 
 A surface that gives off light is not a surface a light reaches, so emission
 needed somewhere to live that lighting reads rather than writes. Nothing was
 spare: the albedo's alpha is carried through to the composite and the normal's
-alpha is the lit flag, so both existing attachments are spent. It went into a
-third color target of its own, which is three of the four a render pass allows
-and leaves exactly one for the surface properties a physically based term wants.
-The cost is one more full frame-sized RGBA8 target, about 8 MB at 1080p, four
-more bytes written per covered fragment and one more texture fetch per pixel in
-the resolve.
+alpha is the lit flag, so both existing attachments are spent. It has a color
+target of its own. The cost is one more full frame-sized RGBA8 target, about
+8 MB at 1080p, four more bytes written per covered fragment and one more texture
+fetch per pixel in the resolve.
 
 An attachment rather than a scalar packed into the spare bits of the normal's
 alpha, because a glow's color is not its albedo. A lamp's glass is grey and
@@ -2893,6 +2891,34 @@ attachment. It cannot write one: it runs after the G-buffer has been resolved,
 which is the price of the lane. So a translucent emitter glows, scaled by its
 alpha along with everything else, and it will not reach a later pass that reads
 the attachment.
+
+### ORM fills the fourth attachment
+
+Surface properties occupy the last color target a render pass allows. Red is
+ambient occlusion, green is roughness, blue is metallic and alpha is reserved.
+The neutral value is `(1.0, 0.5, 0.0, 1.0)`: fully unoccluded, medium roughness
+and non-metallic. It is both the material default and the attachment clear, so
+every built-in keeps the image it had before the target existed.
+
+Ambient occlusion multiplies ambient light and no point-light contribution. It
+is an authored approximation of indirect light the surface cannot receive,
+while a point light has a known direction and the shadow mask says whether it
+reaches the fragment. Roughness and metallic are written now and deliberately
+do nothing under Lambert. The Cook-Torrance term consumes them together, so
+giving either an unrelated approximation here would be a second lighting model
+to remove when that term lands.
+
+Packing the values into the other attachments lost. Albedo alpha is still the
+coverage composite carries, normal alpha is the lit flag, and emission needs
+its color plus strength. Taking any of those channels either removes an
+existing answer or makes a surface property reconstruct from albedo, which is
+false for a painted metal and an occluded white surface alike.
+
+The target costs another frame-sized RGBA8 allocation, about 8 MB at 1080p,
+four bytes written per covered fragment and one fetch per lit pixel. Deferring
+it until the physically based term would save that fetch temporarily and make
+the material contract, geometry pipeline and resolve bindings change again in
+the same work that changes the BRDF.
 
 ### Lights are binned into tiles
 

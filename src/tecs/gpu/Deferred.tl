@@ -49,9 +49,13 @@ Deferred is what makes light count independent of object count: geometry is
 rasterised once regardless of how many lights touch it, and lighting runs
 once per pixel regardless of how many objects overlap it.
 
-The G-buffer is three of the four color attachments a render pass allows:
-albedo, a normal with the lit flag in its alpha, and emission. Emission is
-the one of the three lighting does not read as an input. It is added to the
+The G-buffer uses all four color attachments a render pass allows: albedo, a
+normal with the lit flag in its alpha, ORM surface properties, and emission.
+ORM carries ambient occlusion, roughness and metallic in RGB. Occlusion
+multiplies ambient light; roughness and metallic are carried for the
+physically based light term rather than changing the Lambert term.
+
+Emission is the one attachment lighting does not treat as a surface input. It is added to the
 resolved result rather than multiplied into it, so it survives ambient of
 zero and an occluder's shadow both, and it sits in a target of its own so a
 later pass can blur a scene's glow without picking it back out of a finished
@@ -200,14 +204,21 @@ end
 
 local record DeferredOptions
     --- Draws into the G-buffer. Writes location 0 for albedo, location 1 for a
-    --- normal biased into unsigned range, and location 2 for emission.
+    --- normal biased into unsigned range, location 2 for ORM, and location 3
+    --- for emission.
     ---
     --- Location 1's alpha is what decides lighting: a fragment carrying less
     --- than a half passes through at its own albedo, and one at or above a
     --- half is lit. Geometry that writes a normal and leaves that alpha at
     --- zero is drawn unlit, which reads as lighting doing nothing.
     ---
-    --- Location 2 is a color in rgb and how much of it in alpha, and the resolve
+    --- Location 2 carries ambient occlusion, roughness and metallic in RGB.
+    --- Ambient occlusion multiplies ambient lighting; roughness and metallic
+    --- are reserved for the physically based light term. Geometry that leaves
+    --- it at the default writes fully unoccluded, medium-roughness,
+    --- non-metallic surface properties.
+    ---
+    --- Location 3 is a color in rgb and how much of it in alpha, and the resolve
     --- adds the product on top of the lighting rather than through it. Geometry
     --- that leaves it at zero emits nothing, which is the clear as well, so a
     --- pass that writes only the first two attachments is not a scene that glows
@@ -518,7 +529,7 @@ end
 ---     wrapper around it.
 --- @param swapchainFormat What present writes to, from
 ---     `Device:getSwapchainFormat`. Every other target's format is the
----     graph's; the G-buffer's three come back out of `geometryFormats`.
+---     graph's; the G-buffer's four come back out of `geometryFormats`.
 --- @return A pipeline that has allocated its light buffers but no targets;
 ---     those are sized on the first `render` from the frame it is given.
 function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options: DeferredOptions): Deferred
@@ -626,6 +637,17 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     )
     graph:target(
         {
+            -- Surface properties in the established ORM order: ambient
+            -- occlusion, roughness and metallic in RGB. Alpha is reserved.
+            -- Fully unoccluded, medium roughness and non-metallic is the
+            -- neutral material default as well as the attachment clear.
+            name = "orm",
+            format = RGBA8,
+            clear = {r = 1, g = 0.5, b = 0, a = 1},
+        }
+    )
+    graph:target(
+        {
             -- What each surface gives off, as a color and how much of it. Its own
             -- attachment rather than a channel borrowed from the two above,
             -- because both of those are spent: the albedo carries an alpha the
@@ -710,7 +732,7 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
     graph:pass(
         {
             name = "geometry",
-            outputs = {"albedo", "normal", "emission"},
+            outputs = {"albedo", "normal", "orm", "emission"},
             -- Cleared to the far plane every frame, and "lessOrEqual" rather than
             -- "less" so equal depths still resolve to whatever drew last. Draw
             -- order is deterministic and means something here, so depth decides
@@ -803,10 +825,10 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer, options:
         {
             name = "lighting",
             -- Declaration order is binding order, and the shader numbers its
-            -- samplers to match: the G-buffer's three first, then the two a
+            -- samplers to match: the G-buffer's four first, then the two a
             -- pipeline built with shadows on adds.
-            inputs = shadows and {"albedo", "normal", "emission", "occluders", "dropShadowAO"}
-                or {"albedo", "normal", "emission"},
+            inputs = shadows and {"albedo", "normal", "orm", "emission", "occluders", "dropShadowAO"}
+                or {"albedo", "normal", "orm", "emission"},
             outputs = {"lit"},
             execute = function(context: PassGraph.PassContext)
                 local scene <const> = sceneUniform(self, context.width, context.height)
@@ -1129,17 +1151,20 @@ function Deferred:rebuildPipelines()
     oldBin:destroy()
 end
 
---- Returns the three formats a geometry pipeline must be created against.
+--- Returns the four formats a geometry pipeline must be created against.
 ---
 --- In attachment order, so a pipeline passes them straight through as its
---- color formats and cannot get two of them the wrong way round. Three of the
---- four color attachments a render pass allows, leaving one for the surface
---- properties a physically based term would read.
+--- color formats and cannot get two of them the wrong way round. These use all
+--- four color attachments a render pass allows.
 --- @return The albedo target's format, which is color attachment zero.
 --- @return The normal target's format, which is color attachment one.
---- @return The emission target's format, which is color attachment two.
-function Deferred:geometryFormats(): integer, integer, integer
-    return self.graph:formatOf("albedo"), self.graph:formatOf("normal"), self.graph:formatOf("emission")
+--- @return The ORM target's format, which is color attachment two.
+--- @return The emission target's format, which is color attachment three.
+function Deferred:geometryFormats(): integer, integer, integer, integer
+    return self.graph:formatOf("albedo"),
+        self.graph:formatOf("normal"),
+        self.graph:formatOf("orm"),
+        self.graph:formatOf("emission")
 end
 
 --- Returns the depth state a geometry pipeline must be created with.
@@ -1152,7 +1177,7 @@ end
 
 --- Returns the color format a forward pipeline must be created against.
 ---
---- One target rather than the G-buffer's three: the forward pass draws onto the
+--- One target rather than the G-buffer's four: the forward pass draws onto the
 --- composited image, which is a picture and not a description of a surface. A
 --- blended fragment therefore adds its own emission to its own color and reaches
 --- the emission attachment not at all.

@@ -57,14 +57,40 @@ MaterialOutput material(MaterialInput frag) {
 `frag.local` runs from -0.5 to 0.5 inside the quad. `frag.uv`, `frag.color`,
 and `frag.param` carry the image coordinates, tint, and instance parameter.
 `frag.blended` says whether the fragment reaches a pass that blends it. Start
-from `materialDefaults`, then set `albedo`, `normal`, `lit`, `emission`, and
-`coverage`.
+from `materialDefaults`, then set `albedo`, `normal`, `orm`, `lit`, `emission`,
+and `coverage`.
 
 Coverage above zero keeps a fragment; zero or below discards it. The deferred
 lane does not blend partial coverage. A tint alpha below one routes the
 instance to the blended lane instead, and so does a particle effect whose
 `render.blend` asks for it. A material that resolves an edge by discarding should
 put the edge in alpha where `frag.blended` is set, which is what `textured` does.
+
+## Surface properties
+
+`orm` carries ambient occlusion, roughness, and metallic in RGB. Alpha is
+reserved. `materialDefaults` returns `vec4(1.0, 0.5, 0.0, 1.0)`: fully
+unoccluded, medium roughness, and non-metallic.
+
+Ambient occlusion multiplies ambient lighting only. A point light is a known
+directional contribution and keeps its own brightness; shadow components
+control whether that light reaches a fragment. Roughness and metallic are
+stored in the G-buffer for the physically based light term. The current Lambert
+term does not consume them yet.
+
+```glsl
+MaterialOutput material(MaterialInput frag) {
+    MaterialOutput result = materialDefaults();
+    result.albedo = texture(images, frag.uv) * frag.color;
+    result.coverage = 1.0;
+    // The instance parameter controls authored ambient occlusion.
+    result.orm = vec4(frag.param, 0.8, 0.0, 1.0);
+    return result;
+}
+```
+
+The ORM attachment is eight bits a channel, so values outside zero to one are
+clamped when geometry writes them.
 
 ## Emission
 
