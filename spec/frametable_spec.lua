@@ -147,6 +147,25 @@ describe("a frame table", function()
             assert.are_not.equal(before, frametable.revision())
         end)
 
+        it("moves the layer to wherever a rebound sheet landed", function()
+            -- A reloaded image lands on whatever layer of the array is free, so
+            -- a playback registered before the rebind has to follow it. Nothing
+            -- about an entity changes: the layer is the frame's rather than the
+            -- entity's, which is what makes a rebind cost one table and no
+            -- instances at all.
+            local source = taggedSheet()
+            source:bind(components.Sprite(4, 0.0, 0.0, 1.0, 1.0, 2))
+            local id = frametable.register(source, source:tagId("forward"))
+
+            local entry = frametable.HEADER_FLOATS + (id - 1) * frametable.DIRECTORY_FLOATS
+            local data = frametable.floats()
+            near(data[data[entry] + 4], 2, "the layer it was bound to")
+
+            source:bind(components.Sprite(9, 0.0, 0.0, 1.0, 1.0, 5))
+            data = frametable.floats()
+            near(data[data[entry] + 4], 5, "and the layer it was rebound to")
+        end)
+
         it("lays the regions out where the directory says", function()
             local source = taggedSheet()
             source:bind(components.Sprite(1, 0.0, 0.0, 1.0, 1.0, 3))
@@ -330,14 +349,6 @@ describe("playback resolved on the GPU", function()
         local base = index * INSTANCE_FLOATS
         return instances[base + 12], instances[base + 13], instances[base + 14], instances[base + 15]
     end
-
-    before_each(function()
-        animation.useGPU(true)
-    end)
-
-    after_each(function()
-        animation.useGPU(false)
-    end)
 
     it("writes the playback into the sprite instead of a region", function()
         local source = taggedSheet()

@@ -107,8 +107,9 @@ API.
 Custom codecs must turn process-local numbers into durable names:
 
 - `tecs.gfx.Sprite` saves the image name instead of its intern index.
-- `tecs.gfx.animation.Animation` saves sheet and tag names. Load resets the
-  frame index so the next update writes the sprite region.
+- `tecs.gfx.animation.Animation` saves sheet and tag names, and the phase in
+  the cycle rather than the frame. Load clears the frame field, so the next
+  update encodes the playback the sprite carries from that phase.
 - `tecs.audio.Sound` saves the clip path and group name. Load starts a new
   voice instead of restoring playback progress.
 - `tecs.gfx.Text` saves authored fields and the font name. A missing font

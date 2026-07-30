@@ -58,7 +58,7 @@ The engine installs its work into the same tree:
 | `First`           | Advance frame-clock sequences                                                           |
 | `FixedFirst`      | Latch fixed input, snapshot transforms, advance fixed-clock sequences                   |
 | `FixedUpdate`     | Run TTL and physics                                                                     |
-| `FixedPostUpdate` | Copy physics poses and advance sprite animation                                         |
+| `FixedPostUpdate` | Copy physics poses                                                                      |
 | `FixedLast`       | Leave fixed-input mode                                                                  |
 | `Update`          | Advance presentation-clock sequences                                                    |
 | `PostUpdate`      | Compose relative transforms, play sounds, encode animation, lay out text, sync emitters |

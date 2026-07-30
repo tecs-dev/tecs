@@ -2967,11 +2967,17 @@ describe("ecs.Renderer", function()
     -- Playback resolved in the vertex shader rather than written into the
     -- instance by a system.
     --
-    -- The property worth a render test is that the two paths draw the same
-    -- thing on the same step. Everything else about the design is a claim about
-    -- what is written, which the frame table's own spec covers; this is the
-    -- claim that the picture is unchanged, and the only way to hold it is to
-    -- put both paths on a screen and compare.
+    -- The property worth a render test is that the pixels are the frame
+    -- `animation.frameOf` names, because that is the frame gameplay acts on: a
+    -- shader that resolved a different one would put a hitbox on one drawing
+    -- and a picture on another. Everything else about the design is a claim
+    -- about what is written, which the frame table's own spec covers.
+    --
+    -- What the animated quad is compared against is a still one carrying that
+    -- frame's own region and pivot, spawned with no Animation at all. That is
+    -- the path an unanimated sprite takes, so the comparison holds the shader's
+    -- resolution against the host's own arithmetic on a screen without a second
+    -- playback implementation to compare against.
     describe("animation on the GPU", function()
         local sheet = require("tecs.gfx.sheet")
         local animation = require("tecs.gfx.animation")
@@ -3008,13 +3014,13 @@ describe("ecs.Renderer", function()
                 :bind(sprite)
         end
 
-        -- Which frame the middle of the screen is showing, as its color.
-        local function shownAfter(steps, gpu)
-            animation.useGPU(gpu)
+        -- Which frame the middle of the screen is showing, as its color, and
+        -- which frame the host says the entity is on.
+        local function shownAfter(steps)
             local world, renderer = newScene()
             local source = twoFrameSheet(renderer)
             world:addPlugin(animation.plugin)
-            world:spawn(
+            local entity = world:spawn(
                 Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
                 Tint(1, 1, 1, 1),
                 Renderable(),
@@ -3027,20 +3033,40 @@ describe("ecs.Renderer", function()
                 pixels = frameAt(world, renderer, STEP)
             end
             local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            -- Read against the same step count the frame was drawn with: the
+            -- clock that crossed in that frame's packet is the one the world
+            -- holds now, because nothing between two updates moves it.
+            local frame = animation.frameOf(world, entity)
             renderer:destroy()
-            animation.useGPU(false)
+            return center, frame
+        end
+
+        -- The same sheet at a frame named outright, with nothing animating it.
+        local function staticFrame(frame)
+            local world, renderer = newScene()
+            local source = twoFrameSheet(renderer)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
+                Tint(1, 1, 1, 1),
+                Renderable(),
+                source:sprite(frame)
+            )
+
+            local pixels = frameAt(world, renderer, STEP)
+            local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            renderer:destroy()
             return center
         end
 
         -- Frames hold for a tenth of a second each by default, so six steps of
         -- a sixtieth carry the cycle from the first frame to the second and
         -- twelve bring it back round.
-        it("shows the frame the host path shows, step for step", function()
+        it("draws the frame the host says it is on, step for step", function()
             for _, steps in ipairs({ 1, 5, 7, 11, 13 }) do
-                local host = shownAfter(steps, false)
-                local gpu = shownAfter(steps, true)
-                assert.are.equal(host.r, gpu.r, ("red after %d steps"):format(steps))
-                assert.are.equal(host.g, gpu.g, ("green after %d steps"):format(steps))
+                local shown, frame = shownAfter(steps)
+                local still = staticFrame(frame)
+                assert.are.equal(still.r, shown.r, ("red after %d steps on frame %d"):format(steps, frame))
+                assert.are.equal(still.g, shown.g, ("green after %d steps on frame %d"):format(steps, frame))
             end
         end)
 
@@ -3048,8 +3074,10 @@ describe("ecs.Renderer", function()
             -- The two frames are different colors, so seeing both proves the
             -- shader moved between them; the frame table's spec is what proves
             -- nothing was written to get there.
-            local first = shownAfter(1, true)
-            local second = shownAfter(7, true)
+            local first, firstFrame = shownAfter(1)
+            local second, secondFrame = shownAfter(7)
+            assert.are.equal(1, firstFrame)
+            assert.are.equal(2, secondFrame)
             assert.are.equal(255, first.r, "the first frame is red")
             assert.are.equal(255, second.g, "and the second is green")
             assert.are_not.equal(first.g, second.g)
@@ -3091,13 +3119,13 @@ describe("ecs.Renderer", function()
                 :bind(sprite)
         end
 
-        -- Whether the left and right halves of the screen are covered.
-        local function hangsAfter(steps, gpu)
-            animation.useGPU(gpu)
+        -- Whether the left and right halves of the screen are covered, and
+        -- which frame the host says the entity is on.
+        local function hangsAfter(steps)
             local world, renderer = newScene()
             local source = movingPivotSheet(renderer)
             world:addPlugin(animation.plugin)
-            world:spawn(
+            local entity = world:spawn(
                 Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE / 2, SIZE / 2),
                 Tint(1, 1, 1, 1),
                 Renderable(),
@@ -3112,25 +3140,49 @@ describe("ecs.Renderer", function()
             end
             local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
             local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+            local frame = animation.frameOf(world, entity)
             renderer:destroy()
-            animation.useGPU(false)
+            return left.b, right.b, frame
+        end
+
+        -- The same quad with the frame's own pivot written into it and nothing
+        -- animating it, which is the fold extraction has always done.
+        local function staticHang(frame)
+            local world, renderer = newScene()
+            local source = movingPivotSheet(renderer)
+            local x, y = source:pivotOf(source:sliceId("feet"), frame)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE / 2, SIZE / 2),
+                Tint(1, 1, 1, 1),
+                Renderable(),
+                source:sprite(frame),
+                sheet.Pivot(x, y)
+            )
+
+            local pixels = frameAt(world, renderer, STEP)
+            local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+            local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+            renderer:destroy()
             return left.b, right.b
         end
 
         it("hangs the quad off the pivot of the frame it is showing", function()
             -- Three steps in is the middle of the first frame and nine the
-            -- middle of the second, so neither sample sits on a boundary.
+            -- middle of the second, so neither sample sits on a boundary. The
+            -- middle pivot plus the table's offset has to land where writing
+            -- that frame's pivot directly lands, or a slice that moves drags
+            -- the drawing off the point it names.
             for _, steps in ipairs({ 3, 9 }) do
-                local hostLeft, hostRight = hangsAfter(steps, false)
-                local gpuLeft, gpuRight = hangsAfter(steps, true)
-                assert.are.equal(hostLeft, gpuLeft, ("left after %d steps"):format(steps))
-                assert.are.equal(hostRight, gpuRight, ("right after %d steps"):format(steps))
+                local left, right, frame = hangsAfter(steps)
+                local stillLeft, stillRight = staticHang(frame)
+                assert.are.equal(stillLeft, left, ("left after %d steps on frame %d"):format(steps, frame))
+                assert.are.equal(stillRight, right, ("right after %d steps on frame %d"):format(steps, frame))
             end
         end)
 
         it("moves the quad as the slice moves under it", function()
-            local firstLeft, firstRight = hangsAfter(3, true)
-            local secondLeft, secondRight = hangsAfter(9, true)
+            local firstLeft, firstRight = hangsAfter(3)
+            local secondLeft, secondRight = hangsAfter(9)
 
             assert.are.equal(255, firstRight, "the first frame hangs off its left edge")
             assert.are.equal(0, firstLeft)
