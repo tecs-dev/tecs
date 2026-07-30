@@ -34,6 +34,7 @@ local type time = require("tecs.platform.time")
 local type events = require("tecs.platform.events")
 local type net = require("tecs.net")
 local type filesystem = require("tecs.platform.filesystem")
+local type binaryIO = require("tecs.io")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
 local type components = require("tecs.components")
@@ -356,6 +357,7 @@ local record tecs
     filesystem: filesystem
     gfx: gfx
     input: input
+    io: binaryIO
     log: log
     math: vectorMath
     mcp: mcp
@@ -450,6 +452,7 @@ local SURFACE <const>: {string: Namespace} = {
         },
     },
     input = {module = "tecs.platform.input"},
+    io = {module = "tecs.io"},
     log = {module = "tecs.log"},
     math = {module = "tecs.math"},
     mcp = {module = "tecs.mcp"},

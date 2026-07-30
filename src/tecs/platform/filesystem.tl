@@ -36,6 +36,7 @@ whole asset tree.
 local adapter <const> = require("tecs.platform.adapter")
 local storagebackend <const> = require("tecs.platform.storagebackend")
 local content <const> = require("tecs.platform.content")
+local type binaryIO = require("tecs.io")
 
 -- Type-only, so nothing loads here: the field below declares the name and
 -- `tecs.init` fills it in on the first read of it. `watch` reaches content
@@ -68,11 +69,13 @@ local record filesystem
     --- `GlobOptions` controls pattern matching.
     type GlobOptions = storagebackend.GlobOptions
 
-    --- `Writer` accepts a write in pieces.
-    type Writer = storagebackend.Writer
+    --- `Writer` accepts a write in pieces. This compatibility alias names
+    --- [`tecs.io.Writer`](tealdoc:tecs.io.Writer).
+    type Writer = binaryIO.Writer
 
-    --- `Reader` returns a read in pieces.
-    type Reader = storagebackend.Reader
+    --- `Reader` returns a read in pieces. This compatibility alias names
+    --- [`tecs.io.Reader`](tealdoc:tecs.io.Reader).
+    type Reader = binaryIO.Reader
 end
 
 local type Info = filesystem.Info
@@ -439,8 +442,8 @@ end
 --- Opens `path` for reading in pieces. The mirror of `openWrite`.
 ---
 --- `read` is the right call for a file a program wants whole. This is for one
---- it wants to hand over as it goes: an upload body is read through this, so
---- the file being sent is never also in memory.
+--- it wants to consume incrementally without first asking the filesystem for
+--- one string containing the whole file.
 ---
 --- @param path The caller supplies the source file.
 --- @return Returns a caller-owned reader, or nil when it cannot open.

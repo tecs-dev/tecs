@@ -29,6 +29,7 @@ A module may contain one level of subordinate modules, such as
 | [`tecs.filesystem`](/modules/filesystem/) | game paths and file access                                  |
 | [`tecs.gfx`](/modules/gfx/)               | cameras, rendering, text, and graphics components           |
 | [`tecs.input`](/modules/input)            | gameplay input, gamepads, and sensors                       |
+| [`tecs.io`](/modules/io)                  | directional binary readers and writers                      |
 | [`tecs.log`](/modules/log)                | named, leveled platform logging                             |
 | [`tecs.math`](/modules/math)              | allocation-free 2D vector and angle math                    |
 | [`tecs.mcp`](/modules/mcp)                | the debug server, tools, and sandbox                        |

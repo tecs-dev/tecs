@@ -1447,6 +1447,22 @@ pulls complete float32 frames with `Microphone:read`. That also gives capture
 an explicit lifetime and a natural nonblocking `availableFrames` query instead
 of making game code run at device-thread cadence.
 
+## Moving binary data
+
+`tecs.io` owns the two interfaces for moving binary strings between modules:
+`Reader` supplies bytes and `Writer` accepts them. Direction is in the type
+rather than in optional methods on one `Stream`. A file opened for input cannot
+be written, an HTTP response destination need not be readable, and making both
+pretend otherwise would move the error from the type checker to a missing
+method at runtime.
+
+The module owns no resources and constructs nothing. The subsystem that opens a
+resource remains responsible for its lifetime and its policy: filesystem paths
+stay with `tecs.filesystem`, socket state stays with `tecs.net`, and HTTP
+content types stay with `tecs.net.http`. `tecs.filesystem.Reader` and
+`tecs.filesystem.Writer` remain aliases, so moving the contracts does not
+invalidate code that named them where they originated.
+
 ## Touching the filesystem
 
 `tecs.filesystem` answers both halves: where a path is, and what to do once

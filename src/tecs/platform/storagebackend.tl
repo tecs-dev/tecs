@@ -64,8 +64,12 @@ delegates, so a port inherits it rather than repeating it.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
+local type binaryIO = require("tecs.io")
 
 local C <const> = sdl.C
+
+local type Reader = binaryIO.Reader
+local type Writer = binaryIO.Writer
 
 --- What a path is. Symbolic links are followed where the platform has them, so
 --- a link never reports as one: "other" is a socket, a fifo or a device.
@@ -100,31 +104,6 @@ local enum UserFolder
     "screenshots"
     "templates"
     "videos"
-end
-
---- A write that takes its bytes in pieces.
----
---- `write` answers the whole file at once, which is the right shape for state a
---- game saves and the wrong one for bytes that arrive over time: a download
---- that ends in a file has to become a Lua string first, and the string is as
---- large as the download. This is the other spelling, and it is what
---- `tecs.http`'s `into` writes through.
-local record Writer
-    --- Appends `bytes`. False and a reason when they did not land.
-    write: function(self: Writer, bytes: string): boolean, string
-    --- Finishes the file and releases the handle. Answers false and a reason
-    --- when the last bytes did not reach it, which is a failure a caller that
-    --- only checked each `write` would never see. Closing twice succeeds.
-    close: function(self: Writer): boolean, string
-end
-
---- A read that hands over its bytes in pieces. The mirror of `Writer`.
-local record Reader
-    --- Up to `count` bytes, fewer at the end of the file and an empty string
-    --- once there are none left. Nil and a reason on a failure.
-    read: function(self: Reader, count: integer): string, string
-    --- Releases the handle. Closing twice is a no-op.
-    close: function(self: Reader)
 end
 
 --- How a pattern is matched.
@@ -201,9 +180,11 @@ local record storagebackend
     folders: {UserFolder: boolean}
     --- How `Backend.glob` matches.
     GlobOptions: GlobOptions
-    --- A write taking its bytes in pieces.
+    --- A write taking its bytes in pieces. Kept as an alias of
+    --- [`tecs.io.Writer`](tealdoc:tecs.io.Writer) for backend compatibility.
     Writer: Writer
-    --- A read handing its bytes over in pieces.
+    --- A read handing its bytes over in pieces. Kept as an alias of
+    --- [`tecs.io.Reader`](tealdoc:tecs.io.Reader) for backend compatibility.
     Reader: Reader
     --- The seam a port implements.
     Backend: Backend

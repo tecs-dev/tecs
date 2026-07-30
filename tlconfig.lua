@@ -405,6 +405,7 @@ local SIDEBAR = {
                 },
             },
             { text = "tecs.input", path = "modules/input" },
+            { text = "tecs.io", path = "modules/io" },
             { text = "tecs.log", path = "modules/log" },
             { text = "tecs.math", path = "modules/math" },
             { text = "tecs.mcp", path = "modules/mcp" },

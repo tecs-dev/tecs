@@ -234,6 +234,7 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.filesystem`](/modules/filesystem/) - where a game may read and write, and what to do with a path
 - [`tecs.gfx`](/modules/gfx/) - the camera, the components, the renderer, text, and the vocabularies below
 - [`tecs.input`](/modules/input) - gameplay input, gamepads and standalone sensors
+- [`tecs.io`](/modules/io) - directional interfaces for streaming binary strings
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
 - [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
