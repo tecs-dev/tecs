@@ -49,14 +49,35 @@ owns the scheduled lifecycle:
 | Frame | The phases driven by `world:update(dt)` |
 | Shutdown | `PreShutdown`, `Shutdown`, and `PostShutdown` |
 
-Each frame drains platform events, advances asynchronous services, updates the
-world, submits rendering, and updates audio. Event observers run before the
-world update and outside every phase. They see input state after the
-application folds in the event. Store event state in a component or resource
-when a scheduled system must react to it.
+Every iteration runs the same seven steps in the same order, and the order is
+the contract: a system reads what the steps above it settled during this frame
+rather than one frame later.
 
-The application skips world and rendering work while suspended but continues
-to service platform transitions.
+1. The application starts the input frame and drains every platform event SDL
+   delivered since the previous iteration. A quit request ends the iteration
+   here.
+2. `tecs.assets.update` settles the loads the worker finished.
+3. `tecs.system.updateProcesses` and `tecs.system.updateDialogs` settle the
+   children that exited and the dialogs the user answered.
+4. The application pumps every open `tecs.net.http` client, which settles the
+   transfers that completed.
+5. `tecs.filesystem.watch` polls, which reloads content whose file changed.
+6. The debug server answers, `world:update(dt)` runs the phases, and the
+   renderer records and submits one frame.
+7. The audio mixer updates, which reaps the voices it has finished with.
+
+Steps 2 through 5 and step 7 run whatever else is true of the process. A decode
+that finished, a child that exited, a transfer that completed and a file that
+changed have all already happened, and a voice the mixer is done with has to be
+reaped either way, so a suspended run and a crashed one keep settling them.
+Step 6 is the one the guards hold back. A suspended application skips all of
+it, and a crashed one skips the world update and the rendering while still
+answering the debug server, so an agent that was watching gets the traceback.
+
+Event observers run inside step 1, before the world update and outside every
+phase. They see input state after the application folds the event in. Store
+event state in a component or a resource when a scheduled system has to react
+to it.
 
 ## Checkpoints and crashes
 

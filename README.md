@@ -3847,6 +3847,18 @@ and a reason for each. Neither of those two checks reads a license out of a
 binary, because that is not something a binary carries; what they prove is that
 nothing gets linked without somebody having written down what it is.
 
+The spec asks both directions, and the second one is the one that was missing.
+Reading the pins and asking the notices about each catches a dependency arriving
+without a notice, which is the compliance failure; it cannot catch a notice for
+a dependency that left, because nothing ever looks at the notice again. That
+direction costs nothing to get wrong and reads as current for as long as it
+survives, and the exception tables are where it turns harmful: each entry turns
+a check off, so an entry that has stopped being true suppresses the check it was
+written to skip rather than merely describing something absent. So the pins are
+read out of the notices as well as into them, and the Cargo exceptions are held
+to the lockfile: an excused package the runtime crate reaches is a failure, which
+is what four crates in that table had quietly become.
+
 `THIRD_PARTY_NOTICES.md` is the list, and it installs to `share/tecs` with the
 binaries it describes. A package that carried the code and not the notice would
 be the one compliance failure this engine could commit on its own, so

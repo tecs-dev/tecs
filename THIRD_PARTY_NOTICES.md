@@ -27,8 +27,10 @@ about what it does not cover:
   this is the code that makes it not.
 - `spec/licenses_spec.lua` holds those options to their values, fails on an
   option it does not recognise, and fails when a dependency is pinned without
-  being named below. It reads a declaration, so it cannot tell an option that
-  works from one upstream renamed.
+  being named below. It asks the reverse too, so a section here for something
+  the build stopped pinning fails, and so does an exception that excuses a
+  package the runtime crate reaches. It reads a declaration, so it cannot tell
+  an option that works from one upstream renamed.
 - The Cargo package checker holds the libraries an installed tree actually
   links against a list carrying a licence and a reason for each, and fails an
   install missing this file. It reads link tables, so it cannot see a static
