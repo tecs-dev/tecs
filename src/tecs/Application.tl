@@ -935,14 +935,14 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- The loading worker answers whenever it finishes, and nothing else in a
     -- frame is obliged to ask. A subsystem that loads assets of its own drains
     -- the same queue when it looks at its own waiting list, but a game that
-    -- loaded an image and nothing else has no such subsystem, and its handle
-    -- would stay "loading" for the life of the process. Outside the suspension
+    -- loaded an image and nothing else has no such subsystem, and its future
+    -- would stay pending for the life of the process. Outside the suspension
     -- guard, because a decode that finished while backgrounded is finished.
     assets.update()
 
     -- The same argument, for the same reason: a child that has exited has
     -- exited, and a game that shelled out and did nothing else would otherwise
-    -- hold a handle that never leaves "running". Costs a nil check on a
+    -- hold a future that never settles. Costs a nil check on a
     -- process that has never started a child.
     system.updateProcesses()
     system.updateDialogs()

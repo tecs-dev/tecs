@@ -353,6 +353,29 @@ describe("assets", function()
         assert.are.equal(0, assets.update())
     end)
 
+    -- The property that makes a drain a barrier and a join not one. The loader
+    -- asks whether anything is outstanding after a result has run its listeners
+    -- rather than inside the settlement, so a load one of those listeners starts
+    -- is already counted by the time the question is put. A join cannot do this:
+    -- it reads its inputs once, so the second load is not among them and the
+    -- wait answers with a decode in flight. `Audio:destroy` frees a mixer on the
+    -- strength of this, so it is asserted rather than assumed.
+    it("keeps waiting for a load that a settled listener started", function()
+        local first = assets.loadImage(FIXTURE)
+        local second
+        first:onSettle(function()
+            second = assets.loadImage(FIXTURE)
+        end)
+
+        assets.waitAll()
+
+        assert.is_not_nil(second, "the listener never ran")
+        assert.are.equal("ready", second.status, "the wait answered with a decode still in flight")
+        assert.are.equal(0, assets.pending())
+        first.value:release()
+        second.value:release()
+    end)
+
     -- Installing twice used to spawn a second worker over the first, which
     -- left a thread and both its channels with nothing reading them. The load
     -- already queued is what makes that visible: its answer comes back on the

@@ -17,7 +17,7 @@
 -- on it.
 --
 -- Loading is the one half driven for real: both fixtures are read and decoded
--- by SDL_mixer on the asset worker, on a thread, which is what the "loading"
+-- by SDL_mixer on the asset worker, on a thread, which is what the "pending"
 -- status immediately after the call proves. `blip.ogg` is there so the Vorbis
 -- decoder is exercised rather than assumed; it was produced from `blip.wav`
 -- with `oggenc -q 4 -o spec/fixtures/blip.ogg spec/fixtures/blip.wav`.
@@ -345,7 +345,7 @@ describe("audio", function()
             local audio = newAudio({ backend = recorder() })
             local clip = audio:load(FIXTURE)
 
-            assert.are.equal("loading", clip.status, "loading must not block the caller")
+            assert.are.equal("pending", clip.status, "loading must not block the caller")
             assert.are.equal(1, audio:loading())
 
             audio:waitForLoads()
@@ -389,6 +389,70 @@ describe("audio", function()
             assert.are.equal(1, audio:loading())
             audio:waitForLoads()
             audio:destroy()
+        end)
+
+        -- A join over these two would have stopped at the missing file, since
+        -- `Future.all` fails on its first failed input and a path with no file
+        -- fails as fast as the worker can look, and it would have answered with
+        -- the good load still in flight. What the wait is asking is "is anything
+        -- of mine outstanding", which a failure answers as well as a success.
+        it("waits for every load, whatever each of them settled as", function()
+            local audio = newAudio({ backend = recorder() })
+            local missing = audio:load("spec/fixtures/does-not-exist.wav")
+            local present = audio:load(FIXTURE)
+            assert.are.equal(2, audio:loading())
+
+            audio:waitForLoads()
+
+            assert.are.equal(0, audio:loading(), "a failed load left the rest unwaited for")
+            assert.are.equal("failed", missing.status)
+            assert.are.equal("ready", present.status)
+            audio:destroy()
+        end)
+
+        -- The mixer frees everything SDL_mixer made for it, so a clip arriving
+        -- afterwards would hold a pointer into it. Destroying with a decode in
+        -- flight has to settle that decode before it closes.
+        --
+        -- `assets.pending` is what says it did. A destroy that gave the load up
+        -- instead of waiting for it would leave the entry queued until the worker
+        -- answered, and every other observable here would read the same: destroy
+        -- writes `"released"` over each clip and zeroes its own count whether it
+        -- drained or canceled.
+        it("settles a load in flight before it frees the mixer", function()
+            local audio = newAudio({ backend = recorder() })
+            local clip = audio:load(FIXTURE)
+            assert.are.equal(1, audio:loading())
+            assert.is_true(assets.pending() >= 1, "the loader has nothing queued to destroy under")
+
+            audio:destroy()
+
+            assert.are.equal(0, assets.pending(), "the mixer went while a decode was outstanding")
+            assert.are.equal(0, audio:loading())
+            assert.are.equal("released", clip.status)
+            assert.is_nil(clip._sound, "a released clip still points at samples")
+
+            assets.waitAll()
+            assert.are.equal("released", clip.status, "something arrived after the mixer had gone")
+        end)
+
+        -- The drain that waiting means is the loader's, and the loader's scope is
+        -- every load in the process. So an instance with nothing outstanding has
+        -- to decide not to enter it: a mixer that loaded nothing must not spend
+        -- a `waitForLoads` on a texture somebody else asked for.
+        it("drains nobody when it has nothing in flight", function()
+            assets.install()
+            local audio = newAudio({ backend = recorder() })
+            local elsewhere = assets.loadImage("spec/fixtures/split.png")
+
+            audio:waitForLoads()
+            assert.are.equal("pending", elsewhere.status, "an unrelated decode was drained")
+
+            audio:destroy()
+            assert.are.equal("pending", elsewhere.status, "destroy drained it instead")
+
+            assets.waitAll()
+            elsewhere.value:release()
         end)
     end)
 

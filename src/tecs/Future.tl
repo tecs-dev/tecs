@@ -51,6 +51,11 @@ end
 
 Do not call `wait` from a frame. A timeout leaves the future pending.
 
+Waiting until a subsystem has nothing outstanding is that subsystem's own drain
+rather than a join over futures a caller holds. `Future.all` reads its inputs
+once and holds each one, so it answers for a set fixed at the call and not for a
+set that work started during the wait joins.
+
 A source must settle its futures on the same thread that pumps it.
 
 Canceling releases one consumer's interest. Shared operations stop only after
@@ -336,11 +341,20 @@ local record Future<T>
     --- Settles when the last input does, whatever order they settle in. A
     --- failed or canceled input fails the join with that input's error; the
     --- rest are left running, because an input shared with something outside
-    --- the join is not this join's to stop.
+    --- the join is not this join's to stop. A caller that wants every outcome
+    --- rather than the first failure puts a `recover` on each input, which is
+    --- the shape a value that may be missing already uses.
     ---
     --- Fan-in does not nest: each listener decrements a counter and only the
     --- last input settles the join, so a join over five hundred loads is two
     --- deep rather than five hundred.
+    ---
+    --- Joining takes a hold on every input, so an input the join is still
+    --- waiting for is not abandoned while the join lives, and canceling the join
+    --- releases every one of those holds. A join dropped without being canceled
+    --- keeps them, which is why a barrier over work another subsystem started is
+    --- a drain on that subsystem rather than a join here: the hold would outlive
+    --- the wait and leave that subsystem's own `cancel` unable to reach zero.
     ---
     --- An input that settles "ready" carrying nil fails the join rather than
     --- filling its slot, because nil is a legal value and an array cannot hold

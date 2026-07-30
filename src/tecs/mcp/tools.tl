@@ -479,6 +479,9 @@ mcp.register(
                 clips[#clips + 1] = {
                     path = clip.path,
                     id = clip.id,
+                    -- This is where a clip's status words become something an
+                    -- agent matches on, which is what makes them a
+                    -- compatibility surface. Their declaration says so.
                     status = clip.status,
                     duration = clip.duration,
                     resident = clip.resident,

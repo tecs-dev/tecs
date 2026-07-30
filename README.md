@@ -741,6 +741,17 @@ the payload. `"released"` was the one word with nowhere to go, and losing it is 
 gain: a released image is a load that _succeeded_ and then had its memory given
 back, and erasing the success was less truthful than keeping it.
 
+`Audio.Clip` is where that word survived, and it earns its place there for the
+opposite reason. A clip is not a payload. It outlives its load, holds the `Sound`
+behind it, and is the thing a game keeps and plays. So its first three states are
+its load's and are spelled the way `Future` spells them, `"pending"`, `"ready"`
+and `"failed"`, and the fourth is a state only a clip can be in. It is not
+`"canceled"` either: nothing gives up a clip's load but `destroy`, which has
+written `"released"` by the time the cancel reaches it. Those four words go out
+over JSON-RPC in the `audio` debug tool's clip list, so the declaration says so.
+They moved in one commit because an agent reads them and nothing persists them,
+which is the whole of what separates them from a snapshot key.
+
 The shared decode is what decides the shape. A path already in flight does not
 hand its future to the second caller; it keeps one root future to itself and
 hands each caller a link derived from it. That buys three things out of
@@ -777,18 +788,43 @@ got wrong is that those are one type. Unbundled they are a listener, a counter
 and a wait, and each has a smaller home: the listener is `onSettle`, attached
 where the work starts rather than added to a list something else drains; the
 counter is three lines the subsystem keeps, which is what `system.pendingProcesses`
-already does; and the wait is `Future.all(...):wait`. The batch's own selling
+already does; and the wait is a drain on the loader. The batch's own selling
 point was compacting in place so a frame with loads outstanding allocated
 nothing, and the unified path allocates strictly less, because a batch walked
 every outstanding load on every call where a drain walks only what settled.
 
-`assets.waitAll` survives all of that, and it is the one wait here that is not a
-future. It waits on every load in this process, which is not a set any caller
-holds, so no join expresses it. A join could not do the job anyway, since
-`Future.all` fails on its first failed input and a missing file fails as fast as
-the worker can look. The reload and startup paths want a process-wide drain, so
-that is what it is; its body is a `Future:wait` on a future the loader settles
-when nothing is outstanding, rather than a third copy of the wall-clock loop.
+The wait was meant to be `Future.all(...):wait` and it cannot be. That is worth
+recording, because the reason is about joins rather than about assets, and it is
+three defects rather than one. `Future.all` fails the join on its first
+failed input, and a sound file that is missing fails as fast as the worker can
+look, so the join answers with the caller's other loads still in flight. A join
+reads its inputs once and says so, so a load that a settle listener starts while
+the wait is running is not among them, and the caller cannot see that it is about
+to free something under a decode. And joining takes a hold on every input which
+only canceling the join gives back, so a join dropped after a timeout leaves the
+starter's own `cancel` decrementing to one rather than to zero, abandoning
+nothing. A combinator that settled once every input had settled rather than
+failing fast would fix the first of those and neither of the other two, and the
+one thing it fixes is already expressible: `Future.all` over inputs that each
+carry a `recover` does not fail fast, which is the shape an optional sidecar map
+already uses. So there is no `allSettled` here, and a name for a composition that
+exists would have bought nothing on either of the parts that are hard. What a
+subsystem is asking is not about a set it holds. It is "is anything of mine
+outstanding", and that is a count and a drain.
+
+So `assets.waitAll` is the barrier, and it is the one wait here that is not a
+join: its body is a `Future:wait` on a future the loader settles when its own
+count of loads in flight reaches zero, rather than a third copy of the wall-clock
+loop. Two properties make it right rather than merely available. The loader
+settles that future after a result has run its listeners rather than inside the
+settlement, so a load chained onto one is counted before the barrier is asked
+whether anything is left and holds it pending instead of slipping past it. And
+its scope is every load in the process, which can lengthen a wait and cannot
+shorten one, so a subsystem waiting on it cannot proceed with work of its own
+outstanding. That is what makes a wider scope safe to borrow. `Audio:waitForLoads`
+and `Audio:destroy` borrow it and read their own count first, so an instance with
+nothing in flight waits on nobody, and `destroy` gives up whatever the drain ran
+out of time on rather than freeing the mixer under it.
 
 All three entry points record what they touched, and they record it in one
 place: `filesystem.loaded` answers every path this process has read or decoded

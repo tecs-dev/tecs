@@ -726,6 +726,25 @@ describe("tecs.Future", function()
             assert.are.equal(2, #source.canceled)
         end)
 
+        -- The fact that decides where a "wait until all of these have settled"
+        -- lives. Nothing gives a join's hold back but canceling the join, so a
+        -- caller that joined a set only to wait on it and then let the join go
+        -- leaves the starter unable to abandon its own work: one decrement takes
+        -- two holders to one rather than to zero. A barrier over loads another
+        -- subsystem started is therefore a drain on that subsystem rather than a
+        -- join here, which is what `Audio:waitForLoads` does.
+        it("keeps its hold on an input when the join is dropped rather than canceled", function()
+            local source = newSource()
+            local outstanding = Future.pending(source)
+            local joined = Future.all({ outstanding, Future.settled(1) })
+
+            assert.are.equal("pending", joined.status, "the join settled without every input")
+            outstanding:cancel()
+
+            assert.are.equal("pending", outstanding.status, "the join let go without being asked to")
+            assert.are.equal(0, #source.canceled, "the work was abandoned under a join still watching it")
+        end)
+
         it("leaves an input the join never took", function()
             local source = newSource()
             local shared = Future.pending(source)
