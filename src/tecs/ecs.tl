@@ -53,7 +53,6 @@ local runIfHelpers <const> = require("tecs.internal.runif")
 local random <const> = require("tecs.random")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local WorldImpl <const> = require("tecs.internal.world")
-local Context <const> = require("tecs.internal.Context")
 
 -- `World`, `Query`, `System` and `Plugin` are `tecs.World` and its three
 -- neighbours rather than names on this record. A plugin is handed a world, a
@@ -105,10 +104,6 @@ local record ecs
     --- `ArchetypeEntityObserver` receives entity changes
     --- within an archetype.
     type ArchetypeEntityObserver = types.ArchetypeEntityObserver
-    --- `Context` stores values under typed keys.
-    type Context = types.Context
-    --- `Key` identifies one typed context value.
-    type Key<T> = types.Context.Key<T>
     --- `StatePolicy` controls state-stack participation.
     type StatePolicy = types.StatePolicy
     --- `Stats` reports live world counts.
@@ -299,42 +294,6 @@ local record ecs
     --- @return Returns the registered relationship.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
 
-    --- Creates a typed key for `world.resources`.
-    ---
-    --- Always pass a name: named keys are discoverable at runtime through
-    --- `findKey`/`listKeys` and the tooling built on them (the MCP `inspect`
-    --- tool, `tecs info --keys`), and a named key is a stable identity --
-    --- calling `newKey` again with the same name returns the same key, so
-    --- values keyed by it survive hot reload. An unnamed key works but logs a
-    --- warning and stays invisible to name-based lookups.
-    ---
-    --- `forType` carries the phantom type, because Teal has no explicit type
-    --- argument at a call site: pass `nil as T` for `world.resources[key]` to
-    --- read as a `T` rather than as `any`.
-    ---
-    --- @param name The caller supplies a namespaced identity such as
-    ---     `"game.state"`. Omitting it creates an anonymous key and warns.
-    --- @param forType The caller passes `nil as T` to carry the phantom value
-    ---     type; the function does not read it.
-    --- @return Returns the stable key for a name or a fresh anonymous key.
-    newKey: function<T>(name?: string, forType?: T): Key<T>
-
-    --- Returns a named key created by `newKey`.
-    ---
-    --- @param name The caller supplies the name used during key creation.
-    --- @return Returns the existing key, or nil before any module creates it.
-    findKey: function<T>(name: string): Key<T> | nil
-
-    --- Returns all named keys as name-to-id entries.
-    ---
-    --- @return Returns a fresh caller-owned process-wide table.
-    listKeys: function(): {string: integer}
-
-    --- Creates a Context.
-    ---
-    --- @return Returns an empty typed key-value store.
-    newContext: function(): Context
-
     --- Returns a registered component by numeric id.
     ---
     --- @param id The caller supplies a process-wide component id.
@@ -389,7 +348,6 @@ ecs.newRelationship = components.newRelationship as function<R is types.componen
 ecs.newFFIRelationship = components.newFFIRelationship as function<R is types.components.Relationship>(
     config: types.components.FFIRelationshipOptions<R>
 ): R
-ecs.newKey = Context.newKey as function<T>(name?: string, forType?: T): types.Context.Key<T>
 
 function ecs.findComponentById(id: integer): types.components.Component
     return components.componentsById[id]
@@ -438,9 +396,6 @@ ecs.StartSnapshotLoad = builtins.StartSnapshotLoad
 ecs.FinishSnapshotLoad = builtins.FinishSnapshotLoad
 
 ecs.newWorld = WorldImpl.new
-ecs.findKey = Context.findKey
-ecs.listKeys = Context.listKeys
-ecs.newContext = Context.new
 ecs.MAX_ENTITIES = IdAllocator.ABSOLUTE_MAX_SLOT_COUNT
 ecs.DEFAULT_MAX_ENTITIES = IdAllocator.DEFAULT_MAX_SLOT_COUNT
 

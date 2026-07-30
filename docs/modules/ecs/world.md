@@ -216,8 +216,8 @@ A plugin configures one world. Games, engine features, and reusable mechanics
 all use the same function shape:
 
 ```teal
-local RATE <const>: tecs.ecs.Key<number> =
-    tecs.ecs.newKey("game.spinRate")
+local RATE <const>: tecs.data.Key<number> =
+    tecs.data.newKey("game.spinRate")
 
 local function spinPlugin(world: tecs.World)
     world.resources[RATE] = 1.5
@@ -229,7 +229,7 @@ world:addPlugin(spinPlugin)
 
 Callers own resource values and may replace them. Tecs owns resource-key
 identity. Always name keys so hot reload, tooling, `findKey`, and `listKeys`
-can find the same key. Snapshots omit `world.resources`; register a
+on `tecs.data` can find the same key. Snapshots omit `world.resources`; register a
 [snapshot handler](/modules/ecs/save-games#snapshot-handlers) for durable resource
 state.
 

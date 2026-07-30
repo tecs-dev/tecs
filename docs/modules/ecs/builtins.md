@@ -11,7 +11,7 @@ which sits at the root because every subsystem moves it.
 
 The durable entity-key component uses the public name `EntityKey` and the
 registered name `"Key"`. Snapshots persist the registered name for
-compatibility. `tecs.ecs.Key` instead names the typed resource-key type.
+compatibility. `tecs.data.Key` instead names the typed resource-key type.
 
 ## Name {#name}
 

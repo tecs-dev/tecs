@@ -158,6 +158,12 @@ describe("the public surface", function()
         assert.is_nil(tecs.system)
     end)
 
+    it("does not retain typed stores on tecs.ecs", function()
+        for _, name in ipairs({ "Context", "Key", "newContext", "newKey", "findKey", "listKeys" }) do
+            assert.is_nil(tecs.ecs[name], "tecs.ecs." .. name .. " still exists")
+        end
+    end)
+
     it("was read out of init.tl", function()
         -- Everything below is generated from this, so a parse that found
         -- nothing would pass every test by having none to run.

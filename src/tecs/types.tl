@@ -8,22 +8,10 @@ The declarations behind the public ECS types.
 -- cycle. The public API publishes them under `tecs` and `tecs.ecs`.
 
 local StringBuffer <const> = require("string.buffer")
+local type Store = require("tecs.data.Store")
 
 --- Public type definitions for Tecs.
 local record types
-    --- Context is a type-safe bag of data.
-    record Context
-        --- Type-safe Key interface.
-        interface Key<T>
-        end
-
-        --- Get a context value using a type-safe key.
-        metamethod __index: function<T>(Context, key: Key<T>): T
-
-        --- Set a context value using a type-safe key.
-        metamethod __newindex: function<T>(Context, key: Key<T>, value: T)
-    end
-
     --- A plugin configures a world with systems, resources, observers, and
     --- initial entities.
     type Plugin = function(world: World)
@@ -1006,7 +994,7 @@ local record types
         end
 
         --- Caller-writable. Stores world resources under typed keys.
-        resources: Context
+        resources: Store
 
         --- Open a defer scope. Mutations within the scope are staged and
         --- drained on the matching `commit`. Pairs with `commit`.

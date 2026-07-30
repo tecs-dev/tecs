@@ -794,7 +794,7 @@ describe(
                     "puts resources",
                     function()
                         local w2 = tecs.ecs.newWorld()
-                        local k: tecs.ecs.Key<string> = tecs.ecs.newKey("spec.world.res")
+                        local k: tecs.data.Key<string> = tecs.data.newKey("spec.world.res")
                         local v = "test"
                         w2.resources[k] = v
 
