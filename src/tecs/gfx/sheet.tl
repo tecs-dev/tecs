@@ -39,6 +39,7 @@ the sheet shares its registered frame, tag, slice, and timing data.
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
 local components <const> = require("tecs.components")
+local log <const> = require("tecs.log")
 
 local type Component = ecs.Component
 local type World = types.World
@@ -46,6 +47,12 @@ local type Sprite = components.Sprite
 
 local floor <const> = math.floor
 local sort <const> = table.sort
+local concat <const> = table.concat
+
+-- "tecs.gfx" is the category the graphics modules already log under, and a
+-- logger name is configuration a developer filters on rather than an
+-- identifier, so this shares theirs instead of opening one for sheets.
+local logger <const> = log.get("tecs.gfx")
 
 --- Milliseconds a frame is held when nothing says otherwise, which is what
 --- Aseprite writes for a frame nobody retimed.
@@ -315,7 +322,17 @@ local record Sheet
     ---
     --- Zero reads as the whole sheet rather than as nothing, so an animation
     --- that names no tag plays every frame in order.
-    --- @param name A tag name, or nil for the whole sheet.
+    ---
+    --- A name the sheet does not carry is reported at error level under the
+    --- `tecs.gfx` logger and then treated as the whole sheet. Zero is a
+    --- plausible wrong answer rather than a visible failure, so a misspelled
+    --- tag would otherwise animate every frame with nothing said. The report
+    --- names the sheet, the name asked for, and the tags the sheet does carry,
+    --- once per sheet and name however often the name is asked. Ask `hasTag`
+    --- instead when a name's absence is expected and ordinary.
+    --- @param name A tag name, or nil or the empty string for the whole sheet.
+    ---     The empty string is what a snapshot stores for tag zero, so neither
+    ---     it nor nil is reported.
     --- @return Returns the index an
     ---     [`Animation`](tealdoc:tecs.gfx.animation.Animation) carries. The
     ---     index belongs to this sheet alone: ids follow tag names in sorted
@@ -746,11 +763,54 @@ function Sheet:tag(name: string): integer, integer, Direction
     return self._from[id], self._to[id], self._direction[id]
 end
 
+--- Unknown tag names already reported, keyed by the sheet's id and then the
+--- name.
+---
+--- A sheet's tag names are fixed once it is registered, because `replace`
+--- refuses a build that would renumber them, so an entry here never goes stale
+--- and a name reported once stays reported.
+local reportedTags: {integer: {string: boolean}} = {}
+
+--- Reports a tag name the sheet does not carry, once per sheet and name.
+---
+--- Zero reads as the whole sheet rather than as nothing, so a caller that
+--- misspells a tag animates every frame instead of the span it named and no
+--- other diagnostic fires. The report lists the tags the sheet does carry,
+--- because a misspelling's answer is almost always one of them.
+---
+--- The memo is what makes reporting from the lookup itself safe: a caller that
+--- asks every frame reports on its first frame and stays quiet afterwards.
+local function reportUnknownTag(self: Sheet, name: string)
+    local seen = reportedTags[self.id]
+    if seen == nil then
+        seen = {}
+        reportedTags[self.id] = seen
+    elseif seen[name] then
+        return
+    end
+    seen[name] = true
+
+    logger:error(
+        "sheet '%s' has no tag '%s', so the whole sheet animates in place of "
+            .. "the frames that name asked for; it carries %s",
+        self.name,
+        name,
+        #self._names > 0 and concat(self._names, ", ") or "no tags"
+    )
+end
+
 function Sheet:tagId(name: string): integer
-    if name == nil then
+    -- The empty string is what a snapshot writes for tag zero, so it names the
+    -- whole sheet exactly as nil does and neither is a mistake to report.
+    if name == nil or name == "" then
         return 0
     end
-    return self._ids[name] or 0
+    local id <const> = self._ids[name]
+    if id ~= nil then
+        return id
+    end
+    reportUnknownTag(self, name)
+    return 0
 end
 
 function Sheet:tagName(id: integer): string

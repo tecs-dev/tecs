@@ -2283,6 +2283,23 @@ never a branch on direction, and pingpong is a longer list rather than a special
 case. Pingpong repeats neither end, so a three-frame tag is 1, 2, 3, 2 and its
 cycle is four frames long.
 
+Tag zero being the whole sheet is also what makes a misspelled tag name
+dangerous. `Sheet:tagId` has no index to answer with, and zero is a plausible
+animation rather than a visible failure, so a typo plays every frame of the
+sheet and nothing else goes wrong. It is reported at error level, with the tags
+the sheet does carry, and the fallback stays, because the paths that arrive with
+a name do not all want the same answer. `animation.of` and `animation.play`
+raise: an author naming a tag there has one in mind, and the sheet is already in
+hand to check it against. A particle effect's `render.tag` and a restored
+snapshot's tag name cannot raise, since the first would fail an effect
+definition over a diagnostic and the second would make a re-exported sheet
+unloadable. The report lives in the lookup rather than at each of those call
+sites, so a path added later cannot miss it, and it is memoized per sheet and
+name, which is what makes putting it there safe: a caller resolving a tag every
+frame reports on its first frame and stays quiet afterwards. Nil and the empty
+string are the whole sheet on purpose, and the empty string is what a snapshot
+stores for tag zero, so neither is reported.
+
 Slices are where pivots come from, rather than an origin API invented beside
 them. A slice holds a key until the next one, so `Sheet:pivotOf` answers the
 key in force on a frame, adds the slice's own origin, and divides by the frame:

@@ -239,7 +239,10 @@ local record animation
     --- [`Animation`](tealdoc:tecs.gfx.animation.Animation) on its own draws
     --- nothing.
     --- @param source The sheet to play. Nil raises.
-    --- @param tag A tag the sheet names, or nil for the whole sheet.
+    --- @param tag A tag the sheet names, or nil for the whole sheet. A name the
+    ---     sheet does not carry raises here rather than reporting and playing
+    ---     the whole sheet, because an author naming a tag at this call has one
+    ---     in mind and the sheet is already in hand to check against.
     --- @param options Defaults are the sheet's own timing, looping, and
     ---     playing.
     --- @return A component value, not an entity: pass it to `world:spawn` or
@@ -255,7 +258,8 @@ local record animation
     --- @param entity A live entity with a
     ---     [`Sprite`](tealdoc:tecs.components.Sprite).
     --- @param source The sheet to play. Nil raises.
-    --- @param tag A tag the sheet names, or nil for the whole sheet.
+    --- @param tag A tag the sheet names, or nil for the whole sheet. A name the
+    ---     sheet does not carry raises, as it does in `of`.
     --- @param options Defaults are the sheet's own timing, looping, and
     ---     playing.
     play: function(world: World, entity: integer, source: Sheet, tag?: string, options?: PlayOptions)
@@ -429,7 +433,9 @@ ecs.newFFIComponent(
         defaults = {0, 0, DEFAULT_SPEED, 0, 0, true, true},
         -- A sheet id and a tag id are this process's answers, decided by the
         -- order sheets were built in. What crosses a save is the pair of names,
-        -- resolved again on the way back in. The frame is deliberately dropped:
+        -- resolved again on the way back in. A tag the sheet has since lost
+        -- resolves to zero and the sheet reports it, once for the whole restore
+        -- however many entities carry the name. The frame is deliberately dropped:
         -- zero makes the first step rewrite the Sprite's region, so a restored
         -- entity does not depend on the region its Sprite was saved holding.
         serialize = function(instance: Animation): {string: any}

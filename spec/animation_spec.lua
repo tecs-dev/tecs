@@ -17,6 +17,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
+local log = require("tecs.log")
 local sheet = require("tecs.gfx.sheet")
 local animation = require("tecs.gfx.animation")
 local frametable = require("tecs.gfx.frametable")
@@ -41,6 +42,31 @@ local nextName = 0
 local function uniqueName(prefix)
     nextName = nextName + 1
     return ("%s%d"):format(prefix, nextName)
+end
+
+-- Log capture. The sink writes the structured stream as JSON Lines, which is
+-- the only place a spec can read a diagnostic back from, so a case opens a file
+-- around the one call it is watching and reads the lines out.
+local LOG_PATH = "/tmp/tecs-animation-spec.jsonl"
+local function logged(body)
+    log.get("tecs.gfx"):setLevel(log.ERROR)
+    assert.is_true(log.openFile(LOG_PATH))
+    local ok, err = pcall(body)
+    log.closeFile()
+
+    local lines = {}
+    local file = io.open(LOG_PATH, "r")
+    if file ~= nil then
+        for line in file:lines() do
+            if line:find('"logger":"tecs.gfx"', 1, true) then
+                lines[#lines + 1] = line
+            end
+        end
+        file:close()
+    end
+    os.remove(LOG_PATH)
+    assert(ok, err)
+    return lines
 end
 
 -- Four 16x16 frames in a 2x2 grid, with "walk" naming the second row.
@@ -304,6 +330,66 @@ describe("tecs.gfx.sheet", function()
             assert.equal("whole", s:tagName(s:tagId("whole")))
             assert.equal(0, s:tagId("crawl"))
             assert.equal("", s:tagName(0))
+        end)
+
+        it("reports a name it does not carry and still answers the whole sheet", function()
+            -- Zero is a plausible wrong answer rather than a visible failure: a
+            -- misspelled tag animates every frame of the sheet instead of the
+            -- span it named. The fallback stays, so nothing that works today
+            -- stops working, and the report is what makes the typo findable.
+            local s = walkSheet()
+
+            local id
+            local lines = logged(function()
+                id = s:tagId("crawl")
+            end)
+            assert.equal(0, id, "the fallback to the whole sheet is unchanged")
+
+            assert.are.equal(1, #lines, table.concat(lines, "\n"))
+            local line = lines[1]
+            assert.is_truthy(line:find('"level":"ERROR"', 1, true), line)
+            assert.is_truthy(line:find("crawl", 1, true), "the name asked for")
+            assert.is_truthy(line:find(s.name, 1, true), "the sheet asked")
+            -- The tags it does carry, because that list is where the answer to a
+            -- misspelling nearly always is.
+            assert.is_truthy(line:find("walk, whole", 1, true), line)
+        end)
+
+        it("reports one name once however often it is asked", function()
+            -- A caller resolving a tag every frame must not fill the log with
+            -- one fact, or whoever hits it silences the category and loses every
+            -- other diagnostic with it.
+            local s = walkSheet()
+
+            local lines = logged(function()
+                for _ = 1, 50 do
+                    s:tagId("crawl")
+                end
+                -- A second unknown name is a second fact and reports on its own.
+                s:tagId("slither")
+            end)
+
+            assert.are.equal(2, #lines, table.concat(lines, "\n"))
+            assert.is_truthy(lines[1]:find("crawl", 1, true), lines[1])
+            assert.is_truthy(lines[2]:find("slither", 1, true), lines[2])
+        end)
+
+        it("says nothing for a name the sheet carries", function()
+            -- This matters more than the report itself. A diagnostic that fires
+            -- on correct code gets filtered out, and then the report above is
+            -- worth nothing. Nil and the empty string both name the whole sheet
+            -- deliberately, and the empty string is what a snapshot stores for
+            -- tag zero, so neither is a mistake.
+            local s = walkSheet()
+
+            local lines = logged(function()
+                assert.is_true(s:tagId("walk") > 0)
+                assert.is_true(s:tagId("whole") > 0)
+                assert.equal(0, s:tagId(nil))
+                assert.equal(0, s:tagId(""))
+            end)
+
+            assert.are.equal(0, #lines, table.concat(lines, "\n"))
         end)
 
         it("rejects a span outside the sheet", function()

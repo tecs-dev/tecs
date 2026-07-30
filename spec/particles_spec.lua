@@ -24,6 +24,7 @@ local Renderer = require("tecs.Renderer")
 local assets = require("tecs.assets")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
+local log = require("tecs.log")
 local particles = require("tecs.gfx.particles")
 local sheet = require("tecs.gfx.sheet")
 local materials = require("tecs.gpu.materials")
@@ -40,6 +41,10 @@ local ParticleEmitter = particles.ParticleEmitter
 -- Slots the pool holds in these tests. Small, so a relayout is cheap and the
 -- reservation is easy to see in the instance count.
 local POOL = 512
+
+-- The structured log stream is the only place a spec can read a diagnostic back
+-- from, so the case watching one opens a file around the call it is watching.
+local LOG_PATH = "/tmp/tecs-particles-spec.jsonl"
 
 -- An effect's name is unique across the process, so a spec registering a fresh
 -- effect per test mints one rather than repeating a literal. What a name means
@@ -1027,6 +1032,46 @@ describe("tecs.gfx.particles", function()
 
         assert.are.equal(8, effect.capacity)
         assert.are.equal(2.0, effect.maxLifetime)
+    end)
+
+    it("reports a sheet tag it does not carry and still defines the effect", function()
+        -- Where the silent fallthrough was found. `render.tag` reaches
+        -- `Sheet:tagId`, whose zero reads as the whole sheet, so a typo animated
+        -- every frame of the sheet with nothing said. Reporting rather than
+        -- raising keeps an effect whose sheet was re-exported without the tag
+        -- drawing, which is why the definition still succeeds.
+        local builder = sheet.build("particles.tagreport", 2, 1)
+        builder:frame(0, 0, 1, 1, 100)
+        builder:frame(1, 0, 1, 1, 100)
+        builder:tag("spark", 1, 2)
+        local strip = builder:finish()
+
+        log.get("tecs.gfx"):setLevel(log.ERROR)
+        assert.is_true(log.openFile(LOG_PATH))
+        local effect = particles.effect({
+            name = effectName(),
+            capacity = 8,
+            initial = { lifetime = 1.0 },
+            render = { layer = 1, sheet = strip, tag = "sprak" },
+        })
+        log.closeFile()
+
+        assert.is_truthy(effect, "the effect is still defined")
+
+        local found = false
+        local file = io.open(LOG_PATH, "r")
+        if file ~= nil then
+            for line in file:lines() do
+                if line:find('"logger":"tecs.gfx"', 1, true) and line:find("sprak", 1, true) then
+                    assert.is_truthy(line:find('"level":"ERROR"', 1, true), line)
+                    assert.is_truthy(line:find("spark", 1, true), "the tags the sheet carries")
+                    found = true
+                end
+            end
+            file:close()
+        end
+        os.remove(LOG_PATH)
+        assert.is_true(found, "the unknown tag was never reported")
     end)
 
     it("refuses a blend mode it does not know", function()
