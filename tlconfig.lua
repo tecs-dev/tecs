@@ -770,6 +770,10 @@ for _, page in ipairs(pages) do
         end
     end
 end
+-- Internal modules do not get pages, but their declarations still belong in
+-- Tealdoc's registry so public aliases can inline targets that have no public
+-- documentation URL.
+table.insert(sources, "src/tecs/sequence/internal/tweeneval.tl")
 table.sort(sources)
 
 return {
