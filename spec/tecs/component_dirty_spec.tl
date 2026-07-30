@@ -31,6 +31,18 @@ local Vel = tecs.ecs.newComponent(
 )
 local Tag = tecs.ecs.newTagComponent({name = "ComponentDirtySpecTag"})
 
+-- A consumer opts a component into `valueCount` by setting this on it, which is
+-- what extraction does for the columns a row is drawn from.
+local Counted = tecs.ecs.newComponent(
+    {
+        name = "ComponentDirtySpecCounted",
+        container = {},
+        fields = {"n"},
+    }
+)
+local countedInternal <const> = Counted as internal.ComponentInternal
+countedInternal.valueCounted = true
+
 local function clearDirty(arch: tecs.ecs.Archetype)
     (arch as internal.ArchetypeInternal):clearDirtyComponents()
 end
@@ -540,6 +552,92 @@ describe(
                         local arch = findArchetype(world, {Pos})
                         assert.is_true(arch:isComponentDirty(Pos), "a placement after a clear is still a placement")
                         assert.are.equal(1, inner(arch):structuralAdded())
+                    end
+                )
+            end
+        )
+
+        describe(
+            "counted value writes",
+            function()
+                -- The value analogue of the structural count above, and it
+                -- exists for the same reader: one whose work runs before the
+                -- frame's later phases and whose copy of the columns therefore
+                -- outlives the frame the dirty bits belong to.
+                local function inner(arch: tecs.ecs.Archetype): internal.ArchetypeInternal
+                    return arch as internal.ArchetypeInternal
+                end
+
+                it(
+                    "counts a write to a counted column and not to an uncounted one",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        local e = world:spawn(Counted(1), Pos(1, 2))
+                        local arch = inner(findArchetype(world, {Counted, Pos}))
+
+                        local before = arch:valueCount()
+                        world:set(e, Pos(3, 4))
+                        assert.are.equal(before, arch:valueCount(), "nobody asked for Pos to be counted")
+
+                        world:set(e, Counted(2))
+                        assert.is_true(arch:valueCount() > before, "and somebody asked for this one")
+                    end
+                )
+
+                it(
+                    "counts every write rather than the first of a frame",
+                    function()
+                        -- The dirty bit is set by the first write and stays set
+                        -- until the frame ends, so a count deduplicated against
+                        -- it would not move for the second write. A reader that
+                        -- ran between the two is owed exactly that difference.
+                        local world = tecs.ecs.newWorld()
+                        local e = world:spawn(Counted(1))
+                        local arch = inner(findArchetype(world, {Counted}))
+
+                        local before = arch:valueCount()
+                        world:getMut(e, Counted).n = 2
+                        local between = arch:valueCount()
+                        world:getMut(e, Counted).n = 3
+
+                        assert.is_true(between > before, "the first write counts")
+                        assert.is_true(arch:valueCount() > between, "and so does the second")
+                    end
+                )
+
+                it(
+                    "counts a placement as structure rather than as a value",
+                    function()
+                        local world = tecs.ecs.newWorld()
+                        world:spawn(Counted(1))
+                        local arch = inner(findArchetype(world, {Counted}))
+                        world:update(0)
+
+                        local before = arch:valueCount()
+                        world:spawn(Counted(2))
+                        assert.are.equal(before, arch:valueCount(), "a placement names rows, not columns")
+                        assert.is_true(arch:structuralCount() > 0, "which is what the structural count answers for")
+                    end
+                )
+
+                it(
+                    "outlives the frame the write was made in",
+                    function()
+                        -- What the dirty bits cannot do. A reader samples the
+                        -- count, a write lands after it, and the frame's clear
+                        -- takes the bit away: the count still differs, so the
+                        -- reader is told on its next pass instead of never.
+                        local world = tecs.ecs.newWorld()
+                        local e = world:spawn(Counted(1))
+                        local arch = inner(findArchetype(world, {Counted}))
+                        world:update(0)
+
+                        local sampled = arch:valueCount()
+                        world:getMut(e, Counted).n = 2
+                        world:update(0)
+
+                        assert.is_false(arch:isComponentDirty(Counted), "the frame took the bit")
+                        assert.is_true(arch:valueCount() > sampled, "and left the count")
                     end
                 )
             end

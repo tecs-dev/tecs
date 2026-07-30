@@ -984,6 +984,187 @@ describe("structural change after extraction", function()
     end
 end)
 
+-- A value write in a phase after RenderFirst, which is the phase extraction
+-- runs in.
+--
+-- The frame that made the write has already extracted, so what it changed is
+-- owed to the next frame's sync; the component bit it set is cleared at the end
+-- of the same update, before that sync ever looks at it. A value write moves no
+-- row and changes no length, so the bit was the only evidence it ever happened:
+-- the row keeps drawing the value the entity held before it, and keeps drawing
+-- it forever rather than one frame late.
+describe("value write after extraction", function()
+    local CAPACITY = 64
+    local POPULATION = 8
+
+    local function newExtraction(partial)
+        local world = tecs.ecs.newWorld()
+        local extractor = Extractor.create({
+            capacity = CAPACITY,
+            partialRewrites = partial,
+            whiteU0 = 0.0,
+            whiteV0 = 0.0,
+            whiteU1 = 1 / 512,
+            whiteV1 = 1 / 512,
+        })
+        local packet = FramePacket.create()
+        local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
+        local bounds = loader.newArray("float[?]", CAPACITY * 4)
+        extractor:setStaging(0, instances, bounds)
+        extractor:install(world, packet)
+        return world, packet, bounds
+    end
+
+    -- A bound's center is the quad's middle, and an unpivoted quad's middle is
+    -- its position, so x names which entity a row is holding and what it holds.
+    local function centerX(bounds, row)
+        return bounds[(row - 1) * 4]
+    end
+
+    local function spawnAt(world, x)
+        return world:spawn(Transform(x, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+    end
+
+    local function population(world)
+        local ids = {}
+        for row = 1, POPULATION do
+            ids[row] = spawnAt(world, row * 10)
+        end
+        return ids
+    end
+
+    -- Moves one row of the run, once, from a system in `phase`.
+    local function move(partial, phase)
+        local world, packet, bounds = newExtraction(partial)
+        local ids = population(world)
+
+        local wrote = false
+        world:addSystem({
+            name = "spec.WriteAfterExtraction",
+            phase = phase,
+            run = function()
+                if wrote then
+                    return
+                end
+                wrote = true
+                world:getMut(ids[3], Transform).x = 555
+            end,
+        })
+
+        world:update(1 / 60)
+        assert.are.equal(POPULATION, packet.count, "the first frame lays the population out")
+        assert.are.equal(30, centerX(bounds, 3), "and the write lands after it extracted")
+
+        world:update(1 / 60)
+        assert.is_true(wrote, "the writing system ran")
+        assert.are.equal(555, centerX(bounds, 3), "the next sync writes what the frame's bits were cleared of")
+        assert.are.equal(POPULATION, packet.rewritten, "as the run, because a value write names no rows")
+
+        -- The count is monotonic rather than carried forward, so the write stops
+        -- being owed once it has been paid: a run nothing has written since is
+        -- left alone, which is the property a carry-forward bit would lose.
+        world:update(1 / 60)
+        assert.are.equal(0, packet.rewritten, "and the frame after it writes nothing")
+    end
+
+    for _, phase in ipairs({ "PostRender", "RenderLast", "Last" }) do
+        it("rewrites a value write made in " .. phase, function()
+            move(false, tecs.ecs.phases[phase])
+        end)
+
+        it("rewrites a value write made in " .. phase .. ", partial", function()
+            -- A value write says nothing about which rows it touched, so the
+            -- narrower path has nothing to offer it either way: what this pins
+            -- is that the write is noticed at all, and that noticing it does not
+            -- let the residue answer for it.
+            move(true, tecs.ecs.phases[phase])
+        end)
+    end
+
+    -- Two writes to one column in one frame, one on each side of extraction.
+    --
+    -- The first sets the frame's dirty bit and the second finds it already set,
+    -- so a count bumped only where that bit goes from clear to set does not move
+    -- for the second write at all. The sync has already read the first by then,
+    -- and the second is the one it has not seen: deduplicating the count against
+    -- a bit whose window is the frame loses it outright, which is the defect
+    -- rather than a narrower version of it.
+    local function moveTwice(partial)
+        local world, packet, bounds = newExtraction(partial)
+        local ids = population(world)
+
+        local wrote = false
+        world:addSystem({
+            name = "spec.WriteBeforeExtraction",
+            phase = tecs.ecs.phases.PostUpdate,
+            run = function()
+                if wrote then
+                    return
+                end
+                world:getMut(ids[3], Transform).x = 111
+            end,
+        })
+        world:addSystem({
+            name = "spec.WriteAfterExtraction",
+            phase = tecs.ecs.phases.Last,
+            run = function()
+                if wrote then
+                    return
+                end
+                wrote = true
+                world:getMut(ids[3], Transform).x = 555
+            end,
+        })
+
+        world:update(1 / 60)
+        assert.are.equal(111, centerX(bounds, 3), "the sync took the write from before it ran")
+
+        world:update(1 / 60)
+        assert.is_true(wrote, "both systems ran")
+        assert.are.equal(555, centerX(bounds, 3), "and the next one takes the write from after")
+    end
+
+    it("takes the second of two writes to one column in one frame", function()
+        moveTwice(false)
+    end)
+
+    it("takes the second of two writes to one column in one frame, partial", function()
+        moveTwice(true)
+    end)
+
+    it("counts a blended row an alpha write after extraction created, partial", function()
+        -- The residue path's blend count is exact only while every column a row
+        -- is drawn from is clean, because a row it did not write is then
+        -- carrying the tint it carried before and cannot have changed pass. An
+        -- alpha write is the one that changes which pass a row draws in, so what
+        -- holds that reasoning up is that a write from any phase, including one
+        -- after the sync, sends the run down the whole-run path instead.
+        local world, packet, bounds = newExtraction(true)
+        local ids = population(world)
+
+        local wrote = false
+        world:addSystem({
+            name = "spec.FadeAfterExtraction",
+            phase = tecs.ecs.phases.Last,
+            run = function()
+                if wrote then
+                    return
+                end
+                wrote = true
+                world:getMut(ids[3], Tint).a = 0.5
+            end,
+        })
+
+        world:update(1 / 60)
+        assert.are.equal(0, packet.blendCount, "an opaque scene routes nothing forward")
+
+        world:update(1 / 60)
+        assert.are.equal(POPULATION, packet.rewritten, "the alpha write rewrites the run rather than a residue")
+        assert.are.equal(1, packet.blendCount, "so the faded row is counted")
+        assert.are.equal(30, centerX(bounds, 3), "and it is still the row it was")
+    end)
+end)
+
 describe("render backend", function()
     local window, device, screen
 

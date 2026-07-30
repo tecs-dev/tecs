@@ -2133,8 +2133,9 @@ blended instance in the scene going missing. It is the one direction that cannot
 be tolerated, so the count is either exact or wrong the other way.
 
 It is exact, and free in the case that matters. The partial path only runs while
-every value column is clean, so a row it did not write carries the tint it
-carried before and cannot have changed lane. A run whose last write found nothing
+no value write has landed on those columns since the run was last written, in any
+phase of any frame, so a row it did not write carries the tint it carried before
+and cannot have changed lane. A run whose last write found nothing
 blended therefore has the residue's own count as its whole answer, which is what
 an opaque scene is and what this option exists for. A run that did hold a blended
 row is recounted, one float per row, because a swap-pop may have written over
@@ -2244,6 +2245,31 @@ Syncing runs in `RenderFirst` inside the world's update; rendering happens
 afterwards against a frame. The two stay separable because the sync needs no
 command buffer and the render needs no world, which also means the swapchain
 is held for as little of the frame as possible.
+
+That phase is also what the dirty bits cannot be read against. They clear at the
+end of the update, and the sync runs inside it, so a spawn, a despawn or a value
+write from any later phase sets a bit that is wiped before the next sync looks:
+not one frame late, but never. So the archetype keeps two monotonic counts
+instead, one for structural changes and one for value writes to the columns a row
+is drawn from, and each run records the count it was last written at. A count
+survives the clear, so the change is still a difference a frame later.
+
+Two cheaper shapes lose. Carrying the bits forward into the next frame answers
+the same question and breaks the property the counts keep: a change has to stop
+being dirty the frame after it happened, or a scene that moved once rewrites for
+ever. And bumping the value count where a column's bit goes from clean to dirty,
+which would cost one add per column per frame rather than one per write, is wrong
+for the reason it is cheap: the bit's window is the frame. Two writes to one
+column in one frame, one on each side of the sync, find the bit already set the
+second time, and the second write is exactly the one the sync has not seen. A
+spec pins it, and it fails under that version.
+
+The read is cheaper than the bits it replaces either way. Asking eight columns
+whether their value bits are set is eight lookups into the archetype's
+column index and eight bitset reads per archetype per frame; asking the count is
+an integer compare. Which columns count is the component's own opt-in, so
+extraction pays for the eight it draws from and a game's own components cost it
+nothing.
 
 ## Sprite sheets and playback
 

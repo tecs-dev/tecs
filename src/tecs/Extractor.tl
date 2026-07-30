@@ -42,9 +42,10 @@ local timing <const> = require("tecs.timing")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 
 local type TextureArray = require("tecs.gpu.TextureArray")
--- Type-only, and the one thing extraction reaches inside the ECS for: which
--- rows a structural change wrote is not part of the supported archetype
--- surface, because nothing outside this file has asked the question.
+-- Type-only, and what extraction reaches inside the ECS for: which rows a
+-- structural change wrote, and which columns count their value writes, are not
+-- part of the supported surface, because nothing outside this file has asked
+-- either question.
 local type internal = require("tecs.internal.types")
 
 --- Extraction: the world-facing half of the frame.
@@ -205,6 +206,11 @@ local record Run
     --- bytes up to date, so the rows every structural change since has written
     --- are what the next sync owes.
     structAt: integer
+    --- The archetype's counted value-write count when this sync last brought
+    --- the run's bytes up to date. The same answer next time means no column a
+    --- row is written from has changed, whichever phase a write would have come
+    --- from, which is what the frame's dirty bits cannot say.
+    valueAt: integer
 end
 
 local record ExtractorOptions
@@ -833,6 +839,7 @@ local function newRun(): Run
         moved = false,
         grown = false,
         structAt = 0,
+        valueAt = 0,
     }
 end
 
@@ -1112,25 +1119,34 @@ local function layoutReserved(self: Extractor, packet: FramePacket): integer, in
     return self._high, dropped, false
 end
 
---- Whether a value write dirtied any column a row's instance is written from.
+--- Every column a row's instance is written from, told to count its value
+--- writes so an archetype answers for all eight of them at once.
 ---
---- Structural change is deliberately not asked about: it dirties every one of
---- these columns and says nothing here, because what it wrote is a set of rows
---- rather than a set of columns and `structuralAdded` and `structuralTouched`
---- are where that is answered.
+--- What the sync asks is whether any of these changed since it last wrote the
+--- run, and the frame's dirty bits cannot answer it: they clear at the end of
+--- every update and the sync runs in RenderFirst, so a write from a later phase
+--- is wiped before the next sync looks. One monotonic count per archetype
+--- outlives the clear, and asking it is an integer compare rather than eight
+--- column lookups and eight bitset reads.
 ---
---- The two casting components are last because the chain short circuits: on an
---- archetype something else already moved they are never asked, and a run being
---- rewritten anyway carries the new height with it.
-local function valueColumnsDirty(archetype: internal.ArchetypeInternal): boolean
-    return archetype:isComponentValueDirty(Transform)
-        or archetype:isComponentValueDirty(components.Tint)
-        or archetype:isComponentValueDirty(components.Sprite)
-        or archetype:isComponentValueDirty(components.Material)
-        or archetype:isComponentValueDirty(components.Clip)
-        or archetype:isComponentValueDirty(Pivot)
-        or archetype:isComponentValueDirty(components.Occluder)
-        or archetype:isComponentValueDirty(components.DropShadow)
+--- Structural change is deliberately not counted here: it dirties every one of
+--- these columns and says nothing, because what it wrote is a set of rows
+--- rather than a set of columns and `structuralCount`, `structuralAdded` and
+--- `structuralTouched` are where that is answered.
+local COUNTED_COLUMNS <const>: {types.components.Component} = {
+    Transform,
+    components.Tint,
+    components.Sprite,
+    components.Material,
+    components.Clip,
+    Pivot,
+    components.Occluder,
+    components.DropShadow,
+}
+
+for index = 1, #COUNTED_COLUMNS do
+    local counted <const> = COUNTED_COLUMNS[index] as internal.ComponentInternal
+    counted.valueCounted = true
 end
 
 --- Writes the rows a structural change wrote, and marks them.
@@ -1293,13 +1309,19 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         if pending > length then
             pending = length
         end
-        -- Every component a row's instance is written from, so a change to any
-        -- of them rewrites the run and one to nothing else leaves it standing.
+        -- A value write to any component a row's instance is written from
+        -- rewrites the run, and one to nothing else leaves it standing. Read as
+        -- the count rather than the bits for the reason the structural count is
+        -- read below: the bits are scoped to the frame and this consumer is not,
+        -- so a write from a phase after RenderFirst is cleared before the next
+        -- sync could see it. The count is monotonic, so what the write changed
+        -- is still a difference here a frame later.
         local inner <const> = archetype as internal.ArchetypeInternal
         local structAt <const> = inner:structuralCount()
+        local valueAt <const> = inner:valueCount()
         local dirty = relayout
             or run.moved
-            or valueColumnsDirty(inner)
+            or valueAt ~= run.valueAt
             or (interpolating and archetype:get(components.PreviousTransform) ~= nil)
 
         local residue = false
@@ -1348,9 +1370,10 @@ local function syncInstances(self: Extractor, packet: FramePacket)
             -- this has to be exact or wrong in the second direction.
             --
             -- Exact, and for free in the case worth the most. The partial path
-            -- only runs while every value column is clean, so a row it did not
-            -- write carries the tint it carried before and cannot have changed
-            -- lane. A run whose last write found nothing blended therefore has
+            -- only runs while no value write has landed on those columns since
+            -- this run was last written, whichever phase it would have come
+            -- from, so a row it did not write carries the tint it carried
+            -- before and cannot have changed lane. A run whose last write found nothing blended therefore has
             -- the residue's own count as its whole answer, which is what an
             -- opaque scene is and what this optimization exists for. A run that
             -- did hold one has to be counted, because a swap-pop may have
@@ -1378,6 +1401,7 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         run.length = pending
         run.moved = false
         run.structAt = structAt
+        run.valueAt = valueAt
     end
 
     -- A Sprite naming an image nothing registered is still an error: every
@@ -1492,10 +1516,13 @@ end
 --- afterwards against a frame, so the two stay separable: the sync needs no
 --- command buffer and the render needs no world.
 ---
---- A spawn or a despawn in a phase after RenderFirst reaches the instance
---- buffer on the next frame's sync rather than this one's, so what it changed
---- draws one frame late. Nothing is lost: the archetype's structural count
---- outlives the frame's dirty bits, and the next sync reads that.
+--- A change made in a phase after RenderFirst reaches the instance buffer on
+--- the next frame's sync rather than this one's, so what it changed draws one
+--- frame late. That holds for a spawn or a despawn and for a value write to any
+--- column a row is drawn from, and the latency is the whole of the cost:
+--- nothing is lost. Both are read as counts the archetype keeps, and a count
+--- outlives the frame's dirty bits, so the next sync sees a change the bits
+--- were cleared of before it looked.
 --- @param published Called once the packet is filled, which is the moment it
 ---     would be handed over. What flips a slot's state when there is one.
 function Extractor:install(world: types.World, packet: FramePacket, published: function())
