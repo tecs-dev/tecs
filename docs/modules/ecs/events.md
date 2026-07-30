@@ -29,7 +29,7 @@ return tecs.newApplication({
 ```
 
 The platform event stream uses the same bus. The host emits each platform kind
-at address `0`; `tecs.platform.events` defines those event types.
+at address `0`; [`tecs.platform.events`](/modules/platform/events) defines those event types.
 
 ## World and entity addresses
 
@@ -61,7 +61,7 @@ the emitter's phase and deferred scope.
 Platform events arrive before `world:update`, so their observers run outside
 the phase tree. They do not receive fixed-step timing, phase order, or state
 gating. Fold an event into state when a reaction needs those properties.
-[`Input`](/modules/input) follows that pattern for keyboard, pointer, and
+[`Input`](/modules/platform/input) follows that pattern for keyboard, pointer, and
 gamepad events.
 
 Observers suit immediate notification. Systems suit ordered frame work.

@@ -45,7 +45,7 @@ owns the scheduled lifecycle:
 | Stage | Game API |
 | --- | --- |
 | Startup | `PreStartup`, `Startup`, and `PostStartup` |
-| Event | `world:observe(0, tecs.events.on.<kind>, handler)` |
+| Event | `world:observe(0, tecs.platform.events.on.<kind>, handler)` |
 | Frame | The phases driven by `world:update(dt)` |
 | Shutdown | `PreShutdown`, `Shutdown`, and `PostShutdown` |
 
@@ -57,7 +57,7 @@ rather than one frame later.
    delivered since the previous iteration. A quit request ends the iteration
    here.
 2. `tecs.assets.update` settles the loads the worker finished.
-3. `tecs.os.updateProcesses` and `tecs.os.updateDialogs` settle the
+3. `tecs.platform.os.updateProcesses` and `tecs.platform.os.updateDialogs` settle the
    children that exited and the dialogs the user answered.
 4. The application pumps every open `tecs.io.http` client, which settles the
    transfers that completed.
@@ -129,6 +129,17 @@ local assets <const> = require("tecs.assets")
 local sequence <const> = require("tecs.sequence")
 local files <const> = require("tecs.io.files")
 local platformOS <const> = require("tecs.platform.os")
+
+-- Host-only event conversion operations. The public events record omits these
+-- engine-facing helpers, while the implementation table retains them for the
+-- application lifecycle.
+local record EventHost
+    drain: function(queue: loader.CValue, count: integer, handler: function(events.Event), arrivals?: loader.CValue)
+    isInput: function(kind: string): boolean
+    setTouchScale: function(width: number, height: number)
+end
+
+local eventHost <const> = events as EventHost
 local httpClients <const> = require("tecs.io.http.clients")
 local watcher <const> = require("tecs.io.watcher")
 local log <const> = require("tecs.log")
@@ -749,7 +760,7 @@ function Application:_init(): boolean
     -- the pixel size would put the two pointers a device-density factor apart
     -- on every high-density display.
     local width, height = self.window:getSize()
-    events.setTouchScale(width, height)
+    eventHost.setTouchScale(width, height)
 
     -- Latched input is what lets a fixed step see a press that began and ended
     -- between two steps. Bracketing the fixed phases is the whole mechanism,
@@ -895,7 +906,7 @@ end
 function Application:_receive(event: events.Event)
     -- Before anything acts on the event, so what is measured is the wait from
     -- the host's stamp rather than from some point inside the reaction.
-    if timing.enabled and event.arrival ~= nil and events.isInput(event.kind) then
+    if timing.enabled and event.arrival ~= nil and eventHost.isInput(event.kind) then
         timing.inputArrived(event.arrival)
     end
 
@@ -908,7 +919,7 @@ function Application:_receive(event: events.Event)
         -- Touch is normalized to the window, so the conversion to window
         -- coordinates has to follow the window rather than the size it had at
         -- startup.
-        events.setTouchScale(event.data1, event.data2)
+        eventHost.setTouchScale(event.data1, event.data2)
     end
     -- Nothing is folded for the six lifecycle kinds. They are dispatched to a
     -- method at the instant they arrive and drained here afterwards, and on
@@ -961,7 +972,7 @@ function Application:_iterate(queue: loader.CValue, count: integer, arrivals: lo
     -- an event a frame, which is what the latency stages are there to catch.
     self.input:beginFrame()
     receiving = self
-    events.drain(queue, count, receive, arrivals)
+    eventHost.drain(queue, count, receive, arrivals)
 
     if self.quitRequested then
         return false

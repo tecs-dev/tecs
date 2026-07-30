@@ -121,7 +121,9 @@ describe("tecs headless", function()
                     "tecs.assets", "tecs.physics", "tecs.io.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.math", "tecs.math.vec2", "tecs.regex",
-                    "tecs.platform.os",
+                    "tecs.platform.events",
+                    "tecs.platform.input", "tecs.platform.os",
+                    "tecs.platform.time", "tecs.platform.window",
                     "tecs.io.files", "tecs.io.watcher",
                     "tecs.io", "tecs.io.http", "tecs.io.http.client",
                 }
@@ -136,6 +138,32 @@ describe("tecs headless", function()
                 false
             )
             assert.are.equal("none\n", output)
+        end)
+
+        it("names the platform without loading any facility", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local platform = tecs.platform
+                local facilities = {
+                    "tecs.platform.events", "tecs.platform.input",
+                    "tecs.platform.os", "tecs.platform.time",
+                    "tecs.platform.window",
+                }
+                local loaded = {}
+                for _, name in ipairs(facilities) do
+                    if package.loaded[name] ~= nil then
+                        loaded[#loaded + 1] = name
+                    end
+                end
+                print(("%s %s %s"):format(
+                    type(platform),
+                    tostring(package.loaded["tecs.platform"] == nil),
+                    #loaded == 0 and "none" or table.concat(loaded, " ")))
+            ]],
+                false
+            )
+            assert.are.equal("table true none\n", output)
         end)
 
         -- The same property one level down, which is where it stops being
@@ -215,6 +243,32 @@ describe("tecs headless", function()
     end)
 
     describe("with the native libraries, and still no window", function()
+        it("loads one platform facility without its siblings", function()
+            local output = run(
+                [[
+                local tecs = require("tecs")
+                local platform = tecs.platform
+                local time = platform.time
+                local siblings = {
+                    "tecs.platform.events", "tecs.platform.input",
+                    "tecs.platform.os", "tecs.platform.window",
+                }
+                local loaded = {}
+                for _, name in ipairs(siblings) do
+                    if package.loaded[name] ~= nil then
+                        loaded[#loaded + 1] = name
+                    end
+                end
+                print(("%s %s %s"):format(
+                    type(platform),
+                    tostring(rawequal(time, require("tecs.platform.time"))),
+                    #loaded == 0 and "none" or table.concat(loaded, " ")))
+            ]],
+                true
+            )
+            assert.are.equal("table true none\n", output)
+        end)
+
         -- `tecs.io` now owns the socket transport, so naming the parent reaches
         -- the Rust FFI. Its four children remain independent and lazy.
         it("hangs io children on their parent without loading siblings", function()

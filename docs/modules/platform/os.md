@@ -3,4 +3,4 @@ description: "Runtime capabilities, clipboard access, child processes, and deskt
 outline: deep
 ---
 
-# tecs.os
+# tecs.platform.os

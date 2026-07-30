@@ -3,4 +3,4 @@ description: "Creating an OS window, choosing display modes, and using screen co
 outline: deep
 ---
 
-# tecs.window
+# tecs.platform.window

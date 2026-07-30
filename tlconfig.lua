@@ -88,7 +88,7 @@ end
 -- The modules a page's reference is assembled from beyond the one `SURFACE`
 -- names. A public name is a namespace and a module is a file, and the two do
 -- not have to agree: `tecs.gfx.animation` hands out the sheet types that
--- `tecs.gfx.sheet` declares, and `tecs.input` the gamepad and the sensors.
+-- `tecs.gfx.sheet` declares, and `tecs.platform.input` the gamepad and the sensors.
 -- `SURFACE` does not carry these because nothing resolves through them at run
 -- time; each module re-exports those names on its own record, so one require
 -- answers for both.
@@ -99,7 +99,7 @@ end
 -- Every entry goes away the day its namespace is one file.
 local BESIDE = {
     ["tecs.gfx.animation"] = { "tecs.gfx.sheet" },
-    ["tecs.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
+    ["tecs.platform.input"] = { "tecs.platform.Gamepad", "tecs.platform.sensors" },
     ["tecs.io"] = { "tecs.io.types" },
 }
 
@@ -147,7 +147,7 @@ local function modulePage(name, spec, parent)
         route = nested and route .. "/" or route,
         title = public,
         public = public,
-        api = api,
+        api = #api > 0 and api or nil,
     }
 end
 
@@ -408,7 +408,6 @@ local SIDEBAR = {
                     { text = "tecs.gfx.particles", path = "modules/gfx/particles" },
                 },
             },
-            { text = "tecs.input", path = "modules/input" },
             {
                 text = "tecs.io",
                 path = "modules/io",
@@ -427,12 +426,20 @@ local SIDEBAR = {
                     { text = "tecs.math.vec2", path = "modules/math/vec2" },
                 },
             },
-            { text = "tecs.os", path = "modules/os" },
             { text = "tecs.physics", path = "modules/physics" },
+            {
+                text = "tecs.platform",
+                path = "modules/platform",
+                items = {
+                    { text = "tecs.platform.events", path = "modules/platform/events" },
+                    { text = "tecs.platform.input", path = "modules/platform/input" },
+                    { text = "tecs.platform.os", path = "modules/platform/os" },
+                    { text = "tecs.platform.time", path = "modules/platform/time" },
+                    { text = "tecs.platform.window", path = "modules/platform/window" },
+                },
+            },
             { text = "tecs.regex", path = "modules/regex" },
             { text = "tecs.sequence", path = "modules/sequence" },
-            { text = "tecs.time", path = "modules/time" },
-            { text = "tecs.window", path = "modules/window" },
             { text = "tecs.workers", path = "modules/workers" },
         },
     },

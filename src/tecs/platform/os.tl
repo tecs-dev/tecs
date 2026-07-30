@@ -24,14 +24,14 @@ reads may return only the value this process wrote.
 `updateProcesses` once per frame until the future settles:
 
 ```teal
-local run <const> = tecs.os.runProcess({
+local run <const> = tecs.platform.os.runProcess({
     args = {"git", "rev-parse", "HEAD"},
     timeoutMs = 2000,
 })
 
-tecs.os.updateProcesses()
+tecs.platform.os.updateProcesses()
 if run.status == "ready" and run.value:succeeded() then
-    tecs.os.setClipboardText(run.value.output)
+    tecs.platform.os.setClipboardText(run.value.output)
 elseif run.status == "failed" then
     print(run.error)
 end
@@ -166,11 +166,11 @@ local record Capabilities
     touch: boolean
     --- Read-only. Reports true because every target reaches gamepads through the same subsystem,
     --- so only the connected devices vary, which the `gamepads`
-    --- method on [`Input`](tealdoc:tecs.input.Input) answers.
+    --- method on [`Input`](tealdoc:tecs.platform.input.Input) answers.
     gamepad: boolean
     --- Read-only. Reports whether the device carries a gyroscope or an accelerometer. This says
     --- nothing about a gamepad's sensors, which `hasSensor` on
-    --- [`Gamepad`](tealdoc:tecs.input.Gamepad) answers per device.
+    --- [`Gamepad`](tealdoc:tecs.platform.input.Gamepad) answers per device.
     sensors: boolean
     --- Read-only. Reports whether work can run off the main thread.
     workers: boolean
@@ -234,7 +234,7 @@ local record platformOS
     ---
     --- Everything here is meaningless before the child ends, which is why none
     --- of it is on the future: a run in flight is a
-    --- [`Future`](tealdoc:tecs.Future)`<`[`ProcessResult`](tealdoc:tecs.os.ProcessResult)`>` reading
+    --- [`Future`](tealdoc:tecs.Future)`<`[`ProcessResult`](tealdoc:tecs.platform.os.ProcessResult)`>` reading
     --- "pending" and a run that ended is the same future carrying one of
     --- these. The one thing worth knowing in between is the child's process id,
     --- and `processResult` answers that from the runner's own bookkeeping.
@@ -1220,7 +1220,7 @@ end
 --- output has just gone, so there is nothing left to be gentle on behalf of,
 --- and a refusable signal would leave the child running with no future left to
 --- observe it. A caller who does want to ask rather than insist has
---- `tecs.os.killProcess(run, false)`, which is that question spelled out.
+--- `tecs.platform.os.killProcess(run, false)`, which is that question spelled out.
 function Runner:cancel(future: Future<any>)
     local entry = byFuture[future as Future<Result>]
     if entry == nil or worker == nil then
