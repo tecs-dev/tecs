@@ -68,7 +68,11 @@ const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
         "the shared FFI library over SPIRV-Cross",
     ),
     (r"cjson", "MIT", "the vendored lua-cjson"),
-    (r"SDL3(_mixer)?", "Zlib", "SDL and its audio satellite"),
+    (
+        r"SDL3(_mixer|_ttf)?",
+        "Zlib",
+        "SDL and its audio and font satellites",
+    ),
     (
         r"(luajit|lua51)",
         "MIT",
@@ -86,6 +90,12 @@ const LINKED_LIBRARIES: &[(&str, &str, &str)] = &[
         "SDL_mixer's Opus decoder",
     ),
     (r"wavpack", "BSD-3-Clause", "SDL_mixer's WavPack decoder"),
+    (
+        r"freetype",
+        "FTL OR GPL-2.0-only",
+        "SDL_ttf's font rasterizer",
+    ),
+    (r"harfbuzz", "MIT", "SDL_ttf's text shaper"),
 ];
 const REQUIRED_NOTICES: &[&str] = &[
     "share/tecs/THIRD_PARTY_NOTICES.md",

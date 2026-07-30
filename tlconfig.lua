@@ -816,6 +816,21 @@ return {
             favicon = "/images/logo.svg",
             github = "https://github.com/tecs-dev/tecs",
             public = "docs/public",
+            -- The wordmark is visible in the first paint. Start its tiny local
+            -- Latin face with the document instead of discovering it after
+            -- the stylesheet arrives.
+            head = {
+                {
+                    tag = "link",
+                    attributes = {
+                        rel = "preload",
+                        href = "/fonts/jersey-15/jersey-15-latin.woff2",
+                        as = "font",
+                        type = "font/woff2",
+                        crossorigin = "anonymous",
+                    },
+                },
+            },
             -- The generated declarations go through Cerulean, so a signature
             -- on a page is formatted the way the same code would be in the
             -- tree. It loads from the runtime's own `package.path`, which the

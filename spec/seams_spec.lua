@@ -37,7 +37,7 @@ local files = require("tecs.io.files")
 -- and types libraries rather than being one, and the engine's own native code
 -- reached through it -- the worker channels, the log sink, the solver pool --
 -- ships with the engine on every target and is not a portability question.
-local BINDINGS = { "rust", "sdl3", "sdl3mixer", "shaderc", "spvc" }
+local BINDINGS = { "rust", "sdl3", "sdl3mixer", "sdl3ttf", "shaderc", "spvc" }
 
 -- Every SDL entry point that reaches content, and the decoders that take a
 -- path instead of a stream. This is the bug class: the storage seam covers
@@ -137,6 +137,7 @@ local REACH = {
             .. "format, which is what `Platform.shaderFormat` is for.",
         modules = {
             "tecs/Backend.lua",
+            "tecs/gfx/text.lua",
             "tecs/gfx/particles.lua",
             "tecs/gpu/Buffer.lua",
             "tecs/gpu/ComputePass.lua",

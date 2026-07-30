@@ -214,13 +214,10 @@ local record gfx
     --- @return The normalized name, or nil when the index names nothing.
     imageName: function(id: integer): string
 
-    --- What `loadFont` answers with, and what a `Text` names.
+    --- What `newTTF` answers with, and what a `Text` names.
     type Font = text.Font
-    --- Describes one entry of a font's `glyphs` in the units used to generate
-    --- the atlas.
-    type GlyphMetrics = text.GlyphMetrics
-    --- What `loadFont` takes.
-    type FontOptions = text.FontOptions
+    --- What `newTTF` takes.
+    type TTFOptions = text.TTFOptions
     --- What `textPlugin` takes.
     type TextOptions = text.TextOptions
 
@@ -228,25 +225,12 @@ local record gfx
     --- entities. Needs `textPlugin` installed on the world.
     Text: text.Text
 
-    --- Starts loading a font's metrics and names its atlas, sharing one read
-    --- under a path while answering each caller with its own future.
-    loadFont: function(options: text.FontOptions): Future<text.Font>
-
-    --- Starts loading the font the engine ships.
-    defaultFont: function(): Future<text.Font>
-
-    --- The font loaded under a metrics path.
-    ---
-    --- @param name The metrics path `loadFont` was given, not the family name
-    ---     inside the file.
-    --- @return The font, or nil before a load of that path has settled
-    ---     successfully. Nil is a question about this process rather than about
-    ---     the disk, so a font that exists but no caller loaded answers nil too.
-    findFont: function(name: string): text.Font
-
-    --- Starts re-reading a loaded font's metrics in place, so every `Text`
-    --- naming it keeps pointing at the same table.
-    reloadFont: function(path: string): Future<text.Font>
+    --- Starts loading a TrueType or OpenType source font with SDL_ttf.
+    --- @param options The caller supplies a source path and may select the
+    ---     raster point size and snapshot identity.
+    --- @return A future that settles with an immutable SDF font after its
+    ---     source bytes have been read and opened.
+    newTTF: function(options: text.TTFOptions): Future<text.Font>
 
     --- Extent of a `Text` in world units, laid out the way the system lays it
     --- out and without touching any entity.
