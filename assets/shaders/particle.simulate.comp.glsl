@@ -4,10 +4,10 @@
 // One thread per pool slot. A particle is an instance like any other once this
 // has run, so nothing downstream is taught about particles: the mark pass
 // tests the bound written here, the scan totals it, the compact pass places it
-// in the visible list, and the one indirect draw consumes it. A slot with no
-// live particle writes the hidden bound, which is the same thing a reserved
-// slot nothing owns has always written, and the mark pass rejects it before
-// the draw sees it.
+// in the lane the bound's signs chose, and that lane's indirect draw consumes
+// it. A slot with no live particle writes the hidden bound, which is the same
+// thing a reserved slot nothing owns has always written, and the mark pass
+// rejects it before either draw sees it.
 //
 // The integration is whole fixed steps and nothing else, so two machines fed
 // the same steps hold the same field however many frames either drew. What
@@ -244,6 +244,15 @@ void main() {
         extent = vec2(0.5 * abs(scaleX), 0.5 * abs(scaleY));
     } else {
         extent = vec2(0.5 * (abs(scaleX) + abs(scaleY)));
+    }
+    // And the lane, which is the sign of the first half extent and nothing else:
+    // `cullBlended` in assets/shaders/include/cull.glsl reads it exactly as it
+    // reads an entity's, so a particle reaches the forward pass through the same
+    // mechanism a translucent sprite does. The second extent stays positive
+    // because a particle casts nothing, which is also why the slot float packs a
+    // blend mode where a caster packs a height.
+    if (effects.value[effect + EFFECT_BLENDED] != 0.0) {
+        extent.x = -extent.x;
     }
     bounds.item[index] = vec4(drawn, extent);
 }

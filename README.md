@@ -121,9 +121,8 @@ Working today:
   application's config
 - Particles simulated on the GPU: an entity is an emitter and its particles are
   not entities, their state living in a buffer the CPU never reads, drawn
-  through the instance stream and the cull that were already there. Opaque
-  only: the forward blended lane exists, and nothing particle-shaped routes
-  into it yet
+  through the instance stream and the cull that were already there, blending
+  over the composited image or adding to it as the effect asks
 
 Not built yet: post-processing, UI, tiled maps and multi-camera.
 
@@ -2738,9 +2737,25 @@ buffer are drawn and the rest are dropped, which is the same answer
 
 What it costs is five compute passes and a draw on a frame that blends
 something, and one branch and one empty render pass on a frame that does not:
-the packet says how many rows extraction routed forward, and the whole lane is
-skipped at zero. What it gives up is resolution. There are 256 buckets, so two
-blended instances whose depths differ by less than one part in 256 draw in the
+the packet says how many instances the frame may blend, and the whole lane is
+skipped at zero. That number is exact for the rows extraction wrote and an upper
+bound for a producer's, because a producer whose instances are written by compute
+cannot count what a frame actually has. Over-reporting runs a lane that finds
+less than it expected; under-reporting drops it, so the bound is the safe way
+round and the particle pool answers with the slots its blended effects reserve.
+
+The forward pipeline blends premultiplied rather than straight alpha, which is
+what lets one pipeline and one draw serve two looks. The fragment shader scales
+its color by its own alpha either way; what it writes into alpha is what chooses
+the mode, so an alpha of zero beside that scaled color adds to the target instead
+of covering it. Two pipelines would mean two draws over one list, and every
+additive instance in the frame would then land after every alpha-blended one
+whatever their depths said. Which mode an instance is in rides in `origin.z`
+beside its array layer, clip region and cast height, since a blended instance
+casts nothing and a caster blends nothing.
+
+What it gives up is resolution. There are 256 buckets, so two blended instances
+whose depths differ by less than one part in 256 draw in the
 order the compaction gave them, which is the order the depth test already
 resolves opaque geometry in. Raising the count is a constant and a larger counts
 table, not a design change.
@@ -3188,19 +3203,38 @@ what almost every "has the explosion ended" question is actually asking;
 name carries the caveat. Neither reads anything back, because a readback here
 is a pipeline stall.
 
-**Particles are opaque.** The forward blended lane exists and nothing
-particle-shaped reaches it: routing into it is extraction negating the first
-half extent of a cull bound, and the simulate pass writes every particle's bound
-with both extents positive. So a particle goes to the G-buffer, which is written
-with replace and has nowhere to put partial coverage, and a color's alpha
-reaches the swapchain having blended against nothing. A gradient ending at
-transparent black writes opaque black over what was behind it, which is worse
-than not fading. Alpha is carried and it is inert, `render.blend` is accepted
-and logged and ignored so an effect authored today draws as written once the
-simulate pass can pick the lane, and the only fade that works is the size curve
-going to zero. What that leaves working is debris, chunks, gibs, snow, rain,
-confetti and hard-edged sparks. Fire, smoke, glow and soft dust want the blended
-lane and do not yet reach it.
+**Particles blend by default, and the default was chosen rather than inherited.**
+Routing into the forward lane is negating the first half extent of a cull bound,
+and a particle's bound is written by the simulate pass rather than by extraction,
+so the pass reads one float off the effect record and negates or does not. That
+is the whole of the mechanism, which is the point: nothing downstream of the
+bound had to learn what a particle is.
+
+`render.blend` names `"alpha"`, `"additive"` or `"opaque"` and defaults to
+`"alpha"`. Defaulting to opaque would have kept a worse bug as the default: the
+G-buffer is written with replace and has nowhere to put partial coverage, so a
+gradient ending at transparent black wrote opaque black over what was behind it,
+which is worse than not fading at all. It is also nearly free to change, because
+alpha over at an alpha of one is the same image the G-buffer produced. What does
+change for an effect that was already opaque and stays at full alpha is what the
+G-buffer no longer holds: a blended particle is not in the occluder mask, is not
+shadowed by one, and carries no normal into the resolve. An effect that wanted any
+of those asks for `"opaque"` and gives up alpha in exchange, which is the trade
+the two names now make explicit.
+
+Additive is not a second pipeline. The forward pipeline blends premultiplied, so
+the fragment shader chooses between covering and adding by what it writes into
+alpha, and the mode rides in the same `origin.z` that already carries the array
+layer, the clip region and a caster's height. One pipeline, one draw and one sort
+therefore serve both, and an additive spark interleaves with the alpha-blended
+smoke around it rather than being drawn as a second pass after all of it.
+
+What is still not sorted is a pool against itself. An effect names one layer and
+its particles take one depth within it, so they land in one bucket of the forward
+sort and composite in pool-slot order: deterministic, correct for additive, and
+arbitrary for alpha among particles that are all at the same depth anyway.
+Per-particle depth is what would change that, and it is the feature the plan
+defers rather than a consequence of this one.
 
 ## GPU-driven by default
 
