@@ -49,14 +49,14 @@ local record program
 
     --- One step a playback will reach without branching.
     record Step
-        --- Ticks of the program's clock from the reference point until it
-        --- runs.
+        --- Read-only. Ticks of the program's clock from the reference point
+        --- until it runs.
         ticks: integer
-        --- `"call"` or `"emit"`.
+        --- Read-only. `"call"` or `"emit"`.
         kind: string
-        --- Action name for a call, event name for an emit.
+        --- Read-only. Action name for a call, event name for an emit.
         name: string
-        --- Constants the step carries, unresolved.
+        --- Read-only. Constants the step carries, unresolved.
         args: {any}
     end
 

@@ -124,10 +124,11 @@ end
 --- newest version, and a superseded version is released once its last
 --- playback finishes.
 local interface Program
-    --- The name passed to `define`.
+    --- Read-only. The name passed to `define`.
     name: string
 
-    --- Monotonic version, starting at 1. Incremented per redefinition.
+    --- Read-only. Monotonic version, starting at 1. Incremented per
+    --- redefinition.
     version: integer
 end
 
@@ -139,9 +140,10 @@ end
 --- A reference to an entity supplied at `play` time. Resolved when the
 --- instruction that uses it runs, not when the program is defined.
 local record EntityRef
-    --- Name of the binding this reference resolves.
+    --- Read-only. Name of the binding this reference resolves.
     bindName: string
-    --- Marker distinguishing a reference from an ordinary table argument.
+    --- Read-only. Marker distinguishing a reference from an ordinary table
+    --- argument.
     isBinding: boolean
 end
 
@@ -161,27 +163,30 @@ local type Argument = any
 
 --- Options for `play`.
 local record PlayOptions
-    --- Entity whose lifetime governs the playback. When it despawns, the
-    --- playback is canceled. Omit for a world-scoped sequence.
+    --- Caller-writable. Entity whose lifetime governs the playback. When it
+    --- despawns, the playback is canceled. Omit for a world-scoped sequence.
     owner: integer
 
-    --- Entities the program acts on, addressed by `sequence.bind(name)`.
+    --- Caller-writable. Entities the program acts on, addressed by
+    --- `sequence.bind(name)`.
     bindings: {string: integer}
 
-    --- Constants this playback runs with, readable by its actions and its
-    --- evaluators. A program is shared by every playback of it, so anything
-    --- that differs between two of them belongs here rather than in the
-    --- program. Plain data, for the same reason a `call` argument is: it
-    --- travels with a snapshot.
+    --- Caller-writable. Constants this playback runs with, readable by its
+    --- actions and its evaluators. A program is shared by every playback of
+    --- it, so anything that differs between two of them belongs here rather
+    --- than in the program. Plain data, for the same reason a `call`
+    --- argument is: it travels with a snapshot.
     params: {string: any}
 
-    --- Per-step instruction budget for this playback. Defaults to the
-    --- world's configured budget. See `setInstructionBudget`.
+    --- Caller-writable. Per-step instruction budget for this playback.
+    --- Defaults to the world's configured budget. See
+    --- `setInstructionBudget`.
     budget: integer
 
-    --- Names a slot this playback occupies on its owner. Starting another
-    --- playback on the same owner and channel cancels this one, which is how
-    --- a second fade replaces the first rather than fighting it.
+    --- Caller-writable. Names a slot this playback occupies on its owner.
+    --- Starting another playback on the same owner and channel cancels this
+    --- one, which is how a second fade replaces the first rather than
+    --- fighting it.
     channel: string
 end
 
@@ -190,22 +195,24 @@ end
 --- The context and its `args` belong to the sequencer and are reused by
 --- the next call. Read them; do not keep or modify them.
 local record ActionContext
-    --- The world this playback belongs to.
+    --- Read-only. The world this playback belongs to.
     world: World
 
-    --- The playback, for `status` or `cancel` from inside an action.
+    --- Read-only. The playback, for `status` or `cancel` from inside an
+    --- action.
     handle: Handle
 
-    --- The `owner` supplied at `play`, or 0 for a world-scoped sequence.
+    --- Read-only. The `owner` supplied at `play`, or 0 for a world-scoped
+    --- sequence.
     owner: integer
 
-    --- Constants supplied by the `call` node, with any `bind` references
-    --- already resolved to entity ids.
+    --- Read-only. Constants supplied by the `call` node, with any `bind`
+    --- references already resolved to entity ids.
     args: {any}
 
-    --- The `params` supplied at `play`, or nil. Unlike `args`, this is the
-    --- playback's own table rather than borrowed scratch, and it is the same
-    --- one every step of the playback sees.
+    --- Read-only. The `params` supplied at `play`, or nil. Unlike `args`,
+    --- this is the playback's own table rather than borrowed scratch, and it
+    --- is the same one every step of the playback sees.
     params: {string: any}
 
     --- Resolve a named binding. Returns nil when the binding was not
@@ -244,46 +251,57 @@ end
 
 --- A playback's current state.
 local record Status
+    --- Read-only.
     state: PlaybackState
 
-    --- Program name and version this playback is running.
+    --- Read-only. Program name this playback is running.
     program: string
+
+    --- Read-only. Program version this playback is running.
     version: integer
 
-    --- Instruction index, for disassembly and debugging.
+    --- Read-only. Instruction index, for disassembly and debugging.
     pc: integer
 
-    --- Fixed step this playback next runs on. Nil when it is blocked on
-    --- a signal rather than a time.
+    --- Read-only. Fixed step this playback next runs on. Nil when it is
+    --- blocked on a signal rather than a time.
     wakeAt: integer
 
-    --- Signal name this playback is blocked on, when it is.
+    --- Read-only. Signal name this playback is blocked on, when it is.
     waitingFor: string
 
-    --- Query name this playback is blocked on, when it is, and the
+    --- Read-only. Query name this playback is blocked on, when it is, and the
     --- condition it is waiting for.
     waitingQuery: string
+
+    --- Read-only. Query condition this playback is waiting for.
     waitingCondition: QueryCondition
 
-    --- Awaitable provider this playback is blocked on, when it is, and the
-    --- entity it is waiting on.
+    --- Read-only. Awaitable provider this playback is blocked on, when it is,
+    --- and the entity it is waiting on.
     waitingAwaitable: string
+
+    --- Read-only. Entity this playback's awaitable is waiting on.
     waitingAwaitableEntity: integer
 
-    --- Tween playback token this playback is blocked on, when it is.
+    --- Read-only. Tween playback token this playback is blocked on, when it
+    --- is.
     waitingTween: integer
 
-    --- How the last tween it waited on ended.
+    --- Read-only. How the last tween it waited on ended.
     tweenOutcome: TweenOutcome
 
-    --- Live branches this playback forked and has not joined.
+    --- Read-only. Live branches this playback forked and has not joined.
     branches: integer
 
-    --- Whether it is parked at a `join` waiting for those branches.
+    --- Read-only. Whether it is parked at a `join` waiting for those
+    --- branches.
     joining: boolean
 
-    --- Set when `state` is `"faulted"`.
+    --- Read-only. Set when `state` is `"faulted"`.
     fault: FaultReason
+
+    --- Read-only. Error message set when `state` is `"faulted"`.
     faultMessage: string
 end
 

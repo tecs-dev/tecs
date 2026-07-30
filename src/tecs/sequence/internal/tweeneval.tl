@@ -229,9 +229,9 @@ end
 
 --- Nested timeline playback options.
 local record RunOptions
-    --- Nested timeline playback mode. Defaults to "once".
+    --- Caller-writable. Nested timeline playback mode. Defaults to "once".
     mode: PlaybackMode
-    --- Pass count for the nested timeline.
+    --- Caller-writable. Pass count for the nested timeline.
     count: integer
 end
 
