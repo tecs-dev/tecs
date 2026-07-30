@@ -5,7 +5,7 @@ Assets, child processes, and HTTP requests return
 [`Future`](tealdoc:tecs.Future)`<T>`. Compose their
 results without blocking a frame:
 
-```teal
+```teal no-format
 tecs.os.runProcess({args = {"git", "rev-parse", "HEAD"}})
     :map(function(result: tecs.os.ProcessResult): string
         return result.output
