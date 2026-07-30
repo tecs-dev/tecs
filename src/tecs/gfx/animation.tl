@@ -303,7 +303,7 @@ local record animation
     --- Call this once for each world that plays sprite sheets. A second call on
     --- the same world does nothing.
     ---
-    --- It installs two systems, both in `PostUpdate` so they land before
+    --- It installs three systems, all in `PostUpdate` so they land before
     --- extraction whatever order a game added its plugins in.
     --- `tecs.EncodeAnimation` writes what each entity is playing into its
     --- [`Sprite`](tealdoc:tecs.components.Sprite) and writes nothing on a step
@@ -311,6 +311,9 @@ local record animation
     --- [`Completed`](tealdoc:tecs.gfx.animation.Completed) and
     --- [`Looped`](tealdoc:tecs.gfx.animation.Looped) for entities carrying
     --- [`AnimationEvents`](tealdoc:tecs.gfx.animation.AnimationEvents).
+    --- `tecs.RebaseAnimation` moves the playback clock's origin every few hours
+    --- of uptime and re-anchors every animated row on it, which is the one
+    --- update in a hundred thousand that writes every playing animation.
     --- @param world The world to add the systems to.
     plugin: function(world: World)
 
@@ -809,6 +812,64 @@ local function report(world: World, query: Query, from: number, to: number)
     end
 end
 
+--- Re-anchors every encoded row on a clock whose origin has just moved.
+---
+--- Two things go wrong in a world left running for hours, and one walk answers
+--- both. The clock is a float the shader subtracts a start step from, so a count
+--- that only ever grew would stop naming every step at all; and the ticks a row
+--- is into its cycle are that difference times a rate, so a row that has been
+--- playing since the world started would have its frame boundaries quantise to
+--- more than a whole step. Moving the origin fixes the first. What fixes the
+--- second is that this folds each row's phase into the cycle it repeats over
+--- before re-anchoring it, so the elapse a row carries is bounded by the period
+--- rather than by the world's age.
+---
+--- The fold is invisible: what comes off is a whole number of cycles, which is
+--- what the shader's own wrap takes off anyway. What it costs is one rewrite of
+--- every animated row and the upload behind it, once every
+--- `frametable.REBASE_STEPS`, which is two and a half hours at sixty hertz.
+---
+--- Nothing here reads the `Animation` column. The rate, the loop flag and the
+--- playback are all in the encoding, so where a row is playing from moves
+--- without resolving what it is playing.
+local function rebase(query: Query, clock: number, shift: number)
+    -- Where the rows were anchored, which is what the clock read before the
+    -- origin moved under them.
+    local before <const> = clock + shift
+
+    for archetype, length in query:iter() do
+        local sprites <const> = archetype:get(Sprite)
+        local wrote = false
+
+        for row = 1, length do
+            local target <const> = sprites[row]
+            -- A held row carries the tick it is holding rather than a step, so
+            -- the origin moving under it changes nothing. That is what a paused
+            -- entity and one whose speed is zero both look like from here.
+            local rate <const> = target.u1
+            if rate > 0.0 and frametable.isPlayback(target) then
+                local count <const> = frametable.tickCount(frametable.playbackOf(target))
+                if count > 0 then
+                    local ticks = (before - target.v0) * rate
+                    if target.v1 ~= 0.0 then
+                        ticks = ticks % count
+                    elseif ticks > count then
+                        -- A one-shot clamps at its last tick, so parking it one
+                        -- whole cycle in holds the frame it was already holding
+                        -- and reads as finished to the next encode.
+                        ticks = count
+                    end
+                    if not wrote then
+                        archetype:getMut(Sprite)
+                        wrote = true
+                    end
+                    target.v0 = clock - ticks / rate
+                end
+            end
+        end
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Asking what an entity is showing
 -------------------------------------------------------------------------------
@@ -847,7 +908,7 @@ local function phaseOf(world: World, entity: integer): Sheet, integer, number
     end
 
     local rate <const> = target.u1
-    local ticks = rate == 0.0 and target.v0 or (world:fixedStepCount() - target.v0) * rate
+    local ticks = rate == 0.0 and target.v0 or (frametable.clockOf(world) - target.v0) * rate
     if instance.loop then
         ticks = ticks % count
     elseif ticks < 0.0 then
@@ -902,9 +963,11 @@ function animation.plugin(world: World)
         }
     )
 
-    -- The step count each update began on, which is the count the last one
-    -- ended at because nothing between two updates moves it.
-    local began = world:fixedStepCount()
+    -- The clock each update began on, which is what the last one ended at
+    -- because nothing between two updates moves it. Read through the frame table
+    -- rather than off the world, so it is in the units a start step is written
+    -- in: the origin those two share is the frame table's to move.
+    local began = frametable.clockOf(world)
 
     -- `PostUpdate` rather than a render phase, so this lands before extraction
     -- whatever order the renderer and this plugin were installed in.
@@ -932,10 +995,34 @@ function animation.plugin(world: World)
             name = "tecs.ReportAnimation",
             phase = ecs.phases.PostUpdate,
             run = function()
-                local clock <const> = world:fixedStepCount()
+                local clock <const> = frametable.clockOf(world)
                 if clock ~= began then
                     report(world, subscribed, began, clock)
                     began = clock
+                end
+            end,
+        }
+    )
+
+    -- After the report and therefore after the encoder, because both read start
+    -- steps against the clock this update began with and this is what changes
+    -- what that clock means. Declared rather than left to registration order,
+    -- since a report over a window whose ends were measured from two origins
+    -- would emit whatever the difference happened to look like.
+    world:addSystem(
+        {
+            name = "tecs.RebaseAnimation",
+            phase = ecs.phases.PostUpdate,
+            after = {"tecs.ReportAnimation"},
+            run = function()
+                local shift <const> = frametable.rebaseClock(world)
+                if shift > 0.0 then
+                    local clock <const> = frametable.clockOf(world)
+                    -- The paused query as well, because what says a row is held
+                    -- is the rate in its encoding and not which query found it.
+                    rebase(running, clock, shift)
+                    rebase(paused, clock, shift)
+                    began = began - shift
                 end
             end,
         }

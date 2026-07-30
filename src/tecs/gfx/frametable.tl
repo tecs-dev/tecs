@@ -51,14 +51,25 @@ vertex, for every pass that draws the sprite.
 Everything here is floats, including the offsets and counts, so nothing on
 either side bit-casts. A float32 carries integers exactly to 16,777,216 and
 every value written here is far below that.
+
+The clock a playback's start is measured against is here too, because the
+step a row carries and the clock the shader subtracts it from have to share
+an origin, and neither the row nor the shader can be asked what that origin
+is. It is fixed steps since the origin rather than since the world was made:
+a clock that only ever grew would take the product that turns steps into
+ticks past what a float32 resolves to a millisecond, and then past what one
+resolves to a step at all. `REBASE_STEPS` is how far it is allowed to run and
+`rebaseClock` is what moves it, once every row's start has been re-anchored.
 ]=]
 
 local loader <const> = require("tecs.ffi.loader")
 local components <const> = require("tecs.components")
 local sheet <const> = require("tecs.gfx.sheet")
+local type types = require("tecs.types")
 
 local type Sheet = sheet.Sheet
 local type Sprite = components.Sprite
+local type World = types.World
 
 local floor <const> = math.floor
 
@@ -80,6 +91,17 @@ local ENTRY_FLOATS <const> = 8
 
 --- Where a quad sits when nothing names a point on it, which is its middle.
 local CENTER <const> = 0.5
+
+--- Fixed steps a world's clock runs for before playback re-anchors on it.
+---
+--- What sets it is the multiply the shader does: ticks are `elapsed * rate`,
+--- `rate` is about 16.7 at sixty hertz and speed one, and a float32 resolves a
+--- product of that size to a whole tick only while it stays under 2^24. Two to
+--- the nineteenth steps of elapse is 8.7 million ticks at that rate, which
+--- leaves the tick index exact to the millisecond with room for about twice the
+--- speed, and quantises in proportion to the rate above it rather than to the
+--- world's age. At sixty hertz it comes round every two and a half hours.
+local REBASE_STEPS <const> = 524288
 
 --- One registered playback, on the host side.
 local record Playback
@@ -126,6 +148,32 @@ local record frametable
     --- Floats per frame entry: u0, v0, u1, v1, array layer, pivot x, pivot y,
     --- and one reserved.
     ENTRY_FLOATS: integer
+    --- Fixed steps a world's clock runs for before playback re-anchors on it.
+    REBASE_STEPS: integer
+
+    --- The clock a Sprite's start step is measured against, in one world.
+    ---
+    --- Fixed steps since that world's clock origin, which is not the same as
+    --- steps since the world was made: `rebaseClock` moves the origin up as the
+    --- world runs. Extraction publishes this to the shader and
+    --- `animation.frameOf` answers from it, so the two read one clock.
+    --- @param world The world whose steps are being counted.
+    --- @return Whole fixed steps, from zero, as an integer-valued float that a
+    ---     float32 uniform carries exactly.
+    clockOf: function(world: World): number
+
+    --- Moves a world's clock origin up to the step it has reached, when it has
+    --- run far enough to want it.
+    ---
+    --- Every encoded row in that world holds a start step in the old origin's
+    --- units, so a caller that moves the origin owes each of them a rewrite in
+    --- the same update: `tecs.RebaseAnimation` is the system that pairs with
+    --- this, and nothing else may call it.
+    --- @param world The world whose origin moves.
+    --- @return How far the origin moved, in fixed steps, which is what every
+    ---     encoded row's start step has to lose. Zero when the clock has not
+    ---     reached `REBASE_STEPS` and nothing moved.
+    rebaseClock: function(world: World): number
 
     --- Registers a sheet, tag and slice, or answers the index they have.
     ---
@@ -215,6 +263,33 @@ frametable.TICK_HZ = TICK_HZ
 frametable.HEADER_FLOATS = HEADER_FLOATS
 frametable.DIRECTORY_FLOATS = DIRECTORY_FLOATS
 frametable.ENTRY_FLOATS = ENTRY_FLOATS
+frametable.REBASE_STEPS = REBASE_STEPS
+
+--- What each world's clock counts from, in fixed steps since the world was made.
+---
+--- Per world rather than one number for the process, because a start step is
+--- written into a row of one world and two worlds count their own steps. Weak
+--- keys, so a world that goes away takes its origin with it.
+local origins: {World: number} = setmetatable({}, {__mode = "k"} as metatable<{World: number}>)
+
+function frametable.clockOf(world: World): number
+    return world:fixedStepCount() - (origins[world] or 0)
+end
+
+function frametable.rebaseClock(world: World): number
+    local reached <const> = world:fixedStepCount()
+    local shift <const> = reached - (origins[world] or 0)
+    if shift < REBASE_STEPS then
+        return 0.0
+    end
+    -- The origin follows the clock rather than moving by a fixed period, so the
+    -- clock restarts at zero and every start step re-anchored against it is a
+    -- small number again. Moving by a period would leave a row that has been
+    -- playing for days carrying a start step as far below zero as the clock was
+    -- above it, which is the same loss of resolution in the other direction.
+    origins[world] = reached
+    return shift
+end
 
 --- Registered playbacks, by index, and the pair each was registered under.
 local playbacks: {Playback} = {}

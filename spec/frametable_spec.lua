@@ -325,8 +325,8 @@ describe("playback resolved on the GPU", function()
 
     -- Staging is a pair of addresses to the extractor and nothing more, so a
     -- plain C array is the whole of what a device supplies it with.
-    local function newExtraction()
-        local world = tecs.ecs.newWorld()
+    local function newExtraction(config)
+        local world = tecs.ecs.newWorld(config)
         local extractor = Extractor.create({
             capacity = CAPACITY,
             whiteU0 = 0.0,
@@ -459,5 +459,145 @@ describe("playback resolved on the GPU", function()
         local u0 = select(1, regionAt(instances, 0))
         assert.is_true(u0 >= 0.0, "no Animation means no playback")
         near(u0, select(1, source:uv(2)), "and the region it was given")
+    end)
+
+    -- A world left running until the playback clock comes round.
+    --
+    -- Two quantities go wrong in a game nobody restarts. The clock is a float
+    -- the shader subtracts a start step from, so a count that only grew would
+    -- stop naming every step; and the ticks a row is into its cycle are that
+    -- difference times a rate, so a row playing since the world started would
+    -- have its boundaries quantise to more than a step. Both are answered by
+    -- moving the clock's origin and folding each row's phase into its own cycle,
+    -- and the property to hold is that neither is visible in the picture.
+    --
+    -- Hours of uptime cost milliseconds here, because one update runs as many
+    -- fixed steps as it is handed and a world with no fixed systems in it runs
+    -- them for the price of the counter.
+    describe("a clock that comes round", function()
+        local REBASE = frametable.REBASE_STEPS
+
+        -- What a float32 resolves to a whole tick, which is what the fold keeps
+        -- the shader's own multiply below.
+        local EXACT_TICKS = 16777216
+
+        local function driveTo(world, steps)
+            while world:fixedStepCount() < steps do
+                world:update((steps - world:fixedStepCount()) * STEP)
+            end
+        end
+
+        local function within(actual, expected, tolerance, what)
+            assert.is_true(
+                math.abs(actual - expected) <= tolerance,
+                ("%s: expected %.5f within %.5f, got %.5f"):format(what, expected, tolerance, actual)
+            )
+        end
+
+        -- An animated entity in a world whose updates may run for hours.
+        local function playing(tag, steps)
+            local source = taggedSheet()
+            source:bind(Sprite(1, 0.0, 0.0, 1.0, 1.0, 3))
+            local world, packet, instances = newExtraction({ fixedMaxSteps = REBASE * 2 })
+            local entity = world:spawn(
+                Transform(10, 20, 0, 1, 0, 16, 16),
+                Tint(1, 1, 1, 1),
+                Renderable(),
+                source:sprite(1),
+                animation.of(source, tag, { loop = tag ~= nil })
+            )
+            world:update(STEP)
+            driveTo(world, steps)
+            return world, entity, source, packet, instances
+        end
+
+        it("moves the origin the shader is handed", function()
+            local world, entity, source, packet = playing("forward", REBASE - 6)
+            assert.is_true(frametable.clockOf(world) >= REBASE - 12, "the clock ran nearly that far")
+            assert.is_true(frametable.clockOf(world) < REBASE, "and has not come round yet")
+            near(packet.stepClock, frametable.clockOf(world), "what the shader was handed")
+
+            world:update(6 * STEP)
+
+            near(frametable.clockOf(world), 0.0, "the origin followed the clock")
+            near(packet.stepClock, 0.0, "and extraction published the clock it moved to")
+            -- Read after the crossing rather than before it, since a rebase that
+            -- forgot a row would leave that row naming a frame of its own.
+            assert.is_true(animation.frameOf(world, entity) >= 1, "still on a frame of the sheet")
+            assert.is_true(animation.frameOf(world, entity) <= source.count)
+        end)
+
+        it("leaves the cycle where it was", function()
+            local world, entity, source = playing("forward", REBASE - 6)
+            local cycle = frametable.tickCount(frametable.register(source, source:tagId("forward"))) / TICK_HZ
+            local before = animation.timeOf(world, entity)
+
+            local at = world:fixedStepCount()
+            world:update(6 * STEP)
+            local ran = world:fixedStepCount() - at
+            assert.is_true(ran > 0, "steps ran")
+
+            -- The steps that ran and nothing else. A rebase that shifted the
+            -- anchor without folding the phase would land somewhere else in the
+            -- cycle entirely, and one that folded by anything but whole cycles
+            -- would be visible here as a jump.
+            local moved = (animation.timeOf(world, entity) - before) % cycle
+            within(moved, ran * STEP, 0.002, "seconds the cycle carried on by")
+        end)
+
+        it("folds a row's phase into its cycle rather than shifting its anchor", function()
+            local world, entity, source = playing("forward", REBASE - 6)
+            world:update(6 * STEP)
+
+            -- The arithmetic the shader does, in the units it does it in. This
+            -- is the assertion the design turns on: the elapse a row carries is
+            -- bounded by its own cycle rather than by the world's age, so the
+            -- product stays inside what a float32 resolves to a tick forever
+            -- rather than for the first few hours.
+            local target = world:get(entity, Sprite)
+            local ticks = (frametable.clockOf(world) - target.v0) * target.u1
+            local count = frametable.tickCount(frametable.register(source, source:tagId("forward")))
+            assert.is_true(ticks >= 0.0, "anchored at or behind the clock")
+            assert.is_true(ticks <= count, ("within one cycle of it: %.1f of %d"):format(ticks, count))
+            assert.is_true(ticks < EXACT_TICKS)
+        end)
+
+        it("costs one rewrite of the animated rows and nothing after it", function()
+            local world, _, _, packet = playing("forward", REBASE - 6)
+
+            -- The steady state either side of it: a frame changing is not a
+            -- write, which is the whole design.
+            world:update(STEP)
+            assert.are.equal(0, packet.rewritten, "nothing written on the way up to the crossing")
+
+            world:update(6 * STEP)
+            assert.is_true(world:fixedStepCount() >= REBASE, "the clock came round")
+            assert.are.equal(1, packet.rewritten, "the row was re-anchored and rewritten once")
+
+            world:update(STEP)
+            assert.are.equal(0, packet.rewritten, "and nothing on the update after it")
+        end)
+
+        it("holds a paused row on the tick it was holding", function()
+            local world, entity = playing("forward", 12)
+            world:set(entity, tecs.ecs.Paused)
+            world:update(STEP)
+            local held = animation.frameOf(world, entity)
+
+            driveTo(world, REBASE - 6)
+            world:update(6 * STEP)
+
+            near(frametable.clockOf(world), 0.0, "the clock came round")
+            assert.are.equal(held, animation.frameOf(world, entity), "and the held frame is the held frame")
+        end)
+
+        it("parks a one-shot that finished before the clock came round", function()
+            local world, entity, source = playing(nil, REBASE - 6)
+            world:update(6 * STEP)
+
+            -- A one-shot clamps at its last tick, so the frame it parked on is
+            -- the frame it holds however far the clock has run past the end.
+            assert.are.equal(source.count, animation.frameOf(world, entity))
+        end)
     end)
 end)

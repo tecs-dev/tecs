@@ -2401,12 +2401,11 @@ directory read, one tick read, one region read, and no loop. A scan of
 cumulative durations would cost the length of the tag, in the vertex shader,
 once per vertex, for every pass that draws the sprite.
 
-The clock is the world's count of fixed steps, from `world:fixedStepCount`,
-carried in the frame packet and pushed in the spare component of the layer
-uniform. Steps rather than seconds is what keeps playback on the simulation's
-clock: two machines fed the same steps show the same frame however many frames
-either drew, which is the property the host path has and the reason it runs in
-`FixedPostUpdate`. It also costs no binding and no second push, because that
+The clock is a count of fixed steps, carried in the frame packet and pushed in
+the spare component of the layer uniform. Steps rather than seconds is what keeps
+playback on the simulation's clock: two machines fed the same steps show the same
+frame however many frames either drew, and every frame drawn inside one step
+resolves the same one. It also costs no binding and no second push, because that
 block is already sent every frame.
 
 Resolution lives in `assets/shaders/include/playback.glsl` rather than in the
@@ -2465,6 +2464,42 @@ carries the tick to hold instead of the step playback began on. `Paused` moves
 an entity to another archetype and a move marks every component on the
 destination dirty, so the freeze and the thaw both arrive at the encoder without
 anything having to notice them.
+
+### The clock comes round
+
+Both quantities the shader multiplies have a ceiling, because both are floats. A
+float32 names every integer up to 2^24, which is 77 hours of steps at sixty
+hertz, so a clock that only ever grew would eventually stop naming every step.
+And the ticks a row is into its cycle are the difference between the clock and
+the row's start step times a rate, which a float32 resolves to a whole
+millisecond only while the product stays under the same 2^24, about four and a
+half hours of one animation playing. Past that a boundary lands a tick late, then
+two, then a whole step. A game left running all day drifts and then stutters.
+
+So `tecs.RebaseAnimation` moves the clock's origin up to the step the world has
+reached, every `frametable.REBASE_STEPS`, and rewrites every animated row's start
+step against the new origin. That is two and a half hours of uptime at sixty
+hertz, one rewrite of the animated rows on the update it happens, and nothing on
+any update either side of it.
+
+Subtracting a constant from the clock and from every start step is the version
+that suggests itself, and it moves the growth rather than removing it: the start
+steps go as far below zero as the clock was above it and lose exactly the
+resolution the rebase was for. What makes it work is that a cycle repeats. The
+rebase folds each row's phase into its own cycle before re-anchoring it, which is
+invisible because whole cycles are what the shader's own wrap takes off anyway,
+and the elapse a row carries is then bounded by the period instead of by the
+world's age. That is also what sets the period: `REBASE_STEPS` times a rate has
+to stay inside the exact range, which holds to about twice the authored speed at
+sixty hertz and quantises in proportion to the rate above that rather than in
+proportion to how long the game has been on.
+
+The origin lives with the encoding, in `frametable`, because a start step and the
+clock it is subtracted from have to share one, and it is per world since a start
+step is written into a row of one world. Extraction publishes `frametable.clockOf`
+rather than `world:fixedStepCount`, so the world's own count stays what it claims
+to be, a number of steps that only increases, and the only clock that comes round
+is the one playback measures against.
 
 ### The pivot that follows a moving slice
 
