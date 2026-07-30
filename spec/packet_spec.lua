@@ -892,6 +892,98 @@ describe("partial structural rewrites", function()
     end)
 end)
 
+-- A structural change in a phase after RenderFirst, which is the phase
+-- extraction runs in.
+--
+-- The frame that made the change has already extracted, so the rows it moved
+-- are owed to the next frame's sync; the component bits it set are cleared at
+-- the end of the same update, before that sync ever looks at them. A despawn
+-- and a spawn together leave the run the length it already was, so the run's
+-- extent says nothing either, and the row a swap-pop overwrote keeps drawing
+-- the entity the world despawned.
+describe("structural change after extraction", function()
+    local CAPACITY = 64
+    local POPULATION = 8
+
+    local function newExtraction(partial)
+        local world = tecs.ecs.newWorld()
+        local extractor = Extractor.create({
+            capacity = CAPACITY,
+            partialRewrites = partial,
+            whiteU0 = 0.0,
+            whiteV0 = 0.0,
+            whiteU1 = 1 / 512,
+            whiteV1 = 1 / 512,
+        })
+        local packet = FramePacket.create()
+        local instances = loader.newArray("float[?]", CAPACITY * INSTANCE_FLOATS)
+        local bounds = loader.newArray("float[?]", CAPACITY * 4)
+        extractor:setStaging(0, instances, bounds)
+        extractor:install(world, packet)
+        return world, packet, bounds
+    end
+
+    -- A bound's center is the quad's middle, and an unpivoted quad's middle is
+    -- its position, so x names which entity a row is holding.
+    local function centerX(bounds, row)
+        return bounds[(row - 1) * 4]
+    end
+
+    local function spawnAt(world, x)
+        return world:spawn(Transform(x, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+    end
+
+    -- Despawns the run's first row and spawns a replacement, once, from a
+    -- system in `phase`. The despawn swaps the last row down into row one and
+    -- the spawn appends where the despawn left room, so two rows are holding
+    -- something else and the length is what it was.
+    local function churn(partial, phase)
+        local world, packet, bounds = newExtraction(partial)
+        local ids = {}
+        for row = 1, POPULATION do
+            ids[row] = spawnAt(world, row * 10)
+        end
+
+        local churned = false
+        world:addSystem({
+            name = "spec.ChurnAfterExtraction",
+            phase = phase,
+            run = function()
+                if churned then
+                    return
+                end
+                churned = true
+                world:despawn(ids[1])
+                spawnAt(world, 999)
+            end,
+        })
+
+        world:update(1 / 60)
+        assert.are.equal(POPULATION, packet.count, "the first frame lays the population out")
+        assert.are.equal(10, centerX(bounds, 1), "and the churn lands after it extracted")
+
+        world:update(1 / 60)
+        assert.is_true(churned, "the churning system ran")
+        assert.are.equal(POPULATION, packet.count, "the churn nets no length change")
+        assert.are.equal(POPULATION * 10, centerX(bounds, 1), "the swap-pop's row draws what moved into it")
+        assert.are.equal(999, centerX(bounds, POPULATION), "and the appended row draws the spawn")
+    end
+
+    for _, phase in ipairs({ "PostRender", "RenderLast", "Last" }) do
+        it("rewrites a swap-pop made in " .. phase, function()
+            churn(false, tecs.ecs.phases[phase])
+        end)
+
+        it("rewrites a swap-pop made in " .. phase .. ", partial", function()
+            -- The narrower path already survives this: the structural count is
+            -- monotonic, and the residue window opened where the frame's clear
+            -- closed the last one, so a count from before that window is
+            -- refused rather than believed.
+            churn(true, tecs.ecs.phases[phase])
+        end)
+    end
+end)
+
 describe("render backend", function()
     local window, device, screen
 

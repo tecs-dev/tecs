@@ -1321,10 +1321,17 @@ local function syncInstances(self: Extractor, packet: FramePacket)
                     end
                 end
             else
-                -- Structural change dirties every column, which is what the
-                -- archetype answers `isComponentDirty` with and what a length
-                -- that moved is the other half of.
-                dirty = inner:isStructurallyDirty() or run.length ~= pending
+                -- The structural count rather than the dirty flag, for the
+                -- same reason the partial path above reads it: the flag is
+                -- scoped to the frame and this consumer is not. Extraction
+                -- runs in RenderFirst, so a spawn or a despawn in any phase
+                -- after it is owed to the next frame's sync, and the frame's
+                -- clear wipes the flag in between. The count is monotonic, so
+                -- the change is still a difference here a frame later. A
+                -- length that moved is kept as the other half of what a
+                -- placement or a removal owes, and a run truncated by the
+                -- buffer's ceiling is the case it answers on its own.
+                dirty = structAt ~= run.structAt or run.length ~= pending
             end
         end
 
@@ -1484,6 +1491,11 @@ end
 --- Syncing runs inside the world's update, in RenderFirst. Rendering happens
 --- afterwards against a frame, so the two stay separable: the sync needs no
 --- command buffer and the render needs no world.
+---
+--- A spawn or a despawn in a phase after RenderFirst reaches the instance
+--- buffer on the next frame's sync rather than this one's, so what it changed
+--- draws one frame late. Nothing is lost: the archetype's structural count
+--- outlives the frame's dirty bits, and the next sync reads that.
 --- @param published Called once the packet is filled, which is the moment it
 ---     would be handed over. What flips a slot's state when there is one.
 function Extractor:install(world: types.World, packet: FramePacket, published: function())
