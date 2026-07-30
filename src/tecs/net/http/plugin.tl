@@ -40,6 +40,11 @@ had not answered yet is sent again on load rather than restored as a wait on
 a transfer that ended with the world that started it. The `Response` a game
 eventually reads is the reissued request's.
 
+The exception is a `Request` whose `body` or `into` is a
+`DataStream.ofHandle`. The caller owns that live handle, and neither snapshot
+format can reconstruct its ownership or position, so saving the world raises.
+Use `DataStream.ofFile` when a request must survive a snapshot.
+
 Loading stops the transfers that were open before it. A load replaces the
 world in place and despawns nothing, so the entities that asked are gone
 without anything hearing about it, and a transfer nobody is left to receive
@@ -67,9 +72,13 @@ local record plugin
         method: string
         --- Merged over the client's, matched without case.
         headers: {string: string}
-        --- What to send.
+        --- Caller-writable. Sets what to send. A snapshot rejects a
+        --- `DataStream.ofHandle` here because its live handle cannot be
+        --- reconstructed.
         body: string | DataStream
-        --- Where the body goes. Left out, it comes back as a string.
+        --- Caller-writable. Sets where the body goes. Left out, it comes back
+        --- as a string. A snapshot rejects a `DataStream.ofHandle` here
+        --- because its live handle cannot be reconstructed.
         into: string | DataStream
         --- Milliseconds this transfer is given, overriding the client's.
         timeoutMs: number
@@ -124,6 +133,24 @@ end
 local type Request = plugin.Request
 local type Response = plugin.Response
 
+local function serializeRequest(request: Request): {string: any}
+    local data: {string: any} = {}
+    for key, value in pairs(request as {string: any}) do
+        if (key == "body" or key == "into") and DataStream.is(value) and (value as DataStream).kind == "handle" then
+            error(
+                ("tecs: cannot snapshot tecs.http.Request: %s from DataStream.ofHandle is runtime-only"):format(key), 0
+            )
+        end
+        if type(key) == "string" and not key:match("^component") and key ~= "storage" then
+            local valueType <const> = type(value)
+            if valueType == "number" or valueType == "string" or valueType == "boolean" or valueType == "table" then
+                data[key] = value
+            end
+        end
+    end
+    return data
+end
+
 -- The three names below, the resource key under them and the system names
 -- further down are all spelled `tecs.http.*` and stay that way now that the
 -- module is `tecs.net.http`. A snapshot names a component by string and an
@@ -134,6 +161,7 @@ ecs.newComponent(
     {
         name = "tecs.http.Request",
         container = plugin.Request,
+        serialize = serializeRequest,
     }
 )
 

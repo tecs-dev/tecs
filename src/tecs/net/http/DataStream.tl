@@ -138,6 +138,10 @@ local record DataStream
     --- which is the whole difference between this and `ofFile`. Give `length`
     --- when it is known, or the request is sent chunked.
     ---
+    --- A `tecs.net.http.plugin.Request` cannot snapshot this stream. The live
+    --- handle has no stable ownership or position to restore, so both snapshot
+    --- formats raise. Use `ofFile` for a request that must survive a save.
+    ---
     --- @param handle An open file handle. Nil raises. Reading starts wherever it
     ---     is positioned rather than at the beginning.
     --- @param length Optional, and nothing verifies it. Left out, a request is

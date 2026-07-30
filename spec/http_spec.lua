@@ -815,3 +815,26 @@ describe("http.newClient", function()
         end)
     end)
 end)
+
+describe("http.plugin snapshots", function()
+    for _, format in ipairs({ "table", "binary" }) do
+        for _, field in ipairs({ "body", "into" }) do
+            it("rejects a handle-backed request " .. field .. " in a " .. format .. " snapshot", function()
+                local world = tecs.ecs.newWorld()
+                local handle = assert(io.tmpfile())
+                local stream = http.DataStream.ofHandle(handle)
+                local request = { url = "https://example.com/upload", [field] = stream }
+                world:spawn(http.plugin.Request(request))
+
+                local ok, failure = pcall(world.saveSnapshot, world, { format = format })
+                handle:close()
+
+                assert.is_false(ok)
+                assert.matches(
+                    "tecs: cannot snapshot tecs.http.Request: " .. field .. " from DataStream.ofHandle is runtime%-only",
+                    tostring(failure)
+                )
+            end)
+        end
+    end
+end)
