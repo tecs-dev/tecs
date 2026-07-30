@@ -16,10 +16,11 @@ local record Reader
     --- Caller-writable. Supplies the operation that reads the next bytes.
     ---
     --- @param self The reader whose cursor advances.
-    --- @param count The maximum number of bytes to return. A non-positive
-    ---     count may still return one byte so the reader can make progress.
-    --- @return Returns up to `count` bytes, fewer at the end, or an empty
-    ---     string after the source is exhausted.
+    --- @param count The maximum number of bytes to return when positive.
+    ---     Zero and negative counts are treated as one so the reader makes
+    ---     progress.
+    --- @return Returns up to `max(1, count)` bytes, fewer at the end, or an
+    ---     empty string after the source is exhausted.
     --- @return Returns the source's reason when the first return is nil.
     read: function(self: Reader, count: integer): string, string
 

@@ -242,9 +242,6 @@ local function take(pointer: loader.CValue): string
     return text
 end
 
---- Bytes read in one call when a caller does not ask for a size.
-local READ_CHUNK <const> = 64 * 1024
-
 --- Opens an `SDL_IOStream` and wraps it as a `Writer`.
 ---
 --- The stream is a closed-over local rather than a field, so a closed writer
@@ -304,7 +301,7 @@ local function sdlReader(path: string): Reader, string
         if stream == nil then
             return nil, "the reader is closed"
         end
-        local wanted <const> = count ~= nil and count > 0 and count or READ_CHUNK
+        local wanted <const> = math.max(1, count)
         if wanted > capacity then
             buffer = loader.newArray("char[?]", wanted)
             capacity = wanted
