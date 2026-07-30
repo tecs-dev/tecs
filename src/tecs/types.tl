@@ -1740,8 +1740,19 @@ local record types
         interface MessageBus
             --- Observe an event type at a specific address.
             --- Address 0 is for world-level events, entity IDs for entity events.
+            ---
+            --- @param self The message bus that owns the subscription.
+            --- @param address Use 0 for world-level events or an entity ID for
+            ---     entity events.
+            --- @param eventType The registered event type to observe.
+            --- @param observer Called synchronously with each matching event.
+            --- @param id An optional stable name accepted by `stopObserving`.
             observe: function<E is Event>(
-                self: MessageBus, address: integer, eventType: E, observer: function(E), id?: string
+                self: MessageBus,
+                address: integer,
+                eventType: E,
+                observer: function(event: E),
+                id?: string
             )
 
             --- Observe an event type at a specific address, at most once.
