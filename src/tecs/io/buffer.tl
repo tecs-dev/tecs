@@ -245,7 +245,11 @@ function buffer.commitWrite(destination: IOBuffer, offset: integer, count: integ
         end
         return
     end
-    destination:resize(max(previousLength, offset + count))
+    if count == 0 then
+        destination:resize(previousLength)
+    else
+        destination:resize(max(previousLength, offset + count))
+    end
 end
 
 return buffer
