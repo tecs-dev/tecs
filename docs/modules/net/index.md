@@ -1,5 +1,5 @@
 ---
-description: "Nonblocking TCP streams and UDP datagrams with asynchronous hostname resolution"
+description: "Nonblocking TCP and UDP transport with lazy HTTP and MCP protocols"
 outline: deep
 ---
 

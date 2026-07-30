@@ -118,7 +118,7 @@ describe("tecs headless", function()
                 require("tecs")
                 local engine = {
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
-                    "tecs.assets", "tecs.physics", "tecs.mcp",
+                    "tecs.assets", "tecs.physics", "tecs.net.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3",
                     "tecs.data", "tecs.math", "tecs.regex",
                     "tecs.platform.system",
@@ -211,6 +211,32 @@ describe("tecs headless", function()
             -- reading it answers with the module rather than a copy. `net` is
             -- the same, and HTTP did not come with it.
             assert.are.equal("true false true nil true false\n", output)
+        end)
+
+        it("loads one network protocol without its sibling", function()
+            local httpOutput = run(
+                [[
+                local tecs = require("tecs")
+                local http = tecs.net.http
+                print(("%s %s"):format(
+                    tostring(rawequal(http, require("tecs.net.http"))),
+                    tostring(package.loaded["tecs.net.mcp"] == nil)))
+            ]],
+                false
+            )
+            assert.are.equal("true true\n", httpOutput)
+
+            local mcpOutput = run(
+                [[
+                local tecs = require("tecs")
+                local mcp = tecs.net.mcp
+                print(("%s %s"):format(
+                    tostring(rawequal(mcp, require("tecs.net.mcp"))),
+                    tostring(package.loaded["tecs.net.http"] == nil)))
+            ]],
+                false
+            )
+            assert.are.equal("true true\n", mcpOutput)
         end)
 
         it("reports a mistyped engine name as nil", function()

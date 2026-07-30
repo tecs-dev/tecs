@@ -21,7 +21,7 @@ local ComputePass = require("tecs.gpu.ComputePass")
 local time = require("tecs.platform.time")
 local filesystem = require("tecs.platform.filesystem")
 local log = require("tecs.log")
-local mcp = require("tecs.mcp")
+local mcp = require("tecs.net.mcp")
 
 local FIXTURE = "spec/fixtures/split.png"
 

@@ -15,8 +15,8 @@ local cjson = require("cjson")
 local shaders = require("tecs.gpu.shaders")
 local filesystem = require("tecs.platform.filesystem")
 local materials = require("tecs.gpu.materials")
-local mcp = require("tecs.mcp")
-local tools = require("tecs.mcp.tools")
+local mcp = require("tecs.net.mcp")
+local tools = require("tecs.net.mcp.tools")
 local assets = require("tecs.assets")
 
 --- A material body naming itself, so the dispatch can be read back for it.

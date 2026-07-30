@@ -80,7 +80,8 @@ tecs/
 │   ├── platform/          # window, input, audio, events, time, files, the OS
 │   ├── physics/           # Rapier world integration
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
-│   ├── mcp/               # Debug server: transport, tools, sandbox
+│   ├── net/               # HTTP clients and protocol modules
+│   │   └── mcp/           # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
 │   ├── Renderer.tl        # World to GPU, owning the two halves below
 │   ├── Extractor.tl       # World-facing: a world to a frame packet

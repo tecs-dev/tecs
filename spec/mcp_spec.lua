@@ -12,8 +12,8 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")
 local net = require("tecs.net")
-local mcp = require("tecs.mcp")
-local sandbox = require("tecs.mcp.sandbox")
+local mcp = require("tecs.net.mcp")
+local sandbox = require("tecs.net.mcp.sandbox")
 
 local C = sdl.C
 local PORT = 7411

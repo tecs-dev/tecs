@@ -7,7 +7,8 @@ several writes may arrive in one read, and message framing belongs to the
 caller. A datagram preserves one send as one packet, but the network may lose,
 duplicate or reorder it.
 
-HTTP and HTTPS live under `tecs.net.http`.
+HTTP and HTTPS live under `tecs.net.http`. The MCP debug server lives under
+`tecs.net.mcp`.
 
 Resolution and client connection return asynchronous
 [`Future`](tealdoc:tecs.Future) values.
@@ -41,8 +42,8 @@ failure.
 -- establish client connections, then Lua polls their results. No native
 -- callback enters LuaJIT.
 --
--- Reading `tecs.net` does not initialize a protocol. The HTTP runtime starts
--- only when `tecs.net.http` is read.
+-- Reading `tecs.net` does not initialize a protocol. The HTTP and MCP runtimes
+-- start only when their respective subordinate modules are read.
 
 local binding <const> = require("tecs.ffi.rust")
 local loader <const> = require("tecs.ffi.loader")
@@ -51,9 +52,10 @@ local Future <const> = require("tecs.Future")
 -- Type-only, so nothing loads here and HTTP is not initialized by a program
 -- that only opens a socket: the field below declares the name and `tecs.init`
 -- fills it in on the first read of it. The edge runs this way round and only
--- this way. Nothing under `http` requires this module, which is what keeps
--- naming its type from being a require cycle Teal rejects.
+-- this way. Neither protocol child requires this module, which is what keeps
+-- naming either type from being a require cycle Teal rejects.
 local type http = require("tecs.net.http")
+local type mcp = require("tecs.net.mcp")
 
 local type FutureType<T> = Future<T>
 local type Source = Future.Source
@@ -77,6 +79,9 @@ local WAIT_SLICE_MS <const> = 16
 local record net
     --- Read-only. `http` provides asynchronous HTTP and HTTPS clients.
     http: http
+
+    --- Read-only. `mcp` provides the debug server and tool registry.
+    mcp: mcp
 
     --- An `Address` owns one resolved network address.
     record Address

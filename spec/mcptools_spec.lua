@@ -11,9 +11,9 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
-local mcp = require("tecs.mcp")
+local mcp = require("tecs.net.mcp")
 local events = require("tecs.platform.events")
-require("tecs.mcp.tools")
+require("tecs.net.mcp.tools")
 
 local C = sdl.C
 
@@ -123,7 +123,7 @@ describe("mcp send_event", function()
 end)
 
 describe("mcp context", function()
-    local tools = require("tecs.mcp.tools")
+    local tools = require("tecs.net.mcp.tools")
     local tecs = require("tecs")
 
     setup(function()

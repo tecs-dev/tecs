@@ -132,7 +132,7 @@ local system <const> = require("tecs.platform.system")
 local httpClients <const> = require("tecs.net.http.clients")
 local watch <const> = require("tecs.platform.watch")
 local log <const> = require("tecs.log")
-local mcp <const> = require("tecs.mcp")
+local mcp <const> = require("tecs.net.mcp")
 local timing <const> = require("tecs.timing")
 
 local LOGGER <const> = log.get("tecs.app")
@@ -776,7 +776,7 @@ function Application:_init(): boolean
     -- watcher drive them, so they are bound when either is asked for rather
     -- than by the server alone.
     if config.mcpPort ~= nil or config.watch ~= nil then
-        local tools = require("tecs.mcp.tools")
+        local tools = require("tecs.net.mcp.tools")
         tools.bind(self.renderer, self.world)
 
         -- The device's half of a shader reload. The tool re-reads the sources
@@ -791,7 +791,7 @@ function Application:_init(): boolean
         -- Only the world. Which components exist is the ECS's registry to
         -- answer, and the tools read it there, so a game's own components are
         -- nameable without the game being told to say so.
-        local mcpWorld = require("tecs.mcp.world")
+        local mcpWorld = require("tecs.net.mcp.world")
         mcpWorld.bind(self.world)
         self.mcp = mcp.listen(config.mcpPort)
 
@@ -861,7 +861,7 @@ function Application:_init(): boolean
     -- call costs a nil check on the ordinary path. A handler that raised
     -- never reaches it: the reload refused, so nothing has changed.
     if config.watch ~= nil then
-        local tools = require("tecs.mcp.tools")
+        local tools = require("tecs.net.mcp.tools")
         watch.on("shader", function() tools.reloadShaders(); self:clearCrash() end)
         watch.on("image", function(change: watch.Change) tools.reloadImage(change.path); self:clearCrash() end)
         watch.on("sound", function(change: watch.Change) tools.reloadSound(change.path); self:clearCrash() end)

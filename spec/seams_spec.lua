@@ -197,7 +197,7 @@ local REACH = {
         modules = {
             "tecs/physics/TaskPool.lua",
             "tecs/physics/World.lua",
-            "tecs/mcp/transport.lua",
+            "tecs/net/mcp/transport.lua",
             "tecs/net.lua",
             "tecs/regex.lua",
         },
@@ -211,7 +211,7 @@ local REACH = {
             "tecs/audio.lua",
             "tecs/assets.lua",
             "tecs/gfx/screenshot.lua",
-            "tecs/mcp/tools.lua",
+            "tecs/net/mcp/tools.lua",
         },
     },
     {
@@ -304,7 +304,7 @@ local STDIO = {
         reason = "Dumps a profile where whoever was profiling asked for it. "
             .. "Nothing calls it on a target and a release does not profile.",
     },
-    ["tecs/mcp/tools.lua"] = {
+    ["tecs/net/mcp/tools.lua"] = {
         bucket = "bypass",
         reason = "The debug server pages the engine's own log file, seeking to "
             .. "the offset the agent left off at and asking how long the file "

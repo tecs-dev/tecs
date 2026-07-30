@@ -12,8 +12,8 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local cjson = require("cjson")
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
-local mcp = require("tecs.mcp")
-local mcpWorld = require("tecs.mcp.world")
+local mcp = require("tecs.net.mcp")
+local mcpWorld = require("tecs.net.mcp.world")
 local components = require("tecs.components")
 local ecs = require("tecs.ecs")
 

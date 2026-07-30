@@ -334,6 +334,7 @@ describe("the public surface", function()
         it("does not answer at the module names they moved off", function()
             assert.is_nil(tecs.application)
             assert.is_nil(tecs.future)
+            assert.is_nil(tecs.mcp)
         end)
 
         it("keeps the ECS vocabulary on tecs.ecs and not beside it", function()
@@ -362,6 +363,16 @@ describe("the public surface", function()
             -- firing. A module owns every name it answers, so there is nothing
             -- to route and nothing to keep consulting.
             assert.is_true(rawequal(rawget(tecs.filesystem, "watch"), require("tecs.platform.watch")))
+        end)
+
+        it("hangs MCP below networking and nowhere deeper", function()
+            assert.is_true(rawequal(tecs.net.mcp, require("tecs.net.mcp")))
+            assert.is_true(rawequal(rawget(tecs.net, "mcp"), require("tecs.net.mcp")))
+            assert.are.equal("function", type(tecs.net.mcp.tools))
+            assert.is_false(rawequal(tecs.net.mcp.tools, require("tecs.net.mcp.tools")))
+            assert.is_nil(tecs.net.mcp.transport)
+            assert.is_nil(tecs.net.mcp.sandbox)
+            assert.is_nil(tecs.net.mcp.world)
         end)
 
         it("takes a write on the module that reads it back", function()

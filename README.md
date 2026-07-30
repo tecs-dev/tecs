@@ -3820,7 +3820,7 @@ src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Rapier binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
-src/tecs/mcp/             the debug server: transport, tools, sandbox
+src/tecs/net/mcp/         the debug server: transport, tools, sandbox
 src/tecs/assets.tl        images and clips, decoded on a worker
 src/tecs/workers.tl       threads with serialized channels
 src/tecs/Future.tl        the value everything asynchronous settles into

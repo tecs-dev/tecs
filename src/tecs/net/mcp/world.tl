@@ -20,7 +20,7 @@ nothing has to be told about a component twice.
 local data <const> = require("tecs.data")
 local ecs <const> = require("tecs.ecs")
 local type types = require("tecs.types")
-local mcp <const> = require("tecs.mcp")
+local mcp <const> = require("tecs.net.mcp")
 
 --- Registers the world-facing tools, and names the world they act on.
 ---

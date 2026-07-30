@@ -32,7 +32,6 @@ A module may contain one level of subordinate modules, such as
 | [`tecs.io`](/modules/io)                  | directional binary readers and writers                      |
 | [`tecs.log`](/modules/log)                | named, leveled platform logging                             |
 | [`tecs.math`](/modules/math)              | allocation-free 2D vector and angle math                    |
-| [`tecs.mcp`](/modules/mcp)                | the debug server, tools, and sandbox                        |
 | [`tecs.net`](/modules/net/)               | nonblocking TCP streams and UDP datagrams                   |
 | [`tecs.physics`](/modules/physics)        | Rapier 2D rigid-body simulation                             |
 | [`tecs.regex`](/modules/regex)            | compiled regular expressions over Lua byte strings          |
@@ -55,6 +54,7 @@ Each subordinate module has its own page.
 | [`tecs.gfx.materials`](/modules/gfx/materials)       | the material a draw dispatches to               |
 | [`tecs.gfx.particles`](/modules/gfx/particles)       | emitters                                        |
 | [`tecs.net.http`](/modules/net/http)                 | fetching over HTTP without stopping the frame   |
+| [`tecs.net.mcp`](/modules/net/mcp)                   | the debug server, tools, and sandbox            |
 
 ## Root types and functions
 

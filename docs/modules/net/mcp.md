@@ -3,4 +3,4 @@ description: "MCP server setup, world inspection, safe mutation, custom tools, a
 outline: deep
 ---
 
-# tecs.mcp
+# tecs.net.mcp

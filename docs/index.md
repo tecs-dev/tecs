@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Live inspection
-    details: Inspect, freeze, and edit a running game through the <a href="/modules/mcp">built-in MCP server</a>.
+    details: Inspect, freeze, and edit a running game through the <a href="/modules/net/mcp">built-in MCP server</a>.
     icon: 🤖
   - title: ECS built for LuaJIT
     details: >-
@@ -237,7 +237,6 @@ The host loads `tecs` before the entry file. A game can use these names without 
 - [`tecs.io`](/modules/io) - directional interfaces for streaming binary strings
 - [`tecs.log`](/modules/log) - named, leveled platform logging
 - [`tecs.math`](/modules/math) - allocation-free 2D vector and angle math
-- [`tecs.mcp`](/modules/mcp) - the debug server agents and humans drive a running game through
 - [`tecs.net`](/modules/net/) - nonblocking TCP streams and UDP datagrams
 - [`tecs.physics`](/modules/physics) - Rapier 2D, solved across a shared thread pool
 - [`tecs.regex`](/modules/regex) - compiled regular expressions over Lua byte strings
@@ -256,6 +255,7 @@ Inside one of those, one level and no deeper:
 - [`tecs.gfx.materials`](/modules/gfx/materials) - one fragment shader, compiled from the material set
 - [`tecs.gfx.particles`](/modules/gfx/particles) - emitters
 - [`tecs.net.http`](/modules/net/http) - fetching over HTTP without stopping the frame
+- [`tecs.net.mcp`](/modules/net/mcp) - the debug server agents and humans drive a running game through
 
 On `tecs` itself, because no one module owns them:
 

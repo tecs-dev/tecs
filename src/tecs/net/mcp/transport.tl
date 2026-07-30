@@ -12,6 +12,8 @@ local loader <const> = require("tecs.ffi.loader")
 local log <const> = require("tecs.log")
 
 local C <const> = rust.C
+-- `tecs.mcp` is an externally typed logger name and remains unchanged when
+-- the Lua module moves.
 local LOGGER <const> = log.get("tecs.mcp")
 
 local record transport
