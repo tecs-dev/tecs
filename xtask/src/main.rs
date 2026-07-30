@@ -405,9 +405,20 @@ fn install_dev_tools(root: &std::path::Path) -> Result<()> {
         .env("SCINTILLUA_REF", product::SCINTILLUA_REVISION)
         .current_dir(root)
         .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        anyhow::bail!("development tool installation exited with {status}")
+    if !status.success() {
+        anyhow::bail!("development tool installation exited with {status}");
     }
+
+    // The LuaRocks launcher has previously installed successfully while
+    // dropping the checkout-local package path before Busted starts. Exercise
+    // the launcher itself so `dev-tools` cannot report a checkout ready in that
+    // state.
+    let status = std::process::Command::new(root.join("vendor/bin/busted"))
+        .arg("--version")
+        .current_dir(root)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("installed Busted launcher exited with {status}");
+    }
+    Ok(())
 }

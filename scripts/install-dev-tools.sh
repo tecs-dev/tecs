@@ -58,6 +58,25 @@ luarocks install \
     busted \
     "$BUSTED_VERSION"
 
+# LuaRocks' generated launcher prepends this tree and then loads
+# `luarocks.loader`, which replaces that path from the system configuration.
+# The checkout-local modules consequently disappear before Busted starts.
+# Install a relocatable launcher that names the tree directly and does not
+# involve the loader.
+cat >"$vendor/bin/busted" <<EOF
+#!/bin/sh
+
+set -eu
+
+vendor=\$(CDPATH= cd -- "\$(dirname -- "\$0")/.." && pwd)
+LUA_PATH="\$vendor/share/lua/5.1/?.lua;\$vendor/share/lua/5.1/?/init.lua;;\${LUA_PATH:-}"
+LUA_CPATH="\$vendor/lib/lua/5.1/?.so;;\${LUA_CPATH:-}"
+export LUA_PATH LUA_CPATH
+
+exec luajit "\$vendor/lib/luarocks/rocks-5.1/busted/$BUSTED_VERSION/bin/busted" "\$@"
+EOF
+chmod 0755 "$vendor/bin/busted"
+
 # Teal type definitions for the modules this tree requires from outside itself.
 # The compiler reads them out of `vendor/share/lua/5.1`, which is what
 # `cargo xtask check` and every `tl gen` here pass as an include directory, so a
