@@ -375,16 +375,16 @@ pub fn test_package(root: &Path, preset: Preset) -> Result<()> {
 
 pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]) -> Result<()> {
     let source = match name {
-        "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "io" => name,
+        "shapes" | "physics" | "sprites" | "text" | "particles" | "latency" | "io" | "tcp" => name,
         "alloc" | "allocation" => "allocation",
         _ => anyhow::bail!(
             "unknown benchmark {name:?}; expected shapes, physics, sprites, text, \
-             particles, latency, io, or allocation"
+             particles, latency, io, tcp, or allocation"
         ),
     };
-    if source == "io" && preset.sanitize {
+    if matches!(source, "io" | "tcp") && preset.sanitize {
         anyhow::bail!(
-            "the io benchmark runs under system LuaJIT, not the instrumented native host; \
+            "the io and tcp benchmarks run under system LuaJIT, not the instrumented native host; \
              sanitizer preset {preset} would not sanitize it"
         );
     }
@@ -396,7 +396,7 @@ pub fn benchmark(root: &Path, preset: Preset, name: &str, arguments: &[OsString]
         &root.join("bench").join(format!("{source}.tl")),
         &format!("bench/{source}.lua"),
     )?;
-    let mut command = if source == "io" {
+    let mut command = if matches!(source, "io" | "tcp") {
         let mut command = Command::new("luajit");
         command.arg(entry);
         command
