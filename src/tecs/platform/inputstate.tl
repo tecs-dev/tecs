@@ -9,14 +9,15 @@ layer pushed once is answered the same way by all of them.
 ]=]
 
 local record Layer
-    --- What the layer is for, in diagnostics. Not an identity: two layers may
-    --- share a name, and a query is answered from the object rather than from
-    --- what it is called.
+    --- Read-only. Names what the layer is for in diagnostics. Not an identity:
+    --- two layers may share a name, and a query is answered from the object
+    --- rather than from what it is called.
     name: string
-    --- Whether this layer hides input from the layers beneath it.
+    --- Read-only. Reports whether this layer hides input from the layers
+    --- beneath it.
     blocking: boolean
-    --- Position in the stack. Compared against the topmost blocking layer to
-    --- decide whether this layer may read.
+    --- Read-only. Reports the position in the stack. Input compares it against
+    --- the topmost blocking layer to decide whether this layer may read.
     ---
     --- Fixed when the layer is pushed. Nothing renumbers, because the base
     --- layer is never removed and only the top one ever is, so an index cannot
