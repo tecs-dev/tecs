@@ -106,10 +106,12 @@ ecs.newFFIComponent(
 ---
 --- What crossing one costs is what the forward pass cannot do. A blended
 --- entity writes no depth, so it hides nothing behind it and nothing reading
---- the G-buffer can see it, and the forward list is shorter than the instance
---- buffer, so a scene with more blended entities than it holds draws the ones
---- earliest in the buffer and drops the rest. An entity meant to be solid
---- should say so with an alpha of exactly one.
+--- the G-buffer can see it: it casts no shadow, and its material's emission
+--- reaches its own color and no pass that reads the emission attachment. The
+--- forward list is also shorter than the instance buffer, so a scene with more
+--- blended entities than it holds draws the ones earliest in the buffer and
+--- drops the rest. An entity meant to be solid should say so with an alpha of
+--- exactly one.
 local record Tint is Component
     --- Caller-writable. Sets the red channel from zero to one.
     r: number
