@@ -104,8 +104,10 @@ local record watcher
         --- Read-only. The watcher sets `path` to the changed loaded path before
         --- it calls the handler.
         path: string
-        --- Read-only. The watcher sets `kind` to `"image"`, `"sound"`,
-        --- `"font"`, `"shader"` or `"document"` from the original load.
+        --- Read-only. The watcher sets `kind` to the content kind recorded by
+        --- the original load. Built-in loaders use `"image"`, `"sound"`,
+        --- `"font"`, `"shader"` or `"document"`; `filesystem.note` may
+        --- register another name.
         kind: string
     end
 
