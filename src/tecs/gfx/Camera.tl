@@ -50,6 +50,8 @@ local record CameraOptions
     --- Caller-writable. Sets the center of the view in world units. Both
     --- values default to zero.
     x: number
+    --- Caller-writable. Sets the center of the view in world units. Both
+    --- values default to zero.
     y: number
     --- Caller-writable. Sets the zoom and defaults to one. Zero or less
     --- divides through in every method here and is not rejected.

@@ -37,27 +37,27 @@ local record types
     record components
         --- An ECS component.
         interface Component
-            --- The container type of the component, available on instances and containers.
+            --- Read-only. The container type of the component, available on instances and containers.
             componentType: self
 
-            --- The name of the component.
+            --- Read-only. The name of the component.
             componentName: string
 
-            --- The auto-incrementing ID of the component container.
+            --- Read-only. The auto-incrementing ID of the component container.
             componentId: integer
 
-            --- Relationship components only: the relationship container type (nil for non-relationships).
+            --- Read-only. Relationship components only: the relationship container type (nil for non-relationships).
             --- For containers, this equals self. For instances, it points to the container.
             relationshipType: Component
 
-            --- Relationship instance wildcard container (nil for non-relationships and containers).
+            --- Read-only. Relationship instance wildcard container (nil for non-relationships and containers).
             --- For `Rel(target)` dense instances, this points back to `Rel`.
             wildcardContainer: Component
 
-            --- Relationship components only: The target entity ID (for relationship instances only).
+            --- Read-only. Relationship components only: The target entity ID (for relationship instances only).
             target: integer
 
-            --- True if this component is runtime-only and omitted from snapshots.
+            --- Read-only. True if this component is runtime-only and omitted from snapshots.
             transient: boolean
 
             --- Serialize a component instance to a plain table.
@@ -91,11 +91,11 @@ local record types
 
         --- Scalar component container. Rows store scalar payloads directly.
         interface ScalarComponent<T> is Component
-            --- Which primitive the column holds. Fixed at registration and
+            --- Read-only. Which primitive the column holds. Fixed at registration and
             --- never widened afterwards.
             scalarKind: ScalarKind
 
-            --- The value a row takes when the component is added without one.
+            --- Read-only. The value a row takes when the component is added without one.
             --- Never nil: `newScalarComponent` fills an omitted `default` with
             --- the zero of `kind` (`0`, `false` or `""`).
             scalarDefault: T
@@ -114,7 +114,7 @@ local record types
 
         --- A relationship component that links one or more entities together.
         interface Relationship is Component where self.relationshipType ~= nil
-            --- Component container property indicating that the relationship is exclusive (e.g., has-one).
+            --- Read-only. Component container property indicating that the relationship is exclusive (e.g., has-one).
             exclusiveRelationship: boolean
 
             --- Returns the component type for a specific target.
@@ -152,14 +152,14 @@ local record types
 
         --- Options for creating a new component.
         interface ComponentOptions<C is Component> is ContainerComponentOptions<C>
-            --- Ordered field names for positional construction and `.new(data)`.
+            --- Caller-writable. Ordered field names for positional construction and `.new(data)`.
             --- Example: `fields = {"x", "y"}` means `Component(1, 2)` maps to
             --- `{x = 1, y = 2}` and `Component.new({x = 1, y = 2})` unpacks by
             --- the same order. The generated constructor is `load`ed so LuaJIT
             --- sees literal field assignments.
             fields: {string}
 
-            --- Positional defaults, in the same order as `fields`. Use `nil` for
+            --- Caller-writable. Positional defaults, in the same order as `fields`. Use `nil` for
             --- fields that have no default. Requires `fields`.
             defaults: {any}
 
@@ -199,19 +199,19 @@ local record types
         --- often moves the entity between archetypes on every flip and is
         --- better as a boolean field.
         interface TagComponentOptions is BasicComponentOptions<Component>
-            --- Optional container to use for the tag component.
+            --- Caller-writable. Optional container to use for the tag component.
             container: Component
         end
 
         --- Options for creating an FFI-backed component.
         interface FFIComponentOptions<C is Component> is ContainerComponentOptions<C>
-            --- FFI field definitions for the backing struct.
+            --- Caller-writable. FFI field definitions for the backing struct.
             fields: {{string, string}}
 
-            --- Positional defaults, in the same order as `fields`.
+            --- Caller-writable. Positional defaults, in the same order as `fields`.
             defaults: {any}
 
-            --- Optional metatable to apply to FFI instances (for instance methods).
+            --- Caller-writable. Optional metatable to apply to FFI instances (for instance methods).
             metatable: {any: any}
 
             --- Optional post-allocation positional initializer. Same semantics as
@@ -245,11 +245,11 @@ local record types
         --- `Health: types.components.ScalarComponent<number>`) and assigning the
         --- registration result to it.
         interface ScalarComponentOptions<T> is BasicComponentOptions<ScalarComponent<T>>
-            --- Required. One of `"number"`, `"boolean"` or `"string"`;
+            --- Caller-writable. Required. One of `"number"`, `"boolean"` or `"string"`;
             --- anything else errors at registration rather than at first use.
             kind: string
 
-            --- Optional. Omitting it takes the zero of `kind` (`0`, `false`
+            --- Caller-writable. Optional. Omitting it takes the zero of `kind` (`0`, `false`
             --- or `""`), so a scalar column never reads back nil.
             default: T
         end
@@ -294,15 +294,15 @@ local record types
     --- `tecs.internal.Archetype` and are not part of the
     --- supported API.
     interface Archetype
-        --- The unique identifier of the archetype in the ECS container.
+        --- Read-only. The unique identifier of the archetype in the ECS container.
         id: integer
 
-        --- Entity IDs that belong to this archetype. Length is
+        --- Read-only. Entity IDs that belong to this archetype. Length is
         --- `entities[0]`; rows are 1-based (`entities[1]` is the
         --- first entity).
         entities: DoubleArray
 
-        --- Components in this archetype, in the order they were passed
+        --- Read-only. Components in this archetype, in the order they were passed
         --- at construction. Finalized at creation -- archetypes never
         --- add or remove components. Iterate with `#componentList` /
         --- `ipairs` to walk the archetype's signature.
@@ -647,13 +647,13 @@ local record types
 
     --- A phase in the game loop pipeline.
     interface Phase
-        --- The name of the phase.
+        --- Read-only. The name of the phase.
         name: string
 
-        --- The public pipeline position for this phase.
+        --- Read-only. The public pipeline position for this phase.
         position: integer
 
-        --- Child phases of this phase.
+        --- Read-only. Child phases of this phase.
         children: {Phase}
     end
 
@@ -683,28 +683,28 @@ local record types
 
     --- The pipeline that executes systems in phases.
     interface Pipeline
-        --- The number of systems in the pipeline.
+        --- Read-only. The number of systems in the pipeline.
         count: integer
 
-        --- The fixed timestep interval in seconds (e.g., 1/60 for 60Hz physics).
+        --- Read-only. The fixed timestep interval in seconds (e.g., 1/60 for 60Hz physics).
         fixedTimestep: number
 
-        --- Accumulated time not yet consumed by fixed updates.
+        --- Read-only. Accumulated time not yet consumed by fixed updates.
         --- Use with fixedTimestep to compute interpolation alpha: accumulator / timestep.
         fixedAccumulator: number
 
-        --- Fixed steps run since the pipeline was made.
+        --- Read-only. Fixed steps run since the pipeline was made.
         fixedStepCount: integer
 
-        --- The most fixed steps one `update` will run before the overload
+        --- Read-only. The most fixed steps one `update` will run before the overload
         --- policy decides what happens to the rest. Defaults to 10.
         fixedMaxSteps: integer
 
-        --- What happens to the time those steps would have consumed.
+        --- Read-only. What happens to the time those steps would have consumed.
         --- Defaults to `"drop"`.
         fixedOverload: FixedOverload
 
-        --- Simulated seconds abandoned by the `"drop"` policy since the
+        --- Read-only. Simulated seconds abandoned by the `"drop"` policy since the
         --- pipeline was made. Stays at zero under `"accumulate"`, which
         --- abandons nothing, and stays at zero on a machine that keeps up.
         ---
@@ -712,7 +712,7 @@ local record types
         --- exactly this much, and nothing else in the world says so.
         fixedTimeDropped: number
 
-        --- Fixed steps that were owed and never ran, on the same terms. Whole
+        --- Read-only. Fixed steps that were owed and never ran, on the same terms. Whole
         --- steps only: `fixedTimeDropped` is this many timesteps, because a
         --- drop leaves the sub-step remainder alone rather than resetting the
         --- interpolation alpha along with it.
@@ -753,7 +753,7 @@ local record types
 
     --- System configuration used when adding systems to the world
     interface SystemConfig
-        --- Optional, and unique across the whole pipeline: registering a
+        --- Caller-writable. Optional, and unique across the whole pipeline: registering a
         --- second system under a name already taken errors. Omitting it
         --- assigns a synthetic `_anonymousSystemN`, so `removeSystem` always
         --- has a handle, but the debugger, the MCP tools and profiles then
@@ -761,22 +761,22 @@ local record types
         --- system.
         name: string
 
-        --- Required, and must already be registered with the pipeline;
+        --- Caller-writable. Required, and must already be registered with the pipeline;
         --- `addSystem` errors on an unregistered phase rather than creating
         --- one.
         phase: Phase
 
-        --- Required. Receives `(dt, world)`, where `dt` is seconds and, in a
+        --- Caller-writable. Required. Receives `(dt, world)`, where `dt` is seconds and, in a
         --- fixed phase, is the fixed timestep rather than frame time.
         run: System
 
-        --- Names of systems this one must run before. A name that no system
+        --- Caller-writable. Names of systems this one must run before. A name that no system
         --- in the SAME phase carries is ignored silently: ordering is solved
         --- per phase, so a constraint naming a system in another phase does
         --- nothing. Mutual constraints across a group error as a cycle.
         before: {string}
 
-        --- Names of systems this one must run after, on the same terms as
+        --- Caller-writable. Names of systems this one must run after, on the same terms as
         --- `before`. Systems with no constraint between them keep
         --- registration order.
         after: {string}
@@ -1693,21 +1693,21 @@ local record types
     interface Bundle
         --- Declarative bundle definition.
         interface Definition
-            --- Components that must be provided as positional args to spawn().
+            --- Caller-writable. Components that must be provided as positional args to spawn().
             required: {components.Component}
-            --- Components with defaults, keyed by component type.
+            --- Caller-writable. Components with defaults, keyed by component type.
             --- Value is either a factory function returning a component instance,
             --- or `true` to call the component's default constructor.
             with: {components.Component: boolean | function(): components.Component}
         end
 
-        --- The name of the bundle.
+        --- Read-only. The name of the bundle.
         name: string
 
-        --- Component names that must be provided when spawning.
+        --- Read-only. Component names that must be provided when spawning.
         required: {string}
 
-        --- Component names with default factories.
+        --- Read-only. Component names with default factories.
         defaulted: {string}
 
         --- Spawn an entity using this bundle.
@@ -1734,7 +1734,7 @@ local record types
     record events
         --- An event that can be emitted.
         interface Event
-            --- The unique ID of the event.
+            --- Read-only. The unique ID of the event.
             eventId: integer
 
             --- Positional initializer used by `newEvent` / `newFFIEvent`.
@@ -1789,19 +1789,19 @@ local record types
         --- A string action ("pause", "resume", "despawn", "disable"),
         --- a plugin function, or a policy with both.
         record Action
-            --- Built-in action: "pause", "resume", "despawn", "disable"
+            --- Caller-writable. Built-in action: "pause", "resume", "despawn", "disable"
             apply: string
             --- Custom function called with the world
             call: function(World)
         end
 
-        --- Fires when this state is no longer top (another state pushed on top).
+        --- Caller-writable. Fires when this state is no longer top (another state pushed on top).
         onBlur: string | Action | function(World)
-        --- Fires when this state becomes top again (state above popped).
+        --- Caller-writable. Fires when this state becomes top again (state above popped).
         onFocus: string | Action | function(World)
         --- Fires when this state is first pushed. Only accepts a plugin function.
         onEnter: function(World)
-        --- Fires when this state is popped (default: "despawn").
+        --- Caller-writable. Fires when this state is popped (default: "despawn").
         onExit: string | Action | function(World)
     end
 end
